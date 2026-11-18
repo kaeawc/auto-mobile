@@ -6,7 +6,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeStoredValues
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.util.Base64
+import kotlin.io.encoding.Base64
 import kotlinx.serialization.json.*
 
 /** One encrypted, atomically replaced document per full prototype id, separate from plaintext. */
@@ -25,10 +25,7 @@ internal class FilePrototypeSecureValueStore(
       require(file.length() <= MAX_FILE_BYTES)
       val document =
         Json.parseToJsonElement(
-            String(
-              cipher.decrypt(id, Base64.getDecoder().decode(file.readBytes())),
-              Charsets.UTF_8,
-            ),
+            String(cipher.decrypt(id, Base64.decode(file.readBytes())), Charsets.UTF_8),
           )
           .jsonObject
       val version = document.getValue("version").jsonPrimitive.int
@@ -69,8 +66,9 @@ internal class FilePrototypeSecureValueStore(
         put("values", JsonObject(stored.values))
       }
       val encrypted =
-        Base64.getEncoder()
-          .encode(cipher.encrypt(id, document.toString().toByteArray(Charsets.UTF_8)))
+        Base64.encodeToByteArray(
+          cipher.encrypt(id, document.toString().toByteArray(Charsets.UTF_8)),
+        )
       val target = fileFor(id)
       val temp = File(root, "${target.name}.tmp")
       try {

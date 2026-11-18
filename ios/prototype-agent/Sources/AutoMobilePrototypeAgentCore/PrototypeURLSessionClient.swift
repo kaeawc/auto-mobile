@@ -16,6 +16,7 @@ final class PrototypeURLSessionClient: PrototypeHttpClient, @unchecked Sendable 
     private let delegate: PrototypeURLSessionDelegate
     private let egress: PrototypeRequestEgressCheck
     private let nowMs: @Sendable () -> Double
+    private let deadlines: any PrototypeDNSDeadlineScheduling
 
     /// `protocolClasses` lets a test stub the network with a `URLProtocol`.
     init(
@@ -23,6 +24,7 @@ final class PrototypeURLSessionClient: PrototypeHttpClient, @unchecked Sendable 
         policy: PrototypeEgressPolicy = PrototypeEgressPolicy(),
         resolver: any HostResolving = PrototypeSystemHostResolver(),
         metrics: any PrototypeConnectionMetricsProviding = PrototypeConnectionMetrics(),
+        deadlines: any PrototypeDNSDeadlineScheduling = PrototypeDNSDeadline(),
         nowMs: @escaping @Sendable () -> Double = { ProcessInfo.processInfo.systemUptime * 1000 }
     ) {
         let configuration = Self.configuration(protocolClasses: protocolClasses)
@@ -35,6 +37,7 @@ final class PrototypeURLSessionClient: PrototypeHttpClient, @unchecked Sendable 
         self.delegate = delegate
         self.egress = egress
         self.nowMs = nowMs
+        self.deadlines = deadlines
     }
 
     static func configuration(protocolClasses: [AnyClass]? = nil) -> URLSessionConfiguration {
@@ -58,6 +61,15 @@ final class PrototypeURLSessionClient: PrototypeHttpClient, @unchecked Sendable 
     }
 
     func perform(_ request: PrototypeHttpRequest) async throws -> PrototypeHttpResponse {
+        try await perform(request, delivery: PrototypeDeliveryCheck(), uploadProgress: nil)
+    }
+
+    func perform(
+        _ request: PrototypeHttpRequest, delivery _: PrototypeDeliveryCheck,
+        uploadProgress: PrototypeUploadProgressCallback?
+    )
+        async throws -> PrototypeHttpResponse
+    {
         let started = nowMs()
         if let problem = PrototypeHttpHeaderCheck.problem(in: request.headers) {
             throw PrototypeHttpFailure(error: problem, durationMs: 0)
@@ -65,9 +77,15 @@ final class PrototypeURLSessionClient: PrototypeHttpClient, @unchecked Sendable 
         guard let urlRequest = Self.urlRequest(for: request) else {
             throw PrototypeHttpFailure(error: .init(.invalidURL, "Not an absolute URL: \(request.url)"), durationMs: 0)
         }
-        let task = session.dataTask(with: urlRequest)
+        let task: URLSessionTask
+        if let upload = request.uploadBody {
+            task = session.uploadTask(with: urlRequest, from: upload.data)
+        } else {
+            task = session.dataTask(with: urlRequest)
+        }
         let call = PrototypeURLSessionCall(
-            maxBytes: request.maxResponseBytes, timeoutMs: request.timeoutMs, request: urlRequest
+            maxBytes: request.maxResponseBytes, timeoutMs: request.timeoutMs, request: urlRequest,
+            uploadBody: request.uploadBody?.data, uploadProgress: uploadProgress
         )
         let handle = PrototypeURLSessionTaskHandle(task)
         do {
@@ -75,7 +93,7 @@ final class PrototypeURLSessionClient: PrototypeHttpClient, @unchecked Sendable 
                 try await withCheckedThrowingContinuation { continuation in
                     call.install(continuation)
                     delegate.register(call, for: handle)
-                    call.armDeadline(cancelling: handle)
+                    call.armDeadline(cancelling: handle, scheduler: deadlines)
                     if Task.isCancelled { call.cancelByCaller(handle) }
                     // DNS suspends here while a bounded worker resolves. A late answer cannot
                     // resume a call stopped by its total deadline or caller cancellation.
@@ -143,7 +161,8 @@ enum PrototypeURLErrorMapping {
         timedOut: Bool,
         tooLarge: Bool,
         cancelledByCaller: Bool,
-        maxBytes: Int
+        maxBytes: Int,
+        isUpload: Bool = false
     )
         -> PrototypeRequestError
     {
@@ -161,7 +180,13 @@ enum PrototypeURLErrorMapping {
         case URLError.Code.cannotConnectToHost.rawValue: return .init(.connectionRefused, "Connection refused: \(url)")
         case URLError.Code.badURL.rawValue, URLError.Code.unsupportedURL.rawValue:
             return .init(.invalidURL, "Not an absolute URL: \(url)")
-        case appTransportSecurityCode: return .init(.network, appTransportSecurityMessage)
+        case appTransportSecurityCode:
+            return .init(
+                .network,
+                isUpload
+                    ? "App Transport Security blocked this cleartext upload. Use an HTTPS URL and keep via \"device\"."
+                    : appTransportSecurityMessage
+            )
         default: return .init(.network, error.localizedDescription)
         }
     }
@@ -194,19 +219,28 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
     private var policyError: PrototypeRequestError?
     private var currentRequest: URLRequest
     private var redirectCount = 0
+    private var uploadBody: Data?
+    private let isUpload: Bool
+    private let uploadProgress: PrototypeUploadProgressCallback?
     private var tooLarge = false
     /// A non-2xx status ends the call at the headers: the outcome is `http_error`, so its body is
     /// never read and the size cap does not apply to it.
     private var skippedBody = false
     private var timedOut = false
     private var cancelledByCaller = false
-    private var deadline: DispatchWorkItem?
+    private var cancelDeadline: (@Sendable () -> Void)?
 
-    init(maxBytes: Int, timeoutMs: Int, request: URLRequest) {
+    init(
+        maxBytes: Int, timeoutMs: Int, request: URLRequest,
+        uploadBody: Data? = nil, uploadProgress: PrototypeUploadProgressCallback? = nil
+    ) {
         self.maxBytes = maxBytes
         self.timeoutMs = timeoutMs
         url = request.url?.absoluteString ?? ""
         currentRequest = request
+        self.uploadBody = uploadBody
+        isUpload = uploadBody != nil
+        self.uploadProgress = uploadProgress
     }
 
     var canProceed: Bool {
@@ -261,6 +295,9 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
             }
             redirectCount += 1
             var next = currentRequest
+            // Retained upload bytes are outside httpBody on an upload task. Supply a fresh stream
+            // for the next hop; a GET rewrite below removes both this stream and the retained bytes.
+            if let uploadBody { next.httpBodyStream = InputStream(data: uploadBody) }
             next.url = url
             if !PrototypeRequestEgressCheck.sameOrigin(previous, url) {
                 next.setValue(nil, forHTTPHeaderField: "Authorization")
@@ -279,8 +316,23 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
             }
         }
         try await egress.validate(next)
-        lock.withLock { currentRequest = next }
+        lock.withLock {
+            // Upload tasks own bytes outside URLRequest.httpBody. Explicitly clear those too when
+            // Fetch downgrades to GET; a later needNewBodyStream must never resurrect the payload.
+            if next.httpMethod == "GET" || next.httpMethod == "HEAD" { uploadBody = nil }
+            currentRequest = next
+        }
         return next
+    }
+
+    func newBodyStream() -> InputStream? {
+        lock.withLock { (uploadBody ?? currentRequest.httpBody).map { InputStream(data: $0) } }
+    }
+
+    func sentBodyBytes(_ sent: Int64, expected: Int64) {
+        guard canProceed else { return }
+        let hasBody = lock.withLock { uploadBody != nil }
+        if hasBody { uploadProgress?(sent, expected) }
     }
 
     func install(_ continuation: CheckedContinuation<PrototypeHttpResponse, Error>) {
@@ -288,13 +340,20 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
     }
 
     /// Cancels the task when the total deadline passes; `timeoutMs` bounds the whole call.
-    func armDeadline(cancelling handle: PrototypeURLSessionTaskHandle) {
-        let item = DispatchWorkItem { [self] in
+    func armDeadline(
+        cancelling handle: PrototypeURLSessionTaskHandle,
+        scheduler: any PrototypeDNSDeadlineScheduling = PrototypeDNSDeadline()
+    ) {
+        let cancel = scheduler.schedule(afterMilliseconds: timeoutMs) { [self] in
             lock.withLock { timedOut = true }
             handle.cancel()
         }
-        lock.withLock { deadline = item }
-        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(timeoutMs), execute: item)
+        let finished = lock.withLock {
+            guard continuation != nil else { return true }
+            cancelDeadline = cancel
+            return false
+        }
+        if finished { cancel() }
     }
 
     func cancelByCaller(_ handle: PrototypeURLSessionTaskHandle) {
@@ -338,7 +397,8 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
             Result<PrototypeHttpResponse, PrototypeHttpFailure>
         ) =
             lock.withLock {
-                deadline?.cancel()
+                cancelDeadline?()
+                cancelDeadline = nil
                 let continuation = self.continuation
                 self.continuation = nil
                 let durationMs = metricsMs ?? measuredMs
@@ -354,7 +414,7 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
                 if tooLarge || policyError != nil || (error != nil && !skipped) {
                     let mapped = PrototypeURLErrorMapping.map(
                         error ?? URLError(.cancelled), url: url, timeoutMs: timeoutMs, timedOut: timedOut,
-                        tooLarge: tooLarge, cancelledByCaller: cancelledByCaller, maxBytes: maxBytes
+                        tooLarge: tooLarge, cancelledByCaller: cancelledByCaller, maxBytes: maxBytes, isUpload: isUpload
                     )
                     return (continuation, .failure(PrototypeHttpFailure(error: mapped, durationMs: durationMs)))
                 }
@@ -434,6 +494,20 @@ final class PrototypeURLSessionDelegate: NSObject, URLSessionDataDelegate, @unch
     func urlSession(_: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         guard let call = call(for: dataTask) else { return }
         if !call.append(data) { dataTask.cancel() }
+    }
+
+    func urlSession(
+        _: URLSession, task: URLSessionTask, didSendBodyData _: Int64,
+        totalBytesSent: Int64, totalBytesExpectedToSend: Int64
+    ) {
+        call(for: task)?.sentBodyBytes(totalBytesSent, expected: totalBytesExpectedToSend)
+    }
+
+    func urlSession(
+        _: URLSession, task: URLSessionTask,
+        needNewBodyStream completionHandler: @escaping @Sendable (InputStream?) -> Void
+    ) {
+        completionHandler(call(for: task)?.newBodyStream())
     }
 
     func urlSession(_: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {

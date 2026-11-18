@@ -66,9 +66,18 @@ struct PrototypeLibraryGatedClient: PrototypeHttpClient {
     )
         async throws -> PrototypeHttpResponse
     {
+        try await perform(request, delivery: delivery, uploadProgress: nil)
+    }
+
+    func perform(
+        _ request: PrototypeHttpRequest, delivery: PrototypeDeliveryCheck,
+        uploadProgress: PrototypeUploadProgressCallback?
+    )
+        async throws -> PrototypeHttpResponse
+    {
         guard let epoch = gate.snapshot() else { throw Self.disabled }
         delivery.bind(isCurrent: { gate.permits(epoch) }, obsolete: Self.disabled)
-        do { return try await execute(request, epoch: epoch) }
+        do { return try await execute(request, epoch: epoch, delivery: delivery, uploadProgress: uploadProgress) }
         catch {
             if let failure = error as? PrototypeHttpFailure,
                failure.localNetworkDenied
@@ -91,7 +100,8 @@ struct PrototypeLibraryGatedClient: PrototypeHttpClient {
     }
 
     private func execute(
-        _ request: PrototypeHttpRequest, epoch: PrototypeConsentEpoch
+        _ request: PrototypeHttpRequest, epoch: PrototypeConsentEpoch, delivery: PrototypeDeliveryCheck,
+        uploadProgress: PrototypeUploadProgressCallback?
     )
         async throws -> PrototypeHttpResponse
     {
@@ -108,8 +118,14 @@ struct PrototypeLibraryGatedClient: PrototypeHttpClient {
                         guard let client = await client(epoch: epoch, call: call),
                               call.active, gate.permits(epoch) else { return }
                         let result: Result<PrototypeHttpResponse, Error>
-                        do { result = try .success(await client.perform(request)) }
-                        catch { result = .failure(error) }
+                        do {
+                            result = try .success(await client.perform(
+                                request, delivery: delivery,
+                                uploadProgress: { sent, expected in
+                                    if gate.permits(epoch) { uploadProgress?(sent, expected) }
+                                }
+                            ))
+                        } catch { result = .failure(error) }
                         call.finish(gate.permits(epoch) ? result : .failure(Self.disabled))
                     }
                     call.install(task: task)

@@ -10,6 +10,7 @@ import {
   type FocusObserver,
   type FocusScreen,
 } from "../../../src/features/action/FocusNavigate";
+import { focusLabelSibling } from "../../../src/features/action/FocusNavigateMatching";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
@@ -237,3 +238,36 @@ test.each(["hierarchy", "bounds"] as const)(
     expect(firstMatchTarget(screen, { label: "Play" }).atBounds).toEqual(title.bounds);
   },
 );
+
+const parkedRow: Element = { bounds: { left: 0, top: 0, right: 100, bottom: 50 } };
+const parkedOutside = (extra: Partial<Element> = {}): Element => ({
+  focusable: true,
+  ...extra,
+  bounds: { left: 300, top: 300, right: 340, bottom: 320 },
+});
+const parkedNodes = (parked: Element) => [
+  { element: parkedRow, index: 0 },
+  { element: title, index: 1, parentIndex: 0 },
+  {
+    element: { focusable: true, bounds: { left: 40, top: 10, right: 90, bottom: 40 } },
+    index: 2,
+    parentIndex: 0,
+  },
+  { element: parked, index: 3, parentIndex: 0 },
+];
+
+test("a focusable parked outside its sized row does not make the visible sibling ambiguous", () => {
+  const nodes = parkedNodes(parkedOutside());
+  expect(focusLabelSibling(nodes, nodes[1])).toBe(nodes[2].element);
+});
+
+test("a parked matching duplicate does not win over the visible match", () => {
+  const nodes = parkedNodes(parkedOutside({ text: "Play all" }));
+  const visible: Element = {
+    text: "Play all",
+    focusable: true,
+    bounds: { left: 40, top: 10, right: 90, bottom: 40 },
+  };
+  nodes[2] = { element: visible, index: 2, parentIndex: 0 };
+  expect(focusLabelSibling(nodes, nodes[1], { label: "Play all" })).toBe(nodes[2].element);
+});

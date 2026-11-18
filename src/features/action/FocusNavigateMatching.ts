@@ -233,10 +233,15 @@ export function focusLabelSibling(
   ) {
     return undefined;
   }
+  const rowBounds = nodes[label.parentIndex]?.element?.bounds;
+  const sizedRow = rowBounds && boundsArea(rowBounds) > 0 ? rowBounds : undefined;
   const candidates = nodes.filter(
     (node) =>
       node !== label &&
       node.parentIndex === label.parentIndex &&
+      // A sibling parked wholly outside its sized row is out of sight: it must neither
+      // win nor make a single visible candidate ambiguous (same rule as parkedOutOfSight).
+      !(sizedRow && node.element?.bounds && !intersectBounds(node.element.bounds, sizedRow)) &&
       isTruthyFlag(node.element?.focusable) &&
       siblingLabelQualifies(nodes, node, target),
   );

@@ -32,7 +32,9 @@ final class PrototypeStateBindingTests: XCTestCase {
     private func assertRefused(
         event: JSONValue, platform: [String: JSONValue] = [:],
         file: StaticString = #filePath, line: UInt = #line
-    ) throws {
+    )
+        throws
+    {
         for source in ["event", "platform"] {
             var session = try session()
             try session.setPlatformState(platform)
@@ -127,7 +129,9 @@ final class PrototypeStateBindingTests: XCTestCase {
 
     private func assertRequestFollowUpUsesOwnEvent(
         append: Bool, file: StaticString = #filePath, line: UInt = #line
-    ) throws {
+    )
+        throws
+    {
         // Exercise both success and error callbacks without a transport, clock, or scheduler.
         for succeeds in [true, false] {
             var session = try session(bound: true)

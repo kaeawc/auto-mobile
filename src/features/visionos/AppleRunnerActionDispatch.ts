@@ -1,3 +1,4 @@
+import type { Timer } from "../../utils/SystemTimer";
 import type { BootedDevice, Platform, TapOnElementOptions, TapOnElementResult } from "../../models";
 import type { SendKeysCommand, SendKeysSelector, SendKeysFocusOptions } from "../action/SendKeys";
 import { tvosSendKeys } from "../tvos/TvosActions";
@@ -16,6 +17,7 @@ export function tapOnAppleRunner(
   device: BootedDevice,
   options: TapOnElementOptions,
   signal?: AbortSignal,
+  timer?: Timer,
 ): Promise<TapOnElementResult> | undefined {
   switch (device.platform) {
     case "visionos":
@@ -23,7 +25,7 @@ export function tapOnAppleRunner(
     case "tvos":
       return tvosTapOn(device.deviceId, options, signal);
     case "watchos":
-      return watchTapOn(device.deviceId, options, signal);
+      return watchTapOn(device.deviceId, options, signal, { timer });
     default:
       return undefined;
   }

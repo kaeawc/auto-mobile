@@ -52,6 +52,7 @@ import {
   requestSdkWebSnapshot,
 } from "../../../../src/features/observe/ios/CtrlProxySdkWebView";
 import { requestAccessibilityAudit } from "../../../../src/features/observe/ios/CtrlProxyAccessibilityAudit";
+import { requestStoreKit } from "../../../../src/features/observe/ios/CtrlProxyStoreKit";
 import { CtrlProxyClipboard } from "../../../../src/features/observe/ios/CtrlProxyClipboard";
 import { CtrlProxyDatabase } from "../../../../src/features/observe/ios/CtrlProxyDatabase";
 import { CtrlProxyGestures } from "../../../../src/features/observe/ios/CtrlProxyGestures";
@@ -142,7 +143,6 @@ interface SnapshotSpec {
 // These runner commands are declared by the host but have no production TS builder.
 // Remove an entry when its builder lands: the disjointness test prevents stale exemptions.
 const HOST_NEVER_SENDS = new Set([
-  "request_storekit", // Runner-first contract; TS builder follows in #18399.
   "get_current_focus",
   "get_traversal_order",
   "request_two_finger_swipe",
@@ -205,6 +205,22 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
       requestAccessibilityAudit(h.context, {
         appId: "com.example.audited",
         checks: ["contrast", "hitRegion"],
+      }),
+  },
+  {
+    name: "request_storekit",
+    builder: "requestStoreKit",
+    invoke: (h) =>
+      requestStoreKit(h.context, {
+        action: "load",
+        bundleId: "com.example.purchases",
+        configPath: "/tmp/Products.storekit",
+        productId: "com.example.pro",
+        transactionId: 7,
+        subscriptionId: "com.example.monthly",
+        timeRate: "oneRenewalEveryTenSeconds",
+        simulatedError: 2,
+        enabled: false,
       }),
   },
   {

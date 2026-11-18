@@ -176,6 +176,8 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "shake",
   "siri",
   "statusBar",
+  // Added after the list was frozen: a StoreKit purchase, refund or expiry replays as a plan step (#18399).
+  "storeKitTest",
   "swipeAt",
   "swipeOn",
   "systemAlerts",

@@ -82,7 +82,10 @@ case "$*" in
       echo '{"screenshotPath":"stub.png","hierarchyUnavailable":{"platform":"watchos","message":"no runner"}}'
       exit
     fi
-    if [[ -f "$CALLS.tapped" ]]; then id=watch-smoke-next; else id=watch-smoke-row; fi
+    id=watch-smoke-row
+    if [[ -f "$CALLS.tapped" && ${TAPS_NEVER_NAVIGATE:-} != 1 ]]; then
+      if (( $(wc -l < "$CALLS.tapped") >= ${TAP_NAVIGATES_ON:-1} )); then id=watch-smoke-next; fi
+    fi
     if [[ ${MISSING_ROW:-} == 1 && ! -f "$CALLS.tapped" ]]; then id=watch-smoke-row-extra; fi
     if [[ ${MISSING_NEXT:-} == 1 && -f "$CALLS.tapped" ]]; then id=missing; fi
     if [[ ${FULL_HIERARCHY:-} == 1 ]]; then
@@ -102,7 +105,7 @@ case "$*" in
 
   *tapOn*)
     [[ "$*" == *'--session-uuid watch-session tapOn --deviceId 11111111-2222-3333-4444-555555555555 --selector {"text":"watch-smoke-row"}' ]] || exit 1
-    touch "$CALLS.tapped"; echo '{"success":true}' ;;
+    echo tap >> "$CALLS.tapped"; echo '{"success":true}' ;;
 esac
 STUB
   cat > "$BATS_TEST_TMPDIR/bin/bun" <<'STUB'
@@ -236,6 +239,9 @@ teardown() {
   ! grep -- '^cli ' "$CALLS" | grep -v -- '--daemon start' | grep -q -- '--port' || return 1
   [ "$(grep -c -- '--session-uuid watch-session observe --deviceId 11111111-2222-3333-4444-555555555555' "$CALLS")" -eq 2 ]
   grep -Fq -- '--selector {"text":"watch-smoke-row"}' "$CALLS"
+  [ "$(grep -c -- ' tapOn ' "$CALLS")" -eq 1 ]
+  [ -f "$WATCH_SMOKE_LOG_DIR/before.png" ]
+  [ -f "$WATCH_SMOKE_LOG_DIR/after.png" ]
   [ "$(grep -c -- '--daemon release-session watch-session' "$CALLS")" -eq 1 ]
   release_line="$(grep -n -- '--daemon release-session' "$CALLS" | cut -d: -f1)"
   stop_line="$(grep -n -- '--daemon stop' "$CALLS" | cut -d: -f1)"
@@ -255,11 +261,40 @@ teardown() {
   grep -q -- '--daemon start --debug --embedded-sdk --port 45678' "$CALLS"
 }
 
-@test "failed next-screen check captures failure screenshot and cleans up" {
+@test "dropped first row tap retries once and navigates" {
+  export TAP_NAVIGATES_ON=2
+  run bash "$SCRIPT" latest
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(grep -c -- ' tapOn ' "$CALLS")" -eq 2 ]
+  [ "$(grep -c 'row tap attempt .* did not navigate; retrying' "$WATCH_SMOKE_LOG_DIR/smoke.log")" -eq 1 ]
+  [[ "$output" == *'watch-smoke-lane: row tap attempt 1 did not navigate; retrying'* ]]
+  [ -f "$WATCH_SMOKE_LOG_DIR/before.png" ]
+  [ -f "$WATCH_SMOKE_LOG_DIR/after.png" ]
+}
+
+@test "row taps that never navigate fail after three attempts and clean up" {
+  export TAPS_NEVER_NAVIGATE=1
+  run bash "$SCRIPT" latest
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'missing identifier watch-smoke-next'* ]]
+  [ "$(grep -c -- ' tapOn ' "$CALLS")" -eq 3 ]
+  [ "$(grep -c 'row tap attempt .* did not navigate; retrying' "$WATCH_SMOKE_LOG_DIR/smoke.log")" -eq 2 ]
+  [[ "$output" == *'watch-smoke-lane: row tap attempt 2 did not navigate; retrying'* ]]
+  [ -f "$WATCH_SMOKE_LOG_DIR/before.png" ]
+  [ -f "$WATCH_SMOKE_LOG_DIR/failure.png" ] || { echo "$output"; return 1; }
+  [ ! -f "$WATCH_SMOKE_LOG_DIR/after.png" ]
+  grep -q -- '--daemon release-session watch-session' "$CALLS"
+  grep -q 'cli --debug --embedded-sdk --daemon stop' "$CALLS"
+  grep -q '^simctl shutdown 11111111-2222-3333-4444-555555555555$' "$CALLS"
+  grep -q '^simctl delete 11111111-2222-3333-4444-555555555555$' "$CALLS"
+}
+
+@test "changed screen without next identifier fails without retapping and cleans up" {
   export MISSING_NEXT=1
   run bash "$SCRIPT" 26.5
   [ "$status" -eq 1 ]
   [[ "$output" == *'missing identifier watch-smoke-next'* ]]
+  [ "$(grep -c -- ' tapOn ' "$CALLS")" -eq 1 ]
   [ -f "$WATCH_SMOKE_LOG_DIR/failure.png" ] || { echo "$output"; return 1; }
   grep -q '^simctl delete 11111111-2222-3333-4444-555555555555$' "$CALLS"
   grep -q 'cli --debug --embedded-sdk --daemon stop' "$CALLS"

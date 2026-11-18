@@ -58,7 +58,7 @@ import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
 import { webModalLayers } from "./webModal";
-import { webRepeatLimit, webRepeatRows } from "./webRepeat";
+import { webRepeatRowsForScope } from "./webRepeat";
 import { searchBarFillAxes, webSelectionRenderers } from "./webSelection";
 import { webSheetLayers } from "./webSheet";
 import { webSkins, type WebSkinId } from "./webSkin";
@@ -315,7 +315,7 @@ function rowScopes(node: Raw, scope: WebRenderScope): WebRenderScope[] {
   const derive = record(repeat.derive) as
     | Parameters<typeof projectPrototypeDerivedItem>[0]
     | undefined;
-  return webRepeatRows(repeat, scope.data, webRepeatLimit(node)).map((item, index) => {
+  return webRepeatRowsForScope(node, scope).map((item, index) => {
     const values = record(item) ?? {};
     const instance: Instance = {
       binding: { alias, index: true },

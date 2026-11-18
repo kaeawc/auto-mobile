@@ -32,6 +32,8 @@ function rig(notifyutilStdout: (enrolled: string) => string) {
       privacyGrants: { readServiceRows: unused },
       trustStore: { readUserTrustedCertificates: unused },
       residue: new FakeIosResidueInspector(),
+
+      storeKit: { clear: async () => {} },
     },
     new FakeTimer(),
   );

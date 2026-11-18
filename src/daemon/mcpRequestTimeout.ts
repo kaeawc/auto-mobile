@@ -215,6 +215,14 @@ export const MIN_PROTOTYPE_INSTALL_APP_MCP_TIMEOUT_MS =
   INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS;
 
 /**
+ * Floor for `prototype uninstallApp` (#14184): the disposable installer gives `adb uninstall` the
+ * package transfer timeout, plus headroom for the signing inspection and registry update. A bulk
+ * removal (`all`, `expired`) runs its apps one after another under this one floor.
+ */
+export const MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS =
+  ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS + INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS;
+
+/**
  * Floor for preference tools — iOS `setPreference` has a 30s write/read-back
  * deadline and direct `getPreference` permits independently retried value and
  * type reads for up to 40s. The transport budget starts before queueing, so it
@@ -452,7 +460,7 @@ function resolvePrototypeAwaitBudgetMs(args: Record<string, unknown>): number {
     return MIN_PROTOTYPE_INSTALL_APP_MCP_TIMEOUT_MS;
   }
   if (args.action === "uninstallApp") {
-    return MIN_UNINSTALL_APP_MCP_TIMEOUT_MS;
+    return MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS;
   }
   if (args.action === "save" || args.action === "open") {
     // On Android with ProtoViewer installed these wait for the app's result file (#13621).

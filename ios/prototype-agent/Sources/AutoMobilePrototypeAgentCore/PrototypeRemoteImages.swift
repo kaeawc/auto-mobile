@@ -7,6 +7,8 @@ public enum PrototypeRemoteImages {
     public static let maxDownloadBytes = 8_388_608
     public static let androidHeapDivisor = 8
     public static let maxIOSMemoryBytes = 67_108_864
+    /// Longest decoded edge in pixels; larger sources are downsampled while decoding.
+    static let maxDecodedEdge = 2048
     public static let maxDiskBytes = 134_217_728
     public static let maxLoads = 6
 

@@ -30,7 +30,10 @@ struct PrototypeRequestEgressCheck: Sendable {
             throw Self.blocked
         }
         guard let host = url.host, (1 ... 65535).contains(Self.port(url)) else { throw Self.blocked }
-        if !isImageLoopback(url) {
+        if isImageLoopback(url) {
+            // Development loopback must not reach the AutoMobile daemon.
+            guard !policy.daemonPorts.contains(Self.port(url)) else { throw Self.blocked }
+        } else {
             guard policy.checkHost(host: host, port: Self.port(url)) == .allow,
                   !PrototypeEgressPolicy.isIPLiteral(host) || isPublic(host) else { throw Self.blocked }
         }
@@ -71,6 +74,7 @@ struct PrototypeRequestEgressCheck: Sendable {
 
     func checkConnected(address: String, url: URL, port: Int? = nil) -> Bool {
         if isImageLoopback(url) {
+            guard !policy.daemonPorts.contains(port ?? Self.port(url)) else { return false }
             return ["127.0.0.1", "::1"].contains(PrototypeEgressPolicy.canonicalLiteral(address) ?? "")
         }
         return (remoteImageDevelopment == nil || isPublic(address)) &&

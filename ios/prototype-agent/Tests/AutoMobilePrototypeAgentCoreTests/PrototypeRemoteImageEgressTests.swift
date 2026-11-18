@@ -41,6 +41,15 @@ final class PrototypeRemoteImageEgressTests: XCTestCase {
         XCTAssertThrowsError(try check(development: true).validateImageURL("http://public.example/image"))
     }
 
+    func testDevelopmentLoopbackNeverReachesDaemonPorts() throws {
+        for port in [3000, 3005, 3010, 8765] {
+            XCTAssertThrowsError(try check(development: true).validateImageURL("http://localhost:\(port)/image"))
+            let url = try XCTUnwrap(URL(string: "http://127.0.0.1:\(port)/image"))
+            XCTAssertFalse(check(development: true).checkConnected(address: "127.0.0.1", url: url))
+        }
+        XCTAssertNoThrow(try check(development: true).validateImageURL("http://localhost:8080/image"))
+    }
+
     func testResolvedWholeFieldBindingRevalidated() async throws {
         let bound = interpolatePrototypeText("{photo}", state: ["photo": .string("https://10.0.0.1/image")], pager: nil)
         XCTAssertEqual(bound, "https://10.0.0.1/image")

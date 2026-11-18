@@ -1,4 +1,6 @@
 @testable import AutoMobilePrototypeAgentCore
+import CoreGraphics
+import ImageIO
 import XCTest
 
 private actor ImageClient: PrototypeHttpClient {
@@ -27,6 +29,28 @@ final class PrototypeRemoteImageLoaderTests: XCTestCase {
         137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 96, 96, 96, 248, 15, 0, 1, 4, 1, 0, 95, 229, 195, 75, 0, 0,
         0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
     ])
+
+    func testExifOrientationIsAppliedAndLargeImagesAreDownsampled() throws {
+        let landscape = try Self.jpeg(width: 40, height: 20, orientation: 6)
+        let rotated = try PrototypeRemoteImage(bytes: landscape)
+        XCTAssertEqual(rotated.image.width, 20)
+        XCTAssertEqual(rotated.image.height, 40)
+        let large = try PrototypeRemoteImage(bytes: Self.jpeg(width: 4096, height: 2048, orientation: 1))
+        XCTAssertLessThanOrEqual(max(large.image.width, large.image.height), PrototypeRemoteImages.maxDecodedEdge)
+    }
+
+    private static func jpeg(width: Int, height: Int, orientation: Int) throws -> Data {
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ))
+        let image = try XCTUnwrap(context.makeImage())
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: orientation] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
 
     func testDecodedMemoryCacheAvoidsTransport() async throws {
         let client = ImageClient(Self.png)

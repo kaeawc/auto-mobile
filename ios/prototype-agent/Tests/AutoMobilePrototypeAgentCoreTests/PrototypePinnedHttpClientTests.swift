@@ -30,6 +30,34 @@ final class PrototypePinnedHttpClientTests: XCTestCase {
         }
     }
 
+    func testImageTransportDialsOnlyCheckedPublicAddresses() async throws {
+        let egress = PrototypeRequestEgressCheck(
+            policy: PrototypeEgressPolicy(), resolver: FakeHostResolver(), remoteImageDevelopment: false
+        )
+        func imageClient(_ resolver: FakeHostResolver, _ connector: FakePinnedConnector) -> PrototypePinnedHttpClient {
+            PrototypePinnedHttpClient(
+                resolver: resolver, connector: connector, deadlines: FakePinnedDeadline(),
+                imageEgress: egress, nowMs: { 1 }
+            )
+        }
+        let connector = FakePinnedConnector([FakePinnedConnection()])
+        _ = try await imageClient(FakeHostResolver(), connector).perform(pinnedRequest("https://public.example/a.png"))
+        XCTAssertEqual(connector.dials, [.init(address: "8.8.8.8", port: 443, tlsServerName: "public.example")])
+        let blocked = FakePinnedConnector([])
+        for url in ["http://public.example/a.png", "https://192.168.1.1/a.png"] {
+            do {
+                _ = try await imageClient(FakeHostResolver(), blocked).perform(pinnedRequest(url))
+                XCTFail("Accepted \(url)")
+            } catch {}
+        }
+        do {
+            _ = try await imageClient(FakeHostResolver(["192.168.1.1"]), blocked)
+                .perform(pinnedRequest("https://public.example/a.png"))
+            XCTFail("Private DNS answer accepted")
+        } catch {}
+        XCTAssertTrue(blocked.dials.isEmpty)
+    }
+
     func testRemoteMustMatchAndMustBeKnown() async {
         for address: String? in [nil, "1.1.1.1"] {
             let connection = FakePinnedConnection(address: address)

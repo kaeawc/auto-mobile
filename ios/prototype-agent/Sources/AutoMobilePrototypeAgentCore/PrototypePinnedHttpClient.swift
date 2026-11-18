@@ -24,6 +24,8 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
     private let connector: any PrototypePinnedConnecting
     private let deadlines: any PrototypeDNSDeadlineScheduling
     private let allowsCleartext: Bool
+    /// Set for remote image loads: public-only destinations, with loopback http in development.
+    private let imageEgress: PrototypeRequestEgressCheck?
     private let onLocalNetworkDenied: @Sendable () -> Void
     private let nowMs: @Sendable () -> Double
 
@@ -33,9 +35,11 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
         connector: any PrototypePinnedConnecting,
         deadlines: any PrototypeDNSDeadlineScheduling = PrototypeDNSDeadline(),
         allowsCleartext: Bool = false,
+        imageEgress: PrototypeRequestEgressCheck? = nil,
         nowMs: @escaping @Sendable () -> Double = { ProcessInfo.processInfo.systemUptime * 1000 },
         onLocalNetworkDenied: @escaping @Sendable () -> Void = {}
     ) {
+        self.imageEgress = imageEgress
         self.policy = policy
         self.resolver = resolver
         self.connector = connector
@@ -51,6 +55,7 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
             resolver: any HostResolving = PrototypeSystemHostResolver(),
             deadlines: any PrototypeDNSDeadlineScheduling = PrototypeDNSDeadline(),
             allowsCleartext: Bool = false,
+            imageEgress: PrototypeRequestEgressCheck? = nil,
             nowMs: @escaping @Sendable () -> Double = { ProcessInfo.processInfo.systemUptime * 1000 },
             onLocalNetworkDenied: @escaping @Sendable () -> Void = {}
         ) {
@@ -60,6 +65,7 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
                 connector: PrototypeNWConnector(onLocalNetworkDenied: onLocalNetworkDenied),
                 deadlines: deadlines,
                 allowsCleartext: allowsCleartext,
+                imageEgress: imageEgress,
                 nowMs: nowMs,
                 onLocalNetworkDenied: onLocalNetworkDenied
             )
@@ -156,6 +162,10 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
         else {
             throw PrototypeRequestError(.invalidURL, "Not an absolute URL: \(request.url)")
         }
+        if let imageEgress {
+            try imageEgress.validateImageURL(request.url)
+            if imageEgress.isImageLoopback(url) { return url }
+        }
         if scheme == "http", !allowsCleartext {
             throw PrototypeRequestError(
                 .blockedDestination,
@@ -168,17 +178,33 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
     private func checkedAddresses(_ url: URL) async throws -> [String] {
         let host = Self.host(url)
         let port = PrototypeRequestEgressCheck.port(url)
-        guard policy.checkHost(host: host, port: port) == .allow else { throw PrototypeRequestEgressCheck.blocked }
-        if let literal = PrototypeEgressPolicy.canonicalLiteral(host) { return [literal] }
+        let loopback = imageEgress?.isImageLoopback(url) == true
+        if !loopback {
+            guard policy.checkHost(host: host, port: port) == .allow else { throw PrototypeRequestEgressCheck.blocked }
+        }
+        if let literal = PrototypeEgressPolicy.canonicalLiteral(host) {
+            try checkImageAddresses([literal], url: url)
+            return [literal]
+        }
         let addresses: [String]
         do { addresses = try await resolver.addresses(for: host) }
         catch { throw PrototypeRequestError(.network, "Destination resolution failed.") }
-        guard !addresses.isEmpty, policy.check(host: host, port: port, addresses: addresses) == .allow else {
-            throw PrototypeRequestEgressCheck.blocked
-        }
+        guard !addresses.isEmpty,
+              loopback || policy.check(host: host, port: port, addresses: addresses) == .allow
+        else { throw PrototypeRequestEgressCheck.blocked }
         let literals = addresses.compactMap(PrototypeEgressPolicy.canonicalLiteral)
         guard literals.count == addresses.count else { throw PrototypeRequestEgressCheck.blocked }
+        try checkImageAddresses(literals, url: url)
         return literals
+    }
+
+    /// Image loads dial public addresses only; development loopback http dials loopback only.
+    private func checkImageAddresses(_ addresses: [String], url: URL) throws {
+        guard let imageEgress else { return }
+        let port = PrototypeRequestEgressCheck.port(url)
+        guard addresses.allSatisfy({ imageEgress.checkConnected(address: $0, url: url, port: port) }) else {
+            throw PrototypeRequestEgressCheck.blocked
+        }
     }
 
     private func connect(_ addresses: [String], url: URL) async throws -> any PrototypePinnedConnection {

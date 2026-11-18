@@ -18,8 +18,13 @@ final class PrototypeRemoteImage: NSObject, @unchecked Sendable {
               let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
               let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
               width.doubleValue > 0, height.doubleValue > 0,
+              // Reject decompression bombs from the header before any pixels are allocated.
               width.doubleValue * height.doubleValue * 4 <= Double(PrototypeRemoteImages.maxIOSMemoryBytes),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, [
+              // The thumbnail path applies the EXIF orientation and bounds the decoded edge.
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: PrototypeRemoteImages.maxDecodedEdge,
                   kCGImageSourceShouldCacheImmediately: true,
               ] as CFDictionary),
               image.bytesPerRow <= PrototypeRemoteImages.maxIOSMemoryBytes / image.height
@@ -56,7 +61,22 @@ actor PrototypeRemoteImageLoader {
             .appendingPathComponent("AutoMobilePrototypeRemoteImages", isDirectory: true),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
-        let transport = client ?? PrototypeURLSessionClient(remoteImageDevelopment: development, resolver: resolver)
+        let imageEgress = PrototypeRequestEgressCheck(
+            policy: PrototypeEgressPolicy(), resolver: resolver, remoteImageDevelopment: development
+        )
+        let transport: any PrototypeHttpClient
+        if let client {
+            transport = client
+        } else {
+            #if canImport(Network)
+                // Dial only the checked addresses; URLSession would re-resolve after the preflight.
+                transport = PrototypePinnedHttpClient(
+                    resolver: resolver, allowsCleartext: development, imageEgress: imageEgress
+                )
+            #else
+                transport = PrototypeURLSessionClient(remoteImageDevelopment: development, resolver: resolver)
+            #endif
+        }
         if let gate {
             self.client = PrototypeLibraryGatedClient(gate: gate, factory: { _ in
                 PrototypeNetworkConfiguration(device: transport)
@@ -67,9 +87,7 @@ actor PrototypeRemoteImageLoader {
         self.memory = memory
         self.slots = slots
         self.gate = gate
-        egress = PrototypeRequestEgressCheck(
-            policy: PrototypeEgressPolicy(), resolver: resolver, remoteImageDevelopment: development
-        )
+        egress = imageEgress
         disk = PrototypeRemoteImageDiskCache(directory: directory, now: now)
     }
 

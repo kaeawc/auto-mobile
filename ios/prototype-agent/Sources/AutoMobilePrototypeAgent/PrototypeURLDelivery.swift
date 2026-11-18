@@ -11,13 +11,20 @@
         private static var methods: Set<String> = []
 
         static var registeredSchemes: [String] {
-            (Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] ?? [])
-                .flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
+            PrototypeInboundLinkSchemes
+                .registered(
+                    (Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] ?? [])
+                        .flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }
+                )
+        }
+
+        static var capabilities: [String] {
+            PrototypeInboundLinkSchemes.capabilities(installed: installed, schemes: registeredSchemes)
         }
 
         static func receive(_ url: URL) {
             // Document imports remain owned by the host. ProtoViewer separates its MCP URLs at its callback.
-            guard !url.isFileURL else { return }
+            guard PrototypeInboundLinkSchemes.accepts(url, schemes: registeredSchemes) else { return }
             inbox.receive(url.absoluteString)
         }
 

@@ -484,9 +484,9 @@ struct PrototypeSession {
         let routing = PrototypeInboundRouting(entries: spec.links)
         let safeURL = JSONValue.string(routing.redact(url))
         guard let match = routing.resolve(url, schemes: registeredSchemes) else {
-            return emit(kind: "emit", name: "link_unmatched", payload: .object(["url": safeURL]))
+            return emit(kind: "link_unmatched", name: nil, payload: .object(["url": safeURL]))
         }
-        let accepted = emit(kind: "emit", name: "link_opened", payload: .object([
+        let accepted = emit(kind: "link_opened", name: nil, payload: .object([
             "url": safeURL, "entry": .string(routing.path(match)),
         ]))
         do {

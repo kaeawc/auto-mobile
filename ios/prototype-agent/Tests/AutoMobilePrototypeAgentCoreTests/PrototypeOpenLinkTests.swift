@@ -57,7 +57,8 @@ final class PrototypeOpenLinkTests: XCTestCase {
             "amp-demo://post/41?ref=private&%72ef=also-private&visible=yes#fragment",
             registeredSchemes: ["amp-demo"]
         )
-        XCTAssertEqual(events.first?.name, "link_opened")
+        XCTAssertEqual(events.first?.wireKind, "link_opened")
+        XCTAssertNil(events.first?.name)
         XCTAssertEqual(events.first?.payload, .object([
             "url": .string("amp-demo://post/41?visible=yes#fragment"), "entry": .string("/post/{postId}"),
         ]))
@@ -77,7 +78,8 @@ final class PrototypeOpenLinkTests: XCTestCase {
         for url in ["amp-demo://missing", "amp-other://post/41", "https://evil.test/post/41"] {
             let events = session.openLink(url + "?ref=secret&%72ef=again", registeredSchemes: ["amp-demo"])
             XCTAssertEqual(events.count, 1)
-            XCTAssertEqual(events.first?.name, "link_unmatched")
+            XCTAssertEqual(events.first?.wireKind, "link_unmatched")
+            XCTAssertNil(events.first?.name)
             XCTAssertEqual(events.first?.payload, .object(["url": .string(url)]))
             XCTAssertEqual(session.state["title"], .string(""))
             XCTAssertEqual(session.stacks["main"]?.path, ["feed"])
@@ -87,7 +89,8 @@ final class PrototypeOpenLinkTests: XCTestCase {
     func testAcceptancePrecedesActionsAndDismissalIsFinal() throws {
         var session = try shown(dismiss: true)
         let events = session.openLink("amp-demo://post/41?ref=private", registeredSchemes: ["amp-demo"])
-        XCTAssertEqual(events.first?.name, "link_opened")
+        XCTAssertEqual(events.first?.wireKind, "link_opened")
+        XCTAssertNil(events.first?.name)
         XCTAssertEqual(events.first?.state["title"], .string(""))
         XCTAssertTrue(events.contains { $0.wireKind == "screen_changed" })
         XCTAssertEqual(events.last?.wireKind, "dismissed")
@@ -98,7 +101,8 @@ final class PrototypeOpenLinkTests: XCTestCase {
     func testAbsentOptionalBindingRefusesTheWholeActionListAfterAcceptance() throws {
         var session = try shown(optional: true)
         let events = session.openLink("amp-demo://post/41", registeredSchemes: ["amp-demo"])
-        XCTAssertEqual(events.map(\.name), ["link_opened"])
+        XCTAssertEqual(events.map(\.wireKind), ["link_opened"])
+        XCTAssertNil(events.first?.name)
         XCTAssertEqual(session.state["title"], .string(""))
         XCTAssertEqual(session.stacks["main"]?.path, ["feed"])
     }
@@ -113,7 +117,8 @@ final class PrototypeOpenLinkTests: XCTestCase {
     func testRegistrationIsRequiredEvenWhenThePathMatches() throws {
         var session = try shown()
         let events = session.openLink("amp-demo://post/41?ref=private", registeredSchemes: [])
-        XCTAssertEqual(events.map(\.name), ["link_unmatched"])
+        XCTAssertEqual(events.map(\.wireKind), ["link_unmatched"])
+        XCTAssertNil(events.first?.name)
         XCTAssertEqual(session.stacks["main"]?.path, ["feed"])
     }
 

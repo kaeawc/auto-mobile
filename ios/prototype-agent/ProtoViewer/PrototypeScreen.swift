@@ -47,7 +47,10 @@ struct PrototypeScreen: View {
     ) {
         _diagnostics = State(initialValue: ViewerDiagnostics(
             appVersion: appVersion, osVersion: osVersion,
-            capabilities: Set(AutoMobilePrototypeCapabilities.supported + registry.capabilities)
+            capabilities: Set(
+                AutoMobilePrototypeCapabilities.supported + registry.capabilities + PrototypeURLDelivery
+                    .capabilities
+            )
         ))
         self.copyText = copyText
         self.onClose = onClose

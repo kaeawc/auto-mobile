@@ -96,12 +96,16 @@ use `string`, `int`, `number` or `boolean`, optionally suffixed `?`. A declarati
 validates the table and selects the first match. A registration guard rejects unregistered
 schemes; HTTP(S) also needs an explicit host registration. Nothing registers verified HTTPS yet.
 
-The event contract defines `link_opened {url,entry}` (entry is the path pattern) and
-`link_unmatched {url}` with no actions on an unmatched URL. Event URLs omit secret query values.
+Inbound links emit kind `link_opened` with payload `{url,entry}` (entry is the path pattern) or
+kind `link_unmatched` with payload `{url}` and no actions. Both have `name: null`.
+Event URLs omit secret query values.
 These are core navigation events, independent of `prototype_platform_v1` and outbound `links.open`.
 Android routes cold-start URLs before publishing the first prototype frame and warm URLs through
 `onNewIntent`. The shell registers `amp-<slug>`; the stamp writes the same schemes into its intent
-filter and runtime metadata. A spec without `prototype_links_v1` ignores inbound URLs.
+filter and runtime metadata; optional schemes must be custom schemes, excluding `http` and `https`.
+Only the stamped shell advertises inbound delivery; the shared Compose renderer and Android ProtoViewer do not.
+The shell consumes each launch intent once, skips recreation and history launches, and delivers links under
+the interaction lock. A spec without `prototype_links_v1` ignores inbound URLs.
 
 ## Stack transitions
 

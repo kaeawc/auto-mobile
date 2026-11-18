@@ -78,9 +78,7 @@ class PrototypeAppActivity : ComponentActivity() {
       links.attach(runtime::openLink)
     }
     // Main.immediate queues the launch URL under the interaction lock before composition starts.
-    intent?.dataString?.let { url ->
-      attachScope.launch { embeddedHost.interactions.withLock { links.receive(url) } }
-    }
+    deliverLink(intent, savedInstanceState)
     embeddedHost.nextSequence = { attachTarget.nextSequence() }
     embeddedHost.eventSink = PrototypeEventSink { process.agent.emit(it) }
     val source = ApkPrototypeSource(assets)
@@ -96,7 +94,11 @@ class PrototypeAppActivity : ComponentActivity() {
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     setIntent(intent)
-    intent.dataString?.let { url ->
+    deliverLink(intent, null)
+  }
+
+  private fun deliverLink(intent: Intent?, savedInstanceState: Bundle?) {
+    intent?.takePrototypeLaunchLink(savedInstanceState)?.let { url ->
       attachScope.launch { embeddedHost.interactions.withLock { links.receive(url) } }
     }
   }
@@ -195,4 +197,17 @@ class PrototypeAppActivity : ComponentActivity() {
       } else AppShellStatus(current) { moveTaskToBack(true) }
     }
   }
+}
+
+/** Consume the Intent itself so a later recreation or history launch cannot replay it. */
+internal fun Intent.takePrototypeLaunchLink(savedInstanceState: Bundle?): String? {
+  if (
+    savedInstanceState != null ||
+      flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0 ||
+      getBooleanExtra("automobile.prototype.linkConsumed", false)
+  )
+    return null
+  val url = dataString ?: return null
+  putExtra("automobile.prototype.linkConsumed", true)
+  return url
 }

@@ -54,9 +54,15 @@ class PrototypeOpenLinkTest {
       runtime.current.stacks.getValue("main").paramsAt(1)["ref"],
     )
     assertEquals(PrototypeScalar.Text("41"), runtime.current.state["title"])
-    val opened = events.single { it.name == "link_opened" }.payload!!.jsonObject
-    assertEquals(JsonPrimitive("/post/{postId}"), opened["entry"])
-    assertEquals(JsonPrimitive("amp-feed://post/41?visible=yes"), opened["url"])
+    val opened = events.single { it.kind == PrototypeEventKind.LINK_OPENED }
+    assertNull(opened.name)
+    assertEquals(
+      buildJsonObject {
+        put("url", "amp-feed://post/41?visible=yes")
+        put("entry", "/post/{postId}")
+      },
+      opened.payload,
+    )
     runtime.handle(PrototypeInteraction.Back)
     assertEquals(listOf("feed"), runtime.current.stacks.getValue("main").path)
   }
@@ -72,7 +78,9 @@ class PrototypeOpenLinkTest {
       )) {
       runtime.openLink(url)
       assertEquals(listOf("feed"), runtime.current.stacks.getValue("main").path)
-      assertEquals("link_unmatched", events.last().name)
+      assertEquals(PrototypeEventKind.LINK_UNMATCHED, events.last().kind)
+      assertNull(events.last().name)
+      assertEquals(setOf("url"), events.last().payload!!.jsonObject.keys)
       assertFalse(events.last().payload.toString().contains("private"))
     }
   }
@@ -90,7 +98,8 @@ class PrototypeOpenLinkTest {
       }
     runtime.replace(runtime.current.spec.copy(links = JsonArray(entries)))
     runtime.openLink("amp-feed://post/41?ref=private")
-    assertEquals("link_opened", events.first().name)
+    assertEquals(PrototypeEventKind.LINK_OPENED, events.first().kind)
+    assertNull(events.first().name)
     assertEquals(PrototypeEventKind.DISMISSED, events.last().kind)
     assertFalse(runtime.current.active)
   }
@@ -115,7 +124,8 @@ class PrototypeOpenLinkTest {
       )
     runtime.replace(runtime.current.spec.copy(links = JsonArray(listOf(entry))))
     runtime.openLink("amp-feed://post/41")
-    assertEquals("link_opened", events.single().name)
+    assertEquals(PrototypeEventKind.LINK_OPENED, events.single().kind)
+    assertNull(events.single().name)
     assertEquals(PrototypeScalar.Text(""), runtime.current.state["title"])
     assertEquals(listOf("feed"), runtime.current.stacks.getValue("main").path)
   }
@@ -125,7 +135,7 @@ class PrototypeOpenLinkTest {
     val runtime = runtime()
     runtime.replace(runtime.current.spec.copy(requires = null))
     runtime.openLink("amp-feed://post/41?ref=private")
-    assertTrue(events.none { it.name?.startsWith("link_") == true })
+    assertTrue(events.isEmpty())
     assertEquals(listOf("feed"), runtime.current.stacks.getValue("main").path)
   }
 }

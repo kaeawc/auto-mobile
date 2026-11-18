@@ -69,8 +69,14 @@ function stampInboundLinks(application: XmlNode, input: AndroidManifestStampInpu
   );
   if (activity) {
     const schemes = [...new Set([`amp-${input.slug}`, ...(input.extraLinkSchemes ?? [])])];
-    if (schemes.some((scheme) => !/^[a-z][a-z0-9+.-]*$/.test(scheme))) {
-      throw new ActionableError("Invalid Android inbound link scheme.");
+    if (
+      schemes.some(
+        (scheme) => !/^[a-z][a-z0-9+.-]*$/.test(scheme) || scheme === "http" || scheme === "https",
+      )
+    ) {
+      throw new ActionableError(
+        "Invalid Android inbound link scheme. Use a custom scheme, not http or https.",
+      );
     }
     const filters = (activity["intent-filter"] as XmlNode[] | undefined) ?? [];
     activity["intent-filter"] = filters.filter(

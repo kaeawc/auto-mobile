@@ -138,10 +138,13 @@ transition as a real tap, including on part identifiers.
 - **Back stack.** Back-stack entries stay mounted, transparent, non-interactive and
   accessibility-hidden, preserving scroll positions on pop within the bounded stack depth; the agent
   releases removed entries after motion. Inbound `links` require only `prototype_links_v1` and resolve
-  against the app's `CFBundleURLTypes` schemes. Matching links bind captures and typed query values
+  against registered `amp-` schemes in the app's `CFBundleURLTypes`; host OAuth and web URLs never enter
+  the link inbox. The capability is advertised only after URL delivery is installed for such a scheme.
+  Matching links bind captures and typed query values
   into the tap executor, including `setStack`; Back returns to the entry below the linked screen.
-  `link_opened` precedes actions; `link_unmatched` runs none. Both URLs omit every declared secret
-  query value. An absent optional binding refuses the complete action list after acceptance.
+  Kind `link_opened` with payload `{url,entry}` precedes actions; kind `link_unmatched` with payload
+  `{url}` runs none. Both have `name: null`, and URLs omit every declared secret query value.
+  An absent optional binding refuses the complete action list after acceptance.
   Injected agents intercept scene and application URL delegate callbacks, preserving host callbacks;
   cold URLs wait for the first spec before rendering. ProtoViewer forwards its existing `onOpenURL`
   callback and registers `amp-demo` for prototype links alongside its separate MCP scheme.

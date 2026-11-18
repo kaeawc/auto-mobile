@@ -675,19 +675,18 @@ class PrototypeRuntime(
     val match = routing.resolve(url, registeredLinkSchemes)
     if (match == null) {
       emit(
-        PrototypeEventKind.EMIT,
-        "link_unmatched",
-        buildJsonObject { put("url", routing.redact(url)) },
+        kind = PrototypeEventKind.LINK_UNMATCHED,
+        payload = buildJsonObject { put("url", routing.redact(url)) },
       )
       return
     }
     emit(
-      PrototypeEventKind.EMIT,
-      "link_opened",
-      buildJsonObject {
-        put("url", routing.redact(url))
-        put("entry", routing.path(match))
-      },
+      kind = PrototypeEventKind.LINK_OPENED,
+      payload =
+        buildJsonObject {
+          put("url", routing.redact(url))
+          put("entry", routing.path(match))
+        },
     )
     // Acceptance precedes actions so a dismiss action still delivers the final runtime event.
     try {

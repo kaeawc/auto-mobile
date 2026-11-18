@@ -1,5 +1,21 @@
 import Foundation
 
+/// Only registered prototype schemes belong to this renderer; host OAuth and web URLs do not.
+enum PrototypeInboundLinkSchemes {
+    static func registered(_ schemes: [String]) -> [String] {
+        schemes.map { $0.lowercased() }.filter { $0.hasPrefix("amp-") && $0.count > 4 }
+    }
+
+    static func accepts(_ url: URL, schemes: [String]) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return registered(schemes).contains(scheme)
+    }
+
+    static func capabilities(installed: Bool, schemes: [String]) -> [String] {
+        installed && !registered(schemes).isEmpty ? [PrototypeAgentProtocol.linksCapability] : []
+    }
+}
+
 @MainActor
 protocol PrototypeInboundLinkTarget: AnyObject {
     var isReadyForInboundLinks: Bool { get }

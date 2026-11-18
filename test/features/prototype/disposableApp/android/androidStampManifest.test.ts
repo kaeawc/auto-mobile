@@ -143,3 +143,12 @@ test("registers the slug scheme and optional schemes identically in routing meta
   );
   expect(restamped.manifest.application[0].activity[0]["intent-filter"]).toHaveLength(2);
 });
+
+test.each(["http", "https", "HTTPS", "not a scheme"])(
+  "refuses the unsupported inbound scheme %s",
+  async (scheme) => {
+    await expect(
+      stampAndroidManifest(templateXml, { ...input, extraLinkSchemes: [scheme] }),
+    ).rejects.toBeInstanceOf(ActionableError);
+  },
+);

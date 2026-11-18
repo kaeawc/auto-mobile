@@ -187,7 +187,7 @@ final class PrototypeAgent: NSObject {
             capabilities: PrototypeViewerHostCapabilities.advertised(
                 model.mode.advertising(PrototypeTestHooks.capabilities(
                     enabled: false,
-                    registryCapabilities: model.platformRegistry.capabilities
+                    registryCapabilities: model.platformRegistry.capabilities + PrototypeURLDelivery.capabilities
                 ))
             ),
             maxAuthenticatedClients: 1,
@@ -302,7 +302,7 @@ final class PrototypeAgent: NSObject {
             configuration: configuration,
             capabilities: model.mode.advertising(PrototypeTestHooks.capabilities(
                 enabled: testHooksEnabled,
-                registryCapabilities: model.platformRegistry.capabilities
+                registryCapabilities: model.platformRegistry.capabilities + PrototypeURLDelivery.capabilities
             ))
         ) { [weak self] message, reply in
             self?.handle(message, reply: reply)

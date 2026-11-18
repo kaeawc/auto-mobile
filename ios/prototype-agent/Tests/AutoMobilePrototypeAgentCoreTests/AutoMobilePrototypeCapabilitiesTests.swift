@@ -56,6 +56,17 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         }
     }
 
+    func testUploadAndDeviceTransportAreAdvertisedTogetherAtTheMinimumOS() {
+        struct MinimumOS: OSVersionProvider { let majorVersion = 17 }
+        for capability in [
+            PrototypeAgentProtocol.networkUploadCapability,
+            PrototypeAgentProtocol.networkDeviceCapability,
+        ] {
+            XCTAssertTrue(PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS()).contains(capability))
+            XCTAssertTrue(AutoMobilePrototypeCapabilities.supported.contains(capability))
+        }
+    }
+
     func testWindowAndKeyboardAreAdvertisedAtTheMinimumOS() {
         struct MinimumOS: OSVersionProvider { let majorVersion = 17 }
         let capabilities = Set(PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS()))
@@ -115,7 +126,6 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // not through the static list this test reads.
         // no renderer yet, and so do device media items (#14192).
         var exclusions: Set<String> = [
-            "prototype_network_upload_v1", // Contract only until upload execution ships.
             // Realtime transport, routing and lifecycle remain owed by the runtime slices.
             "prototype_platform_realtime_v1", "prototype_platform_realtime_device_v1",
             "prototype_platform_test_v1",

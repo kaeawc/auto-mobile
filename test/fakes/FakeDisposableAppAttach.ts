@@ -18,6 +18,7 @@ export class FakeDisposableAppSocket
   ];
   replay: Record<string, unknown>[] = [];
   appInstanceId: string | undefined;
+  showingId: string | undefined;
   override write(data: string): void {
     super.write(data);
     const frame = JSON.parse(data) as Record<string, unknown>;
@@ -31,6 +32,7 @@ export class FakeDisposableAppSocket
             protocolVersion: 1,
             capabilities: this.capabilities,
             appInstanceId: this.appInstanceId,
+            showingId: this.showingId,
           }),
           ...this.replay.map((event) => JSON.stringify(event)),
         ].join("\n") + "\n",

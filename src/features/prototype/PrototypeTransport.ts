@@ -52,6 +52,7 @@ export interface PrototypeDeviceStatus {
 
 export interface PrototypeTransport {
   readonly eventInstanceId?: string;
+  readonly eventShowingId?: string;
   show(spec: PrototypeSpec, options?: PrototypeShowOptions): Promise<PrototypeResult>;
   dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult>;
   patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypePatchReply>;
@@ -73,6 +74,9 @@ export function prototypeEventSource(transport: PrototypeTransport): PrototypeEv
   let source = eventSources.get(transport);
   if (source === undefined) {
     source = {
+      get showingId() {
+        return transport.eventShowingId;
+      },
       get instanceId() {
         return transport.eventInstanceId;
       },

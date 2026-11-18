@@ -309,4 +309,5 @@ and `onSubmit`, and draws the trailing icon as an SF Symbol button inside the fi
 `leadingIcon` is a built-in icon name drawn in the field's leading slot (decoration, no actions; an
 SF Symbol on iOS), gated by `prototype_text_field_leading_icon_v1`.
 
-A `secure` field's value is not redacted: it lives in state, `change` events and `inspect`.
+A `secure` field masks its text. Values listed in `storage.secure` are also omitted from public
+state, `change` payloads and `inspect`; see [secure storage](prototype-ux-platform-services.md).

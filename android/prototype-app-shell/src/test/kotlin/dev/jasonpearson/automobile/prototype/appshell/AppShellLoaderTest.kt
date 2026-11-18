@@ -26,7 +26,15 @@ class AppShellLoaderTest {
         .jsonArray
         .map { it.jsonPrimitive.content }
     org.junit.Assert.assertTrue("prototype_platform_permissions_v1" in capabilities)
+    org.junit.Assert.assertTrue("prototype_platform_secureStorage_v1" in capabilities)
     org.junit.Assert.assertFalse("prototype_platform_notifications_v1" in capabilities)
+  }
+
+  @Test
+  fun `secure storage spec loads without rewriting the contract`() {
+    val input =
+      """{"id":"vault","window":{"placement":{"type":"fullscreen"}},"requires":{"platform":["secureStorage"]},"state":{"token":"","count":0},"storage":{"version":1,"keys":["state:count"],"secure":["state:token"]},"root":{"type":"text","text":"Vault"}}"""
+    assertEquals(AppShellState.Ready(input), loader(input).load())
   }
 
   @Test

@@ -38,6 +38,18 @@ class ProtoViewerCapabilitiesTest {
   }
 
   @Test
+  fun reportedCapabilitiesAcceptSecureStorage() {
+    val input =
+      """{"id":"vault","window":{"placement":{"type":"fullscreen"}},"requires":{"platform":["secureStorage"]},"state":{"token":"","count":0},"storage":{"version":1,"keys":["state:count"],"secure":["state:token"]},"root":{"type":"text","text":"Vault"}}"""
+    val capabilities = protoViewerMcpAbout(42, "test").capabilities
+    assertTrue("prototype_platform_secureStorage_v1" in capabilities)
+    assertTrue(
+      PrototypeSpecValidator.validate(input, capabilities, library = true)
+        is PrototypeSpecValidation.Success,
+    )
+  }
+
+  @Test
   fun reportedCapabilitiesAcceptPermissionsWithoutAdvertisingNotifications() {
     val capabilities = protoViewerMcpAbout(42, "test").capabilities
     assertTrue("prototype_platform_permissions_v1" in capabilities)

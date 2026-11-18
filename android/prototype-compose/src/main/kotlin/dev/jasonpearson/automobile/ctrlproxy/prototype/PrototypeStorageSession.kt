@@ -506,7 +506,7 @@ internal constructor(
     synchronized(lock) {
       if (!quiesced || invalidated) return
       quiesced = false
-      markDirty()
+      invalidateSecureBaseline()
     }
   }
 
@@ -583,6 +583,11 @@ internal constructor(
         sizes[key] = PrototypeStorageRestorer.entryBytes(key, value)
       }
       for ((key, value) in secureForgotten) secureValues.putIfAbsent(key, value)
+      invalidateSecureBaseline()
+    }
+
+  private fun invalidateSecureBaseline() =
+    synchronized(lock) {
       secureBaselineStale = true
       markDirty()
     }

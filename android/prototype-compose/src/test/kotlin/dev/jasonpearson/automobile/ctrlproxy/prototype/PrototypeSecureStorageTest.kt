@@ -128,6 +128,21 @@ class PrototypeSecureStorageTest {
   }
 
   @Test
+  fun `resume rewrites secure values after quiesced deletion removes them`() = runTest {
+    val original = spec()
+    val session = persistence().open(original).session!!
+    session.record(changed(original))
+    session.flush()
+    assertEquals(JsonPrimitive(SECRET), secure.values.getValue(original.id).values["state:token"])
+    session.quiesce()
+    secure.delete(original.id)
+    assertTrue(secure.values.isEmpty())
+    session.resume()
+    session.flush()
+    assertEquals(JsonPrimitive(SECRET), secure.values.getValue(original.id).values["state:token"])
+  }
+
+  @Test
   fun `dismiss flushes secure changes and retains them for the next show`() = runTest {
     val opened = persistence().open(spec())
     var sequence = 0L

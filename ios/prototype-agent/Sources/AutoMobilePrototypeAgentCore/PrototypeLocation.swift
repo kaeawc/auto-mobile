@@ -53,12 +53,89 @@ enum PrototypeLocationSourceError: Error {
 }
 
 @MainActor
+protocol PrototypeLocationStreamActions: AnyObject {
+    func setDesiredAccuracy(_ accuracy: Double)
+    func startUpdates()
+    func stopUpdates()
+    func requestLocation()
+}
+
+/// Arbitrates one-shot and continuous consumers of a single native location manager.
+@MainActor
+struct PrototypeLocationStreamArbiter {
+    var updateAccuracy: Double
+    private var desiredAccuracy: Double
+    private var waiterCount = 0
+    private var updating = false
+
+    init(updateAccuracy: Double) {
+        self.updateAccuracy = updateAccuracy
+        desiredAccuracy = updateAccuracy
+    }
+
+    mutating func requestFix(accuracy: Double, using actions: any PrototypeLocationStreamActions) {
+        desiredAccuracy = waiterCount == 0
+            ? (updating ? min(accuracy, updateAccuracy) : accuracy) : min(desiredAccuracy, accuracy)
+        actions.setDesiredAccuracy(desiredAccuracy)
+        waiterCount += 1
+        if waiterCount == 1 {
+            // A continuous stream swallows requestLocation, so pause it until the waiters leave.
+            if updating { actions.stopUpdates() }
+            actions.requestLocation()
+        }
+    }
+
+    mutating func cancelFix(using actions: any PrototypeLocationStreamActions) {
+        guard waiterCount > 0 else { return }
+        waiterCount -= 1
+        if waiterCount == 0 { resumeOrStop(using: actions) }
+    }
+
+    mutating func finishFixes(using actions: any PrototypeLocationStreamActions) {
+        let hadWaiters = waiterCount > 0
+        waiterCount = 0
+        // Ordinary stream fixes (including late callbacks after cancellation) need no restart.
+        if hadWaiters { resumeOrStop(using: actions) }
+        else if !updating { actions.stopUpdates() }
+    }
+
+    mutating func startUpdates(using actions: any PrototypeLocationStreamActions) {
+        updating = true
+        desiredAccuracy = waiterCount == 0 ? updateAccuracy : min(desiredAccuracy, updateAccuracy)
+        actions.setDesiredAccuracy(desiredAccuracy)
+        actions.startUpdates()
+    }
+
+    mutating func stopUpdates(using actions: any PrototypeLocationStreamActions) {
+        updating = false
+        actions.stopUpdates()
+        // Stopping continuous updates also cancels requestLocation on the shared manager.
+        if waiterCount > 0 { actions.requestLocation() }
+    }
+
+    mutating func stop(using actions: any PrototypeLocationStreamActions) {
+        // Full shutdown cancels one-shot consumers as well as continuous updates.
+        waiterCount = 0
+        stopUpdates(using: actions)
+    }
+
+    private mutating func resumeOrStop(using actions: any PrototypeLocationStreamActions) {
+        if updating {
+            desiredAccuracy = updateAccuracy
+            actions.setDesiredAccuracy(desiredAccuracy)
+            actions.startUpdates()
+        } else { actions.stopUpdates() }
+    }
+}
+
+@MainActor
 protocol PrototypeLocationSource: AnyObject {
     var servicesEnabled: Bool { get }
     var authorization: PrototypeLocationAuthorization { get }
     func requestAuthorization() async
     func requestFix(accuracy: String) async throws -> PrototypeLocationFix
     func requestTemporaryFullAccuracy() async -> Bool
+    func setAuthorizationChangeHandler(_ handler: (@MainActor @Sendable () -> Void)?)
     func setUpdateAccuracy(_ accuracy: String)
     func startUpdates(
         minDistanceM: Double,
@@ -69,6 +146,7 @@ protocol PrototypeLocationSource: AnyObject {
 }
 
 extension PrototypeLocationSource {
+    func setAuthorizationChangeHandler(_: (@MainActor @Sendable () -> Void)?) {}
     func stop() {}
 
     /// Sources without a configurable accuracy can keep their native best-available policy.
@@ -187,6 +265,7 @@ final class PrototypeLocationModule: PrototypePlatformModule {
     }
 
     func stop() {
+        source.setAuthorizationChangeHandler(nil)
         guard started else { return }
         started = false
         generation += 1
@@ -214,6 +293,18 @@ final class PrototypeLocationModule: PrototypePlatformModule {
         lastUpdate = nil
         deliveredAt = nil
         block = root
+        // Register even with services disabled so a later authorization/services change can start us.
+        // Missing usage descriptions and construction must never create the host location manager.
+        if root != nil, hasUsage {
+            source.setAuthorizationChangeHandler { [weak self] in
+                guard let self else { return }
+                if updating, !self.source.authorization.authorized {
+                    self.source.stopUpdates()
+                    updating = false
+                }
+                startIfAuthorized()
+            }
+        } else { source.setAuthorizationChangeHandler(nil) }
         startIfAuthorized()
     }
 

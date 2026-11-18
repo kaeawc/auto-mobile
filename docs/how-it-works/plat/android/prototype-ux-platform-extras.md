@@ -10,31 +10,28 @@ preflight capability, not a strict-spec gate.
 
 A root Final-pass observer reports single-pointer down/up gestures left
 unconsumed by descendants, with movement below touch slop. Scrolling, pager
-drags, multitouch and taps outside the content window do not report. Interactive
+drags, multitouch and taps outside the content window never report. Interactive
 controls and dismissing scrims consume their gestures. Gesture-only nodes with
-nonempty long-press or double-tap actions explicitly mark their down as handled
-without consuming it, preserving ancestor clicks. Passive text, boxes, images
-and spacers remain dead areas. A single tap on a gesture-only node counts as
-handled, even if its hold or double tap action does not fire.
+nonempty long-press or double-tap actions mark their down as handled without
+consuming it, preserving ancestor clicks, and a single tap on them counts as
+handled. Passive text, boxes, images and spacers stay dead.
 
 Payloads contain only `stack`, `screen`, `x` and `y`; coordinates are window-local
-dp rounded to one decimal. The deepest stack path supplies its id and top screen;
-equal depths choose the lowest stack id lexicographically. Both ids are null
+dp rounded to one decimal. The deepest stack path supplies its id and top screen; equal depths choose the lexicographically lowest stack id. Both are null
 without stacks. The event uses normal sequence allocation, state, pages and
-stacks. The payload never includes typed text. Authored emits cannot use the
-reserved `prototype_` prefix. Disabling the option or closing the runtime stops
-reporting.
+stacks, never typed text. Authored emits cannot use the
+reserved `prototype_` prefix. Disabling the option or closing the runtime stops reports.
 
 ## Value formatters (#14227)
 
-Optional `derive` maps up to 32 STATE_KEY names to strict
+`derive` maps up to 32 STATE_KEY names to strict
 `{of, format, locale?, timeZone?}` entries. `of` contains exactly one of
 `{data: "/pointer"}` (relative to data), `{state: "key"}`, or
 `{value: number|string}`. Every text field supporting `{data:/pointer}` also
 accepts `{derived:name}`; undeclared names are validation errors, unused entries
 are allowed, and malformed braces remain literal. Devices render these tokens in
 text node text, contentDescription, rich-text spans, button/FAB labels, topAppBar
-title, badge text, dialog title/text, and snackbar text. Other text-kind fields
+title, badge text, dialog title/text and snackbar text. Other text-kind fields
 (request url/headers/body, check messages, select/segmented/menu/searchBar labels)
 validate unknown names but display the token literally on devices.
 
@@ -43,9 +40,8 @@ to `{item: "field"}` or `{value: number|string}`. It projects strings onto each
 original row for `{item.createdAtText}` (using the repeat's actual alias).
 Names cannot collide with any original item field, including non-scalar data
 fields. Derived entries do not read other derived entries. Host validation checks projected
-field references without evaluating device-local strings; value-dependent checks
-on derived repeat keys and emit names are deferred to the renderer. Missing source fields
-are allowed and format as empty strings.
+field references without evaluating device-local strings; the renderer defers value-dependent checks
+on derived repeat keys and emit names. Missing source fields format as empty strings.
 
 `format` contains exactly one of these keys, each containing a strict object:
 
@@ -199,40 +195,38 @@ entries and waits. Other actions use CtrlProxy.
 The listener requires a nonblank `assets/prototype/attach-token` and an emulator identity
 (kernel qemu flag or emulator build fingerprint/hardware). The stamper's explicit
 `allowPhysicalDeviceAttach: true` option writes `assets/prototype/attach-allow-physical-device`
-to permit physical devices. This applies to both debug and release templates, independently of
-APK debuggability. The token-in-APK model is development-only: anyone who can read the APK can
-recover its token. Reinstalling a slug in place reuses the token. A second connection cannot
+to permit physical devices. This applies to debug and release templates alike. The token-in-APK model is development-only: anyone who can read the APK can recover the token. Reinstalling in place reuses the token. A second connection cannot
 replace an authenticated live peer. Status and patch conflicts redact `storage.secure` state keys.
 
-Events replay at least once. A process-scoped agent retains its listener, buffer, sequence ledger
-and `appInstanceId` across reconnects and Activity recreation. Activities rebind targets;
-a new process resets identity and epoch. `hello_result` reports identity and an optional `showingId`. A showing id changes when the Activity
-mounts a new runtime. It clears a dismissal on a same-process remount. Pending events are kept.
-Older apps without `showingId` keep process-only identity.
-One daemon-host attacher serves every MCP registration and retains app/device cursors. `hello` sends `appInstanceId` and
-`lastAcknowledgedSequence` (initially zero); `{type: "ack", sequence, appInstanceId}` acknowledges
-matching instances after subscriber delivery. Epochs initialize before replay. Status reconciles
-only its app. The 256-event
-buffer closes on overflow for replay. Device cleanup and host disposal close sockets and remove
-adb forwards and forget device cursors. Uninstall and reinstall each forget only that app's cursors.
+Events replay at least once. A process-scoped agent keeps its listener, buffer, sequence ledger
+and `appInstanceId` across reconnects and Activity recreation. Activities rebind targets. A
+new process resets identity and epoch. `hello_result` reports identity and an optional
+`showingId`, which changes when the Activity mounts a new runtime. A same-process remount clears
+the dismissal and keeps pending events. Older apps without `showingId` keep process-only identity.
+One daemon-host attacher serves every MCP registration and keeps app/device cursors. `hello` sends
+`appInstanceId` and `lastAcknowledgedSequence` (initially zero), and `{type: "ack", sequence,
+appInstanceId}` acknowledges matching instances after subscriber delivery. Epochs initialize before
+replay. Status reconciles only its app. The 256-event buffer closes on overflow for replay. Device
+cleanup and host disposal close sockets, remove adb forwards and forget device cursors. Uninstall
+and reinstall each forget only that app's cursors.
 
-Events stay buffered until acknowledged and replay on the next hello,
-and the host de-duplicates replays by sequence, within the connection and coordinator. The app retains 200 events,
-drops the oldest on overflow, and reports cumulative `droppedEvents` in hello and status;
-sequence gaps expose missing events. A separate writer uses a 256-frame queue and five-second
-write deadline. Queue overflow or blocked writes close the peer; events and requests continue, retaining replay.
+Events stay buffered until acknowledged and replay on the next hello; the host de-duplicates
+replays by sequence, within the connection and coordinator. The app retains 200 events, drops the
+oldest on overflow, and reports cumulative `droppedEvents` in hello and status; sequence gaps expose
+missing events. A separate writer uses a 256-frame queue and five-second write deadline. Queue
+overflow or blocked writes close the peer, and events and requests continue with replay retained.
 
 - **Identity.** The package is `dev.jasonpearson.automobile.app.<slug>_<sha256(slug) 8 hex>`.
   Hyphens in the slug become underscores because Android package segments allow only
   `[A-Za-z0-9_]`. A slug is lowercase hyphen-separated words of at most 48 characters that start
-  with a letter. The prefix is never agent-chosen, so a disposable app cannot replace a real app.
+  with a letter. The prefix is never agent-chosen, so a disposable app cannot replace a real one.
 - **Permissions** come only from the spec's root `requires`. `INTERNET` is always declared.
   Each canonical permission maps to its manifest permissions (`location` maps to fine and coarse;
   `photosAdd` maps to none). Each `requires.background` kind adds `FOREGROUND_SERVICE` and its
   `FOREGROUND_SERVICE_<TYPE>` permission; `remoteNotification` adds none. A `requires.platform`
   module whose runtime needs an install-time permission adds it (`biometric` adds `USE_BIOMETRIC`);
   it is never granted or denied, so it is not part of the permission mode. The permission mode is
-  `prompt` (the default), `grantDeclared`, or `{grant, deny}`, which may name only declared
+  `prompt` (default), `grantDeclared`, or `{grant, deny}`, which may name only declared
   permissions and must not name one in both lists.
 - **Template.** The host picks the smallest flavor whose capabilities cover
   `requiredPrototypeCapabilities(spec)`. If none does, it refuses and names the missing capabilities

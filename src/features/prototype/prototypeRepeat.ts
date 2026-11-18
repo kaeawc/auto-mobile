@@ -5,7 +5,7 @@ import { chargeMotionNode } from "./prototypeMotionBudget";
 import { PrototypeScreenBudget, prototypeScreenBudgetMessage } from "./prototypeScreenBudget";
 import { effectUses } from "./prototypeEffects";
 import { prototypeNodeChildren } from "./prototypeNodeChildren";
-import { PrototypeRepeatData } from "./prototypeData";
+import { PrototypeRepeatData, projectPrototypeDataItem } from "./prototypeData";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
   prototypeDataPathHasIndex,
@@ -345,10 +345,13 @@ function scopeItems(repeat: Raw, data: PrototypeRepeatData): readonly Readonly<R
   if (typeof source?.path === "string") {
     return data.items(source.path);
   }
-  const items = typeof source?.derived === "string" ? data.derived[source.derived] : repeat.items;
-  return (Array.isArray(items) ? items : []).filter(
+  const derived = typeof source?.derived === "string";
+  const items = derived ? data.derived[String(source?.derived)] : repeat.items;
+  const objects = (Array.isArray(items) ? items : []).filter(
     (item): item is Raw => record(item) !== undefined,
   );
+  // Derived rows are data rows: templates see only their named scalars, as for a path source.
+  return derived ? objects.map(projectPrototypeDataItem) : objects;
 }
 
 function scopeOf(node: Raw, path: string, data: PrototypeRepeatData): Scope | undefined {

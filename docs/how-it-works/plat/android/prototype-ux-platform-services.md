@@ -57,8 +57,9 @@ event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, b
 exactly one `/<module>/<key>`. The keys are `pitchDeg` and `rollDeg` (whole degrees, -180 to 180), `headingDeg` (0 to 359),
 `steps` (counted since the subscription started), `proximityNear` (boolean) and `lightLux` (whole lux, Android
 only). There is no public ambient-light API on iOS. A sensor the device lacks leaves its key absent, so it compares as
-missing. The `prototypeSensorReference.ts` module is the reference the runtimes copy: whole-unit rounding, per-key
-throttling at `1000 / rateHz` ms (`rateHz` 1 to 30), and a shake at 2.7 g or more with a 1000 ms cooldown.
+missing. The runtimes copy whole-unit rounding from `prototypeSensorReference.ts`. Continuous values use per-key
+throttling at `1000 / rateHz` ms (`rateHz` 1 to 30). A shake needs 2.7 g or more with a 1000 ms cooldown.
+On iOS, every distinct proximity change publishes immediately; identical consecutive values are ignored.
 The runtimes replay it from `test/fixtures/prototype-sensors/`.
 
 The root `sensors` block lists the sensors the device listens to, and needs `sensors` in `requires.platform`.
@@ -66,8 +67,16 @@ In it, `shake`, `steps` and `proximity` take `{}`, while `orientation` (the thre
 `rateHz` of 1 to 30. The `steps` sensor also needs the `motion` permission in `requires.permissions`. A `/platform/sensors`
 read or a `sensors.shake` handler must name a sensor the block lists. Android CtrlProxy advertises the module
 using platform sensors, with subscriptions only while the prototype is active and in the foreground. Steps
-remain absent without an `ACTIVITY_RECOGNITION` grant; the module does not request it. iOS does not yet
-advertise the module.
+remain absent without an `ACTIVITY_RECOGNITION` grant; the module does not request it.
+
+The iOS agent, ProtoViewer and Viewer registries advertise the module using CoreMotion and UIKit proximity monitoring.
+Steps require `NSMotionUsageDescription`, available step counting and motion authorization that is neither
+denied nor restricted. The `CMPedometer` source counts steps from each subscription's start date; the first callback
+already includes steps since that date, and restarting a subscription resets the baseline. Orientation uses
+magnetic north when available, omitting an invalid heading. CoreMotion acceleration is converted from g to m/s²
+before shake detection. iOS never subscribes to or publishes light readings. Hiding the prototype or changing
+its sensor block stops all sources, clears sensor state and resets filters and the shake cooldown. Callbacks
+from a stopped subscription cannot publish state or events into a later session.
 
 **Android biometric runtime support.** The [biometric module](prototype-ux-platform-device.md) is
 registered by Android Activity hosts (SavedPrototypeActivity, ProtoViewer and disposable apps). CtrlProxy overlays omit the capability and

@@ -195,7 +195,9 @@ and `uninstallApp` actions remain separate from this artifact pipeline.
 - **Permissions** come only from the spec's root `requires`. `INTERNET` is always declared.
   Each canonical permission maps to its manifest permissions (`location` maps to fine and coarse;
   `photosAdd` maps to none). Each `requires.background` kind adds `FOREGROUND_SERVICE` and its
-  `FOREGROUND_SERVICE_<TYPE>` permission; `remoteNotification` adds none. The permission mode is
+  `FOREGROUND_SERVICE_<TYPE>` permission; `remoteNotification` adds none. A `requires.platform`
+  module whose runtime needs an install-time permission adds it (`biometric` adds `USE_BIOMETRIC`);
+  it is never granted or denied, so it is not part of the permission mode. The permission mode is
   `prompt` (the default), `grantDeclared`, or `{grant, deny}`, which may name only declared
   permissions and must not name one in both lists.
 - **Template.** The host picks the smallest flavor whose capabilities cover

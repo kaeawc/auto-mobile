@@ -29,6 +29,17 @@ export const DISPOSABLE_APP_ANDROID_PERMISSIONS: Readonly<Record<string, readonl
   speech: [`${ANDROID}RECORD_AUDIO`],
 };
 
+/**
+ * `requires.platform` module → Android install-time permissions its runtime uses. These have no
+ * contract permission name because nothing is granted at runtime, so they come from the module
+ * list; the template's merged manifest declares them, but stamping rebuilds the permission list.
+ */
+export const DISPOSABLE_APP_ANDROID_MODULE_PERMISSIONS: Readonly<
+  Record<string, readonly string[]>
+> = {
+  biometric: [`${ANDROID}USE_BIOMETRIC`],
+};
+
 /** Contract background kind → Android foreground-service type permissions. */
 export const DISPOSABLE_APP_ANDROID_BACKGROUND: Readonly<Record<string, readonly string[]>> = {
   audio: [`${ANDROID}FOREGROUND_SERVICE_MEDIA_PLAYBACK`],
@@ -98,6 +109,7 @@ export function disposableAppDeclarations(spec: PrototypeJson): DisposableAppDec
   const permissionEntries = parsed.data.permissions ?? [];
   const permissions = sortedUnique(permissionEntries.map((entry) => entry.name));
   const background = sortedUnique(parsed.data.background ?? []);
+  const modules = parsed.data.platform ?? [];
   const services = background.flatMap((kind) => DISPOSABLE_APP_ANDROID_BACKGROUND[kind] ?? []);
   return {
     permissions,
@@ -106,6 +118,7 @@ export function disposableAppDeclarations(spec: PrototypeJson): DisposableAppDec
       permissions: sortedUnique([
         ...ANDROID_ALWAYS,
         ...permissions.flatMap((name) => DISPOSABLE_APP_ANDROID_PERMISSIONS[name] ?? []),
+        ...modules.flatMap((name) => DISPOSABLE_APP_ANDROID_MODULE_PERMISSIONS[name] ?? []),
         ...(services.length > 0 ? [ANDROID_FOREGROUND_SERVICE, ...services] : []),
       ]),
     },

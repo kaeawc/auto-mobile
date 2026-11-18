@@ -112,6 +112,10 @@ public final class PrototypePlatformRegistry {
         modules["location"]?.configure(root: locationBlock)
     }
 
+    public func configure(sensorsBlock: JSONValue?) {
+        modules["sensors"]?.configure(root: sensorsBlock)
+    }
+
     public var capabilities: [String] { Set(modules.values.map(\.capability)).sorted() }
 
     // Production membership lives here so pure core tests exercise the same factories as UIKit.
@@ -124,6 +128,7 @@ public final class PrototypePlatformRegistry {
         bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
         deviceStatus: [any PrototypePlatformModule] = [],
         location: (any PrototypeLocationSource)? = nil,
+        sensors: (any PrototypeSensorSource)? = nil,
         biometric: (any PrototypeBiometricSource)? = nil
     )
         -> PrototypePlatformRegistry
@@ -137,6 +142,7 @@ public final class PrototypePlatformRegistry {
         ] + deviceStatus
         if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
         if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
+        if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 
@@ -148,6 +154,7 @@ public final class PrototypePlatformRegistry {
         bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
         deviceStatus: [any PrototypePlatformModule] = [],
         location: (any PrototypeLocationSource)? = nil,
+        sensors: (any PrototypeSensorSource)? = nil,
         biometric: (any PrototypeBiometricSource)? = nil
     )
         -> PrototypePlatformRegistry
@@ -160,6 +167,7 @@ public final class PrototypePlatformRegistry {
         ] + deviceStatus
         if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
         if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
+        if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 

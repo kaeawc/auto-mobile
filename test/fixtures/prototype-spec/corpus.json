@@ -813,6 +813,7 @@
     "derive-locale.json",
     "derive-over-limit.json",
     "derive-repeat-collision.json",
+    "derive-repeat-derived-nested-field.json",
     "derive-repeat-over-limit.json",
     "derive-repeat-state-source.json",
     "derive-timezone.json",

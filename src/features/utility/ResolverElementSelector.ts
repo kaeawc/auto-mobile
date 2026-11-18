@@ -84,6 +84,12 @@ export interface ContainerMatch {
   visibleToUser?: boolean;
 }
 
+/** A selection and the one resolver run that produced it. */
+export interface SelectionWithResolution {
+  selection: ElementSelectionResult;
+  resolution: ElementResolution;
+}
+
 /** Compatibility at the injected selector boundary; all matching belongs to ElementResolver. */
 export class ResolverElementSelector implements ElementSelector {
   constructor(
@@ -217,6 +223,18 @@ export class ResolverElementSelector implements ElementSelector {
     query: ElementQuery,
     options: SelectionOptions = {},
   ): ElementSelectionResult {
+    return this.selectWithResolution(capture, query, options).selection;
+  }
+
+  /**
+   * {@link select}, plus the resolution it was made from: the visible-filtered, ranked candidates
+   * and the snapshot nodes their ancestry indexes into, for a caller that refines the choice.
+   */
+  selectWithResolution(
+    capture: ViewHierarchyResult,
+    query: ElementQuery,
+    options: SelectionOptions = {},
+  ): SelectionWithResolution {
     const selector = withMatchPolicy(query, options);
     const snapshot = { id: this.snapshotId(capture), nodes: this.selectionNodes(capture, options) };
     const resolverSelector: ResolverSelector = {
@@ -234,12 +252,16 @@ export class ResolverElementSelector implements ElementSelector {
     const result = this.resolver.resolve(snapshot, resolverSelector, intent);
     this.checkResolutionError(result, options);
     if (!result.error && !result.chosen && options.intentAction === "long-press") {
-      return this.select(capture, query, { ...options, intentAction: "tap" });
+      return this.selectWithResolution(capture, query, { ...options, intentAction: "tap" });
     }
     const selection = this.selectionResult(result, capture, options.strategy ?? "first", selector);
-    return intent.excludeImeKeys && !result.error && !result.chosen
-      ? this.flagKeyboardOnlyMatch(selection, snapshot, resolverSelector, intent)
-      : selection;
+    return {
+      selection:
+        intent.excludeImeKeys && !result.error && !result.chosen
+          ? this.flagKeyboardOnlyMatch(selection, snapshot, resolverSelector, intent)
+          : selection,
+      resolution: { ...result, snapshotNodes: result.snapshotNodes ?? snapshot.nodes },
+    };
   }
 
   /** Mark a miss whose only match is a keyboard key, so the caller can say so (issue #10225). */

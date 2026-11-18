@@ -81,17 +81,17 @@ internal class PrototypeRealtimeModule(
 
   override suspend fun call(call: PlatformCall): PlatformCallResult {
     val channel = (call.args["channel"] as? JsonPrimitive)?.content ?: return invalid("channel")
-    val body = if (call.name == SEND) sendText(call.args) ?: return invalid("body") else null
+    val body = if (call.call == SEND) sendText(call.args) ?: return invalid("body") else null
     val result = CompletableDeferred<PrototypeChannelError?>()
     val queued =
       inbox
         .trySend {
           result.complete(
-            when (call.name) {
+            when (call.call) {
               CONNECT -> controller.connect(channel)
               DISCONNECT -> controller.disconnect(channel)
               SEND -> controller.send(channel, checkNotNull(body))
-              else -> unsupported(call.name)
+              else -> unsupported(call.call)
             },
           )
         }

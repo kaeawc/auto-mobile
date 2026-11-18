@@ -32,6 +32,9 @@ interface PrototypePermissionsSource {
 
   fun request(): Flow<PrototypePermissionOutcome>
 
+  /** Stateful Android sources fork denial history; stateless sources may share the instance. */
+  fun session(): PrototypePermissionsSource = this
+
   fun close()
 }
 
@@ -70,10 +73,11 @@ class FakePrototypePermissionsSource : PrototypePermissionsSource {
   }
 }
 
-/** Each surface owns its state and events; the Activity owns the shared permission source. */
+/** Each surface owns its state, events and denial history; the Activity coordinates prompts. */
 class PrototypePermissionsModule(
   private val source: PrototypePermissionsSource,
   scope: CoroutineScope? = null,
+  private val ownsSession: Boolean = false,
 ) : PrototypePlatformModule {
   companion object {
     const val CAPABILITY = "prototype_platform_permissions_v1"
@@ -148,11 +152,15 @@ class PrototypePermissionsModule(
     )
   }
 
-  internal fun session(scope: CoroutineScope) = PrototypePermissionsModule(source, scope)
+  internal fun session(scope: CoroutineScope): PrototypePermissionsModule {
+    val session = source.session()
+    return PrototypePermissionsModule(session, scope, ownsSession = session !== source)
+  }
 
   internal fun detach() {
     closed = true
     changesJob?.cancel()
+    if (ownsSession) source.close()
   }
 
   override fun close() {

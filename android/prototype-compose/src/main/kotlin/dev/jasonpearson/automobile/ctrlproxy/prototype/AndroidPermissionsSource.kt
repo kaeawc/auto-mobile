@@ -1,15 +1,16 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.app.NotificationManager
-import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.edit
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
@@ -23,10 +24,11 @@ internal interface AndroidPermissionsGateway {
   val rationale: Boolean
   val resumes: Flow<Unit>
 
-  fun request(deliver: () -> Unit): () -> Unit
+  /** Null when another session owns the Activity's prompt. */
+  fun request(deliver: (Boolean) -> Unit, cancel: () -> Unit): (() -> Unit)?
 }
 
-/** Persisted separately from the framework so never-asked and permanently denied stay distinct. */
+/** Session-local denial history; a launch alone is not evidence of a denial. */
 internal interface PrototypePermissionRequestStore {
   var asked: Boolean
 }
@@ -41,7 +43,7 @@ internal constructor(
     activity: ComponentActivity,
   ) : this(
     FrameworkPermissionsGateway(activity),
-    SharedPreferencesPermissionRequestStore(activity),
+    SessionPermissionRequestStore(),
     Dispatchers.Main.immediate,
   )
 
@@ -53,8 +55,9 @@ internal constructor(
   override fun status(): PrototypePermissionState =
     if (closed || !gateway.foreground) PrototypePermissionState.UNAVAILABLE else authorization()
 
-  private fun authorization(): PrototypePermissionState =
-    when {
+  private fun authorization(): PrototypePermissionState {
+    if (gateway.sdk >= 33 && gateway.granted) store.asked = false
+    return when {
       gateway.sdk < 33 ->
         if (gateway.notificationsEnabled) PrototypePermissionState.GRANTED
         else PrototypePermissionState.BLOCKED
@@ -65,36 +68,55 @@ internal constructor(
       gateway.rationale -> PrototypePermissionState.DENIED
       else -> PrototypePermissionState.BLOCKED
     }
+  }
 
-  override fun request(): Flow<PrototypePermissionOutcome> = callbackFlow {
+  override fun session(): PrototypePermissionsSource =
+    AndroidPermissionsSource(gateway, SessionPermissionRequestStore(), dispatcher)
+
+  override fun request(): Flow<PrototypePermissionOutcome> = flow {
     val current = status()
     if (finish != null) {
-      trySend(PrototypePermissionOutcome.Busy)
-      close()
-      return@callbackFlow
+      emit(PrototypePermissionOutcome.Busy)
+      return@flow
     }
     if (
       current !in setOf(PrototypePermissionState.NOT_DETERMINED, PrototypePermissionState.DENIED)
     ) {
-      trySend(PrototypePermissionOutcome.Status(current))
-      close()
-      return@callbackFlow
+      emit(PrototypePermissionOutcome.Status(current))
+      return@flow
     }
+    val result = CompletableDeferred<Boolean?>()
+    var cancelled = false
     val end = {
-      trySend(PrototypePermissionOutcome.Cancelled)
-      close()
+      cancelled = true
+      result.complete(null)
       Unit
     }
     finish = end
     try {
-      store.asked = true
-      val unregister = gateway.request {
-        // Activity results can arrive before ON_RESUME; read authorization without the foreground
-        // gate.
-        trySend(PrototypePermissionOutcome.Status(authorization()))
-        close()
+      val unregister =
+        gateway.request(
+          { granted ->
+            if (!closed && finish === end) result.complete(granted)
+          },
+          end,
+        )
+      if (unregister == null) {
+        emit(PrototypePermissionOutcome.Busy)
+        return@flow
       }
-      awaitClose { unregister() }
+      try {
+        val granted = result.await()
+        if (closed || cancelled || granted == null) emit(PrototypePermissionOutcome.Cancelled)
+        else {
+          // Reaching here proves launch succeeded and a result was delivered. Results may precede
+          // ON_RESUME, so read authorization without the foreground gate.
+          store.asked = !granted
+          emit(PrototypePermissionOutcome.Status(authorization()))
+        }
+      } finally {
+        unregister()
+      }
     } finally {
       if (finish === end) finish = null
     }
@@ -103,23 +125,20 @@ internal constructor(
 
   override fun close() {
     closed = true
+    store.asked = false
     finish?.invoke()
   }
 }
 
-private class SharedPreferencesPermissionRequestStore(context: Context) :
-  PrototypePermissionRequestStore {
-  private val preferences =
-    context.getSharedPreferences("prototype.permissions", Context.MODE_PRIVATE)
-  override var asked: Boolean
-    get() = preferences.getBoolean("notifications.asked", false)
-    set(value) {
-      preferences.edit { putBoolean("notifications.asked", value) }
-    }
+private class SessionPermissionRequestStore : PrototypePermissionRequestStore {
+  override var asked = false
 }
 
-private class FrameworkPermissionsGateway(private val activity: ComponentActivity) :
-  AndroidPermissionsGateway {
+internal class FrameworkPermissionsGateway(
+  private val activity: ComponentActivity,
+  private val activityResultRegistry: ActivityResultRegistry = activity.activityResultRegistry,
+) : AndroidPermissionsGateway {
+  private var requesting = false
   override val sdk
     get() = Build.VERSION.SDK_INT
 
@@ -146,21 +165,41 @@ private class FrameworkPermissionsGateway(private val activity: ComponentActivit
     awaitClose { activity.lifecycle.removeObserver(observer) }
   }
 
-  override fun request(deliver: () -> Unit): () -> Unit {
-    val launcher =
-      activity.activityResultRegistry.register(
+  override fun request(deliver: (Boolean) -> Unit, cancel: () -> Unit): (() -> Unit)? {
+    if (requesting) return null
+    var active = true
+    lateinit var launcher: ActivityResultLauncher<String>
+    lateinit var observer: LifecycleEventObserver
+    val unregister = {
+      if (active) {
+        active = false
+        requesting = false
+        launcher.unregister()
+        activity.lifecycle.removeObserver(observer)
+      }
+    }
+    observer = LifecycleEventObserver { _, event ->
+      if (event == Lifecycle.Event.ON_DESTROY) {
+        unregister()
+        cancel()
+      }
+    }
+    launcher =
+      activityResultRegistry.register(
         "prototype.notifications.${nextRequest.incrementAndGet()}",
         ActivityResultContracts.RequestPermission(),
-      ) {
-        deliver()
+      ) { granted ->
+        if (active && !activity.isDestroyed) deliver(granted)
       }
+    requesting = true
+    activity.lifecycle.addObserver(observer)
     try {
       launcher.launch(POST_NOTIFICATIONS)
     } catch (@Suppress("TooGenericExceptionCaught") error: RuntimeException) {
-      launcher.unregister()
+      unregister()
       throw error
     }
-    return { launcher.unregister() }
+    return unregister
   }
 
   companion object {

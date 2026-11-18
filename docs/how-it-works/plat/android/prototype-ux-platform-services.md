@@ -134,19 +134,23 @@ CtrlProxy's SavedPrototypeActivity advertise the capability. A plain Activity wi
 ActivityResultRegistry and the CtrlProxy overlay omit it. Other canonical names return `unavailable`.
 The result is `{results: {<name>: <state>}}`; each result also updates `/platform/permissions/<name>`.
 Bound request lists must name declared permissions, just like literal lists. Only one request can be
-in flight; a second returns `too_many_in_flight`. Cancellation and teardown unregister the result
-launcher. Activity resume re-reads notification authorization and emits only changed states.
+in flight per Activity; a second returns `too_many_in_flight`. A permission prompt waits for the user
+without a platform-call deadline, including an explicit `timeoutMs`; `statusKey` remains `loading`
+until a result or cancellation. Cancellation, Activity destruction and teardown unregister the result
+launcher and drop late callbacks. Activity resume re-reads notification authorization and emits only
+changed states. Denial history belongs to each runtime session, is recorded only after a successful
+launch delivers a denial, and is cleared on reset or teardown and whenever a grant is observed.
 
-| Android notification authorization                                           | State           |
-| ---------------------------------------------------------------------------- | --------------- |
-| Activity is not resumed, or source is closed                                 | `unavailable`   |
-| API below 33, notifications enabled                                          | `granted`       |
-| API below 33, notifications disabled in Settings                             | `blocked`       |
-| API 33+, POST_NOTIFICATIONS granted and notifications enabled                | `granted`       |
-| API 33+, POST_NOTIFICATIONS granted but notifications disabled               | `blocked`       |
-| API 33+, not granted and no persisted request                                | `notDetermined` |
-| API 33+, previously requested and rationale available                        | `denied`        |
-| API 33+, previously requested and no rationale (including user-fixed denial) | `blocked`       |
+| Android notification authorization                                      | State           |
+| ----------------------------------------------------------------------- | --------------- |
+| Activity is not resumed, or source is closed                            | `unavailable`   |
+| API below 33, notifications enabled                                     | `granted`       |
+| API below 33, notifications disabled in Settings                        | `blocked`       |
+| API 33+, POST_NOTIFICATIONS granted and notifications enabled           | `granted`       |
+| API 33+, POST_NOTIFICATIONS granted but notifications disabled          | `blocked`       |
+| API 33+, not granted and no denial recorded in this session             | `notDetermined` |
+| API 33+, denial recorded and rationale available                        | `denied`        |
+| API 33+, denial recorded and no rationale (including user-fixed denial) | `blocked`       |
 
 `POST_NOTIFICATIONS` is a runtime permission starting at API 33. Earlier versions never prompt;
 Settings alone controls notification availability. Already-granted and blocked requests return their

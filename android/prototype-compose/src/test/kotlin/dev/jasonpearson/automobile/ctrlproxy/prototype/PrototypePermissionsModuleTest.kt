@@ -238,6 +238,75 @@ class PrototypePermissionsModuleTest {
     }
 
   @Test
+  fun `permission prompt stays loading beyond platform deadlines and a late grant succeeds`() =
+    runTest {
+      for (timeout in listOf(null, 1)) {
+        val answer = CompletableDeferred<PrototypePermissionOutcome>()
+        val source =
+          FakePrototypePermissionsSource().apply { outcomes = flow { emit(answer.await()) } }
+        val runtime = runtime(source)
+        runtime.handle(
+          PrototypeInteraction.Tap(
+            listOf(
+              PrototypePlatformAction(
+                "permissions.request",
+                mapOf(
+                  "names" to
+                    buildJsonObject {
+                      put("value", JsonArray(listOf(JsonPrimitive("notifications"))))
+                    },
+                ),
+                statusKey = "requestStatus",
+                timeoutMs = timeout,
+              ),
+            ),
+          ),
+        )
+        runCurrent()
+        advanceTimeBy(300_001)
+        runCurrent()
+        assertEquals(PrototypeScalar.Text("loading"), runtime.current.state["requestStatus"])
+        assertEquals(1, source.requests)
+        answer.complete(PrototypePermissionOutcome.Status(PrototypePermissionState.GRANTED))
+        runCurrent()
+        assertEquals(PrototypeScalar.Text("success"), runtime.current.state["requestStatus"])
+        assertEquals(
+          JsonPrimitive("granted"),
+          runtime.current.platformState.getValue("permissions").jsonObject["notifications"],
+        )
+        runtime.close()
+      }
+    }
+
+  @Test
+  fun `long pending permission prompt is still cancelled on runtime replacement`() = runTest {
+    val source = FakePrototypePermissionsSource().apply { outcomes = flow { awaitCancellation() } }
+    val runtime = runtime(source)
+    runtime.handle(
+      PrototypeInteraction.Tap(
+        listOf(
+          PrototypePlatformAction(
+            "permissions.request",
+            mapOf(
+              "names" to
+                buildJsonObject { put("value", JsonArray(listOf(JsonPrimitive("notifications")))) },
+            ),
+            statusKey = "requestStatus",
+          ),
+        ),
+      ),
+    )
+    runCurrent()
+    advanceTimeBy(30_000)
+    runCurrent()
+    assertEquals(PrototypeScalar.Text("loading"), runtime.current.state["requestStatus"])
+    runtime.cancelPlatformCalls()
+    runCurrent()
+    assertEquals(PrototypeScalar.Text("error"), runtime.current.state["requestStatus"])
+    runtime.close()
+  }
+
+  @Test
   fun `runtime refuses undeclared bound permission before source access`() = runTest {
     val source = FakePrototypePermissionsSource()
     val runtime = runtime(source)

@@ -79,22 +79,27 @@ final class PrototypeNestedRepeatTests: XCTestCase {
             var values = PrototypeRepeatData(data: data)
             guard case let .array(orders)? = data["orders"],
                   let outer = orders.first?.objectFields,
-                  case let .array(children)? = fields["root"]?.objectFields?["children"] else {
+                  case let .array(children)? = fields["root"]?.objectFields?["children"]
+            else {
                 XCTFail("Missing boundary rows"); return 0
             }
             return try children.reduce(values.cells("/orders")) { total, child in
                 let items = child.objectFields?["repeat"]?.objectFields?["items"]?.objectFields
                 let field = try XCTUnwrap(items?["field"]?.stringValue)
-                var inner = PrototypeRepeatData(data: ["rows": try XCTUnwrap(outer[field])])
+                var inner = try PrototypeRepeatData(data: ["rows": XCTUnwrap(outer[field])])
                 return total + inner.cells("/rows")
             }
         }
-        let valid = try Data(contentsOf:
-            PrototypeSpecFixtures.directory.appendingPathComponent("repeat/nested-cell-limit.json"))
+        let valid = try Data(
+            contentsOf:
+            PrototypeSpecFixtures.directory.appendingPathComponent("repeat/nested-cell-limit.json")
+        )
         XCTAssertEqual(try cells(JSONDecoder().decode(JSONValue.self, from: valid)), PrototypeLimits.maxRepeatPathCells)
         XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: valid))
-        let invalid = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf:
-            PrototypeSpecFixtures.directory.appendingPathComponent("invalid/nested-repeat-cell-limit.json")))
+        let invalid = try JSONDecoder().decode(JSONValue.self, from: Data(
+            contentsOf:
+            PrototypeSpecFixtures.directory.appendingPathComponent("invalid/nested-repeat-cell-limit.json")
+        ))
         XCTAssertEqual(try cells(XCTUnwrap(invalid.objectFields?["spec"])), PrototypeLimits.maxRepeatPathCells + 1)
     }
 
@@ -139,6 +144,52 @@ final class PrototypeNestedRepeatTests: XCTestCase {
         XCTAssertFalse(PrototypeStrictCapabilities.required([
             "root": .object(["type": .string("text"), "text": .string("{outerIndex}")]),
         ]).contains(capability))
+    }
+
+    func testOrdinaryRepeatsDoNotRequireNestedCapability() throws {
+        for items in [#"[{"n":1}]"#, #"{"path":"/rows"}"#, #"{"derived":"rows"}"#] {
+            let root = try JSONDecoder().decode(JSONValue.self, from: Data("""
+            {"type":"column","repeat":{"as":"item","items":\(items),"key":"shown","derive":{
+              "shown":{"of":{"item":"n"},"format":{"number":{}}}}},
+              "children":[{"type":"checkbox","stateKey":"s{item.shown}"}]}
+            """.utf8))
+            let required = PrototypeStrictCapabilities.required(["root": root])
+            XCTAssertFalse(required.contains(PrototypeAgentProtocol.nestedRepeatCapability), items)
+        }
+    }
+
+    func testNestedEmitBindingsUseScalarProjectionAndRetainCollectionSources() throws {
+        let root = try JSONDecoder().decode(JSONValue.self, from: Data(#"""
+        {"type":"column","repeat":{"as":"order","items":{"path":"/orders"},"derive":{
+          "shown":{"of":{"item":"id"},"format":{"number":{}}}}},"children":[
+          {"type":"column","repeat":{"as":"line","items":{"field":"lines"},"derive":{
+            "shown":{"of":{"item":"sku"},"format":{"number":{}}}}},"children":[
+            {"type":"text","text":"Emit","onTap":[{"type":"emit","name":"pick","context":{
+              "id":{"state":"{line.sku}"},"parent":{"state":"{order.id}"},
+              "shown":{"state":"{line.shown}"},"parentShown":{"state":"{order.shown}"}}}]}]}]}
+        """#.utf8))
+        let data: [String: JSONValue] = ["orders": .array([.object([
+            "id": .number(1), "object": .object(["x": .number(1)]),
+            "shown": .object([:]), "lines": .array([.object([
+                "sku": .number(2), "object": .object(["x": .number(2)]), "shown": .object([:]),
+            ])]),
+        ])])]
+        XCTAssertNoThrow(try PrototypeRepeat.validateEmitContexts(root, data: data))
+        let text = try XCTUnwrap(String(data: JSONEncoder().encode(root), encoding: .utf8))
+        for (reference, field) in [
+            ("line.object", "object"), ("order.object", "outer.object"), ("order.lines", "outer.lines"),
+        ] {
+            let invalid = try JSONDecoder().decode(JSONValue.self, from: Data(
+                text.replacingOccurrences(of: "{line.sku}", with: "{\(reference)}").utf8
+            ))
+            XCTAssertThrowsError(try PrototypeRepeat.validateEmitContexts(invalid, data: data)) { error in
+                guard case let DecodingError.dataCorrupted(context) = error else { return XCTFail("\(error)") }
+                XCTAssertEqual(
+                    context.debugDescription,
+                    "root.children[0].children[0].onTap[0].context.id.state: Unknown repeat field \"\(field)\""
+                )
+            }
+        }
     }
 
     func testInnerLimitAndProductBudgets() throws {

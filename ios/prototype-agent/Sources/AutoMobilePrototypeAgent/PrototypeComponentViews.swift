@@ -989,7 +989,7 @@
             case nil: !(DateFormatter.dateFormat(
                     fromTemplate: "j", options: 0, locale: PrototypeRecordingMode.current.locale
                 ) ?? "")
-                .contains("a")
+                    .contains("a")
             }
         }
     }

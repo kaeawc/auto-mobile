@@ -167,6 +167,23 @@ enum PrototypeRepeat {
         let repeated = fields["repeat"]?.objectFields
         let rows = repeated.map { instances(of: $0, formatter: formatter, environment: environment, outer: outer) }
         let ownNames = Set(repeated?["derive"]?.objectFields?.keys ?? [:].keys)
+        for child in PrototypeStrictRepeats.children(fields, path: path) {
+            if let rows, child.path.hasPrefix("\(path).children[") {
+                let inherited = outer == nil ? Set<String>() : Set(names.map { "outer.\($0)" })
+                for row in rows {
+                    try validateDerivedTree(
+                        .object(child.value), path: child.path, formatter: formatter, environment: environment,
+                        outer: row, names: ownNames.union(inherited), repeatPath: path
+                    )
+                }
+            } else {
+                try validateDerivedTree(
+                    .object(child.value), path: child.path, formatter: formatter, environment: environment,
+                    outer: outer, names: names, repeatPath: repeatPath
+                )
+            }
+        }
+        // Bindings report invalid state keys and emit names before derived identity collisions.
         if let rows, let key = repeated?["key"]?.stringValue, ownNames.contains(key) {
             var seen: [[UInt16]: Int] = [:]
             for row in rows {
@@ -184,22 +201,6 @@ enum PrototypeRepeat {
                     )
                 }
                 seen[identity] = row.index
-            }
-        }
-        for child in PrototypeStrictRepeats.children(fields, path: path) {
-            if let rows, child.path.hasPrefix("\(path).children[") {
-                let inherited = outer == nil ? Set<String>() : Set(names.map { "outer.\($0)" })
-                for row in rows {
-                    try validateDerivedTree(
-                        .object(child.value), path: child.path, formatter: formatter, environment: environment,
-                        outer: row, names: ownNames.union(inherited), repeatPath: path
-                    )
-                }
-            } else {
-                try validateDerivedTree(
-                    .object(child.value), path: child.path, formatter: formatter, environment: environment,
-                    outer: outer, names: names, repeatPath: repeatPath
-                )
             }
         }
     }
@@ -467,6 +468,8 @@ extension PrototypeRepeat {
     private struct EmitScope {
         let alias: String
         let items: [JSONValue]
+        /// Unprojected rows are used only to resolve an inner repeat's collection source.
+        let sourceItems: [JSONValue]
         var outerAlias: String?
     }
 
@@ -483,10 +486,10 @@ extension PrototypeRepeat {
             if case let .object(source)? = spec["items"], let pointer = source["path"]?.stringValue {
                 items = PrototypeDataPointer.resolve(repeats.data, pointer: pointer) ?? .array([])
             } else if let field = spec["items"]?.objectFields?["field"]?.stringValue, let scope {
-                items = .array(scope.items.flatMap { outer in
+                items = .array(scope.sourceItems.enumerated().flatMap { index, outer in
                     PrototypeStrictBindings.array(outer.objectFields?[field]).map { row in
-                        var values = row.objectFields ?? [:]
-                        for (name, value) in outer.objectFields ?? [:] {
+                        var values = PrototypeDataValues.project(row.objectFields ?? [:]).objectFields ?? [:]
+                        for (name, value) in scope.items[index].objectFields ?? [:] {
                             values["outer.\(name)"] = value
                         }
                         return .object(values)
@@ -499,10 +502,13 @@ extension PrototypeRepeat {
                 let names = spec["derive"]?.objectFields?.keys ?? [:].keys
                 let derivedFields = Dictionary(uniqueKeysWithValues: names.map { ($0, JSONValue.string("")) })
                 let projected = rows.map { row in
-                    JSONValue.object((row.objectFields ?? [:]).merging(derivedFields) { old, _ in old })
+                    let values = spec["items"]?.objectFields?["field"] == nil
+                        ? PrototypeDataValues.project(row.objectFields ?? [:]).objectFields ?? [:]
+                        : row.objectFields ?? [:]
+                    return JSONValue.object(values.merging(derivedFields) { old, _ in old })
                 }
                 childScope = EmitScope(
-                    alias: alias, items: projected,
+                    alias: alias, items: projected, sourceItems: rows,
                     outerAlias: spec["items"]?.objectFields?["field"] == nil ? nil : scope?.alias
                 )
             }

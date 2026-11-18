@@ -159,8 +159,11 @@ extension PrototypeNode {
             .map(\.node) : children ?? []
         return Array(nodes.enumerated()).filter { $0.element.drawsInPlace(holds: holds) }
             .map {
-                (offset: $0.offset, node: $0.element,
-                 identity: $0.element.repeatIdentity.map { "repeat:\($0)" } ?? "index:\($0.offset)")
+                (
+                    offset: $0.offset,
+                    node: $0.element,
+                    identity: $0.element.repeatIdentity.map { "repeat:\($0)" } ?? "index:\($0.offset)"
+                )
             }
     }
 

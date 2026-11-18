@@ -20,7 +20,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
-import kotlinx.serialization.json.jsonPrimitive
 
 /** Immutable, device-free inputs for the Compose adapter. All numeric sizes remain dp. */
 @Immutable
@@ -171,6 +170,12 @@ fun mapPrototypeSpec(
         locales,
       )
     guardPrototypeTree(resolved.root)
+    val derived =
+      PrototypeDerive.evaluate(
+        resolved.derive,
+        resolved.data,
+        resolved.state.orEmpty().mapValues { EmitContextResolver.scalar(it.value) },
+      )
     prototypeRenderModel(
       resolved,
       PrototypeNodeMapping(
@@ -179,12 +184,13 @@ fun mapPrototypeSpec(
           stacks = stacks,
           validity =
             prototypeValidity(
-              checkedPrototypeNodes(resolved.root, resolved.data),
+              checkedPrototypeNodes(resolved.root, resolved.data, derived = derived),
               resolved.state.orEmpty(),
             ),
           shownErrors = shownErrors,
           data = resolved.data,
           derive = resolved.derive.orEmpty(),
+          derivedValues = derived,
           fillWindowRoot =
             resolved.window.placement is PrototypeFullscreenPlacement ||
               resolved.window.placement is PrototypeSheetPlacement,
@@ -230,23 +236,26 @@ internal class PrototypeNodeMapping(
   private val derive: Map<String, PrototypeDerivedEntry> = emptyMap(),
   private val formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
   private val fillWindowRoot: Boolean = false,
+  private val derivedValues: Map<String, kotlinx.serialization.json.JsonElement?> =
+    PrototypeDerive.evaluate(
+      derive,
+      data,
+      state.mapValues { EmitContextResolver.scalar(it.value) },
+    ),
 ) {
   private val derivedState by lazy {
     derive
-      .mapKeys { "derived:${it.key}" }
-      .mapValues { (_, entry) ->
-        val input =
-          when {
-            "value" in entry.of -> entry.of["value"]
-            "data" in entry.of ->
-              PrototypeDataPointer.resolve(data, entry.of.getValue("data").jsonPrimitive.content)
-            else ->
-              state[entry.of.getValue("state").jsonPrimitive.content]?.let(
-                EmitContextResolver::scalar,
-              )
-          }
-        PrototypeScalar.Text(formatter.format(entry, input))
+      .map { (name, entry) ->
+        "derived:$name" to
+          PrototypeScalar.Text(
+            if (entry.format.isEmpty())
+              (derivedValues[name] as? JsonPrimitive)
+                ?.let(PrototypeRepeatTemplate::rendered)
+                .orEmpty()
+            else formatter.format(entry, derivedValues[name]),
+          )
       }
+      .toMap()
   }
   val nodes = mutableMapOf<String, PrototypeRenderNode>()
 
@@ -267,7 +276,12 @@ internal class PrototypeNodeMapping(
         else pagerState ?: state)
     val inPager = node is PrototypePagerNode || pagerState != null
     val allEntries =
-      cache?.children(node, path) ?: validatedPrototypeChildren(node, path, formatter)
+      cache?.children(node, path, derivedValues)
+        ?: validatedPrototypeChildren(
+          prototypeDerivedRepeatNode(node, derivedValues),
+          path,
+          formatter,
+        )
     // Hidden stack screens are never mapped into the rendered tree (including modal/anchor layers).
     val entries =
       if (node is PrototypeStackNode) {
@@ -402,9 +416,11 @@ internal class PrototypeNodeMapping(
                 path = path,
                 inPager = inPager,
               )
-            PrototypeLazyListModel(list, PrototypeListRows.items(list, data), snapshot) {
-              item,
-              index ->
+            PrototypeLazyListModel(
+              list,
+              prototypeDerivedListRows(list, data, derivedValues),
+              snapshot,
+            ) { item, index ->
               PrototypeNodeMapping(
                   state = localState,
                   pages = pages,
@@ -412,6 +428,9 @@ internal class PrototypeNodeMapping(
                   validity = validity,
                   shownErrors = shownErrors,
                   data = data,
+                  derive = derive,
+                  derivedValues = derivedValues,
+                  formatter = formatter,
                 )
                 .map(
                   bindPrototypeListRow(list, item, index),

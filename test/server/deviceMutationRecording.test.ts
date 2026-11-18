@@ -82,12 +82,13 @@ function harness() {
     handler: DeviceAwareToolHandler,
     mutationRecording = recording,
     signal?: AbortSignal,
+    device: BootedDevice = DEVICE,
   ) =>
     invokeResolvedDeviceHandler({
       target: {
         args,
         baseSessionUuid: SCOPE.sessionUuid,
-        device: DEVICE,
+        device,
         internalCall: false,
         sessionUuid: SCOPE.sessionUuid,
         shouldResolveDevice: true,
@@ -175,10 +176,11 @@ describe("broker tool-surface mutation recording", () => {
 
   test.each(CASES)(
     "$name records its kind and prior value before invoking the dispatch boundary",
-    async ({ name, args, kind }) => {
+    async ({ name, args, kind, platform }) => {
       const { dispatch, journal } = harness();
       let acted = false;
-      await dispatch(name, args, async () => {
+      const device: BootedDevice = platform ? { ...DEVICE, platform } : DEVICE;
+      const handler: DeviceAwareToolHandler = async () => {
         const entries = await journal.list(SCOPE);
         expect(entries.length).toBeGreaterThan(0);
         expect(entries[0]).toMatchObject({
@@ -189,7 +191,8 @@ describe("broker tool-surface mutation recording", () => {
         expect(entries.every((entry) => entry.key.length > 0)).toBe(true);
         acted = true;
         return { content: [] };
-      });
+      };
+      await dispatch(name, args, handler, undefined, undefined, device);
       expect(acted).toBe(true);
     },
   );

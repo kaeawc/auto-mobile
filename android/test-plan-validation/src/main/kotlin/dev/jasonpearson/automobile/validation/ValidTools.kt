@@ -138,6 +138,7 @@ object ValidTools {
         "siri",
         "snapshotOf",
         "statusBar",
+        "storeKitTest",
         "tapAny",
         "tapAt",
         "wakeAndUnlock",

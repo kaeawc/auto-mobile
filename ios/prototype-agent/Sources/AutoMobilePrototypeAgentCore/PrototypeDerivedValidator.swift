@@ -2,10 +2,21 @@ import Foundation
 
 /// Semantic backstop shared by strict imports and the decoder; formatting remains a runtime concern.
 enum PrototypeDerivedValidator {
-    static func validate(derive: JSONValue?, root: JSONValue, data: [String: JSONValue]?) throws {
+    static func validate(
+        derive: JSONValue?,
+        root: JSONValue,
+        data: [String: JSONValue]?,
+        state: [String: JSONValue] = [:],
+        values cached: [String: JSONValue]? = nil
+    )
+        throws
+    {
         let entries = derive?.objectFields ?? [:]
         try fractions(entries, path: "derive")
-        try visit(root, path: "root", entries: entries, data: data)
+        let values = try cached ?? PrototypeDerive.evaluate(
+            PrototypeDerivedCollections.entries(derive), data: data, state: state
+        )
+        try visit(root, path: "root", entries: entries, data: data, values: values)
     }
 
     private static func fractions(_ entries: [String: JSONValue], path: String) throws {
@@ -25,7 +36,8 @@ enum PrototypeDerivedValidator {
     }
 
     private static func visit(
-        _ root: JSONValue, path: String, entries: [String: JSONValue], data: [String: JSONValue]?
+        _ root: JSONValue, path: String, entries: [String: JSONValue], data: [String: JSONValue]?,
+        values: [String: JSONValue]
     )
         throws
     {
@@ -39,12 +51,38 @@ enum PrototypeDerivedValidator {
             path: path,
             entries: entries
         )
-        if let repeated = fields["repeat"]?.objectFields, let derived = repeated["derive"]?.objectFields {
+        if let repeated = fields["repeat"]?.objectFields {
+            let derived = repeated["derive"]?.objectFields ?? [:]
             let derivePath = "\(path).repeat.derive"
             try fractions(derived, path: derivePath)
             let source = repeated["items"]
             let items: JSONValue?
-            if let pointer = source?.objectFields?["path"]?.stringValue {
+            if let name = source?.objectFields?["derived"]?.stringValue {
+                let at = "\(path).repeat.items.derived"
+                guard let entry = entries[name]?.objectFields else {
+                    throw PrototypeContractValidator.invalid(
+                        at,
+                        "Unknown derived value \(PrototypeContractValidator.quoted(name))"
+                    )
+                }
+                guard entry["collection"] != nil, entry["reduce"] == nil else {
+                    throw PrototypeContractValidator.invalid(
+                        at,
+                        "Repeat derived items must name a collection without reduce"
+                    )
+                }
+                items = values[name]
+                let maximum = fields["type"] == .string("list") ? PrototypeLimits.maxListItems : PrototypeLimits
+                    .maxRepeatItems
+                if case let .array(rows)? = items, rows.count > maximum {
+                    throw PrototypeContractValidator.invalid(at, "Repeat path resolves to more than \(maximum) items")
+                }
+                if fields["type"] == .string("list"), let maximum = fields["maxItems"]?.intValue,
+                   case let .array(rows)? = items, rows.count > maximum
+                {
+                    throw PrototypeContractValidator.invalid(at, "List data has more items than maxItems")
+                }
+            } else if let pointer = source?.objectFields?["path"]?.stringValue {
                 items = PrototypeDataPointer.resolve(data, pointer: pointer)
             } else { items = source }
             if case let .array(rows)? = items {
@@ -59,7 +97,7 @@ enum PrototypeDerivedValidator {
             }
         }
         for child in PrototypeStrictRepeats.children(fields, path: path) {
-            try visit(.object(child.value), path: child.path, entries: entries, data: data)
+            try visit(.object(child.value), path: child.path, entries: entries, data: data, values: values)
         }
     }
 

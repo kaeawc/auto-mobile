@@ -117,6 +117,9 @@ private fun PrototypeNode.repeatSpec(): PrototypeRepeat? =
     else -> null
   }
 
+internal fun prototypeRepeatDerivedName(node: PrototypeNode): String? =
+  node.repeatSpec()?.itemsDerived
+
 /**
  * The children [node] renders, with `repeat` expanded before layout: the template children are
  * instantiated once per item, in item order. With [bind] true, each child is bound to its item and

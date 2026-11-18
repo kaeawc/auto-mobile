@@ -177,6 +177,11 @@ const fixtures: Record<string, Node> = {
   },
   prototype_strings_v1: { ...label, text: "{t:title}" },
   prototype_semantics_v1: { ...label, semantics: { heading: true } },
+  prototype_derive_v1: {
+    type: "column",
+    repeat: { items: { derived: "results" }, as: "item" },
+    children: [label],
+  },
   prototype_format_v1: {
     type: "column",
     repeat: {

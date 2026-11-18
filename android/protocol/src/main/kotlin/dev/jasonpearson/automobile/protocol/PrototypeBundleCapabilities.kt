@@ -41,7 +41,9 @@ internal object PrototypeBundleCapabilities {
     if ("data" in spec) caps.add("prototype_data_model_v1")
     if (PrototypeMediaQueue.queued(spec)) caps.add("prototype_platform_media_queue_v1")
     if ("storage" in spec) caps.add("prototype_storage_v1")
-    if ("derive" in spec) caps.add("prototype_format_v1")
+    val entries = (spec["derive"] as? JsonObject).orEmpty().values.mapNotNull { it as? JsonObject }
+    if (entries.any { "collection" !in it || "format" in it }) caps.add("prototype_format_v1")
+    if (entries.any { "collection" in it }) caps.add("prototype_derive_v1")
   }
 
   /** Window and theme level presentation: namespaces, motion, backdrop, design and mode colours. */
@@ -130,6 +132,8 @@ internal object PrototypeBundleCapabilities {
       caps.add("prototype_loading_states_v1")
     val repeat = node["repeat"] as? JsonObject
     if (repeat?.containsKey("derive") == true) caps.add("prototype_format_v1")
+    if ((repeat?.get("items") as? JsonObject)?.containsKey("derived") == true)
+      caps.add("prototype_derive_v1")
     if (repeat?.let { "key" in it || it["items"] is JsonObject } == true)
       caps.add("prototype_data_model_v1")
     PrototypeBindableFields.first<Unit>(node, "") { value, _, kind ->

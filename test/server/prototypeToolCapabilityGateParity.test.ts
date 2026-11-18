@@ -99,6 +99,10 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
   },
   prototype_semantics_v1: fixture({ ...label, semantics: { heading: true } }),
+  prototype_derive_v1: {
+    minimalSpec: { ...base, derive: { results: { collection: { of: { data: "/rows" } } } } },
+    ops: [],
+  },
   prototype_format_v1: fixture({
     type: "column",
     id: "label",

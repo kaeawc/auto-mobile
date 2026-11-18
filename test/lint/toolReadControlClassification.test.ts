@@ -70,6 +70,10 @@ const CLASSIFICATION: Classification = {
       ],
     },
     accessibility: { reads: [{}], controls: [{ talkback: true }, { voiceover: false }] },
+    storeKitTest: {
+      reads: [{ action: "list" }],
+      controls: [{ action: "buy" }, { action: "load" }, { action: "clear" }],
+    },
     backgroundWork: {
       reads: [{ action: "list" }, { action: { listAlarms: true } }],
       controls: [

@@ -95,6 +95,7 @@ struct PrototypeSession {
     private(set) var spec: PrototypeSpec?
     private(set) var state: [String: JSONValue] = [:] {
         didSet {
+            if tracksStateRevisions { refreshDerivedState(since: oldValue) }
             syncBoundPages()
             if tracksStateRevisions { noteStateWrites(since: oldValue) }
         }
@@ -293,7 +294,11 @@ struct PrototypeSession {
         let shownRevision = (revisions[spec.id] ?? 0) + 1
         revisions[spec.id] = shownRevision
         stateRevisions = state.keys.reduce(into: [:]) { $0[$1] = shownRevision }
-        self.spec = spec
+        self.spec = (try? spec.replacingDerivedInputs(
+            data: spec.data, state: state,
+            changed: PrototypeDeriveChanges(stateKeys: Set(state.keys).union(spec.derivedState.keys))
+        )) ?? spec
+        if let root = self.spec?.root { rebuildNavigation(for: root, keepingPages: pages, keepingStacks: stacks) }
         // A same-id show retains a stack when at least one of its entries still fits, as on Android.
         var retainedStacks = Set(previousStacks.compactMap { id, snapshot in
             stackNodes[id].flatMap { node in
@@ -663,7 +668,10 @@ struct PrototypeSession {
         case let .success(written): data = written.data
         case let .failure(failure): return .failure(failure)
         }
-        guard let rebuilt = try? spec.replacingData(data) else {
+        guard let rebuilt = try? spec.replacingDerivedInputs(
+            data: data, state: state,
+            changed: PrototypeDeriveChanges(dataPointers: [String(path.dropFirst("/data".count))])
+        ) else {
             return .failure(.init(
                 code: .limitExceeded, message: "\(path): the changed data breaks a limit the show enforces"
             ))
@@ -686,6 +694,24 @@ struct PrototypeSession {
             payload["value"] = value
         }
         return .success(emit(kind: "change", name: path, payload: .object(payload)))
+    }
+
+    private mutating func refreshDerivedState(since old: [String: JSONValue]) {
+        guard let current = spec, !(current.derive ?? [:]).isEmpty else { return }
+        let keys = Set(old.keys).union(state.keys).filter { old[$0] != state[$0] }
+        guard !keys.isEmpty else { return }
+        let changed = PrototypeDeriveChanges(stateKeys: Set(keys))
+        guard (current.derive ?? [:]).values.contains(where: { PrototypeDerive.affected($0, changed: changed) })
+        else { return }
+        guard let next = try? current.replacingDerivedInputs(data: current.data, state: state, changed: changed)
+        else { return }
+        spec = next
+        structureRevision += 1
+        if (current.derive ?? [:]).values.contains(where: {
+            $0.collection != nil && PrototypeDerive.affected($0, changed: changed)
+        }) {
+            rebuildNavigation(for: next.root, keepingPages: pages, keepingStacks: stacks)
+        }
     }
 
     /// Allocates one revision for the state keys `old` and the current state disagree on.

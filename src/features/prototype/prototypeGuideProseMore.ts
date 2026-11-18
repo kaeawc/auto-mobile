@@ -107,7 +107,19 @@ elapsed unit: seconds, minutes (60 s), hours (60 min), days (24 h), months (30 d
 Under one second uses localized now. Exact English fixtures normalize U+202F/U+00A0 to spaces;
 foreign currency symbols, narrow relative text, now wording and non-English CLDR data can vary
 by engine and use structural comparisons. Set locale, zone and clock for deterministic previews.
-Both derive maps require \`prototype_format_v1\`; use literal strings with older renderers.
+Collection entries use \`{collection:{of:{data:"/rows"},where:[{field:"name",op:"contains",value:{state:"query"}}],sort:{field:"name",order:"asc"},limit:50}}\`.
+The top-level derive map still allows 32 entries. Collections scan at most 500 source items,
+keep objects matching all clauses (at most four), stably sort, then limit (1..500).
+Operators are contains (case-insensitive string substring), eq, neq, gt, gte, lt and lte;
+clause values are \`{state:"key"}\` or \`{value:string|number}\`.
+Missing fields and mismatched types never match. Empty substring matches every string.
+Sort compares numbers numerically and strings by Unicode code point; missing fields sort last.
+Bind original rows with \`repeat.items:{derived:"results"}\`.
+Optional \`reduce:{op:"count"}\` or \`reduce:{op:"sum"|"min"|"max",field:"amount"}\`
+runs after limit; numeric reductions ignore non-numbers and empty reductions yield zero.
+Reduced scalars support the existing format, locale and timeZone options.
+Collections and derived repeat items require \`prototype_derive_v1\`.
+Scalar and formatted collection entries and repeat derive maps require \`prototype_format_v1\`; use literal strings with older renderers.
 \`dateTime\`, \`duration\`, \`plural\`, and \`fileSize\` are unsupported follow-ups.
 `;
 

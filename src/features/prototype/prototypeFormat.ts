@@ -1,4 +1,4 @@
-import { resolvePrototypeDataPointer } from "./prototypeData";
+import { derivePrototypeValues } from "./prototypeDerive";
 import type {
   PrototypeFormat,
   PrototypeDerivedEntry,
@@ -162,15 +162,12 @@ export function resolvePrototypeDerived(
   if (!entry) {
     return "";
   }
-  const input =
-    "value" in entry.of
-      ? entry.of.value
-      : "data" in entry.of
-        ? resolvePrototypeDataPointer(context.data, entry.of.data)
-        : context.state && Object.hasOwn(context.state, entry.of.state)
-          ? context.state[entry.of.state]
-          : undefined;
-  return formatPrototypeValue(entry.format, input, environment(entry, context.env)) ?? "";
+  const input = derivePrototypeValues(spec.derive, context.data, context.state ?? {})[name];
+  return entry.format
+    ? (formatPrototypeValue(entry.format, input, environment(entry, context.env)) ?? "")
+    : typeof input === "number" || typeof input === "string"
+      ? String(input)
+      : "";
 }
 
 /** Derived fields read only the original item, never another derived field. */

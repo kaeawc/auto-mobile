@@ -29,24 +29,40 @@ internal object PrototypeDerivedRules {
         ?.let {
           return it
         }
-      repeatError(node, path, root["data"] as? JsonObject)?.let {
+      repeatError(node, path, root)?.let {
         return it
       }
     }
     return null
   }
 
-  private fun repeatError(node: JsonObject, path: String, data: JsonObject?): PrototypeSpecError? {
+  private fun repeatError(node: JsonObject, path: String, root: JsonObject): PrototypeSpecError? {
     val repeat = node["repeat"] as? JsonObject ?: return null
-    val entries = repeat["derive"] as? JsonObject ?: return null
+    val entries = repeat["derive"] as? JsonObject ?: JsonObject(emptyMap())
     fractions(entries, "$path.repeat.derive")?.let {
       return it
     }
     val source = repeat["items"]
     val items =
       if (source is JsonObject) {
-        val pointer = source["path"]?.jsonPrimitive?.content ?: return null
-        PrototypeDataPointer.resolve(data, pointer) as? JsonArray
+        val name = source["derived"]?.jsonPrimitive?.content
+        if (name != null) {
+          val entry =
+            (root["derive"] as? JsonObject)?.get(name) as? JsonObject
+              ?: return fail(
+                "$path.repeat.items.derived",
+                "Unknown derived value ${JsonPrimitive(name)}",
+              )
+          if (entry["collection"] == null || entry["reduce"] != null)
+            return fail(
+              "$path.repeat.items.derived",
+              "Repeat derived items must name a collection without reduce",
+            )
+          PrototypeDerive.fromSpec(root)[name] as? JsonArray
+        } else {
+          val pointer = source["path"]?.jsonPrimitive?.content ?: return null
+          PrototypeDataPointer.resolve(root["data"], pointer) as? JsonArray
+        }
       } else source as? JsonArray
     for (name in entries.keys) {
       if (items.orEmpty().any { (it as? JsonObject)?.containsKey(name) == true })

@@ -12,7 +12,7 @@ export interface TapAtResult extends BaseActionResult {
   warning?: string;
   /** Gesture requested, including on a failed dispatch. */
   action?: "tap" | "longPress" | "doubleTap";
-  /** iOS: observed screen change after a successful tap. */
+  /** iOS/watchOS: observed screen change after a successful tap. */
   effect?: TapEffect;
   /** The route the runner reports, e.g. "xcuiCoordinate" / "displayTargetedRecord"; absent when unreported. */
   dispatchRoute?: string;

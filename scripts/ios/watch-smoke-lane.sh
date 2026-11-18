@@ -5,6 +5,7 @@
 # Seams: XCRUN_BIN, LSOF_BIN, AUTO_MOBILE_CMD (whitespace-separated argv), WATCH_SMOKE_LOG_DIR.
 # Exit: 0 pass, 1 setup/check failure, 2 usage/isolation refusal, 3 runtime unavailable.
 set -euo pipefail
+readonly ROW_TAP_MAX_ATTEMPTS=3
 
 if [[ $# -ne 1 || ! ${1:-} =~ ^(latest|[0-9]+(\.[0-9]+)*)$ ]]; then
   echo 'usage: watch-smoke-lane.sh <watchos-version|latest>' >&2
@@ -257,12 +258,19 @@ install_session_release_trap "${session_uuid}"
 # Compose release with owned-resource cleanup and preserve this lane's signal exit codes.
 trap cleanup EXIT
 trap terminate INT TERM
-check_identifier() {
+has_identifier() {
   # Observe can put label-only watch rows in context; full nodes use resource-id.
   jq -e --arg id "$1" 'any(.context[]?; .elementId == $id or .label == $id) or
     any(.skeleton[]?; .elementId == $id) or
     any(.viewHierarchy? | .. | objects; .["resource-id"]? == $id)' \
-    "${log_dir}/hierarchy.json" >/dev/null || fail "missing identifier $1"
+    "${log_dir}/hierarchy.json" >/dev/null
+}
+check_identifier() {
+  # Predicate failure is handled explicitly rather than by errexit.
+  # shellcheck disable=SC2310
+  if ! has_identifier "$1"; then
+    fail "missing identifier $1"
+  fi
 }
 observe() {
   call_tool observe --platform watchos
@@ -278,8 +286,22 @@ observe
 cp "${log_dir}/observe.json" "${log_dir}/before.json"
 check_identifier watch-smoke-row
 run_with_timeout 30 "${xcrun_bin}" simctl io "${udid}" screenshot "${log_dir}/before.png"
-call_tool tapOn --selector '{"text":"watch-smoke-row"}'
-observe
+for ((attempt = 1; attempt <= ROW_TAP_MAX_ATTEMPTS; attempt++)); do
+  call_tool tapOn --selector '{"text":"watch-smoke-row"}'
+  observe
+  # Predicate status controls retries; an absent identifier is not a shell error.
+  # shellcheck disable=SC2310
+  if has_identifier watch-smoke-next; then
+    break
+  fi
+  # shellcheck disable=SC2310
+  if ! has_identifier watch-smoke-row; then
+    break
+  fi
+  if ((attempt < ROW_TAP_MAX_ATTEMPTS)); then
+    echo "watch-smoke-lane: row tap attempt ${attempt} did not navigate; retrying"
+  fi
+done
 check_identifier watch-smoke-next
 run_with_timeout 30 "${xcrun_bin}" simctl io "${udid}" screenshot "${log_dir}/after.png"
 echo 'watch-smoke-lane: PASS'

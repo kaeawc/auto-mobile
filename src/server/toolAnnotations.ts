@@ -182,6 +182,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   setDeviceState: entry("Set Device State", destructiveDevice),
   setUIState: entry("Set Form State", destructiveDevice),
   sqlQuery: entry("Query Database", destructiveDevice),
+  storeKitTest: entry("Test In-App Purchases", destructiveDevice),
   startDevice: entry("Start Device", destructiveDevice),
   systemTray: entry("Control Notifications", destructiveDevice),
 

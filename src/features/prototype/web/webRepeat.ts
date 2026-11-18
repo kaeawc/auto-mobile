@@ -1,3 +1,5 @@
+import { derivePrototypeValues } from "../prototypeDerive";
+import type { PrototypeDerivedEntry } from "../prototypeFormatSchema";
 import { prototypeRenderLimits } from "../prototypeRenderContract.generated";
 import { resolvePrototypeDataPointer } from "../prototypeData";
 import { record, type Raw } from "../prototypeTemplate";
@@ -24,13 +26,36 @@ export function webRepeatLimit(node: Raw): number {
  * A repeat's rows: a literal array or a pointer into the spec's data. As on the devices, only
  * object items repeat (scalars are skipped before indices are assigned), up to `limit`.
  */
-export function webRepeatRows(repeat: Raw, data: unknown, limit: number): unknown[] {
+export function webRepeatRows(
+  repeat: Raw,
+  data: unknown,
+  limit: number,
+  derived: Record<string, unknown> = {},
+): unknown[] {
   const itemsPath = record(repeat.items)?.path;
   const items = Array.isArray(repeat.items)
     ? repeat.items
     : typeof itemsPath === "string"
       ? resolvePrototypeDataPointer(data, itemsPath)
-      : undefined;
+      : typeof record(repeat.items)?.derived === "string"
+        ? derived[String(record(repeat.items)?.derived)]
+        : undefined;
   const rows = Array.isArray(items) ? items.filter((item) => record(item) !== undefined) : [];
   return rows.slice(0, limit);
+}
+
+interface WebRepeatScope {
+  spec: Raw;
+  data: unknown;
+  condition: { state: Raw };
+}
+
+/** Resolve top-level collection bindings before the existing repeat row projection. */
+export function webRepeatRowsForScope(node: Raw, scope: WebRepeatScope): unknown[] {
+  const values = derivePrototypeValues(
+    record(scope.spec.derive) as Record<string, PrototypeDerivedEntry> | undefined,
+    scope.data,
+    scope.condition.state,
+  );
+  return webRepeatRows(record(node.repeat) ?? {}, scope.data, webRepeatLimit(node), values);
 }

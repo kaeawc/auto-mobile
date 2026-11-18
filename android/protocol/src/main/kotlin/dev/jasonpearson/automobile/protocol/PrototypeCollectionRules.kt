@@ -137,15 +137,9 @@ internal object PrototypeCollectionRules {
     depth: Int,
   ): PrototypeSpecError? {
     val options = rule.getValue("options").jsonArray.map { it.jsonObject }
-    val candidates = options.filter { option ->
-      when (option.text("kind")) {
-        "array" -> value is JsonArray
-        "object" -> value is JsonObject
-        "number" -> value is JsonPrimitive && !value.isString && value.doubleOrNull != null
-        "scalar" -> value is JsonPrimitive && value !is JsonNull
-        else -> value is JsonPrimitive && value.isString
-      }
-    }
+    // Object-only alternatives still require an object, even when no branch can be probed.
+    if (PrototypeUnionChoice.requiresObject(value, options)) return fail(path, "Expected object")
+    val candidates = options.filter { PrototypeUnionChoice.optionAccepts(it, value) }
     // Several options can accept the same JSON type (a hex colour or a role name are both strings).
     val ranked =
       if (rule.flag("preferMatchingFields"))
@@ -213,4 +207,18 @@ internal object PrototypeCollectionRules {
     val cost = jsonCost(value)
     return cost.isFinite() && cost <= rule.number("maxBytes", Double.POSITIVE_INFINITY)
   }
+}
+
+private object PrototypeUnionChoice {
+  fun requiresObject(value: JsonElement, options: List<JsonObject>): Boolean =
+    value !is JsonObject && options.isNotEmpty() && options.all { it.text("kind") == "object" }
+
+  fun optionAccepts(option: JsonObject, value: JsonElement): Boolean =
+    when (option.text("kind")) {
+      "array" -> value is JsonArray
+      "object" -> value is JsonObject
+      "number" -> value is JsonPrimitive && !value.isString && value.doubleOrNull != null
+      "scalar" -> value is JsonPrimitive && value !is JsonNull
+      else -> value is JsonPrimitive && value.isString
+    }
 }

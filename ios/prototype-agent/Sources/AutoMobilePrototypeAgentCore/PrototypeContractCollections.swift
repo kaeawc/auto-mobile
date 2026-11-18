@@ -66,6 +66,12 @@ extension PrototypeContractValidator {
         guard case let .array(options)? = rule["options"] else {
             throw Self.invalid(path, "Invalid union value")
         }
+        // Object-only alternatives still require an object, even when no branch can be probed.
+        if value.objectFields == nil, !options.isEmpty,
+           options.allSatisfy({ $0.objectFields?["kind"]?.stringValue == "object" })
+        {
+            throw Self.invalid(path, "Expected object")
+        }
         var first: PrototypeLoadError?
         let ranked = options.enumerated().sorted { left, right in
             func matches(_ option: JSONValue) -> Int {

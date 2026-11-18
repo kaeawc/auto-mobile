@@ -17,6 +17,7 @@ export const PROTOTYPE_WEB_CAPABILITIES: readonly string[] = [
   "prototype_data_actions_v1",
   "prototype_data_model_v1",
   "prototype_dead_tap_v1",
+  "prototype_derive_v1",
   "prototype_design_platform_v1",
   "prototype_drawer_v1",
   "prototype_effects_v1",

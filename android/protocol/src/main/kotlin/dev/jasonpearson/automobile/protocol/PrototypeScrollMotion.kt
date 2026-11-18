@@ -108,7 +108,7 @@ object PrototypeScrollMotion {
           "${node.path}.screens[${PrototypeSpecInput.canonicalString(name)}]"
         }
       }
-    val data = PrototypeRepeatData((context.root as? JsonObject)?.get("data") as? JsonObject)
+    val data = PrototypeRepeatData.fromSpec(context.root)
     for (node in context.nodes) {
       val linked = node.value["scrollLinked"] as? JsonObject
       val bindings = listOfNotNull(linked, node.value["scrollTransition"]).size

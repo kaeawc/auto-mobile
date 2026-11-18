@@ -490,6 +490,7 @@ internal object PrototypeStrictPolicy {
     private fun repeatFeatures(child: JsonElement) {
       val repeatSpec = child as? JsonObject
       if (repeatSpec?.containsKey("derive") == true) need("format")
+      if ((repeatSpec?.get("items") as? JsonObject)?.containsKey("derived") == true) need("derive")
       if (repeatSpec?.get("stagger") != null) need("window_motion")
       if (repeatSpec?.get("items") is JsonObject || repeatSpec?.get("key") != null)
         need("data_model")
@@ -557,7 +558,13 @@ internal object PrototypeEnvelopeFeatures {
     if (spec["data"] != null) add("data_model")
     if (PrototypeMediaQueue.queued(spec)) add("platform_media_queue")
     if (spec["storage"] != null) add("storage")
-    if ("derive" in spec) add("format")
+    derived(spec)
+  }
+
+  private fun MutableList<String>.derived(spec: JsonObject) {
+    val entries = (spec["derive"] as? JsonObject).orEmpty().values.mapNotNull { it as? JsonObject }
+    if (entries.any { "collection" !in it || "format" in it }) add("format")
+    if (entries.any { "collection" in it }) add("derive")
   }
 
   private fun MutableList<String>.presentation(spec: JsonObject) {

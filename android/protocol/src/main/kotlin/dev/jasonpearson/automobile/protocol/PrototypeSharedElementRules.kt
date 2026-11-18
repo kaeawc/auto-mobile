@@ -126,7 +126,7 @@ internal object PrototypeSharedElementRules {
       PrototypeRepeatTree.scopeOf(
         it.value,
         it.path,
-        PrototypeRepeatData((context.root as? JsonObject)?.get("data") as? JsonObject),
+        PrototypeRepeatData.fromSpec(context.root),
       )
     }
     val templateError = templateError(key, shared, glass || path != parent?.path, repeat, at)

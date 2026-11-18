@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { watchTapOn } from "../../../src/features/watch/WatchActions";
 import { normalizeWatchHierarchy } from "../../../src/features/watch/WatchHierarchy";
 import { watchRunners } from "../../../src/features/watch/WatchRunnerRegistry";
@@ -46,14 +47,24 @@ test.each([
     expect(accept).toMatchObject({ class: className });
     expect(accept?.["resource-id"]).toBeUndefined();
 
-    const result = await watchTapOn(deviceId, { action: "tap", text: "Accept", index });
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const result = await watchTapOn(deviceId, { action: "tap", text: "Accept", index }, undefined, {
+      timer,
+    });
 
-    expect(result).toEqual({ success: true, action: "tap", element: accept });
+    expect(result).toEqual({
+      success: true,
+      action: "tap",
+      element: accept,
+      effect: { screenChanged: false, basis: "viewHierarchy unchanged" },
+    });
     // Both captured Accept nodes have the same center in XCTest points.
     expect(client.commands).toEqual([
       { type: "face", op: "dump" },
       { type: "hierarchy" },
       { type: "tap", x: 93.5, y: 131 },
+      ...Array.from({ length: 8 }, () => ({ type: "hierarchy" as const })),
     ]);
   },
 );

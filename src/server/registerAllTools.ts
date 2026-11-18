@@ -28,6 +28,7 @@ import { registerTelephonyTools } from "./telephonyTools";
 import { registerMeasureStartupTools } from "./measureStartupTools";
 import { registerProfilingTools } from "./profilingTools";
 import { registerMediaSessionTools } from "./mediaSessionTools";
+import { registerStoreKitTestTool } from "./storeKitTestTool";
 import { registerAmbientTools } from "./ambientTool";
 import { registerSessionRequirementCapabilityTool } from "./sessionRequirementCapabilityTool";
 import { registerWearSurfaceTools } from "./wearSurfaceTool";
@@ -154,6 +155,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerStorageTools();
   registerPreferenceTools();
   registerAppFileTools();
+  registerStoreKitTestTool();
   registerSessionLogTools();
   registerPerformanceTraceTools();
   registerFormTools();

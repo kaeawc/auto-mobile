@@ -36,6 +36,16 @@ before you select it.
 `tapAt` takes absolute coordinates in points. A point outside the watch screen fails with
 `tap is outside the watch screen`. Take the coordinates from `observe`, within `screenSize`.
 
+Outside the Smart Stack, both results include `effect: {screenChanged, basis}`. AutoMobile checks
+the screen for about 1 second after the tap. `basis` is `viewHierarchy changed`,
+`viewHierarchy unchanged` or `insufficient observation data`. The tap is never retried for you. A
+changed screen does not prove the intended control responded, so `observe` when it matters.
+
+When a system or app alert, such as the notification permission prompt, covers the app, `tapOn`
+refuses a target outside the alert. The error names the alert title and its buttons. Tap one of
+those buttons first, for example `tapOn` with `text: "Allow"`, then retry the original tap.
+`tapAt` has no such guard: a point under an alert taps the alert.
+
 With the host app not in the foreground and no Smart Stack open, `tapAt` taps the watch face at the
 given point. A device has not confirmed whether such a tap opens a complication, so `observe`
 afterwards. In that state `tapOn` still needs the host app in the foreground.
@@ -119,7 +129,8 @@ respond before retrying.
 
 `sendKeys` accepts non-empty text only and appends to the focused field. Focus a field with `tapOn`
 first, or pass a selector with an exact `elementId` or `text`. Selector `text` matches a field's
-label, value or placeholder, and prefers text fields over static text. A focused field opens the
+label, value or placeholder, and prefers text fields over static text. Like `tapOn`, a selector
+refuses a field covered by an alert and names its buttons; tap one, then retry. A focused field opens the
 watch keyboard, and AutoMobile types through it. Input fails when no text field or keyboard is up.
 The watch refuses commands that clear, replace or press keys.
 

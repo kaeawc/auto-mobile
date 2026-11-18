@@ -20,7 +20,13 @@ enum PrototypeBundleCapabilities {
         if spec["window"]?.objectFields?["transition"] != nil { need("window_motion") }
         if spec["data"] != nil { need("data_model") }
         if PrototypeMediaQueue.queued(spec) { need("platform_media_queue") }
-        if spec["derive"] != nil { need("format") }
+        let derived = spec["derive"]?.objectFields ?? [:]
+        if derived.values.contains(where: { $0.objectFields?["collection"] != nil }) { need("derive") }
+        if derived.values
+            .contains(where: { $0.objectFields?["collection"] == nil || $0.objectFields?["format"] != nil })
+        {
+            need("format")
+        }
         if spec["theme"] != nil { need("theme_modes") }
         if spec["storage"] != nil { need("storage") }
         if PrototypeContractValidator.strings(spec["storage"]?.objectFields?["keys"])
@@ -91,6 +97,7 @@ enum PrototypeBundleCapabilities {
             if let feature = featureTypes[type] { need(feature) }
             if let repeated = node["repeat"]?.objectFields,
                repeated["items"]?.objectFields != nil || repeated["key"] != nil { need("data_model") }
+            if node["repeat"]?.objectFields?["items"]?.objectFields?["derived"] != nil { need("derive") }
             if node["repeat"]?.objectFields?["derive"] != nil { need("format") }
             if node["span"] != nil { need("flow_grid") }
             if node["onLongPress"] != nil || node["onDoubleTap"] != nil { need("gestures") }

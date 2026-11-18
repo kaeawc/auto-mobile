@@ -1,0 +1,1493 @@
+[
+  {
+    "name": "contains",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "where": [
+              {
+                "field": "name",
+                "op": "contains",
+                "value": {
+                  "value": "ALP"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "results": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        }
+      ]
+    }
+  },
+  {
+    "name": "eq",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "where": [
+              {
+                "field": "n",
+                "op": "eq",
+                "value": {
+                  "value": 2
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "results": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        }
+      ]
+    }
+  },
+  {
+    "name": "neq",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "where": [
+              {
+                "field": "n",
+                "op": "neq",
+                "value": {
+                  "value": 2
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "results": [
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        }
+      ]
+    }
+  },
+  {
+    "name": "gt",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "where": [
+              {
+                "field": "n",
+                "op": "gt",
+                "value": {
+                  "value": 1
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "results": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        }
+      ]
+    }
+  },
+  {
+    "name": "gte",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "where": [
+              {
+                "field": "n",
+                "op": "gte",
+                "value": {
+                  "value": 2
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "results": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        }
+      ]
+    }
+  },
+  {
+    "name": "lt",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "where": [
+              {
+                "field": "n",
+                "op": "lt",
+                "value": {
+                  "value": 2
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "results": [
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        }
+      ]
+    }
+  },
+  {
+    "name": "lte",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "where": [
+              {
+                "field": "n",
+                "op": "lte",
+                "value": {
+                  "value": 1
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "results": [
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        }
+      ]
+    }
+  },
+  {
+    "name": "asc",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "sort": {
+              "field": "n",
+              "order": "asc"
+            }
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "results": [
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    }
+  },
+  {
+    "name": "desc",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "sort": {
+              "field": "n",
+              "order": "desc"
+            }
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "results": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "d"
+        }
+      ]
+    }
+  },
+  {
+    "name": "count after limit",
+    "spec": {
+      "derive": {
+        "result": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "limit": 2
+          },
+          "reduce": {
+            "op": "count"
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "result": 2
+    }
+  },
+  {
+    "name": "sum after limit",
+    "spec": {
+      "derive": {
+        "result": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "limit": 2
+          },
+          "reduce": {
+            "op": "sum",
+            "field": "n"
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "result": 3
+    }
+  },
+  {
+    "name": "min after limit",
+    "spec": {
+      "derive": {
+        "result": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "limit": 2
+          },
+          "reduce": {
+            "op": "min",
+            "field": "n"
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "result": 1
+    }
+  },
+  {
+    "name": "max after limit",
+    "spec": {
+      "derive": {
+        "result": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "limit": 2
+          },
+          "reduce": {
+            "op": "max",
+            "field": "n"
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "result": 2
+    }
+  },
+  {
+    "name": "non-array and empty reductions",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            }
+          }
+        },
+        "count": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            }
+          },
+          "reduce": {
+            "op": "count"
+          }
+        },
+        "sum": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            }
+          },
+          "reduce": {
+            "op": "sum",
+            "field": "n"
+          }
+        },
+        "min": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            }
+          },
+          "reduce": {
+            "op": "min",
+            "field": "n"
+          }
+        },
+        "max": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            }
+          },
+          "reduce": {
+            "op": "max",
+            "field": "n"
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": "invalid"
+    },
+    "state": {},
+    "expected": {
+      "results": [],
+      "count": 0,
+      "sum": 0,
+      "min": 0,
+      "max": 0
+    }
+  },
+  {
+    "name": "query dependency subset",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "where": [
+              {
+                "field": "name",
+                "op": "contains",
+                "value": {
+                  "state": "query"
+                }
+              }
+            ]
+          }
+        },
+        "other": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            }
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {
+      "query": ""
+    },
+    "expected": {
+      "results": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        }
+      ],
+      "other": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "changes": [
+      {
+        "state": {
+          "query": "alp"
+        },
+        "expectRecomputed": ["results"]
+      },
+      {
+        "state": {
+          "unrelated": 1
+        },
+        "expectRecomputed": []
+      },
+      {
+        "data": {
+          "rows": []
+        },
+        "expectRecomputed": ["results", "other"]
+      }
+    ]
+  },
+  {
+    "name": "string comparisons and all clauses",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "where": [
+              {
+                "field": "name",
+                "op": "gte",
+                "value": {
+                  "value": "Alpha"
+                }
+              },
+              {
+                "field": "n",
+                "op": "neq",
+                "value": {
+                  "value": "2"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 2
+        },
+        {
+          "id": "b",
+          "name": "beta",
+          "n": 1
+        },
+        {
+          "id": "c",
+          "name": "ALP",
+          "n": 2
+        },
+        {
+          "id": "d"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "results": []
+    }
+  },
+  {
+    "name": "string code point stable sort",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "sort": {
+              "field": "name"
+            }
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "name": "\ud83d\ude00"
+        },
+        {
+          "name": "\ue000"
+        },
+        {
+          "name": "a"
+        },
+        {
+          "name": "a"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "results": [
+        {
+          "name": "a"
+        },
+        {
+          "name": "a"
+        },
+        {
+          "name": "\ue000"
+        },
+        {
+          "name": "\ud83d\ude00"
+        }
+      ]
+    }
+  },
+  {
+    "name": "no top-level of",
+    "derive": {
+      "results": {
+        "collection": {
+          "of": {
+            "data": "/rows"
+          }
+        },
+        "of": {
+          "data": "/rows"
+        }
+      }
+    },
+    "error": {
+      "path": "derive.results.collection",
+      "message": "Unknown property"
+    }
+  },
+  {
+    "name": "strict collection",
+    "derive": {
+      "results": {
+        "collection": {
+          "of": {
+            "data": "/rows"
+          },
+          "extra": 1
+        }
+      }
+    },
+    "error": {
+      "path": "derive.results.collection.extra",
+      "message": "Unknown property"
+    }
+  },
+  {
+    "name": "state source forbidden",
+    "derive": {
+      "results": {
+        "collection": {
+          "of": {
+            "state": "rows"
+          }
+        }
+      }
+    },
+    "error": {
+      "path": "derive.results.collection.of.data",
+      "message": "Required property"
+    }
+  },
+  {
+    "name": "too many clauses",
+    "derive": {
+      "results": {
+        "collection": {
+          "of": {
+            "data": "/rows"
+          },
+          "where": [
+            {
+              "field": "n",
+              "op": "eq",
+              "value": {
+                "value": 1
+              }
+            },
+            {
+              "field": "n",
+              "op": "eq",
+              "value": {
+                "value": 1
+              }
+            },
+            {
+              "field": "n",
+              "op": "eq",
+              "value": {
+                "value": 1
+              }
+            },
+            {
+              "field": "n",
+              "op": "eq",
+              "value": {
+                "value": 1
+              }
+            },
+            {
+              "field": "n",
+              "op": "eq",
+              "value": {
+                "value": 1
+              }
+            }
+          ]
+        }
+      }
+    },
+    "error": {
+      "path": "derive.results.collection.where",
+      "message": "Array length out of range"
+    }
+  },
+  {
+    "name": "limit zero",
+    "derive": {
+      "results": {
+        "collection": {
+          "of": {
+            "data": "/rows"
+          },
+          "limit": 0
+        }
+      }
+    },
+    "error": {
+      "path": "derive.results.collection.limit",
+      "message": "Invalid number value"
+    }
+  },
+  {
+    "name": "limit too large",
+    "derive": {
+      "results": {
+        "collection": {
+          "of": {
+            "data": "/rows"
+          },
+          "limit": 501
+        }
+      }
+    },
+    "error": {
+      "path": "derive.results.collection.limit",
+      "message": "Invalid number value"
+    }
+  },
+  {
+    "name": "fractional limit",
+    "derive": {
+      "results": {
+        "collection": {
+          "of": {
+            "data": "/rows"
+          },
+          "limit": 1.5
+        }
+      }
+    },
+    "error": {
+      "path": "derive.results.collection.limit",
+      "message": "Invalid number value"
+    }
+  },
+  {
+    "name": "unknown operator",
+    "derive": {
+      "results": {
+        "collection": {
+          "of": {
+            "data": "/rows"
+          },
+          "where": [
+            {
+              "field": "n",
+              "op": "has",
+              "value": {
+                "value": 1
+              }
+            }
+          ]
+        }
+      }
+    },
+    "error": {
+      "path": "derive.results.collection.where[0].op",
+      "message": "Invalid enum value"
+    }
+  },
+  {
+    "name": "exclusive clause value",
+    "derive": {
+      "results": {
+        "collection": {
+          "of": {
+            "data": "/rows"
+          },
+          "where": [
+            {
+              "field": "n",
+              "op": "eq",
+              "value": {
+                "value": 1,
+                "state": "n"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "error": {
+      "path": "derive.results.collection.where[0].value.state",
+      "message": "Exactly one of state, value is required"
+    }
+  },
+  {
+    "name": "bad sort",
+    "derive": {
+      "results": {
+        "collection": {
+          "of": {
+            "data": "/rows"
+          },
+          "sort": {
+            "field": "n",
+            "order": "random"
+          }
+        }
+      }
+    },
+    "error": {
+      "path": "derive.results.collection.sort.order",
+      "message": "Invalid enum value"
+    }
+  },
+  {
+    "name": "count has no field",
+    "derive": {
+      "results": {
+        "collection": {
+          "of": {
+            "data": "/rows"
+          }
+        },
+        "reduce": {
+          "op": "count",
+          "field": "n"
+        }
+      }
+    },
+    "error": {
+      "path": "derive.results.reduce.field",
+      "message": "Unknown property"
+    }
+  },
+  {
+    "name": "sum requires field",
+    "derive": {
+      "results": {
+        "collection": {
+          "of": {
+            "data": "/rows"
+          }
+        },
+        "reduce": {
+          "op": "sum"
+        }
+      }
+    },
+    "error": {
+      "path": "derive.results.reduce.op",
+      "message": "Invalid enum value"
+    }
+  },
+  {
+    "name": "empty array",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            }
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": []
+    },
+    "state": {},
+    "expected": {
+      "results": []
+    }
+  },
+  {
+    "name": "missing source",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            }
+          }
+        }
+      }
+    },
+    "data": {},
+    "state": {},
+    "expected": {
+      "results": []
+    }
+  },
+  {
+    "name": "ignores non-object items",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            }
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        1,
+        false,
+        [],
+        {
+          "id": "a"
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "results": [
+        {
+          "id": "a"
+        }
+      ]
+    }
+  },
+  {
+    "name": "AND filters",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "where": [
+              {
+                "field": "n",
+                "op": "gte",
+                "value": {
+                  "value": 1
+                }
+              },
+              {
+                "field": "n",
+                "op": "lt",
+                "value": {
+                  "value": 2
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "n": 0
+        },
+        {
+          "n": 1
+        },
+        {
+          "n": 2
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "results": [
+        {
+          "n": 1
+        }
+      ]
+    }
+  },
+  {
+    "name": "numeric reductions skip missing and mismatched types",
+    "spec": {
+      "derive": {
+        "sum": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            }
+          },
+          "reduce": {
+            "op": "sum",
+            "field": "n"
+          }
+        },
+        "min": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            }
+          },
+          "reduce": {
+            "op": "min",
+            "field": "n"
+          }
+        },
+        "max": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            }
+          },
+          "reduce": {
+            "op": "max",
+            "field": "n"
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "n": "7"
+        },
+        {},
+        {
+          "n": -3
+        },
+        {
+          "n": 2
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "sum": -1,
+      "min": -3,
+      "max": 2
+    }
+  },
+  {
+    "name": "strings compare by code point",
+    "spec": {
+      "derive": {
+        "results": {
+          "collection": {
+            "of": {
+              "data": "/rows"
+            },
+            "where": [
+              {
+                "field": "name",
+                "op": "gt",
+                "value": {
+                  "value": "Z"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "data": {
+      "rows": [
+        {
+          "name": "a"
+        },
+        {
+          "name": "A"
+        },
+        {
+          "name": 100
+        }
+      ]
+    },
+    "state": {},
+    "expected": {
+      "results": [
+        {
+          "name": "a"
+        }
+      ]
+    }
+  }
+]

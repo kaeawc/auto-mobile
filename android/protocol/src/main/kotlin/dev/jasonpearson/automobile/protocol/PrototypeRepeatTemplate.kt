@@ -707,12 +707,12 @@ internal object PrototypeRepeatValidator {
     val items: List<JsonObject>,
     val pathBound: Boolean = false,
     val derivedNames: Set<String> = emptySet(),
+    val sourceKind: String = "path",
   )
 
   fun validate(
     spec: JsonElement,
-    data: PrototypeRepeatData =
-      PrototypeRepeatData((spec as? JsonObject)?.get("data") as? JsonObject),
+    data: PrototypeRepeatData = PrototypeRepeatData.fromSpec(spec),
   ): PrototypeSpecError? {
     val root = (spec as? JsonObject)?.get("root") as? JsonObject ?: return null
     return templateErrors(root, "root", null, RepeatState(data))
@@ -722,8 +722,7 @@ internal object PrototypeRepeatValidator {
   /** Every repeat container in the spec, outermost first. */
   fun scopes(
     spec: JsonElement,
-    data: PrototypeRepeatData =
-      PrototypeRepeatData((spec as? JsonObject)?.get("data") as? JsonObject),
+    data: PrototypeRepeatData = PrototypeRepeatData.fromSpec(spec),
   ): List<Scope> {
     val root = (spec as? JsonObject)?.get("root") as? JsonObject ?: return emptyList()
     val scopes = mutableListOf<Scope>()

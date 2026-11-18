@@ -148,6 +148,8 @@ export class PrototypeRepeatData {
   private readonly counts = new Map<string, number>();
   private readonly projections = new Map<string, readonly Readonly<Raw>[]>();
 
+  derived: Record<string, unknown> = {};
+
   constructor(private readonly data: unknown) {}
 
   source(pointer: string): unknown {

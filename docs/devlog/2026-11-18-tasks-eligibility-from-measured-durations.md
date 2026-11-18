@@ -8,12 +8,19 @@
 ## Context
 
 The Tasks rule is that a call returning in under about 2 s should not become a task. #13944
-measured tool durations from host telemetry (10,024 calls, no per-action split) and a short
-Android emulator run. Tools over 2 s: `explore` (p50 16.3 s), `setUIState` (p50 11.0 s, already
-eligible since #18531), `killDevice` (wall p50 5.9 s), `deviceSnapshot` (telemetry p50 2.1 s,
-p95 9.4 s; capture p95 2.9 s on a clean device), and interactive tools with a p50 of 3 to 5 s
-(`tapOn`, `pressButton`, `sendKeys`, `swipeOn`, `launchApp`). `installApp`, `uninstallApp` and
-`putAppFile` (150 MB) stayed under 2 s.
+measured tool durations in two ways. Host telemetry held 10,024 calls with no per-action split,
+and a short Android emulator run filled the gaps.
+
+Tools over 2 s:
+
+- `explore`: p50 16.3 s.
+- `setUIState`: p50 11.0 s, eligible since #18531.
+- `killDevice`: wall-clock p50 5.9 s.
+- `deviceSnapshot`: telemetry p50 2.1 s and p95 9.4 s; capture p95 2.9 s on a clean device.
+- Interactive tools with a p50 of 3 to 5 s: `tapOn`, `pressButton`, `sendKeys`, `swipeOn` and
+  `launchApp`.
+
+`installApp`, `uninstallApp` and `putAppFile` (150 MB) stayed under 2 s.
 
 ## Options
 
@@ -26,8 +33,8 @@ p95 9.4 s; capture p95 2.9 s on a clean device), and interactive tools with a p5
 
 `explore` and `killDevice` are eligible with `abort`: explore checks its signal between
 interactions, and killDevice already recovers from an aborted shutdown. `deviceSnapshot` capture
-and restore are eligible with `detach`: neither takes a signal, and stopping one partway would
-leave a partial snapshot or a half-restored device. Snapshot delete stays synchronous.
+and restore are eligible with `detach`. Neither takes a signal. Stopping one partway would leave
+a partial snapshot or a half-restored device. Snapshot delete stays synchronous.
 Interactive tools stay synchronous, because a task round trip costs more than it saves.
 `launchApp` stays synchronous: telemetry has no arguments, so the cost of `coldBoot` and
 `clearAppData` calls is not measured.

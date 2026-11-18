@@ -61,11 +61,11 @@ extension undefined on `2025-11-25`. It is not gated on the legacy client's `pro
   cancellation), when the session ends under it, or at daemon shutdown
   (`releaseDaemonTaskLeases`). The daemon's per-request servers get the daemon-scoped instance
   from `createStatelessMcpServer`; direct stdio holds nothing.
-- `TASK_ELIGIBILITY`: per-call eligibility and cancellation policy, limited to calls measured
+- `TASK_ELIGIBILITY`: per-call eligibility and cancellation policy. It names only calls measured
   to routinely exceed about 2 s (#13944). `startDevice`, `killDevice`, `executePlan`,
-  `installApp`, `explore` and `setUIState` use cooperative `abort`; `videoRecording` with
+  `installApp`, `explore` and `setUIState` use cooperative `abort`. `videoRecording` with
   `action: "stop"` (#13090) and `deviceSnapshot` with `action: "capture"` or `"restore"` use
-  `detach`, so a cancelled task never leaves a partial snapshot or a half-restored device.
+  `detach`. A cancelled snapshot task never leaves a partial snapshot or a half-restored device.
   Interactive tools (`tapOn`, `pressButton`, `sendKeys`, `swipeOn`) and `launchApp` stay
   synchronous. A cancelled `setUIState` stops before its next field.
   Its task drops the request's forwarded transport deadline and runs under its own whole-call

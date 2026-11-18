@@ -236,8 +236,9 @@ class PrototypeSecureStorageTest {
       PrototypeStorageSecureMetadata("state:token", true, SECRET.length),
       session.report().secure!!.first(),
     )
-    session.record(changed(original).copy(state = original.state))
-    assertFalse(session.report().secure!!.first().present)
+    session.record(changed(original, "longer-pending-token"))
+    assertTrue(secure.values.isEmpty())
+    assertEquals("longer-pending-token".length, session.report().secure!!.first().bytes)
   }
 
   @Test

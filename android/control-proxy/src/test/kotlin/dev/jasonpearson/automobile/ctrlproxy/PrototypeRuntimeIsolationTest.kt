@@ -1,7 +1,11 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import android.content.ContextWrapper
+import android.content.pm.PackageManager
+import androidx.activity.ComponentActivity
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeRuntimePlatform
+import dev.jasonpearson.automobile.prototype.FakePrototypeClipboard
+import dev.jasonpearson.automobile.prototype.PrototypePlatform
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlinx.coroutines.cancel
@@ -16,118 +20,229 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.Robolectric
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.android.controller.ActivityController
 
-/** Contract and manifest checks use only the JVM; no server or Android runtime is started. */
+/** Registration only: no service, saved-prototype UI, database, or permission prompt is started. */
+@RunWith(RobolectricTestRunner::class)
 class PrototypeRuntimeIsolationTest {
   private val scope = TestScope()
-  // Sources acquire Android services lazily, so registration needs no real context.
-  private val overlay = prototypeRuntimePlatform(ContextWrapper(null))
-  private val registered = overlay.registry.modules.map { it.name }.toSet()
+  private lateinit var controller: ActivityController<ComponentActivity>
+  private lateinit var overlay: PrototypePlatform
+  private lateinit var saved: PrototypePlatform
+
+  @Before
+  fun setUp() {
+    // Match SavedPrototypeActivity's ComponentActivity host without starting its UI or store.
+    controller = Robolectric.buildActivity(ComponentActivity::class.java).create()
+    overlay = prototypeRuntimePlatform(ContextWrapper(null))
+    saved = prototypeRuntimePlatform(controller.get())
+  }
 
   @After
   fun tearDown() {
+    overlay.registry.modules.forEach { it.close() }
+    saved.registry.modules.forEach { it.close() }
     scope.cancel()
+    controller.destroy()
   }
 
   @Test
-  fun `registered permissioned modules equal the explicit allow list`() {
-    assertTrue("No permissioned calls found in the contract", permissionedModules.isNotEmpty())
-    // test.protected exercises declaration checks but accesses no permissioned Android API.
-    assertTrue(modules.getValue("test").jsonObject.getValue("placeholder").jsonPrimitive.boolean)
-    assertEquals(setOf("camera"), callPermissions(modules.getValue("test").jsonObject))
-    assertEquals(EXPECTED_PERMISSIONED_MODULES + "test", permissionedModules intersect registered)
+  fun `service host registers exactly its variant inventory`() {
+    assertEquals(SERVICE_MODULES + debugModules, registered(overlay))
+    assertTrue((ACTIVITY_IDENTITY_MODULES + "permissions").intersect(registered(overlay)).isEmpty())
+  }
+
+  @Test
+  fun `saved Activity host registers exactly its variant inventory`() {
+    assertEquals(ACTIVITY_MODULES + debugModules, registered(saved))
+  }
+
+  @Test
+  fun `service clipboard injection adds only clipboard`() {
+    // CtrlProxy supplies a clipboard adapter; the saved Activity uses the default null adapter.
+    val platform = prototypeRuntimePlatform(ContextWrapper(null), FakePrototypeClipboard())
+    try {
+      assertEquals(SERVICE_MODULES + debugModules + "clipboard", registered(platform))
+    } finally {
+      platform.registry.modules.forEach { it.close() }
+    }
+  }
+
+  @Test
+  fun `service permissioned modules equal its explicit allow list`() {
     assertEquals(
-      EXPECTED_PERMISSIONED_MODULES,
-      (permissionedModules - "test") intersect registered,
+      SERVICE_PERMISSIONED_MODULES + debugModules,
+      permissionedModules intersect registered(overlay),
     )
   }
 
   @Test
-  fun `allow listed modules declare every mapped Android permission in the manifest`() {
-    val file = File("src/main/AndroidManifest.xml")
-    assertTrue("Expected module manifest at ${file.absolutePath}", file.isFile)
-    val factory = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
-    val permissions =
-      factory.newDocumentBuilder().parse(file).getElementsByTagName("uses-permission")
-    val declared =
-      (0 until permissions.length)
-        .map {
-          permissions.item(it).attributes.getNamedItemNS(ANDROID_NAMESPACE, "name").nodeValue
-        }
-        .toSet()
-    EXPECTED_PERMISSIONED_MODULES.forEach { name ->
-      val needed = callPermissions(modules.getValue(name).jsonObject)
-      assertTrue("$name has no contract permissions", needed.isNotEmpty())
+  fun `saved Activity permissioned modules equal its explicit allow list`() {
+    assertEquals(
+      ACTIVITY_PERMISSIONED_MODULES + debugModules,
+      permissionedModules intersect registered(saved),
+    )
+  }
+
+  @Test
+  fun `call block node and prompting permissions name canonical mapping keys`() {
+    assertTrue(
+      "No permissioned calls found in the contract",
+      modules.values.any { callPermissions(it.jsonObject).isNotEmpty() },
+    )
+    assertTrue(modules.keys.containsAll(BLOCK_NODE_PERMISSIONS.keys + PROMPT_PERMISSIONS.keys))
+    modulePermissions.forEach { (name, permissions) ->
+      assertTrue(
+        "$name names unknown permissions: ${permissions - permissionMapping.keys}",
+        permissionMapping.keys.containsAll(permissions),
+      )
+    }
+    // test.protected checks declarations without accessing a permissioned Android API.
+    assertTrue(modules.getValue("test").jsonObject.getValue("placeholder").jsonPrimitive.boolean)
+    assertEquals(setOf("camera"), callPermissions(modules.getValue("test").jsonObject))
+  }
+
+  @Test
+  fun `both host allow lists declare every mapped Android permission in the manifest`() {
+    val declared = manifestPermissions(File("src/main/AndroidManifest.xml"))
+    (SERVICE_PERMISSIONED_MODULES + ACTIVITY_PERMISSIONED_MODULES).forEach { name ->
+      val needed = modulePermissions.getValue(name)
+      assertTrue("$name has no call block node or prompting permissions", needed.isNotEmpty())
       needed.forEach { permission ->
-        val manifest =
-          permissionMapping
-            .getValue(permission)
-            .jsonObject
-            .getValue("android")
-            .jsonObject
-            .getValue("manifest")
-            .jsonArray
-            .map { it.jsonPrimitive.content }
-        manifest.forEach {
-          assertTrue(
-            "$name needs $permission mapped to $it in CtrlProxy's manifest",
-            it in declared,
-          )
-        }
+        permissionMapping
+          .getValue(permission)
+          .jsonObject
+          .getValue("android")
+          .jsonObject
+          .getValue("manifest")
+          .jsonArray
+          .forEach {
+            val androidPermission = it.jsonPrimitive.content
+            assertTrue(
+              "$name needs $permission mapped to $androidPermission in CtrlProxy's manifest",
+              androidPermission in declared,
+            )
+          }
       }
     }
   }
 
   @Test
-  fun `blocked modules and their per call capabilities are neither registered nor advertised`() {
+  fun `Activity biometric identity permission is present in the merged host manifest`() {
+    // USE_BIOMETRIC is install-time, outside the runtime-permission contract mapping.
+    val activity = controller.get()
+    val declared =
+      activity.packageManager
+        .getPackageInfo(activity.packageName, PackageManager.GET_PERMISSIONS)
+        .requestedPermissions
+        .orEmpty()
+        .toSet()
+    assertTrue(
+      "Merged CtrlProxy manifest needs USE_BIOMETRIC",
+      "android.permission.USE_BIOMETRIC" in declared,
+    )
+  }
+
+  @Test
+  fun `service blocked modules and per call capabilities are not advertised`() {
+    assertAdvertisement(overlay, SERVICE_MODULES + debugModules)
+  }
+
+  @Test
+  fun `saved Activity blocked modules and per call capabilities are not advertised`() {
+    assertAdvertisement(saved, ACTIVITY_MODULES + debugModules)
+  }
+
+  private fun assertAdvertisement(platform: PrototypePlatform, expected: Set<String>) {
     val commands =
       WebSocketServer(
           port = 0,
           scope = scope,
           options = WebSocketServerOptions(sdkInt = { 36 }),
-          platform = overlay,
+          platform = platform,
         )
         .supportedCommands()
         .toSet()
     val blocked =
-      (permissionedModules - EXPECTED_PERMISSIONED_MODULES - "test") +
-        setOf("permissions", "contacts", "calendar", "secureStorage", "biometric")
+      (permissionedModules +
+        ACTIVITY_IDENTITY_MODULES +
+        setOf("permissions", "contacts", "calendar")) - expected
     assertTrue(
-      blocked.containsAll(setOf("camera", "mediaLibrary", "audioRecorder", "notifications")),
+      blocked.containsAll(setOf("camera", "map", "mediaLibrary", "audioRecorder", "notifications")),
     )
     blocked.forEach { name ->
-      val module = modules.getValue(name).jsonObject
-      assertFalse("$name is registered", name in registered)
-      val capabilities =
-        listOf(module.getValue("capability").jsonPrimitive.content) +
-          module.getValue("calls").jsonObject.values.mapNotNull {
-            it.jsonObject["capability"]?.jsonPrimitive?.content
-          }
-      capabilities.forEach { capability ->
+      assertFalse("$name is registered", name in registered(platform))
+      capabilities(modules.getValue(name).jsonObject).forEach { capability ->
         assertFalse(
           "$name registry advertises $capability",
-          capability in overlay.registry.capabilities,
+          capability in platform.registry.capabilities,
         )
         assertFalse("$name server advertises $capability", capability in commands)
       }
     }
-    EXPECTED_PERMISSIONED_MODULES.forEach { name ->
-      assertTrue(
-        modules.getValue(name).jsonObject.getValue("capability").jsonPrimitive.content in commands,
-      )
+    expected.forEach { name ->
+      assertTrue("$name is missing from the registry", name in registered(platform))
+      capabilities(modules.getValue(name).jsonObject).forEach { capability ->
+        assertTrue("$name server omits $capability", capability in commands)
+      }
     }
   }
 
   companion object {
     private const val ANDROID_NAMESPACE = "http://schemas.android.com/apk/res/android"
-    private val EXPECTED_PERMISSIONED_MODULES = setOf("location")
+    private val SERVICE_MODULES =
+      setOf(
+        "haptics",
+        "sound",
+        "location",
+        "sensors",
+        "connectivity",
+        "battery",
+        "power",
+        "audio",
+        "links",
+        "settings",
+      )
+    private val ACTIVITY_IDENTITY_MODULES = setOf("biometric", "secureStorage")
+    private val ACTIVITY_MODULES = SERVICE_MODULES + ACTIVITY_IDENTITY_MODULES + "permissions"
+    private val SERVICE_PERMISSIONED_MODULES = setOf("location", "sensors")
+    private val ACTIVITY_PERMISSIONED_MODULES = setOf("location", "sensors", "permissions")
+    private val debugModules = if (BuildConfig.DEBUG) setOf("test") else emptySet()
+
+    // These requirements live in Kotlin validators, outside the per-call JSON contract.
+    private val BLOCK_NODE_PERMISSIONS =
+      mapOf(
+        "sensors" to setOf("motion"), // sensors.steps (PrototypeSensorRules)
+        "map" to setOf("location"), // map.showUserLocation (PrototypeMap)
+        "camera" to setOf("camera"), // cameraPreview node (PrototypeCameraPreview)
+      )
+    // AndroidPermissionsSource can launch POST_NOTIFICATIONS even though its calls have no
+    // contract permission. Review this map when its prompt vocabulary grows.
+    private val PROMPT_PERMISSIONS = mapOf("permissions" to setOf("notifications"))
+    // Both canonical JSON files are already packaged by :protocol as classpath resources.
     private val modules =
       resource("/prototype-spec-contract.json").getValue("platformModules").jsonObject
-    // Both canonical JSON files are already packaged by :protocol as classpath resources.
     private val permissionMapping = resource("/prototype-platform-permissions.json")
-    private val permissionedModules =
-      modules.filterValues { callPermissions(it.jsonObject).isNotEmpty() }.keys
+    private val modulePermissions = modules.mapValues { (name, module) ->
+      callPermissions(module.jsonObject) +
+        BLOCK_NODE_PERMISSIONS[name].orEmpty() +
+        PROMPT_PERMISSIONS[name].orEmpty()
+    }
+    private val permissionedModules = modulePermissions.filterValues { it.isNotEmpty() }.keys
+
+    private fun registered(platform: PrototypePlatform): Set<String> =
+      platform.registry.modules.map { it.name }.toSet()
+
+    private fun capabilities(module: JsonObject): List<String> =
+      listOf(module.getValue("capability").jsonPrimitive.content) +
+        module.getValue("calls").jsonObject.values.mapNotNull {
+          it.jsonObject["capability"]?.jsonPrimitive?.content
+        }
 
     private fun callPermissions(module: JsonObject): Set<String> =
       module
@@ -140,6 +255,21 @@ class PrototypeRuntimeIsolationTest {
           }
         }
         .toSet()
+
+    private fun manifestPermissions(file: File): Set<String> {
+      check(file.isFile) { "Expected module manifest at ${file.absolutePath}" }
+      val permissions =
+        DocumentBuilderFactory.newInstance()
+          .apply { isNamespaceAware = true }
+          .newDocumentBuilder()
+          .parse(file)
+          .getElementsByTagName("uses-permission")
+      return (0 until permissions.length)
+        .map {
+          permissions.item(it).attributes.getNamedItemNS(ANDROID_NAMESPACE, "name").nodeValue
+        }
+        .toSet()
+    }
 
     private fun resource(path: String): JsonObject =
       Json.parseToJsonElement(

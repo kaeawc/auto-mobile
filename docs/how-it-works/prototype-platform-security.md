@@ -71,9 +71,14 @@ per-call permissions (#15642). The Android stamper rebuilds manifest permissions
 declarations. The install path refuses calls and nodes needing undeclared permissions before
 stamping. The CtrlProxy capability table is tested against the contract and its manifest.
 
-- CtrlProxy advertises a permissioned module only when it is in an explicit allow-list (currently
-  `location`) and its required manifest permissions are declared in CtrlProxy's manifest. The debug
-  `test` module uses synthetic permissions without accessing protected APIs.
+- CtrlProxy's overlay service registers `location`, `sensors` (steps need
+  `motion` / `ACTIVITY_RECOGNITION`), and permission-free modules. Its
+  `SavedPrototypeActivity` additionally registers `biometric`, `secureStorage`, and
+  `permissions`, which can prompt for `POST_NOTIFICATIONS` under CtrlProxy's identity.
+  The required runtime permissions are declared in CtrlProxy's manifest; `USE_BIOMETRIC`
+  comes from the renderer library's manifest. Tests enforce exact inventories and explicit
+  permission allow-lists for both hosts, including block/node-derived permissions.
+  The debug-only `test` module uses synthetic permissions without accessing protected APIs.
 - The iOS prototype agent never advertises permissioned modules. It offers only modules that need
   no permission and no identity of their own.
 - The injected iOS agent never calls TCC APIs, and Info.plist filtering keeps usage strings out of

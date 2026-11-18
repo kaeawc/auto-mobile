@@ -31,7 +31,7 @@ describe("disposableAppDeclarations", () => {
     expect(DISPOSABLE_APP_IOS_USAGE_KEYS).toEqual(
       Object.fromEntries(
         Object.entries(permissionMapping).flatMap(([name, mapping]) =>
-          // The installer deliberately keeps nearbyWifi out of the plist (iosPrototypeInstaller.test.ts).
+          // Tracked in #18634: IosPrototypeInstaller omits NSLocalNetworkUsageDescription for nearbyWifi.
           mapping.ios.usageKey === null || name === "nearbyWifi"
             ? []
             : [[name, mapping.ios.usageKey]],

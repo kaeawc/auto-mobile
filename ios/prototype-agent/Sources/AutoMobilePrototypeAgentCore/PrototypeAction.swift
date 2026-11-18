@@ -5,6 +5,8 @@ struct PrototypeAction: Decodable, Sendable {
     let name: String?
     let payload: JSONValue?
     let context: PrototypeEmitContext?
+    /// Runtime-only handler context, retained by nested callbacks and timers.
+    var mapMarkerId: String?
     let scroll: String?
     let to: JSONValue?
     let animated: Bool?
@@ -55,6 +57,7 @@ struct PrototypeAction: Decodable, Sendable {
     let onError: [PrototypeAction]?
 
     private enum CodingKeys: String, CodingKey {
+        case mapMarkerId = "_mapMarkerId"
         case type, name, payload, context, pager, page, stack, screen, transition, source, path, key, value, scroll, to,
              animated, call, args, params, force
         case id, afterMs, everyMs, maxRuns, actions, maxItems
@@ -172,6 +175,7 @@ struct PrototypeAction: Decodable, Sendable {
             stackPath: type == "setStack" ? container.decode([PrototypeRouteEntry].self, forKey: .path) : nil,
             maxItems: container.decodeIfPresent(Int.self, forKey: .maxItems)
         )
+        mapMarkerId = try container.decodeIfPresent(String.self, forKey: .mapMarkerId)
     }
 
     /// This action and every action nested in its `onSuccess` / `onError` lists, depth first.

@@ -105,6 +105,11 @@ internal constructor(
   private val sessions: List<PrototypeStorageSession>,
   private val finish: (() -> Unit) -> Unit,
 ) {
+  /** Drain saves that passed their generation check before quiesce; call before touching disk. */
+  suspend fun awaitWrites() {
+    sessions.forEach { it.awaitWrites() }
+  }
+
   fun invalidate() = finish { sessions.forEach { it.invalidate() } }
 
   fun resume() = finish { sessions.forEach { it.resume() } }
@@ -383,8 +388,10 @@ internal constructor(
   /** Set once the id was deleted: nothing this session holds may reach the disk again. */
   private var invalidated = false
 
-  /** Set while a delete is cleaning up: writes wait, and resume if the cleanup fails. */
-  private var quiesced = false
+  /** Nested reset/delete holds each keep writes paused until their own cleanup finishes. */
+  private var quiesceDepth = 0
+  private val quiesced: Boolean
+    get() = quiesceDepth > 0
 
   /** Orders every disk operation of this session, so a clear cannot overtake an older save. */
   private val diskLock = Mutex()
@@ -503,20 +510,18 @@ internal constructor(
       diskLock.withLock {
         // A clear that ran after the snapshot already emptied the disk; the snapshot is stale.
         if (synchronized(lock) { generation != snapshotGeneration }) return
-        try {
-          withContext(io) {
-            if (document.values.isEmpty()) store.delete(id)
-            else store.save(id, document.copy(secure = emptyMap()))
-            writeSecure(document)
+        val completed =
+          try {
+            withContext(io) { writeIfCurrent(document) }
+          } catch (error: CancellationException) {
+            // I/O may have finished before the dispatch back was cancelled. Invalidate before
+            // releasing diskLock, so a later flush cannot trust the previous secure baseline.
+            synchronized(lock) {
+              if (generation == snapshotGeneration) secureBaselineStale = true
+            }
+            throw error
           }
-        } catch (error: CancellationException) {
-          // I/O may have finished before the dispatch back was cancelled. Invalidate before
-          // releasing diskLock, so a later flush cannot trust the previous secure baseline.
-          synchronized(lock) {
-            if (generation == snapshotGeneration) secureBaselineStale = true
-          }
-          throw error
-        }
+        if (!completed) return
         synchronized(lock) {
           persistedValues = LinkedHashMap(document.values)
           persistedSecureValues = LinkedHashMap(document.secure)
@@ -531,6 +536,16 @@ internal constructor(
       if (secureKeys.isNotEmpty()) warn.warn("Could not store prototype values", null)
       else warn.warn("Could not store the values of $id: ${error.message}", error)
     }
+  }
+
+  /** An admitted write precedes a plain clear; reset/delete holds can still fence either store. */
+  private fun writeIfCurrent(document: PrototypeStoredValues): Boolean {
+    if (synchronized(lock) { invalidated || quiesced }) return false
+    if (document.values.isEmpty()) store.delete(id)
+    else store.save(id, document.copy(secure = emptyMap()))
+    if (synchronized(lock) { invalidated || quiesced }) return false
+    writeSecure(document)
+    return true
   }
 
   private fun writeSecure(document: PrototypeStoredValues) {
@@ -556,18 +571,21 @@ internal constructor(
   /** Holds writes back while a delete cleans up; [resume] undoes it if the cleanup fails. */
   internal fun quiesce() {
     synchronized(lock) {
-      quiesced = true
+      quiesceDepth++
       pending?.cancel()
       pending = null
       generation++
     }
   }
 
+  /** Quiesce fences new saves first; acquiring the mutex then drains the older disk operation. */
+  internal suspend fun awaitWrites() = diskLock.withLock {}
+
   /** The delete failed: the session persists again, writing what it holds from now. */
   internal fun resume() {
     synchronized(lock) {
       if (!quiesced || invalidated) return
-      quiesced = false
+      quiesceDepth--
       invalidateSecureBaseline()
     }
   }
@@ -585,7 +603,7 @@ internal constructor(
       persistedValues = emptyMap()
       persistedSecureValues = emptyMap()
       secureBaselineStale = false
-      quiesced = false
+      if (quiesceDepth > 0) quiesceDepth--
     }
   }
 

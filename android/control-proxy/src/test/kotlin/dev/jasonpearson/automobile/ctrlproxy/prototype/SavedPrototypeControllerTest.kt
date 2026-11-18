@@ -1,9 +1,12 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import dev.jasonpearson.automobile.protocol.PrototypeRequires
 import dev.jasonpearson.automobile.protocol.PrototypeResult
+import dev.jasonpearson.automobile.protocol.PrototypeScalar
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
+import dev.jasonpearson.automobile.protocol.PrototypeStorageBlock
 import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
 import dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode
 import dev.jasonpearson.automobile.protocol.SavedPrototypeInfo
@@ -11,9 +14,14 @@ import dev.jasonpearson.automobile.protocol.SavedPrototypePinInfo
 import dev.jasonpearson.automobile.protocol.SavedPrototypePinStatus
 import dev.jasonpearson.automobile.protocol.SavedPrototypeShortcutUpdate
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertArrayEquals
@@ -21,7 +29,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -30,6 +40,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
 class SavedPrototypeControllerTest {
+  @get:Rule val temp = TemporaryFolder()
   private val spec =
     Json.decodeFromString<PrototypeSpec>(
       """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hello"}}""",
@@ -75,13 +86,14 @@ class SavedPrototypeControllerTest {
     shortcutPinner: PrototypeShortcutPinner = pinner,
     clearStorage: suspend (String) -> Int = { 0 },
     sessions: PrototypeStorageSessionRegistry = PrototypeStorageSessionRegistry(),
+    ioDispatcher: CoroutineDispatcher = StandardTestDispatcher(testScheduler),
   ) =
     SavedPrototypeController(
       backing,
       assets,
       shortcuts,
       sink,
-      StandardTestDispatcher(testScheduler),
+      ioDispatcher,
       shortcutPinner,
       clearStorage,
       sessions,
@@ -91,6 +103,26 @@ class SavedPrototypeControllerTest {
     assertEquals(1, replies.size)
     return replies.single().also { assertEquals(id, it.requestId) }
   }
+
+  private fun storageController(
+    sessions: PrototypeStorageSessionRegistry,
+    plain: PrototypeStorageStore,
+    secure: PrototypeSecureValueStore,
+  ) =
+    PrototypeController(
+      FakePrototypeHost(),
+      sink,
+      clock = { 42L },
+      lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+      storage =
+        PrototypeStoragePersistence(
+          plain,
+          FakePrototypeTimer(),
+          kotlin.coroutines.EmptyCoroutineContext,
+        ),
+      purgeSecureStorage = { id -> secure.delete(id) },
+      storageSessions = sessions,
+    )
 
   @Test
   fun `save returns saved info and replacement flag once per request`() = runTest {
@@ -293,6 +325,91 @@ class SavedPrototypeControllerTest {
 
     assertEquals(emptyList<Any>(), disk.saves)
     assertEquals(null, disk.stored("prefs"))
+  }
+
+  @Test
+  fun `delete drains an Activity secure save before removing its storage and saved entry`() =
+    runTest {
+      val registry = PrototypeStorageSessionRegistry()
+      val secure = ControllerSecureStore()
+      val plain = FakePrototypeStorageStore()
+      val timer = FakePrototypeTimer()
+      val original =
+        spec.copy(
+          requires = PrototypeRequires(platform = listOf("secureStorage")),
+          state =
+            mapOf("token" to PrototypeScalar.Text(""), "count" to PrototypeScalar.Numeric(0.0)),
+          storage = PrototypeStorageBlock(1, listOf("state:count"), secure = listOf("state:token")),
+        )
+      val session =
+        PrototypeStoragePersistence(
+            PrototypeStorageBackends(plain, secure),
+            timer,
+            kotlin.coroutines.EmptyCoroutineContext,
+            registry = registry,
+          )
+          .open(original)
+          .session!!
+      val storageController = storageController(registry, plain, secure)
+      val controller =
+        controller(
+          sessions = registry,
+          clearStorage = storageController::clearStoredValues,
+          ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        )
+      controller.save("save", original, "Vault", null)
+      assertTrue(onlyReply("save").success)
+      replies.clear()
+      lateinit var deletion: Deferred<Unit>
+      secure.beforeSave = {
+        deletion =
+          async(start = CoroutineStart.UNDISPATCHED) { controller.delete("delete", original.id) }
+        assertFalse(deletion.isCompleted)
+        assertEquals(0, secure.deletes)
+        assertTrue(original.id in store.stored)
+      }
+      session.record(
+        original.copy(state = original.state!! + ("token" to PrototypeScalar.Text("secret"))),
+      )
+      timer.advance(PROTOTYPE_STORAGE_DEBOUNCE_MILLIS)
+      deletion.await()
+      assertTrue(onlyReply("delete").success)
+      assertTrue(store.stored.isEmpty())
+      assertEquals(null, secure.value)
+      session.record(
+        original.copy(state = original.state!! + ("token" to PrototypeScalar.Text("later"))),
+      )
+      session.flush()
+      assertEquals(null, secure.value)
+    }
+
+  @Test
+  fun `delete drains a plaintext save before purging ciphertext and alias`() = runTest {
+    assertDeleteWriteRace(blockPlainSave = true)
+  }
+
+  @Test
+  fun `delete fences a write paused after its generation check before IO`() = runTest {
+    assertDeleteWriteRace(blockPlainSave = false)
+  }
+
+  private suspend fun TestScope.assertDeleteWriteRace(blockPlainSave: Boolean) {
+    val race = StorageWriteRaceFixture(temp.newFolder())
+    val storageController = storageController(race.registry, race.plain, race.secure)
+    val controller =
+      controller(
+        sessions = race.registry,
+        clearStorage = storageController::clearStoredValues,
+        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+      )
+    controller.save("save", race.original, "Vault", null)
+    assertTrue(onlyReply("save").success)
+    replies.clear()
+    val cleanup: suspend () -> Unit = { controller.delete("delete", race.original.id) }
+    if (blockPlainSave) race.blockPlainSave(this, cleanup)
+    else race.afterGenerationCheck(this, cleanup)
+    assertTrue(onlyReply("delete").success)
+    assertTrue(store.stored.isEmpty())
   }
 
   @Test

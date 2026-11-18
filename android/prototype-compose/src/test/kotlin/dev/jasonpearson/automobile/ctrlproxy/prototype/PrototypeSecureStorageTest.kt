@@ -262,6 +262,31 @@ class PrototypeSecureStorageTest {
   }
 
   @Test
+  fun `inner reset or resume cannot release an outer quiesce hold`() = runTest {
+    for (resetInner in listOf(false, true)) {
+      val original = spec()
+      val registry = PrototypeStorageSessionRegistry()
+      val session = persistence(registry = registry).open(original).session!!
+      session.record(changed(original))
+      val outer = registry.quiesce(original.id)
+      val inner = registry.quiesce(original.id)
+      if (resetInner) inner.reset() else inner.resume()
+      // Completing a hold twice must not release the other hold.
+      inner.resume()
+      session.record(changed(original, "later"))
+      session.flush()
+      assertTrue(secure.values.isEmpty())
+      outer.resume()
+      session.flush()
+      assertEquals(
+        JsonPrimitive("later"),
+        secure.values.getValue(original.id).values["state:token"],
+      )
+      secure.delete(original.id)
+    }
+  }
+
+  @Test
   fun `dismiss flushes secure changes and retains them for the next show`() = runTest {
     val opened = persistence().open(spec())
     var sequence = 0L

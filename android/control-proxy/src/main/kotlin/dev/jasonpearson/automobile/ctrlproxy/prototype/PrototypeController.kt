@@ -1192,6 +1192,7 @@ class PrototypeController(
     val held = storageSessions.quiesce(id)
     val removed =
       try {
+        held.awaitWrites()
         val secureRemoved = purgeSecureStorage(id)
         val live = surfaces[id]?.runtime?.storage
         secureRemoved + (live?.clear() ?: storage?.clear(id) ?: 0)

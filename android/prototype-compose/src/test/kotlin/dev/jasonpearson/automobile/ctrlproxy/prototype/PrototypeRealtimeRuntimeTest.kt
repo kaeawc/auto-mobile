@@ -326,6 +326,43 @@ class PrototypeRealtimeRuntimeTest {
   }
 
   @Test
+  fun `an onOpen send follow-up binds state to the captured event`() = runTest {
+    val base = spec()
+    val followed =
+      base.copy(
+        state = base.state.orEmpty() + ("captured" to PrototypeScalar.Text("")),
+        channels =
+          base.channels!!.mapValues { (_, channel) ->
+            channel.copy(
+              onOpen =
+                listOf(
+                  send("hello")
+                    .copy(
+                      onSuccess =
+                        listOf(
+                          PrototypeSetStateAction(
+                            "captured",
+                            PrototypeScalar.Binding(obj("event" to JsonPrimitive("/status"))),
+                          ),
+                        ),
+                    ),
+                ),
+            )
+          },
+      )
+    val transport = FakeTransport()
+    val runtime = runtime(transport, followed)
+    runtime.shown()
+    runCurrent()
+    transport.last.listener.onOpen(null)
+    runCurrent()
+
+    assertEquals(emptyList<String>(), warnings)
+    assertEquals(listOf("hello"), transport.last.sent)
+    assertEquals(PrototypeScalar.Text("open"), runtime.current.state["captured"])
+  }
+
+  @Test
   fun `removing the last channel drops its platform state and closes it`() = runTest {
     val transport = FakeTransport()
     val runtime = runtime(transport)

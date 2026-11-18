@@ -320,9 +320,7 @@ class PrototypeRuntime(
     val previousEvent = eventData
     eventData = data
     try {
-      handle(
-        PrototypeInteraction.Tap(bindStateValues(current.spec.platform?.on?.get(name).orEmpty())),
-      )
+      handle(PrototypeInteraction.Tap(current.spec.platform?.on?.get(name).orEmpty()))
     } finally {
       eventData = previousEvent
     }
@@ -821,7 +819,7 @@ class PrototypeRuntime(
     val plannedData = current.spec.data
     val plannedStacks = current.stacks
     val touched = LinkedHashSet<String>()
-    for ((index, action) in actions.withIndex()) {
+    for ((index, action) in bindStateValues(actions).withIndex()) {
       if (!current.active) break
       when (action) {
         is PrototypeEmitAction -> emitAction(action)
@@ -885,7 +883,7 @@ class PrototypeRuntime(
   ): Map<Int, Pair<String, PrototypeSpec>> {
     var spec = from
     val writes = HashMap<Int, Pair<String, PrototypeSpec>>()
-    for ((index, action) in actions.withIndex()) {
+    for ((index, action) in bindStateValues(actions).withIndex()) {
       if (action == PrototypeDismissAction) break
       val (key, value) = action.stateWrite(spec.state.orEmpty()) ?: continue
       spec = validated(spec, mapOf(key to value))
@@ -2032,8 +2030,9 @@ class PrototypeRuntime(
   }
 
   /**
-   * A `setState` value bound to `{event}` or `{platform}` reads the handler event before the list
-   * is planned, so the validator sees the scalar it writes. A binding that resolves to no scalar
+   * A `setState` value bound to `{event}` or `{platform}` reads the handler event when its list is
+   * planned and run, so the validator sees the scalar it writes. Every list goes through [run], so
+   * handlers, routes and platform-call follow-ups all bind. A binding that resolves to no scalar
    * stays as authored and is refused like any invalid write.
    */
   private fun bindStateValues(actions: List<PrototypeAction>): List<PrototypeAction> =
@@ -2053,7 +2052,7 @@ class PrototypeRuntime(
     val previousEvent = eventData
     eventData = event
     try {
-      val decoded = bindStateValues(runtimeJson.decodeFromJsonElement(channelActions, actions))
+      val decoded = runtimeJson.decodeFromJsonElement(channelActions, actions)
       if (decoded.isEmpty() || !requireValid(decoded)) return
       run(decoded, plannedWrites(decoded, current.spec))
       runAppearances()

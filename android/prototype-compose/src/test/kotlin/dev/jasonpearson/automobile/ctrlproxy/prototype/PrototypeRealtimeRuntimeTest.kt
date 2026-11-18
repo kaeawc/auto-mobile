@@ -35,11 +35,12 @@ class PrototypeRealtimeRuntimeTest {
           val runtime = runtime(transport)
           runtime.shown()
           runCurrent()
+          check(transport.opened.isNotEmpty()) { "warm: no connection; warnings=$warnings" }
           transport.last.listener.onOpen(null)
           transport.last.listener.onFrame("""{"id":1,"text":"warm"}""", null, null)
           advanceTimeBy(PrototypeChannelLimits.flushMs + 1L)
           runCurrent()
-          runtime.patch(runtime.current.revision, urlPatch("wss://example.test/warm"), json) {
+          runtime.patch(runtime.current.revision, roomPatch("warm"), json) {
             json.decodeFromJsonElement(PrototypeSpec.serializer(), it)
           }
           runtime.handle(PrototypeInteraction.Tap(listOf(send("""{"warm":true}"""))))
@@ -79,6 +80,9 @@ class PrototypeRealtimeRuntimeTest {
 
   private val json = Json { classDiscriminator = "type" }
 
+  /** Refusals the runtime explains; every test expects none. */
+  private val warnings = mutableListOf<String>()
+
   private fun obj(vararg pairs: Pair<String, JsonElement>) = JsonObject(mapOf(*pairs))
 
   private fun spec(connect: String? = null) =
@@ -103,7 +107,7 @@ class PrototypeRealtimeRuntimeTest {
                     actions =
                       listOf(
                         PrototypeUpsertDataAction(
-                          path = "/messages",
+                          path = "/data/messages",
                           value = obj("event" to JsonPrimitive("")),
                           key = "/id",
                         ),
@@ -131,17 +135,16 @@ class PrototypeRealtimeRuntimeTest {
         requestScope = backgroundScope,
         exclusively = { lock.withLock { it() } },
         newRequestId = { "id-${++id}" },
-        warn = { error(it) },
+        warn = { warnings += it },
         realtime =
           PrototypeRealtimeConfig(PrototypeChannelTransports(transport, transport), Random(0)),
       )
       .also { it.startPlatformModules() }
   }
 
-  private fun urlPatch(url: String): JsonArray =
-    json
-      .parseToJsonElement("""[{"op":"replace","path":"/channels/chat/url","value":"$url"}]""")
-      .jsonArray
+  /** The channel URL binds `{room}`, so a state patch rebinds it. */
+  private fun roomPatch(room: String): JsonArray =
+    json.parseToJsonElement("""[{"op":"replace","path":"/state/room","value":"$room"}]""").jsonArray
 
   private fun call(name: String, vararg args: Pair<String, JsonElement>) =
     PrototypePlatformAction(
@@ -166,6 +169,7 @@ class PrototypeRealtimeRuntimeTest {
     val runtime = runtime(transport)
     runtime.shown()
     runCurrent()
+    assertEquals(emptyList<String>(), warnings)
     assertEquals("wss://example.test/a", transport.last.request.url)
     assertEquals("connecting", runtime.chat()?.get("status")?.jsonPrimitive?.content)
     assertEquals(PrototypeScalar.Text("connecting"), runtime.current.state["status"])
@@ -177,13 +181,14 @@ class PrototypeRealtimeRuntimeTest {
     advanceTimeBy(PrototypeChannelLimits.flushMs + 1L)
     runCurrent()
 
+    assertEquals(emptyList<String>(), warnings)
     assertEquals(PrototypeScalar.Text("open"), runtime.current.state["status"])
-    assertEquals(listOf("hi, edited", "there"), runtime.messages())
+    assertEquals(runtime.chat().toString(), listOf("hi, edited", "there"), runtime.messages())
     assertEquals(3, runtime.chat()?.get("framesIn")?.jsonPrimitive?.content?.toInt())
   }
 
   @Test
-  fun `a patch under the interaction lock while frames flush reconnects without deadlock`() =
+  fun `a state patch under the interaction lock while frames flush rebinds and reconnects`() =
     runTest {
       val lock = Mutex()
       val transport = FakeTransport()
@@ -194,27 +199,30 @@ class PrototypeRealtimeRuntimeTest {
       first.listener.onOpen(null)
       runCurrent()
 
+      first.listener.onFrame("""{"id":1,"text":"during patch"}""", null, null)
+      runCurrent()
+
       lock.withLock {
-        first.listener.onFrame("""{"id":1,"text":"during patch"}""", null, null)
         // The flush takes the controller lock, then waits in the sink for the interaction lock.
         advanceTimeBy(PrototypeChannelLimits.flushMs + 1L)
         runCurrent()
         // A runtime that called the controller here would wait on its lock forever.
         val result =
           withTimeout(1_000) {
-            runtime.patch(runtime.current.revision, urlPatch("wss://example.test/b"), json) {
+            runtime.patch(runtime.current.revision, roomPatch("b"), json) {
               json.decodeFromJsonElement(PrototypeSpec.serializer(), it)
             }
           }
-        assertTrue(result is PrototypeRuntime.PatchResult.Applied)
+        assertTrue(result.toString(), result is PrototypeRuntime.PatchResult.Applied)
       }
       runCurrent()
 
-      assertEquals(listOf("during patch"), runtime.messages())
+      assertEquals(emptyList<String>(), warnings)
+      assertEquals(runtime.chat().toString(), listOf("during patch"), runtime.messages())
       assertEquals(2, transport.opened.size)
       assertEquals(PrototypeChannelController.GOING_AWAY, first.closedWith)
       assertEquals("wss://example.test/b", transport.last.request.url)
-      assertEquals("reconnecting", runtime.chat()?.get("status")?.jsonPrimitive?.content)
+      assertEquals("connecting", runtime.chat()?.get("status")?.jsonPrimitive?.content)
     }
 
   @Test

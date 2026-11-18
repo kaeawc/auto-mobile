@@ -1282,8 +1282,9 @@ class PrototypeRuntime(
       override fun platform(pointer: String): JsonElement? =
         PrototypeDataPointer.resolve(current.platformState, pointer)
 
+      // `{event: ""}` is the whole handler event (a realtime route's decoded frame, #14269).
       override fun event(pointer: String): JsonElement? =
-        PrototypeDataPointer.resolve(eventData, pointer)
+        if (pointer.isEmpty()) eventData else PrototypeDataPointer.resolve(eventData, pointer)
     }
 
   /**

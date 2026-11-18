@@ -155,3 +155,15 @@ test("the single-candidate fallback still permits a control before its label", (
   const nodes = siblingNodes(control, labelElement);
   expect(focusLabelSibling(nodes, nodes[2])).toBe(nodes[1].element);
 });
+
+test("a lone control between both labels (title, switch, summary) is owned by each label", () => {
+  const nodes = siblingNodes(labelElement, control, nextLabel);
+  expect(focusLabelSibling(nodes, nodes[1])).toBe(nodes[2].element);
+  expect(focusLabelSibling(nodes, nodes[3])).toBe(nodes[2].element);
+});
+
+test("a lone control after both labels (title, summary, switch) is owned by each label", () => {
+  const nodes = siblingNodes(labelElement, nextLabel, control);
+  expect(focusLabelSibling(nodes, nodes[1])).toBe(nodes[3].element);
+  expect(focusLabelSibling(nodes, nodes[2])).toBe(nodes[3].element);
+});

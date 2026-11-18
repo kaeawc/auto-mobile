@@ -188,7 +188,7 @@ final class PrototypeChannelController {
             slot.connection = try transport.open(request, listener: listener)
         } catch {
             try await ended(slot, code: nil, reason: nil, error: PrototypeChannelError(
-                code: "transport", message: String(describing: error)
+                code: "network", message: String(describing: error)
             ))
         }
     }

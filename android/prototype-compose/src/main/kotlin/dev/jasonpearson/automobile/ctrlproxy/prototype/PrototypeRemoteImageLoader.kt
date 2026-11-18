@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeRemoteImageCounts
 import dev.jasonpearson.automobile.protocol.PrototypeRemoteImages
 import dev.jasonpearson.automobile.prototype.BuildConfig
 import java.io.IOException
+import java.net.URI
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -141,7 +142,7 @@ internal suspend fun loadPrototypeRemoteImage(
 fun prototypeRemoteImageUrlAllowed(url: String, allowLoopback: Boolean): Boolean {
   if (
     url.length !in 1..PrototypeRemoteImages.MAX_PROTOTYPE_REMOTE_IMAGE_URL_LENGTH ||
-      url.any { it.isWhitespace() || it.isISOControl() || it == '\\' }
+      url.hasInvalidImageUrlCharacters()
   )
     return false
   val uri =
@@ -150,13 +151,21 @@ fun prototypeRemoteImageUrlAllowed(url: String, allowLoopback: Boolean): Boolean
     } catch (_: java.net.URISyntaxException) {
       return false
     }
-  if (uri.rawUserInfo != null || uri.host == null || uri.port !in -1..65535 || uri.port == 0)
-    return false
-  return uri.scheme.equals("https", true) ||
-    (allowLoopback &&
-      uri.scheme.equals("http", true) &&
-      uri.host.lowercase() in setOf("localhost", "127.0.0.1", "[::1]"))
+  if (uri.hasInvalidImageAuthority()) return false
+  return uri.scheme.equals("https", true) || (allowLoopback && uri.isLoopbackHttpImageUrl())
 }
+
+private fun String.hasInvalidImageUrlCharacters(): Boolean = any {
+  it.isWhitespace() || it.isISOControl() || it == '\\'
+}
+
+private fun URI.hasInvalidImageAuthority(): Boolean =
+  rawUserInfo != null || host == null || hasInvalidImagePort()
+
+private fun URI.hasInvalidImagePort(): Boolean = port !in -1..65535 || port == 0
+
+private fun URI.isLoopbackHttpImageUrl(): Boolean =
+  scheme.equals("http", true) && host.lowercase() in setOf("localhost", "127.0.0.1", "[::1]")
 
 /** The renderer and fake-only tests use the same state/count lifecycle. */
 internal class PrototypeRemoteImageSession(private val activity: PrototypeRemoteImageActivity?) {

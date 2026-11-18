@@ -45,12 +45,7 @@ class PrototypeEgressPolicy(
   ): PrototypeEgressDecision {
     val name = host.removeSurrounding("[", "]").trimEnd('.').lowercase()
     // Development fixtures may reach adb-reversed loopback, never a protected daemon port.
-    if (
-      allowLoopback &&
-        port !in daemonPorts &&
-        name in setOf("localhost", "127.0.0.1", "::1") &&
-        resolvedAddresses.all { it.isLoopbackAddress }
-    )
+    if (allowLoopback && port !in daemonPorts && isLoopbackDestination(name, resolvedAddresses))
       return PrototypeEgressDecision.Allow
     if (name == "localhost" || name.endsWith(".localhost")) {
       return PrototypeEgressDecision.Blocked("Blocked destination hostname")
@@ -70,6 +65,9 @@ class PrototypeEgressPolicy(
     }
     return PrototypeEgressDecision.Allow
   }
+
+  private fun isLoopbackDestination(name: String, resolvedAddresses: List<InetAddress>): Boolean =
+    name in setOf("localhost", "127.0.0.1", "::1") && resolvedAddresses.all { it.isLoopbackAddress }
 
   private fun blockedAddress(bytes: ByteArray): Boolean {
     val b = bytes.map { it.toInt() and 0xff }

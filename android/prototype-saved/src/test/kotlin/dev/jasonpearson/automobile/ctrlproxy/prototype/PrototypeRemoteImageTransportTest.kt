@@ -6,6 +6,7 @@ import java.io.IOException
 import java.net.InetAddress
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.*
+import kotlinx.serialization.json.Json
 import okhttp3.Dns
 import okhttp3.MediaType
 import okhttp3.OkHttpClient
@@ -227,12 +228,13 @@ class PrototypeRemoteImageTransportTest {
         "{photo}" to mapOf("photo" to PrototypeScalar.Text("http://169.254.169.254/")),
       )
     for ((url, state) in cases) {
-      val spec =
-        PrototypeSpecValidator.json
-          .decodeFromString<PrototypeSpec>(
-            """{"id":"private-image","window":{"placement":{"type":"fullscreen"}},"root":{"type":"image","url":"https://images.example/a"}}""",
-          )
-          .copy(state = state, root = PrototypeImageNode(url = url))
+      val spec = Json {
+        ignoreUnknownKeys = false
+      }
+        .decodeFromString<PrototypeSpec>(
+          """{"id":"private-image","window":{"placement":{"type":"fullscreen"}},"root":{"type":"image","url":"https://images.example/a"}}""",
+        )
+        .copy(state = state, root = PrototypeImageNode(url = url))
       val resolved = (mapPrototypeSpec(spec).root.source as PrototypeImageNode).url!!
       val sent = mutableListOf<Request>()
       val transport = client {

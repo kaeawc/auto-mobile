@@ -112,7 +112,7 @@ internal object PrototypeRemoteImageResponseInterceptor : Interceptor {
     val response = chain.proceed(chain.request())
     return if (response.isSuccessful) response
     else {
-      response.body?.close()
+      response.body.close()
       response.newBuilder().body(ByteArray(0).toResponseBody()).build()
     }
   }

@@ -36,7 +36,6 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.PrototypeDimension
 import dev.jasonpearson.automobile.protocol.PrototypeImageNode
-import dev.jasonpearson.automobile.protocol.PrototypeItem
 import dev.jasonpearson.automobile.protocol.PrototypeStyle
 import java.io.IOException
 
@@ -302,15 +301,6 @@ private fun PrototypeImageBody(
   }
 }
 
-@Composable
-private fun rememberPrototypeImageBitmap(image: BitmapPrototypeImage, asset: String): ImageBitmap {
-  val probe = LocalPrototypeRenderWorkProbe.current
-  return remember(image) {
-    probe?.invoke(PrototypeRenderWork.IMAGE_BITMAP_WRAP, asset)
-    image.imageBitmap
-  }
-}
-
 /**
  * Crop and fill need the image to take the node's whole box; an axis the author left to wrap
  * content keeps the image's natural size on that axis.
@@ -324,39 +314,6 @@ private fun fillAuthoredAxes(style: PrototypeStyle): Modifier {
 
 private fun PrototypeDimension?.isSized() =
   this is PrototypeDimension.Fill || this is PrototypeDimension.Dp
-
-/** A nav item's image, built-in icon or placeholder, per [prototypeNavigationVisual]. */
-@Composable
-internal fun PrototypeNavigationIcon(item: PrototypeItem) {
-  val dark = LocalPrototypeDark.current
-  val image = item.image?.let { prototypeModeValue(it, dark) }
-  val state = image?.let { rememberPrototypeImage(it, NAVIGATION_ICON_TARGET) }
-  when (val visual = prototypeNavigationVisual(item, state)) {
-    is PrototypeNavigationVisual.Image ->
-      (visual.image as? BitmapPrototypeImage)?.let {
-        Image(
-          rememberPrototypeImageBitmap(it, checkNotNull(image)),
-          contentDescription = null,
-          modifier = Modifier.size(24.dp),
-        )
-      } ?: NavigationPlaceholder()
-    is PrototypeNavigationVisual.Icon ->
-      Icon(checkNotNull(prototypeIcon(visual.name)), contentDescription = null)
-    PrototypeNavigationVisual.Loading ->
-      Box(Modifier.size(24.dp).background(prototypePlaceholderColor(MaterialTheme.colorScheme)))
-    PrototypeNavigationVisual.Placeholder -> NavigationPlaceholder()
-  }
-}
-
-@Composable
-private fun NavigationPlaceholder() {
-  Box(
-    Modifier.size(24.dp).background(prototypePlaceholderColor(MaterialTheme.colorScheme)),
-  )
-}
-
-/** Nav icons are drawn at 24 dp; decode for up to xxxhdpi so they stay sharp on any display. */
-private val NAVIGATION_ICON_TARGET = PrototypeImageTarget(96, 96)
 
 internal val LocalPrototypeRemoteImages = compositionLocalOf<PrototypeRemoteImageLoader?> { null }
 internal val LocalPrototypeRemoteImageActivity =

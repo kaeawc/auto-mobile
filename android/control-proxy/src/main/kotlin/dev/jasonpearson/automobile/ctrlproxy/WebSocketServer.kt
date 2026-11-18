@@ -391,6 +391,11 @@ class WebSocketServer(
     add("prototype_platform_device_v1")
     add("prototype_platform_v1")
     addAll(platform.registry.capabilities)
+    addPrototypeTextAndMotionFlags()
+  }
+
+  /** Prototype text, motion, effects and collection feature flags. */
+  private fun MutableList<String>.addPrototypeTextAndMotionFlags() {
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
     add("prototype_text_field_options_v1")

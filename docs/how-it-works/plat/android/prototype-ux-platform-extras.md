@@ -12,12 +12,12 @@ A root Final-pass observer reports single-pointer down/up gestures left
 unconsumed by descendants, with movement below touch slop. Scrolling, pager
 drags, multitouch and taps outside the content window never report. Interactive
 controls and dismissing scrims consume their gestures. Gesture-only nodes with
-long-press or double-tap actions mark their down handled without consuming it,
+nonempty long-press or double-tap actions mark their down handled without consuming it,
 preserving ancestor clicks. A single tap on one counts as handled even if its
 hold or double-tap action does not fire. Passive text, boxes, images and spacers stay dead.
 
 Payloads contain only `stack`, `screen`, `x` and `y`; coordinates are window-local
-dp rounded to one decimal. The deepest stack supplies its id and top screen; ties pick the lowest stack id. Both are null
+dp rounded to one decimal. The deepest stack supplies its id and top screen; ties pick the lexicographically lowest stack id. Both are null
 without stacks. The event uses normal sequence allocation, state, pages and
 stacks, never typed text. Authored emits cannot use the
 reserved `prototype_` prefix. Disabling it or closing the runtime stops reports.
@@ -30,18 +30,18 @@ Optional `derive` maps up to 32 STATE_KEY names to strict
 `{value: number|string}`. Every text field supporting `{data:/pointer}` also
 accepts `{derived:name}`; undeclared names are validation errors, unused entries
 are allowed, and malformed braces remain literal. Devices render them in
-text, contentDescription, rich-text spans, button/FAB labels, topAppBar
+text node text, contentDescription, rich-text spans, button/FAB labels, topAppBar
 title, badge text, dialog title/text and snackbar text. Other text-kind fields
 (request url/headers/body, check messages, select/segmented/menu/searchBar labels)
 validate unknown names but display the token literally on devices.
 
 `repeat.derive` maps at most 8 names to the same entry shape with `of` restricted
 to `{item: "field"}` or `{value: number|string}`. It projects strings onto each
-original row for `{item.createdAtText}` (using the repeat's actual alias).
+original row for `{item.createdAtText}` (with the repeat's actual alias).
 Names cannot collide with any original item field, including non-scalar data
 fields. Derived entries do not read other derived entries. Host validation checks projected
 field references without evaluating device-local strings; the renderer defers value-dependent checks
-on derived repeat keys and emit names. Missing source fields format as empty strings.
+on derived repeat keys and emit names. Missing source fields are allowed and format as empty strings.
 
 `format` contains exactly one of these keys, each containing a strict object:
 
@@ -58,8 +58,7 @@ on derived repeat keys and emit names. Missing source fields format as empty str
 minFraction must not exceed maxFraction when both are supplied. Omitted numeric
 fraction options use Intl/CLDR defaults (currency respects minor units, including
 zero for JPY). Number grouping true/default respects the locale's minimum grouping
-digits; false disables grouping entirely. Compact, currency, and percent also
-respect locale minimum grouping digits. Locale defaults to the device locale; timeZone defaults to the
+digits; false disables grouping. Compact, currency, and percent do too. Locale defaults to the device locale; timeZone defaults to the
 device zone. Overrides accept a simple BCP 47 tag of at most 35 characters and an
 IANA zone identifier of at most 128 characters. Shape validation does not prove
 that the current engine supports a locale or zone.
@@ -80,12 +79,11 @@ and zone overrides before formatting, and keep the clock snapshot fixed when
 reproducible output is required.
 
 `prototype_format_v1` gates either derive map, including empty maps, before show
-or the complete patch result. Renderers must implement this capability before
-advertising it. Shared `derive/formatters.json` cases define parity: normalize
+or the complete patch result. Renderers advertise it only once implemented. Shared `derive/formatters.json` cases define parity: normalize
 U+202F and U+00A0 to plain space before comparisons. Exact cases pin supported
 English output; structural cases allow documented CLDR differences in foreign
 currency symbols, narrow relative abbreviations, zero-relative wording and
-non-English data. Add engine overrides only after measuring an actual platform
+non-English data. Add engine overrides only for a measured platform
 difference; the fixture note records the divergence policy and unit thresholds.
 
 `dateTime`, `duration`, `plural` and `fileSize` are not format kinds (invalid). No dependencies are needed: the host uses Intl.NumberFormat,

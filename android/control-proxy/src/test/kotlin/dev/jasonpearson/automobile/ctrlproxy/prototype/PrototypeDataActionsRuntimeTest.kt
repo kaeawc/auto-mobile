@@ -110,12 +110,13 @@ class PrototypeDataActionsRuntimeTest {
     val spec =
       validated(
         """{"id":"secure-keyed","window":{"placement":{"type":"fullscreen"}},
-          "requires":{"platform":["secureStorage"]},"state":{"token":""},
-          "storage":{"version":1,"keys":[],"secure":["state:token"]},
+          "requires":{"platform":["secureStorage"]},"state":{"token":"","count":0},
+          "storage":{"version":1,"keys":["state:count"],"secure":["state:token"]},
           "data":{"items":[{"id":"$secret","title":"old"}]},
           "root":{"type":"button","label":"Edit","onTap":[$action]}}""",
       )
-    val runtime = runtime(spec.copy(state = mapOf("token" to PrototypeScalar.Text(secret))))
+    val runtime =
+      runtime(spec.copy(state = spec.state.orEmpty() + ("token" to PrototypeScalar.Text(secret))))
     val before = runtime.current.revision
 
     runtime.handle(tap((spec.root as PrototypeButtonNode).onTap))

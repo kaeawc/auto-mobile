@@ -52,6 +52,7 @@ export const VIRTUAL_PROTOTYPE_CAPABILITIES: readonly string[] = [
   "prototype_emit_context_v1",
   "prototype_flow_grid_v1",
   "prototype_format_v1",
+  "prototype_derive_v1",
   "prototype_hide_keyboard_v1",
   "prototype_icon_effects_v1",
   "prototype_keyframes_v1",

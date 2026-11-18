@@ -2,6 +2,7 @@
 // Regenerate: bun scripts/prototype/generate-prototype-render-contract.ts
 
 export const prototypeRenderLimits = {
+  MAX_PROTOTYPE_DATA_ARRAY_ITEMS: 2000,
   MAX_PROTOTYPE_DATA_POINTER_LENGTH: 256,
   MAX_PROTOTYPE_LIST_ITEMS: 2000,
   MAX_PROTOTYPE_NODES: 2000,

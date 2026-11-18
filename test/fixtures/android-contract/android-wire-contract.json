@@ -8862,13 +8862,13 @@
         "name": "of",
         "type": "json",
         "nullable": false,
-        "hasDefault": false
+        "hasDefault": true
       },
       {
         "name": "format",
         "type": "json",
         "nullable": false,
-        "hasDefault": false
+        "hasDefault": true
       },
       {
         "name": "locale",
@@ -8879,6 +8879,18 @@
       {
         "name": "timeZone",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "collection",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "reduce",
+        "type": "json",
         "nullable": true,
         "hasDefault": true
       }

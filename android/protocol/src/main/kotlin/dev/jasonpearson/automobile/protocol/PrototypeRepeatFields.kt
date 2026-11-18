@@ -83,7 +83,7 @@ internal object PrototypeRepeatFields {
         }
       if (invalidRepeatPart || !pattern.matches(bound)) {
         return fail(
-          if (scope.pathBound) "${scope.path}.repeat.items.path"
+          if (scope.pathBound) "${scope.path}.repeat.items.${scope.sourceKind}"
           else "${scope.path}.repeat.items[$index]",
           "Bound state key ${JsonPrimitive(bound)} is invalid" +
             if (scope.pathBound) " (repeat item $index)" else "",

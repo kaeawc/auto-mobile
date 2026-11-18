@@ -1,3 +1,5 @@
+import { derivePrototypeValues } from "./prototypeDerive";
+import { prototypeDeriveSchema } from "./prototypeFormatSchema";
 import {
   fail,
   object,
@@ -27,10 +29,40 @@ function fractionError(derive: unknown, path: string): PrototypeValidationError 
   return undefined;
 }
 
+function derivedRepeatSourceError(
+  source: Record<string, unknown> | undefined,
+  data: Record<string, unknown>,
+  at: string,
+): PrototypeValidationError | undefined {
+  if (typeof source?.derived !== "string") {
+    return undefined;
+  }
+  const entry = object(object(data.derive)?.[source.derived]);
+  if (!entry) {
+    return fail(at, `Unknown derived value ${JSON.stringify(source.derived)}`);
+  }
+  return !entry.collection || entry.reduce
+    ? fail(at, "Repeat derived items must name a collection without reduce")
+    : undefined;
+}
+
+function repeatDerivedItems(
+  repeat: Record<string, unknown> | undefined,
+  data: Record<string, unknown>,
+  values: Record<string, unknown>,
+): unknown {
+  const source = object(repeat?.items);
+  if (typeof source?.path === "string") {
+    return resolvePrototypeDataPointer(data.data, source.path);
+  }
+  return typeof source?.derived === "string" ? values[source.derived] : repeat?.items;
+}
+
 function repeatDerivedError(
   value: Record<string, unknown>,
   path: string,
   data: Record<string, unknown>,
+  derivedValues: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   const repeat = object(value.repeat);
   const entries = object(repeat?.derive);
@@ -39,10 +71,11 @@ function repeatDerivedError(
     return fractions;
   }
   const source = object(repeat?.items);
-  const items =
-    source && typeof source.path === "string"
-      ? resolvePrototypeDataPointer(data.data, source.path)
-      : repeat?.items;
+  const sourceError = derivedRepeatSourceError(source, data, `${path}.repeat.items.derived`);
+  if (sourceError) {
+    return sourceError;
+  }
+  const items = repeatDerivedItems(repeat, data, derivedValues);
   for (const name of Object.keys(entries ?? {})) {
     if (Array.isArray(items) && items.some((item) => Object.hasOwn(object(item) ?? {}, name))) {
       return fail(`${path}.repeat.derive.${name}`, "Derived name collides with an item field");
@@ -82,8 +115,13 @@ export function prototypeDerivedError(
   if (fractions) {
     return fractions;
   }
+  const parsed = prototypeDeriveSchema.safeParse(derived);
+  const values = parsed.success
+    ? derivePrototypeValues(parsed.data, data.data, object(data.state) ?? {})
+    : {};
   for (const { value, path } of nodes) {
-    const error = derivedReadError(value, path, derived) ?? repeatDerivedError(value, path, data);
+    const error =
+      derivedReadError(value, path, derived) ?? repeatDerivedError(value, path, data, values);
     if (error) {
       return error;
     }

@@ -98,6 +98,7 @@ export const DEVICE_MUTATION_KINDS = [
   "preference",
   "shared-file",
   "account",
+  "storekit",
 ] as const;
 
 export async function applyJournaledMutation<Result>(

@@ -50,13 +50,23 @@ internal object PrototypeRepeatTree {
     val pointer = source?.text("path")
     val items =
       if (pointer != null) data.items(pointer)
-      else (repeat["items"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+      else
+        ((source?.text("derived")?.let { data.derived[it] } ?: repeat["items"]) as? JsonArray)
+          .orEmpty()
+          .mapNotNull { it as? JsonObject }
     val names = (repeat["derive"] as? JsonObject)?.keys.orEmpty()
     // Only copy rows when derived fields are added; the projected list is otherwise shared.
     val projected =
       if (names.isEmpty()) items
       else items.map { JsonObject(it + names.associateWith { JsonPrimitive("") }) }
-    return Scope(path, alias, projected, source != null, names)
+    return Scope(
+      path,
+      alias,
+      projected,
+      source != null,
+      names,
+      if (source?.text("derived") != null) "derived" else "path",
+    )
   }
 
   fun repeatSourceError(
@@ -65,10 +75,13 @@ internal object PrototypeRepeatTree {
     state: RepeatState,
   ): PrototypeSpecError? {
     val source = (node["repeat"] as? JsonObject)?.get("items") as? JsonObject ?: return null
-    val pointer = source.text("path") ?: return null
-    val at = "$path.repeat.items.path"
+    val pointer = source.text("path")
+    val derived = source.text("derived")
+    val at = "$path.repeat.items.${if (derived != null) "derived" else "path"}"
     val items =
-      state.data.source(pointer) ?: return fail(at, "Repeat path does not resolve to an array")
+      (if (derived != null) state.data.derived[derived] as? JsonArray
+      else pointer?.let(state.data::source))
+        ?: return fail(at, "Repeat path does not resolve to an array")
     val maximum =
       if (node.text("type") == "list") PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS
       else PrototypeSpecValidator.maxRepeatItems
@@ -78,7 +91,9 @@ internal object PrototypeRepeatTree {
       return fail(at, "List data has more items than maxItems")
     val invalid = items.indexOfFirst { it !is JsonObject }
     if (invalid >= 0) return fail(at, "Repeat path item $invalid is not an object")
-    state.cells += state.data.cells(pointer)
+    state.cells +=
+      if (derived != null) PrototypeRepeatData(JsonObject(mapOf("rows" to items))).cells("/rows")
+      else state.data.cells(checkNotNull(pointer))
     return if (state.cells > PrototypeSpecValidator.MAX_PROTOTYPE_REPEAT_PATH_CELLS)
       fail(at, "Repeat path cell limit exceeded")
     else null

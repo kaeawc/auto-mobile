@@ -277,6 +277,7 @@ nav:
           - "SDK capabilities": using/sdk-capabilities.md
       - "Audit and measure":
           - "Accessibility and performance audits": using/audits.md
+          - "In-app purchase testing": using/storekit-test.md
           - "Performance traces": using/performance-trace.md
       - "Devices and sessions":
           - "Device ownership": using/device-ownership.md

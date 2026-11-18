@@ -270,7 +270,11 @@ enum PrototypeDataResolver {
         -> JSONValue
     {
         guard case var .object(fields) = root else { return root }
-        if pass == .all { PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind($0, data: data, platform: platform) } }
+        if pass == .all { PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind(
+            $0,
+            data: data,
+            platform: platform
+        ) } }
         let lazy = fields["type"] == .string("list")
         if !lazy, let value = fields["repeat"] { fields["repeat"] = resolveRepeat(
             value, repeats: &repeats, retainSource: PrototypeRepeat.containsFieldSource(root)

@@ -325,7 +325,8 @@ final class PrototypeLazyListTests: XCTestCase {
 
     private func lazySpec(text: String, data: String) -> String {
         #"{"id":"rb","window":{"placement":{"type":"fullscreen"}},"data":"# + data
-            + #","root":{"type":"list","repeat":{"items":{"path":"/posts"},"as":"row","key":"id"},"children":[{"type":"text","text":""#
+            +
+            #","root":{"type":"list","repeat":{"items":{"path":"/posts"},"as":"row","key":"id"},"children":[{"type":"text","text":""#
             + text + #""}]}}"#
     }
 

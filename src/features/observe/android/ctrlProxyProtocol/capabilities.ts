@@ -1,3 +1,4 @@
+export const PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY = "prototype_platform_simulation_v1";
 export const PROTOTYPE_TIMERS_CAPABILITY = "prototype_timers_v1";
 /** Android control-proxy capability negotiation and request/response registries. */
 import type { CtrlProxyRequestType } from "./requestMessages";
@@ -484,6 +485,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   list_saved_prototypes: true,
   delete_saved_prototype: true,
   advance_prototype_clock: true,
+  simulate_prototype_platform: true,
   clear_prototype_storage: true,
   put_prototype_asset: true,
   remove_prototype_asset: true,

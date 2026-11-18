@@ -2060,3 +2060,68 @@ describe("host channel frames (#14268)", () => {
     expect([first.disconnects, second.disconnects]).toEqual([0, 1]);
   });
 });
+
+describe("CtrlProxy simulate_prototype_platform", () => {
+  test("refuses absent and unknown capabilities before writing the socket", async () => {
+    for (const commands of [
+      null,
+      [],
+      ["simulate_prototype_platform"],
+      ["full_command_set_v1", "simulate_prototype_platform"],
+    ]) {
+      const { client, socket } = await harness(commands);
+      const send = spyOn(socket, "send");
+      try {
+        await expect(
+          client.requestSimulatePrototypePlatform({ id: "panel", event: "test.tick", data: {} }),
+        ).rejects.toThrow("prototype_platform_simulation_v1");
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        send.mockRestore();
+      }
+    }
+  });
+  test("sends the typed frame on the existing connection and preserves device refusal", async () => {
+    const { client, socket, receive } = await harness([
+      "full_command_set_v1",
+      "request_id_echo_v1",
+      "simulate_prototype_platform",
+      "prototype_platform_simulation_v1",
+    ]);
+    const frames: Record<string, unknown>[] = [];
+    const send = spyOn(socket, "send").mockImplementation((data) => {
+      const frame = JSON.parse(String(data));
+      frames.push(frame);
+      void receive({
+        type: "prototype_result",
+        requestId: frame.requestId,
+        success: false,
+        error: "unsupported",
+      });
+    });
+    try {
+      expect(
+        await client.requestSimulatePrototypePlatform({
+          id: "panel",
+          event: "test.tick",
+          data: { count: 7 },
+        }),
+      ).toMatchObject({ success: false, error: "unsupported" });
+      expect(frames).toEqual([
+        {
+          type: "simulate_prototype_platform",
+          requestId: frames[0]?.requestId,
+          id: "panel",
+          event: "test.tick",
+          data: { count: 7 },
+        },
+      ]);
+      await expect(
+        client.requestSimulatePrototypePlatform({ id: "panel", event: "test.unknown", data: {} }),
+      ).rejects.toThrow("known");
+      expect(frames).toHaveLength(1);
+    } finally {
+      send.mockRestore();
+    }
+  });
+});

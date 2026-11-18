@@ -18,7 +18,7 @@ internal class PrototypePlatformDispatcher(
   private val newId: () -> String,
   private val clock: () -> Long,
   private val complete: suspend (Pending, PlatformCallResult) -> Unit,
-  private val deliver: suspend (String, JsonObject) -> Unit,
+  private val deliver: suspend (String, JsonObject, Boolean) -> Unit,
   private val publish: (String, JsonObject) -> Unit,
   private val warn: (String) -> Unit,
   private val limiter: PrototypeRequestLimiter,
@@ -58,13 +58,30 @@ internal class PrototypePlatformDispatcher(
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
           module.events.collect { event ->
             exclusively {
-              if (!closed && PrototypePlatformCalls.eventOwner(event.name) == module.name) {
-                deliver(event.name, event.data)
-              }
+              deliverEvent(module, event, simulated = false)
             }
           }
         }
     }
+  }
+
+  /** Called only by the host under the same lock as real event delivery. */
+  suspend fun simulate(event: PlatformEvent): Boolean {
+    if (closed) return false
+    val module = registry.module(event.name) ?: return false
+    if (!module.simulate(event)) return false
+    deliverEvent(module, event, simulated = true)
+    return true
+  }
+
+  private suspend fun deliverEvent(
+    module: PrototypePlatformModule,
+    event: PlatformEvent,
+    simulated: Boolean,
+  ) {
+    if (closed || PrototypePlatformCalls.eventOwner(event.name) != module.name) return
+    publish(module.name, module.state.value)
+    deliver(event.name, event.data, simulated)
   }
 
   suspend fun start(

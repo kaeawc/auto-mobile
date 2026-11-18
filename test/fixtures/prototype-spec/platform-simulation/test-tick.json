@@ -1,0 +1,9 @@
+{
+  "event": "test.tick",
+  "data": { "count": 7, "nested": { "label": "tick", "values": [true, null] } },
+  "expected": {
+    "event": "test.tick",
+    "data": { "count": 7, "nested": { "label": "tick", "values": [true, null] } },
+    "simulated": true
+  }
+}

@@ -104,6 +104,57 @@ class PrototypeDataActionsRuntimeTest {
     assertEquals(2, spec.data?.get("items")?.jsonArray?.size)
   }
 
+  private suspend fun assertSecureKeyedWriteRefused(action: String) {
+    val secret = "private-keyed-write-token"
+    // A matching row ensures an unguarded secure selector would actually change public data.
+    val spec =
+      validated(
+        """{"id":"secure-keyed","window":{"placement":{"type":"fullscreen"}},
+          "requires":{"platform":["secureStorage"]},"state":{"token":""},
+          "storage":{"version":1,"keys":[],"secure":["state:token"]},
+          "data":{"items":[{"id":"$secret","title":"old"}]},
+          "root":{"type":"button","label":"Edit","onTap":[$action]}}""",
+      )
+    val runtime = runtime(spec.copy(state = mapOf("token" to PrototypeScalar.Text(secret))))
+    val before = runtime.current.revision
+
+    runtime.handle(tap((spec.root as PrototypeButtonNode).onTap))
+
+    assertEquals(spec.data, runtime.current.spec.data)
+    assertEquals(before, runtime.current.revision)
+    assertEquals(PrototypeScalar.Text(secret), runtime.current.state["token"])
+    assertTrue(events.isEmpty())
+    assertEquals(listOf("Prototype action could not be completed"), warnings)
+    assertFalse((events.toString() + warnings).contains(secret))
+    runtime.close()
+  }
+
+  @Test
+  fun `keyed setData refuses a secure value binding`() = runTest {
+    assertSecureKeyedWriteRefused(
+      """{"type":"setData","path":"/data/items","member":"title",
+        "where":{"field":"id","equals":{"data":"/items/0/id"}},
+        "value":{"state":"token"}}""",
+    )
+  }
+
+  @Test
+  fun `keyed setData refuses a secure selector binding`() = runTest {
+    assertSecureKeyedWriteRefused(
+      """{"type":"setData","path":"/data/items","member":"title",
+        "where":{"field":"id","equals":{"state":"token"}},
+        "value":{"value":"changed"}}""",
+    )
+  }
+
+  @Test
+  fun `keyed removeData refuses a secure selector binding`() = runTest {
+    assertSecureKeyedWriteRefused(
+      """{"type":"removeData","path":"/data/items",
+        "where":{"field":"id","equals":{"state":"token"}}}""",
+    )
+  }
+
   @Test
   fun `the shared fixture decodes into the three data actions`() {
     val spec = list()

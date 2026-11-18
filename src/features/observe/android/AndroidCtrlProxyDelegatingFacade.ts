@@ -1,3 +1,4 @@
+import type { PrototypePlatformSimulationRequest } from "./ctrlProxyProtocol";
 import type WebSocket from "ws";
 import type { SendCommandOptions } from "../DeviceServiceUtils";
 import type {
@@ -515,6 +516,13 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     perf?: PerformanceTracker,
   ): Promise<PrototypeResult> {
     return this.prototypes.requestDeleteSavedPrototype(id, timeoutMs, perf);
+  }
+  requestSimulatePrototypePlatform(
+    simulation: PrototypePlatformSimulationRequest,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    return this.prototypes.requestSimulatePrototypePlatform(simulation, timeoutMs, perf);
   }
   requestAdvancePrototypeClock(
     id: string,

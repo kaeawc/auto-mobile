@@ -4,7 +4,7 @@ import { PrototypeWebInputError } from "./prototypeWebInputError";
 export const DEFAULT_STILL_LOCALE = "en-US";
 
 /** Scripts written right to left, as both platforms lay them out. */
-const RTL_SCRIPTS = new Set(["adlm", "arab", "hebr", "nkoo", "rohg", "syrc", "thaa"]);
+const RTL_SCRIPTS = new Set(["adlm", "arab", "aran", "hebr", "nkoo", "rohg", "syrc", "thaa"]);
 
 /** The canonical BCP 47 tag, or a PrototypeWebInputError naming the invalid one. */
 export function stillLocale(locale: string | undefined): string {

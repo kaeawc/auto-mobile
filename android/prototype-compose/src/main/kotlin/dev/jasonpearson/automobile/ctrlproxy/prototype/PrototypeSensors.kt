@@ -46,10 +46,12 @@ interface PrototypeSensorSource {
 class FakePrototypeSensorSource : PrototypeSensorSource {
   val present = PrototypeSensor.entries.toMutableSet()
   override var stepsGranted = true
-  val readings = PrototypeSensor.entries.associateWith { MutableSharedFlow<PrototypeSensorSample>() }
+  val readings =
+    PrototypeSensor.entries.associateWith { MutableSharedFlow<PrototypeSensorSample>() }
   val subscriptions = mutableListOf<Pair<PrototypeSensor, Int>>()
   var activeSubscriptions = 0
     private set
+
   var closed = false
     private set
 
@@ -75,7 +77,8 @@ internal fun roundPrototypeSensorValue(key: String, value: Double): Double {
   val whole = floor(value + 0.5)
   return when (key) {
     "headingDeg" -> ((whole % 360) + 360) % 360
-    "pitchDeg", "rollDeg" -> whole.coerceIn(-180.0, 180.0)
+    "pitchDeg",
+    "rollDeg" -> whole.coerceIn(-180.0, 180.0)
     else -> max(0.0, whole)
   }
 }
@@ -135,20 +138,24 @@ class PrototypeSensorsModule(
 
   fun startSensors(block: JsonObject) {
     if (closed) return
-    val sensors = PrototypeSensor.entries.filterTo(mutableSetOf()) {
-      it.blockKey in block && source.hasSensor(it) && (it != PrototypeSensor.STEPS || source.stepsGranted)
-    }
+    val sensors =
+      PrototypeSensor.entries.filterTo(mutableSetOf()) {
+        it.blockKey in block &&
+          source.hasSensor(it) &&
+          (it != PrototypeSensor.STEPS || source.stepsGranted)
+      }
     if (config == block && subscribed == sensors && job?.isActive == true) return
     stopSensors()
     config = block
     subscribed = sensors
-    job = moduleScope.launch(start = CoroutineStart.UNDISPATCHED) {
-      sensors.forEach { sensor ->
-        val rate = (block[sensor.blockKey] as? JsonObject)?.get("rateHz")?.jsonPrimitive?.int ?: 1
-        launch(start = CoroutineStart.UNDISPATCHED) { collectSensor(sensor, rate) }
+    job =
+      moduleScope.launch(start = CoroutineStart.UNDISPATCHED) {
+        sensors.forEach { sensor ->
+          val rate = (block[sensor.blockKey] as? JsonObject)?.get("rateHz")?.jsonPrimitive?.int ?: 1
+          launch(start = CoroutineStart.UNDISPATCHED) { collectSensor(sensor, rate) }
+        }
+        awaitCancellation()
       }
-      awaitCancellation()
-    }
   }
 
   private suspend fun collectSensor(sensor: PrototypeSensor, rateHz: Int) {
@@ -164,14 +171,21 @@ class PrototypeSensorsModule(
           is PrototypeSensorSample.Proximity ->
             if (sensor == PrototypeSensor.PROXIMITY)
               publish(filter, "proximityNear", sample.timestampMs, JsonPrimitive(sample.near))
-          is PrototypeSensorSample.Values -> sample.values.forEach { (key, raw) ->
-            if (key !in sensor.keys || !raw.isFinite()) return@forEach
-            val value = if (sensor == PrototypeSensor.STEPS) {
-              if (initialSteps == null) initialSteps = raw
-              raw - checkNotNull(initialSteps)
-            } else raw
-            publish(filter, key, sample.timestampMs, JsonPrimitive(roundPrototypeSensorValue(key, value).toLong()))
-          }
+          is PrototypeSensorSample.Values ->
+            sample.values.forEach { (key, raw) ->
+              if (key !in sensor.keys || !raw.isFinite()) return@forEach
+              val value =
+                if (sensor == PrototypeSensor.STEPS) {
+                  if (initialSteps == null) initialSteps = raw
+                  raw - checkNotNull(initialSteps)
+                } else raw
+              publish(
+                filter,
+                key,
+                sample.timestampMs,
+                JsonPrimitive(roundPrototypeSensorValue(key, value).toLong()),
+              )
+            }
         }
       }
     } catch (error: CancellationException) {

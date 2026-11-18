@@ -13,7 +13,8 @@ class AndroidSensorSourceTest {
 
   @Test
   fun `rotation orientation radians map azimuth pitch and roll to contract degrees`() {
-    val degrees = orientationDegrees(floatArrayOf((-PI / 2).toFloat(), (PI / 4).toFloat(), PI.toFloat()))
+    val degrees =
+      orientationDegrees(floatArrayOf((-PI / 2).toFloat(), (PI / 4).toFloat(), PI.toFloat()))
     assertEquals(-90.0, degrees.getValue("headingDeg"), 0.0001)
     assertEquals(45.0, degrees.getValue("pitchDeg"), 0.0001)
     assertEquals(180.0, degrees.getValue("rollDeg"), 0.0001)

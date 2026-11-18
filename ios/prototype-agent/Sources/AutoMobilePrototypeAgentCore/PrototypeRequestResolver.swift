@@ -297,17 +297,19 @@ enum PrototypeRequestURL {
     }
 
     static func formComponent(_ text: String) -> String {
-        var out = ""
+        let hex = Array("0123456789ABCDEF".utf8)
+        var out: [UInt8] = []
+        out.reserveCapacity(text.utf8.count)
         for byte in text.utf8 {
-            let scalar = Unicode.Scalar(byte)
-            if byte < 0x80, CharacterSet.alphanumerics.contains(scalar) || "*-._".unicodeScalars.contains(scalar) {
-                out.unicodeScalars.append(scalar)
-            } else if byte == 0x20 {
-                out += "+"
-            } else {
-                out += String(format: "%%%02X", UInt32(byte))
+            switch byte {
+            case 65 ... 90, 97 ... 122, 48 ... 57, 42, 45, 46, 95: out.append(byte)
+            case 32: out.append(43)
+            default:
+                out.append(37)
+                out.append(hex[Int(byte >> 4)])
+                out.append(hex[Int(byte & 15)])
             }
         }
-        return out
+        return String(decoding: out, as: UTF8.self)
     }
 }

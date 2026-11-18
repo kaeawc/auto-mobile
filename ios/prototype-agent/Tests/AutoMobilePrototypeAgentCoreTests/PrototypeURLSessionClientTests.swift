@@ -658,35 +658,97 @@ extension PrototypeURLSessionClientTests {
             "https://public.example/", method: .post, body: Data("json body".utf8)
         )))
         let state = PrototypeURLSessionCall(maxBytes: 100, timeoutMs: 1000, request: source)
-        XCTAssertNotNil(state.newBodyStream())
+        let stream = try XCTUnwrap(state.newBodyStream())
+        stream.open()
+        defer { stream.close() }
+        var replay = Data()
+        var buffer = [UInt8](repeating: 0, count: 4)
+        while true {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            XCTAssertGreaterThanOrEqual(count, 0)
+            if count <= 0 { break }
+            replay.append(buffer, count: count)
+        }
+        XCTAssertEqual(replay, Data("json body".utf8))
     }
 
     func testUploadTotalDeadlineEndsAsTypedTimeoutWithInjectedScheduler() async throws {
-        let arrived = FakePinnedSignal()
+        let arrived = expectation(description: "upload reached stub")
         let deadline = FakePinnedDeadline()
-        StubProtocol.reset { _ in arrived.release(); return .hang }
+        StubProtocol.reset { _ in arrived.fulfill(); return .hang }
         let client = PrototypeURLSessionClient(
             protocolClasses: [StubProtocol.self], resolver: FakeHostResolver(),
             metrics: FakeConnectionMetrics.allowed, deadlines: deadline
         )
         let request = uploadCall()
         let task = Task { try await client.perform(request) }
-        await arrived.wait()
+        guard await XCTWaiter.fulfillment(of: [arrived], timeout: 1) == .completed else {
+            XCTFail("Upload did not reach the stub")
+            task.cancel()
+            return
+        }
         deadline.fire()
         let failed = await failure { try await task.value }
         XCTAssertEqual(failed?.error.code, .timeout)
         XCTAssertEqual(deadline.scheduleCount, 1)
+        XCTAssertEqual(deadline.scheduledDelays, [request.timeoutMs])
+        XCTAssertEqual(deadline.cancelCount, 1)
     }
 
     func testCancellingUploadEndsAsTypedCancelledWithoutSleeping() async {
-        let arrived = FakePinnedSignal()
-        StubProtocol.reset { _ in arrived.release(); return .hang }
-        let client = client()
+        let arrived = expectation(description: "upload reached stub")
+        StubProtocol.reset { _ in arrived.fulfill(); return .hang }
+        let deadline = FakePinnedDeadline()
+        let client = PrototypeURLSessionClient(
+            protocolClasses: [StubProtocol.self], resolver: FakeHostResolver(),
+            metrics: FakeConnectionMetrics.allowed, deadlines: deadline
+        )
         let request = uploadCall()
         let task = Task { try await client.perform(request) }
-        await arrived.wait()
+        guard await XCTWaiter.fulfillment(of: [arrived], timeout: 1) == .completed else {
+            XCTFail("Upload did not reach the stub")
+            task.cancel()
+            return
+        }
         task.cancel()
         let failed = await failure { try await task.value }
         XCTAssertEqual(failed?.error.code, .cancelled)
+        XCTAssertEqual(deadline.scheduledDelays, [request.timeoutMs])
+        XCTAssertEqual(deadline.cancelCount, 1)
+    }
+}
+
+extension PrototypeURLSessionClientTests {
+    func testUploadATSFailureRequiresHTTPSOnDevice() async {
+        StubProtocol.reset { _ in .fail(code: PrototypeURLErrorMapping.appTransportSecurityCode) }
+        let failed = await failure { try await client().perform(uploadCall()) }
+        XCTAssertEqual(failed?.error.code, .network)
+        XCTAssertTrue(failed?.error.message.contains("HTTPS") == true)
+        XCTAssertTrue(failed?.error.message.contains("via \"device\"") == true)
+        XCTAssertFalse(failed?.error.message.contains("host") == true)
+    }
+
+    func testDeadlineHandleIsCancelledIfTheCallFinishesDuringSchedulerInstallation() async throws {
+        let request = uploadCall()
+        let source = try XCTUnwrap(PrototypeURLSessionClient.urlRequest(for: request))
+        let call = PrototypeURLSessionCall(
+            maxBytes: 100, timeoutMs: request.timeoutMs, request: source, uploadBody: request.uploadBody?.data
+        )
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let task = session.dataTask(with: source)
+        let deadline = FakePinnedDeadline()
+        deadline.onSchedule = { call.finish(error: URLError(.cancelled), measuredMs: 0) }
+        let failed = await failure {
+            try await withCheckedThrowingContinuation { continuation in
+                call.install(continuation)
+                call.armDeadline(cancelling: PrototypeURLSessionTaskHandle(task), scheduler: deadline)
+            }
+        }
+        XCTAssertEqual(failed?.error.code, .cancelled)
+        XCTAssertEqual(deadline.scheduledDelays, [request.timeoutMs])
+        XCTAssertEqual(deadline.cancelCount, 1)
+        deadline.fire()
+        XCTAssertFalse(call.canProceed)
     }
 }

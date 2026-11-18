@@ -18,7 +18,7 @@ struct PrototypeUploadProgress {
     mutating func advance(key: String, requestId: String, value: Int, nowMs: Int, completed: Bool = false) -> Int? {
         guard var entry = entries[key], entry.requestId == requestId else { return nil }
         let value = min(100, max(0, value))
-        guard value > entry.value, completed || nowMs - entry.lastWriteMs >= 100 else { return nil }
+        guard completed || (value > entry.value && nowMs - entry.lastWriteMs >= 100) else { return nil }
         entry.value = value
         entry.lastWriteMs = nowMs
         entries[key] = entry

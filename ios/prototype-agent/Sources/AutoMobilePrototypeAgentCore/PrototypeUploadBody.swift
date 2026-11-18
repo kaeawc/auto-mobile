@@ -121,9 +121,10 @@ enum PrototypeUploadResolver {
         }
     }
 
-    /// OkHttp's quoted form-data parameter escaping.
+    /// Preserve quoted-pairs while percent-escaping header delimiters.
     private static func quoted(_ value: String) -> String {
-        value.replacingOccurrences(of: "\n", with: "%0A").replacingOccurrences(of: "\r", with: "%0D")
+        value.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\n", with: "%0A").replacingOccurrences(of: "\r", with: "%0D")
             .replacingOccurrences(of: "\"", with: "%22")
     }
 

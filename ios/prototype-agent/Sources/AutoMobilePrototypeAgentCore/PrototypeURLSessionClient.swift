@@ -161,7 +161,8 @@ enum PrototypeURLErrorMapping {
         timedOut: Bool,
         tooLarge: Bool,
         cancelledByCaller: Bool,
-        maxBytes: Int
+        maxBytes: Int,
+        isUpload: Bool = false
     )
         -> PrototypeRequestError
     {
@@ -179,7 +180,13 @@ enum PrototypeURLErrorMapping {
         case URLError.Code.cannotConnectToHost.rawValue: return .init(.connectionRefused, "Connection refused: \(url)")
         case URLError.Code.badURL.rawValue, URLError.Code.unsupportedURL.rawValue:
             return .init(.invalidURL, "Not an absolute URL: \(url)")
-        case appTransportSecurityCode: return .init(.network, appTransportSecurityMessage)
+        case appTransportSecurityCode:
+            return .init(
+                .network,
+                isUpload
+                    ? "App Transport Security blocked this cleartext upload. Use an HTTPS URL and keep via \"device\"."
+                    : appTransportSecurityMessage
+            )
         default: return .init(.network, error.localizedDescription)
         }
     }
@@ -213,6 +220,7 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
     private var currentRequest: URLRequest
     private var redirectCount = 0
     private var uploadBody: Data?
+    private let isUpload: Bool
     private let uploadProgress: PrototypeUploadProgressCallback?
     private var tooLarge = false
     /// A non-2xx status ends the call at the headers: the outcome is `http_error`, so its body is
@@ -231,6 +239,7 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
         url = request.url?.absoluteString ?? ""
         currentRequest = request
         self.uploadBody = uploadBody
+        isUpload = uploadBody != nil
         self.uploadProgress = uploadProgress
     }
 
@@ -339,7 +348,12 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
             lock.withLock { timedOut = true }
             handle.cancel()
         }
-        lock.withLock { cancelDeadline = cancel }
+        let finished = lock.withLock {
+            guard continuation != nil else { return true }
+            cancelDeadline = cancel
+            return false
+        }
+        if finished { cancel() }
     }
 
     func cancelByCaller(_ handle: PrototypeURLSessionTaskHandle) {
@@ -400,7 +414,7 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
                 if tooLarge || policyError != nil || (error != nil && !skipped) {
                     let mapped = PrototypeURLErrorMapping.map(
                         error ?? URLError(.cancelled), url: url, timeoutMs: timeoutMs, timedOut: timedOut,
-                        tooLarge: tooLarge, cancelledByCaller: cancelledByCaller, maxBytes: maxBytes
+                        tooLarge: tooLarge, cancelledByCaller: cancelledByCaller, maxBytes: maxBytes, isUpload: isUpload
                     )
                     return (continuation, .failure(PrototypeHttpFailure(error: mapped, durationMs: durationMs)))
                 }

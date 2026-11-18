@@ -101,13 +101,14 @@ final class PrototypeConnectionMetricsTests: XCTestCase {
     func testDeadlineOutranksALatePolicyRejection() async throws {
         let (call, handle, session) = try Self.unstartedCall()
         defer { session.invalidateAndCancel() }
-        call.armDeadline(cancelling: handle)
-        // The deadline marks the call timed out before it cancels the task.
-        for _ in 0 ..< 1000 where handle.task.state == .suspended {
-            try await Task.sleep(nanoseconds: 1_000_000)
+        let code = await Self.codeAfterLateRejection(call) {
+            // The deadline needs an installed call; it marks the call timed out before it cancels the task.
+            call.armDeadline(cancelling: handle)
+            for _ in 0 ..< 1000 where handle.task.state == .suspended {
+                try await Task.sleep(nanoseconds: 1_000_000)
+            }
+            XCTAssertNotEqual(handle.task.state, .suspended)
         }
-        XCTAssertNotEqual(handle.task.state, .suspended)
-        let code = await Self.codeAfterLateRejection(call)
         XCTAssertEqual(code, .timeout)
     }
 
@@ -118,12 +119,18 @@ final class PrototypeConnectionMetricsTests: XCTestCase {
         return (call, PrototypeURLSessionTaskHandle(session.dataTask(with: url)), session)
     }
 
-    private static func codeAfterLateRejection(_ call: PrototypeURLSessionCall) async -> PrototypeRequestErrorCode? {
+    private static func codeAfterLateRejection(
+        _ call: PrototypeURLSessionCall,
+        afterInstall: (@Sendable () async throws -> Void)? = nil
+    ) async -> PrototypeRequestErrorCode? {
         do {
             let _: PrototypeHttpResponse = try await withCheckedThrowingContinuation { continuation in
                 call.install(continuation)
-                call.reject()
-                call.finish(error: URLError(.cancelled), measuredMs: 1)
+                Task {
+                    try? await afterInstall?()
+                    call.reject()
+                    call.finish(error: URLError(.cancelled), measuredMs: 1)
+                }
             }
             return nil
         } catch {

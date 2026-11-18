@@ -50,6 +50,30 @@ final class PrototypeUploadTransportTests: XCTestCase {
         XCTAssertTrue(text.contains("Content-Type: image/png\r\n"))
     }
 
+    func testMultipartQuotedPairParserPreservesLiteralBackslashesInFieldNames() throws {
+        let upload = try resolve(#"{"multipart":[{"name":"a\\b\\","value":{"value":"ok"}}]}"#)
+        let text = try XCTUnwrap(String(data: upload.data, encoding: .utf8))
+        let start = try XCTUnwrap(text.range(of: "name=\""))
+        // Decode MIME quoted-pairs, as a receiving multipart parser does.
+        var parsed = ""
+        var escaped = false
+        var closed = false
+        for character in text[start.upperBound...] {
+            if escaped { parsed.append(character); escaped = false }
+            else if character == "\\" { escaped = true }
+            else if character == "\"" { closed = true; break }
+            else { parsed.append(character) }
+        }
+        XCTAssertTrue(closed)
+        XCTAssertFalse(escaped)
+        XCTAssertEqual(parsed, "a\\b\\")
+    }
+
+    func testFormEncoderPreservesEveryByteEscapeAndUnescapedCharacter() {
+        XCTAssertEqual(PrototypeRequestURL.formComponent("AZaz09*-._ ~!+é"), "AZaz09*-._+%7E%21%2B%C3%A9")
+        XCTAssertEqual(PrototypeRequestURL.formComponent("\0\r\n"), "%00%0D%0A")
+    }
+
     func testFormEncodesUnicodeSpacesAndJSONValuesCanonically() throws {
         let upload = try resolve(
             #"{"form":{"a b":{"value":"a+b & café"},"array":{"value":[2,true]},"object":{"value":{"z":1,"a":false}},"number":{"value":1e-7}}}"#

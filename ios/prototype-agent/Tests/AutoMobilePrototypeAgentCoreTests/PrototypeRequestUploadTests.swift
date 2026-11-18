@@ -88,16 +88,13 @@ final class PrototypeRequestUploadTestsRuntime: XCTestCase {
         )
         XCTAssertNil(request.body)
         harness.clock.nowMilliseconds = 99
-        harness.client.sendProgress(0, sent: 40)
-        await harness.yield()
+        await harness.sendProgress(0, sent: 40)
         XCTAssertEqual(harness.session.state["progress"], .number(0))
         harness.clock.nowMilliseconds = 100
-        harness.client.sendProgress(0, sent: 40)
-        await harness.yield()
+        await harness.sendProgress(0, sent: 40)
         XCTAssertEqual(harness.session.state["progress"], .number(40))
         harness.clock.nowMilliseconds = 200
-        harness.client.sendProgress(0, sent: 20)
-        await harness.yield()
+        await harness.sendProgress(0, sent: 20)
         XCTAssertEqual(harness.session.state["progress"], .number(40))
         harness.client.respond(0, body: "ok")
         await harness.driver.settled()
@@ -152,7 +149,7 @@ final class PrototypeRequestUploadTestsRuntime: XCTestCase {
     func testDriverAlsoRefusesAlreadyResolvedHostUploadsOnEveryRoute() async {
         for route in 0 ..< 3 {
             let clock = ManualRequestClock()
-            let client = FakeHttpClient()
+            let client = RecordingUploadClient()
             var frames = 0
             var responses: [PrototypeRequestResponse] = []
             let host: PrototypeRequestDriver.HostRoute = route == 0 ? .daemon { _ in frames += 1; return true }
@@ -198,15 +195,19 @@ final class PrototypeRequestUploadTestsRuntime: XCTestCase {
         let first = try XCTUnwrap(requests.firstIndex { $0.url == "https://public.example/first" })
         let second = try XCTUnwrap(requests.firstIndex { $0.url == "https://public.example/second" })
         harness.clock.nowMilliseconds = 100
-        harness.client.sendProgress(second, sent: 25)
-        await harness.yield()
+        await harness.sendProgress(second, sent: 25)
         XCTAssertEqual(harness.session.state["progress"], .number(25))
         harness.clock.nowMilliseconds = 200
-        harness.client.sendProgress(first, sent: 90)
-        await harness.yield()
+        await harness.sendProgress(first, sent: 90)
         XCTAssertEqual(harness.session.state["progress"], .number(25))
+        let completed = expectation(description: "first request completion event")
+        let complete = harness.driver.onComplete
+        harness.driver.onComplete = { id, response in
+            complete?(id, response)
+            if harness.requestEvents.last?["url"] == .string(requests[first].url) { completed.fulfill() }
+        }
         harness.client.respond(first, body: "first")
-        await harness.yield()
+        await fulfillment(of: [completed], timeout: 1)
         XCTAssertEqual(harness.session.state["progress"], .number(25))
         harness.client.respond(second, body: "second")
         await harness.driver.settled()
@@ -222,8 +223,7 @@ final class PrototypeRequestUploadTestsRuntime: XCTestCase {
         await harness.waitForDeviceCalls(1)
         for (time, sent, expected) in [(100, 80, 80), (200, 0, 80), (300, 40, 80), (400, 90, 90)] {
             harness.clock.nowMilliseconds = time
-            harness.client.sendProgress(0, sent: Int64(sent))
-            await harness.yield()
+            await harness.sendProgress(0, sent: Int64(sent))
             XCTAssertEqual(harness.session.state["progress"], .number(Double(expected)))
         }
         harness.client.respond(0, body: "ok")
@@ -239,9 +239,109 @@ final class PrototypeRequestUploadTestsRuntime: XCTestCase {
         harness.dismiss()
         let state = harness.session.state
         harness.clock.nowMilliseconds = 1000
-        harness.client.sendProgress(0, sent: 90)
+        await harness.sendProgress(0, sent: 90)
         await harness.driver.settled()
-        await harness.yield()
         XCTAssertEqual(harness.session.state, state)
+    }
+}
+
+private final class RecordingUploadClient: PrototypeHttpClient, @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls: [PrototypeHttpRequest] = []
+    var requests: [PrototypeHttpRequest] { lock.withLock { calls } }
+    func perform(_ request: PrototypeHttpRequest) async throws -> PrototypeHttpResponse {
+        lock.withLock { calls.append(request) }
+        return .init(status: 200, headers: [:], body: Data(), durationMs: 0)
+    }
+
+    func perform(
+        _ request: PrototypeHttpRequest, delivery _: PrototypeDeliveryCheck,
+        uploadProgress _: PrototypeUploadProgressCallback?
+    )
+        async throws -> PrototypeHttpResponse { try await perform(request) }
+}
+
+extension RequestHarness {
+    func sendProgress(_ index: Int, sent: Int64, expected: Int64 = 100) async {
+        let processed = XCTestExpectation(description: "progress callback processed")
+        driver.onUploadProgressProcessed = { _ in processed.fulfill() }
+        client.sendProgress(index, sent: sent, expected: expected)
+        let result = await XCTWaiter.fulfillment(of: [processed], timeout: 1)
+        XCTAssertEqual(result, .completed)
+        driver.onUploadProgressProcessed = nil
+    }
+}
+
+extension PrototypeRequestUploadTests {
+    func testDirectUploadProgressControlsMustAcceptTheWholePercentageRange() throws {
+        for control in [
+            #"{"type":"progress","stateKey":"progress"}"#,
+            #"{"type":"progress","stateKey":"progress","max":99}"#,
+            #"{"type":"slider","stateKey":"progress","min":1,"max":100}"#,
+        ] {
+            XCTAssertThrowsError(try validateProgressControl(control)) { error in
+                XCTAssertTrue(String(describing: error).contains("set max: 100"), "\(error)")
+            }
+        }
+        for max in [100, 200] {
+            XCTAssertNoThrow(try validateProgressControl(
+                "{\"type\":\"progress\",\"stateKey\":\"progress\",\"max\":\(max)}"
+            ))
+        }
+    }
+
+    private func validateProgressControl(_ control: String) throws {
+        let json = """
+        {"id":"p","window":{"placement":{"type":"fullscreen"}},"state":{"progress":1},
+         "root":{"type":"column","children":[\(control),{"type":"button","label":"Upload","onTap":[
+         {"type":"request","method":"POST","via":"device","url":"https://public.example/",
+          "body":{"form":{"q":{"value":"ok"}}},"progressKey":"progress"}]}]}}
+        """
+        try PrototypeSpecStrictValidator.validate(data: Data(json.utf8))
+    }
+}
+
+extension PrototypeRequestUploadTestsRuntime {
+    func testStoppingFromResetCancelsAllRegisteredUploadsBeforeTheClientReceivesThem() async throws {
+        let harness = RequestHarness()
+        let client = RecordingUploadClient()
+        harness.driver.updateClients(device: client, hostRoute: .deviceClient)
+        try harness.show(
+            "[\(action(body: form, into: "/data/first")),\(action(body: form, into: "/data/second"))]",
+            state: #"{"progress":88}"#
+        )
+        let ended = expectation(description: "both registered client tasks ended")
+        ended.expectedFulfillmentCount = 2
+        harness.driver.onClientTaskFinished = { _ in ended.fulfill() }
+        var resets = 0
+        let progress = harness.driver.onUploadProgress
+        harness.driver.onUploadProgress = { id, key, value in
+            progress?(id, key, value)
+            resets += 1
+            // PrototypeEmbeddedController.stop() dismisses the session synchronously.
+            harness.dismiss()
+        }
+        harness.tap()
+        await harness.driver.settled()
+        await fulfillment(of: [ended], timeout: 1)
+        XCTAssertEqual(resets, 1)
+        XCTAssertEqual(harness.driver.runningCount, 0)
+        XCTAssertTrue(client.requests.isEmpty)
+    }
+
+    func testCompletionRestoresTerminalProgressAfterSameIDShowResetsVisibleState() async throws {
+        let harness = RequestHarness()
+        let actions = "[\(action(body: form))]"
+        try harness.show(actions, state: #"{"progress":0}"#)
+        harness.tap()
+        await harness.waitForDeviceCalls(1)
+        harness.clock.nowMilliseconds = 100
+        await harness.sendProgress(0, sent: 100)
+        XCTAssertEqual(harness.session.state["progress"], .number(100))
+        try harness.show(actions, state: #"{"progress":0}"#)
+        XCTAssertEqual(harness.session.state["progress"], .number(0))
+        harness.client.respond(0, body: "ok")
+        await harness.driver.settled()
+        XCTAssertEqual(harness.session.state["progress"], .number(100))
     }
 }

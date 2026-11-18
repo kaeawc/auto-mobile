@@ -44,7 +44,14 @@ final class FakeHttpClient: PrototypeHttpClient, @unchecked Sendable {
     private var progress: [Int: PrototypeUploadProgressCallback] = [:]
     private var cancelledCalls: Set<Int> = []
     private var readyCalls: Set<Int> = []
-    private var requestWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    private struct Waiter {
+        let id: UUID
+        let count: Int
+        let continuation: CheckedContinuation<Int, Never>
+        let deadline: DispatchWorkItem
+    }
+
+    private var requestWaiters: [Waiter] = []
 
     var requests: [PrototypeHttpRequest] { lock.withLock { calls } }
     var cancelled: Set<Int> { lock.withLock { cancelledCalls } }
@@ -67,15 +74,16 @@ final class FakeHttpClient: PrototypeHttpClient, @unchecked Sendable {
         }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                let waiting = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+                let waiting = lock.withLock { () -> [Waiter] in
                     continuations[index] = continuation
                     readyCalls.insert(index)
-                    let waiting = requestWaiters.filter { $0.0 <= readyCalls.count }.map(\.1)
-                    requestWaiters.removeAll { $0.0 <= readyCalls.count }
+                    let waiting = requestWaiters.filter { $0.count <= readyCalls.count }
+                    requestWaiters.removeAll { $0.count <= readyCalls.count }
                     return waiting
                 }
                 for waiter in waiting {
-                    waiter.resume()
+                    waiter.deadline.cancel()
+                    waiter.continuation.resume(returning: lock.withLock { readyCalls.count })
                 }
                 if Task.isCancelled { cancel(index) }
             }
@@ -84,14 +92,23 @@ final class FakeHttpClient: PrototypeHttpClient, @unchecked Sendable {
         }
     }
 
-    func waitForRequests(_ count: Int) async {
-        await withCheckedContinuation { waiter in
-            let ready = lock.withLock {
-                if readyCalls.count >= count { return true }
-                requestWaiters.append((count, waiter))
-                return false
+    func waitForRequests(_ count: Int) async -> Int {
+        await withCheckedContinuation { continuation in
+            let id = UUID()
+            let deadline = DispatchWorkItem { [self] in
+                let expired = lock.withLock { () -> (Waiter, Int)? in
+                    guard let index = requestWaiters.firstIndex(where: { $0.id == id }) else { return nil }
+                    return (requestWaiters.remove(at: index), readyCalls.count)
+                }
+                if let (waiter, observed) = expired { waiter.continuation.resume(returning: observed) }
             }
-            if ready { waiter.resume() }
+            let observed = lock.withLock { () -> Int? in
+                if readyCalls.count >= count { return readyCalls.count }
+                requestWaiters.append(Waiter(id: id, count: count, continuation: continuation, deadline: deadline))
+                return nil
+            }
+            if let observed { continuation.resume(returning: observed) }
+            else { DispatchQueue.global().asyncAfter(deadline: .now() + 1, execute: deadline) }
         }
     }
 
@@ -207,12 +224,26 @@ final class RequestHarness {
 
     /// Lets the tasks the driver started reach their first suspension.
     func waitForDeviceCalls(_ count: Int) async {
-        await client.waitForRequests(count)
+        let observed = await client.waitForRequests(count)
+        XCTAssertGreaterThanOrEqual(observed, count, "Expected \(count) ready client calls; observed \(observed)")
     }
 }
 
 @MainActor
 final class PrototypeRequestDriverTests: XCTestCase {
+    override class func setUp() {
+        super.setUp()
+        // Compile shared contract patterns outside individual test timing, including isolated runs.
+        let data = Data(
+            #"{"id":"warm","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"warm"}}"#
+                .utf8
+        )
+        do {
+            try PrototypeSpecStrictValidator.validate(data: data)
+            _ = try JSONDecoder().decode(PrototypeSpec.self, from: data)
+        } catch { XCTFail("Fixture warmup failed: \(error)") }
+    }
+
     func testDeliveryBoundaryChecksSuccessAndFailureAndKeepsCurrentResponse() async throws {
         for revoked in [false, true] {
             for fails in [false, true] {

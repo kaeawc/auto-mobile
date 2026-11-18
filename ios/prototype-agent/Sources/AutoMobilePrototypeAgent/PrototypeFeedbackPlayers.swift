@@ -60,15 +60,16 @@
     }
 
     extension PrototypePlatformRegistry {
-        /// The haptics, sound, connectivity, links and settings modules the injected agent and ProtoViewer
-        /// register; none needs a permission, an entitlement or an Info.plist key.
+        /// Production modules for the injected agent and ProtoViewer. Location checks the host's
+        /// usage description before accessing its source and prompts only for an explicit request.
         static func feedbackModules() -> PrototypePlatformRegistry {
             feedbackModules(
                 haptics: UIKitHapticsPlayer(),
                 sound: SystemSoundPlayer(),
                 connectivity: NWPathConnectivitySource(),
                 links: UIKitLinkOpener(),
-                settings: UIKitSettingsURLOpener()
+                settings: UIKitSettingsURLOpener(),
+                location: CLLocationManagerPrototypeLocationSource()
             )
         }
     }

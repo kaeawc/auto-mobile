@@ -33,7 +33,8 @@
                 clipboard: UIPasteboardPrototypeClipboard(),
                 connectivity: NWPathConnectivitySource(),
                 links: UIKitLinkOpener(),
-                settings: UIKitSettingsURLOpener()
+                settings: UIKitSettingsURLOpener(),
+                location: CLLocationManagerPrototypeLocationSource()
             )
     }
 #endif

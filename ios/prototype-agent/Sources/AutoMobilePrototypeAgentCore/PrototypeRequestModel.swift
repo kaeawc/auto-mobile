@@ -56,6 +56,13 @@ enum PrototypeRequestErrorCode: String, CaseIterable, Sendable {
     case tooManyInFlight = "too_many_in_flight"
     case httpError = "http_error"
     case invalidResponse = "invalid_response"
+    case notFound = "not_found"
+    case ambiguousMatch = "ambiguous_match"
+    case notArray = "not_array"
+    case invalidPath = "invalid_path"
+    case invalidValue = "invalid_value"
+    case limitExceeded = "limit_exceeded"
+    case lastGeneratedUnset = "lastGenerated_unset"
 }
 
 struct PrototypeRequestError: Error, Equatable, Sendable {
@@ -127,6 +134,9 @@ struct PrototypeInFlightRequest {
     let onSuccess: [PrototypeAction]
     let onError: [PrototypeAction]
     var append: PrototypeRequestAppend? = nil
+    var `where`: PrototypeDataWrite.Match? = nil
+    var member: String? = nil
+    var context: PrototypeActionContext? = nil
 }
 
 /// The session's request bookkeeping: ids, who is waiting, and the commands for the driver.

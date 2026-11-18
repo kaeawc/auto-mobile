@@ -137,6 +137,10 @@ struct PrototypeContractValidator {
             try PrototypeLazyList.validateLimits(root: root, data: fields["data"]?.objectFields)
         }
         try validator.walk(value, rule: spec, path: "", depth: 0)
+        try PrototypeRemoteImages.validate(
+            nodes: validator.locatedNodes,
+            state: value.objectFields?["state"]?.objectFields ?? [:]
+        )
         validator.dropIgnoredAccessories()
         try PrototypeKeyframes.validate(nodes: validator.locatedNodes, spec: value.objectFields ?? [:])
         return validator

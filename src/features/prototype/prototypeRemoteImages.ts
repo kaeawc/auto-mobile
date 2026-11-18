@@ -3,7 +3,7 @@ import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeRequestUrlError } from "./prototypeRequest";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { STATE_KEY, record, type Raw } from "./prototypeTemplate";
-import { dataPlaceholderSpans } from "./prototypeData";
+import { dataPlaceholderSpans, prototypeBindingSpans } from "./prototypeData";
 
 import { PROTOTYPE_REMOTE_IMAGE_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 export { PROTOTYPE_REMOTE_IMAGE_CAPABILITY };
@@ -22,6 +22,14 @@ const FIELDS = ["url", "placeholder", "error", "crossfade", "via"];
 export function prototypeRemoteImageFields(spec: unknown): string[] {
   const fields: string[] = [];
   walkPrototypeNodes(spec, (node, path) => {
+    const accessory = record(record(node.ios)?.bottomAccessory);
+    if (accessory) {
+      fields.push(
+        ...prototypeRemoteImageFields({ root: accessory }).map(
+          (field) => `${path}.ios.bottomAccessory${field.slice(4)}`,
+        ),
+      );
+    }
     if (node.type === "image") {
       fields.push(
         ...FIELDS.filter((field) => node[field] !== undefined).map((field) => `${path}.${field}`),
@@ -48,32 +56,44 @@ export function prototypeRemoteImageError(
       continue;
     }
     const url = node.url;
-    const missing = Array.from(dataPlaceholderSpans(url, "", (key) => STATE_KEY.test(key))).find(
-      ({ pointer }) => pointer !== "index" && !Object.hasOwn(declared, pointer),
-    );
+    const missing = undeclaredStateReference(url, declared);
     if (missing) {
       return {
         path: `${path}.url`,
         message: "Remote image URL references an undeclared state key",
       };
     }
-    if (node.via === "host" && url.includes("{")) {
-      return { path: `${path}.via`, message: "Host remote images require a static URL" };
-    }
-    // Whole-field bindings follow the existing string validators; loaders validate their resolved value.
-    if (url.startsWith("{")) {
-      continue;
-    }
-    const problem = prototypeRequestUrlError(url);
-    if (problem) {
-      return { path: `${path}.url`, message: problem };
-    }
-    const security = remoteImageTransportError(url);
-    if (security) {
-      return { path: `${path}.url`, message: security };
+    const failure = staticUrlFailure(url, node.via);
+    if (failure) {
+      return { path: `${path}.${failure.field}`, message: failure.message };
     }
   }
   return undefined;
+}
+
+function staticUrlFailure(
+  url: string,
+  via: unknown,
+): { field: "url" | "via"; message: string } | undefined {
+  if (via === "host" && url.includes("{")) {
+    return { field: "via", message: "Host remote images require a static URL" };
+  }
+  // Whole-field bindings follow the existing string validators; loaders validate their resolved value.
+  if (/^\{[^{}]+\}$/.test(url)) {
+    return undefined;
+  }
+  const message = prototypeRequestUrlError(url) ?? remoteImageTransportError(url);
+  return message ? { field: "url", message } : undefined;
+}
+
+function undeclaredStateReference(url: string, declared: Raw): boolean {
+  const consumed = prototypeBindingSpans(url);
+  return Array.from(dataPlaceholderSpans(url, "", (key) => STATE_KEY.test(key))).some(
+    ({ pointer, start }) =>
+      !consumed.some((span) => span.start <= start && start < span.end) &&
+      pointer !== "index" &&
+      !Object.hasOwn(declared, pointer),
+  );
 }
 
 /** Static transport policy; loaders apply it again after bindings and redirects. */
@@ -83,6 +103,7 @@ function remoteImageTransportError(url: string): string | undefined {
     /^http:/i.test(url) &&
     !/^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]+)?(?:[/?#]|$)/i.test(url);
   return !authority ||
+    authority.startsWith(":") ||
     /[@\\]/.test(authority) ||
     Array.from(url).some(
       (char) =>

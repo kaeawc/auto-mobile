@@ -1,3 +1,4 @@
+import contract from "../../../schemas/prototype-spec-contract.json";
 import { prototypeLoopSchema } from "./prototypeLoops";
 import { z } from "zod/v3";
 import { prototypeAnimateError } from "./prototypeMotionTokens";
@@ -31,7 +32,7 @@ export const prototypeMotionNodeShape = {
 export const prototypeImageShape = {
   type: z.enum(["image"]),
   asset: imageAssetSchema.optional(),
-  url: z.string().min(1).max(2048).optional(),
+  url: z.string().min(1).max(contract.limits.MAX_PROTOTYPE_REMOTE_IMAGE_URL_LENGTH).optional(),
   placeholder: z
     .union([
       z.object({ asset: z.string().min(1) }).strict(),

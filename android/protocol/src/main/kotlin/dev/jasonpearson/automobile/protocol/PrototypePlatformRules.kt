@@ -78,7 +78,6 @@ internal object PrototypePlatformRules {
       PrototypeMedia::videoPlayerError,
       PrototypeMap::error,
       PrototypeWebView::error,
-      PrototypeRemoteImages::error,
       PrototypeMediaCaptions::error,
       PrototypeMedia::castButtonError,
       PrototypeCameraPreview::error,

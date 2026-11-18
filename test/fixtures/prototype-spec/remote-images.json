@@ -572,11 +572,11 @@
       },
       "root": {
         "type": "image",
-        "asset": "a",
         "placeholder": {
           "asset": "x",
           "color": "#123456"
-        }
+        },
+        "url": "https://example.com/a"
       }
     }
   },
@@ -595,8 +595,8 @@
       },
       "root": {
         "type": "image",
-        "asset": "a",
-        "error": {}
+        "error": {},
+        "url": "https://example.com/a"
       }
     }
   },
@@ -763,6 +763,331 @@
           "asset": {
             "light": "a",
             "dark": "b"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "whole-state-binding",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "{cover}"
+      },
+      "state": {
+        "cover": "a"
+      }
+    }
+  },
+  {
+    "name": "binding-path-suffix",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "{cover}/thumb.png"
+      },
+      "state": {
+        "cover": "a"
+      }
+    }
+  },
+  {
+    "name": "binding-text-suffix",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "{cover} not-a-url"
+      },
+      "state": {
+        "cover": "a"
+      }
+    }
+  },
+  {
+    "name": "binding-scheme-suffix",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "{cover}http://example.com/a"
+      },
+      "state": {
+        "cover": "a"
+      }
+    }
+  },
+  {
+    "name": "binding-newline-suffix",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "{cover}\n"
+      },
+      "state": {
+        "cover": "a"
+      }
+    }
+  },
+  {
+    "name": "empty-templated-host",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://:/{cover}"
+      },
+      "state": {
+        "cover": "a"
+      }
+    }
+  },
+  {
+    "name": "empty-templated-host-with-port",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://:443/{cover}"
+      },
+      "state": {
+        "cover": "a"
+      }
+    }
+  },
+  {
+    "name": "data-consumes-platform",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.test/{data:/photos/{platform:/device/os}"
+      }
+    }
+  },
+  {
+    "name": "data-consumes-state",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.test/{data:/photos/{cover}"
+      }
+    }
+  },
+  {
+    "name": "platform-consumes-state",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.test/{platform:/device/{cover}"
+      },
+      "requires": {
+        "platform": ["device"]
+      }
+    }
+  },
+  {
+    "name": "standalone-state-after-data",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.test/{data:/photos/a}/{cover}"
+      }
+    }
+  },
+  {
+    "name": "standalone-platform-after-data",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.test/{data:/photos/a}/{platform:/device/os}"
+      }
+    }
+  },
+  {
+    "name": "declared-platform-after-data",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.test/{data:/photos/a}/{platform:/device/os}"
+      },
+      "requires": {
+        "platform": ["device"]
+      }
+    }
+  },
+  {
+    "name": "accessory-https",
+    "valid": true,
+    "spec": {
+      "id": "accessory",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "state": {
+        "cover": "a"
+      },
+      "root": {
+        "type": "text",
+        "text": "main",
+        "ios": {
+          "bottomAccessory": {
+            "type": "column",
+            "children": [
+              {
+                "type": "image",
+                "url": "https://example.com/a"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "accessory-insecure",
+    "valid": false,
+    "spec": {
+      "id": "accessory",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "state": {
+        "cover": "a"
+      },
+      "root": {
+        "type": "text",
+        "text": "main",
+        "ios": {
+          "bottomAccessory": {
+            "type": "column",
+            "children": [
+              {
+                "type": "image",
+                "url": "http://example.com/a"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "accessory-binding-suffix",
+    "valid": false,
+    "spec": {
+      "id": "accessory",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "state": {
+        "cover": "a"
+      },
+      "root": {
+        "type": "text",
+        "text": "main",
+        "ios": {
+          "bottomAccessory": {
+            "type": "column",
+            "children": [
+              {
+                "type": "image",
+                "url": "{cover}/thumb.png"
+              }
+            ]
           }
         }
       }

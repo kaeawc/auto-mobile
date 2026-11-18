@@ -213,7 +213,14 @@ internal object PrototypeDataText {
     text: String,
     namespace: String,
     valid: (String) -> Boolean = PrototypeDataPointer::isValid,
-  ): List<String> = placeholders(text, namespace, valid).map { it.pointer }
+  ): List<String> {
+    val consumed =
+      if (namespace.isEmpty()) placeholders(text) + placeholders(text, "platform")
+      else if (namespace == "platform") placeholders(text) else emptyList()
+    return placeholders(text, namespace, valid)
+      .filter { span -> consumed.none { it.start <= span.start && span.start < it.end } }
+      .map { it.pointer }
+  }
 
   private fun placeholders(
     text: String,

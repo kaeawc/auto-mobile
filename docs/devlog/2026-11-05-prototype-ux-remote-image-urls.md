@@ -31,5 +31,5 @@ Owner decision of 2026-10-31 (#14180):
 
 ## Consequences
 
-The remote-image contract, validators and capability gate landed in #14181. URL loading, host
+PR #18600 implements the remote-image contract, validators and capability gate; #14181 tracks the feature. URL loading, host
 fetch-and-upload, caches, egress enforcement and image-state reporting remain runtime work.

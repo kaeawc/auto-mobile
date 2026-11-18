@@ -857,7 +857,6 @@ function behaviourErrors(
     prototypeRequestsError(context.actions, data.data) ??
     hostVocabularyError(value, context) ??
     prototypeTimersError([...context.actions, ...componentTimers]) ??
-    prototypeRemoteImageError(context.nodes, data.state) ??
     prototypeLoadingStatesError(context.nodes) ??
     prototypeMotionErrors(context.nodes) ??
     prototypeKeyframesError(context.nodes, data) ??
@@ -870,7 +869,9 @@ function behaviourErrors(
 
 function walkedError(value: unknown, context: Context): PrototypeValidationError | undefined {
   return (
-    walk(value, definitions.spec, "", { context, depth: 0 }) ?? excludeAccessoryReferences(context)
+    walk(value, definitions.spec, "", { context, depth: 0 }) ??
+    prototypeRemoteImageError(context.nodes, object(value)?.state) ??
+    excludeAccessoryReferences(context)
   );
 }
 

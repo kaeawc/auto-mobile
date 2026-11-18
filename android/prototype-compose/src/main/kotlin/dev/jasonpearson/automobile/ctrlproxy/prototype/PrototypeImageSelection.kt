@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypeShader
 import dev.jasonpearson.automobile.protocol.PrototypeTabBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeTextNode
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
@@ -75,7 +76,14 @@ fun prototypeAssetReferences(root: PrototypeNode): List<String> {
       is PrototypeImageNode -> {
         ids += node.asset?.values.orEmpty()
         for (fallback in listOf(node.placeholder, node.error)) {
-          (fallback?.get("asset") as? JsonPrimitive)?.content?.let(ids::add)
+          when (val asset = fallback?.get("asset")) {
+            is JsonPrimitive -> if (asset.isString) ids += asset.content
+            is JsonObject ->
+              for (mode in listOf("light", "dark")) {
+                (asset[mode] as? JsonPrimitive)?.takeIf { it.isString }?.content?.let(ids::add)
+              }
+            else -> Unit
+          }
         }
       }
       is PrototypeTabBarNode -> node.items.flatMapTo(ids) { it.image?.values.orEmpty() }

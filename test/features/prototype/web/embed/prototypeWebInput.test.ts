@@ -94,5 +94,14 @@ describe("advertised capabilities (#16453)", () => {
 
   test("the generator refuses an empty set", () => {
     expect(() => renderPrototypeWebCapabilities([])).toThrow("No prototype capabilities");
+    expect(() => renderPrototypeWebCapabilities(["prototype_remote_image_v1"])).toThrow(
+      "No prototype capabilities",
+    );
+    const mixed = renderPrototypeWebCapabilities([
+      "prototype_remote_image_v1",
+      "prototype_stack_v1",
+    ]);
+    expect(mixed).toContain('"prototype_stack_v1"');
+    expect(mixed).not.toContain('"prototype_remote_image_v1"');
   });
 });

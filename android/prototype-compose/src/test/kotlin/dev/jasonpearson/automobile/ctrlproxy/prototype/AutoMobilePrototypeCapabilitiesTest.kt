@@ -160,11 +160,19 @@ class AutoMobilePrototypeCapabilitiesTest {
     for (sdk in listOf(32, 33, 36)) {
       val capabilities = AutoMobilePrototype.capabilitiesForSdk(sdk)
       assertTrue("prototype_remote_image_v1" !in capabilities)
+      val refused = PrototypeSpecValidator.validate(spec, supportedCapabilities = capabilities)
+      assertTrue(refused is PrototypeSpecValidation.Failure)
+      assertTrue(
+        (refused as PrototypeSpecValidation.Failure)
+          .error
+          .message
+          .contains("prototype_remote_image_v1"),
+      )
       assertTrue(
         PrototypeSpecValidator.validate(
           spec,
-          supportedCapabilities = capabilities,
-        ) is PrototypeSpecValidation.Failure,
+          supportedCapabilities = capabilities + "prototype_remote_image_v1",
+        ) is PrototypeSpecValidation.Success,
       )
     }
   }

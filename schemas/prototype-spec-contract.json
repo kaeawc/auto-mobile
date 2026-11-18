@@ -5592,6 +5592,7 @@
             "placeholder": {
               "rule": {
                 "kind": "choice",
+                "preferMatchingFields": true,
                 "options": [
                   {
                     "kind": "object",
@@ -5623,6 +5624,7 @@
             "error": {
               "rule": {
                 "kind": "choice",
+                "preferMatchingFields": true,
                 "options": [
                   {
                     "kind": "object",

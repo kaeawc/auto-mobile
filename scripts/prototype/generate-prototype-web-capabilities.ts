@@ -11,7 +11,10 @@ export const webCapabilitiesOutputPath =
 const REGENERATE = "bun scripts/prototype/generate-prototype-web-capabilities.ts";
 
 export function renderPrototypeWebCapabilities(capabilities: readonly string[]): string {
-  if (capabilities.length === 0) {
+  const advertised = capabilities.filter(
+    (capability) => capability !== "prototype_remote_image_v1",
+  );
+  if (advertised.length === 0) {
     throw new Error("No prototype capabilities to advertise");
   }
   return [
@@ -20,10 +23,7 @@ export function renderPrototypeWebCapabilities(capabilities: readonly string[]):
     "",
     "/** Capabilities advertised by this release of the web library. */",
     "export const PROTOTYPE_WEB_CAPABILITIES: readonly string[] = [",
-    ...capabilities
-      .filter((capability) => capability !== "prototype_remote_image_v1")
-      .sort()
-      .map((capability) => `  ${JSON.stringify(capability)},`),
+    ...advertised.sort().map((capability) => `  ${JSON.stringify(capability)},`),
     "];",
     "",
   ].join("\n");

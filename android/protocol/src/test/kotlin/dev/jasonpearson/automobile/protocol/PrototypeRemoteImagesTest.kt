@@ -58,6 +58,64 @@ class PrototypeRemoteImagesTest {
     )
   }
 
+  @Test
+  fun `component roots contribute primary and fallback asset references`() {
+    val spec =
+      """{"id":"components","window":{"placement":{"type":"fullscreen"}},"root":{"type":"image","asset":"root"},"components":{"photo":{"root":{"type":"image","asset":{"light":"photo-light","dark":"photo-dark"},"placeholder":{"asset":"loading"},"error":{"asset":"failed"}}}}}"""
+    assertEquals(
+      setOf("root", "photo-light", "photo-dark", "loading", "failed"),
+      PrototypeBundleSpec.references(spec.toByteArray()).images,
+    )
+  }
+
+  @Test
+  fun `screen named value requires remote capability without treating literals as nodes`() {
+    val spec =
+      Json.parseToJsonElement(
+          """{"root":{"type":"stack","id":"nav","start":"value","screens":{"value":{"type":"image","url":"https://example.com/a"}}}}""",
+        )
+        .jsonObject
+    assertEquals(
+      true,
+      PrototypeStrictPolicy.required(spec).contains(PrototypeRemoteImages.CAPABILITY),
+    )
+    val literal =
+      Json.parseToJsonElement(
+          """{"root":{"type":"text","text":"safe","onTap":[{"type":"emit","name":"safe","payload":{"value":{"type":"image","url":"https://example.com/a"}}}]}}""",
+        )
+        .jsonObject
+    assertEquals(
+      false,
+      PrototypeStrictPolicy.required(literal).contains(PrototypeRemoteImages.CAPABILITY),
+    )
+  }
+
+  @Test
+  fun `state and platform scans skip consumed binding spans`() {
+    for (text in listOf("{data:/photos/{cover}", "{platform:/device/{cover}")) {
+      assertEquals(
+        emptyList<String>(),
+        PrototypeDataText.pointers(text, "", PrototypeRepeatTemplate::isFieldName),
+      )
+    }
+    assertEquals(
+      emptyList<String>(),
+      PrototypeDataText.pointers("{data:/photos/{platform:/device/os}", "platform"),
+    )
+    assertEquals(
+      listOf("/device/os"),
+      PrototypeDataText.pointers("{data:/photos/a}{platform:/device/os}", "platform"),
+    )
+    assertEquals(
+      listOf("cover"),
+      PrototypeDataText.pointers(
+        "{data:/photos/a}{cover}",
+        "",
+        PrototypeRepeatTemplate::isFieldName,
+      ),
+    )
+  }
+
   @TestFactory
   fun capabilityFields(): List<DynamicTest> {
     val fields =
@@ -95,10 +153,22 @@ class PrototypeRemoteImagesTest {
           true,
           PrototypeSpecValidator.validate(spec.toString()) is PrototypeSpecValidation.Success,
         )
+        val refused =
+          PrototypeSpecValidator.validate(spec.toString(), supportedCapabilities = emptySet())
+        assertEquals(true, refused is PrototypeSpecValidation.Failure)
         assertEquals(
           true,
-          PrototypeSpecValidator.validate(spec.toString(), supportedCapabilities = emptySet())
-            is PrototypeSpecValidation.Failure,
+          (refused as PrototypeSpecValidation.Failure)
+            .error
+            .message
+            .contains(PrototypeRemoteImages.CAPABILITY),
+        )
+        assertEquals(
+          true,
+          PrototypeSpecValidator.validate(
+            spec.toString(),
+            supportedCapabilities = setOf(PrototypeRemoteImages.CAPABILITY),
+          ) is PrototypeSpecValidation.Success,
         )
       }
     }
@@ -111,7 +181,29 @@ class PrototypeRemoteImagesTest {
     return cases.map { raw ->
       val fixture = raw.jsonObject
       DynamicTest.dynamicTest(fixture.getValue("name").jsonPrimitive.content) {
-        val result = PrototypeSpecValidator.validate(fixture.getValue("spec").toString())
+        val spec = fixture.getValue("spec")
+        val result = PrototypeSpecValidator.validate(spec.toString())
+        if (fixture.getValue("name").jsonPrimitive.content == "accessory-https") {
+          val supported = setOf("prototype_platform_namespace_v1", PrototypeRemoteImages.CAPABILITY)
+          assertEquals(
+            true,
+            PrototypeSpecValidator.validate(spec.toString(), supportedCapabilities = supported)
+              is PrototypeSpecValidation.Success,
+          )
+          val refused =
+            PrototypeSpecValidator.validate(
+              spec.toString(),
+              supportedCapabilities = supported - PrototypeRemoteImages.CAPABILITY,
+            )
+          assertEquals(true, refused is PrototypeSpecValidation.Failure)
+          assertEquals(
+            true,
+            (refused as PrototypeSpecValidation.Failure)
+              .error
+              .message
+              .contains(PrototypeRemoteImages.CAPABILITY),
+          )
+        }
         assertEquals(
           fixture.getValue("valid").jsonPrimitive.boolean,
           result is PrototypeSpecValidation.Success,

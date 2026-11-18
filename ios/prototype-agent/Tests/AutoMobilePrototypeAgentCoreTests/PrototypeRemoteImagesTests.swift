@@ -28,6 +28,22 @@ final class PrototypeRemoteImagesTests: XCTestCase {
             if fixture.valid {
                 XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data), fixture.name)
                 let decoded = try JSONDecoder().decode(PrototypeSpec.self, from: data)
+                if fixture.name == "accessory-https" {
+                    let capabilities: Set<String> = [
+                        "prototype_platform_namespace_v1",
+                        PrototypeRemoteImages.capability,
+                    ]
+                    XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(
+                        data: data,
+                        supportedCapabilities: capabilities
+                    ))
+                    XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(
+                        data: data,
+                        supportedCapabilities: capabilities.subtracting([PrototypeRemoteImages.capability])
+                    )) { error in
+                        XCTAssertTrue(String(describing: error).contains(PrototypeRemoteImages.capability))
+                    }
+                }
                 if fixture.name == "static" {
                     var assets: Set<String> = []
                     decoded.root.collectAssets(into: &assets)
@@ -41,6 +57,33 @@ final class PrototypeRemoteImagesTests: XCTestCase {
                 XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: data), fixture.name)
             }
         }
+    }
+
+    func testScreenNamedValueRequiresRemoteCapability() throws {
+        for names in [["value"], ["value", "other"], ["screens"]] {
+            let image: JSONValue = .object(["type": .string("image"), "url": .string("https://example.com/a")])
+            let spec: [String: JSONValue] = ["root": .object([
+                "type": .string("stack"), "id": .string("nav"), "start": .string(names[0]),
+                "screens": .object(Dictionary(uniqueKeysWithValues: names.map { ($0, image) })),
+            ])]
+            XCTAssertTrue(PrototypeStrictCapabilities.required(spec).contains(PrototypeRemoteImages.capability))
+        }
+        let literal: [String: JSONValue] = ["root": .object([
+            "type": .string("text"), "text": .string("safe"), "onTap": .array([.object([
+                "type": .string("emit"), "name": .string("safe"),
+                "payload": .object(["value": .object(["type": .string("image"),
+                                                      "url": .string("https://example.com/a")])]),
+            ])]),
+        ])]
+        XCTAssertFalse(PrototypeStrictCapabilities.required(literal).contains(PrototypeRemoteImages.capability))
+    }
+
+    func testBindingSpanOrder() {
+        XCTAssertEqual(PrototypeDataText.stateKeys("{data:/photos/{cover}"), [])
+        XCTAssertEqual(PrototypeDataText.stateKeys("{platform:/device/{cover}"), [])
+        XCTAssertEqual(PrototypeDataText.stateKeys("{data:/photos/a}{cover}"), ["cover"])
+        XCTAssertEqual(PrototypePlatformValidator.placeholders("{data:/photos/{platform:/device/os}"), [])
+        XCTAssertEqual(PrototypePlatformValidator.placeholders("{data:/photos/a}{platform:/device/os}"), ["/device/os"])
     }
 
     func testRemoteImagesAreNotAdvertised() {

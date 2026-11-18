@@ -1529,9 +1529,17 @@ test.each(["android", "ios"] as const)(
     );
     const device: BootedDevice = { platform, deviceId: `remote-${platform}`, name: "Fake" };
     const { minimalSpec, ops } = fixtures.prototype_remote_image_v1;
+    const showCount = () =>
+      platform === "android"
+        ? proxy.getPrototypeHistory().filter(({ method }) => method === "show").length
+        : agent.requests.filter(({ type }) => type === "show_prototype").length;
+    const before = showCount();
     const refused = await show(device, minimalSpec);
+    expect(showCount()).toBe(before);
     expect(refused.success).toBe(false);
     expect(refused.error).toContain("does not advertise prototype_remote_image_v1");
+    expect(refused.error).toContain("bundled asset");
+    expect(refused.error).not.toContain("updated agent");
     expect((await show(device, base)).success).toBe(true);
     expect(await patch(device, ops)).toEqual({ success: false, error: refused.error });
     expect(requests(device)).toEqual([]);

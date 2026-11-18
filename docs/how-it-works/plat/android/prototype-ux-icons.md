@@ -12,13 +12,14 @@ variable font) are unavailable. Custom text fonts ship as host-uploaded assets (
 
 Unknown names reject the spec at the offending field with close substring suggestions and an allowed-icon lookup URI. Image nodes accept exactly one of `asset` or `url`; nav images remain asset-based. The asset form is `{type: "image", asset: "opaque-id"}` and nav
 `image: "opaque-id"`. Existence is not validated at spec level; a missing asset renders a placeholder and is
-reported in `missingAssets`. Bytes, MIME types, URLs, cache paths and screenshot handles are not spec
+reported in `missingAssets`. Bytes, MIME types, cache paths and screenshot handles are not spec
 properties.
 
 The remote-image contract requires `prototype_remote_image_v1` for any `url`, `placeholder`,
-`error`, `crossfade` or `via` field. This capability is not yet advertised on any platform: support is
-validation only, so specs requiring it are refused until a renderer implements it. `url` is 1–2048 UTF-16 units, with the same state, data,
-repeat and route text bindings as other strings. `via` is `device` (default) or `host`;
+`error`, `crossfade` or `via` field. No platform advertises this capability yet; support is validation only.
+Refused specs must replace `url` and remote-image options with a bundled `asset`.
+`url` is 1–2048 UTF-16 units and supports state, data, repeat and route text bindings.
+Only a whole-field binding skips static URL checks; literal text outside it still requires a valid URL. `via` is `device` (default) or `host`;
 `host` requires a static URL for fetch-and-upload. `placeholder` and `error` each contain exactly
 one of `asset` or `color` (hex or Material role). Their assets participate in missing-asset checks and asset budgets;
 URL images themselves do not consume `MAX_PROTOTYPE_IMAGES`.
@@ -28,8 +29,8 @@ HTTPS is required; literal `localhost`, `127.0.0.1` and `[::1]` HTTP URLs are re
 fixtures. Loaders must enforce flavor and revalidate resolved URLs and redirects, apply the request
 egress policy, respect ProtoViewer's network switch, and send no cookies or referrers.
 
-The loader contract caps each download at 8 MiB, Android memory at one eighth of the heap,
-iOS memory at 64 MiB, per-app disk cache at 128 MiB keyed by URL, and concurrent loads at six.
+The loader contract caps each download at 8 MiB, Android memory at one-eighth of the heap,
+and iOS memory at 64 MiB. The per-app disk cache holds 128 MiB keyed by URL; concurrent loads are capped at six.
 The accessibility state-description contract is `loading|loaded|error`; inspect's per-prototype
 image counts are `{loaded, failed, pending}`. URLs must never enter accessibility text, observe or
 events. These are contract requirements; URL loading, crossfade, caches and image-state reporting

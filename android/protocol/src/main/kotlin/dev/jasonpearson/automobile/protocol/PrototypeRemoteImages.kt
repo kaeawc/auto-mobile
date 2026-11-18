@@ -41,7 +41,7 @@ object PrototypeRemoteImages {
     }
     if (node.text("via") == "host" && '{' in url)
       return fail("$path.via", "Host remote images require a static URL")
-    if (url.startsWith("{")) return null
+    if (Regex("""\{[^{}]+\}""").matches(url)) return null
     PrototypeRequestRules.requestUrlError(url)?.let {
       return fail("$path.url", it)
     }
@@ -59,7 +59,8 @@ object PrototypeRemoteImages {
   private fun unsafeURL(url: String): Boolean {
     val host = authority.find(url)?.groupValues?.get(1) ?: return true
     val blank = url.any { PrototypeSpecContract.blankTextPattern.matches(it.toString()) }
-    return '@' in host ||
+    return host.startsWith(":") ||
+      '@' in host ||
       unsafe.containsMatchIn(url) ||
       blank ||
       (url.startsWith("http:", ignoreCase = true) && !loopback.containsMatchIn(url))

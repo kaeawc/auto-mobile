@@ -24,7 +24,8 @@ public enum PrototypeRemoteImages {
             if node["via"] == .string("host"), url.contains("{") {
                 throw PrototypeLimits.violation("\(path).via", "Host remote images require a static URL")
             }
-            if url.hasPrefix("{") { continue }
+            if url.range(of: #"\{[^{}]+\}"#, options: .regularExpression) == url.startIndex ..< url
+                .endIndex { continue }
             try PrototypeRequestValidator.url(node["url"], path: "\(path).url")
             let lower = url.lowercased()
             let scheme = lower.hasPrefix("https://") ? "https://" : "http://"
@@ -38,7 +39,7 @@ public enum PrototypeRemoteImages {
                 of: #"^http://(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]+)?(?:[/?#]|$)"#,
                 options: .regularExpression
             ) != nil
-            if authority.isEmpty || authority
+            if authority.isEmpty || authority.hasPrefix(":") || authority
                 .contains(where: { "@\\".contains($0) }) || unsafe || (lower.hasPrefix("http:") && !loopback)
             {
                 throw PrototypeLimits.violation(

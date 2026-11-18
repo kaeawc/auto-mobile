@@ -214,12 +214,26 @@ enum PrototypeDataText {
     }
 
     static func stateKeys(_ text: String) -> [String] {
+        var consumed: [Range<Int>] = []
+        scan(Array(text.utf16), includePlatform: true) { open, close, _, _ in
+            consumed.append(open ..< close + 1)
+            return true
+        }
         var keys: [String] = []
-        scan(Array(text.utf16), prefixOverride: "", valid: PrototypeRepeat.isFieldName) { _, _, key, _ in
-            keys.append(key)
+        scan(Array(text.utf16), prefixOverride: "", valid: PrototypeRepeat.isFieldName) { open, _, key, _ in
+            if !consumed.contains(where: { $0.contains(open) }) { keys.append(key) }
             return true
         }
         return keys
+    }
+
+    static func platformPointers(_ text: String) -> [String] {
+        var pointers: [String] = []
+        scan(Array(text.utf16), includePlatform: true) { _, _, pointer, isPlatform in
+            if isPlatform { pointers.append(pointer) }
+            return true
+        }
+        return pointers
     }
 
     /// Returning false stops the shared scanner before any oversized binding is constructed.

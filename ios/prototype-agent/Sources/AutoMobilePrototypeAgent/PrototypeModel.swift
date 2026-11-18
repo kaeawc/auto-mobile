@@ -446,6 +446,8 @@
             // Stored values replace the spec's for the keys it lists before the first draw, and emit
             // nothing (#12526); the session only receives the result.
             let prepared = storage?.prepare(spec)
+            (platformRegistry.modules["secureStorage"] as? PrototypeSecureStorageModule)?
+                .restored(locked: prepared?.locked ?? [])
             let seeded: PrototypeSpec
             do { seeded = try (prepared?.spec ?? spec).replacingPlatform(
                 platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }

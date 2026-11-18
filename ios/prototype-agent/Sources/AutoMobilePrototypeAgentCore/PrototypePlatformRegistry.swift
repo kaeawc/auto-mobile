@@ -86,6 +86,7 @@ public final class PrototypePlatformRegistry {
 
     let modules: [String: any PrototypePlatformModule]
     private var observers = 0
+    private var embeddedRegistry: PrototypePlatformRegistry?
 
     func retainSources() { observers += 1 }
 
@@ -108,6 +109,10 @@ public final class PrototypePlatformRegistry {
         self.modules = accepted
     }
 
+    private init(acceptedModules: [String: any PrototypePlatformModule]) {
+        modules = acceptedModules
+    }
+
     public func configure(locationBlock: JSONValue?) {
         modules["location"]?.configure(root: locationBlock)
     }
@@ -123,7 +128,8 @@ public final class PrototypePlatformRegistry {
         settings: any PrototypeSettingsURLOpener,
         bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
         deviceStatus: [any PrototypePlatformModule] = [],
-        location: (any PrototypeLocationSource)? = nil
+        location: (any PrototypeLocationSource)? = nil,
+        secureStorage: (any PrototypeSecureValueStore)? = nil
     )
         -> PrototypePlatformRegistry
     {
@@ -135,6 +141,7 @@ public final class PrototypePlatformRegistry {
             PrototypeSettingsModule(opener: settings),
         ] + deviceStatus
         if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
+        if let secureStorage { modules.append(PrototypeSecureStorageModule(store: secureStorage)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 
@@ -145,7 +152,8 @@ public final class PrototypePlatformRegistry {
         settings: any PrototypeSettingsURLOpener,
         bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
         deviceStatus: [any PrototypePlatformModule] = [],
-        location: (any PrototypeLocationSource)? = nil
+        location: (any PrototypeLocationSource)? = nil,
+        secureStorage: (any PrototypeSecureValueStore)? = nil
     )
         -> PrototypePlatformRegistry
     {
@@ -156,7 +164,21 @@ public final class PrototypePlatformRegistry {
             PrototypeSettingsModule(opener: settings),
         ] + deviceStatus
         if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
+        if let secureStorage { modules.append(PrototypeSecureStorageModule(store: secureStorage)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
+    }
+
+    var secureStorage: (any PrototypeSecureValueStore)? {
+        (modules["secureStorage"] as? PrototypeSecureStorageModule)?.store
+    }
+
+    /// Embedded presentations cannot access the host application's Keychain through this runtime.
+    var withoutSecureStorage: PrototypePlatformRegistry {
+        guard modules["secureStorage"] != nil else { return self }
+        if let embeddedRegistry { return embeddedRegistry }
+        let registry = PrototypePlatformRegistry(acceptedModules: modules.filter { $0.key != "secureStorage" })
+        embeddedRegistry = registry
+        return registry
     }
 
     var snapshot: [String: JSONValue] {

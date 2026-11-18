@@ -191,6 +191,8 @@ describe("device storage report", () => {
   };
   test("a well-formed report is passed through", () => {
     expect(parsePrototypeStorageReport(report)).toEqual(report);
+    const secure = [{ key: "state:token", present: true, bytes: 10 }];
+    expect(parsePrototypeStorageReport({ ...report, secure })).toEqual({ ...report, secure });
     expect(parsePrototypeStorageReport({ ...report, skippedKeys: ["data:/cart"] })).toEqual({
       ...report,
       skippedKeys: ["data:/cart"],

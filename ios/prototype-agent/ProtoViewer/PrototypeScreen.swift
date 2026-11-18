@@ -165,6 +165,7 @@ struct PrototypeScreen: View {
                         reportLoad(.failed)
                     }
                 )
+                .standaloneStorage(registry: registry)
                 .onAppearanceChange { chromeAppearance = $0 }
                 .onFirstRender {
                     guard importRefusal == nil else { return }

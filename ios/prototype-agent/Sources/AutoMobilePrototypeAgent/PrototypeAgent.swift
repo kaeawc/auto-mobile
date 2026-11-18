@@ -165,7 +165,10 @@ final class PrototypeAgent: NSObject {
             return
         }
 
-        let agent = PrototypeAgent(mode: .standalone, registry: .feedbackModules())
+        let agent = PrototypeAgent(
+            mode: .standalone,
+            registry: .feedbackModules(secureStorage: KeychainPrototypeSecureValueStore())
+        )
         instance = agent
         agent.boot()
     }
@@ -231,7 +234,11 @@ final class PrototypeAgent: NSObject {
 
     init(mode: PrototypeLifecycleMode = .session, registry: PrototypePlatformRegistry = .system) {
         // No concrete permission-needing modules are approved for injection yet (#14289).
-        model = PrototypeModel(mode: mode, storage: PrototypeStorageCoordinator.fileBacked(), registry: registry)
+        model = PrototypeModel(
+            mode: mode,
+            storage: PrototypeStorageCoordinator.fileBacked(secure: registry.secureStorage),
+            registry: registry
+        )
         outbox = PrototypeEventOutbox(mode: mode)
         super.init()
     }

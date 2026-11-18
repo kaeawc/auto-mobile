@@ -218,6 +218,19 @@ function isRangeValueDescription(
   );
 }
 
+function labelMayOwnFollowing(
+  node: FocusSiblingNode,
+  precedingCount: number,
+  previousLabelCanOwn: boolean,
+): boolean {
+  // A single candidate can belong to the preceding label only if that label was unambiguous.
+  // A focusable label owns itself, not a following control.
+  return (
+    !isTruthyFlag(node.element?.focusable) &&
+    (precedingCount === 0 || (precedingCount === 1 && previousLabelCanOwn))
+  );
+}
+
 /** A label can own one following control only if preceding candidates are already claimed. */
 function followingLabelSibling(
   nodes: readonly FocusSiblingNode[],
@@ -232,11 +245,7 @@ function followingLabelSibling(
       continue;
     }
     if (hasLabel(node.element)) {
-      // A single candidate can belong to the preceding label only if that label was unambiguous.
-      // A focusable label owns itself, not a following control.
-      previousLabelCanOwn =
-        !isTruthyFlag(node.element?.focusable) &&
-        (precedingCount === 0 || (precedingCount === 1 && previousLabelCanOwn));
+      previousLabelCanOwn = labelMayOwnFollowing(node, precedingCount, previousLabelCanOwn);
       precedingCount = 0;
     } else if (candidateIndices.has(node.index)) {
       precedingCount++;

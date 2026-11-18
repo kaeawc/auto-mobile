@@ -10,6 +10,7 @@ final class PrototypePlatformDriver {
     private var deadlines: [String: any PrototypeTimerHandle] = [:]
     private var started: [String: Int] = [:]
     private var subscriptions: [Task<Void, Never>] = []
+    private var observing = false
     var onComplete: ((String, PlatformCallResult, Int) -> Void)?
     var onEvent: ((PlatformEvent) -> Void)?
     var onState: (([String: JSONValue]) -> Void)?
@@ -20,7 +21,9 @@ final class PrototypePlatformDriver {
     }
 
     func subscribe() {
-        guard subscriptions.isEmpty else { return }
+        guard !observing else { return }
+        observing = true
+        registry.retainSources()
         for name in registry.modules.keys.sorted() {
             guard let module = registry.modules[name] else { continue }
             let stream = module.events
@@ -43,8 +46,11 @@ final class PrototypePlatformDriver {
     }
 
     func stopEvents() {
+        guard observing else { return }
+        observing = false
         subscriptions.forEach { $0.cancel() }
         subscriptions = []
+        registry.releaseSources()
     }
 
     func perform(_ commands: [PrototypePlatformCommand]) {

@@ -64,8 +64,22 @@ The runtimes replay it from `test/fixtures/prototype-sensors/`.
 The root `sensors` block lists the sensors the device listens to, and needs `sensors` in `requires.platform`.
 In it, `shake`, `steps` and `proximity` take `{}`, while `orientation` (the three degree keys) and `light` take an optional
 `rateHz` of 1 to 30. The `steps` sensor also needs the `motion` permission in `requires.permissions`. A `/platform/sensors`
-read or a `sensors.shake` handler must name a sensor the block lists. No production runtime advertises the
-module.
+read or a `sensors.shake` handler must name a sensor the block lists. Android CtrlProxy advertises the module
+using platform sensors, with subscriptions only while the prototype is active and in the foreground. Steps
+remain absent without an `ACTIVITY_RECOGNITION` grant; the module does not request it. iOS does not yet
+advertise the module.
+
+**Android biometric runtime support.** The [biometric module](prototype-ux-platform-device.md) is
+registered by Android Activity hosts (SavedPrototypeActivity, ProtoViewer and disposable apps). CtrlProxy overlays omit the capability and
+refuse these specs before show. Failures use `cancelled`, or `unavailable` with reason `lockout`,
+`not_enrolled` or `no_hardware`. Only a foreground Activity can start a prompt. Cancellation, timeout
+and host teardown dismiss it.
+
+API 28 checks only `PackageManager.FEATURE_FINGERPRINT` before showing the prompt; a missing feature
+returns `unavailable` with reason `no_hardware`. With that feature present, enrollment and lockout
+errors come from the prompt callback. API 29 adds device credentials, and API 30 selects
+`BIOMETRIC_STRONG | DEVICE_CREDENTIAL` when requested. Earlier Android versions and credential
+fallback on API 28 report `no_hardware`.
 
 **Voice notes (#14194, contract only).** The `audioRecorder` module
 (`prototype_platform_audioRecorder_v1`) records from the microphone, so every call needs `microphone`

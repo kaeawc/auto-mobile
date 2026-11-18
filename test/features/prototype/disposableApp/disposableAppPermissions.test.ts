@@ -2,12 +2,17 @@ import { describe, expect, test } from "bun:test";
 import contract from "../../../../schemas/prototype-spec-contract.json";
 import {
   DISPOSABLE_APP_ANDROID_BACKGROUND,
+  DISPOSABLE_APP_ANDROID_MODULE_PERMISSIONS,
   DISPOSABLE_APP_ANDROID_PERMISSIONS,
   DISPOSABLE_APP_IOS_BACKGROUND_MODES,
   disposableAppDeclarations,
   resolveDisposableAppGrants,
 } from "../../../../src/features/prototype/disposableApp/disposableAppPermissions";
 import fixture from "../../../fixtures/prototype-spec/valid/platform-requires.json";
+import biometricFixtureJson from "../../../fixtures/prototype-spec/valid/platform-biometric.json";
+import { prototypeJsonSchema } from "../../../../src/features/prototype/prototypeJson";
+
+const biometricFixture = prototypeJsonSchema.parse(biometricFixtureJson);
 
 const P = "android.permission.";
 
@@ -34,6 +39,27 @@ describe("disposableAppDeclarations", () => {
     expect(declarations.permissions).toEqual([]);
     expect(declarations.android.permissions).toEqual([`${P}INTERNET`]);
     expect(declarations.ios).toEqual({ usageDescriptions: {}, backgroundModes: [] });
+  });
+
+  test("a biometric module declares USE_BIOMETRIC without a contract permission or grant", () => {
+    const declarations = disposableAppDeclarations(biometricFixture);
+    expect(declarations.permissions).toEqual([]);
+    expect(declarations.android.permissions).toEqual([`${P}INTERNET`, `${P}USE_BIOMETRIC`]);
+    expect(declarations.ios).toEqual({ usageDescriptions: {}, backgroundModes: [] });
+  });
+
+  test("modules without install-time permissions add none", () => {
+    const declarations = disposableAppDeclarations({ requires: { platform: ["clipboard"] } });
+    expect(declarations.android.permissions).toEqual([`${P}INTERNET`]);
+  });
+
+  test("every module permission entry names a contract platform module", () => {
+    const modules = Object.keys(contract.platformModules);
+    expect(
+      Object.keys(DISPOSABLE_APP_ANDROID_MODULE_PERMISSIONS).filter(
+        (name) => !modules.includes(name),
+      ),
+    ).toEqual([]);
   });
 
   test("an invalid requires block is refused rather than partly derived", () => {

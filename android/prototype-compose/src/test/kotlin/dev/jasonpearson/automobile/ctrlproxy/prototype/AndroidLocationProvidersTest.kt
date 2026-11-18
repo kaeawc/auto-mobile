@@ -13,6 +13,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -39,13 +41,7 @@ class AndroidLocationProvidersTest {
   @Before
   fun setUp() {
     app = RuntimeEnvironment.getApplication()
-    // ContextCompat's pre-33 not-exported receivers need androidx's signature permission, which a
-    // device grants at install and Robolectric does not.
-    shadowOf(app)
-      .grantPermissions(
-        Manifest.permission.ACCESS_FINE_LOCATION,
-        "${app.packageName}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
-      )
+    shadowOf(app).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
     manager = app.getSystemService(LocationManager::class.java)
     shadow = shadowOf(manager)
     shadow.setProviderEnabled(LocationManager.GPS_PROVIDER, false)
@@ -138,5 +134,59 @@ class AndroidLocationProvidersTest {
     runCurrent()
     assertEquals(listOf(2.0), fixes.map { it.latitude })
     source.close()
+  }
+
+  @Test
+  @Config(sdk = [30])
+  fun `coarse-only without network returns unavailable without registering gps`() = runTest {
+    shadowOf(app).denyPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
+    shadowOf(app).grantPermissions(Manifest.permission.ACCESS_COARSE_LOCATION)
+    shadow.removeProvider(LocationManager.NETWORK_PROVIDER)
+    shadow.setProviderEnabled(LocationManager.GPS_PROVIDER, true)
+    val source = AndroidLocationSource(app)
+    val module = PrototypeLocationModule(source, scope = backgroundScope)
+    try {
+      val result =
+        async(UnconfinedTestDispatcher(testScheduler)) {
+          module.call(PlatformCall("c", "location.request", buildJsonObject {}))
+        }
+      runCurrent()
+      assertTrue(result.isCompleted)
+      val error = (result.getCompleted() as PlatformCallResult.Failure).error
+      assertEquals(PlatformErrorCode.UNAVAILABLE, error.code)
+      assertEquals("disabled", error.reason)
+      assertTrue(shadow.getLocationUpdateListeners(LocationManager.GPS_PROVIDER).isEmpty())
+      assertEquals(null, source.current(PrototypeLocationAccuracy.PRECISE, 0))
+    } finally {
+      module.close()
+    }
+  }
+
+  @Test
+  @Config(sdk = [30])
+  fun `coarse-only with network receives an approximate fix`() = runTest {
+    shadowOf(app).denyPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
+    shadowOf(app).grantPermissions(Manifest.permission.ACCESS_COARSE_LOCATION)
+    shadow.setProviderEnabled(LocationManager.GPS_PROVIDER, true)
+    val source = AndroidLocationSource(app)
+    val module = PrototypeLocationModule(source, scope = backgroundScope)
+    try {
+      val result =
+        async(UnconfinedTestDispatcher(testScheduler)) {
+          module.call(PlatformCall("c", "location.request", buildJsonObject {}))
+        }
+      runCurrent()
+      assertFalse(result.isCompleted)
+      assertTrue(shadow.getLocationUpdateListeners(LocationManager.GPS_PROVIDER).isEmpty())
+      shadow.simulateLocation(location(LocationManager.NETWORK_PROVIDER, 2.12345))
+      idle()
+      runCurrent()
+      assertTrue(result.isCompleted)
+      val fix = (result.getCompleted() as PlatformCallResult.Success).value as JsonObject
+      assertEquals(JsonPrimitive(true), fix["approximate"])
+      assertEquals(JsonPrimitive(2.12), fix["latitude"])
+    } finally {
+      module.close()
+    }
   }
 }

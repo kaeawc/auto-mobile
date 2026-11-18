@@ -1,5 +1,5 @@
 import { projectPrototypeDerivedItem, type PrototypeFormatEnvironment } from "../prototypeFormat";
-import { derivePrototypeValues } from "../prototypeDerive";
+import { memoizedPrototypeDerive } from "../prototypeDerive";
 import type { PrototypeDerivedEntry } from "../prototypeFormatSchema";
 import { prototypeRenderLimits } from "../prototypeRenderContract.generated";
 import { resolvePrototypeDataPointer } from "../prototypeData";
@@ -54,7 +54,7 @@ interface WebRepeatScope {
 
 /** Resolve top-level collection bindings before the existing repeat row projection. */
 export function webRepeatRowsForScope(node: Raw, scope: WebRepeatScope): unknown[] {
-  const values = derivePrototypeValues(
+  const values = memoizedPrototypeDerive(
     record(scope.spec.derive) as Record<string, PrototypeDerivedEntry> | undefined,
     scope.data,
     scope.condition.state,

@@ -135,6 +135,21 @@
             if !fixWaiters.isEmpty { manager.requestLocation() }
         }
 
+        func stop() {
+            manager.stopUpdatingLocation()
+            update = nil
+            let authorizations = authorizationWaiters
+            let fixes = fixWaiters
+            let accuracies = accuracyWaiters
+            authorizationWaiters.removeAll()
+            fixWaiters.removeAll()
+            accuracyWaiters.removeAll()
+            accuracyRequest = nil
+            authorizations.values.forEach { $0.resume() }
+            fixes.values.forEach { $0.resume(throwing: CancellationError()) }
+            accuracies.values.forEach { $0.resume(returning: false) }
+        }
+
         private func stopIfIdle() {
             if fixWaiters.isEmpty, update == nil { manager.stopUpdatingLocation() }
         }

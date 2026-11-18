@@ -56,7 +56,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_realtime_v1", "prototype_platform_realtime_device_v1",
             "prototype_platform_test_v1",
             "prototype_platform_share_v1", // Contract only; system share sheet runtime is owed.
-            // Contract only; the device status readers are owed (#14323).
+            // Registered by the agent and Viewer registries, not the static list.
             "prototype_platform_battery_v1", "prototype_platform_power_v1",
             "prototype_platform_audio_v1",
             // Registered by the agent and Viewer registries (#14273), not the static list.
@@ -78,7 +78,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_map_maplibre_v1",
             // Contract only; the web view runtimes and the ProtoViewer import rule are owed (#14312).
             "prototype_platform_webview_v1",
-            // Contract only; the location runtimes are owed (#14325, #14326).
+            // Registered by the agent and Viewer registries, not the static list.
             "prototype_platform_location_v1",
             // Contract only; the system media picker and camera runtimes are owed (#14197).
             "prototype_platform_mediaLibrary_v1", "prototype_platform_camera_v1",

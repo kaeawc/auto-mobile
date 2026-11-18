@@ -52,6 +52,7 @@ final class LocationTestSource: PrototypeLocationSource {
     var fix = PrototypeLocationFix(latitude: 1, longitude: 2, accuracyM: 3, timestampMs: 0, approximate: false)
     var handler: (@MainActor @Sendable (PrototypeLocationFix) -> Void)?
     var authorizationChangeHandler: (@MainActor @Sendable () -> Void)?
+    var authorizationHandlerRegistrations = 0
     var servicesEnabled: Bool { touches += 1; return enabled }
     var authorization: PrototypeLocationAuthorization { touches += 1; return grant }
     func requestAuthorization() async { touches += 1; prompts += 1; grant = afterPrompt }
@@ -71,9 +72,15 @@ final class LocationTestSource: PrototypeLocationSource {
 
     func setUpdateAccuracy(_ accuracy: String) { touches += 1; updateAccuracies.append(accuracy) }
 
-    // Registering a callback does not access the native location service.
+    // A non-nil callback creates the native manager/delegate; clearing it does not.
     func setAuthorizationChangeHandler(_ handler: (@MainActor @Sendable () -> Void)?) {
+        if handler != nil { touches += 1; authorizationHandlerRegistrations += 1 }
         authorizationChangeHandler = handler
+    }
+
+    func changeServices(enabled: Bool) {
+        self.enabled = enabled
+        authorizationChangeHandler?()
     }
 
     func changeAuthorization(to grant: PrototypeLocationAuthorization) {
@@ -124,6 +131,7 @@ final class PrototypeLocationTests: XCTestCase {
     func testMissingUsageDescriptionNeverTouchesSource() async {
         let source = LocationTestSource()
         let module = PrototypeLocationModule(source: source, bundle: LocationBundle(keys: []), clock: LocationClock())
+        XCTAssertNil(source.authorizationChangeHandler)
         XCTAssertTrue(module.requiredInfoPlistKeys.isEmpty)
         XCTAssertEqual(module.availability(), .unavailable("missing_usage_description"))
         XCTAssertEqual(source.touches, 0)
@@ -131,12 +139,55 @@ final class PrototypeLocationTests: XCTestCase {
         XCTAssertEqual(result, .failure(.unavailable, "missing_usage_description"))
         XCTAssertEqual(source.touches, 0)
         module.configure(root: .object([:]))
+        XCTAssertNil(source.authorizationChangeHandler)
+        XCTAssertEqual(source.authorizationHandlerRegistrations, 0)
         XCTAssertEqual(source.touches, 0)
         _ = module.events
         XCTAssertEqual(module.state["current"], .object([:]))
         XCTAssertEqual(module.state["servicesEnabled"], .bool(false))
         source.changeAuthorization(to: .authorizedPrecise)
         XCTAssertEqual(source.touches, 0)
+    }
+
+    func testDisabledServicesSubscriptionRegistersHandlerAndStartsWhenEnabled() {
+        let source = LocationTestSource()
+        source.enabled = false
+        let module = module(source)
+        XCTAssertEqual(source.touches, 0, "Construction must not create the host location manager")
+        XCTAssertNil(source.authorizationChangeHandler)
+
+        module.configure(root: .object([:]))
+        XCTAssertNotNil(source.authorizationChangeHandler)
+        XCTAssertEqual(source.authorizationHandlerRegistrations, 1)
+        XCTAssertTrue(source.distances.isEmpty)
+        XCTAssertTrue(source.updateAccuracies.isEmpty)
+        XCTAssertEqual(source.prompts, 0)
+
+        source.changeServices(enabled: true)
+        XCTAssertEqual(source.distances, [0])
+        XCTAssertEqual(source.updateAccuracies, ["precise"])
+        source.report(source.fix)
+        XCTAssertEqual(module.state["current"], source.fix.json)
+
+        module.configure(root: nil)
+        XCTAssertNil(source.authorizationChangeHandler)
+        XCTAssertEqual(source.stops, 1)
+        source.changeServices(enabled: false)
+        source.changeServices(enabled: true)
+        XCTAssertEqual(source.distances, [0], "Cleared subscriptions must not restart")
+    }
+
+    func testClearingDisabledServicesSubscriptionRemovesHandlerWithoutStarting() {
+        let source = LocationTestSource()
+        source.enabled = false
+        let module = module(source)
+        module.configure(root: .object([:]))
+        XCTAssertNotNil(source.authorizationChangeHandler)
+        module.configure(root: nil)
+        XCTAssertNil(source.authorizationChangeHandler)
+        source.changeServices(enabled: true)
+        XCTAssertTrue(source.distances.isEmpty)
+        XCTAssertEqual(source.stops, 0)
     }
 
     func testConfiguredSubscriptionStartsAfterLaterAuthorizationGrant() {

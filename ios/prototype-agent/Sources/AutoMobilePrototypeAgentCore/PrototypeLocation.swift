@@ -53,6 +53,76 @@ enum PrototypeLocationSourceError: Error {
 }
 
 @MainActor
+protocol PrototypeLocationStreamActions: AnyObject {
+    func setDesiredAccuracy(_ accuracy: Double)
+    func startUpdates()
+    func stopUpdates()
+    func requestLocation()
+}
+
+/// Arbitrates one-shot and continuous consumers of a single native location manager.
+@MainActor
+struct PrototypeLocationStreamArbiter {
+    var updateAccuracy: Double
+    private var desiredAccuracy: Double
+    private var waiterCount = 0
+    private var updating = false
+
+    init(updateAccuracy: Double) {
+        self.updateAccuracy = updateAccuracy
+        desiredAccuracy = updateAccuracy
+    }
+
+    mutating func requestFix(accuracy: Double, using actions: any PrototypeLocationStreamActions) {
+        desiredAccuracy = waiterCount == 0
+            ? (updating ? min(accuracy, updateAccuracy) : accuracy) : min(desiredAccuracy, accuracy)
+        actions.setDesiredAccuracy(desiredAccuracy)
+        waiterCount += 1
+        if waiterCount == 1 {
+            // A continuous stream swallows requestLocation, so pause it until the waiters leave.
+            if updating { actions.stopUpdates() }
+            actions.requestLocation()
+        }
+    }
+
+    mutating func cancelFix(using actions: any PrototypeLocationStreamActions) {
+        guard waiterCount > 0 else { return }
+        waiterCount -= 1
+        if waiterCount == 0 { resumeOrStop(using: actions) }
+    }
+
+    mutating func finishFixes(using actions: any PrototypeLocationStreamActions) {
+        let hadWaiters = waiterCount > 0
+        waiterCount = 0
+        // Ordinary stream fixes (including late callbacks after cancellation) need no restart.
+        if hadWaiters { resumeOrStop(using: actions) }
+        else if !updating { actions.stopUpdates() }
+    }
+
+    mutating func startUpdates(using actions: any PrototypeLocationStreamActions) {
+        updating = true
+        desiredAccuracy = waiterCount == 0 ? updateAccuracy : min(desiredAccuracy, updateAccuracy)
+        actions.setDesiredAccuracy(desiredAccuracy)
+        actions.startUpdates()
+    }
+
+    mutating func stopUpdates(using actions: any PrototypeLocationStreamActions) {
+        updating = false
+        actions.stopUpdates()
+        // Stopping continuous updates also cancels requestLocation on the shared manager.
+        if waiterCount > 0 { actions.requestLocation() }
+    }
+
+    private mutating func resumeOrStop(using actions: any PrototypeLocationStreamActions) {
+        if updating {
+            desiredAccuracy = updateAccuracy
+            actions.setDesiredAccuracy(desiredAccuracy)
+            actions.startUpdates()
+        } else { actions.stopUpdates() }
+    }
+}
+
+@MainActor
 protocol PrototypeLocationSource: AnyObject {
     var servicesEnabled: Bool { get }
     var authorization: PrototypeLocationAuthorization { get }
@@ -102,14 +172,6 @@ final class PrototypeLocationModule: PrototypePlatformModule {
         self.source = source
         self.bundle = bundle
         self.clock = clock
-        source.setAuthorizationChangeHandler { [weak self] in
-            guard let self else { return }
-            if updating, !self.source.authorization.authorized {
-                self.source.stopUpdates()
-                updating = false
-            }
-            startIfAuthorized()
-        }
     }
 
     private var hasUsage: Bool { bundle.containsInfoPlistKey("NSLocationWhenInUseUsageDescription") }
@@ -190,6 +252,18 @@ final class PrototypeLocationModule: PrototypePlatformModule {
         lastUpdate = nil
         deliveredAt = nil
         block = root
+        // Register even with services disabled so a later authorization/services change can start us.
+        // Missing usage descriptions and construction must never create the host location manager.
+        if root != nil, hasUsage {
+            source.setAuthorizationChangeHandler { [weak self] in
+                guard let self else { return }
+                if updating, !self.source.authorization.authorized {
+                    self.source.stopUpdates()
+                    updating = false
+                }
+                startIfAuthorized()
+            }
+        } else { source.setAuthorizationChangeHandler(nil) }
         startIfAuthorized()
     }
 

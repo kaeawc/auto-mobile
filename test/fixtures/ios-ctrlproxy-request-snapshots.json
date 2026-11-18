@@ -43,6 +43,23 @@
       }
     },
     {
+      "name": "request_storekit",
+      "builder": "requestStoreKit",
+      "wire": {
+        "type": "request_storekit",
+        "requestId": "fixture-request-id",
+        "action": "load",
+        "bundleId": "com.example.purchases",
+        "configPath": "/tmp/Products.storekit",
+        "productId": "com.example.pro",
+        "transactionId": 7,
+        "subscriptionId": "com.example.monthly",
+        "timeRate": "oneRenewalEveryTenSeconds",
+        "simulatedError": 2,
+        "enabled": false
+      }
+    },
+    {
       "name": "request_accessibility_focus",
       "builder": "CtrlProxyVoiceOver.requestAccessibilityFocus",
       "wire": {

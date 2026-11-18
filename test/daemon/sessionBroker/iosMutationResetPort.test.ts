@@ -187,6 +187,8 @@ function harness(residueOverride?: IosResidueInspector) {
         },
       },
       residue: residueOverride ?? residue,
+
+      storeKit: { clear: async () => {} },
       trustStore: {
         readUserTrustedCertificates: async (deviceId, signal) => {
           state.trustStoreReads.push({ deviceId, signal });
@@ -383,7 +385,11 @@ describe("iOS mutation reset adapter", () => {
     }
     for (const kind of [
       ...DEVICE_MUTATION_KINDS.filter(
-        (kind) => !cases.some((entry) => entry.kind === kind) && kind !== "installed-app",
+        // storekit reverts through the runner, not simctl: iosStoreKitReset.test.ts covers it.
+        (kind) =>
+          !cases.some((entry) => entry.kind === kind) &&
+          kind !== "installed-app" &&
+          kind !== "storekit",
       ),
       "unknown",
     ]) {

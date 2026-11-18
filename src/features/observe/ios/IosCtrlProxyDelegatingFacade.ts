@@ -32,6 +32,12 @@ import {
   type CtrlProxyAccessibilityAuditResult,
   type IosAccessibilityAuditRequest,
 } from "./CtrlProxyAccessibilityAudit";
+import {
+  requestStoreKit,
+  type CtrlProxyStoreKitResult,
+  type StoreKitRequestOptions,
+  type StoreKitRunnerRequest,
+} from "./CtrlProxyStoreKit";
 
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import { logger } from "../../../utils/logger";
@@ -790,6 +796,14 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     request: IosAccessibilityAuditRequest,
   ): Promise<CtrlProxyAccessibilityAuditResult> {
     return requestAccessibilityAudit(this.createDelegateContext(), request);
+  }
+
+  /** Control the runner's simulator-only StoreKitTest session (#18399). */
+  async requestStoreKit(
+    request: StoreKitRunnerRequest,
+    options?: StoreKitRequestOptions,
+  ): Promise<CtrlProxyStoreKitResult> {
+    return requestStoreKit(this.createDelegateContext(), request, options);
   }
 
   /** Invoke Magic Tap directly through the foreground app's in-app SDK. */

@@ -285,6 +285,52 @@ describe("iOS keep-booted best-effort cleaning", () => {
     expect(rig.state.eraseCalls).toBe(1);
   });
 
+  test("a storeKitTest session's storekit row is cleared and the reset stays booted", async () => {
+    const rig = await harness();
+    const [row] = deviceToolMutations(
+      "storeKitTest",
+      { action: "setSimulatedError", appId: "com.example.shop" },
+      "ios",
+    );
+    await rig.journal.record(SCOPE, {
+      ...row!,
+      priorValue: { state: "absent" },
+      toolName: "storeKitTest",
+    });
+    expect(await rig.run()).toMatchObject({
+      outcome: "clean",
+      mode: "keep-booted",
+      phases: { "revert:storekit:com.example.shop": 0 },
+    });
+    expect(
+      rig.mutations.reverted.map(({ kind, key, priorValue }) => ({ kind, key, priorValue })),
+    ).toEqual([{ kind: "storekit", key: "com.example.shop", priorValue: { state: "absent" } }]);
+    expect(rig.state.eraseCalls).toBe(0);
+  });
+
+  test("a StoreKit clear the runner cannot confirm erases instead of reporting clean", async () => {
+    const rig = await harness();
+    await rig.journal.record(SCOPE, {
+      kind: "storekit",
+      key: "com.example.shop",
+      priorValue: { state: "absent" },
+      toolName: "storeKitTest",
+    });
+    rig.mutations.beforeWrite = async () => {
+      throw new ActionableError("iOS StoreKit test session could not be cleared");
+    };
+    expect(await rig.run()).toMatchObject({ outcome: "fallback:erase", mode: "erase" });
+    expect(rig.state.eraseCalls).toBe(1);
+  });
+
+  test("a session that never used storeKitTest reverts no StoreKit state", async () => {
+    const rig = await harness();
+    await recordClipboard(rig);
+    expect(await rig.run()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    expect(rig.mutations.reverted.map((entry) => entry.kind)).toEqual(["clipboard"]);
+    expect(rig.state.eraseCalls).toBe(0);
+  });
+
   test("a best-effort opaque journal row keeps the booted reset", async () => {
     const rig = await harness();
     await rig.journal.record(SCOPE, {

@@ -16,7 +16,8 @@ import type { PrototypeStrictOptions } from "../src/features/prototype/prototype
  * numbered in contract order, so a full run renumbers fixtures, adds near-duplicates and rewrites
  * formatting (#15565). By default it works on a copy under scratch/ and prints how to compare;
  * copy the fixtures you want into test/fixtures by hand. Pass --in-place only to regenerate the
- * whole corpus deliberately, then run oxfmt and review every change.
+ * whole corpus deliberately, then run oxfmt and review every change. Use --in-place
+ * --inventory-only to refresh the inventory after adding curated fixtures without recapturing them.
  */
 const live = join(import.meta.dir, "../test/fixtures/prototype-spec");
 const inPlace = process.argv.includes("--in-place");
@@ -25,6 +26,10 @@ if (!inPlace) {
   rmSync(directory, { recursive: true, force: true });
   mkdirSync(directory, { recursive: true });
   cpSync(live, directory, { recursive: true });
+}
+if (process.argv.includes("--inventory-only")) {
+  writeInventory();
+  process.exit(0);
 }
 const definitions: Record<string, Rule> = contract.definitions;
 const base = () => ({
@@ -711,25 +716,33 @@ for (const [capability, spec] of capabilityExamples) {
     supportedCapabilities: prototypeGateCapabilities(spec).filter((name) => name !== capability),
   });
 }
-const valid = readdirSync(join(directory, "valid"))
-  .filter((name) => name.endsWith(".json"))
-  .sort();
-const invalid = readdirSync(join(directory, "invalid"))
-  .filter((name) => name.endsWith(".json"))
-  .sort();
-const validCapabilities = Object.fromEntries(
-  valid.map((name) => {
-    const result = validatePrototypeSpec(readFileSync(join(directory, "valid", name), "utf8"));
-    if (!result.success) {
-      throw new Error(name + JSON.stringify(result.error));
-    }
-    return [name, prototypeGateCapabilities(result.data)];
-  }),
-);
-writeFileSync(
-  join(directory, "corpus.json"),
-  JSON.stringify({ valid, invalid, validCapabilities }, null, 2) + "\n",
-);
+function writeInventory() {
+  const valid = readdirSync(join(directory, "valid"))
+    .filter((name) => name.endsWith(".json"))
+    .sort();
+  const invalid = readdirSync(join(directory, "invalid"))
+    .filter((name) => name.endsWith(".json"))
+    .sort();
+  const validCapabilities = Object.fromEntries(
+    valid.map((name) => {
+      const result = validatePrototypeSpec(readFileSync(join(directory, "valid", name), "utf8"));
+      if (!result.success) {
+        throw new Error(name + JSON.stringify(result.error));
+      }
+      return [name, prototypeGateCapabilities(result.data)];
+    }),
+  );
+  // The curated corpus also carries platform-note expectations that recapture does not derive.
+  const inventory: Record<string, unknown> = JSON.parse(
+    readFileSync(join(directory, "corpus.json"), "utf8"),
+  );
+  writeFileSync(
+    join(directory, "corpus.json"),
+    JSON.stringify({ ...inventory, valid, invalid, validCapabilities }, null, 2) + "\n",
+  );
+  return { valid, invalid };
+}
+const { valid, invalid } = writeInventory();
 console.log(
   `Captured ${valid.length} valid, ${invalid.length} invalid; ${seenObjects.size} object rules, ${seenBounds.size} bounds, ${capabilityExamples.size} gates`,
 );

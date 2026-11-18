@@ -356,6 +356,21 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     label: "Save",
     enabledWhen: { key: "liked", equals: true },
   }),
+  prototype_data_actions_v2: {
+    ...fixture({
+      ...label,
+      onTap: [
+        {
+          type: "setData",
+          path: "/data/rows",
+          where: { field: "id", equals: { value: 1 } },
+          member: "title",
+          value: { value: "new" },
+        },
+      ],
+    }),
+    with: ["prototype_data_actions_v1"],
+  },
   prototype_data_actions_v1: fixture({
     ...label,
     onTap: [{ type: "setData", path: "/data/count", value: { value: 1 } }],

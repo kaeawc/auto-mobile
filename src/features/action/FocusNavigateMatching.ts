@@ -233,7 +233,10 @@ function followingLabelSibling(
     }
     if (hasLabel(node.element)) {
       // A single candidate can belong to the preceding label only if that label was unambiguous.
-      previousLabelCanOwn = precedingCount === 0 || (precedingCount === 1 && previousLabelCanOwn);
+      // A focusable label owns itself, not a following control.
+      previousLabelCanOwn =
+        !isTruthyFlag(node.element?.focusable) &&
+        (precedingCount === 0 || (precedingCount === 1 && previousLabelCanOwn));
       precedingCount = 0;
     } else if (candidateIndices.has(node.index)) {
       precedingCount++;

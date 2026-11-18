@@ -134,6 +134,18 @@ test("control-first pairs in a shared parent remain ambiguous for both labels", 
   expect(focusLabelSibling(nodes, nodes[4])).toBeUndefined();
 });
 
+test("a labelled focusable sibling cannot claim a following control-first pair", () => {
+  const nodes = siblingNodes(
+    { ...control, text: "Back" },
+    control,
+    { ...labelElement, text: "WiFi" },
+    { ...control },
+    { ...labelElement, text: "Bluetooth" },
+  );
+  expect(focusLabelSibling(nodes, nodes[3])).toBeUndefined();
+  expect(focusLabelSibling(nodes, nodes[5])).toBeUndefined();
+});
+
 test("label-first pairs in a shared parent each own their following control", () => {
   const nodes = siblingNodes(labelElement, control, nextLabel, { ...control });
   expect(focusLabelSibling(nodes, nodes[1])).toBe(nodes[2].element);

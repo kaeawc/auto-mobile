@@ -5,7 +5,7 @@ import Foundation
 /// `location` module, so it also needs `location` in `requires.platform` and the `location`
 /// permission in `requires.permissions`; `onCameraIdle.into` is a `/data` write path; and an `emit`
 /// that `onMarkerTap` runs cannot author a context name the runtime adds (`markerId`, #16492).
-/// Contract only: no renderer draws a map.
+/// iOS renders maps with MapKit; the pure mapping rules live in PrototypeMapModel.
 enum PrototypeMap {
     /// Emit-context names the runtime adds to every `emit` a marker tap runs (#16492).
     static var markerTapEmitContext: [String] {
@@ -39,7 +39,9 @@ enum PrototypeMap {
 
     private static func validateNode(
         _ node: [String: JSONValue], path: String, map: Bool, location: Bool, permission: Bool
-    ) throws {
+    )
+        throws
+    {
         guard map else { throw PrototypeLimits.violation(path, "map requires map in requires.platform") }
         if node["showUserLocation"] == .bool(true) {
             guard location else {

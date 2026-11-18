@@ -71,8 +71,6 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_contacts_v1", "prototype_platform_calendar_v1",
             // Registered by the agent and Viewer registries, not the static list.
             "prototype_platform_sensors_v1",
-            // Contract only; the map renderers are owed (#14310, #14311).
-            "prototype_platform_map_v1",
             // Contract only; map backends are advertised once their renderers can serve them (#14302).
             "prototype_platform_map_google_v1",
             "prototype_platform_map_maplibre_v1",

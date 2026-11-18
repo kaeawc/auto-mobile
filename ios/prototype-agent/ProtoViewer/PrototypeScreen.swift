@@ -99,6 +99,7 @@ struct PrototypeScreen: View {
                 .background(.bar)
             }
             prototypeContent
+                .environment(\.prototypeMapNetworkAllowed, networkSwitch.enabled)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
                 .ignoresSafeArea(

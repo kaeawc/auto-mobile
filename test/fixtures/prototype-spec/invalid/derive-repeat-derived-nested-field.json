@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "derived-nested-field",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "rows": [{ "id": "a", "name": { "nested": 2 } }]
+    },
+    "derive": {
+      "rows": {
+        "collection": {
+          "of": {
+            "data": "/rows"
+          }
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": { "derived": "rows" },
+        "as": "row"
+      },
+      "children": [{ "type": "text", "text": "{row.name}" }]
+    }
+  },
+  "expectedPath": "root.children[0].text",
+  "expectedMessage": "Unknown repeat field \"name\""
+}

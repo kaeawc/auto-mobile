@@ -1489,5 +1489,46 @@
         }
       ]
     }
+  },
+  {
+    "name": "mixed sort orders numbers before strings",
+    "spec": {
+      "derive": {
+        "asc": {
+          "collection": { "of": { "data": "/rows" }, "sort": { "field": "v", "order": "asc" } }
+        },
+        "desc": {
+          "collection": { "of": { "data": "/rows" }, "sort": { "field": "v", "order": "desc" } }
+        }
+      }
+    },
+    "data": {
+      "rows": [{ "v": "b" }, { "v": 10 }, { "v": "A" }, { "v": 2 }, { "v": "10" }]
+    },
+    "state": {},
+    "expected": {
+      "asc": [{ "v": 2 }, { "v": 10 }, { "v": "10" }, { "v": "A" }, { "v": "b" }],
+      "desc": [{ "v": "b" }, { "v": "A" }, { "v": "10" }, { "v": 10 }, { "v": 2 }]
+    }
+  },
+  {
+    "name": "integral decimal limits",
+    "spec": {
+      "derive": {
+        "one": { "collection": { "of": { "data": "/rows" }, "limit": 1.0 } },
+        "hundred": {
+          "collection": { "of": { "data": "/rows" }, "limit": 1e2 },
+          "reduce": { "op": "count" }
+        }
+      }
+    },
+    "data": {
+      "rows": [{ "id": "a" }, { "id": "b" }, { "id": "c" }]
+    },
+    "state": {},
+    "expected": {
+      "one": [{ "id": "a" }],
+      "hundred": 3
+    }
   }
 ]

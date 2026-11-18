@@ -32,15 +32,16 @@ final class PrototypeNestedRepeatTests: XCTestCase {
     }
 
     static func fixtures() throws -> [Fixture] {
-        try JSONDecoder().decode([Fixture].self, from: Data(
-            contentsOf:
-            PrototypeSpecFixtures.directory.appendingPathComponent("repeat/nested.json")
-        ))
+        try ["nested.json", "nested-sources.json"].flatMap { file in
+            try JSONDecoder().decode([Fixture].self, from: Data(
+                contentsOf: PrototypeSpecFixtures.directory.appendingPathComponent("repeat/\(file)")
+            ))
+        }
     }
 
     func testAllSharedValidFixtures() throws {
         let fixtures = try Self.fixtures()
-        XCTAssertEqual(fixtures.count, 6)
+        XCTAssertEqual(fixtures.count, 9)
         for fixture in fixtures {
             XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: fixture.envelope()), fixture.name)
         }
@@ -55,7 +56,7 @@ final class PrototypeNestedRepeatTests: XCTestCase {
         let directory = PrototypeSpecFixtures.directory.appendingPathComponent("invalid")
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.lastPathComponent.hasPrefix("nested-repeat-") }.sorted { $0.path < $1.path }
-        XCTAssertEqual(files.count, 11)
+        XCTAssertEqual(files.count, 16)
         for file in files {
             let fixture = try JSONDecoder().decode(Invalid.self, from: Data(contentsOf: file))
             XCTAssertThrowsError(
@@ -69,6 +70,32 @@ final class PrototypeNestedRepeatTests: XCTestCase {
                 )
             }
         }
+    }
+
+    func testSharedCellFixtureReachesExactContractLimit() throws {
+        func cells(_ spec: JSONValue) throws -> Int {
+            let fields = try XCTUnwrap(spec.objectFields)
+            let data = try XCTUnwrap(fields["data"]?.objectFields)
+            var values = PrototypeRepeatData(data: data)
+            guard case let .array(orders)? = data["orders"],
+                  let outer = orders.first?.objectFields,
+                  case let .array(children)? = fields["root"]?.objectFields?["children"] else {
+                XCTFail("Missing boundary rows"); return 0
+            }
+            return try children.reduce(values.cells("/orders")) { total, child in
+                let items = child.objectFields?["repeat"]?.objectFields?["items"]?.objectFields
+                let field = try XCTUnwrap(items?["field"]?.stringValue)
+                var inner = PrototypeRepeatData(data: ["rows": try XCTUnwrap(outer[field])])
+                return total + inner.cells("/rows")
+            }
+        }
+        let valid = try Data(contentsOf:
+            PrototypeSpecFixtures.directory.appendingPathComponent("repeat/nested-cell-limit.json"))
+        XCTAssertEqual(try cells(JSONDecoder().decode(JSONValue.self, from: valid)), PrototypeLimits.maxRepeatPathCells)
+        XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: valid))
+        let invalid = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf:
+            PrototypeSpecFixtures.directory.appendingPathComponent("invalid/nested-repeat-cell-limit.json")))
+        XCTAssertEqual(try cells(XCTUnwrap(invalid.objectFields?["spec"])), PrototypeLimits.maxRepeatPathCells + 1)
     }
 
     func testStrictCapabilityPolicyUsesSharedFixture() throws {

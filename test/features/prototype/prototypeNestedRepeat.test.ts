@@ -4,6 +4,10 @@ import { toHtml } from "../../../src/features/prototype/web/webNodes";
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import fixtures from "../../fixtures/prototype-spec/repeat/nested.json";
+import sourceFixtures from "../../fixtures/prototype-spec/repeat/nested-sources.json";
+import cellLimitFixture from "../../fixtures/prototype-spec/repeat/nested-cell-limit.json";
+import contract from "../../../schemas/prototype-spec-contract.json";
+import { PrototypeRepeatData } from "../../../src/features/prototype/prototypeData";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 import { prototypeGateCapabilities } from "../../../src/features/prototype/prototypeCapabilityGates";
 import { prototypeRolePalette } from "../../../src/features/prototype/prototypeContrast";
@@ -20,7 +24,7 @@ interface Case {
   state?: Raw;
   expected: { rows: { outerIndex: number; innerIndex: number; texts: string[] }[] };
 }
-for (const fixture of fixtures as Case[]) {
+for (const fixture of [...fixtures, ...sourceFixtures] as Case[]) {
   test(fixture.name, () => {
     const spec: Raw = {
       ...fixture.spec,
@@ -233,4 +237,39 @@ test("representative orders render one card and header per order", () => {
   expect(html).toContain("PEN x2 (A 0.0)");
   expect(html).toContain("INK x1 (A 0.1)");
   expect(html).toContain("PAD x3 (C 1.0)");
+});
+
+// Repeated sources must be charged per use, including childless inner templates.
+test("shared cell fixtures straddle the exact contract limit", () => {
+  const root = cellLimitFixture.root;
+  const data = new PrototypeRepeatData(cellLimitFixture.data);
+  const outer = cellLimitFixture.data.orders[0]!;
+  const cells =
+    data.cells("/orders") +
+    root.children.reduce(
+      (sum, node) =>
+        sum +
+        new PrototypeRepeatData({
+          rows: outer[node.repeat.items.field as keyof typeof outer],
+        }).cells("/rows"),
+      0,
+    );
+  expect(cells).toBe(contract.limits.MAX_PROTOTYPE_REPEAT_PATH_CELLS);
+  expect(validatePrototypeSpec(cellLimitFixture)).toMatchObject({ success: true });
+  const over = JSON.parse(
+    readFileSync(new URL("nested-repeat-cell-limit.json", invalidDir), "utf8"),
+  );
+  const overData = new PrototypeRepeatData(over.spec.data);
+  const overOuter = over.spec.data.orders[0];
+  expect(
+    overData.cells("/orders") +
+      over.spec.root.children.reduce(
+        (sum: number, node: Raw) =>
+          sum +
+          new PrototypeRepeatData({
+            rows: overOuter[String(record(record(node.repeat)?.items)?.field)],
+          }).cells("/rows"),
+        0,
+      ),
+  ).toBe(contract.limits.MAX_PROTOTYPE_REPEAT_PATH_CELLS + 1);
 });

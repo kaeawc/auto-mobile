@@ -12,7 +12,9 @@ class PrototypeNestedRepeatTest {
   companion object {
     private val directory = fixtureDirectory()
     private val cases =
-      Json.parseToJsonElement(File(directory, "repeat/nested.json").readText()).jsonArray
+      listOf("nested.json", "nested-sources.json").flatMap { file ->
+        Json.parseToJsonElement(File(directory, "repeat/$file").readText()).jsonArray
+      }
 
     private fun input(case: JsonObject): JsonObject =
       JsonObject(
@@ -113,6 +115,33 @@ class PrototypeNestedRepeatTest {
     val result =
       PrototypeSpecValidator.validate(File(directory, "repeat/nested-orders.json").readText())
     assertTrue(result is PrototypeSpecValidation.Success, "$result")
+  }
+
+  @Test
+  fun `shared cell fixture reaches the exact contract limit`() {
+    val source =
+      Json.parseToJsonElement(File(directory, "repeat/nested-cell-limit.json").readText())
+        .jsonObject
+    fun cells(spec: JsonObject): Int {
+      val data = PrototypeRepeatData(spec.getValue("data").jsonObject)
+      val outer = spec.getValue("data").jsonObject.getValue("orders").jsonArray[0].jsonObject
+      return data.cells("/orders") +
+        spec.getValue("root").jsonObject.getValue("children").jsonArray.sumOf { child ->
+          val items = child.jsonObject.getValue("repeat").jsonObject.getValue("items").jsonObject
+          val field = items.getValue("field").jsonPrimitive.content
+          PrototypeRepeatData(buildJsonObject { put("rows", outer.getValue(field)) }).cells("/rows")
+        }
+    }
+    assertEquals(PrototypeSpecValidator.MAX_PROTOTYPE_REPEAT_PATH_CELLS, cells(source))
+    assertTrue(
+      PrototypeSpecValidator.validate(source.toString()) is PrototypeSpecValidation.Success,
+    )
+    val over =
+      Json.parseToJsonElement(File(directory, "invalid/nested-repeat-cell-limit.json").readText())
+        .jsonObject
+        .getValue("spec")
+        .jsonObject
+    assertEquals(PrototypeSpecValidator.MAX_PROTOTYPE_REPEAT_PATH_CELLS + 1, cells(over))
   }
 
   private fun nested(

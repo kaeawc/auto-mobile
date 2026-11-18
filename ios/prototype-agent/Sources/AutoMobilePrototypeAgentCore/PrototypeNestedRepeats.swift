@@ -39,6 +39,13 @@ extension PrototypeStrictRepeats {
             if let invalid = rows.firstIndex(where: { $0.objectFields == nil }) {
                 throw PrototypeContractValidator.invalid(sourcePath, "Repeat field item \(invalid) is not an object")
             }
+            if rows.contains(where: { row in
+                row.objectFields?.keys.contains(where: { $0.hasPrefix("outer.") }) == true
+            }) {
+                throw PrototypeContractValidator.invalid(
+                    sourcePath, "Inner repeat fields starting with \"outer.\" are reserved"
+                )
+            }
             let outerItem = outer.items[index]
             let items = rows.compactMap(\.objectFields).map { row in
                 var item = row

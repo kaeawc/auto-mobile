@@ -51,6 +51,8 @@ internal object PrototypeNestedRepeat {
       return fail(at, "Repeat field resolves to more than 100 items")
     val invalid = rows.indexOfFirst { it !is JsonObject }
     if (invalid >= 0) return fail(at, "Repeat field item $invalid is not an object")
+    if (rows.filterIsInstance<JsonObject>().any { row -> row.keys.any { it.startsWith("outer.") } })
+      return fail(at, "Inner repeat fields starting with \"outer.\" are reserved")
     state.cells += PrototypeRepeatData(JsonObject(mapOf("rows" to rows))).cells("/rows")
     return if (state.cells > PrototypeSpecValidator.MAX_PROTOTYPE_REPEAT_PATH_CELLS)
       fail(at, "Repeat path cell limit exceeded")

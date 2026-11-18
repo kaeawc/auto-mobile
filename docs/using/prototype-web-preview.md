@@ -170,7 +170,8 @@ Collections require `prototype_derive_v1`; update a renderer that refuses this c
 
 Use `repeat: {"items":{"field":"lines"},"as":"line"}` on a container inside an outer
 repeat's template. `lines` must be an array of object rows on every outer item; empty arrays draw
-no inner rows. Inner arrays allow at most 100 items, and repeats allow two levels total.
+no inner rows. Inner arrays allow at most 100 items, and repeats allow two levels total;
+inner row field names starting with `outer.` are reserved.
 Use distinct aliases, excluding `route` for the inner alias. In the inner template, `{line.sku}`
 reads the inner row, `{order.id}` reads the outer row, `{index}` is the inner index and
 `{outerIndex}` is the outer index. `{outerIndex}` is valid only in an inner template.

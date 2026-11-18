@@ -55,13 +55,15 @@ enum PrototypeRepeat {
 
     /// Field `expand` stamps on the first child of each keyed repeat row; it is not part of the authored contract.
     static let rowKeyField = "_repeatKey"
+    static let identityField = "_repeatIdentity"
 
-    /// Drops the expansion-only row key everywhere under `value`, so a post-expansion structural
+    /// Drops expansion-only row keys and identities everywhere under `value`, so a post-expansion structural
     /// check sees only authored fields (#15815). Authored specs are contract-checked before expansion.
     static func withoutRowKeys(_ value: JSONValue) -> JSONValue {
         switch value {
         case var .object(fields):
             fields[rowKeyField] = nil
+            fields[identityField] = nil
             return .object(fields.mapValues(withoutRowKeys))
         case let .array(items):
             return .array(items.map(withoutRowKeys))
@@ -105,11 +107,12 @@ enum PrototypeRepeat {
                 ).flatMap { instance in
                     children.enumerated().map { index, child in
                         var bound = expand(child, outer: instance, formatter: formatter, environment: environment)
-                        if index == 0, let key = spec["key"]?.stringValue,
-                           let value = instance.item[key], var anchored = bound.objectFields,
-                           let rendered = PrototypeScrollTarget.scalarKey(value)
-                        {
-                            anchored[rowKeyField] = .string(rendered)
+                        if var anchored = bound.objectFields, let identity = instance.identity {
+                            // Every template child needs an identity; only the first is a scroll anchor.
+                            anchored[identityField] = .string("\(identity)/children[\(index)]")
+                            if index == 0, spec["key"] != nil {
+                                anchored[rowKeyField] = .string(identity)
+                            }
                             bound = .object(anchored)
                         }
                         return bound
@@ -262,7 +265,7 @@ enum PrototypeRepeat {
         }
     }
 
-    /// `key` is accepted but rows keep positional identity until keyed patching (#11675).
+    /// Compose outer and inner keys, using an index only for a repeat without a declared key.
     private static func instances(
         of spec: [String: JSONValue],
         formatter: PrototypeValueFormatter,
@@ -298,8 +301,15 @@ enum PrototypeRepeat {
                 }
                 values["$outerIndex"] = .number(Double(outer.index))
             }
+            let key = spec["key"]?.stringValue
+            let ownIdentity = key.flatMap { values[$0] }.flatMap(PrototypeScrollTarget.scalarKey)
+                ?? (key == nil ? String(index) : nil)
+            let identity = ownIdentity.map { value in
+                outer.map { "\($0.identity ?? String($0.index))/\(value)" } ?? value
+            }
             return PrototypeRepeatInstance(
-                alias: alias, item: values, index: index, outerAlias: outer?.alias, sourceItem: fields
+                alias: alias, item: values, index: index, outerAlias: outer?.alias, sourceItem: fields,
+                identity: identity
             )
         }
     }
@@ -655,6 +665,7 @@ struct PrototypeRepeatInstance {
     let index: Int
     var outerAlias: String?
     var sourceItem: [String: JSONValue]?
+    var identity: String?
 
     /// One template node bound to this instance; descendants are bound too.
     func bind(_ node: JSONValue, descendants: Bool = true) -> JSONValue {

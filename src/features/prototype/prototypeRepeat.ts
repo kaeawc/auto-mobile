@@ -513,6 +513,9 @@ function innerSourceError(
   if (invalid >= 0) {
     return fail(at, `Repeat field item ${invalid} is not an object`);
   }
+  if (rows.some((row) => Object.keys(row).some((key) => key.startsWith("outer.")))) {
+    return fail(at, 'Inner repeat fields starting with "outer." are reserved');
+  }
   state.cells += new PrototypeRepeatData({ rows }).cells("/rows");
   if (state.cells > contract.limits.MAX_PROTOTYPE_REPEAT_PATH_CELLS) {
     return fail(at, "Repeat path cell limit exceeded");

@@ -67,6 +67,91 @@ final class PrototypeNestedRepeatMappingTests: XCTestCase {
         XCTAssertEqual(last.node.children?.compactMap(\.text), ["2/0 C Cy: PAD x3"])
     }
 
+    private func identitySpec(_ ids: [String], outerKey: Bool = true, innerKey: Bool = true) throws -> PrototypeSpec {
+        let fixture = try XCTUnwrap(PrototypeNestedRepeatTests.fixtures().first)
+        var fields = try XCTUnwrap(JSONDecoder().decode(JSONValue.self, from: fixture.envelope()).objectFields)
+        var root = try XCTUnwrap(fields["root"]?.objectFields)
+        var repeatSpec = try XCTUnwrap(root["repeat"]?.objectFields)
+        repeatSpec["key"] = outerKey ? .string("id") : nil
+        root["repeat"] = .object(repeatSpec)
+        guard case let .array(children)? = root["children"], var inner = children[0].objectFields,
+              var nested = inner["repeat"]?.objectFields
+        else { throw PrototypeLoadError.invalidSpec(path: "root", message: "Missing template") }
+        nested["key"] = innerKey ? .string("sku") : nil
+        inner["repeat"] = .object(nested)
+        inner["children"] = .array([
+            .object(["type": .string("text"), "text": .string("{order.id}/{line.sku}")]),
+            .object(["type": .string("text"), "text": .string("second {line.sku}")]),
+        ])
+        root["children"] = .array([.object(inner)])
+        fields["root"] = .object(root)
+        fields["data"] = .object(["orders": .array(ids.map { id in .object([
+            "id": .string(id), "lines": .array([.object(["sku": .string("shared")])]),
+        ]) })])
+        let data = try JSONEncoder().encode(JSONValue.object(fields))
+        try PrototypeSpecStrictValidator.validate(data: data)
+        return try JSONDecoder().decode(PrototypeSpec.self, from: data)
+    }
+
+    func testComposedForEachIdentitySurvivesOuterReorderAndInsertion() throws {
+        func identities(_ ids: [String]) throws -> [String: [String]] {
+            let spec = try identitySpec(ids)
+            let outer = spec.root.drawnChildren(holds: { _ in true })
+            return try Dictionary(uniqueKeysWithValues: outer.map { entry in
+                let key = try XCTUnwrap(entry.node.repeatKey)
+                let rows = entry.node.drawnChildren(holds: { _ in true })
+                XCTAssertEqual(
+                    rows.map(\.node.repeatIdentity),
+                    ["\(key)/shared/children[0]", "\(key)/shared/children[1]"]
+                )
+                XCTAssertEqual(rows.first?.node.repeatKey, "\(key)/shared")
+                return (key, [entry.identity] + rows.map(\.identity))
+            })
+        }
+        let before = try identities(["A", "B"])
+        let reordered = try identities(["B", "A"])
+        let inserted = try identities(["NEW", "B", "A"])
+        XCTAssertEqual(before, reordered)
+        XCTAssertEqual(before["A"], inserted["A"])
+        XCTAssertEqual(before["B"], inserted["B"])
+        let all = inserted.values.flatMap { $0 }
+        XCTAssertEqual(Set(all).count, all.count)
+    }
+
+    func testComposedIdentityFallsBackOnlyForUndeclaredKeys() throws {
+        let innerPositional = try identitySpec(["A", "B"], innerKey: false)
+        XCTAssertEqual(innerPositional.root.children?[0].children?[0].repeatIdentity, "A/0/children[0]")
+        XCTAssertEqual(innerPositional.root.children?[1].children?[0].repeatIdentity, "B/0/children[0]")
+        let outerPositional = try identitySpec(["A", "B"], outerKey: false)
+        XCTAssertEqual(outerPositional.root.children?[0].children?[0].repeatIdentity, "0/shared/children[0]")
+        XCTAssertEqual(outerPositional.root.children?[1].children?[0].repeatIdentity, "1/shared/children[0]")
+    }
+
+    func testExpansionIdentityIsInternalMetadata() throws {
+        let node: JSONValue = .object([
+            "type": .string("column"), PrototypeRepeat.identityField: .string("A/children[0]"),
+            "children": .array([.object([
+                "type": .string("text"), "text": .string("row"),
+                PrototypeRepeat.rowKeyField: .string("A/shared"),
+                PrototypeRepeat.identityField: .string("A/shared/children[0]"),
+            ])]),
+        ])
+        XCTAssertEqual(PrototypeRepeat.withoutRowKeys(node), .object([
+            "type": .string("column"),
+            "children": .array([.object(["type": .string("text"), "text": .string("row")])]),
+        ]))
+        let spec: JSONValue = .object([
+            "id": .string("authored-identity"),
+            "window": .object(["placement": .object(["type": .string("fullscreen")])]),
+            "root": node,
+        ])
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: JSONEncoder().encode(spec))) { error in
+            XCTAssertEqual(error as? PrototypeLoadError, .invalidSpec(
+                path: "root._repeatIdentity", message: "Unknown property"
+            ))
+        }
+    }
+
     func testDataWriteRebuildsNestedRows() throws {
         let fixture = try XCTUnwrap(PrototypeNestedRepeatTests.fixtures().first)
         let original = try JSONDecoder().decode(PrototypeSpec.self, from: fixture.envelope())

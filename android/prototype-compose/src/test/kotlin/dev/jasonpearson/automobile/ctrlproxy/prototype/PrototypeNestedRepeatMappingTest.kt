@@ -15,7 +15,9 @@ class PrototypeNestedRepeatMappingTest {
         .map { File(it, "test/fixtures/prototype-spec") }
         .first { it.isDirectory }
     private val cases =
-      Json.parseToJsonElement(File(directory, "repeat/nested.json").readText()).jsonArray
+      listOf("nested.json", "nested-sources.json").flatMap { file ->
+        Json.parseToJsonElement(File(directory, "repeat/$file").readText()).jsonArray
+      }
     private val json = Json { ignoreUnknownKeys = false }
 
     private fun spec(case: JsonObject): PrototypeSpec =
@@ -129,6 +131,92 @@ class PrototypeNestedRepeatMappingTest {
       (PrototypeSpecValidator.validate(encoded, supported - "prototype_nested_repeat_v1")
           as PrototypeSpecValidation.Failure)
         .error,
+    )
+  }
+
+  private fun identitySpec(
+    ids: List<String>,
+    outerKey: Boolean = true,
+    innerKey: Boolean = true,
+  ): PrototypeSpec {
+    val source = spec(cases.first().jsonObject)
+    val root = source.root as PrototypeColumnNode
+    val inner = root.children.single() as PrototypeColumnNode
+    return source.copy(
+      root =
+        root.copy(
+          repeat = root.repeat!!.copy(key = if (outerKey) "id" else null),
+          children =
+            listOf(
+              inner.copy(
+                repeat = inner.repeat!!.copy(key = if (innerKey) "sku" else null),
+                children =
+                  listOf(
+                    PrototypeTextNode(text = "{order.id}/{line.sku}"),
+                    PrototypeTextNode(text = "second {line.sku}"),
+                  ),
+              ),
+            ),
+        ),
+      data =
+        buildJsonObject {
+          put(
+            "orders",
+            JsonArray(
+              ids.map { id ->
+                buildJsonObject {
+                  put("id", id)
+                  put("lines", buildJsonArray { add(buildJsonObject { put("sku", "shared") }) })
+                }
+              },
+            ),
+          )
+        },
+    )
+  }
+
+  @Test
+  fun `composed identity survives outer reorder and insertion without inner key collisions`() {
+    fun identities(ids: List<String>): Map<String, List<String>> {
+      val root =
+        PrototypeRenderMapper(FakePrototypeValueFormatter()).map(identitySpec(ids), emptyMap()).root
+      return ids.zip(root.children).associate { (id, outer) ->
+        assertEquals(
+          listOf(0, 1).map { "root.repeat[$id].children[0].repeat[shared].children[$it]" },
+          outer.children.map { it.identity },
+        )
+        id to listOf(outer.identity) + outer.children.map { it.identity }
+      }
+    }
+    val before = identities(listOf("A", "B"))
+    assertEquals(before, identities(listOf("B", "A")))
+    val inserted = identities(listOf("NEW", "B", "A"))
+    assertEquals(before["A"], inserted["A"])
+    assertEquals(before["B"], inserted["B"])
+    val all = inserted.values.flatten()
+    assertEquals(all.size, all.toSet().size)
+  }
+
+  @Test
+  fun `identity falls back to index only without a declared key`() {
+    val mapper = PrototypeRenderMapper(FakePrototypeValueFormatter())
+    val inner = mapper.map(identitySpec(listOf("A", "B"), innerKey = false), emptyMap()).root
+    assertEquals(
+      "root.repeat[A].children[0].repeat[0].children[0]",
+      inner.children[0].children[0].identity,
+    )
+    assertEquals(
+      "root.repeat[B].children[0].repeat[0].children[0]",
+      inner.children[1].children[0].identity,
+    )
+    val outer = mapper.map(identitySpec(listOf("A", "B"), outerKey = false), emptyMap()).root
+    assertEquals(
+      "root.repeat[0].children[0].repeat[shared].children[0]",
+      outer.children[0].children[0].identity,
+    )
+    assertEquals(
+      "root.repeat[1].children[0].repeat[shared].children[0]",
+      outer.children[1].children[0].identity,
     )
   }
 

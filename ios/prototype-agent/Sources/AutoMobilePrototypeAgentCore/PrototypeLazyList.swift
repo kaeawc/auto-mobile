@@ -54,7 +54,8 @@ enum PrototypeLazyList {
               items.indices.contains(index) else { return nil }
         let fields = PrototypeDataValues.project(items[index].objectFields ?? [:]).objectFields ?? [:]
         let instance = PrototypeRepeatInstance(
-            alias: spec.as, item: fields, index: index, sourceItem: items[index].objectFields
+            alias: spec.as, item: fields, index: index, sourceItem: items[index].objectFields,
+            identity: fields[spec.key]?.displayString
         )
         let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
         let bound = PrototypeRepeat.expand(

@@ -448,11 +448,24 @@ struct PrototypeSession {
         rebuildNavigation(for: rebuilt.root, keepingPages: pages, keepingStacks: stacks)
     }
 
-    mutating func deliverPlatformEvent(_ name: String, data: JSONValue) throws -> [PrototypeEvent] {
+    mutating func deliverPlatformEvent(
+        _ name: String,
+        data: JSONValue,
+        simulated: Bool = false
+    )
+        throws -> [PrototypeEvent]
+    {
         guard let spec else { return [] }
         var payload = JSONValue.object(["event": .string(name), "data": data])
-        if try JSONEncoder().encode(payload).count > PrototypeLimits.maxEmitPayloadBytes {
+        if simulated { payload = .object(["event": .string(name), "data": data, "simulated": .bool(true)]) }
+        let encoder = JSONEncoder()
+        if simulated { encoder.outputFormatting = [.withoutEscapingSlashes] }
+        if try encoder.encode(payload).count > PrototypeLimits.maxEmitPayloadBytes {
             payload = .object(["event": .string(name), "data": .null, "truncated": .bool(true)])
+        }
+        if simulated, case var .object(fields) = payload {
+            fields["simulated"] = .bool(true)
+            payload = .object(fields)
         }
         let actions = spec.platformHandlers[name] ?? .array([])
         let decoded = try JSONDecoder().decode([PrototypeAction].self, from: JSONEncoder().encode(actions))

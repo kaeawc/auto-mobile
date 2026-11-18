@@ -84,6 +84,9 @@ final class PrototypeAgentRuntimeIsolationTests: XCTestCase {
             ),
         ]
         for registry in registries {
+            XCTAssertFalse(registry.supportsSimulation)
+            XCTAssertFalse(registry.capabilities.contains(PrototypeAgentProtocol.platformSimulationCapability))
+            XCTAssertNil(registry.modules["test"])
             XCTAssertFalse(registry.modules.isEmpty)
             XCTAssertTrue(registry.capabilities.contains("prototype_platform_settings_v1"))
             XCTAssertNotNil(registry.modules["settings"])

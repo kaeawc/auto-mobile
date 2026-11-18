@@ -20,6 +20,13 @@ final class PrototypePlatformDriver {
         self.clock = clock
     }
 
+    func simulate(id: String, event: String, data: JSONValue, session: PrototypeSession) -> String? {
+        PrototypePlatformSimulation.apply(id: id, event: event, data: data, session: session, registry: registry) {
+            onState?(registry.snapshot)
+            onEvent?($0)
+        }
+    }
+
     func subscribe() {
         if !observing {
             observing = true

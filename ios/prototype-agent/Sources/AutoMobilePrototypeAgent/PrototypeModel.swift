@@ -278,8 +278,11 @@
             driver.onState = { [weak self] snapshot in self?.updatePlatformState(snapshot) }
             driver.onEvent = { [weak self] event in
                 self?.apply(activity: false) { session in
-                    do { return try session.deliverPlatformEvent(event.event, data: event.data) }
-                    catch { NSLog("Prototype platform event failed: %@", String(describing: error)); return [] }
+                    do { return try session.deliverPlatformEvent(
+                        event.event,
+                        data: event.data,
+                        simulated: event.simulated
+                    ) } catch { NSLog("Prototype platform event failed: %@", String(describing: error)); return [] }
                 }
             }
             return driver
@@ -331,6 +334,10 @@
 
         func pauseTimers() { timers.pause() }
         func resumeTimers() { timers.resume() }
+
+        func simulatePlatformEvent(id: String, event: String, data: JSONValue) -> String? {
+            platformDriver.simulate(id: id, event: event, data: data, session: session)
+        }
 
         func advanceClock(id: String, milliseconds: Int) -> PrototypeTimers.AdvanceResult {
             guard session.isShown, spec?.id == id else {

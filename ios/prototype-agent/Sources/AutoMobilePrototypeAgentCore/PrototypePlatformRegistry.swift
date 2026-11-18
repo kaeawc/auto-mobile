@@ -29,14 +29,22 @@ public enum PlatformCallResult: Equatable, Sendable {
 public struct PlatformEvent: Equatable, Sendable {
     public let event: String
     public let data: JSONValue
+    let simulated: Bool
 
     public init(event: String, data: JSONValue) {
+        simulated = false
         self.event = event
         self.data = data
     }
 }
 
 extension PlatformEvent {
+    init(simulating event: String, data: JSONValue) {
+        self.event = event
+        self.data = data
+        simulated = true
+    }
+
     /// A module's own signal that its state changed with no authored event to deliver: the driver
     /// refreshes `/platform` and runs no handler. The name is outside the contract's event names.
     static func stateRefresh(_ module: String) -> PlatformEvent {
@@ -58,10 +66,16 @@ public protocol PrototypePlatformModule: Sendable {
     var state: [String: JSONValue] { get }
     /// Releases observations after the final driver stops; later reads may start them again.
     func stop()
+    var supportsSimulation: Bool { get }
+    /// Apply state without yielding to events; the runtime delivers the accepted event once.
+    /// Returning false must leave state untouched.
+    func simulate(_ event: PlatformEvent) -> Bool
 }
 
 extension PrototypePlatformModule {
     public var requiredInfoPlistKeys: [String] { [] }
+    public var supportsSimulation: Bool { false }
+    public func simulate(_: PlatformEvent) -> Bool { false }
     public func stop() {}
     public func configure(root _: JSONValue?) {}
 }
@@ -121,7 +135,7 @@ public final class PrototypePlatformRegistry {
 
     private init(
         modules: [String: any PrototypePlatformModule],
-        parent: PrototypePlatformRegistry,
+        parent: PrototypePlatformRegistry?,
         presentationModules: [any PrototypePlatformModule]
     ) {
         self.modules = modules
@@ -162,7 +176,20 @@ public final class PrototypePlatformRegistry {
         } else { modules["sensors"]?.configure(root: sensorsBlock) }
     }
 
-    public var capabilities: [String] { Set(modules.values.map(\.capability)).sorted() }
+    public var supportsSimulation: Bool { modules.values.contains { $0.supportsSimulation } }
+
+    public var capabilities: [String] {
+        let simulation = supportsSimulation ? [PrototypeAgentProtocol.platformSimulationCapability] : []
+        return Set(modules.values.map(\.capability) + simulation).sorted()
+    }
+
+    /// Launch-only test membership, with environment injected by the agent factory.
+    func withTestHooks(environment: [String: String]) -> PrototypePlatformRegistry {
+        guard PrototypeTestHooks.isEnabled(environment: environment) else { return self }
+        var registered = modules
+        if registered["test"] == nil { registered["test"] = PrototypeTestPlatformModule() }
+        return PrototypePlatformRegistry(modules: registered, parent: nil, presentationModules: [])
+    }
 
     // Production membership lives here so pure core tests exercise the same factories as UIKit.
     static func feedbackModules(

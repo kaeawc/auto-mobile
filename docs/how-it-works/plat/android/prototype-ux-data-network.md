@@ -19,6 +19,7 @@ map.
 | `prototype_platform_realtime_v1`        | channels, realtime calls, upsertData, appendData.maxItems | Contract only     | Contract only |
 | `prototype_platform_realtime_device_v1` | channels with `via: "device"`                             | Contract only     | Contract only |
 | `prototype_network_device_v1`           | `request` with `via: "device"`                            | Advertised        | Advertised    |
+| `prototype_network_upload_v1`           | upload request bodies and progress                        | Advertised        | Contract only |
 
 A device without a capability is refused before uploads or show, with a message naming the
 capability. Device-side verification is the manual run in `skills/manual-test/prototype-acceptance.md`

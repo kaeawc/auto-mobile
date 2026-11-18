@@ -385,6 +385,7 @@ class WebSocketServer(
     // The device runs a via "device" request with its own HTTP stack (Retrofit over OkHttp), to any
     // http or https host. Without it a host refuses a spec that asks for via "device".
     add("prototype_network_device_v1")
+    add("prototype_network_upload_v1")
     add("prototype_platform_clipboard_v1")
     add("prototype_platform_device_v1")
     add("prototype_platform_v1")

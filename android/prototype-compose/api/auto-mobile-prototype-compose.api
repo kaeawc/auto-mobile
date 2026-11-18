@@ -230,10 +230,12 @@ Compiled from "PrototypeAssets.kt"
 public final class dev.jasonpearson.automobile.prototype.PrototypeAssets {
   public static final dev.jasonpearson.automobile.prototype.PrototypeAssets$Companion Companion;
   public static final int $stable;
+  public final kotlin.jvm.functions.Function1<java.lang.String, java.io.File> getUploadFile$prototype_compose();
   public dev.jasonpearson.automobile.prototype.PrototypeAssets(java.util.Map<java.lang.String, byte[]>, java.util.Map<java.lang.String, byte[]>, kotlin.jvm.functions.Function1<? super java.lang.String, byte[]>, kotlin.jvm.functions.Function1<? super java.lang.String, byte[]>);
   public dev.jasonpearson.automobile.prototype.PrototypeAssets(java.util.Map, java.util.Map, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final dev.jasonpearson.automobile.prototype.PrototypeAssets withShaders(java.util.Map<java.lang.String, byte[]>, kotlin.jvm.functions.Function1<? super java.lang.String, byte[]>);
   public static dev.jasonpearson.automobile.prototype.PrototypeAssets withShaders$default(dev.jasonpearson.automobile.prototype.PrototypeAssets, java.util.Map, kotlin.jvm.functions.Function1, int, java.lang.Object);
+  public final dev.jasonpearson.automobile.prototype.PrototypeAssets withUploadFiles(kotlin.jvm.functions.Function1<? super java.lang.String, ? extends java.io.File>);
   public final byte[] imageBytes$prototype_compose(java.lang.String);
   public final byte[] fontBytes$prototype_compose(java.lang.String);
   public final byte[] shaderBytes$prototype_compose(java.lang.String);
@@ -296,6 +298,9 @@ public final class dev.jasonpearson.automobile.prototype.PrototypeHttpRequest {
   public final java.util.Map<java.lang.String, java.lang.String> getHeaders();
   public final kotlinx.serialization.json.JsonElement getBody();
   public final int getTimeoutMs();
+  public final dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeUploadBody getUploadBody();
+  public static void getUploadBody$annotations();
+  public final kotlin.jvm.functions.Function1<java.lang.Integer, kotlin.Unit> getOnUploadProgress();
 }
 Compiled from "PrototypeLoadError.kt"
 public final class dev.jasonpearson.automobile.prototype.PrototypeLoadError$Invalid implements dev.jasonpearson.automobile.prototype.PrototypeLoadError {

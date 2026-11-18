@@ -33008,7 +33008,14 @@
               "type": "object"
             },
             "requires": {
-              "type": "object"
+              "anyOf": [
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "array"
+                }
+              ]
             },
             "links": {
               "type": "array"

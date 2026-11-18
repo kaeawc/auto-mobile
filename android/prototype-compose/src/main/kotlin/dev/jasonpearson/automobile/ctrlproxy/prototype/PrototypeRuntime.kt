@@ -187,6 +187,7 @@ class PrototypeRuntime(
     PrototypeRequestLimiter(PrototypePlatformCalls.maxInFlight),
   private val requestHideKeyboard: suspend () -> Unit = {},
   monotonicMs: () -> Long = { System.nanoTime() / 1_000_000L },
+  private val uploadAssets: PrototypeAssetSource? = null,
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
@@ -1618,7 +1619,10 @@ class PrototypeRuntime(
     val onError: List<PrototypeAction>?,
     val eventContext: JsonObject?,
     val append: PrototypeRequestAppend?,
+    val progressKey: String?,
   ) {
+    var uploadBytes: Long? = null
+
     lateinit var job: Job
 
     /** The runtime that applies the response; a same-id replacement hands it to the new one. */
@@ -1695,12 +1699,34 @@ class PrototypeRuntime(
         action.onError,
         eventData,
         action.append,
+        action.progressKey,
       )
     }
     // The newest request wins even when it fails to resolve: the older one must not land later.
     supersedeRequests(action.into, action.append?.to)
+    val upload =
+      try {
+        resolveUpload(action)
+      } catch (error: IllegalArgumentException) {
+        return finishRequest(
+          info(bound.url),
+          PrototypeRequestResponse.Failed(
+            PrototypeRequestError(
+              PrototypeRequestErrorCode.INVALID_REQUEST,
+              error.message ?: "Invalid upload",
+            ),
+          ),
+        )
+      }
     val resolved =
-      when (val result = PrototypeRequestResolver.resolve(bound, bound.url, bindingInputs())) {
+      when (
+        val result =
+          PrototypeRequestResolver.resolve(
+            if (upload == null) bound else bound.copy(body = null),
+            bound.url,
+            bindingInputs(),
+          )
+      ) {
         is PrototypeResolvedRequestResult.Failure ->
           return finishRequest(
             info(bound.url),
@@ -1710,6 +1736,7 @@ class PrototypeRuntime(
       }
     val started = info(resolved.url)
     started.owner = this
+    started.uploadBytes = upload?.fileBytes
     if (!requestLimiter.tryAcquire()) {
       val error =
         PrototypeRequestError(
@@ -1718,9 +1745,7 @@ class PrototypeRuntime(
         )
       return finishRequest(started, PrototypeRequestResponse.Failed(error))
     }
-    action.statusKey?.let { key ->
-      if (writeStatus(key, PrototypeRequests.STATUS_LOADING)) touched += key
-    }
+    writeRequestLoading(action, upload, touched)
     val request =
       PrototypeHttpRequest(
         requestId = started.requestId,
@@ -1730,7 +1755,57 @@ class PrototypeRuntime(
         headers = resolved.headers,
         body = resolved.body,
         timeoutMs = action.timeoutMs ?: PrototypeSpecValidator.DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS,
+        uploadBody = upload,
+        onUploadProgress = uploadProgressCallback(action.progressKey, started),
       )
+    launchRequest(started, request)
+  }
+
+  private fun resolveUpload(action: PrototypeRequestAction): PrototypeUploadBody? {
+    if (!PrototypeUploadResolver.isUpload(action.body)) return null
+    require((action.via ?: PrototypeHttpClients.VIA_HOST) == PrototypeHttpClients.VIA_DEVICE) {
+      "Host uploads are not available yet; use via \"device\"."
+    }
+    return PrototypeUploadResolver.resolve(checkNotNull(action.body), bindingInputs(), uploadAssets)
+  }
+
+  private suspend fun writeRequestLoading(
+    action: PrototypeRequestAction,
+    upload: PrototypeUploadBody?,
+    touched: MutableSet<String>,
+  ) {
+    action.statusKey?.let { key ->
+      if (writeStatus(key, PrototypeRequests.STATUS_LOADING)) touched += key
+    }
+    if (upload != null) action.progressKey?.let { writeUploadProgress(it, 0, reset = true) }
+  }
+
+  private fun uploadProgressCallback(key: String?, started: RequestInFlight): ((Int) -> Unit)? =
+    key?.let { key ->
+      { percent: Int ->
+        requestScope.launch {
+          do {
+            val owner = started.owner
+            owner.exclusively {
+              if (
+                started.owner === owner &&
+                  owner.current.active &&
+                  synchronized(owner.inFlight) { owner.inFlight[started.requestId] === started }
+              ) {
+                try {
+                  owner.writeUploadProgress(key, percent)
+                } finally {
+                  owner.interactionRevision = null
+                }
+              }
+            }
+          } while (started.owner !== owner)
+        }
+        Unit
+      }
+    }
+
+  private fun launchRequest(started: RequestInFlight, request: PrototypeHttpRequest) {
     val client = httpClients.forVia(started.via)
     // Lazy, so the job is registered before it can settle even on an eager dispatcher.
     started.job =
@@ -1830,6 +1905,7 @@ class PrototypeRuntime(
       check(applyDataWrite(write) == null) { "A staged request write was refused at ${write.path}" }
     }
     if (!current.active) return
+    finishUploadProgress(request, response)
     request.statusKey?.let { key ->
       val status =
         if (result.succeeded) PrototypeRequests.STATUS_SUCCESS else PrototypeRequests.STATUS_ERROR
@@ -1859,6 +1935,15 @@ class PrototypeRuntime(
     }
   }
 
+  private suspend fun finishUploadProgress(
+    request: RequestInFlight,
+    response: PrototypeRequestResponse,
+  ) {
+    if (request.uploadBytes != null && response is PrototypeRequestResponse.Received) {
+      request.progressKey?.let { writeUploadProgress(it, 100) }
+    }
+  }
+
   private suspend fun sendRequestEvent(
     request: RequestInFlight,
     status: Int?,
@@ -1869,17 +1954,31 @@ class PrototypeRuntime(
       kind = PrototypeEventKind.EMIT,
       name = PrototypeRequests.EVENT_NAME,
       payload =
-        PrototypeRequestEvent.payload(
-          request.requestId,
-          request.method,
-          request.url,
-          request.via,
-          request.into,
-          status,
-          durationMs,
-          error,
+        JsonObject(
+          PrototypeRequestEvent.payload(
+            request.requestId,
+            request.method,
+            request.url,
+            request.via,
+            request.into,
+            status,
+            durationMs,
+            error,
+          ) + request.uploadBytes?.let { mapOf("uploadBytes" to JsonPrimitive(it)) }.orEmpty(),
         ),
     )
+  }
+
+  private suspend fun writeUploadProgress(key: String, percent: Int, reset: Boolean = false) {
+    val value = PrototypeScalar.Numeric(percent.coerceIn(0, 100).toDouble())
+    val previous = current.state[key] as? PrototypeScalar.Numeric ?: return
+    if (previous.value == value.value || (!reset && previous.value >= value.value)) return
+    try {
+      writeInteractionSpec(validated(current.spec, mapOf(key to value)))
+      emitStateChange(listOf(key))
+    } catch (error: IllegalArgumentException) {
+      warn("Refused upload progress $key: ${error.message}")
+    }
   }
 
   /** True when the state key changed; a rejected write leaves state alone and says why. */

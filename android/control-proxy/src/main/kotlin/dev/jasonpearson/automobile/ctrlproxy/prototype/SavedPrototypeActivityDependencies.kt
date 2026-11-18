@@ -98,6 +98,8 @@ internal object SavedPrototypeActivityDependencies {
           request.headers,
           request.body,
           request.timeoutMs,
+          request.uploadBody,
+          request.onUploadProgress,
         ),
       )
     }

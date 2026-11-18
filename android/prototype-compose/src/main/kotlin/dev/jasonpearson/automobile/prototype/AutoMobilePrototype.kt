@@ -386,6 +386,7 @@ private class EmbeddedOwner(
         requestDismiss = config.environment.host?.requestDismiss ?: { true },
         storage = opened.session,
         httpClients = config.network.clients(),
+        uploadAssets = source,
         platform = config.platform,
         requestScope = config.scope,
         exclusively = { block -> interactions.withLock { block() } },

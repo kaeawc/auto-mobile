@@ -1,0 +1,203 @@
+@file:OptIn(dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi::class)
+
+package dev.jasonpearson.automobile.prototype.appshell
+
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
+import dev.jasonpearson.automobile.protocol.*
+import dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.*
+import org.junit.Assert.*
+import org.junit.BeforeClass
+import org.junit.Test
+
+class RuntimeAttachTargetTest {
+  companion object {
+    @JvmStatic
+    @BeforeClass
+    fun warmValidator() {
+      PrototypeSpecValidator.validate("{}")
+    }
+  }
+
+  private class Ledger(override val appInstanceId: String = "test-process") : AttachEventLedger {
+    override var lastSequence = 0L
+      private set
+
+    override fun nextSequence(): Long = ++lastSequence
+  }
+
+  private fun target(
+    scope: kotlinx.coroutines.CoroutineScope,
+    ledger: AttachEventLedger = Ledger(),
+  ) = RuntimeAttachTarget(EmbeddedPrototypeHost(scope, Mutex()), ledger) { false }
+
+  private fun runtime(
+    scope: kotlinx.coroutines.CoroutineScope,
+    id: String = "panel",
+    persistence: String? = null,
+  ) =
+    PrototypeRuntime(
+      PrototypeSpec(
+        id,
+        PrototypeWindow(PrototypeFullscreenPlacement(), persistence = persistence),
+        state = mapOf("title" to PrototypeScalar.Text("before")),
+        root = PrototypeTextNode(text = "Title"),
+      ),
+      nextSequence = { 1L },
+      clock = { 0L },
+      requestScope = scope,
+      warn = {},
+    )
+
+  private fun ops(value: String, key: String = "title") =
+    attachJson
+      .parseToJsonElement(
+        """[{"op":"replace","path":"/state/$key","value":"$value"}]""",
+      )
+      .jsonArray
+
+  @Test
+  fun `activity targets share process identity and sequence ledger`() = runTest {
+    val ledger = Ledger("first-process")
+    val first = target(backgroundScope, ledger)
+    assertEquals(1L, first.nextSequence())
+    val recreated = target(backgroundScope, ledger)
+    assertEquals(first.appInstanceId, recreated.appInstanceId)
+    assertEquals(JsonPrimitive(1L), recreated.status()["lastSequence"])
+    assertEquals(2L, recreated.nextSequence())
+    val relaunched = target(backgroundScope, Ledger("new-process"))
+    assertNotEquals(first.appInstanceId, relaunched.appInstanceId)
+    assertEquals(1L, relaunched.nextSequence())
+  }
+
+  @Test
+  fun `runtime patch replies match CtrlProxy applied rejected and conflict fields`() = runTest {
+    val target = target(backgroundScope)
+    val runtime = runtime(backgroundScope)
+    target.runtime = runtime
+    val rejected = target.patch("panel", null, ops("next"))
+    assertFalse(rejected.success)
+    assertEquals("baseRevision is required when a patch has /state ops", rejected.error)
+    assertEquals(0L, rejected.revision)
+    assertNull(rejected.conflict)
+    val applied = target.patch("panel", 0, ops("next"))
+    assertTrue("error=${applied.error}", applied.success)
+    assertEquals(1L, applied.revision)
+    assertEquals(1L, runtime.current.revision)
+    assertNull(applied.error)
+    assertEquals(PrototypeScalar.Text("next"), runtime.current.state["title"])
+    val conflict = target.patch("panel", 0, ops("stale"))
+    assertFalse(conflict.success)
+    assertEquals("conflict: state changed after baseRevision 0", conflict.error)
+    assertEquals(1L, conflict.revision)
+    assertEquals(
+      PrototypePatchConflict(1, mapOf("title" to PrototypeScalar.Text("next"))),
+      conflict.conflict,
+    )
+    // Serialize the actual runtime reply, so discriminator and scalar shape are checked too.
+    val frame = attachJson.encodeToJsonElement(WebSocketResponse.serializer(), conflict).jsonObject
+    assertEquals(JsonPrimitive("prototype_result"), frame["type"])
+    assertEquals(
+      JsonPrimitive("next"),
+      frame.getValue("conflict").jsonObject.getValue("state").jsonObject["title"],
+    )
+    runtime.close()
+  }
+
+  @Test
+  fun `unknown inactive and replaced runtimes cannot be patched`() = runTest {
+    val target = target(backgroundScope)
+    val old = runtime(backgroundScope)
+    target.runtime = old
+    val unknown = target.patch("other", 0, ops("next"))
+    assertEquals("Unknown prototype id: other", unknown.error)
+    assertNull(unknown.revision)
+    assertEquals(0L, old.current.revision)
+    val replacement = runtime(backgroundScope, "replacement")
+    target.runtime = replacement
+    assertFalse(target.patch("panel", 0, ops("next")).success)
+    val applied = target.patch("replacement", 0, ops("next"))
+    assertTrue("error=${applied.error}", applied.success)
+    assertEquals(1L, applied.revision)
+    assertEquals(1L, replacement.current.revision)
+    assertEquals(PrototypeScalar.Text("next"), replacement.current.state["title"])
+    assertEquals(0L, old.current.revision)
+    assertEquals(PrototypeScalar.Text("before"), old.current.state["title"])
+    replacement.close()
+    assertFalse(target.patch("replacement", 1, ops("next")).success)
+    old.close()
+  }
+
+  @Test
+  fun `status follows the current runtime and sequence survives remount`() = runTest {
+    val target = target(backgroundScope)
+    assertEquals(JsonPrimitive(false), target.status()["shown"])
+    assertEquals(JsonNull, target.status()["id"])
+    val first = runtime(backgroundScope)
+    target.runtime = first
+    assertEquals(1L, target.nextSequence())
+    val shown = target.status()
+    assertEquals(JsonPrimitive(true), shown["shown"])
+    assertEquals(JsonPrimitive("panel"), shown["id"])
+    assertEquals(JsonPrimitive(false), shown["persistent"])
+    assertEquals(JsonPrimitive("before"), shown.getValue("state").jsonObject["title"])
+    assertEquals(JsonPrimitive(1L), shown["lastSequence"])
+    assertTrue(shown.containsKey("pages"))
+    assertTrue(shown.containsKey("appearance"))
+    first.close()
+    assertEquals(JsonPrimitive(false), target.status()["shown"])
+    val next = runtime(backgroundScope, "replacement", persistence = "device")
+    target.runtime = next
+    assertEquals(2L, target.nextSequence())
+    assertEquals(JsonPrimitive("replacement"), target.status()["id"])
+    assertEquals(JsonPrimitive(true), target.status()["persistent"])
+    next.close()
+  }
+
+  @Test
+  fun `status and conflict redact secure keys while retaining public state`() = runTest {
+    val target = target(backgroundScope)
+    val runtime =
+      PrototypeRuntime(
+        PrototypeSpec(
+          "panel",
+          PrototypeWindow(PrototypeFullscreenPlacement()),
+          state =
+            mapOf(
+              "secret" to PrototypeScalar.Text("private-token"),
+              "title" to PrototypeScalar.Text("public"),
+            ),
+          storage =
+            PrototypeStorageBlock(1, listOf("state:title"), secure = listOf("state:secret")),
+          requires = PrototypeRequires(platform = listOf("secureStorage")),
+          root = PrototypeTextNode(text = "Title"),
+        ),
+        nextSequence = { 1L },
+        clock = { 0L },
+        requestScope = backgroundScope,
+        warn = {},
+      )
+    target.runtime = runtime
+    val status = target.status().getValue("state").jsonObject
+    assertEquals(JsonPrimitive("[redacted]"), status["secret"])
+    assertEquals(JsonPrimitive("public"), status["title"])
+    assertFalse(target.status().toString().contains("private-token"))
+    val changes = JsonArray(ops("changed") + ops("new-private-token", "secret"))
+    val applied = target.patch("panel", 0, changes)
+    assertTrue("error=${applied.error}", applied.success)
+    assertEquals(1L, applied.revision)
+    val conflict = target.patch("panel", 0, JsonArray(ops("stale") + ops("stale-secret", "secret")))
+    assertFalse(conflict.success)
+    // Runtime conflicts omit secure keys; status above masks them at the attach boundary.
+    assertEquals(
+      PrototypePatchConflict(1, mapOf("title" to PrototypeScalar.Text("changed"))),
+      conflict.conflict,
+    )
+    val frame = attachJson.encodeToJsonElement(WebSocketResponse.serializer(), conflict).toString()
+    assertFalse(frame.contains("new-private-token"))
+    assertEquals(PrototypeScalar.Text("new-private-token"), runtime.current.state["secret"])
+    runtime.close()
+  }
+}

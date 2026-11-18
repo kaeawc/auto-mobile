@@ -58,23 +58,69 @@ class PrototypeSensorsModuleTest {
       )
       .also { if (start) it.startPlatformModules() }
 
+  private fun fixtureFiles(): List<File> =
+    repoFile("test/fixtures/prototype-sensors")
+      .listFiles()!!
+      .filter { it.extension == "json" }
+      .sorted()
+
+  private fun sensorFor(key: String?): PrototypeSensor =
+    when (key) {
+      null -> PrototypeSensor.SHAKE
+      "lightLux" -> PrototypeSensor.LIGHT
+      else -> PrototypeSensor.ORIENTATION
+    }
+
+  private fun sampleFor(key: String?, sample: JsonObject, now: Long): PrototypeSensorSample =
+    if (key == null)
+      PrototypeSensorSample.Acceleration(
+        now,
+        sample.getValue("x").jsonPrimitive.double,
+        sample.getValue("y").jsonPrimitive.double,
+        sample.getValue("z").jsonPrimitive.double,
+      )
+    else values(now, key to sample.getValue("value").jsonPrimitive.double)
+
+  private suspend fun TestScope.replaySamples(
+    fixture: JsonObject,
+    key: String?,
+    sensor: PrototypeSensor,
+    source: FakePrototypeSensorSource,
+    timer: FakeTimer,
+  ) {
+    for (element in fixture.getValue("samples").jsonArray) {
+      val sample = element.jsonObject
+      timer.now = sample.getValue("timestampMs").jsonPrimitive.long
+      val raw = sampleFor(key, sample, timer.now)
+      source.readings.getValue(sensor).emit(raw)
+      runCurrent()
+    }
+  }
+
+  private fun assertReferenceOutput(
+    file: File,
+    fixture: JsonObject,
+    key: String?,
+    writes: List<JsonElement>,
+    shakes: List<Long>,
+  ) {
+    if (key == null)
+      assertEquals(
+        file.name,
+        fixture.getValue("expectedShakes").jsonArray.map { it.jsonPrimitive.long },
+        shakes,
+      )
+    else assertEquals(file.name, fixture.getValue("expectedWrites").jsonArray.toList(), writes)
+  }
+
   @Test
   fun `every shared stream produces exactly the reference writes and shakes`() = runTest {
-    val files =
-      repoFile("test/fixtures/prototype-sensors")
-        .listFiles()!!
-        .filter { it.extension == "json" }
-        .sorted()
+    val files = fixtureFiles()
     assertTrue(files.isNotEmpty())
     for (file in files) {
       val fixture = Json.parseToJsonElement(file.readText()).jsonObject
       val key = fixture["key"]?.jsonPrimitive?.content
-      val sensor =
-        when (key) {
-          null -> PrototypeSensor.SHAKE
-          "lightLux" -> PrototypeSensor.LIGHT
-          else -> PrototypeSensor.ORIENTATION
-        }
+      val sensor = sensorFor(key)
       val source = FakePrototypeSensorSource()
       val module = PrototypeSensorsModule(source, backgroundScope)
       val timer = FakeTimer()
@@ -99,28 +145,8 @@ class PrototypeSensorsModuleTest {
         }
       module.startSensors(block(sensor, rateHz = fixture["rateHz"]?.jsonPrimitive?.int ?: 1))
       runCurrent()
-      for (element in fixture.getValue("samples").jsonArray) {
-        val sample = element.jsonObject
-        timer.now = sample.getValue("timestampMs").jsonPrimitive.long
-        val raw =
-          if (key == null)
-            PrototypeSensorSample.Acceleration(
-              timer.now,
-              sample.getValue("x").jsonPrimitive.double,
-              sample.getValue("y").jsonPrimitive.double,
-              sample.getValue("z").jsonPrimitive.double,
-            )
-          else values(timer.now, key to sample.getValue("value").jsonPrimitive.double)
-        source.readings.getValue(sensor).emit(raw)
-        runCurrent()
-      }
-      if (key == null)
-        assertEquals(
-          file.name,
-          fixture.getValue("expectedShakes").jsonArray.map { it.jsonPrimitive.long },
-          shakes,
-        )
-      else assertEquals(file.name, fixture.getValue("expectedWrites").jsonArray.toList(), writes)
+      replaySamples(fixture, key, sensor, source, timer)
+      assertReferenceOutput(file, fixture, key, writes, shakes)
       module.close()
       runCurrent()
       assertEquals(0, source.activeSubscriptions)

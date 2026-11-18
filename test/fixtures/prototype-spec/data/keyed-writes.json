@@ -1,0 +1,750 @@
+[
+  {
+    "name": "member set",
+    "before": {
+      "items": [
+        {
+          "id": 1,
+          "text": "one"
+        },
+        {
+          "id": 2,
+          "text": "two"
+        }
+      ]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      },
+      "value": "edit",
+      "member": "text"
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "id": 1,
+            "text": "one"
+          },
+          {
+            "id": 2,
+            "text": "edit"
+          }
+        ]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "whole element replace",
+    "before": {
+      "items": [
+        {
+          "id": 1,
+          "text": "one"
+        },
+        {
+          "id": 2,
+          "text": "two"
+        }
+      ]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      },
+      "value": {
+        "id": 3
+      }
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "id": 1,
+            "text": "one"
+          },
+          {
+            "id": 3
+          }
+        ]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "remove where",
+    "before": {
+      "items": [
+        {
+          "id": 1,
+          "text": "one"
+        },
+        {
+          "id": 2,
+          "text": "two"
+        }
+      ]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      }
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "id": 1,
+            "text": "one"
+          }
+        ]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "set no match",
+    "before": {
+      "items": [
+        {
+          "id": 1,
+          "text": "one"
+        },
+        {
+          "id": 2,
+          "text": "two"
+        }
+      ]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 9
+      },
+      "value": 1
+    },
+    "expected": {
+      "errorCode": "not_found"
+    }
+  },
+  {
+    "name": "set duplicate matches",
+    "before": {
+      "items": [
+        {
+          "id": 2
+        },
+        {
+          "id": 2
+        }
+      ]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      },
+      "value": 1
+    },
+    "expected": {
+      "errorCode": "ambiguous_match"
+    }
+  },
+  {
+    "name": "set non-array",
+    "before": {
+      "items": {}
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      },
+      "value": 1
+    },
+    "expected": {
+      "errorCode": "not_array"
+    }
+  },
+  {
+    "name": "set absent path",
+    "before": {},
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      },
+      "value": 1
+    },
+    "expected": {
+      "errorCode": "not_found"
+    }
+  },
+  {
+    "name": "remove no match",
+    "before": {
+      "items": [
+        {
+          "id": 1,
+          "text": "one"
+        },
+        {
+          "id": 2,
+          "text": "two"
+        }
+      ]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 9
+      }
+    },
+    "expected": {
+      "errorCode": "not_found"
+    }
+  },
+  {
+    "name": "remove duplicate matches",
+    "before": {
+      "items": [
+        {
+          "id": 2
+        },
+        {
+          "id": 2
+        }
+      ]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      }
+    },
+    "expected": {
+      "errorCode": "ambiguous_match"
+    }
+  },
+  {
+    "name": "remove non-array",
+    "before": {
+      "items": {}
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      }
+    },
+    "expected": {
+      "errorCode": "not_array"
+    }
+  },
+  {
+    "name": "remove absent path",
+    "before": {},
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      }
+    },
+    "expected": {
+      "errorCode": "not_found"
+    }
+  },
+  {
+    "name": "missing member creates object member",
+    "before": {
+      "items": [
+        {
+          "id": 1,
+          "text": "one"
+        },
+        {
+          "id": 2,
+          "text": "two"
+        }
+      ]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      },
+      "value": true,
+      "member": "done"
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "id": 1,
+            "text": "one"
+          },
+          {
+            "id": 2,
+            "text": "two",
+            "done": true
+          }
+        ]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "missing identity skips primitive and absent field",
+    "before": {
+      "items": [
+        2,
+        {},
+        {
+          "id": 2
+        }
+      ]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      }
+    },
+    "expected": {
+      "data": {
+        "items": [2, {}]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "null identity replace skips missing fields and primitives",
+    "before": {
+      "items": [0, {}, { "id": null, "text": "before" }, { "id": 1 }]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": { "field": "id", "equals": null },
+      "value": { "id": 2, "text": "after" }
+    },
+    "expected": {
+      "data": {
+        "items": [0, {}, { "id": 2, "text": "after" }, { "id": 1 }]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "null identity remove skips missing fields and primitives",
+    "before": {
+      "items": [0, {}, { "id": null }, { "id": 1 }]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": { "field": "id", "equals": null }
+    },
+    "expected": {
+      "data": { "items": [0, {}, { "id": 1 }] },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "null identity set does not match an absent field",
+    "before": {
+      "items": [{}]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": { "field": "id", "equals": null },
+      "value": { "id": 1 }
+    },
+    "expected": { "errorCode": "not_found" }
+  },
+  {
+    "name": "null identity remove does not match an absent field",
+    "before": {
+      "items": [{}]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": { "field": "id", "equals": null }
+    },
+    "expected": { "errorCode": "not_found" }
+  },
+  {
+    "name": "nested array member set only changes the selected group",
+    "before": {
+      "groups": [
+        {
+          "items": [
+            { "id": 1, "text": "one" },
+            { "id": 2, "text": "two" }
+          ]
+        },
+        { "items": [{ "id": 2, "text": "other group" }] }
+      ]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/groups/0/items",
+      "where": { "field": "id", "equals": 2 },
+      "member": "text",
+      "value": "edit"
+    },
+    "expected": {
+      "data": {
+        "groups": [
+          {
+            "items": [
+              { "id": 1, "text": "one" },
+              { "id": 2, "text": "edit" }
+            ]
+          },
+          { "items": [{ "id": 2, "text": "other group" }] }
+        ]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "nested array remove only changes the selected group",
+    "before": {
+      "groups": [{ "items": [{ "id": 1 }, { "id": 2 }, { "id": 3 }] }, { "items": [{ "id": 2 }] }]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/groups/0/items",
+      "where": { "field": "id", "equals": 2 }
+    },
+    "expected": {
+      "data": {
+        "groups": [{ "items": [{ "id": 1 }, { "id": 3 }] }, { "items": [{ "id": 2 }] }]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "numeric identity by value",
+    "before": {
+      "items": [
+        {
+          "id": 1.0
+        }
+      ]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 1
+      }
+    },
+    "expected": {
+      "data": {
+        "items": []
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "string identity differs from number",
+    "before": {
+      "items": [
+        {
+          "id": "2"
+        }
+      ]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      }
+    },
+    "expected": {
+      "errorCode": "not_found"
+    }
+  },
+  {
+    "name": "structured identity ignores key order",
+    "before": {
+      "items": [
+        {
+          "id": {
+            "b": 2,
+            "a": [1]
+          }
+        }
+      ]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": {
+          "a": [1],
+          "b": 2
+        }
+      }
+    },
+    "expected": {
+      "data": {
+        "items": []
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "exact Unicode identity",
+    "before": {
+      "items": [
+        {
+          "id": "é"
+        }
+      ]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": "é"
+      }
+    },
+    "expected": {
+      "errorCode": "not_found"
+    }
+  },
+  {
+    "name": "unsafe member ''",
+    "before": {
+      "items": [
+        {
+          "id": 1,
+          "text": "one"
+        },
+        {
+          "id": 2,
+          "text": "two"
+        }
+      ]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      },
+      "value": 1,
+      "member": ""
+    },
+    "expected": {
+      "errorCode": "invalid_path"
+    }
+  },
+  {
+    "name": "unsafe field ''",
+    "before": {
+      "items": [
+        {
+          "id": 1,
+          "text": "one"
+        },
+        {
+          "id": 2,
+          "text": "two"
+        }
+      ]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": {
+        "field": "",
+        "equals": 2
+      }
+    },
+    "expected": {
+      "errorCode": "invalid_path"
+    }
+  },
+  {
+    "name": "unsafe member 'a/b'",
+    "before": {
+      "items": [
+        {
+          "id": 1,
+          "text": "one"
+        },
+        {
+          "id": 2,
+          "text": "two"
+        }
+      ]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      },
+      "value": 1,
+      "member": "a/b"
+    },
+    "expected": {
+      "errorCode": "invalid_path"
+    }
+  },
+  {
+    "name": "unsafe field 'a/b'",
+    "before": {
+      "items": [
+        {
+          "id": 1,
+          "text": "one"
+        },
+        {
+          "id": 2,
+          "text": "two"
+        }
+      ]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": {
+        "field": "a/b",
+        "equals": 2
+      }
+    },
+    "expected": {
+      "errorCode": "invalid_path"
+    }
+  },
+  {
+    "name": "unsafe member 'a~b'",
+    "before": {
+      "items": [
+        {
+          "id": 1,
+          "text": "one"
+        },
+        {
+          "id": 2,
+          "text": "two"
+        }
+      ]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 2
+      },
+      "value": 1,
+      "member": "a~b"
+    },
+    "expected": {
+      "errorCode": "invalid_path"
+    }
+  },
+  {
+    "name": "unsafe field 'a~b'",
+    "before": {
+      "items": [
+        {
+          "id": 1,
+          "text": "one"
+        },
+        {
+          "id": 2,
+          "text": "two"
+        }
+      ]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": {
+        "field": "a~b",
+        "equals": 2
+      }
+    },
+    "expected": {
+      "errorCode": "invalid_path"
+    }
+  },
+  {
+    "name": "member name at pointer length limit uses the authored array path",
+    "before": {
+      "items": [
+        {
+          "id": 1
+        }
+      ]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": {
+        "field": "id",
+        "equals": 1
+      },
+      "member": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+      "value": true
+    },
+    "expected": {
+      "data": {
+        "items": [
+          {
+            "id": 1,
+            "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm": true
+          }
+        ]
+      },
+      "trimmed": 0
+    }
+  }
+]

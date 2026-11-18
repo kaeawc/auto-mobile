@@ -463,6 +463,7 @@ internal object PrototypeStrictPolicy {
       typeNamespaceFeatures(type, fields, ::need)
       iconEffectNeeds(type, fields).forEach(::need)
       typeFeatures[type]?.let(::need)
+      if (PrototypeDataRules.isKeyedAction(fields)) result.add("prototype_data_actions_v2")
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)
       }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Generate MCP tool definitions for IDE YAML completion, and each tool's Requires cell in
+ * Generate MCP tool definitions for IDE YAML completion, and each tool's Platforms and Needs cells in
  * docs/tools.md and on the tool's own page (its TOOL_EMOJI `page`). `--check` also fails when a
  * tool's `requires` disagrees with a runtime gate (#18141), or a tool page lacks its tool row
  * (#18140).
@@ -15,9 +15,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { findToolDefinitionsDrift } from "./lib/toolDefinitionsDrift";
 import {
-  applyRequiresColumn,
+  applyRequirementColumns,
   applyRequiresKey,
-  findDocsRequiresDrift,
+  findDocsRequirementDrift,
   findRequiresKeyDrift,
   findMissingToolRows,
   findToolRequirementsDrift,
@@ -125,19 +125,19 @@ function toolPages(): Map<string, string[]> {
   return pages;
 }
 
-/** Requires drift on docs/tools.md and on every tool page, plus tool pages missing their row. */
+/** Platforms/Needs drift on docs/tools.md and on every tool page, plus tool pages missing their row. */
 function docsProblems(definitions: unknown[]): string[] {
   const declared = declaredRequirements(definitions);
   const pageProblems = [...toolPages()].flatMap(([page, tools]) => {
     const markdown = readDocs(page);
     return [
       ...findMissingToolRows(markdown, tools),
-      ...findDocsRequiresDrift(markdown, declared),
+      ...findDocsRequirementDrift(markdown, declared),
     ].map((problem) => `${page}: ${problem}`);
   });
   const tools = readDocs(DOCS_PATH);
   return [
-    ...[...findRequiresKeyDrift(tools), ...findDocsRequiresDrift(tools, declared)].map(
+    ...[...findRequiresKeyDrift(tools), ...findDocsRequirementDrift(tools, declared)].map(
       (problem) => `${DOCS_PATH}: ${problem}`,
     ),
     ...pageProblems,
@@ -177,7 +177,7 @@ function writeDocs(definitions: unknown[]): void {
   const declared = declaredRequirements(definitions);
   for (const page of [DOCS_PATH, ...toolPages().keys()]) {
     const resolvedPath = path.resolve(process.cwd(), page);
-    const withColumn = applyRequiresColumn(readDocs(page), declared);
+    const withColumn = applyRequirementColumns(readDocs(page), declared);
     fs.writeFileSync(resolvedPath, page === DOCS_PATH ? applyRequiresKey(withColumn) : withColumn);
     console.log(`Updated tool requirements in ${resolvedPath}`);
   }

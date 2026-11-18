@@ -28,7 +28,7 @@ const OUT_DIR = join(ROOT, "docs", "assets", "javascripts");
 const TSCONFIG = join(ROOT, "docs-assets", "tsconfig.json");
 
 // Entry basename -> emitted file. Keep in sync with mkdocs.yml extra_javascript.
-const ENTRIES = ["prompt-form", "usage-data"];
+const ENTRIES = ["prompt-form", "tool-table", "usage-data"];
 
 // Bun bundles the module sources into a plain-script IIFE, which drops the
 // implicit module strict-mode. Restore an explicit directive so the emitted

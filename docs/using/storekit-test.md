@@ -1,8 +1,8 @@
 # In-app purchase testing
 
-| Tool                         | What it does                                                    | Requires                             |
-| ---------------------------- | --------------------------------------------------------------- | ------------------------------------ |
-| 🛒 <code>storeKitTest</code> | Test in-app purchases with StoreKit Testing on an iOS simulator | <span class="tool-requires">—</span> |
+| Tool                         | What it does                                                    | Platforms                                                                                                                                                   | Needs                             |
+| ---------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| 🛒 <code>storeKitTest</code> | Test in-app purchases with StoreKit Testing on an iOS simulator | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span></span> | <span class="tool-needs">—</span> |
 
 `storeKitTest` drives StoreKit Testing on an iOS simulator: load a `.storekit` configuration,
 then buy, refund, expire and list transactions without the App Store sandbox. It is off by

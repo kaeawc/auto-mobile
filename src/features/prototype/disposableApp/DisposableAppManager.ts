@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../models/describeUnknownError";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -36,6 +36,9 @@ export type DisposableAppIcon = { asset: string } | { backgroundColor: string };
 
 export interface DisposableAppStampInput {
   appId: string;
+  attachToken?: string;
+  /** Development-only opt-in to expose attach on physical Android devices. */
+  allowPhysicalDeviceAttach?: boolean;
   slug: string;
   label: string;
   icon?: DisposableAppIcon;
@@ -85,6 +88,7 @@ export interface DisposableAppPlatformSupport {
 }
 
 export interface DisposableAppManagerDependencies {
+  attachTokens?: { next(): string };
   platforms: Partial<Record<DisposableAppPlatform, DisposableAppPlatformSupport>>;
   registry: DisposableAppRegistry;
   timer: Pick<Timer, "now">;
@@ -162,6 +166,13 @@ function ttlMs(ttlHours: number | undefined): number | null {
   return hours === 0 ? null : hours * HOUR_MS;
 }
 
+function disposableSpecId(spec: PrototypeJson): string | undefined {
+  if (spec === null || typeof spec !== "object" || Array.isArray(spec)) {
+    return undefined;
+  }
+  return typeof spec.id === "string" ? spec.id : undefined;
+}
+
 export class DisposableAppManager {
   /**
    * Per-app lifecycle chains keyed by `deviceId/appId`, so an expiry decision made before a
@@ -192,10 +203,13 @@ export class DisposableAppManager {
       await stamper.templates(),
       input.platform,
     );
-    const existing = (await this.deps.registry.list(input.deviceId)).some(
+    const existing = (await this.deps.registry.list(input.deviceId)).find(
       (record) => record.appId === appId,
     );
+    const attachToken =
+      existing?.attachToken ?? this.deps.attachTokens?.next() ?? randomBytes(32).toString("hex");
     const stamped = await stamper.stamp({
+      attachToken,
       appId,
       slug: input.app.slug,
       label: input.app.label,
@@ -214,6 +228,8 @@ export class DisposableAppManager {
       slug: input.app.slug,
       platform: input.platform,
       label: input.app.label,
+      specId: disposableSpecId(input.spec),
+      attachToken,
       specSha256: createHash("sha256").update(JSON.stringify(input.spec)).digest("hex"),
       template: template.name,
       signer: await stamper.signer(),
@@ -246,7 +262,7 @@ export class DisposableAppManager {
       expiresAt: isoOrNull(expiresAt),
       template: template.name,
       permissions: { declared: declarations.permissions, ...grants },
-      updated: existing,
+      updated: existing !== undefined,
       launched: false,
     };
   }

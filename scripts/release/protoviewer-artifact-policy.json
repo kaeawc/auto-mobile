@@ -6,7 +6,12 @@
   "android": {
     "applicationId": "dev.jasonpearson.automobile.protoviewer",
     "minTargetSdk": 36,
-    "permissions": ["android.permission.ACCESS_LOCAL_NETWORK", "android.permission.INTERNET"],
+    "permissions": [
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+      "android.permission.ACCESS_LOCAL_NETWORK",
+      "android.permission.INTERNET"
+    ],
     "declaredPermissions": [],
     "exportedComponents": [
       {

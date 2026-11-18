@@ -114,7 +114,7 @@ function dropUnreportedPrototypes(
   // session that tracked the vanished prototype is not necessarily the one inspecting.
   for (const id of store.shownIds(scope.deviceId)) {
     const owner = events.sourceFor(scope.deviceId, id);
-    if (reconciliationSource && owner && owner !== reconciliationSource) {
+    if (reconciliationSource && owner !== reconciliationSource) {
       continue;
     }
     if ((reconciliationId === undefined || reconciliationId === id) && !reportedIds.has(id)) {

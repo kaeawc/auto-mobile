@@ -1,5 +1,5 @@
 {
-  "note": "Frames are the actions each frame produced after routing and {event} binding, in arrival order within one flush window. A frame made only of setData/setState coalesces with the previous kept frame when both write exactly the same set of targets; the later frame replaces the earlier. Everything else is kept as is.",
+  "note": "Frames are the actions each frame produced after routing and {event} binding, in arrival order within one flush window. A frame made only of setData/setState without keyed selectors coalesces with the previous kept frame when both write exactly the same set of targets; the later frame replaces the earlier. Everything else is kept as is.",
   "flushMs": 50,
   "cases": [
     {
@@ -347,6 +347,148 @@
             "type": "setData",
             "path": "/data/a",
             "value": 3
+          }
+        ]
+      ]
+    },
+    {
+      "name": "keyed writes preserve different rows",
+      "frames": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/items",
+            "where": {
+              "field": "id",
+              "equals": {
+                "value": 1
+              }
+            },
+            "member": "title",
+            "value": {
+              "value": "new"
+            }
+          }
+        ],
+        [
+          {
+            "type": "setData",
+            "path": "/data/items",
+            "where": {
+              "field": "id",
+              "equals": {
+                "value": 2
+              }
+            },
+            "member": "title",
+            "value": {
+              "value": "new"
+            }
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/items",
+            "where": {
+              "field": "id",
+              "equals": {
+                "value": 1
+              }
+            },
+            "member": "title",
+            "value": {
+              "value": "new"
+            }
+          }
+        ],
+        [
+          {
+            "type": "setData",
+            "path": "/data/items",
+            "where": {
+              "field": "id",
+              "equals": {
+                "value": 2
+              }
+            },
+            "member": "title",
+            "value": {
+              "value": "new"
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "keyed writes preserve repeated selectors",
+      "frames": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/items",
+            "where": {
+              "field": "id",
+              "equals": {
+                "value": 1
+              }
+            },
+            "member": "title",
+            "value": {
+              "value": "new"
+            }
+          }
+        ],
+        [
+          {
+            "type": "setData",
+            "path": "/data/items",
+            "where": {
+              "field": "id",
+              "equals": {
+                "value": 1
+              }
+            },
+            "member": "title",
+            "value": {
+              "value": "new"
+            }
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "type": "setData",
+            "path": "/data/items",
+            "where": {
+              "field": "id",
+              "equals": {
+                "value": 1
+              }
+            },
+            "member": "title",
+            "value": {
+              "value": "new"
+            }
+          }
+        ],
+        [
+          {
+            "type": "setData",
+            "path": "/data/items",
+            "where": {
+              "field": "id",
+              "equals": {
+                "value": 1
+              }
+            },
+            "member": "title",
+            "value": {
+              "value": "new"
+            }
           }
         ]
       ]

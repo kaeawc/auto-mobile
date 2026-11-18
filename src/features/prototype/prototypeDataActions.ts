@@ -1,4 +1,7 @@
-import { PROTOTYPE_DATA_ACTIONS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY,
+  PROTOTYPE_DATA_ACTIONS_CAPABILITY,
+} from "../observe/android/ctrlProxyProtocol";
 import { prototypeDataPathPointer, resolvePrototypeDataPointer } from "./prototypeData";
 import { prototypeFieldsOfKind } from "./prototypeEmitContext";
 import { templateSegments, type Binding } from "./prototypeTemplate";
@@ -34,6 +37,20 @@ export function prototypeDataActionsUnsupportedMessage(
       : "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version";
   const more = fields.length > 1 ? ` (and ${fields.length - 1} more)` : "";
   return `The ${device} does not advertise ${PROTOTYPE_DATA_ACTIONS_CAPABILITY}, so it cannot run the setData, appendData, prependData or removeData action at ${fields[0]}${more}. Nothing was shown. ${update}, or answer the tap from the host with a /data patch.`;
+}
+
+export function prototypeKeyedDataActionFields(spec: unknown): string[] {
+  return prototypeFieldsOfKind(spec, "keyedData");
+}
+
+export function prototypeKeyedDataActionsUnsupportedMessage(
+  fields: readonly string[],
+  platform: "android" | "ios",
+): string {
+  return prototypeDataActionsUnsupportedMessage(fields, platform).replace(
+    PROTOTYPE_DATA_ACTIONS_CAPABILITY,
+    PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY,
+  );
 }
 
 const INDEX_SEGMENT = "{index}";
@@ -108,7 +125,8 @@ export function prototypeDataActionError(
     return literal;
   }
   if (
-    ["appendData", "prependData", "upsertData"].includes(action.type) &&
+    (["appendData", "prependData", "upsertData"].includes(action.type) ||
+      action.where !== undefined) &&
     !prototypeDataPathHasIndex(path)
   ) {
     const target = resolvePrototypeDataPointer(data, pointer);

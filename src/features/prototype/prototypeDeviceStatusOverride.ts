@@ -54,7 +54,10 @@ export function prototypeStatusOverrideUpdates(
     if ("error" in next) {
       return { success: false, index, path: `inputs[${index}]${next.path}`, error: next.error };
     }
-    if (next.values !== undefined && next.values !== shown.values) {
+    if (
+      next.values !== undefined &&
+      (shown.values === undefined || !prototypeStatusValuesEqual(next.values, shown.values))
+    ) {
       updates.push({ timestampMs: input.timestampMs, values: next.values });
     }
     shown = next;

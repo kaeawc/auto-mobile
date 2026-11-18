@@ -83,6 +83,24 @@ describe("prototypeStatusOverrideUpdates", () => {
     });
   });
 
+  test("a repeated equal reading and a restore equal to the seed are not updates", () => {
+    const result = prototypeStatusOverrideUpdates("power", "android", [
+      { timestampMs: 0, reading: { saver: false } },
+      { timestampMs: 10, reading: { saver: false } },
+      { timestampMs: 20, mode: "fake" },
+      { timestampMs: 30, seed: { saver: true } },
+      { timestampMs: 40, reading: { saver: true } },
+      { timestampMs: 50, mode: "real" },
+    ]);
+    expect(result).toEqual({
+      success: true,
+      updates: [
+        { timestampMs: 0, values: { saver: false } },
+        { timestampMs: 30, values: { saver: true } },
+      ],
+    });
+  });
+
   test("a refusal names the reason", () => {
     const result = prototypeStatusOverrideUpdates("audio", "ios", [
       { timestampMs: 0, mode: "fake" },

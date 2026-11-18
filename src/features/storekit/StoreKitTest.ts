@@ -13,6 +13,10 @@ import {
   type StoreKitTransaction,
 } from "../observe/ios/CtrlProxyStoreKit";
 import {
+  defaultStoreKitClearedSessions,
+  type StoreKitClearedSessions,
+} from "./StoreKitClearedSessions";
+import {
   resolveIosDeviceKind,
   type IosDeviceKind,
 } from "../../utils/ios-cmdline-tools/IosDeviceKind";
@@ -36,6 +40,8 @@ export interface StoreKitTestInput {
   simulatedError?: StoreKitSimulatedError;
   enabled?: boolean;
   signal?: AbortSignal;
+  /** Use the runner's open socket only: a sessionless read of a device another session holds. */
+  connectOnly?: boolean;
 }
 
 export type StoreKitUnsupportedCode =
@@ -51,6 +57,8 @@ export interface StoreKitTestResult {
   /** Set when StoreKit Testing cannot run on this target or runner; nothing was changed. */
   unsupported?: StoreKitUnsupportedCode;
   error?: string;
+  /** false: the request was sent but unanswered and may still apply; check list before retrying. */
+  retryable?: boolean;
 }
 
 /** The narrow runner seam StoreKit Testing needs. */
@@ -152,6 +160,7 @@ export class StoreKitTest {
   constructor(
     private readonly senderFactory: StoreKitSenderFactory = iosCtrlProxyClientFor,
     private readonly kindOf: IosDeviceKindResolver = resolveIosDeviceKind,
+    private readonly clearedSessions: StoreKitClearedSessions = defaultStoreKitClearedSessions,
   ) {}
 
   async run(device: BootedDevice, input: StoreKitTestInput): Promise<StoreKitTestResult> {
@@ -161,27 +170,50 @@ export class StoreKitTest {
     if (unsupported) {
       return { ...base, success: false, unsupported: unsupported.code, error: unsupported.error };
     }
-    const result = await this.senderFactory(device).requestStoreKit(
-      toRunnerRequest(input),
-      input.signal ? { signal: input.signal } : {},
-    );
-    if (result.unsupported) {
-      const detail = result.error ? ` (${result.error})` : "";
-      return {
-        ...base,
-        success: false,
-        unsupported: "unsupported_capability",
-        error: `${OUTDATED_RUNNER_ERROR}${detail}.`,
-      };
+    return toToolResult(base, await this.send(device, input));
+  }
+
+  /** Sends one action, keeping the cleared-session ledger in step with what it may change. */
+  private async send(
+    device: BootedDevice,
+    input: StoreKitTestInput,
+  ): Promise<CtrlProxyStoreKitResult> {
+    // list changes nothing and clear only ever cleans; every other action may leave state behind.
+    if (input.action !== "list" && input.action !== "clear") {
+      this.clearedSessions.markTouched(device.deviceId, input.appId);
     }
-    if (!result.success && result.error?.startsWith(UNSUPPORTED_PREFIX)) {
-      return { ...base, success: false, unsupported: "unsupported_device", error: result.error };
+    const result = await this.senderFactory(device).requestStoreKit(toRunnerRequest(input), {
+      ...(input.signal ? { signal: input.signal } : {}),
+      ...(input.connectOnly ? { requireExistingConnection: true } : {}),
+    });
+    if (input.action === "clear" && result.success) {
+      this.clearedSessions.markCleared(device.deviceId, input.appId);
     }
+    return result;
+  }
+}
+
+function toToolResult(
+  base: Pick<StoreKitTestResult, "action" | "appId">,
+  result: CtrlProxyStoreKitResult,
+): StoreKitTestResult {
+  if (result.unsupported) {
+    const detail = result.error ? ` (${result.error})` : "";
     return {
       ...base,
-      success: result.success,
-      ...(result.transactions ? { transactions: result.transactions } : {}),
-      ...(result.error ? { error: result.error } : {}),
+      success: false,
+      unsupported: "unsupported_capability",
+      error: `${OUTDATED_RUNNER_ERROR}${detail}.`,
     };
   }
+  if (!result.success && result.error?.startsWith(UNSUPPORTED_PREFIX)) {
+    return { ...base, success: false, unsupported: "unsupported_device", error: result.error };
+  }
+  return {
+    ...base,
+    success: result.success,
+    ...(result.transactions ? { transactions: result.transactions } : {}),
+    ...(result.error ? { error: result.error } : {}),
+    ...(result.retryable === false ? { retryable: false } : {}),
+  };
 }

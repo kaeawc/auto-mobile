@@ -349,6 +349,116 @@
     }
   },
   {
+    "name": "null identity replace skips missing fields and primitives",
+    "before": {
+      "items": [0, {}, { "id": null, "text": "before" }, { "id": 1 }]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": { "field": "id", "equals": null },
+      "value": { "id": 2, "text": "after" }
+    },
+    "expected": {
+      "data": {
+        "items": [0, {}, { "id": 2, "text": "after" }, { "id": 1 }]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "null identity remove skips missing fields and primitives",
+    "before": {
+      "items": [0, {}, { "id": null }, { "id": 1 }]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": { "field": "id", "equals": null }
+    },
+    "expected": {
+      "data": { "items": [0, {}, { "id": 1 }] },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "null identity set does not match an absent field",
+    "before": {
+      "items": [{}]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/items",
+      "where": { "field": "id", "equals": null },
+      "value": { "id": 1 }
+    },
+    "expected": { "errorCode": "not_found" }
+  },
+  {
+    "name": "null identity remove does not match an absent field",
+    "before": {
+      "items": [{}]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/items",
+      "where": { "field": "id", "equals": null }
+    },
+    "expected": { "errorCode": "not_found" }
+  },
+  {
+    "name": "nested array member set only changes the selected group",
+    "before": {
+      "groups": [
+        {
+          "items": [
+            { "id": 1, "text": "one" },
+            { "id": 2, "text": "two" }
+          ]
+        },
+        { "items": [{ "id": 2, "text": "other group" }] }
+      ]
+    },
+    "write": {
+      "op": "set",
+      "path": "/data/groups/0/items",
+      "where": { "field": "id", "equals": 2 },
+      "member": "text",
+      "value": "edit"
+    },
+    "expected": {
+      "data": {
+        "groups": [
+          {
+            "items": [
+              { "id": 1, "text": "one" },
+              { "id": 2, "text": "edit" }
+            ]
+          },
+          { "items": [{ "id": 2, "text": "other group" }] }
+        ]
+      },
+      "trimmed": 0
+    }
+  },
+  {
+    "name": "nested array remove only changes the selected group",
+    "before": {
+      "groups": [{ "items": [{ "id": 1 }, { "id": 2 }, { "id": 3 }] }, { "items": [{ "id": 2 }] }]
+    },
+    "write": {
+      "op": "remove",
+      "path": "/data/groups/0/items",
+      "where": { "field": "id", "equals": 2 }
+    },
+    "expected": {
+      "data": {
+        "groups": [{ "items": [{ "id": 1 }, { "id": 3 }] }, { "items": [{ "id": 2 }] }]
+      },
+      "trimmed": 0
+    }
+  },
+  {
     "name": "numeric identity by value",
     "before": {
       "items": [

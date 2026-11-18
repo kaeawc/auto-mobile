@@ -154,3 +154,59 @@ test("ZIP assembly patches stamped colours into resources.arsc", () => {
     }),
   ).toThrow("resources.arsc");
 });
+
+test("attach tokens key the cache and replace the template secret", async () => {
+  const { fs, stamper } = setup();
+  const input = stampInput();
+  await fs.writeFileBuffer(input.template.apkPath, Buffer.from("template"));
+  const first = await stamper.stamp({ ...input, attachToken: "a".repeat(64) });
+  const second = await stamper.stamp({ ...input, attachToken: "b".repeat(64) });
+  expect(first.version).not.toBe(second.version);
+  const template = new AdmZip();
+  template.addFile("resources.arsc", Buffer.from("old"));
+  template.addFile("assets/prototype/attach-token", Buffer.from("old-secret"));
+  const linked = new AdmZip();
+  linked.addFile("AndroidManifest.xml", Buffer.from("manifest"));
+  const result = new AdmZip(
+    new DefaultAndroidStampZip().assemble(template.toBuffer(), linked.toBuffer(), {
+      spec: "{}",
+      assets: [],
+      attachToken: "a".repeat(64),
+    }),
+  );
+  expect(result.readAsText("assets/prototype/attach-token")).toBe("a".repeat(64));
+});
+
+test("physical-device listener opt-in changes cache and is stamped only with a token", async () => {
+  const { fs, stamper } = setup();
+  const input = stampInput();
+  await fs.writeFileBuffer(input.template.apkPath, Buffer.from("template"));
+  const first = await stamper.stamp({ ...input, attachToken: "a".repeat(64) });
+  const optedIn = await stamper.stamp({
+    ...input,
+    attachToken: "a".repeat(64),
+    allowPhysicalDeviceAttach: true,
+  });
+  expect(first.version).not.toBe(optedIn.version);
+  const template = new AdmZip();
+  template.addFile("resources.arsc", Buffer.from("old"));
+  template.addFile("assets/prototype/attach-allow-physical-device", Buffer.from("true"));
+  const linked = new AdmZip();
+  linked.addFile("AndroidManifest.xml", Buffer.from("manifest"));
+  const stamp = (allowPhysicalDeviceAttach: boolean, attachToken?: string) =>
+    new AdmZip(
+      new DefaultAndroidStampZip().assemble(template.toBuffer(), linked.toBuffer(), {
+        spec: "{}",
+        assets: [],
+        allowPhysicalDeviceAttach,
+        attachToken,
+      }),
+    );
+  expect(
+    stamp(false, "token").getEntry("assets/prototype/attach-allow-physical-device"),
+  ).toBeNull();
+  expect(stamp(true).getEntry("assets/prototype/attach-allow-physical-device")).toBeNull();
+  expect(stamp(true, "token").readAsText("assets/prototype/attach-allow-physical-device")).toBe(
+    "true",
+  );
+});

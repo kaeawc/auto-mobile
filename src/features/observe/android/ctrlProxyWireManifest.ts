@@ -445,6 +445,7 @@ export const CTRL_PROXY_RESPONSE_FIELDS: {
   },
   prototype_result: {
     pages: "optional",
+    status: "optional",
     type: "required",
     requestId: "optional",
     error: "optional",

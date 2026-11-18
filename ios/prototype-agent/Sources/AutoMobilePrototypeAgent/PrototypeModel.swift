@@ -505,13 +505,19 @@
         }
 
         /// Uploaded assets are tracked independently of session transitions.
-        func putAsset(_ id: String, _ image: UIImage) {
+        func putAsset(_ id: String, _ image: UIImage, data: Data) {
             assets[id] = image
+            var upload = session.uploadAssets as? PrototypeUploadAssets ?? PrototypeUploadAssets()
+            upload.bytes[id] = data
+            session.uploadAssets = upload
         }
 
         func removeAsset(_ id: String) {
             guard assets[id] != nil else { return }
             assets[id] = nil
+            var upload = session.uploadAssets as? PrototypeUploadAssets ?? PrototypeUploadAssets()
+            upload.bytes[id] = nil
+            session.uploadAssets = upload
         }
 
         func holds(_ condition: Condition) -> Bool {
@@ -728,6 +734,7 @@
             dismiss(reason: .disconnect)
             if !assets.isEmpty {
                 assets = [:]
+                session.uploadAssets = nil
             }
         }
 
@@ -770,6 +777,11 @@
             timers.perform(timerCommands)
             platformDriver.perform(platformCommands)
             requestDriver?.perform(requestCommands)
+        }
+
+        /// Upload progress follows ordinary state transitions without counting as user activity.
+        func writeUploadProgress(_ requestId: String, key: String, value: Int) {
+            apply(activity: false) { $0.writeUploadProgress(requestId, key: key, value: value) }
         }
 
         /// A request's answer. Not user activity: it neither restarts the idle TTL nor needs the

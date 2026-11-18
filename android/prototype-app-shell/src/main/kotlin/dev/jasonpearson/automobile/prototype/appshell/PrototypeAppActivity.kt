@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.prototype.appshell
 
+import android.content.res.Configuration
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -23,19 +24,34 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPermissionsSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi
 import dev.jasonpearson.automobile.ctrlproxy.prototype.LocalPrototypeRootBack
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBiometricModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePermissionsModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
+import dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost
 import dev.jasonpearson.automobile.prototype.PrototypeAssets
 import dev.jasonpearson.automobile.prototype.PrototypePlatform
 import dev.jasonpearson.automobile.prototype.PrototypeStorage
+import dev.jasonpearson.automobile.prototype.ProvideEmbeddedPrototypeHost
 import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
+@OptIn(InternalAutoMobilePrototypeApi::class)
 class PrototypeAppActivity : ComponentActivity() {
+  private val attachScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+  private val embeddedHost = EmbeddedPrototypeHost(attachScope, Mutex())
+  private lateinit var attachTarget: RuntimeAttachTarget
+  private var detachAttachTarget: (() -> Unit)? = null
   private val generation = mutableIntStateOf(0)
   private val remountGate = ResumedRemountGate { generation.intValue++ }
 
@@ -43,6 +59,16 @@ class PrototypeAppActivity : ComponentActivity() {
     installSplashScreen()
     super.onCreate(savedInstanceState)
     lifecycle.addObserver(remountGate)
+    val process = AndroidAppAttachProcess.get(applicationContext)
+    attachTarget =
+      RuntimeAttachTarget(embeddedHost, process) {
+        resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+          Configuration.UI_MODE_NIGHT_YES
+      }
+    detachAttachTarget = process.bind(attachTarget)
+    embeddedHost.onRuntime = { attachTarget.runtime = it }
+    embeddedHost.nextSequence = { attachTarget.nextSequence() }
+    embeddedHost.eventSink = PrototypeEventSink { process.agent.emit(it) }
     val source = ApkPrototypeSource(assets)
     val loader = AppShellLoader(source, PrototypeStorage.fileBacked(this))
     val prototypeAssets = PrototypeAssets(image = source::readAsset, font = source::readAsset)
@@ -53,7 +79,34 @@ class PrototypeAppActivity : ComponentActivity() {
     }
   }
 
-  @OptIn(InternalAutoMobilePrototypeApi::class)
+  private fun flushRuntime() {
+    val runtime = attachTarget.runtime
+    attachScope.launch {
+      withContext(NonCancellable) {
+        embeddedHost.interactions.withLock {
+          try {
+            runtime?.flushStorage()
+          } catch (error: IOException) {
+            Log.w("PrototypeAppShell", "Cannot flush prototype storage", error)
+          }
+        }
+      }
+    }
+  }
+
+  override fun onStop() {
+    flushRuntime()
+    super.onStop()
+  }
+
+  override fun onDestroy() {
+    detachAttachTarget?.invoke()
+    flushRuntime()
+    attachTarget.runtime?.close()
+    attachScope.cancel()
+    super.onDestroy()
+  }
+
   @Composable
   private fun AppContent(
     loader: AppShellLoader,
@@ -92,21 +145,27 @@ class PrototypeAppActivity : ComponentActivity() {
         // Root Back only backgrounds the task, so the renderer and its unsaved state stay alive.
         CompositionLocalProvider(LocalPrototypeRootBack provides { moveTaskToBack(true) }) {
           key(generation.intValue) {
-            AutoMobilePrototype(
-              platform = platform,
-              spec = current.spec,
-              assets = prototypeAssets,
-              storage = loader.storage,
-              handleBack = true,
-              onDismiss = {
-                // Any other user dismissal ends the session; remount so returning is not blank, but
-                // only once the activity resumes so onAppear never runs while backgrounding.
-                if (appShellBackAction(depth = 1) == AppShellBackAction.MOVE_TASK_TO_BACK) {
-                  if (moveTaskToBack(true)) remountGate.requestAfterBackgrounding()
-                  else generation.intValue++
-                }
-              },
-            )
+            ProvideEmbeddedPrototypeHost(embeddedHost) {
+              DisposableEffect(generation.intValue) {
+                onDispose { flushRuntime() }
+              }
+              AutoMobilePrototype(
+                platform = platform,
+                spec = current.spec,
+                assets = prototypeAssets,
+                storage = loader.storage,
+                handleBack = true,
+                onDismiss = {
+                  // Any other user dismissal ends the session; remount so returning is not blank,
+                  // but
+                  // only once the activity resumes so onAppear never runs while backgrounding.
+                  if (appShellBackAction(depth = 1) == AppShellBackAction.MOVE_TASK_TO_BACK) {
+                    if (moveTaskToBack(true)) remountGate.requestAfterBackgrounding()
+                    else generation.intValue++
+                  }
+                },
+              )
+            }
           }
         }
       } else AppShellStatus(current) { moveTaskToBack(true) }

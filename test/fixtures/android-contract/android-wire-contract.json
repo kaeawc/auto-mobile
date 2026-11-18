@@ -4000,6 +4000,12 @@
           "type": "list",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "status",
+          "type": "json",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -8864,6 +8870,20 @@
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeContainer",
         "nullable": true,
         "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeDataWhere": [
+      {
+        "name": "field",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "equals",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect": [
@@ -14168,6 +14188,12 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "where",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeDataWhere",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "replace": [
@@ -15188,6 +15214,18 @@
         "type": "json",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "where",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeDataWhere",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "member",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "setPage": [

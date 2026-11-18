@@ -9,6 +9,7 @@ struct PrototypeResolvedRequest: Equatable {
     let url: String
     let headers: [String: String]
     let body: JSONValue?
+    var uploadBody: PrototypeUploadBody? = nil
 }
 
 enum PrototypeRequestResolver {
@@ -19,7 +20,9 @@ enum PrototypeRequestResolver {
     }
 
     static func resolve(
-        _ action: PrototypeAction, urlText: String, inputs: some PrototypeEmitContextInputs
+        _ action: PrototypeAction, urlText: String, inputs: some PrototypeEmitContextInputs,
+        assets: (any PrototypeUploadAssetSource)? = nil,
+        boundary: any PrototypeUploadBoundaryGenerating = PrototypeUploadBoundaryGenerator()
     )
         -> Result<PrototypeResolvedRequest, PrototypeRequestError>
     {
@@ -52,7 +55,17 @@ enum PrototypeRequestResolver {
         }
         if let problem = PrototypeHttpHeaderCheck.problem(in: headers) { return .failure(problem) }
         var body: JSONValue?
-        if let binding = action.body {
+        var upload: PrototypeUploadBody?
+        if let binding = action.body, PrototypeUploadResolver.isUpload(binding) {
+            guard action.via == "device" else { return .failure(PrototypeUploadResolver.hostRefusal) }
+            do { upload = try PrototypeUploadResolver.resolve(
+                binding,
+                inputs: inputs,
+                assets: assets,
+                boundary: boundary
+            ) } catch let error as PrototypeRequestError { return .failure(error) }
+            catch { return .failure(.init(.invalidRequest, "Invalid upload body")) }
+        } else if let binding = action.body {
             switch PrototypeDataWrite.resolveValue(binding, inputs: inputs) {
             case let .success(value): body = value
             case let .failure(failure):
@@ -65,7 +78,13 @@ enum PrototypeRequestResolver {
         case let .failure(error): return .failure(error)
         }
         let method = action.method.flatMap(PrototypeRequestMethod.init(rawValue:)) ?? .get
-        return .success(PrototypeResolvedRequest(method: method, url: url, headers: headers, body: body))
+        return .success(PrototypeResolvedRequest(
+            method: method,
+            url: url,
+            headers: headers,
+            body: body,
+            uploadBody: upload
+        ))
     }
 
     /// One header or query entry as text: a literal string with placeholders, or a binding that
@@ -277,18 +296,20 @@ enum PrototypeRequestURL {
         return pieces.joined(separator: "&")
     }
 
-    private static func formComponent(_ text: String) -> String {
-        var out = ""
+    static func formComponent(_ text: String) -> String {
+        let hex = Array("0123456789ABCDEF".utf8)
+        var out: [UInt8] = []
+        out.reserveCapacity(text.utf8.count)
         for byte in text.utf8 {
-            let scalar = Unicode.Scalar(byte)
-            if byte < 0x80, CharacterSet.alphanumerics.contains(scalar) || "*-._".unicodeScalars.contains(scalar) {
-                out.unicodeScalars.append(scalar)
-            } else if byte == 0x20 {
-                out += "+"
-            } else {
-                out += String(format: "%%%02X", UInt32(byte))
+            switch byte {
+            case 65 ... 90, 97 ... 122, 48 ... 57, 42, 45, 46, 95: out.append(byte)
+            case 32: out.append(43)
+            default:
+                out.append(37)
+                out.append(hex[Int(byte >> 4)])
+                out.append(hex[Int(byte & 15)])
             }
         }
-        return out
+        return String(decoding: out, as: UTF8.self)
     }
 }

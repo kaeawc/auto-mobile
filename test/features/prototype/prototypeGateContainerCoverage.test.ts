@@ -311,6 +311,18 @@ const fixtures: Record<string, Node> = {
     ...label,
     onTap: [{ type: "setData", path: "/data/count", value: { value: 1 } }],
   },
+  prototype_data_actions_v2: {
+    ...label,
+    onTap: [
+      {
+        type: "setData",
+        path: "/data/rows",
+        where: { field: "id", equals: { value: 1 } },
+        member: "title",
+        value: { value: "Updated" },
+      },
+    ],
+  },
   prototype_network_v1: {
     ...label,
     onTap: [{ type: "request", url: "http://localhost:8080/feed", into: "/data/feed" }],

@@ -21,6 +21,8 @@ A fullscreen root defaults each omitted `width` or `height` to `fill`; explicit 
 6. Each launch gets its own port and random token (`AUTOMOBILE_PROTOTYPE_PORT`,
    `AUTOMOBILE_PROTOTYPE_TOKEN`, token at least 16 chars; the agent does not start without both). The
    first frame must be a `hello` carrying the token; the agent replies with version and capabilities.
+   The dylib does not advertise `prototype_event_ack_v1` or implement event acknowledgements and
+   replay, so the shared host socket client delivers its events without sending acknowledgements.
 
 The window lives in the app's process, so `observe`, `tapOn`, `sendKeys`, screenshots and video all see
 the prototype as app UI.

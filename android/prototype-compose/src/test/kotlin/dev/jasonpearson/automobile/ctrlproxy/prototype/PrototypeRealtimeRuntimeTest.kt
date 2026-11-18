@@ -1,7 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
+import dev.jasonpearson.automobile.prototype.PlatformCall
+import dev.jasonpearson.automobile.prototype.PlatformCallResult
 import kotlin.random.Random
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.TestScope
@@ -253,6 +256,44 @@ class PrototypeRealtimeRuntimeTest {
       assertNull(runtime.chat())
       assertEquals(PrototypeChannelController.GOING_AWAY, first.closedWith)
     }
+
+  @Test
+  fun `a send queued behind a blocked frame never goes out once dismissal begins`() = runTest {
+    val lock = Mutex()
+    val transport = FakeTransport()
+    val runtime = runtime(transport, lock = lock)
+    runtime.shown()
+    runCurrent()
+    val connection = transport.last
+    connection.listener.onOpen(null)
+    runCurrent()
+    val module =
+      runtime.platformRegistry.modules.filterIsInstance<PrototypeRealtimeModule>().single()
+    var result: PlatformCallResult? = null
+
+    lock.withLock {
+      // The frame's event waits in the sink for the interaction lock, holding the controller lock.
+      connection.listener.onFrame("""{"id":1,"text":"blocked"}""", null, null)
+      runCurrent()
+      backgroundScope.launch {
+        result =
+          module.call(
+            PlatformCall(
+              "send-1",
+              PrototypeRealtimeModule.SEND,
+              obj("channel" to JsonPrimitive("chat"), "body" to JsonPrimitive("late")),
+            ),
+          )
+      }
+      runCurrent()
+      runtime.close()
+    }
+    runCurrent()
+
+    assertEquals(emptyList<String>(), connection.sent)
+    assertEquals(PrototypeChannelController.GOING_AWAY, connection.closedWith)
+    assertTrue(result.toString(), result is PlatformCallResult.Failure)
+  }
 
   @Test
   fun `realtime calls connect, send and disconnect a manual channel`() = runTest {

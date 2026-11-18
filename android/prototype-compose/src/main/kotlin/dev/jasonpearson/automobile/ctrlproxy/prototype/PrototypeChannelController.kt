@@ -106,9 +106,23 @@ class PrototypeChannelController(
   private var flush: Job? = null
   private var started = false
   private var closed = false
+  @Volatile private var closing = false
+
+  /** Closed, or a [beginClose] has run and [close] has not reached the lock yet. */
+  private val ended: Boolean
+    get() = closed || closing
 
   init {
-    scope.launch { for (work in inbox) lock.withLock { if (!closed) work() } }
+    scope.launch { for (work in inbox) lock.withLock { if (!ended) work() } }
+  }
+
+  /**
+   * Dismissal began. Takes no lock, so it holds at once: work still waiting for the lock (a send
+   * queued behind a blocked flush, a transport callback, a timer) does nothing, and [close] then
+   * closes the connections.
+   */
+  fun beginClose() {
+    closing = true
   }
 
   /** The current snapshot of [channel], or null when it is not declared. */
@@ -119,7 +133,7 @@ class PrototypeChannelController(
    * channels as they are, closes removed ones, and reconnects only changed ones that were live.
    */
   suspend fun update(channels: Map<String, PrototypeChannelDeclaration>) = lock.withLock {
-    if (closed) return@withLock
+    if (ended) return@withLock
     for (id in slots.keys - channels.keys) slots.remove(id)?.let(::abandon)
     for ((id, declaration) in channels) {
       val previous = slots[id]
@@ -137,7 +151,7 @@ class PrototypeChannelController(
 
   /** The prototype is shown: connect every `onShow` channel that is still idle. */
   suspend fun show() = lock.withLock {
-    if (closed || started) return@withLock
+    if (ended || started) return@withLock
     started = true
     for (slot in slots.values) {
       if (slot.declaration.connectOnShow && slot.status == PrototypeChannelStatus.IDLE)
@@ -148,7 +162,7 @@ class PrototypeChannelController(
   /** `realtime.connect`: null once connecting (or already live), else why not. */
   suspend fun connect(channel: String): PrototypeChannelError? = lock.withLock {
     val slot = slots[channel] ?: return@withLock unknown(channel)
-    if (!closed && !slot.status.active) {
+    if (!ended && !slot.status.active) {
       slot.attempt = 0
       connect(slot)
     }
@@ -158,7 +172,7 @@ class PrototypeChannelController(
   /** `realtime.disconnect`: closes the connection with 1000 and drops queued sends. */
   suspend fun disconnect(channel: String): PrototypeChannelError? = lock.withLock {
     val slot = slots[channel] ?: return@withLock unknown(channel)
-    if (closed || !slot.status.active) return@withLock null
+    if (ended || !slot.status.active) return@withLock null
     end(slot)
     slot.connection?.close(NORMAL_CLOSURE, "")
     slot.connection = null
@@ -171,6 +185,12 @@ class PrototypeChannelController(
   /** `realtime.send`: sent when open, queued while (re)connecting, refused otherwise. */
   suspend fun send(channel: String, data: String): PrototypeChannelError? = lock.withLock {
     val slot = slots[channel] ?: return@withLock unknown(channel)
+    if (ended) {
+      return@withLock PrototypeChannelError(
+        PrototypeChannelError.NETWORK,
+        "The channels are closed",
+      )
+    }
     sendError(slot, data)
   }
 
@@ -417,7 +437,7 @@ class PrototypeChannelController(
 
   private fun timer(millis: Long, work: suspend () -> Unit): Job = scope.launch {
     delay(millis)
-    lock.withLock { if (!closed) work() }
+    lock.withLock { if (!ended) work() }
   }
 
   private fun unknown(channel: String) =

@@ -10,7 +10,9 @@ import dev.jasonpearson.automobile.prototype.PrototypePlatformModule
 import kotlin.random.Random
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emptyFlow
@@ -75,6 +77,7 @@ internal class PrototypeRealtimeModule(
 
   /** Dismissal or replacement: closes every connection, then stops the inbox. */
   override fun close() {
+    controller.beginClose()
     inbox.trySend { controller.close() }
     inbox.close()
   }
@@ -83,9 +86,12 @@ internal class PrototypeRealtimeModule(
     val channel = (call.args["channel"] as? JsonPrimitive)?.content ?: return invalid("channel")
     val body = if (call.call == SEND) sendText(call.args) ?: return invalid("body") else null
     val result = CompletableDeferred<PrototypeChannelError?>()
+    val caller = currentCoroutineContext()[Job]
     val queued =
       inbox
         .trySend {
+          // A call cancelled (timed out or dismissed) while it waited in the inbox does nothing.
+          if (caller?.isActive == false) return@trySend
           result.complete(
             when (call.call) {
               CONNECT -> controller.connect(channel)

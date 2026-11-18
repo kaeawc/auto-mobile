@@ -97,6 +97,12 @@ case "$*" in
     else
       payload="$(jq -n --arg id "$id" '{screenshotPath:"stub.png",skeleton:[],context:[{label:$id,bounds:[2,144,206,200],affordances:[]}]}')"
     fi
+    if [[ ${ALERT:-} == 1 && ! -f "$CALLS.dismissed" ]]; then
+      # Octal bytes spell U+2019 so the stub source stays ASCII.
+      dont="Don$(printf '\342\200\231')t Allow"
+      [[ ${ALERT_APOSTROPHE:-} != straight ]] || dont="Don't Allow"
+      payload="$(jq -c --arg dont "$dont" '.context += [{label:"CtrlProxyWatch Would Like to Send You Notifications"},{label:"Allow"},{label:$dont}]' <<< "$payload")"
+    fi
     if [[ ${OBSERVE_ENVELOPE:-} == 1 ]]; then
       jq -n --arg payload "$payload" '{content:[{type:"text",text:$payload}]}'
     else
@@ -104,8 +110,26 @@ case "$*" in
     fi ;;
 
   *tapOn*)
-    [[ "$*" == *'--session-uuid watch-session tapOn --deviceId 11111111-2222-3333-4444-555555555555 --selector {"text":"watch-smoke-row"}' ]] || exit 1
-    echo tap >> "$CALLS.tapped"; echo '{"success":true}' ;;
+    [[ "$*" == *'--session-uuid watch-session tapOn --deviceId 11111111-2222-3333-4444-555555555555 --selector {"text":'* ]] || exit 1
+    text="$(jq -r '.text' <<< "${@: -1}")"
+    curly="Don$(printf '\342\200\231')t Allow"
+    if [[ "$text" == "$curly" || "$text" == "Don't Allow" ]]; then
+      printf 'alert-tap %s\n' "$text" >> "$CALLS"
+      [[ ${ALERT_STAYS:-} == 1 ]] || touch "$CALLS.dismissed"
+      echo '{"success":true,"effect":{"screenChanged":true,"basis":"hierarchy"}}'
+      exit
+    fi
+    [[ "$text" == watch-smoke-row ]] || exit 1
+    if [[ ${REFUSE_COVERED:-} == 1 && ( ! -f "$CALLS.dismissed" || ${REFUSE_ALWAYS:-} == 1 ) ]]; then
+      message="A system alert is covering the app (\"CtrlProxyWatch Would Like to Send You Notifications\"); a tap on \"watch-smoke-row\" would land on the alert instead. Tap one of its buttons (Allow, $curly) first, then retry."
+      jq -n --arg m "$message" '{isError:true,content:[{type:"text",text:({success:false,error:$m}|tojson)}]}'
+      echo "$message" >&2
+      exit 1
+    fi
+    echo tap >> "$CALLS.tapped"
+    changed=false
+    if [[ ${TAPS_NEVER_NAVIGATE:-} != 1 ]] && (( $(wc -l < "$CALLS.tapped") >= ${TAP_NAVIGATES_ON:-1} )); then changed=true; fi
+    jq -nc --argjson changed "$changed" '{success:true,effect:{screenChanged:$changed,basis:"hierarchy"}}' ;;
 esac
 STUB
   cat > "$BATS_TEST_TMPDIR/bin/bun" <<'STUB'
@@ -268,18 +292,96 @@ teardown() {
   [ "$(grep -c -- ' tapOn ' "$CALLS")" -eq 2 ]
   [ "$(grep -c 'row tap attempt .* did not navigate; retrying' "$WATCH_SMOKE_LOG_DIR/smoke.log")" -eq 1 ]
   [[ "$output" == *'watch-smoke-lane: row tap attempt 1 did not navigate; retrying'* ]]
+  grep -q 'row attempt 1 tap effect.screenChanged=false' "$WATCH_SMOKE_LOG_DIR/smoke.log"
+  grep -q 'row attempt 2 tap effect.screenChanged=true' "$WATCH_SMOKE_LOG_DIR/smoke.log"
   [ -f "$WATCH_SMOKE_LOG_DIR/before.png" ]
   [ -f "$WATCH_SMOKE_LOG_DIR/after.png" ]
 }
 
-@test "row taps that never navigate fail after three attempts and clean up" {
+@test "no covering alert taps the row exactly once and logs its effect" {
+  run bash "$SCRIPT" latest
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(grep -c -- ' tapOn ' "$CALLS")" -eq 1 ]
+  ! grep -q '^alert-tap ' "$CALLS" || return 1
+  grep -q 'row attempt 1 tap effect.screenChanged=true' "$WATCH_SMOKE_LOG_DIR/smoke.log"
+  ! grep -q 'retrying' "$WATCH_SMOKE_LOG_DIR/smoke.log" || return 1
+}
+
+@test "observed permission alert is dismissed with curly Don't Allow, then one row tap navigates" {
+  export ALERT=1 REFUSE_COVERED=1
+  run bash "$SCRIPT" latest
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(grep -c -- ' tapOn ' "$CALLS")" -eq 2 ]
+  [ "$(grep -c '^alert-tap ' "$CALLS")" -eq 1 ]
+  grep -qx "alert-tap Don$(printf '\342\200\231')t Allow" "$CALLS"
+  alert_line="$(grep -n '^alert-tap ' "$CALLS" | cut -d: -f1)"
+  row_line="$(grep -nF -- '{"text":"watch-smoke-row"}' "$CALLS" | head -n 1 | cut -d: -f1)"
+  [ "$alert_line" -lt "$row_line" ]
+  [ "$(wc -l < "$CALLS.tapped")" -eq 1 ]
+  grep -q 'notification permission alert covers the app' "$WATCH_SMOKE_LOG_DIR/smoke.log"
+  grep -q 'alert "Don.*t Allow" tap effect.screenChanged=true' "$WATCH_SMOKE_LOG_DIR/smoke.log"
+  grep -q 'row attempt 1 tap effect.screenChanged=true' "$WATCH_SMOKE_LOG_DIR/smoke.log"
+  ! grep -q 'retrying' "$WATCH_SMOKE_LOG_DIR/smoke.log" || return 1
+  [[ "$output" == *'watch-smoke-lane: PASS'* ]]
+}
+
+@test "observed permission alert with a straight apostrophe is dismissed too" {
+  export ALERT=1 ALERT_APOSTROPHE=straight
+  run bash "$SCRIPT" latest
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qx "alert-tap Don't Allow" "$CALLS"
+  [ "$(grep -c -- ' tapOn ' "$CALLS")" -eq 2 ]
+}
+
+@test "dismissed alert still allows one bounded row fallback" {
+  export ALERT=1 TAP_NAVIGATES_ON=2
+  run bash "$SCRIPT" latest
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(grep -c '^alert-tap ' "$CALLS")" -eq 1 ]
+  [ "$(wc -l < "$CALLS.tapped")" -eq 2 ]
+  [ "$(grep -c 'did not navigate; retrying once' "$WATCH_SMOKE_LOG_DIR/smoke.log")" -eq 1 ]
+}
+
+@test "tapOn covering-alert refusal dismisses the alert, then the row navigates" {
+  export REFUSE_COVERED=1
+  run bash "$SCRIPT" latest
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(grep -c -- ' tapOn ' "$CALLS")" -eq 3 ]
+  [ "$(grep -c '^alert-tap ' "$CALLS")" -eq 1 ]
+  [ "$(wc -l < "$CALLS.tapped")" -eq 1 ]
+  grep -q 'A system alert is covering the app' "$WATCH_SMOKE_LOG_DIR/tapOn-refusal.txt"
+  grep -q 'row attempt 1 tap effect.screenChanged=true' "$WATCH_SMOKE_LOG_DIR/smoke.log"
+  ! grep -q 'retrying' "$WATCH_SMOKE_LOG_DIR/smoke.log" || return 1
+  [[ "$output" == *'watch-smoke-lane: PASS'* ]]
+}
+
+@test "covering-alert refusal after dismissal fails instead of looping and cleans up" {
+  export REFUSE_COVERED=1 REFUSE_ALWAYS=1
+  run bash "$SCRIPT" latest
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'still reports a covering system alert after it was dismissed'* ]]
+  [ "$(grep -c '^alert-tap ' "$CALLS")" -eq 1 ]
+  [ ! -f "$CALLS.tapped" ]
+  grep -q '^simctl delete 11111111-2222-3333-4444-555555555555$' "$CALLS"
+}
+
+@test "alert that survives its Don't Allow tap fails before any row tap" {
+  export ALERT=1 ALERT_STAYS=1
+  run bash "$SCRIPT" latest
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'system alert still covers the app after tapping'* ]]
+  [ ! -f "$CALLS.tapped" ]
+  grep -q -- '--daemon stop' "$CALLS"
+}
+
+@test "row taps that never navigate fail after one fallback attempt and clean up" {
   export TAPS_NEVER_NAVIGATE=1
   run bash "$SCRIPT" latest
   [ "$status" -eq 1 ]
   [[ "$output" == *'missing identifier watch-smoke-next'* ]]
-  [ "$(grep -c -- ' tapOn ' "$CALLS")" -eq 3 ]
-  [ "$(grep -c 'row tap attempt .* did not navigate; retrying' "$WATCH_SMOKE_LOG_DIR/smoke.log")" -eq 2 ]
-  [[ "$output" == *'watch-smoke-lane: row tap attempt 2 did not navigate; retrying'* ]]
+  [ "$(grep -c -- ' tapOn ' "$CALLS")" -eq 2 ]
+  [ "$(grep -c 'row tap attempt .* did not navigate; retrying once' "$WATCH_SMOKE_LOG_DIR/smoke.log")" -eq 1 ]
+  [ "$(grep -c 'row attempt [12] tap effect.screenChanged=false' "$WATCH_SMOKE_LOG_DIR/smoke.log")" -eq 2 ]
   [ -f "$WATCH_SMOKE_LOG_DIR/before.png" ]
   [ -f "$WATCH_SMOKE_LOG_DIR/failure.png" ] || { echo "$output"; return 1; }
   [ ! -f "$WATCH_SMOKE_LOG_DIR/after.png" ]

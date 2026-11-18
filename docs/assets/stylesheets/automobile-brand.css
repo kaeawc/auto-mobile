@@ -86,17 +86,41 @@
   white-space: nowrap;
 }
 
-/* Tool tables (docs/tools.md and tool pages): the generated Requires cells carry
-   .tool-requires, so only those tables keep the emoji and tool name on one line;
+/* Tool tables (docs/tools.md and tool pages): the generated Platforms cells carry
+   .tool-platforms, so only those tables keep the emoji and tool name on one line;
    Material's table scroll wrapper scrolls them sideways on narrow screens. */
-.md-typeset table:not([class]):has(.tool-requires) td:first-child,
-.md-typeset table:not([class]):has(.tool-requires) th:first-child,
-.md-typeset .tool-requires {
+.md-typeset table:not([class]):has(.tool-platforms) td:first-child,
+.md-typeset table:not([class]):has(.tool-platforms) th:first-child,
+.md-typeset .tool-platforms,
+.md-typeset .tool-needs {
   white-space: nowrap;
 }
 
-.md-typeset .tool-requires [title] {
+.md-typeset .tool-platforms [title],
+.md-typeset .tool-needs [title] {
   cursor: help;
+}
+
+/* Description toggle (see assets/javascripts/tool-table.js): data-tool-brief hides
+   the "What it does" column; the button above each table flips it. */
+.md-typeset table[data-tool-brief] .tool-desc {
+  display: none;
+}
+
+.md-typeset .tool-desc-toggle {
+  background: none;
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 0.4rem;
+  color: var(--md-typeset-a-color);
+  cursor: pointer;
+  font-size: 0.7rem;
+  margin: 0.5rem 0 0;
+  padding: 0.3rem 0.7rem;
+}
+
+.md-typeset .tool-desc-toggle:hover,
+.md-typeset .tool-desc-toggle:focus-visible {
+  border-color: var(--md-typeset-a-color);
 }
 
 /* Live prompt search bar (see assets/javascripts/prompt-form.js). */

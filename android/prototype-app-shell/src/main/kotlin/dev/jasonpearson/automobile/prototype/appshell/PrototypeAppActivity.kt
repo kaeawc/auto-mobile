@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.prototype.appshell
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -19,16 +20,15 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.lifecycle.lifecycleScope
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidBiometricSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidLocationSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPermissionsSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi
 import dev.jasonpearson.automobile.ctrlproxy.prototype.LocalPrototypeRootBack
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBiometricModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePermissionsModule
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost
@@ -39,9 +39,10 @@ import dev.jasonpearson.automobile.prototype.ProvideEmbeddedPrototypeHost
 import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -49,26 +50,11 @@ import kotlinx.coroutines.withContext
 
 @OptIn(InternalAutoMobilePrototypeApi::class)
 class PrototypeAppActivity : ComponentActivity() {
-  private val interactions = Mutex()
   private val links = AppShellLinkInbox()
-  private var runtime: PrototypeRuntime? = null
-  // A stop followed by destroy must finish saving after lifecycleScope is cancelled.
-  private val storageFlushScope by lazy {
-    CoroutineScope(lifecycleScope.coroutineContext + NonCancellable)
-  }
-  private val host by lazy {
-    EmbeddedPrototypeHost(lifecycleScope, interactions).also { host ->
-      host.flushScope = storageFlushScope
-      host.onRuntime = { runtime = it }
-      host.initializeRuntime = { runtime ->
-        val metadata =
-          packageManager.getActivityInfo(componentName, PackageManager.GET_META_DATA).metaData
-        runtime.registeredLinkSchemes =
-          metadata?.getString("automobile.prototype.linkSchemes")?.split(',').orEmpty()
-        links.attach(runtime::openLink)
-      }
-    }
-  }
+  private val attachScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+  private val embeddedHost = EmbeddedPrototypeHost(attachScope, Mutex())
+  private lateinit var attachTarget: RuntimeAttachTarget
+  private var detachAttachTarget: (() -> Unit)? = null
   private val generation = mutableIntStateOf(0)
   private val remountGate = ResumedRemountGate { generation.intValue++ }
 
@@ -76,15 +62,33 @@ class PrototypeAppActivity : ComponentActivity() {
     installSplashScreen()
     super.onCreate(savedInstanceState)
     lifecycle.addObserver(remountGate)
-    intent?.dataString?.let { url ->
-      lifecycleScope.launch { interactions.withLock { links.receive(url) } }
+    val process = AndroidAppAttachProcess.get(applicationContext)
+    attachTarget =
+      RuntimeAttachTarget(embeddedHost, process) {
+        resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+          Configuration.UI_MODE_NIGHT_YES
+      }
+    detachAttachTarget = process.bind(attachTarget)
+    embeddedHost.onRuntime = { attachTarget.runtime = it }
+    embeddedHost.initializeRuntime = { runtime ->
+      val metadata =
+        packageManager.getActivityInfo(componentName, PackageManager.GET_META_DATA).metaData
+      runtime.registeredLinkSchemes =
+        metadata?.getString("automobile.prototype.linkSchemes")?.split(',').orEmpty()
+      links.attach(runtime::openLink)
     }
+    // Main.immediate queues the launch URL under the interaction lock before composition starts.
+    intent?.dataString?.let { url ->
+      attachScope.launch { embeddedHost.interactions.withLock { links.receive(url) } }
+    }
+    embeddedHost.nextSequence = { attachTarget.nextSequence() }
+    embeddedHost.eventSink = PrototypeEventSink { process.agent.emit(it) }
     val source = ApkPrototypeSource(assets)
     val loader = AppShellLoader(source, PrototypeStorage.fileBacked(this))
     val prototypeAssets = PrototypeAssets(image = source::readAsset, font = source::readAsset)
     setContent {
       MaterialTheme {
-        ProvideEmbeddedPrototypeHost(host) { AppContent(loader, prototypeAssets) }
+        AppContent(loader, prototypeAssets)
       }
     }
   }
@@ -93,31 +97,36 @@ class PrototypeAppActivity : ComponentActivity() {
     super.onNewIntent(intent)
     setIntent(intent)
     intent.dataString?.let { url ->
-      lifecycleScope.launch { interactions.withLock { links.receive(url) } }
+      attachScope.launch { embeddedHost.interactions.withLock { links.receive(url) } }
+    }
+  }
+
+  private fun flushRuntime() {
+    val runtime = attachTarget.runtime
+    attachScope.launch {
+      withContext(NonCancellable) {
+        embeddedHost.interactions.withLock {
+          try {
+            runtime?.flushStorage()
+          } catch (error: IOException) {
+            Log.w("PrototypeAppShell", "Cannot flush prototype storage", error)
+          }
+        }
+      }
     }
   }
 
   override fun onStop() {
-    val target = runtime
-    storageFlushScope.launch(start = CoroutineStart.UNDISPATCHED) {
-      interactions.withLock {
-        try {
-          target?.pauseTimers()
-          target?.flushStorage()
-        } catch (error: IOException) {
-          Log.w("PrototypeAppShell", "Cannot flush prototype storage", error)
-        } catch (error: SecurityException) {
-          Log.w("PrototypeAppShell", "Cannot flush prototype storage", error)
-        }
-      }
-    }
+    flushRuntime()
     super.onStop()
   }
 
   override fun onDestroy() {
-    runtime?.close()
-    runtime = null
     links.detach()
+    detachAttachTarget?.invoke()
+    flushRuntime()
+    attachTarget.runtime?.close()
+    attachScope.cancel()
     super.onDestroy()
   }
 
@@ -159,22 +168,28 @@ class PrototypeAppActivity : ComponentActivity() {
         // Root Back only backgrounds the task, so the renderer and its unsaved state stay alive.
         CompositionLocalProvider(LocalPrototypeRootBack provides { moveTaskToBack(true) }) {
           key(generation.intValue) {
-            AutoMobilePrototype(
-              platform = platform,
-              spec = current.spec,
-              assets = prototypeAssets,
-              storage = loader.storage,
-              handleBack = true,
-              onDismiss = {
-                links.detach()
-                // Any other user dismissal ends the session; remount so returning is not blank, but
-                // only once the activity resumes so onAppear never runs while backgrounding.
-                if (appShellBackAction(depth = 1) == AppShellBackAction.MOVE_TASK_TO_BACK) {
-                  if (moveTaskToBack(true)) remountGate.requestAfterBackgrounding()
-                  else generation.intValue++
-                }
-              },
-            )
+            ProvideEmbeddedPrototypeHost(embeddedHost) {
+              DisposableEffect(generation.intValue) {
+                onDispose { flushRuntime() }
+              }
+              AutoMobilePrototype(
+                platform = platform,
+                spec = current.spec,
+                assets = prototypeAssets,
+                storage = loader.storage,
+                handleBack = true,
+                onDismiss = {
+                  links.detach()
+                  // Any other user dismissal ends the session; remount so returning is not blank,
+                  // but
+                  // only once the activity resumes so onAppear never runs while backgrounding.
+                  if (appShellBackAction(depth = 1) == AppShellBackAction.MOVE_TASK_TO_BACK) {
+                    if (moveTaskToBack(true)) remountGate.requestAfterBackgrounding()
+                    else generation.intValue++
+                  }
+                },
+              )
+            }
           }
         }
       } else AppShellStatus(current) { moveTaskToBack(true) }

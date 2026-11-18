@@ -1,3 +1,4 @@
+import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
 import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
@@ -43,6 +44,7 @@ const reported = (lastSequence: number) => ({
 });
 
 describe("prototype inspect (#10494)", () => {
+  let store: InMemoryPrototypeStatusStore;
   let client: FakeCtrlProxy;
   let fakeTimer: FakeTimer;
   let restore: () => void;
@@ -63,7 +65,9 @@ describe("prototype inspect (#10494)", () => {
       subscribeDeviceRemoval: () => () => {},
       subscribeDeviceUnbound: () => () => {},
     };
+    store = new InMemoryPrototypeStatusStore(timer);
     unsubscribe = registerPrototypeTools({
+      store,
       clientFactory: () => client,
       adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
       lastRenderedObservation: () => undefined,
@@ -83,10 +87,14 @@ describe("prototype inspect (#10494)", () => {
     return prototypeOutputSchema.parse(readToolResponse(response).structuredContent);
   }
 
-  test("inspect is an argument-free action", () => {
-    expect(prototypeSchema.safeParse({ action: "inspect" }).success).toBe(true);
-    expect(prototypeSchema.safeParse({ action: "inspect", id: "proto" }).success).toBe(false);
-  });
+  test.each(["inspect", "status"])(
+    "%s accepts only an optional disposable-app selection id",
+    (action) => {
+      expect(prototypeSchema.safeParse({ action }).success).toBe(true);
+      expect(prototypeSchema.safeParse({ action, id: "proto" }).success).toBe(true);
+      expect(prototypeSchema.safeParse({ action, goal: "unrelated" }).success).toBe(false);
+    },
+  );
 
   test("a device without prototype_persistence_replay_v1 gets a clear error and nothing is sent", async () => {
     client.setSupportedCommands(["prototype_window_options_v1"]);
@@ -270,6 +278,16 @@ describe("prototype inspect (#10494)", () => {
     const again = call({ action: "awaitEvent", id: "proto", timeoutMs: 10 });
     fakeTimer.advanceTime(10);
     expect((await again).warning).toBeUndefined();
+  });
+
+  test("CtrlProxy reconciliation preserves ownerless shown ids alongside its own ids", async () => {
+    store.adopt({ deviceId: device.deviceId }, { ...reported(0), id: "ownerless" });
+    client.setInspectReply({ success: true, prototypes: [reported(1)] });
+    await call({ action: "inspect" });
+    expect([...store.shownIds(device.deviceId)].sort()).toEqual(["ownerless", "proto"]);
+    client.setInspectReply({ success: true, prototypes: [] });
+    await call({ action: "inspect" });
+    expect(store.shownIds(device.deviceId)).toEqual(["ownerless"]);
   });
 
   test("an empty report clears a prototype the device no longer shows", async () => {

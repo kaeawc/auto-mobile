@@ -55,6 +55,8 @@ export function createPrototypePatchQueue(): PrototypePatchQueue {
   };
 }
 export interface PrototypePatchDependencies {
+  /** A disposable app owns its installed spec and validates patches itself. */
+  deviceOwnsSpec?: boolean;
   store: Pick<PrototypeStatusStore, "shownSpecs" | "recordPatch">;
   transport: Pick<PrototypeTransport, "patch">;
   supportsPatch: () => Promise<boolean>;
@@ -134,6 +136,16 @@ async function queuedPatch(
   args: PrototypePatchInput,
   signal?: AbortSignal,
 ): Promise<PrototypePatchOutput> {
+  if (deps.deviceOwnsSpec) {
+    signal?.throwIfAborted();
+    const result = await sendPatch(deps, args);
+    deps.retire(result);
+    return {
+      success: result.success,
+      ...prototypePatchReplyFields(result),
+      ...(result.error ? { error: result.error } : {}),
+    };
+  }
   const read = deps.store.shownSpecs.read(deviceId, args.id);
   if (read.kind === "busy") {
     return failure(

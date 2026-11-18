@@ -300,6 +300,8 @@ export interface WsTraversalOrderResultMessage extends WsMessageBase {
 
 export interface WsPrototypeResultMessage extends Omit<PrototypeResult, "requestId"> {
   pages?: Record<string, number>;
+  /** Disposable-app get_prototype_status reply; validated by the host's agent status parser. */
+  status?: Record<string, unknown> | null;
   type: "prototype_result";
   requestId?: string | null;
 }

@@ -8,6 +8,12 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 @Serializable
+data class PrototypeDataWhere(
+  val field: String,
+  val equals: EmitContextBinding,
+)
+
+@Serializable
 data class PrototypeRequestUploadFile(
   val asset: String,
 )
@@ -239,6 +245,8 @@ data class PrototypeReplaceAction(
 data class PrototypeSetDataAction(
   val path: String,
   val value: EmitContextBinding,
+  val where: PrototypeDataWhere? = null,
+  val member: String? = null,
 ) : PrototypeAction()
 
 @SerialName("appendData")
@@ -251,7 +259,10 @@ data class PrototypeAppendDataAction(
 
 @SerialName("removeData")
 @Serializable
-data class PrototypeRemoveDataAction(val path: String) : PrototypeAction()
+data class PrototypeRemoveDataAction(
+  val path: String,
+  val where: PrototypeDataWhere? = null,
+) : PrototypeAction()
 
 /**
  * An HTTP call from a tap (`prototype_network_v1`, #12523): the response goes to [into] (and its

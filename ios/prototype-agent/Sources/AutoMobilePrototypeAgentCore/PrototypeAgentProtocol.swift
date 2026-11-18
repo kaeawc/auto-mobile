@@ -46,6 +46,7 @@ enum PrototypeAgentProtocol {
         iconSfSymbolsCapability,
         dataModelCapability,
         dataActionsCapability,
+        dataActionsV2Capability,
         networkCapability,
         networkDeviceCapability,
         textFieldOptionsCapability,
@@ -100,7 +101,7 @@ enum PrototypeAgentProtocol {
         backdropCapability,
         layoutDirectionCapability,
         timersCapability,
-        "prototype_links_v1",
+        linksCapability,
         "prototype_platform_v1",
         "prototype_platform_clipboard_v1",
         "prototype_platform_device_v1",
@@ -110,6 +111,7 @@ enum PrototypeAgentProtocol {
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
     /// `reset` on an agent that does not advertise it.
+    static let linksCapability = "prototype_links_v1"
     static let windowControlsCapability = "prototype_platform_window_controls_v1"
     static let hideKeyboardCapability = "prototype_hide_keyboard_v1"
     /// Advertised only through the registered `PrototypeSettingsModule`, never the static list.
@@ -191,6 +193,7 @@ enum PrototypeAgentProtocol {
     /// `setData`, `appendData`, `prependData` and `removeData` change `/data` from a tap and report each write as a
     /// `change` event named for the `/data/...` path with `{op, value?, revision}` (#12519). Same name
     /// as the CtrlProxy capability; the host refuses a spec using one on an agent without it.
+    static let dataActionsV2Capability = "prototype_data_actions_v2"
     static let dataActionsCapability = "prototype_data_actions_v1"
     /// The `request` action (#12529): host-proxied calls (`via: "host"`, the default) through
     /// `prototype_request` / `prototype_response` frames, and the `/data`, `__meta`, `statusKey` and

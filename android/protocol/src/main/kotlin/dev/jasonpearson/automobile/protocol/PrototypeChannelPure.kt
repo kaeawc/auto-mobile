@@ -43,7 +43,8 @@ object PrototypeChannelCoalescer {
   private fun target(action: JsonObject): String? {
     fun text(key: String) = (action[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
     return when (text("type")) {
-      "setData" -> text("path")?.let { "data:$it" }
+      "setData" ->
+        if ("where" in action || "member" in action) null else text("path")?.let { "data:$it" }
       "setState" -> text("key")?.let { "state:$it" }
       else -> null
     }

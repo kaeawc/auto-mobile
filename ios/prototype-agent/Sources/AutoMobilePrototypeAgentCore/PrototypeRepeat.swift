@@ -797,7 +797,23 @@ struct PrototypeRepeatInstance {
                 }
             })
         }
-        if case let .object(binding)? = fields["body"] { fields["body"] = bindDataValue(binding) }
+        if case var .object(binding)? = fields["body"] {
+            if let entries = binding["form"]?.objectFields {
+                binding["form"] = .object(entries.mapValues { value in
+                    value.objectFields.map(bindDataValue) ?? value
+                })
+                fields["body"] = .object(binding)
+            } else if case let .array(parts)? = binding["multipart"] {
+                binding["multipart"] = .array(parts.map { raw in
+                    guard var part = raw.objectFields else { return raw }
+                    if let value = part["value"]?.objectFields { part["value"] = bindDataValue(value) }
+                    return .object(part)
+                })
+                fields["body"] = .object(binding)
+            } else {
+                fields["body"] = bindDataValue(binding)
+            }
+        }
         for list in ["onSuccess", "onError"] {
             if case let .array(actions)? = fields[list] { fields[list] = .array(actions.map(bindAction)) }
         }

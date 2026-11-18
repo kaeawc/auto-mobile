@@ -82,6 +82,8 @@ export function parsePrototypeAgentStatus(value: unknown): PrototypeAgentStatus 
 export interface PrototypeAgentHandshake {
   /** Stable across socket reconnects, fresh for each disposable-app process. */
   appInstanceId?: string;
+  /** Current UI showing; remounts retain the process sequence ledger. */
+  showingId?: string;
   agentVersion: string;
   protocolVersion: number;
   capabilities: string[];

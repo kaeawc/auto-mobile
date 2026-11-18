@@ -2617,61 +2617,132 @@
   "validPlatformNotes": {
     "ns-android-ignored-on-ios.json": {
       "platform": "ios",
-      "paths": ["root.android"]
+      "paths": [
+        "root.android"
+      ]
     },
     "ns-ios-ignored-on-android.json": {
       "platform": "android",
-      "paths": ["root.ios"]
+      "paths": [
+        "root.ios"
+      ]
     }
   },
   "validCapabilities": {
-    "adaptive-data-slots.json": ["prototype_adaptive_v1", "prototype_data_model_v1"],
-    "adaptive-list-detail.json": ["prototype_adaptive_v1"],
-    "adaptive-navigation-suite.json": ["prototype_adaptive_v1"],
-    "adaptive-nested.json": ["prototype_adaptive_v1"],
-    "adaptive-select.json": ["prototype_adaptive_v1"],
-    "adaptive-supporting.json": ["prototype_adaptive_v1"],
+    "adaptive-data-slots.json": [
+      "prototype_adaptive_v1",
+      "prototype_data_model_v1"
+    ],
+    "adaptive-list-detail.json": [
+      "prototype_adaptive_v1"
+    ],
+    "adaptive-navigation-suite.json": [
+      "prototype_adaptive_v1"
+    ],
+    "adaptive-nested.json": [
+      "prototype_adaptive_v1"
+    ],
+    "adaptive-select.json": [
+      "prototype_adaptive_v1"
+    ],
+    "adaptive-supporting.json": [
+      "prototype_adaptive_v1"
+    ],
     "auth-block-minimal.json": [
       "prototype_data_model_v1",
       "prototype_platform_auth_v1",
       "prototype_platform_v1"
     ],
-    "backdrop-blur-zero.json": ["prototype_backdrop_v1"],
-    "backdrop-full.json": ["prototype_backdrop_v1"],
-    "backdrop-material-only.json": ["prototype_backdrop_v1"],
-    "bar-scroll-defaults.json": ["prototype_bar_scroll_v1"],
-    "bar-scroll-enter-always.json": ["prototype_bar_scroll_v1"],
-    "bar-scroll-material.json": ["prototype_bar_scroll_v1"],
-    "bar-scroll-screen-local.json": ["prototype_bar_scroll_v1", "prototype_stack_v1"],
+    "backdrop-blur-zero.json": [
+      "prototype_backdrop_v1"
+    ],
+    "backdrop-full.json": [
+      "prototype_backdrop_v1"
+    ],
+    "backdrop-material-only.json": [
+      "prototype_backdrop_v1"
+    ],
+    "bar-scroll-defaults.json": [
+      "prototype_bar_scroll_v1"
+    ],
+    "bar-scroll-enter-always.json": [
+      "prototype_bar_scroll_v1"
+    ],
+    "bar-scroll-material.json": [
+      "prototype_bar_scroll_v1"
+    ],
+    "bar-scroll-screen-local.json": [
+      "prototype_bar_scroll_v1",
+      "prototype_stack_v1"
+    ],
     "bounds-anchor-aligned.json": [],
     "bounds-at-limits.json": [],
-    "camera-preview.json": ["prototype_platform_camera_v1", "prototype_platform_v1"],
-    "carousel-hero-repeat.json": ["prototype_carousel_v1"],
-    "carousel-multi-browse.json": ["prototype_carousel_v1"],
-    "chart-variants.json": ["prototype_chart_v1", "prototype_data_model_v1"],
+    "camera-preview.json": [
+      "prototype_platform_camera_v1",
+      "prototype_platform_v1"
+    ],
+    "carousel-hero-repeat.json": [
+      "prototype_carousel_v1"
+    ],
+    "carousel-multi-browse.json": [
+      "prototype_carousel_v1"
+    ],
+    "chart-variants.json": [
+      "prototype_chart_v1",
+      "prototype_data_model_v1"
+    ],
     "chat-scroll.json": [
       "prototype_chat_scroll_v1",
       "prototype_data_actions_v1",
       "prototype_data_model_v1",
       "prototype_text_field_actions_v1"
     ],
-    "checks-enabled-button.json": ["prototype_checks_v1"],
-    "checks-enabled-chip.json": ["prototype_checks_v1"],
-    "checks-enabled-fab.json": ["prototype_checks_v1"],
-    "checks-enabled-iconButton.json": ["prototype_checks_v1"],
-    "checks-enabled-listItem.json": ["prototype_checks_v1"],
-    "checks-form.json": ["prototype_checks_v1"],
-    "checks-rules.json": ["prototype_checks_v1"],
-    "choreography.json": ["prototype_choreography_v1", "prototype_motion_v2"],
-    "clipboard-copy.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
-    "clipboard-has-text.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
-    "clipboard-paste-button.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
+    "checks-enabled-button.json": [
+      "prototype_checks_v1"
+    ],
+    "checks-enabled-chip.json": [
+      "prototype_checks_v1"
+    ],
+    "checks-enabled-fab.json": [
+      "prototype_checks_v1"
+    ],
+    "checks-enabled-iconButton.json": [
+      "prototype_checks_v1"
+    ],
+    "checks-enabled-listItem.json": [
+      "prototype_checks_v1"
+    ],
+    "checks-form.json": [
+      "prototype_checks_v1"
+    ],
+    "checks-rules.json": [
+      "prototype_checks_v1"
+    ],
+    "choreography.json": [
+      "prototype_choreography_v1",
+      "prototype_motion_v2"
+    ],
+    "clipboard-copy.json": [
+      "prototype_platform_clipboard_v1",
+      "prototype_platform_v1"
+    ],
+    "clipboard-has-text.json": [
+      "prototype_platform_clipboard_v1",
+      "prototype_platform_v1"
+    ],
+    "clipboard-paste-button.json": [
+      "prototype_platform_clipboard_v1",
+      "prototype_platform_v1"
+    ],
     "clipboard-paste.json": [
       "prototype_data_model_v1",
       "prototype_platform_clipboard_v1",
       "prototype_platform_v1"
     ],
-    "clipboard-sensitive-copy.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
+    "clipboard-sensitive-copy.json": [
+      "prototype_platform_clipboard_v1",
+      "prototype_platform_v1"
+    ],
     "color-role-and-corner-tokens.json": [],
     "commerce-catalog.json": [
       "prototype_data_model_v1",
@@ -2686,50 +2757,117 @@
       "prototype_stack_v1"
     ],
     "content-description.json": [],
-    "content-transition-crossfade.json": ["prototype_content_transition_v1"],
+    "content-transition-crossfade.json": [
+      "prototype_content_transition_v1"
+    ],
     "content-transition-none.json": [],
-    "content-transition-numeric.json": ["prototype_content_transition_v1"],
-    "content-transition-repeat.json": ["prototype_content_transition_v1"],
-    "content-transition-spans.json": ["prototype_content_transition_v1", "prototype_rich_text_v1"],
-    "custom-shader-16-uniforms.json": ["prototype_custom_shaders_v1"],
-    "custom-shader.json": ["prototype_custom_shaders_v1"],
-    "data-actions-list.json": ["prototype_data_actions_v1", "prototype_data_model_v1"],
-    "data-conditions.json": ["prototype_data_model_v1"],
-    "data-limits-exact.json": ["prototype_data_model_v1"],
-    "data-repeat-empty-array.json": ["prototype_data_model_v1"],
-    "data-repeat-path-authored-budget.json": ["prototype_data_model_v1"],
-    "data-repeat-path-cells-exact.json": ["prototype_data_model_v1"],
-    "data-repeat-path.json": ["prototype_data_model_v1"],
-    "data-text-placeholders.json": ["prototype_data_model_v1"],
-    "derive-formatters.json": ["prototype_data_model_v1", "prototype_format_v1"],
+    "content-transition-numeric.json": [
+      "prototype_content_transition_v1"
+    ],
+    "content-transition-repeat.json": [
+      "prototype_content_transition_v1"
+    ],
+    "content-transition-spans.json": [
+      "prototype_content_transition_v1",
+      "prototype_rich_text_v1"
+    ],
+    "custom-shader-16-uniforms.json": [
+      "prototype_custom_shaders_v1"
+    ],
+    "custom-shader.json": [
+      "prototype_custom_shaders_v1"
+    ],
+    "data-actions-list.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1"
+    ],
+    "data-conditions.json": [
+      "prototype_data_model_v1"
+    ],
+    "data-limits-exact.json": [
+      "prototype_data_model_v1"
+    ],
+    "data-repeat-empty-array.json": [
+      "prototype_data_model_v1"
+    ],
+    "data-repeat-path-authored-budget.json": [
+      "prototype_data_model_v1"
+    ],
+    "data-repeat-path-cells-exact.json": [
+      "prototype_data_model_v1"
+    ],
+    "data-repeat-path.json": [
+      "prototype_data_model_v1"
+    ],
+    "data-text-placeholders.json": [
+      "prototype_data_model_v1"
+    ],
+    "derive-formatters.json": [
+      "prototype_data_model_v1",
+      "prototype_format_v1"
+    ],
     "design-material.json": [],
-    "design-platform.json": ["prototype_design_platform_v1"],
+    "design-platform.json": [
+      "prototype_design_platform_v1"
+    ],
     "divider-orientation.json": [],
     "doc-example-1.json": [],
     "doc-example-2.json": [],
     "doc-example-3.json": [],
     "elevation-gradient-aspect-ratio.json": [],
-    "emit-context-16-entries.json": ["prototype_emit_context_v1"],
-    "emit-context-arbitrary-names.json": ["prototype_emit_context_v1"],
-    "emit-context-data-repeat.json": ["prototype_data_model_v1", "prototype_emit_context_v1"],
-    "emit-context-data.json": ["prototype_data_model_v1", "prototype_emit_context_v1"],
-    "emit-context-empty.json": ["prototype_emit_context_v1"],
-    "emit-context-page.json": ["prototype_emit_context_v1"],
-    "emit-context-payload.json": ["prototype_emit_context_v1"],
-    "emit-context-repeat.json": ["prototype_emit_context_v1"],
-    "emit-context-state.json": ["prototype_emit_context_v1"],
-    "emit-context-value.json": ["prototype_emit_context_v1"],
+    "emit-context-16-entries.json": [
+      "prototype_emit_context_v1"
+    ],
+    "emit-context-arbitrary-names.json": [
+      "prototype_emit_context_v1"
+    ],
+    "emit-context-data-repeat.json": [
+      "prototype_data_model_v1",
+      "prototype_emit_context_v1"
+    ],
+    "emit-context-data.json": [
+      "prototype_data_model_v1",
+      "prototype_emit_context_v1"
+    ],
+    "emit-context-empty.json": [
+      "prototype_emit_context_v1"
+    ],
+    "emit-context-page.json": [
+      "prototype_emit_context_v1"
+    ],
+    "emit-context-payload.json": [
+      "prototype_emit_context_v1"
+    ],
+    "emit-context-repeat.json": [
+      "prototype_emit_context_v1"
+    ],
+    "emit-context-state.json": [
+      "prototype_emit_context_v1"
+    ],
+    "emit-context-value.json": [
+      "prototype_emit_context_v1"
+    ],
     "exact-depth-limit.json": [],
     "exact-image-limit.json": [],
     "exact-node-limit.json": [],
     "exact-selector-depth.json": [],
     "floating-element-anchor.json": [],
-    "flow-basic.json": ["prototype_flow_grid_v1"],
-    "flow-max-lines-repeat.json": ["prototype_flow_grid_v1"],
+    "flow-basic.json": [
+      "prototype_flow_grid_v1"
+    ],
+    "flow-max-lines-repeat.json": [
+      "prototype_flow_grid_v1"
+    ],
     "font-asset.json": [],
     "fullscreen-all-nodes.json": [],
-    "gesture-button.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "gesture-dialog-confirm.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "gesture-button.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-dialog-confirm.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
     "gesture-event-binding.json": [
       "prototype_platform_biometric_v1",
       "prototype_platform_device_v1",
@@ -2785,7 +2923,10 @@
       "prototype_platform_v1",
       "prototype_text_field_actions_v1"
     ],
-    "gesture-onTap.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "gesture-onTap.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
     "gesture-tap-onError.json": [
       "prototype_network_v1",
       "prototype_platform_share_v1",
@@ -2796,27 +2937,54 @@
       "prototype_platform_share_v1",
       "prototype_platform_v1"
     ],
-    "gesture-top-app-bar.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "gesture-top-app-bar.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
     "gesture-unflagged-call.json": [
       "prototype_platform_clipboard_v1",
       "prototype_platform_v1",
       "prototype_timers_v1"
     ],
-    "gestures-repeat.json": ["prototype_gestures_v1"],
-    "gestures.json": ["prototype_gestures_v1"],
-    "glass-conditional.json": ["prototype_glass_v1"],
-    "glass-defaults.json": ["prototype_glass_v1"],
-    "glass-edge-hard.json": ["prototype_scroll_edge_effect_v1"],
+    "gestures-repeat.json": [
+      "prototype_gestures_v1"
+    ],
+    "gestures.json": [
+      "prototype_gestures_v1"
+    ],
+    "glass-conditional.json": [
+      "prototype_glass_v1"
+    ],
+    "glass-defaults.json": [
+      "prototype_glass_v1"
+    ],
+    "glass-edge-hard.json": [
+      "prototype_scroll_edge_effect_v1"
+    ],
     "glass-edge-none-authored-fades.json": [
       "prototype_scroll_edge_effect_v1",
       "prototype_style_polish_v2"
     ],
-    "glass-edge-none.json": ["prototype_scroll_edge_effect_v1"],
-    "glass-edge-soft.json": ["prototype_scroll_edge_effect_v1"],
-    "glass-image-extension.json": ["prototype_glass_v1"],
-    "glass-namespace-mixed.json": ["prototype_glass_v1", "prototype_platform_namespace_v1"],
-    "glass-namespace-only.json": ["prototype_glass_v1"],
-    "glass-shared-nearest-group.json": ["prototype_glass_v1", "prototype_shared_element_v2"],
+    "glass-edge-none.json": [
+      "prototype_scroll_edge_effect_v1"
+    ],
+    "glass-edge-soft.json": [
+      "prototype_scroll_edge_effect_v1"
+    ],
+    "glass-image-extension.json": [
+      "prototype_glass_v1"
+    ],
+    "glass-namespace-mixed.json": [
+      "prototype_glass_v1",
+      "prototype_platform_namespace_v1"
+    ],
+    "glass-namespace-only.json": [
+      "prototype_glass_v1"
+    ],
+    "glass-shared-nearest-group.json": [
+      "prototype_glass_v1",
+      "prototype_shared_element_v2"
+    ],
     "glass-shared-repeat-carrier-template.json": [
       "prototype_data_model_v1",
       "prototype_glass_v1",
@@ -2827,35 +2995,79 @@
       "prototype_glass_v1",
       "prototype_shared_element_v2"
     ],
-    "grid-adaptive-min-width.json": ["prototype_flow_grid_v1"],
-    "grid-fixed-columns-span.json": ["prototype_flow_grid_v1"],
+    "grid-adaptive-min-width.json": [
+      "prototype_flow_grid_v1"
+    ],
+    "grid-fixed-columns-span.json": [
+      "prototype_flow_grid_v1"
+    ],
     "hide-keyboard-channel-literals.json": [
       "prototype_platform_realtime_v1",
       "prototype_platform_v1"
     ],
-    "hide-keyboard-free-form-maps.json": ["prototype_routes_v1", "prototype_stack_v1"],
-    "hide-keyboard-ignored-accessory.json": ["prototype_platform_namespace_v1"],
-    "hide-keyboard-request-query.json": ["prototype_data_model_v1", "prototype_network_v1"],
-    "hide-keyboard.json": ["prototype_hide_keyboard_v1"],
-    "icon-effects-integer-spellings.json": ["prototype_icon_effects_v1"],
-    "icon-effects-repeat.json": ["prototype_data_model_v1", "prototype_icon_effects_v1"],
-    "icon-effects.json": ["prototype_data_model_v1", "prototype_icon_effects_v1"],
+    "hide-keyboard-free-form-maps.json": [
+      "prototype_routes_v1",
+      "prototype_stack_v1"
+    ],
+    "hide-keyboard-ignored-accessory.json": [
+      "prototype_platform_namespace_v1"
+    ],
+    "hide-keyboard-request-query.json": [
+      "prototype_data_model_v1",
+      "prototype_network_v1"
+    ],
+    "hide-keyboard.json": [
+      "prototype_hide_keyboard_v1"
+    ],
+    "icon-effects-integer-spellings.json": [
+      "prototype_icon_effects_v1"
+    ],
+    "icon-effects-repeat.json": [
+      "prototype_data_model_v1",
+      "prototype_icon_effects_v1"
+    ],
+    "icon-effects.json": [
+      "prototype_data_model_v1",
+      "prototype_icon_effects_v1"
+    ],
     "integer-json-spellings.json": [],
     "keyed-data-writes.json": [
       "prototype_data_actions_v1",
       "prototype_data_actions_v2",
       "prototype_data_model_v1"
     ],
-    "keyframes-alpha-pulse.json": ["prototype_keyframes_v1"],
-    "keyframes-data-trigger.json": ["prototype_data_model_v1", "prototype_keyframes_v1"],
-    "keyframes-icon-like.json": ["prototype_keyframes_v1"],
-    "keyframes-object-curves.json": ["prototype_keyframes_v1"],
-    "keyframes-repeat.json": ["prototype_keyframes_v1"],
-    "keyframes-shake.json": ["prototype_keyframes_v1"],
-    "keyframes-sixteen-nodes.json": ["prototype_keyframes_v1"],
-    "layout-direction-ltr.json": ["prototype_layout_direction_v1"],
-    "layout-direction-rtl.json": ["prototype_layout_direction_v1"],
-    "linkify-repeat-binding.json": ["prototype_emit_context_v1", "prototype_linkify_v1"],
+    "keyframes-alpha-pulse.json": [
+      "prototype_keyframes_v1"
+    ],
+    "keyframes-data-trigger.json": [
+      "prototype_data_model_v1",
+      "prototype_keyframes_v1"
+    ],
+    "keyframes-icon-like.json": [
+      "prototype_keyframes_v1"
+    ],
+    "keyframes-object-curves.json": [
+      "prototype_keyframes_v1"
+    ],
+    "keyframes-repeat.json": [
+      "prototype_keyframes_v1"
+    ],
+    "keyframes-shake.json": [
+      "prototype_keyframes_v1"
+    ],
+    "keyframes-sixteen-nodes.json": [
+      "prototype_keyframes_v1"
+    ],
+    "layout-direction-ltr.json": [
+      "prototype_layout_direction_v1"
+    ],
+    "layout-direction-rtl.json": [
+      "prototype_layout_direction_v1"
+    ],
+    "linkify-repeat-binding.json": [
+      "prototype_emit_context_v1",
+      "prototype_linkify_v1"
+    ],
     "linkify-repeat-data-rows.json": [
       "prototype_data_actions_v1",
       "prototype_data_model_v1",
@@ -2881,10 +3093,22 @@
       "prototype_linkify_v1",
       "prototype_stack_v1"
     ],
-    "list-basic.json": ["prototype_data_model_v1", "prototype_lazy_list_v1"],
-    "list-empty.json": ["prototype_data_model_v1", "prototype_lazy_list_v1"],
-    "list-header-footer.json": ["prototype_data_model_v1", "prototype_lazy_list_v1"],
-    "list-horizontal.json": ["prototype_data_model_v1", "prototype_lazy_list_v1"],
+    "list-basic.json": [
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1"
+    ],
+    "list-empty.json": [
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1"
+    ],
+    "list-header-footer.json": [
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1"
+    ],
+    "list-horizontal.json": [
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1"
+    ],
     "list-paging.json": [
       "prototype_data_model_v1",
       "prototype_lazy_list_v1",
@@ -2896,21 +3120,56 @@
       "prototype_data_model_v1",
       "prototype_lazy_list_v1"
     ],
-    "loading-states.json": ["prototype_data_model_v1", "prototype_loading_states_v1"],
-    "location-block-minimal.json": ["prototype_platform_location_v1", "prototype_platform_v1"],
-    "location-block.json": ["prototype_platform_location_v1", "prototype_platform_v1"],
-    "loop-eight-nodes.json": ["prototype_loops_v1"],
-    "loop-eight-with-shimmer.json": ["prototype_loading_states_v1", "prototype_loops_v1"],
-    "loop-lower-bounds.json": ["prototype_loops_v1"],
-    "loop-pulse-default.json": ["prototype_loops_v1"],
-    "loop-pulse-finite.json": ["prototype_loops_v1"],
-    "loop-pulse-infinite.json": ["prototype_loops_v1"],
-    "loop-repeat-eight.json": ["prototype_loops_v1"],
-    "loop-spin-default.json": ["prototype_loops_v1"],
-    "loop-spin-finite.json": ["prototype_loops_v1"],
-    "loop-spin-infinite.json": ["prototype_loops_v1"],
-    "loop-upper-bounds.json": ["prototype_loops_v1"],
-    "map-backend-channel-literal.json": ["prototype_platform_realtime_v1", "prototype_platform_v1"],
+    "loading-states.json": [
+      "prototype_data_model_v1",
+      "prototype_loading_states_v1"
+    ],
+    "location-block-minimal.json": [
+      "prototype_platform_location_v1",
+      "prototype_platform_v1"
+    ],
+    "location-block.json": [
+      "prototype_platform_location_v1",
+      "prototype_platform_v1"
+    ],
+    "loop-eight-nodes.json": [
+      "prototype_loops_v1"
+    ],
+    "loop-eight-with-shimmer.json": [
+      "prototype_loading_states_v1",
+      "prototype_loops_v1"
+    ],
+    "loop-lower-bounds.json": [
+      "prototype_loops_v1"
+    ],
+    "loop-pulse-default.json": [
+      "prototype_loops_v1"
+    ],
+    "loop-pulse-finite.json": [
+      "prototype_loops_v1"
+    ],
+    "loop-pulse-infinite.json": [
+      "prototype_loops_v1"
+    ],
+    "loop-repeat-eight.json": [
+      "prototype_loops_v1"
+    ],
+    "loop-spin-default.json": [
+      "prototype_loops_v1"
+    ],
+    "loop-spin-finite.json": [
+      "prototype_loops_v1"
+    ],
+    "loop-spin-infinite.json": [
+      "prototype_loops_v1"
+    ],
+    "loop-upper-bounds.json": [
+      "prototype_loops_v1"
+    ],
+    "map-backend-channel-literal.json": [
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
     "map-backends.json": [
       "prototype_platform_map_google_v1",
       "prototype_platform_map_maplibre_v1",
@@ -2952,18 +3211,38 @@
       "prototype_data_model_v1",
       "prototype_platform_media_items_v1"
     ],
-    "media-image-data.json": ["prototype_data_model_v1", "prototype_platform_media_items_v1"],
-    "media-literal-id.json": ["prototype_data_model_v1"],
+    "media-image-data.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_media_items_v1"
+    ],
+    "media-literal-id.json": [
+      "prototype_data_model_v1"
+    ],
     "media-players.json": [
       "prototype_data_model_v1",
       "prototype_platform_media_v1",
       "prototype_platform_v1"
     ],
-    "media-repeat-asset.json": ["prototype_data_model_v1", "prototype_flow_grid_v1"],
-    "media-tab-item-data.json": ["prototype_data_model_v1", "prototype_platform_media_items_v1"],
-    "media-video-feed.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
-    "media-video-node-limit-repeat.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
-    "media-video-node-limit.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
+    "media-repeat-asset.json": [
+      "prototype_data_model_v1",
+      "prototype_flow_grid_v1"
+    ],
+    "media-tab-item-data.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_media_items_v1"
+    ],
+    "media-video-feed.json": [
+      "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
+    "media-video-node-limit-repeat.json": [
+      "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
+    "media-video-node-limit.json": [
+      "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
     "media-video-player-captions.json": [
       "prototype_data_model_v1",
       "prototype_platform_media_v1",
@@ -2974,26 +3253,54 @@
       "prototype_platform_v1",
       "prototype_stack_v1"
     ],
-    "media-video-player.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
+    "media-video-player.json": [
+      "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
     "media-video-poster-exact-image-limit.json": [
       "prototype_platform_media_v1",
       "prototype_platform_v1"
     ],
-    "menu-overflow.json": ["prototype_menus_v1"],
+    "menu-overflow.json": [
+      "prototype_menus_v1"
+    ],
     "motion-none.json": [],
-    "motion-tokens-default.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
-    "motion-tokens-fast.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
-    "motion-tokens-slow.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
-    "motion-v2.json": ["prototype_motion_v2"],
-    "motion3-alpha.json": ["prototype_motion_v2"],
-    "motion3-expressive.json": ["prototype_motion_v3"],
-    "motion3-layout.json": ["prototype_motion_v2", "prototype_motion_v3"],
-    "motion3-press.json": ["prototype_motion_v3"],
+    "motion-tokens-default.json": [
+      "prototype_motion_tokens_v1",
+      "prototype_motion_v2"
+    ],
+    "motion-tokens-fast.json": [
+      "prototype_motion_tokens_v1",
+      "prototype_motion_v2"
+    ],
+    "motion-tokens-slow.json": [
+      "prototype_motion_tokens_v1",
+      "prototype_motion_v2"
+    ],
+    "motion-v2.json": [
+      "prototype_motion_v2"
+    ],
+    "motion3-alpha.json": [
+      "prototype_motion_v2"
+    ],
+    "motion3-expressive.json": [
+      "prototype_motion_v3"
+    ],
+    "motion3-layout.json": [
+      "prototype_motion_v2",
+      "prototype_motion_v3"
+    ],
+    "motion3-press.json": [
+      "prototype_motion_v3"
+    ],
     "notify-channel-blocked-read.json": [
       "prototype_platform_notifications_v1",
       "prototype_platform_v1"
     ],
-    "notify-channels-block.json": ["prototype_platform_notifications_v1", "prototype_platform_v1"],
+    "notify-channels-block.json": [
+      "prototype_platform_notifications_v1",
+      "prototype_platform_v1"
+    ],
     "notify-limits-at-boundary.json": [
       "prototype_platform_notifications_v1",
       "prototype_platform_v1"
@@ -3005,7 +3312,10 @@
       "prototype_platform_realtime_v1",
       "prototype_platform_v1"
     ],
-    "notify-post-styles.json": ["prototype_platform_notifications_v1", "prototype_platform_v1"],
+    "notify-post-styles.json": [
+      "prototype_platform_notifications_v1",
+      "prototype_platform_v1"
+    ],
     "notify-push.json": [
       "prototype_data_actions_v1",
       "prototype_data_model_v1",
@@ -3019,26 +3329,59 @@
       "prototype_platform_notifications_v1",
       "prototype_platform_v1"
     ],
-    "ns-accessory-chart.json": ["prototype_data_model_v1", "prototype_platform_namespace_v1"],
-    "ns-android-ignored-on-ios.json": ["prototype_platform_namespace_v1"],
-    "ns-block-both.json": ["prototype_platform_namespace_v1"],
-    "ns-ios-ignored-on-android.json": ["prototype_platform_namespace_v1"],
+    "ns-accessory-chart.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_namespace_v1"
+    ],
+    "ns-android-ignored-on-ios.json": [
+      "prototype_platform_namespace_v1"
+    ],
+    "ns-block-both.json": [
+      "prototype_platform_namespace_v1"
+    ],
+    "ns-ios-ignored-on-android.json": [
+      "prototype_platform_namespace_v1"
+    ],
     "ns-list-slots.json": [
       "prototype_data_model_v1",
       "prototype_lazy_list_v1",
       "prototype_platform_namespace_v1"
     ],
-    "ns-rendered-path-key.json": ["prototype_chat_scroll_v1", "prototype_stack_v1"],
-    "on-appear-repeat.json": ["prototype_timers_v1"],
-    "on-appear.json": ["prototype_timers_v1"],
+    "ns-rendered-path-key.json": [
+      "prototype_chat_scroll_v1",
+      "prototype_stack_v1"
+    ],
+    "on-appear-repeat.json": [
+      "prototype_timers_v1"
+    ],
+    "on-appear.json": [
+      "prototype_timers_v1"
+    ],
     "opaque-json-keys.json": [],
-    "open-url-https-in-app.json": ["prototype_platform_links_v1", "prototype_platform_v1"],
-    "open-url-modes.json": ["prototype_platform_links_v1", "prototype_platform_v1"],
-    "open-url-schemes.json": ["prototype_platform_links_v1", "prototype_platform_v1"],
-    "pager-indicator-dots.json": ["prototype_carousel_v1"],
-    "pager-indicator-placement.json": ["prototype_carousel_v1"],
-    "pager-options.json": ["prototype_pager_options_v1"],
-    "pager-state-key-indicator.json": ["prototype_pager_state_key_v1"],
+    "open-url-https-in-app.json": [
+      "prototype_platform_links_v1",
+      "prototype_platform_v1"
+    ],
+    "open-url-modes.json": [
+      "prototype_platform_links_v1",
+      "prototype_platform_v1"
+    ],
+    "open-url-schemes.json": [
+      "prototype_platform_links_v1",
+      "prototype_platform_v1"
+    ],
+    "pager-indicator-dots.json": [
+      "prototype_carousel_v1"
+    ],
+    "pager-indicator-placement.json": [
+      "prototype_carousel_v1"
+    ],
+    "pager-options.json": [
+      "prototype_pager_options_v1"
+    ],
+    "pager-state-key-indicator.json": [
+      "prototype_pager_state_key_v1"
+    ],
     "platform-audio-recorder.json": [
       "prototype_data_model_v1",
       "prototype_platform_audioRecorder_v1",
@@ -3049,7 +3392,10 @@
       "prototype_platform_auth_v1",
       "prototype_platform_v1"
     ],
-    "platform-biometric.json": ["prototype_platform_biometric_v1", "prototype_platform_v1"],
+    "platform-biometric.json": [
+      "prototype_platform_biometric_v1",
+      "prototype_platform_v1"
+    ],
     "platform-calendar.json": [
       "prototype_data_model_v1",
       "prototype_platform_calendar_v1",
@@ -3072,13 +3418,19 @@
       "prototype_platform_camera_video_v1",
       "prototype_platform_v1"
     ],
-    "platform-cast.json": ["prototype_platform_cast_v1", "prototype_platform_v1"],
+    "platform-cast.json": [
+      "prototype_platform_cast_v1",
+      "prototype_platform_v1"
+    ],
     "platform-commerce.json": [
       "prototype_data_model_v1",
       "prototype_platform_commerce_v1",
       "prototype_platform_v1"
     ],
-    "platform-connectivity.json": ["prototype_platform_connectivity_v1", "prototype_platform_v1"],
+    "platform-connectivity.json": [
+      "prototype_platform_connectivity_v1",
+      "prototype_platform_v1"
+    ],
     "platform-contacts-fields-pair.json": [
       "prototype_data_model_v1",
       "prototype_platform_contacts_v1",
@@ -3103,7 +3455,10 @@
       "prototype_platform_haptics_v1",
       "prototype_platform_v1"
     ],
-    "platform-feedback-handler.json": ["prototype_platform_haptics_v1", "prototype_platform_v1"],
+    "platform-feedback-handler.json": [
+      "prototype_platform_haptics_v1",
+      "prototype_platform_v1"
+    ],
     "platform-feedback-haptics-sound.json": [
       "prototype_platform_haptics_v1",
       "prototype_platform_sound_v1",
@@ -3147,15 +3502,42 @@
       "prototype_platform_permissions_v1",
       "prototype_platform_v1"
     ],
-    "platform-reads.json": ["prototype_platform_test_v1", "prototype_platform_v1"],
-    "platform-repeat.json": ["prototype_platform_test_v1", "prototype_platform_v1"],
-    "platform-requires.json": ["prototype_platform_test_v1", "prototype_platform_v1"],
-    "platform-sensors.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
-    "platform-settings.json": ["prototype_platform_settings_v1", "prototype_platform_v1"],
-    "platform-state-device.json": ["prototype_platform_device_v1", "prototype_platform_v1"],
-    "platform-status-audio.json": ["prototype_platform_audio_v1", "prototype_platform_v1"],
-    "platform-status-battery.json": ["prototype_platform_battery_v1", "prototype_platform_v1"],
-    "platform-status-power.json": ["prototype_platform_power_v1", "prototype_platform_v1"],
+    "platform-reads.json": [
+      "prototype_platform_test_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-repeat.json": [
+      "prototype_platform_test_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-requires.json": [
+      "prototype_platform_test_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-sensors.json": [
+      "prototype_platform_sensors_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-settings.json": [
+      "prototype_platform_settings_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-state-device.json": [
+      "prototype_platform_device_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-status-audio.json": [
+      "prototype_platform_audio_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-status-battery.json": [
+      "prototype_platform_battery_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-status-power.json": [
+      "prototype_platform_power_v1",
+      "prototype_platform_v1"
+    ],
     "prepend-data.json": [
       "prototype_data_actions_v1",
       "prototype_data_model_v1",
@@ -3212,11 +3594,17 @@
       "prototype_platform_realtime_v1",
       "prototype_platform_v1"
     ],
-    "reduced-motion.json": ["prototype_reduced_motion_v1"],
-    "remote-image.json": ["prototype_remote_image_v1"],
+    "reduced-motion.json": [
+      "prototype_reduced_motion_v1"
+    ],
+    "remote-image.json": [
+      "prototype_remote_image_v1"
+    ],
     "repeat-component-labels.json": [],
     "repeat-exact-node-limit.json": [],
-    "repeat-literal-key.json": ["prototype_data_model_v1"],
+    "repeat-literal-key.json": [
+      "prototype_data_model_v1"
+    ],
     "repeat-state-keys.json": [],
     "repeat.json": [],
     "request-actions.json": [
@@ -3224,21 +3612,39 @@
       "prototype_network_device_v1",
       "prototype_network_v1"
     ],
-    "request-upload-16-parts.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "request-upload-16-parts.json": [
+      "prototype_network_upload_v1",
+      "prototype_network_v1"
+    ],
     "request-upload-data.json": [
       "prototype_data_model_v1",
       "prototype_network_upload_v1",
       "prototype_network_v1"
     ],
-    "request-upload-file.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload-form.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload-progress-only.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload-progress.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "request-upload-file.json": [
+      "prototype_network_upload_v1",
+      "prototype_network_v1"
+    ],
+    "request-upload-form.json": [
+      "prototype_network_upload_v1",
+      "prototype_network_v1"
+    ],
+    "request-upload-progress-only.json": [
+      "prototype_network_upload_v1",
+      "prototype_network_v1"
+    ],
+    "request-upload-progress.json": [
+      "prototype_network_upload_v1",
+      "prototype_network_v1"
+    ],
     "request-upload-review-form-data-keys.json": [
       "prototype_network_upload_v1",
       "prototype_network_v1"
     ],
-    "request-upload.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "request-upload.json": [
+      "prototype_network_upload_v1",
+      "prototype_network_v1"
+    ],
     "routes-bindings.json": [
       "prototype_data_actions_v1",
       "prototype_data_model_v1",
@@ -3246,7 +3652,11 @@
       "prototype_stack_v1",
       "prototype_storage_v1"
     ],
-    "routes-boundaries.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
+    "routes-boundaries.json": [
+      "prototype_routes_v1",
+      "prototype_stack_v1",
+      "prototype_storage_v1"
+    ],
     "routes-integration-list-refresh.json": [
       "prototype_data_model_v1",
       "prototype_lazy_list_v1",
@@ -3254,35 +3664,69 @@
       "prototype_routes_v1",
       "prototype_stack_v1"
     ],
-    "routes-literal-anchor-selector.json": ["prototype_tooltip_v1"],
-    "routes-literal-chart-series.json": ["prototype_chart_v1", "prototype_data_model_v1"],
-    "routes-literal-fields.json": ["prototype_text_field_options_v1"],
+    "routes-literal-anchor-selector.json": [
+      "prototype_tooltip_v1"
+    ],
+    "routes-literal-chart-series.json": [
+      "prototype_chart_v1",
+      "prototype_data_model_v1"
+    ],
+    "routes-literal-fields.json": [
+      "prototype_text_field_options_v1"
+    ],
     "routes-literal-items-label.json": [],
     "routes-literal-list-item.json": [],
-    "routes-literal-options.json": ["prototype_menus_v1"],
+    "routes-literal-options.json": [
+      "prototype_menus_v1"
+    ],
     "routes-literal-scroll-target.json": [
       "prototype_chat_scroll_v1",
       "prototype_data_actions_v1",
       "prototype_data_model_v1",
       "prototype_text_field_actions_v1"
     ],
-    "routes-long-param-name.json": ["prototype_routes_v1", "prototype_stack_v1"],
+    "routes-long-param-name.json": [
+      "prototype_routes_v1",
+      "prototype_stack_v1"
+    ],
     "routes-menu-bound-keys.json": [
       "prototype_menus_v1",
       "prototype_routes_v1",
       "prototype_stack_v1"
     ],
     "routes-repeat-alias-backcompat.json": [],
-    "routes-repeat-key-mixed-valid.json": ["prototype_routes_v1", "prototype_stack_v1"],
-    "routes.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
+    "routes-repeat-key-mixed-valid.json": [
+      "prototype_routes_v1",
+      "prototype_stack_v1"
+    ],
+    "routes.json": [
+      "prototype_routes_v1",
+      "prototype_stack_v1",
+      "prototype_storage_v1"
+    ],
     "row-weight-size-bounds.json": [],
-    "scroll-motion-all.json": ["prototype_scroll_motion_v1"],
-    "scroll-motion-exact-cap.json": ["prototype_scroll_motion_v1"],
-    "scroll-motion-reduced.json": ["prototype_reduced_motion_v1", "prototype_scroll_motion_v1"],
-    "scroll-refresh.json": ["prototype_refresh_v1"],
-    "search-bar-docked.json": ["prototype_search_bar_v1"],
-    "search-bar-minimal.json": ["prototype_search_bar_v1"],
-    "search-bar.json": ["prototype_search_bar_v1"],
+    "scroll-motion-all.json": [
+      "prototype_scroll_motion_v1"
+    ],
+    "scroll-motion-exact-cap.json": [
+      "prototype_scroll_motion_v1"
+    ],
+    "scroll-motion-reduced.json": [
+      "prototype_reduced_motion_v1",
+      "prototype_scroll_motion_v1"
+    ],
+    "scroll-refresh.json": [
+      "prototype_refresh_v1"
+    ],
+    "search-bar-docked.json": [
+      "prototype_search_bar_v1"
+    ],
+    "search-bar-minimal.json": [
+      "prototype_search_bar_v1"
+    ],
+    "search-bar.json": [
+      "prototype_search_bar_v1"
+    ],
     "secure-storage-request-opt-in.json": [
       "prototype_emit_context_v1",
       "prototype_network_device_v1",
@@ -3308,36 +3752,104 @@
       "prototype_platform_v1",
       "prototype_storage_v1"
     ],
-    "select-dropdown.json": ["prototype_menus_v1"],
+    "select-dropdown.json": [
+      "prototype_menus_v1"
+    ],
     "selection-controls.json": [],
-    "sensors-block-minimal.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
-    "sensors-block-rates.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
+    "sensors-block-minimal.json": [
+      "prototype_platform_sensors_v1",
+      "prototype_platform_v1"
+    ],
+    "sensors-block-rates.json": [
+      "prototype_platform_sensors_v1",
+      "prototype_platform_v1"
+    ],
     "set-state-matching-values.json": [],
     "set-state-repeat-templated-value.json": [],
     "set-state-unbound-key.json": [],
-    "share-alias-item.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-alias-row.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-bound.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-contact.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-file-name-128-bytes.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-file-placeholders.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-files.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-full.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-templated-host.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-text.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-url-grapheme-host.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-url-grapheme-path.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "shared-element-16-keys.json": ["prototype_shared_element_v1"],
-    "shared-element.json": ["prototype_shared_element_v1"],
-    "shared-v2-alias.json": ["prototype_shared_element_v1", "prototype_shared_element_v2"],
-    "shared-v2-bounds.json": ["prototype_shared_element_v2"],
-    "shared-v2-element.json": ["prototype_shared_element_v2"],
-    "shared-v2-repeat-data.json": ["prototype_data_model_v1", "prototype_shared_element_v2"],
-    "shared-v2-repeat.json": ["prototype_data_model_v1", "prototype_shared_element_v2"],
-    "shared-v2-same-dialog.json": ["prototype_shared_element_v2"],
+    "share-alias-item.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "share-alias-row.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "share-bound.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "share-contact.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "share-file-name-128-bytes.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "share-file-placeholders.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "share-files.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "share-full.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "share-templated-host.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "share-text.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "share-url-grapheme-host.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "share-url-grapheme-path.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "shared-element-16-keys.json": [
+      "prototype_shared_element_v1"
+    ],
+    "shared-element.json": [
+      "prototype_shared_element_v1"
+    ],
+    "shared-v2-alias.json": [
+      "prototype_shared_element_v1",
+      "prototype_shared_element_v2"
+    ],
+    "shared-v2-bounds.json": [
+      "prototype_shared_element_v2"
+    ],
+    "shared-v2-element.json": [
+      "prototype_shared_element_v2"
+    ],
+    "shared-v2-repeat-data.json": [
+      "prototype_data_model_v1",
+      "prototype_shared_element_v2"
+    ],
+    "shared-v2-repeat.json": [
+      "prototype_data_model_v1",
+      "prototype_shared_element_v2"
+    ],
+    "shared-v2-same-dialog.json": [
+      "prototype_shared_element_v2"
+    ],
     "sheet-bindings.json": [],
-    "stack-navigation.json": ["prototype_stack_v1"],
-    "stack-patterns-source-only.json": ["prototype_stack_patterns_v1", "prototype_stack_v1"],
+    "stack-navigation.json": [
+      "prototype_stack_v1"
+    ],
+    "stack-patterns-source-only.json": [
+      "prototype_stack_patterns_v1",
+      "prototype_stack_v1"
+    ],
     "stack-patterns-zoom-idle.json": [
       "prototype_stack_patterns_v1",
       "prototype_stack_transitions_v1",
@@ -3360,26 +3872,53 @@
       "prototype_stack_transitions_v1",
       "prototype_stack_v1"
     ],
-    "stack-transitions.json": ["prototype_stack_transitions_v1", "prototype_stack_v1"],
-    "strict-action-depth-boundary.json": ["prototype_network_v1"],
+    "stack-transitions.json": [
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
+    "strict-action-depth-boundary.json": [
+      "prototype_network_v1"
+    ],
     "strict-bom.json": [],
-    "strict-bound-001-window-opacity-boundary.json": ["prototype_backdrop_v1"],
-    "strict-bound-002-backdrop-blur-boundary.json": ["prototype_backdrop_v1"],
-    "strict-bound-003-placement-sheet-height-boundary.json": ["prototype_backdrop_v1"],
-    "strict-bound-004-node-bottomNav-items-boundary.json": ["prototype_bar_scroll_v1"],
-    "strict-bound-005-node-tabBar-items-boundary.json": ["prototype_bar_scroll_v1"],
+    "strict-bound-001-window-opacity-boundary.json": [
+      "prototype_backdrop_v1"
+    ],
+    "strict-bound-002-backdrop-blur-boundary.json": [
+      "prototype_backdrop_v1"
+    ],
+    "strict-bound-003-placement-sheet-height-boundary.json": [
+      "prototype_backdrop_v1"
+    ],
+    "strict-bound-004-node-bottomNav-items-boundary.json": [
+      "prototype_bar_scroll_v1"
+    ],
+    "strict-bound-005-node-tabBar-items-boundary.json": [
+      "prototype_bar_scroll_v1"
+    ],
     "strict-bound-006-bounds-x-boundary.json": [],
     "strict-bound-007-bounds-width-boundary.json": [],
-    "strict-bound-008-repeat-items-boundary.json": ["prototype_carousel_v1"],
+    "strict-bound-008-repeat-items-boundary.json": [
+      "prototype_carousel_v1"
+    ],
     "strict-bound-009-node-chart-series-boundary.json": [
       "prototype_chart_v1",
       "prototype_data_model_v1"
     ],
-    "strict-bound-012-node-textField-checks-boundary.json": ["prototype_checks_v1"],
-    "strict-bound-014-check-pattern-boundary.json": ["prototype_checks_v1"],
-    "strict-bound-015-condition-any-boundary.json": ["prototype_checks_v1"],
-    "strict-bound-016-style-alpha-boundary.json": ["prototype_checks_v1"],
-    "strict-bound-018-shader-asset-boundary.json": ["prototype_custom_shaders_v1"],
+    "strict-bound-012-node-textField-checks-boundary.json": [
+      "prototype_checks_v1"
+    ],
+    "strict-bound-014-check-pattern-boundary.json": [
+      "prototype_checks_v1"
+    ],
+    "strict-bound-015-condition-any-boundary.json": [
+      "prototype_checks_v1"
+    ],
+    "strict-bound-016-style-alpha-boundary.json": [
+      "prototype_checks_v1"
+    ],
+    "strict-bound-018-shader-asset-boundary.json": [
+      "prototype_custom_shaders_v1"
+    ],
     "strict-bound-020-valueFormat-percent-maxFraction-boundary.json": [
       "prototype_data_model_v1",
       "prototype_format_v1"
@@ -3388,7 +3927,9 @@
     "strict-bound-023-gradient-linear-stops-boundary.json": [],
     "strict-bound-025-style-textSize-boundary.json": [],
     "strict-bound-026-style-fontWeight-boundary.json": [],
-    "strict-bound-028-node-grid-columns-boundary.json": ["prototype_flow_grid_v1"],
+    "strict-bound-028-node-grid-columns-boundary.json": [
+      "prototype_flow_grid_v1"
+    ],
     "strict-bound-029-node-list-children-boundary.json": [
       "prototype_data_model_v1",
       "prototype_lazy_list_v1"
@@ -3405,11 +3946,21 @@
       "prototype_network_v1",
       "prototype_refresh_v1"
     ],
-    "strict-bound-034-style-scale-boundary.json": ["prototype_motion_v2"],
-    "strict-bound-035-style-rotation-boundary.json": ["prototype_motion_v2"],
-    "strict-bound-036-animate-durationMs-boundary.json": ["prototype_motion_v2"],
-    "strict-bound-037-zoomable-maxScale-boundary.json": ["prototype_motion_v2"],
-    "strict-bound-038-action-startTimer-id-boundary.json": ["prototype_timers_v1"],
+    "strict-bound-034-style-scale-boundary.json": [
+      "prototype_motion_v2"
+    ],
+    "strict-bound-035-style-rotation-boundary.json": [
+      "prototype_motion_v2"
+    ],
+    "strict-bound-036-animate-durationMs-boundary.json": [
+      "prototype_motion_v2"
+    ],
+    "strict-bound-037-zoomable-maxScale-boundary.json": [
+      "prototype_motion_v2"
+    ],
+    "strict-bound-038-action-startTimer-id-boundary.json": [
+      "prototype_timers_v1"
+    ],
     "strict-bound-040-action-platform-timeoutMs-boundary.json": [
       "prototype_data_model_v1",
       "prototype_platform_test_v1",
@@ -3430,7 +3981,9 @@
       "prototype_network_device_v1",
       "prototype_network_v1"
     ],
-    "strict-bound-046-node-searchBar-trailingActions-boundary.json": ["prototype_search_bar_v1"],
+    "strict-bound-046-node-searchBar-trailingActions-boundary.json": [
+      "prototype_search_bar_v1"
+    ],
     "strict-bound-048-condition-lengthGt-boundary.json": [
       "prototype_checks_v1",
       "prototype_string_conditions_v1"
@@ -3448,18 +4001,42 @@
       "prototype_style_polish_v2",
       "prototype_theme_modes_v1"
     ],
-    "strict-bound-055-tooltipSpotlight-padding-boundary.json": ["prototype_tooltip_v1"],
-    "strict-bound-056-effect-noise-grain-boundary.json": ["prototype_effects_v1"],
-    "strict-bound-057-effect-noise-seed-boundary.json": ["prototype_effects_v1"],
-    "strict-bound-058-effect-gradientMesh-colors-boundary.json": ["prototype_effects_v1"],
-    "strict-bound-059-effect-shimmer-width-boundary.json": ["prototype_effects_v1"],
-    "strict-bound-060-effect-glow-radius-boundary.json": ["prototype_effects_v1"],
-    "strict-bound-061-effect-blur-radius-boundary.json": ["prototype_effects_v1"],
-    "strict-bound-062-effect-pixelate-cell-boundary.json": ["prototype_effects_v1"],
-    "strict-bound-063-effect-chromaticAberration-offset-boundary.json": ["prototype_effects_v1"],
-    "strict-bound-064-effect-wave-amplitude-boundary.json": ["prototype_effects_v1"],
-    "strict-bound-065-effect-wave-wavelength-boundary.json": ["prototype_effects_v1"],
-    "strict-bound-066-effectAnimate-periodMs-boundary.json": ["prototype_effects_v1"],
+    "strict-bound-055-tooltipSpotlight-padding-boundary.json": [
+      "prototype_tooltip_v1"
+    ],
+    "strict-bound-056-effect-noise-grain-boundary.json": [
+      "prototype_effects_v1"
+    ],
+    "strict-bound-057-effect-noise-seed-boundary.json": [
+      "prototype_effects_v1"
+    ],
+    "strict-bound-058-effect-gradientMesh-colors-boundary.json": [
+      "prototype_effects_v1"
+    ],
+    "strict-bound-059-effect-shimmer-width-boundary.json": [
+      "prototype_effects_v1"
+    ],
+    "strict-bound-060-effect-glow-radius-boundary.json": [
+      "prototype_effects_v1"
+    ],
+    "strict-bound-061-effect-blur-radius-boundary.json": [
+      "prototype_effects_v1"
+    ],
+    "strict-bound-062-effect-pixelate-cell-boundary.json": [
+      "prototype_effects_v1"
+    ],
+    "strict-bound-063-effect-chromaticAberration-offset-boundary.json": [
+      "prototype_effects_v1"
+    ],
+    "strict-bound-064-effect-wave-amplitude-boundary.json": [
+      "prototype_effects_v1"
+    ],
+    "strict-bound-065-effect-wave-wavelength-boundary.json": [
+      "prototype_effects_v1"
+    ],
+    "strict-bound-066-effectAnimate-periodMs-boundary.json": [
+      "prototype_effects_v1"
+    ],
     "strict-capabilities-data-binding.json": [
       "prototype_data_actions_v1",
       "prototype_data_model_v1"
@@ -3467,9 +4044,15 @@
     "strict-capabilities-malformed-placeholder.json": [],
     "strict-capabilities-opaque-sentinels.json": [],
     "strict-condition-depth-boundary.json": [],
-    "strict-data-array-boundary.json": ["prototype_data_model_v1"],
-    "strict-data-bytes-boundary.json": ["prototype_data_model_v1"],
-    "strict-data-write-node-boundary.json": ["prototype_data_model_v1"],
+    "strict-data-array-boundary.json": [
+      "prototype_data_model_v1"
+    ],
+    "strict-data-bytes-boundary.json": [
+      "prototype_data_model_v1"
+    ],
+    "strict-data-write-node-boundary.json": [
+      "prototype_data_model_v1"
+    ],
     "strict-id-bidi.json": [],
     "strict-id-control.json": [],
     "strict-id-max.json": [],
@@ -3483,8 +4066,13 @@
       "prototype_storage_v1",
       "prototype_text_field_options_v1"
     ],
-    "strict-list-items-boundary.json": ["prototype_data_model_v1", "prototype_lazy_list_v1"],
-    "strict-non-library-via-host.json": ["prototype_network_v1"],
+    "strict-list-items-boundary.json": [
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1"
+    ],
+    "strict-non-library-via-host.json": [
+      "prototype_network_v1"
+    ],
     "strict-nonlibrary-secure-request.json": [
       "prototype_network_device_v1",
       "prototype_network_v1",
@@ -3495,21 +4083,50 @@
     "strict-number-unsafeInteger.json": [],
     "strict-payload-bytes-boundary.json": [],
     "strict-replacement-scalar.json": [],
-    "strict-reserved-data-__proto__.json": ["prototype_data_model_v1"],
-    "strict-reserved-data-constructor.json": ["prototype_data_model_v1"],
+    "strict-reserved-data-__proto__.json": [
+      "prototype_data_model_v1"
+    ],
+    "strict-reserved-data-constructor.json": [
+      "prototype_data_model_v1"
+    ],
     "strict-spec-bytes-boundary.json": [],
-    "strict-storage-bytes-boundary.json": ["prototype_storage_v1"],
-    "strict-storage-keys-64.json": ["prototype_storage_v1"],
-    "strict-storage-version-boundary.json": ["prototype_storage_v1"],
-    "strict-url-alternateIpv4.json": ["prototype_network_v1"],
-    "strict-url-backslash.json": ["prototype_network_v1"],
-    "strict-url-ipv6.json": ["prototype_network_v1"],
-    "strict-url-templatedHost.json": ["prototype_network_v1"],
-    "strict-url-uppercase.json": ["prototype_network_v1"],
-    "strict-url-userinfo.json": ["prototype_network_v1"],
-    "strict-url-whitespace.json": ["prototype_network_v1"],
-    "string-conditions.json": ["prototype_checks_v1", "prototype_string_conditions_v1"],
-    "string-error-repeat.json": ["prototype_string_conditions_v1"],
+    "strict-storage-bytes-boundary.json": [
+      "prototype_storage_v1"
+    ],
+    "strict-storage-keys-64.json": [
+      "prototype_storage_v1"
+    ],
+    "strict-storage-version-boundary.json": [
+      "prototype_storage_v1"
+    ],
+    "strict-url-alternateIpv4.json": [
+      "prototype_network_v1"
+    ],
+    "strict-url-backslash.json": [
+      "prototype_network_v1"
+    ],
+    "strict-url-ipv6.json": [
+      "prototype_network_v1"
+    ],
+    "strict-url-templatedHost.json": [
+      "prototype_network_v1"
+    ],
+    "strict-url-uppercase.json": [
+      "prototype_network_v1"
+    ],
+    "strict-url-userinfo.json": [
+      "prototype_network_v1"
+    ],
+    "strict-url-whitespace.json": [
+      "prototype_network_v1"
+    ],
+    "string-conditions.json": [
+      "prototype_checks_v1",
+      "prototype_string_conditions_v1"
+    ],
+    "string-error-repeat.json": [
+      "prototype_string_conditions_v1"
+    ],
     "strings-and-semantics.json": [
       "prototype_data_model_v1",
       "prototype_semantics_v1",
@@ -3517,10 +4134,18 @@
     ],
     "style-polish.json": [],
     "style-when.json": [],
-    "substituted-text-exact-limit.json": ["prototype_data_model_v1"],
-    "substituted-text-total-exact.json": ["prototype_data_model_v1"],
-    "swipe-actions-list-item.json": ["prototype_swipe_actions_v1"],
-    "swipe-actions-row.json": ["prototype_swipe_actions_v1"],
+    "substituted-text-exact-limit.json": [
+      "prototype_data_model_v1"
+    ],
+    "substituted-text-total-exact.json": [
+      "prototype_data_model_v1"
+    ],
+    "swipe-actions-list-item.json": [
+      "prototype_swipe_actions_v1"
+    ],
+    "swipe-actions-row.json": [
+      "prototype_swipe_actions_v1"
+    ],
     "swipe-actions-vertical-pager.json": [
       "prototype_pager_options_v1",
       "prototype_swipe_actions_v1"
@@ -3563,8 +4188,14 @@
       "prototype_search_bar_v1",
       "prototype_stack_v1"
     ],
-    "template-settings.json": ["prototype_stack_v1", "prototype_storage_v1"],
-    "template-tabbed-home.json": ["prototype_emit_context_v1", "prototype_stack_v1"],
+    "template-settings.json": [
+      "prototype_stack_v1",
+      "prototype_storage_v1"
+    ],
+    "template-tabbed-home.json": [
+      "prototype_emit_context_v1",
+      "prototype_stack_v1"
+    ],
     "text-field-actions.json": [
       "prototype_text_field_actions_v1",
       "prototype_text_field_leading_icon_v1",
@@ -3576,25 +4207,47 @@
       "prototype_string_conditions_v1",
       "prototype_text_field_options_v1"
     ],
-    "text-field-options.json": ["prototype_text_field_options_v1"],
-    "text-spans-max.json": ["prototype_rich_text_v1"],
-    "text-spans-placeholders.json": ["prototype_data_model_v1", "prototype_rich_text_v1"],
+    "text-field-options.json": [
+      "prototype_text_field_options_v1"
+    ],
+    "text-spans-max.json": [
+      "prototype_rich_text_v1"
+    ],
+    "text-spans-placeholders.json": [
+      "prototype_data_model_v1",
+      "prototype_rich_text_v1"
+    ],
     "text-spans-plain-text.json": [],
-    "text-spans-tappable.json": ["prototype_rich_text_v1"],
-    "text-spans.json": ["prototype_rich_text_v1"],
+    "text-spans-tappable.json": [
+      "prototype_rich_text_v1"
+    ],
+    "text-spans.json": [
+      "prototype_rich_text_v1"
+    ],
     "text-style-role.json": [],
     "theme-all-color-roles.json": [],
     "theme-device.json": [],
-    "theme-modes-colors.json": ["prototype_theme_modes_v1"],
-    "theme-modes-exact-image-limit.json": ["prototype_theme_modes_v1"],
+    "theme-modes-colors.json": [
+      "prototype_theme_modes_v1"
+    ],
+    "theme-modes-exact-image-limit.json": [
+      "prototype_theme_modes_v1"
+    ],
     "theme-modes-glass.json": [
       "prototype_glass_v1",
       "prototype_shared_element_v2",
       "prototype_theme_modes_v1"
     ],
-    "theme-modes-images.json": ["prototype_theme_modes_v1"],
-    "theme-modes-only-mode-colors.json": ["prototype_theme_modes_v1"],
-    "theme-modes-style-polish-v2.json": ["prototype_style_polish_v2", "prototype_theme_modes_v1"],
+    "theme-modes-images.json": [
+      "prototype_theme_modes_v1"
+    ],
+    "theme-modes-only-mode-colors.json": [
+      "prototype_theme_modes_v1"
+    ],
+    "theme-modes-style-polish-v2.json": [
+      "prototype_style_polish_v2",
+      "prototype_theme_modes_v1"
+    ],
     "theme-role-overrides.json": [],
     "theme-seed.json": [],
     "theme-typography-shapes.json": [],
@@ -3604,19 +4257,39 @@
       "prototype_platform_v1",
       "prototype_timers_v1"
     ],
-    "tooltip-bounds-anchor.json": ["prototype_tooltip_v1"],
-    "tooltip-drawer-end.json": ["prototype_drawer_v1"],
-    "tooltip-drawer-start.json": ["prototype_drawer_v1", "prototype_theme_modes_v1"],
-    "tooltip-element-anchor.json": ["prototype_tooltip_v1"],
-    "tooltip-node-spotlight.json": ["prototype_tooltip_v1"],
-    "tooltip-repeat-single-target.json": ["prototype_tooltip_v1"],
-    "tooltip-spotlight-boundaries.json": ["prototype_tooltip_v1"],
-    "tooltip-tour.json": ["prototype_tooltip_v1"],
+    "tooltip-bounds-anchor.json": [
+      "prototype_tooltip_v1"
+    ],
+    "tooltip-drawer-end.json": [
+      "prototype_drawer_v1"
+    ],
+    "tooltip-drawer-start.json": [
+      "prototype_drawer_v1",
+      "prototype_theme_modes_v1"
+    ],
+    "tooltip-element-anchor.json": [
+      "prototype_tooltip_v1"
+    ],
+    "tooltip-node-spotlight.json": [
+      "prototype_tooltip_v1"
+    ],
+    "tooltip-repeat-single-target.json": [
+      "prototype_tooltip_v1"
+    ],
+    "tooltip-spotlight-boundaries.json": [
+      "prototype_tooltip_v1"
+    ],
+    "tooltip-tour.json": [
+      "prototype_tooltip_v1"
+    ],
     "transition-slide.json": [],
     "watch-41mm-list.json": [],
     "watch-45mm-metric-confirm.json": [],
     "watch-49mm-now-playing.json": [],
-    "webview-node-limits.json": ["prototype_platform_v1", "prototype_platform_webview_v1"],
+    "webview-node-limits.json": [
+      "prototype_platform_v1",
+      "prototype_platform_webview_v1"
+    ],
     "webview-node.json": [
       "prototype_data_actions_v1",
       "prototype_data_model_v1",
@@ -3629,15 +4302,32 @@
       "prototype_platform_v1",
       "prototype_platform_webview_v1"
     ],
-    "webview-url-default-port.json": ["prototype_platform_v1", "prototype_platform_webview_v1"],
+    "webview-url-default-port.json": [
+      "prototype_platform_v1",
+      "prototype_platform_webview_v1"
+    ],
     "width-dp-at-max.json": [],
-    "window-controls-system.json": ["prototype_platform_window_controls_v1"],
-    "window-controls.json": ["prototype_platform_window_controls_v1"],
+    "window-controls-system.json": [
+      "prototype_platform_window_controls_v1"
+    ],
+    "window-controls.json": [
+      "prototype_platform_window_controls_v1"
+    ],
     "window-dead-taps.json": [],
-    "window-motion.json": ["prototype_window_motion_v1"],
-    "z-effects-all-types.json": ["prototype_effects_v1"],
-    "z-effects-animated-phase.json": ["prototype_effects_v1"],
-    "z-effects-at-limits.json": ["prototype_effects_v1"],
-    "z-effects-style-when.json": ["prototype_effects_v1"]
+    "window-motion.json": [
+      "prototype_window_motion_v1"
+    ],
+    "z-effects-all-types.json": [
+      "prototype_effects_v1"
+    ],
+    "z-effects-animated-phase.json": [
+      "prototype_effects_v1"
+    ],
+    "z-effects-at-limits.json": [
+      "prototype_effects_v1"
+    ],
+    "z-effects-style-when.json": [
+      "prototype_effects_v1"
+    ]
   }
 }

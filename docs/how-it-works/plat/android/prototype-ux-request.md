@@ -47,6 +47,10 @@ to 10 MiB in total. Multipart files default to the asset id as filename and
 Bound strings are literal; other values use JSON text. `progressKey` names a declared number key:
 byte updates run at most 10 Hz, with completion setting 100. Events include total file bytes as
 `uploadBytes` (zero for forms). Host uploads fail as `invalid_request`; use `via: "device"`.
+The iOS URLSession transport follows the same contract using original asset bytes. It re-sends
+upload bodies on 307/308 redirects and keeps progress non-decreasing across hops; 301/302 POST
+and 303 redirects drop the body when switching to GET. A new upload resets its progress key to
+zero and owns subsequent writes, so earlier concurrent uploads cannot advance that key.
 
 **Limits** live in the contract's `limits` and `src/features/prototype/prototypeRequestLimits.ts`
 reads them from there (the contract is the single source for the host executor, the validator and

@@ -52,6 +52,9 @@ export function parseHandshake(
     return undefined;
   }
   return {
+    ...(typeof message.showingId === "string" && message.showingId.length > 0
+      ? { showingId: message.showingId }
+      : {}),
     agentVersion,
     protocolVersion,
     capabilities,
@@ -287,10 +290,18 @@ export class SocketPrototypeAgentClient implements PrototypeAgentClient {
     pending.resolve(handshake);
   }
 
+  private refreshShowingId(result: PrototypeAgentResult): void {
+    const showingId = result.status?.showingId;
+    if (result.success && typeof showingId === "string" && showingId.length > 0) {
+      this.handshake.showingId = showingId;
+    }
+  }
+
   private dispatch(message: PrototypeAgentMessage): void {
     if (isResult(message)) {
       if (message.status !== undefined) {
         message.status = parsePrototypeAgentStatus(message.status);
+        this.refreshShowingId(message);
       }
       const waiter = this.waiters.get(message.requestId);
       if (waiter !== undefined) {

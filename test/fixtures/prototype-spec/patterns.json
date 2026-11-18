@@ -369,5 +369,9 @@
       "https://example.com\n",
       ""
     ]
+  },
+  "dataMember": {
+    "accepted": ["id", "id-name", "\u00e9", "a.b", "0", "__proto__"],
+    "rejected": ["", "a/b", "a~b", "/id", "~0id"]
   }
 }

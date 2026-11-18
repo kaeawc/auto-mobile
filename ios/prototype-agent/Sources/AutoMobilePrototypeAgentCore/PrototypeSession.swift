@@ -710,23 +710,45 @@ struct PrototypeSession {
             }
             value = operation == .prepend ? .array([resolved]) : resolved
         }
+        var match: PrototypeDataWrite.Match?
+        if let selector = action.where {
+            guard case let .success(equals) = PrototypeDataWrite.resolveValue(selector.equals, inputs: inputs)
+            else { return [] }
+            match = .init(field: selector.field, equals: equals)
+        }
         if operation == .upsert {
             guard let key = action.key else { return [] }
             return (try? commitDataWrite(.upsert, path: path, value: value, key: key, maxItems: action.maxItems).get())
                 ?? []
         }
-        return (try? commitDataWrite(operation, path: path, value: value).get()) ?? []
+        return (try? commitDataWrite(operation, path: path, value: value, where: match, member: action.member).get()) ??
+            []
     }
 
     /// Applies one data write to the shown spec: the data change, the rebuilt drawn tree, the
     /// bumped revision and the `change` event. A refused write changes nothing.
     private mutating func commitDataWrite(
         _ operation: PrototypeDataWrite.Operation, path: String, value: JSONValue?, key: String? = nil,
-        maxItems actionMaxItems: Int? = nil
+        maxItems actionMaxItems: Int? = nil, where match: PrototypeDataWrite.Match? = nil, member: String? = nil
     )
         -> Result<[PrototypeEvent], PrototypeDataWriteFailure>
     {
         guard let spec else { return .failure(.init(code: .notFound, message: "No prototype is shown")) }
+        let metadata = PrototypeDataWriteEvent(
+            op: operation,
+            path: path,
+            value: nil,
+            maxItems: nil,
+            revision: dataRevision + 1,
+            where: match,
+            member: member
+        )
+        guard PrototypeEmitContext.fits(metadata.payload) else {
+            return .failure(.init(
+                code: .limitExceeded,
+                message: "Data write selector exceeds the change event payload limit"
+            ))
+        }
         let data: [String: JSONValue]
         let listMaxItems = operation == .append || operation == .extend || operation == .prepend
             || operation == .upsert ? PrototypeLazyList.listMaxItems(spec: spec, dataPath: path) : nil
@@ -738,7 +760,7 @@ struct PrototypeSession {
             path: path,
             value: value,
             maxItems: maxItems.map(Double.init),
-            key: key
+            key: key, where: match, member: member
         ) {
         case let .success(written): data = written.data
         case let .failure(failure): return .failure(failure)
@@ -762,6 +784,8 @@ struct PrototypeSession {
         revisions[rebuilt.id] = revision
         var payload: [String: JSONValue] = ["op": .string(operation.rawValue), "revision": .number(Double(revision))]
         if let key { payload["key"] = .string(key) }
+        if let match { payload["where"] = .object(["field": .string(match.field), "equals": match.equals]) }
+        if let member { payload["member"] = .string(member) }
         if let maxItems { payload["maxItems"] = .number(Double(maxItems)) }
         // The value is left out when the event would not fit the emit payload limit, so the host,
         // which cannot mirror a write it was not shown, stops tracking the spec (as on Android).

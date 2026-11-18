@@ -4,6 +4,7 @@ enum PrototypeChannelCoalescer {
         guard let fields = action.objectFields else { return nil }
         switch fields["type"]?.stringValue {
         case "setData":
+            guard fields["where"] == nil, fields["member"] == nil else { return nil }
             return fields["path"]?.stringValue.map { Array("data:\($0)".utf8) }
         case "setState":
             return fields["key"]?.stringValue.map { Array("state:\($0)".utf8) }

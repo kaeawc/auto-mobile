@@ -96,6 +96,12 @@ import {
 import type { ProgressCallback } from "../toolRegistry";
 import { stageAssets } from "./assets";
 import {
+  defaultDisposableAppManager,
+  disposableAppOutput,
+  isDisposableAppAction,
+  type PrototypeDisposableApps,
+} from "./disposableApps";
+import {
   daemonPrototypePreviewBinding,
   prototypePreviewOutput,
   type PrototypePreviewBinding,
@@ -538,7 +544,7 @@ async function specFromPath(
 }
 
 const takesSpecPath = (action: string): boolean =>
-  action === "show" || action === "screenMap" || action === "share";
+  action === "show" || action === "screenMap" || action === "share" || action === "installApp";
 
 /** A show with `mockPath` becomes a show with the file's `{backendId: definition}` as `mock`. */
 async function mockFromPath(
@@ -692,6 +698,8 @@ export function createPrototypeToolRuntime(
     installer: dependencies.iosSavedPrototypeInstaller,
     protoViewer: dependencies.protoViewerFactory ?? defaultProtoViewerFactory(dependencies),
   });
+  // Built on the first disposable-app call, so other actions never construct the Android stamper.
+  let disposableApps: PrototypeDisposableApps | undefined;
   // Resolved on first use: building the daemon's (unbound) server is deferred until a call needs it.
   const preview = () => dependencies.preview ?? daemonPrototypePreviewBinding();
   const handler = async (
@@ -730,6 +738,12 @@ export function createPrototypeToolRuntime(
       if (settled) {
         return respond(settled);
       }
+    }
+    if (isDisposableAppAction(args.action)) {
+      disposableApps ??=
+        dependencies.disposableApps ??
+        defaultDisposableAppManager({ adbFactory: dependencies.adbFactory, timer: clock });
+      return respond(await disposableAppOutput(disposableApps, device, args));
     }
     if (isPrototypeHostOnlyAction(args.action)) {
       const shareFiles = dependencies.protoViewerShareFiles;

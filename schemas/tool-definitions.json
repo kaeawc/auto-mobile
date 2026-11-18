@@ -32914,7 +32914,10 @@
             "backendLog",
             "publish",
             "serve",
-            "stop"
+            "stop",
+            "installApp",
+            "listApps",
+            "uninstallApp"
           ]
         },
         "goal": {
@@ -33220,7 +33223,91 @@
           "const": true
         },
         "all": {
-          "description": "Dismiss all prototypes on the targeted device",
+          "description": "dismiss: all prototypes on the targeted device; uninstallApp: every disposable app on it",
+          "type": "boolean",
+          "const": true
+        },
+        "app": {
+          "description": "installApp only (Android): the disposable app to stamp the spec into. Its id is always dev.jasonpearson.automobile.app.<slug>_<8 hex>, never agent-chosen; permissions come only from the spec's requires.permissions (INTERNET is always declared). Re-installing a slug updates it in place and keeps its storage unless reset",
+          "type": "object",
+          "properties": {
+            "slug": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 48,
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "description": "Lowercase hyphenated words such as feedly or news-reader; names the app id"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "description": "The launcher label, such as Feedly"
+            },
+            "icon": {
+              "type": "object",
+              "properties": {
+                "backgroundColor": {
+                  "type": "string",
+                  "pattern": "^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+                  "description": "#RRGGBB or #AARRGGBB behind the adaptive icon and splash screen"
+                }
+              },
+              "required": ["backgroundColor"],
+              "additionalProperties": false
+            },
+            "ttlHours": {
+              "description": "Hours until the app expires and uninstallApp {expired: true} removes it; default 72, 0 keeps it until uninstallApp",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 720
+            },
+            "permissions": {
+              "description": "prompt (default) leaves the spec's declared permissions to the runtime dialog; grantDeclared grants them all; {grant, deny} names declared permissions to grant or deny (user-fixed)",
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": ["prompt", "grantDeclared"]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "grant": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "deny": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "reset": {
+              "description": "true clears the app's storage when the slug is already installed",
+              "type": "boolean"
+            }
+          },
+          "required": ["slug", "label"],
+          "additionalProperties": false
+        },
+        "appId": {
+          "description": "uninstallApp only: the disposable app id installApp or listApps returned; ids outside dev.jasonpearson.automobile.app. and apps signed by another key are refused",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "expired": {
+          "description": "uninstallApp only: remove every disposable app on the device whose ttl ended",
           "type": "boolean",
           "const": true
         },
@@ -34644,6 +34731,174 @@
           "required": ["running"],
           "additionalProperties": false
         },
+        "disposableApp": {
+          "description": "installApp only: the installed disposable app; launch it with launchApp",
+          "type": "object",
+          "properties": {
+            "appId": {
+              "type": "string",
+              "description": "Pass to launchApp, terminateApp, observe and uninstallApp"
+            },
+            "platform": {
+              "type": "string",
+              "enum": ["android", "ios"]
+            },
+            "label": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ISO time it expires; null keeps it"
+            },
+            "template": {
+              "type": "string",
+              "description": "The smallest template flavor covering the spec's requires"
+            },
+            "permissions": {
+              "type": "object",
+              "properties": {
+                "declared": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "granted": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "denied": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": ["declared", "granted", "denied"],
+              "additionalProperties": false
+            },
+            "updated": {
+              "type": "boolean",
+              "description": "true when the slug was already installed and was updated"
+            },
+            "launched": {
+              "type": "boolean",
+              "const": false
+            }
+          },
+          "required": [
+            "appId",
+            "platform",
+            "label",
+            "version",
+            "expiresAt",
+            "template",
+            "permissions",
+            "updated",
+            "launched"
+          ],
+          "additionalProperties": false
+        },
+        "disposableApps": {
+          "description": "listApps only: this host's registry joined with the device's packages under the reserved prefix",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "appId": {
+                "type": "string"
+              },
+              "registered": {
+                "type": "boolean",
+                "description": "Recorded in this host's disposable app registry"
+              },
+              "installed": {
+                "type": "boolean",
+                "description": "Present on the device"
+              },
+              "expired": {
+                "type": "boolean"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "template": {
+                "type": "string"
+              },
+              "installedAt": {
+                "type": "string"
+              },
+              "expiresAt": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": ["appId", "registered", "installed", "expired"],
+            "additionalProperties": false
+          }
+        },
+        "uninstalled": {
+          "description": "uninstallApp only: each disposable app removed or left in place",
+          "type": "object",
+          "properties": {
+            "removed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "appId": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": ["appId", "reason"],
+                "additionalProperties": false
+              }
+            },
+            "skipped": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "appId": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": ["appId", "reason"],
+                "additionalProperties": false
+              },
+              "description": "Apps left installed, with why (outside the prefix or another signer)"
+            }
+          },
+          "required": ["removed", "skipped"],
+          "additionalProperties": false
+        },
         "deviceDroppedEvents": {
           "description": "inspect only: events the device dropped from its offline buffer (200 per device) since CtrlProxy started; a gap in sequences shows which",
           "type": "integer",
@@ -35177,7 +35432,8 @@
             "backendLog",
             "publish",
             "serve",
-            "stop"
+            "stop",
+            "listApps"
           ]
         }
       ],

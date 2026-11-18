@@ -31,8 +31,8 @@ Tools over 2 s:
 
 ## Decision
 
-`explore` and `killDevice` are eligible with `abort`: explore checks its signal between
-interactions, and killDevice already recovers from an aborted shutdown. `deviceSnapshot` capture
+`explore` and `killDevice` are eligible with `abort`: `explore` checks its signal between
+interactions, and `killDevice` already recovers from an aborted shutdown. `deviceSnapshot` capture
 and restore are eligible with `detach`. Neither takes a signal. Stopping one partway would leave
 a partial snapshot or a half-restored device. Snapshot delete stays synchronous.
 Interactive tools stay synchronous, because a task round trip costs more than it saves.

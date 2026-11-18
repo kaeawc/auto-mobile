@@ -119,10 +119,9 @@ precise reading. Its coordinates are rounded to two decimal places, its `accurac
 `altitudeM`, `speedMps` and `bearingDeg`. On iOS the system reduces the fix itself; a precise request under reduced accuracy asks for
 temporary full accuracy only when the host declares `NSLocationTemporaryUsageDescriptionDictionary`. Failures
 use the typed codes `permission_denied`, `unavailable`, `timeout` and `platform_error`. The `unavailable` code
-carries a `reason`: `disabled` on both platforms (location services off, or on Android below API 31 a coarse-only grant with no
-network provider), and on iOS also
-`missing_usage_description` (the host has no `NSLocationWhenInUseUsageDescription`; the runtime then never touches
-Core Location and reports `servicesEnabled: false`).
+carries a `reason`. It is `disabled` on both platforms: location services are off, or, on Android below API 31,
+a coarse-only grant has no network provider. On iOS it can also be `missing_usage_description`: the host has no
+`NSLocationWhenInUseUsageDescription`, so the runtime never touches Core Location and reports `servicesEnabled: false`.
 
 The `location.updated` event and the state keys `/platform/location/current` (the last fix, a flat object) and
 `/platform/location/servicesEnabled` (location services and a usable provider) complete the module. The call and the event
@@ -142,7 +141,9 @@ write. It writes at most once per `minIntervalMs` (whole milliseconds, 1000 to o
 `requires.permissions`. The runtime delivers no updates in the background. On Android, CtrlProxy, ProtoViewer and the app shell
 register and advertise `prototype_platform_location_v1` using platform `LocationManager`, without Play services.
 Below API 31 GPS needs fine permission, so a coarse-only grant uses only the network provider and reports
-`unavailable` with reason `disabled` when none exists. Disposable apps do not advertise location. On iOS, the injected
+`unavailable` with reason `disabled` when none exists. Disposable apps do not advertise location.
+
+On iOS, the injected
 prototype agent, ProtoViewer and the Viewer app advertise it using `CLLocationManager`, and the runtime asks for
 authorization only on an explicit `location.request`. The iOS runtime checks the host's usage description before
 accessing location. The shared registry stops updates and pending requests when its final observer releases it; a

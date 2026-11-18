@@ -86,8 +86,8 @@ fixtures:
   back, and a seed merges into the shown values; a `null` seed value removes the key.
 - Switching back to `real` drops the override and shows the latest reading at once. Each change of
   the shown values is debounced into `<module>.changed` like a real reading.
-- A seed is refused, with its input path, in `real` mode, for a key outside the state table, for a key
-  the platform does not report (`ringer` on iOS) and for a value its contract rule refuses.
+- A seed is refused with its input path in `real` mode. It is also refused for a key outside the
+  state table, a key the platform does not report (`ringer` on iOS) or a value its rule refuses.
 
 The `simulate` state action that drives this on a device is not built.
 

@@ -1,7 +1,6 @@
 # Apple Watch tool behavior
 
-This page describes how each tool that accepts an [Apple Watch simulator](apple-watch.md) behaves
-on a watch. Every call names the watch with `platform: "watchos"`.
+How each tool that accepts an [Apple Watch simulator](apple-watch.md) behaves on a watch. Every call names the watch with `platform: "watchos"`.
 
 ## `observe`
 
@@ -10,8 +9,7 @@ app's view hierarchy and on-screen system alerts, even when the app is not in th
 alerts include the notification permission prompt and the notification short look and long look
 with action buttons.
 
-- If AutoMobile cannot read the hierarchy, the result carries `hierarchyUnavailable` and no
-  hierarchy fields.
+- An unreadable hierarchy gives `hierarchyUnavailable` and no hierarchy fields.
 - When the target app is not in the foreground, the message says to call `launchApp` to bring it
   back, or to post a notification and retry `observe`. Read the screenshot meanwhile.
 - When the app `launchApp` started has exited or crashed, `hierarchyUnavailable` carries
@@ -38,7 +36,7 @@ before you select it.
 
 Outside the Smart Stack, both results include `effect: {screenChanged, basis}`. AutoMobile checks
 the screen for about 1 second after the tap. `basis` is `viewHierarchy changed`,
-`viewHierarchy unchanged` or `insufficient observation data`. The tap is never retried for you. A
+`viewHierarchy unchanged` or `insufficient observation data`. AutoMobile never retries the tap. A
 changed screen does not prove the intended control responded, so `observe` when it matters.
 
 When a system or app alert, such as the notification permission prompt, covers the app, `tapOn`
@@ -47,7 +45,7 @@ those buttons first, for example `tapOn` with `text: "Allow"`, then retry the or
 `tapAt` has no such guard: a point under an alert taps the alert.
 
 With the host app not in the foreground and no Smart Stack open, `tapAt` taps the watch face at the
-given point. A device has not confirmed whether such a tap opens a complication, so `observe`
+given point. Whether it opens a complication is unconfirmed, so `observe`
 afterwards. In that state `tapOn` still needs the host app in the foreground.
 
 ### Smart Stack widgets
@@ -61,15 +59,15 @@ When the Smart Stack is open and the host app is not in the foreground:
 - `observe` returns `hierarchyUnavailable` and no hierarchy fields.
 
 Tapping a widget opens its host app, so the normal tools work afterwards. A widget you just added
-shows its text about 2 seconds after the final Done tap. Wait about 2 seconds once before you match
+shows its text about 2 seconds after the final Done tap, so wait that long once before you match
 it. See [Smart Stack](../how-it-works/plat/watchos/smart-stack.md) for how this works.
 
 ## `swipeOn` and `pressButton`
 
 `swipeOn` swipes in a direction, including on the watch face after `pressButton` with `home`. With
 `lookFor`, it swipes until an exact `text` or `elementId` is on screen, up to `maxSwipes` (default
-10, maximum 100). Each `lookFor` step is a short, slow drag of about one row, so consecutive reads
-overlap and do not skip nearby targets. You cannot set coordinates or duration.
+10, maximum 100). Each `lookFor` step drags about one row, so reads overlap and do not
+skip nearby targets. You cannot set coordinates or duration.
 
 `pressButton` supports `home` only.
 
@@ -121,9 +119,8 @@ When a rotation changes nothing, the error says which case applies:
   content is at its limit. Tap the control first. For a `delta` between -1 and 1, the error also
   says the turn may be too small.
 
-Use `observe` after rotating to confirm the app responded. Retry only if `observe` confirms the
-turn had no effect, because a retry after a working turn can overshoot. Tap the control that should
-respond before retrying.
+Use `observe` after rotating. Retry only if it shows the turn had no effect, because a retry after a
+working turn can overshoot. Tap the control that should respond first.
 
 ## `sendKeys`
 
@@ -137,15 +134,14 @@ The watch refuses commands that clear, replace or press keys.
 ## `postNotification`
 
 `postNotification` sends a simulated push to the watch app named by `appId`. The simulator cannot
-pre-grant notification authorization, so the app must request permission. Answer Allow with
-`tapOn`, scrolling with `rotateCrown` or `swipeOn` first if needed. Use `observe` to find Allow /
-Don't Allow. A "CtrlProxyWatch" permission prompt may appear first.
+pre-grant notification authorization, so the app must request permission. Find Allow with
+`observe` and tap it with `tapOn`, scrolling with `rotateCrown` or `swipeOn` first if needed. A "CtrlProxyWatch" prompt may appear first.
 
-- If the watch dropped the push because the app's notifications are denied, `postNotification`
+- If the watch dropped the push because notifications are denied, `postNotification`
   returns `success: false`. That happens after Don't Allow, or when Allow was never reached.
 - The watch does not ask a denied app again. Uninstall and reinstall it (`installApp` resets its
   permissions), launch it, answer Allow, then post again.
-- When no delivery verdict is available, success means the simulator accepted the push.
+- Without a delivery verdict, success means the simulator accepted the push.
 - A banner disappears after a few seconds. Call `observe` right after the push to inspect its short
   look; the long look exposes its action buttons.
 
@@ -161,7 +157,7 @@ Don't Allow. A "CtrlProxyWatch" permission prompt may appear first.
 - `crashApp` sends SIGABRT to the running watch app named by `appId`, as on an iOS simulator. It
   checks the watch's unified log and the host crash reports for fresh crash evidence. The result has
   `confirmed`, `evidence` and, when it finds the report, a `crashReport` summary. An app that is not
-  running fails with `wasRunning: false`, and AutoMobile signals nothing.
+  running fails with `wasRunning: false` and is not signalled.
 
 To refresh a widget on demand, make the host app reload its widget timelines when it sees a launch
 argument you choose. Then call `terminateApp` and `launchApp` with that argument, for example

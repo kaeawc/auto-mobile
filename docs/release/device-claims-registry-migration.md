@@ -50,8 +50,12 @@ Live multi-daemon acceptance on a shared adb server is tracked in #15542 (`needs
   open still pending, a write still busy after four attempts, a failed open) is refused
   retryably rather than decided by the claim files alone. The refusal keeps the retryable code
   `device_owned_by_other_daemon` with no owner PID, and its message says the device claims
-  registry cannot decide the claim right now; retry once the registry is usable. Claims made
-  before bind, during startup recovery, still fall back to the claim files.
+  registry cannot decide the claim right now; retry once the registry is usable. Before bind,
+  during startup recovery, the same refusal applies whenever a registry file exists, unless the
+  registry still needs this release's migrations or has a schema this daemon does not know; only
+  then, or with no registry file, do the claim files decide. A refused recovery claim keeps its
+  session pending and retries within the session's recovery window, so a registry that stays
+  unusable before bind can delay the socket bind by up to the 15 s startup rehydration deadline.
 - A row without a recorded control socket (written by an early build or while no socket was bound) is
   judged by its owner's PID alone, so a live owner whose release write was lost keeps the device
   refused until it exits.

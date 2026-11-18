@@ -254,6 +254,60 @@ class PrototypeRealtimeRuntimeTest {
   }
 
   @Test
+  fun `a route setState bound to the frame writes the scalar it reads`() = runTest {
+    val base = spec()
+    val bound =
+      base.copy(
+        state = base.state.orEmpty() + ("last" to PrototypeScalar.Text("")),
+        channels =
+          base.channels!!.mapValues { (_, channel) ->
+            channel.copy(
+              routes =
+                listOf(
+                  PrototypeChannelRoute(
+                    actions =
+                      listOf(
+                        PrototypeSetStateAction(
+                          "last",
+                          PrototypeScalar.Binding(obj("event" to JsonPrimitive("/text"))),
+                        ),
+                      ),
+                  ),
+                ),
+            )
+          },
+      )
+    val transport = FakeTransport()
+    val runtime = runtime(transport, bound)
+    runtime.shown()
+    runCurrent()
+    transport.last.listener.onOpen(null)
+    transport.last.listener.onFrame("""{"text":"hello"}""", null, null)
+    advanceTimeBy(PrototypeChannelLimits.flushMs + 1L)
+    runCurrent()
+
+    assertEquals(emptyList<String>(), warnings)
+    assertEquals(PrototypeScalar.Text("hello"), runtime.current.state["last"])
+  }
+
+  @Test
+  fun `removing the last channel drops its platform state and closes it`() = runTest {
+    val transport = FakeTransport()
+    val runtime = runtime(transport)
+    runtime.shown()
+    runCurrent()
+    transport.last.listener.onOpen(null)
+    runCurrent()
+    assertEquals("open", runtime.chat()?.get("status")?.jsonPrimitive?.content)
+
+    runtime.replace(spec().copy(channels = null, root = PrototypeTextNode(text = "no channels")))
+    runCurrent()
+
+    assertNull(runtime.chat())
+    assertEquals(PrototypeChannelController.GOING_AWAY, transport.last.closedWith)
+  }
+
+  @Test
   fun `dismiss closes every connection and drops frames that arrive after it`() = runTest {
     val transport = FakeTransport()
     val runtime = runtime(transport)

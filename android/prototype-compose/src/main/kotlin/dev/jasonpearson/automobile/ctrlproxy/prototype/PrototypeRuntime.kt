@@ -320,7 +320,9 @@ class PrototypeRuntime(
     val previousEvent = eventData
     eventData = data
     try {
-      handle(PrototypeInteraction.Tap(current.spec.platform?.on?.get(name).orEmpty()))
+      handle(
+        PrototypeInteraction.Tap(bindStateValues(current.spec.platform?.on?.get(name).orEmpty())),
+      )
     } finally {
       eventData = previousEvent
     }
@@ -499,7 +501,7 @@ class PrototypeRuntime(
     stateWriteValidator = null
     mutableSnapshot.value = replacementSnapshot(spec)
     startPlatformUpdates()
-    realtimeModule?.update(channelDeclarations(current.spec))
+    updateRealtime()
   }
 
   /** Authoritative text replacement shares its epoch handling with patch commits. */
@@ -618,7 +620,7 @@ class PrototypeRuntime(
         stateRevisions = before.stateRevisions + changed.associateWith { revision },
       )
     startPlatformUpdates()
-    realtimeModule?.update(channelDeclarations(current.spec))
+    updateRealtime()
     // The commit is authoritative even if an ancillary event sink fails. Cancellation propagates.
     storage?.record(current.spec, current.stacks)
     try {
@@ -1997,20 +1999,55 @@ class PrototypeRuntime(
       }
       .toMap()
 
+  /**
+   * A committed spec change: removed channels leave `/platform/realtime` at once, since the
+   * controller drops a removed channel without publishing, then the declarations are posted.
+   */
+  private fun updateRealtime() {
+    val module = realtimeModule ?: return
+    val previous = current.platformState[PrototypeRealtimeModule.NAME] as? JsonObject
+    val declared = current.spec.channels.orEmpty().keys
+    if (previous != null && !declared.containsAll(previous.keys)) {
+      publishModuleState(
+        PrototypeRealtimeModule.NAME,
+        JsonObject(previous.filterKeys { it in declared }),
+      )
+    }
+    module.update(channelDeclarations(current.spec))
+  }
+
   /** `/platform/realtime/<channel>`, keeping only channels the current spec still declares. */
   private fun publishRealtimeState(channel: String, state: JsonObject) {
     val declared = current.spec.channels.orEmpty().keys
+    if (channel !in declared) return
     val previous = current.platformState[PrototypeRealtimeModule.NAME] as? JsonObject
     val channels = previous.orEmpty().filterKeys { it in declared && it != channel }
     publishModuleState(PrototypeRealtimeModule.NAME, JsonObject(channels + (channel to state)))
   }
+
+  /**
+   * A `setState` value bound to `{event}` or `{platform}` reads the handler event before the list
+   * is planned, so the validator sees the scalar it writes. A binding that resolves to no scalar
+   * stays as authored and is refused like any invalid write.
+   */
+  private fun bindStateValues(actions: List<PrototypeAction>): List<PrototypeAction> =
+    actions.map { action ->
+      val write = action as? PrototypeSetStateAction ?: return@map action
+      val binding = (write.value as? PrototypeScalar.Binding)?.value ?: return@map action
+      if ("event" !in binding && "platform" !in binding) return@map action
+      val resolved = PrototypeDataWriter.resolveValue(binding, bindingInputs())
+      val value = (resolved as? PrototypeDataValue.Resolved)?.value as? JsonPrimitive
+      if (value == null || value is JsonNull) write
+      else
+        write.copy(value = runtimeJson.decodeFromJsonElement(PrototypeScalar.serializer(), value))
+    }
 
   /** A route, callback or `statusKey` list, applied as one write with [event] as its event. */
   private suspend fun runChannelActions(channel: String, actions: JsonArray, event: JsonElement) {
     val previousEvent = eventData
     eventData = event
     try {
-      val decoded = runtimeJson.decodeFromJsonElement(channelActions, actions)
+      val decoded = bindStateValues(runtimeJson.decodeFromJsonElement(channelActions, actions))
       if (decoded.isEmpty() || !requireValid(decoded)) return
       run(decoded, plannedWrites(decoded, current.spec))
       runAppearances()

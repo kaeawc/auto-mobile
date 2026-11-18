@@ -501,6 +501,7 @@ nav:
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-18: Tasks eligibility from measured tool durations": devlog/2026-11-18-tasks-eligibility-from-measured-durations.md
       - "2026-11-17: Docs navigation grouped by task and platform": devlog/2026-11-17-docs-navigation-by-task.md
       - "2026-11-17: Material 3 Expressive component availability at the pinned Compose BOM": devlog/2026-11-17-m3-expressive-component-availability.md
       - "2026-11-16: Android Auto provisioning accepts the welcome screen": devlog/2026-11-16-android-auto-terms-accepted-by-provisioning.md

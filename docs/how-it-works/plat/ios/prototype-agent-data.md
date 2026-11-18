@@ -45,8 +45,15 @@ host's traversal order; the strict boundary also enforces the host data byte-cos
 
 Advertises `prototype_data_actions_v1` for `setData`, `appendData`, `prependData`, `removeData`
 ([contract](../android/prototype-ux-actions.md#data-actions-12519)), plus `prototype_data_actions_v2`
-for keyed writes with `where` and optional set `member`. The `PrototypeRepeat` type binds a whole `{index}`
+for keyed writes with `where` and optional set `member`, generated value bindings and keyed request into. The `PrototypeRepeat` type binds a whole `{index}`
 path segment and `{item}`/`{index}` values per row at expansion, so row actions arrive concrete.
+
+Generated bindings follow the shared [action-list scope rules](../android/prototype-ux-actions.md#data-actions-12519):
+ids and time resolve once on the device, requests capture lastGenerated for their callbacks, and
+change events carry resolved values to both host mirrors. An unset read is `lastGenerated_unset`.
+Keyed requests use the [shared request rules](../android/prototype-ux-data-network.md#data-storage-and-network-12531),
+including metadata beside the array and secure selector guards.
+
 The `PrototypeSession` type resolves `{value}`/`{state}`/`{data}` and applies `PrototypeDataWrite` (twin of the
 host's `applyPrototypeDataWrite`: codes `invalid_path`, `invalid_value`, `not_found`, `ambiguous_match`, `not_array`,
 `limit_exceeded`; `MAX_PROTOTYPE_DATA_WRITE_BYTES`). It then rebuilds the tree from the authored root with

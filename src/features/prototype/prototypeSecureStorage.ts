@@ -92,6 +92,12 @@ export function prototypeSecureStorageActionError(
   root: Raw,
 ): PrototypePlatformError | undefined {
   switch (action.type) {
+    case "setData":
+    case "removeData":
+      return (
+        bindingMapError(action.where, `${path}.where`, root, "data actions") ??
+        bindingMapError({ value: action.value }, path, root, "data actions")
+      );
     case "emit":
       return prototypeSecureStorageEmitError(action, path, root);
     case "request":
@@ -100,23 +106,31 @@ export function prototypeSecureStorageActionError(
     case "replace":
       return bindingMapError(action.params, `${path}.params`, root, "route params");
     case "setStack":
-      for (const [index, entry] of (Array.isArray(action.path) ? action.path : []).entries()) {
-        const error = bindingMapError(
-          record(entry)?.params,
-          `${path}.path[${index}].params`,
-          root,
-          "route params",
-        );
-        if (error) {
-          return error;
-        }
-      }
-      return undefined;
+      return stackBindingsError(action, path, root);
     case "platform":
       return bindingMapError(action.args, `${path}.args`, root, "platform args");
     default:
       return undefined;
   }
+}
+
+function stackBindingsError(
+  action: Raw,
+  path: string,
+  root: Raw,
+): PrototypePlatformError | undefined {
+  for (const [index, entry] of (Array.isArray(action.path) ? action.path : []).entries()) {
+    const error = bindingMapError(
+      record(entry)?.params,
+      `${path}.path[${index}].params`,
+      root,
+      "route params",
+    );
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
 }
 
 /** Only state bindings are resolved here; literal strings do not expand placeholders. */
@@ -171,6 +185,7 @@ export function prototypeSecureStorageRequestError(
       .map((name) => [record(value)![name], memberPath(at, name)] as const);
   const candidates: (readonly [unknown, string])[] = [
     [action.url, `${path}.url`],
+    [record(action.where)?.equals, `${path}.where.equals`],
     ...members(action.headers, `${path}.headers`),
     ...members(action.query, `${path}.query`),
     [action.body, `${path}.body`],

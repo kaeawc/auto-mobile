@@ -153,3 +153,15 @@ at all; draw a placeholder for them. The same glyphs serve Android and iOS frame
 `revision`, `variant` and `mcpSessionId` work as for the web page; there is no `frame`. Errors,
 listing and subscriptions also match the web page, and `_meta` reports the same fields except
 `frame`.
+
+### Derived collections
+
+Use a top-level `derive` entry such as
+`{"results":{"collection":{"of":{"data":"/rows"},"where":[{"field":"name","op":"contains","value":{"state":"query"}}],"sort":{"field":"name","order":"asc"},"limit":50}}}`.
+Bind rows with `repeat.items: {"derived":"results"}`. Collections preserve the original objects,
+filter before sorting and limiting, and scan at most 500 items. Non-array sources yield no rows.
+Up to four clauses combine with AND; operators are `contains`, `eq`, `neq`, `gt`, `gte`, `lt`, and `lte`.
+Clause values read state or a literal string/number. Missing fields and type mismatches do not match.
+Add `reduce: {"op":"count"}` or `{"op":"sum","field":"amount"}` (also `min` or `max`)
+to produce a scalar after limiting; empty reductions return zero. Scalars support `format`.
+Collections require `prototype_derive_v1`; update a renderer that refuses this capability.

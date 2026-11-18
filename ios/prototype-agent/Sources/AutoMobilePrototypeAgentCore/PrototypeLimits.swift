@@ -142,18 +142,30 @@ enum PrototypeLimits {
     /// Runs after guardAuthoredTree has depth-checked every subtree the cell guard and resolver
     /// traverse. Counts containers in pre-order, including childless templates; missing or
     /// non-array pointers contribute no cells. The explicit depth check also bounds direct calls.
-    static func guardRepeatPathCells(_ root: JSONValue, data: [String: JSONValue]?) throws {
+    static func guardRepeatPathCells(
+        _ root: JSONValue, data: [String: JSONValue]?, derivedValues: [String: JSONValue] = [:]
+    )
+        throws
+    {
         var repeats = PrototypeRepeatData(data: data)
+        var collections = PrototypeRepeatData(data: derivedValues)
         var total = 0
         func visitCells(_ node: JSONValue, path: String, depth: Int) throws {
             guard case let .object(fields) = node else { return }
             if depth > maxDepth { throw violation(path, "Tree depth limit exceeded") }
             if case let .object(spec)? = fields["repeat"],
-               case let .object(source)? = spec["items"], let pointer = source["path"]?.stringValue
+               case let .object(source)? = spec["items"]
             {
-                total += repeats.cells(pointer)
+                let field: String
+                if let name = source["derived"]?.stringValue {
+                    field = "derived"
+                    total += collections.cells("/" + name)
+                } else if let pointer = source["path"]?.stringValue {
+                    field = "path"
+                    total += repeats.cells(pointer)
+                } else { field = "path" }
                 if total > maxRepeatPathCells {
-                    throw violation("\(path).repeat.items.path", "Repeat path cell limit exceeded")
+                    throw violation("\(path).repeat.items.\(field)", "Repeat path cell limit exceeded")
                 }
             }
             for name in ["header", "footer"] {

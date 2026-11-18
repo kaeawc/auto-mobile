@@ -1,3 +1,5 @@
+import { derivePrototypeValues } from "./prototypeDerive";
+import { prototypeDeriveSchema } from "./prototypeFormatSchema";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { chargeMotionNode } from "./prototypeMotionBudget";
 import { PrototypeScreenBudget, prototypeScreenBudgetMessage } from "./prototypeScreenBudget";
@@ -46,7 +48,7 @@ interface Scope {
   path: string;
   binding: Binding;
   items: readonly Readonly<Raw>[];
-  pathBound: boolean;
+  pathBound?: "path" | "derived";
   derivedFields: ReadonlySet<string>;
 }
 
@@ -110,7 +112,7 @@ function invalidBoundKey(key: string, path: string, scope: Scope): RepeatError |
     if (invalidRepeatPart || !pattern.test(bound)) {
       return fail(
         scope.pathBound
-          ? `${scope.path}.repeat.items.path`
+          ? `${scope.path}.repeat.items.${scope.pathBound}`
           : `${scope.path}.repeat.items[${index}]`,
         `Bound state key ${JSON.stringify(bound)} is invalid${scope.pathBound ? ` (repeat item ${index})` : ""}`,
       );
@@ -338,25 +340,30 @@ interface RepeatState {
   total: number;
 }
 
+function scopeItems(repeat: Raw, data: PrototypeRepeatData): readonly Readonly<Raw>[] {
+  const source = record(repeat.items);
+  if (typeof source?.path === "string") {
+    return data.items(source.path);
+  }
+  const items = typeof source?.derived === "string" ? data.derived[source.derived] : repeat.items;
+  return (Array.isArray(items) ? items : []).filter(
+    (item): item is Raw => record(item) !== undefined,
+  );
+}
+
 function scopeOf(node: Raw, path: string, data: PrototypeRepeatData): Scope | undefined {
   const repeat = record(node.repeat);
-  const source = record(repeat?.items);
-  const literal: unknown[] = Array.isArray(repeat?.items) ? repeat.items : [];
-  return repeat && typeof repeat.as === "string"
-    ? {
-        path,
-        binding: { alias: repeat.as, index: true },
-        items:
-          source && typeof source.path === "string"
-            ? derivedValidationItems(data.items(source.path), repeat.derive)
-            : derivedValidationItems(
-                literal.filter((item): item is Raw => record(item) !== undefined),
-                repeat.derive,
-              ),
-        pathBound: source !== undefined,
-        derivedFields: new Set(Object.keys(record(repeat.derive) ?? {})),
-      }
-    : undefined;
+  if (!repeat || typeof repeat.as !== "string") {
+    return undefined;
+  }
+  const source = record(repeat.items);
+  return {
+    path,
+    binding: { alias: repeat.as, index: true },
+    items: derivedValidationItems(scopeItems(repeat, data), repeat.derive),
+    pathBound: typeof source?.derived === "string" ? "derived" : source ? "path" : undefined,
+    derivedFields: new Set(Object.keys(record(repeat.derive) ?? {})),
+  };
 }
 
 function templateNodeError(node: Raw, path: string): RepeatError | undefined {
@@ -426,36 +433,42 @@ const MAX_REPEAT_ITEMS =
   contract.definitions.repeat.fields.items.rule.options.find((option) => option.kind === "array")
     ?.max ?? Infinity;
 
+function resolvedRepeatItemsError(items: unknown, node: Raw, at: string): RepeatError | undefined {
+  if (!Array.isArray(items)) {
+    return fail(at, "Repeat path does not resolve to an array");
+  }
+  const maximum =
+    node.type === "list" ? contract.limits.MAX_PROTOTYPE_LIST_ITEMS : MAX_REPEAT_ITEMS;
+  if (items.length > maximum) {
+    return fail(at, `Repeat path resolves to more than ${maximum} items`);
+  }
+  if (node.type === "list" && typeof node.maxItems === "number" && items.length > node.maxItems) {
+    return fail(at, "List data has more items than maxItems");
+  }
+  const invalid = items.findIndex((item) => !record(item));
+  return invalid >= 0 ? fail(at, `Repeat path item ${invalid} is not an object`) : undefined;
+}
+
 function repeatSourceErrors(node: Raw, path: string, state: RepeatState): RepeatError | undefined {
-  const repeat = record(node.repeat);
-  if (!repeat) {
+  const source = record(record(node.repeat)?.items);
+  if (!source || (typeof source.path !== "string" && typeof source.derived !== "string")) {
     return undefined;
   }
-  const source = record(repeat.items);
-  if (source && typeof source.path === "string") {
-    const items = state.data.source(source.path);
-    const at = `${path}.repeat.items.path`;
-    if (!Array.isArray(items)) {
-      return fail(at, "Repeat path does not resolve to an array");
-    }
-    const maximum =
-      node.type === "list" ? contract.limits.MAX_PROTOTYPE_LIST_ITEMS : MAX_REPEAT_ITEMS;
-    if (items.length > maximum) {
-      return fail(at, `Repeat path resolves to more than ${maximum} items`);
-    }
-    if (node.type === "list" && typeof node.maxItems === "number" && items.length > node.maxItems) {
-      return fail(at, "List data has more items than maxItems");
-    }
-    const invalid = items.findIndex((item) => !record(item));
-    if (invalid >= 0) {
-      return fail(at, `Repeat path item ${invalid} is not an object`);
-    }
-    state.cells += state.data.cells(source.path);
-    if (state.cells > contract.limits.MAX_PROTOTYPE_REPEAT_PATH_CELLS) {
-      return fail(at, "Repeat path cell limit exceeded");
-    }
+  const derived = typeof source.derived === "string";
+  const items = derived
+    ? state.data.derived[String(source.derived)]
+    : state.data.source(String(source.path));
+  const at = `${path}.repeat.items.${derived ? "derived" : "path"}`;
+  const error = resolvedRepeatItemsError(items, node, at);
+  if (error) {
+    return error;
   }
-  return undefined;
+  state.cells += derived
+    ? new PrototypeRepeatData({ rows: items }).cells("/rows")
+    : state.data.cells(String(source.path));
+  return state.cells > contract.limits.MAX_PROTOTYPE_REPEAT_PATH_CELLS
+    ? fail(at, "Repeat path cell limit exceeded")
+    : undefined;
 }
 
 function repeatKeyError(
@@ -612,6 +625,14 @@ export function repeatErrors(
   spec: unknown,
   data = new PrototypeRepeatData(record(spec)?.data),
 ): RepeatError | undefined {
+  const parsedDerive = prototypeDeriveSchema.safeParse(record(spec)?.derive ?? {});
+  if (parsedDerive.success) {
+    data.derived = derivePrototypeValues(
+      parsedDerive.data,
+      record(spec)?.data,
+      record(record(spec)?.state) ?? {},
+    );
+  }
   const root = record(record(spec)?.root);
   if (!root) {
     return undefined;
@@ -663,6 +684,14 @@ export function repeatKeyInstances<T extends { value: Raw; path: string }>(
   located: T[],
   data = new PrototypeRepeatData(record(spec)?.data),
 ): KeyInstance<T>[] {
+  const parsedDerive = prototypeDeriveSchema.safeParse(record(spec)?.derive ?? {});
+  if (parsedDerive.success) {
+    data.derived = derivePrototypeValues(
+      parsedDerive.data,
+      record(spec)?.data,
+      record(record(spec)?.state) ?? {},
+    );
+  }
   const root = record(record(spec)?.root);
   const scopes: Scope[] = [];
   if (root) {

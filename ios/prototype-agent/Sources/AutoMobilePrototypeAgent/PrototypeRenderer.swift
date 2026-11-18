@@ -616,7 +616,9 @@
         private var derivedContext: PrototypeDerivedContext {
             // Reading SwiftUI's locale invalidates this view on a device language change.
             _ = deviceLocale
-            return PrototypeDerivedContext(entries: model.spec?.derive ?? [:], data: model.spec?.data)
+            return PrototypeDerivedContext(
+                entries: model.spec?.derive ?? [:], data: model.spec?.data, values: model.spec?.derivedValues
+            )
         }
 
         private func interpolated(_ text: String?) -> String {

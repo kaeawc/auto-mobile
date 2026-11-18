@@ -128,7 +128,19 @@ internal object PrototypeDataValues {
 }
 
 /** Per-call caches; JSON values are read-only and projected rows are shared, never mutated. */
-internal class PrototypeRepeatData(private val data: JsonObject?) {
+internal class PrototypeRepeatData(
+  private val data: JsonObject?,
+  private val evaluateDerived: () -> Map<String, JsonElement?> = { emptyMap() },
+) {
+  val derived by lazy(evaluateDerived)
+
+  companion object {
+    fun fromSpec(spec: JsonElement?): PrototypeRepeatData {
+      val root = spec as? JsonObject ?: JsonObject(emptyMap())
+      return PrototypeRepeatData(root["data"] as? JsonObject) { PrototypeDerive.fromSpec(root) }
+    }
+  }
+
   private val renderings = mutableMapOf<String, String>()
   private val sources = mutableMapOf<String, JsonArray?>()
   private val counts = mutableMapOf<String, Int>()
@@ -349,7 +361,7 @@ object PrototypeDataResolver {
   private fun resolveRepeat(value: JsonElement, repeats: PrototypeRepeatData): JsonElement {
     val repeat = value as? JsonObject ?: return value
     val source = repeat["items"] as? JsonObject ?: return value
-    val pointer = (source["path"] as? JsonPrimitive)?.content.orEmpty()
+    val pointer = (source["path"] as? JsonPrimitive)?.content ?: return value
     return JsonObject(repeat + ("items" to repeats.array(pointer)))
   }
 

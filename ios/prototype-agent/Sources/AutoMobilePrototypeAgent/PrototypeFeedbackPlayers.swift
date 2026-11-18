@@ -63,7 +63,7 @@
         /// Production modules for the injected agent and ProtoViewer. Location checks the host's
         /// usage description before accessing its source and prompts only for an explicit request.
         /// Device status modules need no permission, entitlement or Info.plist key.
-        static func feedbackModules() -> PrototypePlatformRegistry {
+        static func feedbackModules(includePermissions: Bool = true) -> PrototypePlatformRegistry {
             feedbackModules(
                 haptics: UIKitHapticsPlayer(),
                 sound: SystemSoundPlayer(),
@@ -76,7 +76,8 @@
                     PrototypeDeviceStatusModule.audio(source: AVAudioSessionAudioSource()),
                 ],
                 location: CLLocationManagerPrototypeLocationSource(),
-                sensors: CoreMotionPrototypeSensorSource()
+                sensors: CoreMotionPrototypeSensorSource(),
+                permissions: includePermissions ? UNUserNotificationCenterPrototypePermissionsSource() : nil
             )
         }
     }

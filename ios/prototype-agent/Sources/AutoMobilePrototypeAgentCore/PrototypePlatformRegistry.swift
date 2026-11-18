@@ -128,7 +128,8 @@ public final class PrototypePlatformRegistry {
         bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
         deviceStatus: [any PrototypePlatformModule] = [],
         location: (any PrototypeLocationSource)? = nil,
-        sensors: (any PrototypeSensorSource)? = nil
+        sensors: (any PrototypeSensorSource)? = nil,
+        permissions: (any PrototypeNotificationAuthorizationSource)? = nil
     )
         -> PrototypePlatformRegistry
     {
@@ -141,6 +142,7 @@ public final class PrototypePlatformRegistry {
         ] + deviceStatus
         if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
         if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
+        if let permissions { modules.append(PrototypePermissionsModule(source: permissions)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 
@@ -152,7 +154,8 @@ public final class PrototypePlatformRegistry {
         bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
         deviceStatus: [any PrototypePlatformModule] = [],
         location: (any PrototypeLocationSource)? = nil,
-        sensors: (any PrototypeSensorSource)? = nil
+        sensors: (any PrototypeSensorSource)? = nil,
+        permissions: (any PrototypeNotificationAuthorizationSource)? = nil
     )
         -> PrototypePlatformRegistry
     {
@@ -164,6 +167,7 @@ public final class PrototypePlatformRegistry {
         ] + deviceStatus
         if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
         if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
+        if let permissions { modules.append(PrototypePermissionsModule(source: permissions)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 

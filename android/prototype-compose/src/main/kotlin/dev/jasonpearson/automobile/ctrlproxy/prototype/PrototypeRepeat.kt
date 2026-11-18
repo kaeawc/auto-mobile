@@ -860,18 +860,21 @@ private fun PrototypeSwipeAction.bound(instance: RepeatInstance) =
 private fun PrototypeAppBarAction.bound(instance: RepeatInstance) =
   copy(label = instance.interpolate(label), onTap = onTap?.map { it.bound(instance) })
 
-private fun PrototypeRequestAction.boundRequest(instance: RepeatInstance) =
-  copy(
+private fun PrototypeRequestAction.boundRequest(instance: RepeatInstance): PrototypeRequestAction {
+  val where = where
+  return copy(
     url = instance.interpolate(url),
     headers = headers?.mapValues { (_, entry) -> instance.requestEntry(entry) },
     query = query?.mapValues { (_, entry) -> instance.requestEntry(entry) },
     body = body?.let(instance::dataValue),
     into = into?.let(instance::dataPath),
+    where = where?.copy(equals = instance.dataValue(where.equals)),
     append = append?.let { it.copy(to = instance.dataPath(it.to)) },
     statusKey = statusKey?.let(instance::interpolate),
     onSuccess = onSuccess?.map { it.bound(instance) },
     onError = onError?.map { it.bound(instance) },
   )
+}
 
 private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
   when (this) {

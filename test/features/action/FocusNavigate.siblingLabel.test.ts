@@ -185,12 +185,12 @@ test.each(["own text", "own description", "child label", "different parent"] as 
 );
 
 test.each(["selector", "hierarchy", "bounds"] as const)(
-  "%s declines the sibling fallback when two unlabelled controls share the row",
+  "%s declines the sibling fallback when two unlabelled controls follow the label",
   (path) => {
     const later = { ...control, bounds: { left: 70, top: 10, right: 90, bottom: 30 } };
-    const hierarchy = tree({ ...row, node: [control, title, later] });
+    const hierarchy = tree({ ...row, node: [title, control, later] });
     const screen = {
-      ...flat(row, control, title, later),
+      ...flat(row, title, control, later),
       ...(path === "bounds" ? {} : { hierarchy }),
     };
     expect(

@@ -218,9 +218,25 @@ function isRangeValueDescription(
   );
 }
 
+/** The label's following segment must contain exactly one qualifying unlabelled control. */
+function followingLabelSibling(
+  nodes: readonly FocusSiblingNode[],
+  label: FocusSiblingNode,
+  candidates: readonly FocusSiblingNode[],
+): Element | undefined {
+  const nextLabel = nodes.find(
+    (node) =>
+      node.parentIndex === label.parentIndex && node.index > label.index && hasLabel(node.element),
+  );
+  const following = candidates.filter(
+    (node) => node.index > label.index && (!nextLabel || node.index < nextLabel.index),
+  );
+  return following.length === 1 ? following[0].element : undefined;
+}
+
 /**
  * A matching focusable in this same parent row (best match, nearest in hierarchy order), else
- * the row's only unlabelled focusable. Several unlabelled candidates are ambiguous: none is pinned.
+ * its only unlabelled focusable, or the only one after the label before the next sibling label.
  */
 export function focusLabelSibling(
   nodes: readonly FocusSiblingNode[],
@@ -247,7 +263,9 @@ export function focusLabelSibling(
   );
   const matching = candidates.filter((node) => siblingMatchRank(node, target) > 0);
   if (matching.length === 0) {
-    return candidates.length === 1 ? candidates[0].element : undefined;
+    return candidates.length === 1
+      ? candidates[0].element
+      : followingLabelSibling(nodes, label, candidates);
   }
   return matching.sort(
     (a, b) =>

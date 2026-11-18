@@ -524,6 +524,329 @@
           "expected": null
         }
       ]
+    },
+    {
+      "name": "combining mark is part of segment",
+      "table": [
+        {
+          "path": "/post/{id}"
+        }
+      ],
+      "cases": [
+        {
+          "url": "https://h/\u0301post/41",
+          "expected": null
+        },
+        {
+          "url": "amp://\u0301post/41",
+          "expected": null
+        },
+        {
+          "url": "https://h/post/\u0301",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "id": "\u0301"
+            },
+            "query": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "combining mark capture",
+      "table": [
+        {
+          "path": "/{segment}/{id}"
+        }
+      ],
+      "cases": [
+        {
+          "url": "https://h/\u0301post/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "segment": "\u0301post",
+              "id": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp://\u0301post/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "segment": "\u0301post",
+              "id": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "https://h/\u0301post/41/\u0301",
+          "expected": null
+        }
+      ]
+    },
+    {
+      "name": "literal before capture",
+      "table": [
+        {
+          "path": "/post/new"
+        },
+        {
+          "path": "/post/{id}"
+        }
+      ],
+      "cases": [
+        {
+          "url": "https://h/post/new",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {},
+            "query": {}
+          }
+        },
+        {
+          "url": "https://h/post/41",
+          "expected": {
+            "entryIndex": 1,
+            "captures": {
+              "id": "41"
+            },
+            "query": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "capture before literal",
+      "table": [
+        {
+          "path": "/post/{id}"
+        },
+        {
+          "path": "/post/new"
+        }
+      ],
+      "cases": [
+        {
+          "url": "https://h/post/new",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "id": "new"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "https://h/post/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "id": "41"
+            },
+            "query": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "custom authority normalization",
+      "table": [
+        {
+          "path": "/post/{postId}"
+        }
+      ],
+      "cases": [
+        {
+          "url": "amp://user@post:80/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp://user@post/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp://post:80/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp://user@:80/41",
+          "expected": null
+        },
+        {
+          "url": "amp://post:80x/41",
+          "expected": null
+        },
+        {
+          "url": "amp://first@user@post:80/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "custom authority non-digit port capture",
+      "table": [
+        {
+          "path": "/{segment}/{id}"
+        }
+      ],
+      "cases": [
+        {
+          "url": "amp://post:80x/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "segment": "post:80x",
+              "id": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp://user@post:80x/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "segment": "post:80x",
+              "id": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp://post:/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "segment": "post:",
+              "id": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp://post:١/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "segment": "post:١",
+              "id": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp://user@:80/41",
+          "expected": null
+        }
+      ]
+    },
+    {
+      "name": "scalar query delimiters",
+      "table": [
+        {
+          "path": "/post/{id}"
+        }
+      ],
+      "cases": [
+        {
+          "url": "https://h/post/41?\u0301ignored=x",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "id": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "https://h/post/41#\u0301ignored",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "id": "41"
+            },
+            "query": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "literal matching uses exact text",
+      "table": [
+        {
+          "path": "/K/{id}"
+        }
+      ],
+      "cases": [
+        {
+          "url": "https://h/\u212a/41",
+          "expected": null
+        },
+        {
+          "url": "https://h/K/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "id": "41"
+            },
+            "query": {}
+          }
+        }
+      ]
+    },
+    {
+      "name": "scalar query values",
+      "table": [
+        {
+          "path": "/post/{id}",
+          "query": {
+            "ref": "string"
+          }
+        }
+      ],
+      "cases": [
+        {
+          "url": "https://h/post/41?ref=\u0301value",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "id": "41"
+            },
+            "query": {
+              "ref": "\u0301value"
+            }
+          }
+        }
+      ]
     }
   ],
   "validationCases": [
@@ -873,6 +1196,27 @@
         }
       ],
       "expected": []
+    },
+    {
+      "name": "combining mark cannot be removed from pattern delimiters",
+      "table": [
+        {
+          "path": "/\u0301post/{id}"
+        },
+        {
+          "path": "/{\u0301id}"
+        }
+      ],
+      "expected": [
+        {
+          "index": 0,
+          "code": "badPattern"
+        },
+        {
+          "index": 1,
+          "code": "badPattern"
+        }
+      ]
     }
   ]
 }

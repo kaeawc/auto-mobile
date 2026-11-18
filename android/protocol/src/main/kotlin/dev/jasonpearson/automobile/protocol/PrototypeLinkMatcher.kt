@@ -132,7 +132,7 @@ object PrototypeLinkMatcher {
       if (scheme == "http" || scheme == "https") {
         val slash = rawPath.indexOf('/')
         if (slash < 0) "" else rawPath.substring(slash)
-      } else rawPath
+      } else customSchemePath(rawPath) ?: return null
     path = path.removePrefix("/").removeSuffix("/")
     val segments = if (path.isEmpty()) emptyList() else path.split('/')
     if (segments.any { it.isEmpty() } || rawPath.endsWith("//")) return null
@@ -203,4 +203,16 @@ object PrototypeLinkMatcher {
       matchEntry(entry, parts, index)
     }
   }
+}
+
+private fun customSchemePath(rawPath: String): String? {
+  val authority = rawPath.substringBefore('/')
+  var host = authority.substringAfterLast('@')
+  val colon = host.lastIndexOf(':')
+  val port = host.substring(colon + 1)
+  if (colon >= 0 && port.isNotEmpty() && port.all { it in '0'..'9' }) {
+    host = host.substring(0, colon)
+  }
+  if (authority.isNotEmpty() && host.isEmpty()) return null
+  return host + rawPath.substring(authority.length)
 }

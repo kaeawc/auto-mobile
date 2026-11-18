@@ -39,15 +39,17 @@ public enum PrototypeLinkMatcher {
     }
 
     private static func captureName(_ segment: String) -> String? {
-        guard segment.hasPrefix("{"), segment.hasSuffix("}") else { return nil }
-        let name = String(segment.dropFirst().dropLast())
+        let scalars = segment.unicodeScalars
+        guard scalars.first == "{", scalars.last == "}" else { return nil }
+        let name = String(scalars.dropFirst().dropLast())
         return validName(name) ? name : nil
     }
 
     private static func patternSegments(_ path: String) -> [String]? {
-        if path == "/" { return [] }
-        guard path.hasPrefix("/") else { return nil }
-        let segments = path.dropFirst().components(separatedBy: "/")
+        let scalars = path.unicodeScalars
+        if scalars.elementsEqual("/".unicodeScalars) { return [] }
+        guard scalars.first == "/" else { return nil }
+        let segments = scalars.dropFirst().split(separator: "/", omittingEmptySubsequences: false).map { String($0) }
         return segments.allSatisfy { matches($0, "[A-Za-z0-9._~-]+") || captureName($0) != nil }
             ? segments : nil
     }
@@ -142,21 +144,39 @@ public enum PrototypeLinkMatcher {
     }
 
     private static func urlParts(_ url: String) -> Parts? {
-        let clean = url.components(separatedBy: "#")[0]
-        guard let separator = clean.range(of: "://"), separator.lowerBound != clean.startIndex else { return nil }
-        let scheme = clean[..<separator.lowerBound].lowercased()
+        // URL delimiters are scalars, even when followed by a combining mark.
+        let clean = String(url.unicodeScalars.prefix { $0 != "#" })
+        guard let separator = clean.range(of: "://", options: .literal),
+              separator.lowerBound != clean.startIndex else { return nil }
+        let scheme = String(clean.unicodeScalars[..<separator.lowerBound]).lowercased()
         guard matches(scheme, "[a-z][a-z0-9+.-]*") else { return nil }
-        let rest = String(clean[separator.upperBound...])
+        let rest = clean.unicodeScalars[separator.upperBound...]
         let question = rest.firstIndex(of: "?")
-        let rawPath = question.map { String(rest[..<$0]) } ?? rest
+        let rawPath = question.map { rest[..<$0] } ?? rest
         var path = rawPath
         if scheme == "http" || scheme == "https" {
-            path = rawPath.firstIndex(of: "/").map { String(rawPath[$0...]) } ?? ""
+            path = rawPath.firstIndex(of: "/").map { rawPath[$0...] } ?? rawPath[rawPath.endIndex...]
+        } else {
+            let slash = rawPath.firstIndex(of: "/") ?? rawPath.endIndex
+            let authority = rawPath[..<slash]
+            var host = authority
+            if let at = host.lastIndex(of: "@") {
+                host = host[host.index(after: at)...]
+            }
+            if let colon = host.lastIndex(of: ":") {
+                let port = host[host.index(after: colon)...]
+                if !port.isEmpty, port.allSatisfy({ $0.value >= 48 && $0.value <= 57 }) {
+                    host = host[..<colon]
+                }
+            }
+            guard authority.isEmpty || !host.isEmpty else { return nil }
+            path = (String(host) + String(rawPath[slash...])).unicodeScalars[...]
         }
-        if path.hasPrefix("/") { path.removeFirst() }
-        if path.hasSuffix("/") { path.removeLast() }
-        let segments = path.isEmpty ? [] : path.components(separatedBy: "/")
-        guard !segments.contains(""), !rawPath.hasSuffix("//") else { return nil }
+        if path.first == "/" { path = path.dropFirst() }
+        if path.last == "/" { path = path.dropLast() }
+        let segments = path.isEmpty ? [] : path.split(separator: "/", omittingEmptySubsequences: false)
+            .map { String($0) }
+        guard !segments.contains(""), !rawPath.suffix(2).elementsEqual("//".unicodeScalars) else { return nil }
         var decoded: [String] = []
         for segment in segments {
             guard let part = decode(segment, plus: false), !part.isEmpty else { return nil }
@@ -168,9 +188,9 @@ public enum PrototypeLinkMatcher {
 
     private static func queryPairs(_ text: String) -> [String: String] {
         var pairs: [String: String] = [:]
-        for pair in text.components(separatedBy: "&") where !pair.isEmpty {
+        for pair in text.unicodeScalars.split(separator: "&") {
             let equal = pair.firstIndex(of: "=")
-            let rawKey = equal.map { String(pair[..<$0]) } ?? pair
+            let rawKey = equal.map { String(pair[..<$0]) } ?? String(pair)
             let rawValue = equal.map { String(pair[pair.index(after: $0)...]) } ?? ""
             guard let key = decode(rawKey, plus: true), let value = decode(rawValue, plus: true) else { continue }
             if pairs[key] == nil { pairs[key] = value }
@@ -201,7 +221,7 @@ public enum PrototypeLinkMatcher {
             if let name = captureName(segment) {
                 guard captures[name] == nil else { return nil }
                 captures[name] = parts.segments[index]
-            } else if segment != parts.segments[index] {
+            } else if !segment.utf8.elementsEqual(parts.segments[index].utf8) {
                 return nil
             }
         }

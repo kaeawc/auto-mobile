@@ -136,11 +136,32 @@ function decode(text: string, plus: boolean): string | undefined {
   return isUtf8(buffer) ? buffer.toString("utf8") : undefined;
 }
 
+function customSchemePath(rawPath: string): string | undefined {
+  const slash = rawPath.indexOf("/");
+  const authority = slash < 0 ? rawPath : rawPath.slice(0, slash);
+  let host = authority.slice(authority.lastIndexOf("@") + 1);
+  const colon = host.lastIndexOf(":");
+  const port = host.slice(colon + 1);
+  if (colon >= 0 && port.length > 0 && [...port].every((digit) => digit >= "0" && digit <= "9")) {
+    host = host.slice(0, colon);
+  }
+  if (authority !== "" && host === "") {
+    return undefined;
+  }
+  return host + (slash < 0 ? "" : rawPath.slice(slash));
+}
+
 function pathSegments(rawPath: string, scheme: string): string[] | undefined {
   let path = rawPath;
   if (scheme === "http" || scheme === "https") {
     const slash = path.indexOf("/");
     path = slash < 0 ? "" : path.slice(slash);
+  } else {
+    const customPath = customSchemePath(path);
+    if (customPath === undefined) {
+      return undefined;
+    }
+    path = customPath;
   }
   if (path.startsWith("/")) {
     path = path.slice(1);

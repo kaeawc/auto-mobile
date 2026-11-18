@@ -19,10 +19,12 @@ import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidBiometricSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidLocationSource
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPermissionsSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi
 import dev.jasonpearson.automobile.ctrlproxy.prototype.LocalPrototypeRootBack
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBiometricModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePermissionsModule
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.PrototypeAssets
 import dev.jasonpearson.automobile.prototype.PrototypePlatform
@@ -75,6 +77,7 @@ class PrototypeAppActivity : ComponentActivity() {
           listOf(
             PrototypeLocationModule(AndroidLocationSource(this)),
             PrototypeBiometricModule(AndroidBiometricSource(this)),
+            PrototypePermissionsModule(AndroidPermissionsSource(this)),
           ),
         )
       }

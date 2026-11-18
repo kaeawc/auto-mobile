@@ -115,4 +115,5 @@ private val EXPECTED_PERMISSIONS =
     "android.permission.ACCESS_COARSE_LOCATION",
     "android.permission.ACCESS_FINE_LOCATION",
     "android.permission.USE_BIOMETRIC",
+    "android.permission.POST_NOTIFICATIONS",
   )

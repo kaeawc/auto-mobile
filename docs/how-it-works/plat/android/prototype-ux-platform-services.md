@@ -116,9 +116,33 @@ The `permissions` module (`prototype_platform_permissions_v1`) has one call, `pe
 `names` (1-16 unique canonical names). A literal list may only name permissions declared in
 `requires.permissions`; a bound list is checked by the runtime. State is `/platform/permissions/<name>`, one
 of `granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted` or `unavailable`, and
-`permissions.changed` fires when the user changes a permission in Settings and the app resumes. A call that
-needs a permission the user denied fails with `permission_denied` and never prompts implicitly. Overlay
+`permissions.changed` carries `{name, state}` when a request changes authorization. It also fires when
+the user changes a permission in Settings and the app resumes. A call that needs a permission the user denied fails with `permission_denied` and never prompts implicitly. Overlay
 runtimes do not advertise the module, since a grant there would go to CtrlProxy or the borrowed host app.
+
+Android Activity hosts register `permissions` for `notifications`: ProtoViewer, disposable apps and
+CtrlProxy's SavedPrototypeActivity advertise the capability. A plain Activity without an
+ActivityResultRegistry and the CtrlProxy overlay omit it. Other canonical names return `unavailable`.
+The result is `{results: {<name>: <state>}}`; each result also updates `/platform/permissions/<name>`.
+Bound request lists must name declared permissions, just like literal lists. Only one request can be
+in flight; a second returns `too_many_in_flight`. Cancellation and teardown unregister the result
+launcher. Activity resume re-reads notification authorization and emits only changed states.
+
+| Android notification authorization                                           | State           |
+| ---------------------------------------------------------------------------- | --------------- |
+| Activity is not resumed, or source is closed                                 | `unavailable`   |
+| API below 33, notifications enabled                                          | `granted`       |
+| API below 33, notifications disabled in Settings                             | `blocked`       |
+| API 33+, POST_NOTIFICATIONS granted and notifications enabled                | `granted`       |
+| API 33+, POST_NOTIFICATIONS granted but notifications disabled               | `blocked`       |
+| API 33+, not granted and no persisted request                                | `notDetermined` |
+| API 33+, previously requested and rationale available                        | `denied`        |
+| API 33+, previously requested and no rationale (including user-fixed denial) | `blocked`       |
+
+`POST_NOTIFICATIONS` is a runtime permission starting at API 33. Earlier versions never prompt;
+Settings alone controls notification availability. Already-granted and blocked requests return their
+state without a prompt. This runtime does not publish `/platform/notifications/authorization` or
+advertise the notifications module.
 
 The host sets declared permissions after install and before launch, so the first frame shows the final
 state. The mode is `prompt`, `grantDeclared`, or `{grant: [...], deny: [...]}` naming declared
@@ -127,8 +151,8 @@ granted, so the first request shows the system dialog and plans rely on the syst
 an explicit mode. An Android denial revokes with the `user-fixed` flag, so it reads `blocked` and no dialog
 appears; an iOS simulator denial is `simctl privacy revoke` and reads `denied`. Each declared permission is
 reported as `{name, state, verified}`; `verified` is false, with `reason`, for a simulator name that is
-notGrantableOnSimulator and for an Android `photosAdd` denial (`notRevocable`). No production runtime
-advertises the module, and `prototype show` does not yet accept the mode.
+notGrantableOnSimulator and for an Android `photosAdd` denial (`notRevocable`).
+`prototype show` does not yet accept the mode.
 
 **Notifications (#14280).** The `notifications` module (`prototype_platform_notifications_v1`) has three
 calls:
@@ -152,10 +176,9 @@ carries typed text) and `.dismissed`.
 State is `/platform/notifications/{badge, active, pending, authorization}` plus
 `/platform/notifications/channels/<id>/blocked` (a boolean, readable only for a declared channel). The
 `active` key is at most 24 per prototype, and `authorization` uses the permission vocabulary (`granted`,
-`denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). The runtime homes follow
-the owner decision on #14276: the disposable app, the iOS per-prototype Viewer and ProtoViewer advertise
-the module. The CtrlProxy overlay advertises it as a disclosed preview, and the iOS injected agent never
-does.
+`denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). Android hosts do not
+advertise this module. The `permissions` module above supplies notification authorization without
+publishing the notifications state tree.
 
 Channels come from a root `notifications` block,
 `{channels: [{id, name, importance, description?, showBadge?}]}`. It holds 1-8 channels with unique

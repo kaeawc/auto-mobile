@@ -26,6 +26,18 @@ export const prototypeDataActionValueSchema = z.union([
   z.object({ data: pointerSchema }).strict(),
   z.object({ value: prototypeJsonSchema }).strict(),
 ]);
+/** A single unescaped object member; never interpreted as a pointer. */
+export const dataMemberSchema = z
+  .string()
+  .min(1)
+  .max(contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH)
+  .regex(prototypeContractPatterns.dataMember);
+export const dataWhereSchema = z
+  .object({
+    field: dataMemberSchema,
+    equals: prototypeDataActionValueSchema,
+  })
+  .strict();
 export type PrototypeDataActionValue = z.infer<typeof prototypeDataActionValueSchema>;
 /**
  * `{match: "text" | "kind"}` (#14233): the tapped linkify match, valid only inside
@@ -55,6 +67,22 @@ export const dataActionFields: {
     z.object({ platform: pointerSchema }).strict(),
   ]),
 };
+
+export const setDataActionSchema = z
+  .object({
+    type: z.enum(["setData"]),
+    ...dataActionFields,
+    where: dataWhereSchema.optional(),
+    member: dataMemberSchema.optional(),
+  })
+  .strict();
+export const removeDataActionSchema = z
+  .object({
+    type: z.enum(["removeData"]),
+    path: dataActionPathSchema,
+    where: dataWhereSchema.optional(),
+  })
+  .strict();
 
 export const appendDataActionSchema = z
   .object({

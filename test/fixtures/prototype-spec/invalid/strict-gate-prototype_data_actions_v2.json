@@ -1,0 +1,59 @@
+{
+  "spec": {
+    "id": "keyed",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "selected": 2
+    },
+    "data": {
+      "items": [
+        {
+          "id": 1,
+          "title": "one"
+        },
+        {
+          "id": 2,
+          "title": "two"
+        }
+      ]
+    },
+    "root": {
+      "type": "button",
+      "label": "Edit",
+      "onTap": [
+        {
+          "type": "setData",
+          "path": "/data/items",
+          "where": {
+            "field": "id",
+            "equals": {
+              "state": "selected"
+            }
+          },
+          "member": "title",
+          "value": {
+            "value": "new"
+          }
+        },
+        {
+          "type": "removeData",
+          "path": "/data/items",
+          "where": {
+            "field": "id",
+            "equals": {
+              "data": "/items/0/id"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_data_actions_v1", "prototype_data_model_v1"]
+  },
+  "expectedPath": "$"
+}

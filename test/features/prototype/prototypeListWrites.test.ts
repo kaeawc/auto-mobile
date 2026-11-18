@@ -8,7 +8,9 @@ import {
 import { applyPrototypeRequestOutcome } from "../../../src/features/prototype/prototypeRequestOutcome";
 import type { PrototypeRequestJson } from "../../../src/features/prototype/prototypeRequestProtocol";
 
-for (const fixture of cases) {
+import keyedCases from "../../fixtures/prototype-spec/data/keyed-writes.json";
+
+for (const fixture of [...cases, ...keyedCases]) {
   test(fixture.name, () => {
     const before = structuredClone(fixture.before);
     const result = applyPrototypeDataWrite(fixture.before, fixture.write as PrototypeDataWrite);

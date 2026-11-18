@@ -22,6 +22,7 @@ import { DEVICE_MUTATION_KINDS, type DeviceBaseline, type DeviceMutationInput } 
 import type { BaselineChange } from "./baseline";
 import { parseNotifyutilState } from "../../../utils/ios-cmdline-tools/notifyutil";
 import { iosBiometricEnrollmentTarget, iosBiometricRevertArgs } from "./iosBiometricRevert";
+import { STOREKIT_MUTATION_KIND, type IosStoreKitSessionReset } from "./storeKitSession";
 import {
   IOS_ACCESSIBILITY_RESIDUE_DOMAIN,
   IOS_KEYBOARD_DEFAULTS_DOMAIN,
@@ -96,6 +97,7 @@ export const IOS_UNOBSERVABLE_BASELINE_REASONS = {
   "opened-url": "simctl cannot inventory persistent effects of arbitrary URL handlers.",
   preference: "simctl cannot inventory every app's arbitrary preferences and live caches.",
   account: "simctl cannot inventory and restore all provider and system accounts.",
+  storekit: "The runner's StoreKit test sessions have no baseline inventory.",
 } as const;
 
 /**
@@ -193,6 +195,7 @@ export interface IosMutationResetDependencies {
   privacyGrants: Pick<TccServiceRowReader, "readServiceRows">;
   trustStore: UserTrustStoreReader;
   residue: IosResidueInspector;
+  storeKit: IosStoreKitSessionReset;
 }
 
 interface IosAppGroupCleanup {
@@ -229,9 +232,15 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
       return false;
     }
     if (
-      ["installed-app", "app-group", "keychain", "permission", "location", "status-bar"].includes(
-        mutation.kind,
-      )
+      [
+        "installed-app",
+        "app-group",
+        "keychain",
+        "permission",
+        "location",
+        "status-bar",
+        STOREKIT_MUTATION_KIND,
+      ].includes(mutation.kind)
     ) {
       return prior.state === "absent";
     }
@@ -408,6 +417,11 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
       }
       case "biometric-enrollment":
         await this.revertBiometricEnrollment(mutation, context);
+        break;
+      case STOREKIT_MUTATION_KIND:
+        await context.assertOwned();
+        await this.dependencies.storeKit.clear(udid, mutation.key, context.signal);
+        await context.assertOwned();
         break;
       default:
         await this.revertByCommand(mutation, context);

@@ -32,6 +32,18 @@ function height(bounds: Bounds): number {
   return bounds.bottom - bounds.top;
 }
 
+/** Spans the list's width but not its height: a row, not a full-bleed page. */
+function isRowShaped(child: Bounds, list: Bounds): boolean {
+  const listWidth = width(list);
+  const listHeight = height(list);
+  return (
+    listWidth > 0 &&
+    listHeight > 0 &&
+    width(child) >= listWidth * FULL_WIDTH_ROW_RATIO &&
+    height(child) < listHeight * ROW_MAX_HEIGHT_RATIO
+  );
+}
+
 function childNodes(node: ViewHierarchyNode): ViewHierarchyNode[] {
   return Array.isArray(node.node) ? node.node : node.node ? [node.node] : [];
 }
@@ -110,15 +122,7 @@ function isIosListRowSwipe({
     return layout === "vertical";
   }
   const row = parser.parseNodeBounds(rowNode);
-  const listWidth = width(candidate.bounds);
-  const listHeight = height(candidate.bounds);
-  return (
-    row !== null &&
-    listWidth > 0 &&
-    listHeight > 0 &&
-    width(row.bounds) >= listWidth * FULL_WIDTH_ROW_RATIO &&
-    height(row.bounds) < listHeight * ROW_MAX_HEIGHT_RATIO
-  );
+  return row !== null && isRowShaped(row.bounds, candidate.bounds);
 }
 
 /** Root-to-`target` node path in `root`'s subtree, or `undefined` when `target` is not under it. */

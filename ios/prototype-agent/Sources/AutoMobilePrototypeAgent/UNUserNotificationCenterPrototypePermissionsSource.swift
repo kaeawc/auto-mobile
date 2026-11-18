@@ -54,18 +54,18 @@
             return await withTaskCancellationHandler {
                 await withCheckedContinuation { continuation in
                     guard !Task.isCancelled else { continuation.resume(returning: .cancelled); return }
-                    pending = (id, continuation)
+                    self.pending = (id, continuation)
                     UNUserNotificationCenter.current().requestAuthorization(
                         options: [.alert, .sound, .badge]
                     ) { [weak self] _, error in
                         let failed = error != nil
                         Task { @MainActor in
-                            guard let self, pending?.id == id, session == generation else { return }
-                            if failed { finish(id, .platformError); return }
+                            guard let self, self.pending?.id == id, session == self.generation else { return }
+                            if failed { self.finish(id, .platformError); return }
                             // The Bool omits provisional/ephemeral and may be stale. Read settings again.
-                            let state = await status()
-                            guard session == generation else { return }
-                            finish(id, .status(state))
+                            let state = await self.status()
+                            guard session == self.generation else { return }
+                            self.finish(id, .status(state))
                         }
                     }
                 }
@@ -92,13 +92,13 @@
                 forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
             ) { [weak self] _ in
                 Task { @MainActor in
-                    guard let self, session == generation, pending == nil else { return }
-                    foregroundRead?.cancel()
-                    foregroundRead = Task { [weak self] in
+                    guard let self, session == self.generation, self.pending == nil else { return }
+                    self.foregroundRead?.cancel()
+                    self.foregroundRead = Task { [weak self] in
                         guard let self else { return }
-                        let state = await status()
-                        guard !Task.isCancelled, session == generation else { return }
-                        continuation?.yield(state)
+                        let state = await self.status()
+                        guard !Task.isCancelled, session == self.generation else { return }
+                        self.continuation?.yield(state)
                     }
                 }
             }

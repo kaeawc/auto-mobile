@@ -41,6 +41,7 @@
                 ],
                 location: CLLocationManagerPrototypeLocationSource(),
                 sensors: CoreMotionPrototypeSensorSource(),
+                permissions: UNUserNotificationCenterPrototypePermissionsSource(),
                 biometric: LAContextPrototypeBiometricSource()
             )
     }

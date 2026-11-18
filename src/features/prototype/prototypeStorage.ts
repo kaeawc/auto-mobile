@@ -194,6 +194,9 @@ const storageReportSchema = z.object({
   keys: z.array(z.object({ key: storageKeySchema, bytes: byteCountSchema })),
   totalBytes: byteCountSchema,
   skippedKeys: z.array(storageKeySchema).optional(),
+  secure: z
+    .array(z.object({ key: storageKeySchema, present: z.boolean(), bytes: byteCountSchema }))
+    .optional(),
 });
 
 /**

@@ -1630,6 +1630,11 @@ extension PrototypeSession {
             nodeId: PrototypeNode.owningNodeId(of: action, in: spec.root)
         )
         if failure == nil { failure = PrototypePlatformDriver.invalidArguments(call) }
+        if failure == nil, call.call == "permissions.request", case let .array(names)? = call.args["names"],
+           names.contains(where: { !spec.declaredPermissions.contains($0.stringValue ?? "") })
+        {
+            failure = .failure(.invalidArgs, "Permission is not declared in requires.permissions")
+        }
         if failure == nil, let refusal = platformRateLimiter.refusal(for: call.call) {
             return events + finishPlatform(pending, refusal, durationMs: 0)
         }

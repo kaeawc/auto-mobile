@@ -42,4 +42,6 @@ export interface PrototypeStorageReport {
   keys: { key: string; bytes: number }[];
   totalBytes: number;
   skippedKeys?: string[];
+  /** Secure entry presence and UTF-8 byte count, never the value. */
+  secure?: { key: string; present: boolean; bytes: number }[];
 }

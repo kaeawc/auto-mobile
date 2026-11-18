@@ -7,9 +7,9 @@ import type { PrototypePlatformError } from "./prototypePlatform";
  * the runtime keeps in the Android Keystore or the iOS Keychain instead of plaintext storage:
  * the list needs the `secureStorage` module, each key is a declared string state key that is not
  * also in `storage.keys`, a `secureAuth` entry names a secure key and needs the `biometric` module,
- * and no secure key may leave the device through an emit context, or through a `request` that does
- * not opt in with `allowSecureInRequest: true`. Kotlin and Swift `PrototypeSecureStorageRules`
- * mirror these checks.
+ * and no secure key may bind into an emit context, route params or platform args, or into a
+ * `request` that does not opt in with `allowSecureInRequest: true`. Kotlin and Swift
+ * `PrototypeSecureStorageRules` mirror these checks.
  */
 export function prototypeSecureStorageError(root: Raw): PrototypePlatformError | undefined {
   const storage = record(root.storage);
@@ -79,6 +79,61 @@ export function prototypeSecureStorageEmitError(
       return {
         path: memberPath(`${path}.context`, name),
         message: `Secure storage key ${leaked} cannot be sent in an emit context`,
+      };
+    }
+  }
+  return undefined;
+}
+
+/** Refuses action bindings that could expose secure state outside its storage. */
+export function prototypeSecureStorageActionError(
+  action: Raw,
+  path: string,
+  root: Raw,
+): PrototypePlatformError | undefined {
+  switch (action.type) {
+    case "emit":
+      return prototypeSecureStorageEmitError(action, path, root);
+    case "request":
+      return prototypeSecureStorageRequestError(action, path, root);
+    case "push":
+    case "replace":
+      return bindingMapError(action.params, `${path}.params`, root, "route params");
+    case "setStack":
+      for (const [index, entry] of (Array.isArray(action.path) ? action.path : []).entries()) {
+        const error = bindingMapError(
+          record(entry)?.params,
+          `${path}.path[${index}].params`,
+          root,
+          "route params",
+        );
+        if (error) {
+          return error;
+        }
+      }
+      return undefined;
+    case "platform":
+      return bindingMapError(action.args, `${path}.args`, root, "platform args");
+    default:
+      return undefined;
+  }
+}
+
+/** Only state bindings are resolved here; literal strings do not expand placeholders. */
+function bindingMapError(
+  value: unknown,
+  path: string,
+  root: Raw,
+  destination: string,
+): PrototypePlatformError | undefined {
+  const bindings = record(value) ?? {};
+  const secure = strings(record(root.storage)?.secure);
+  for (const name of Object.keys(bindings).sort()) {
+    const key = bindingKey(bindings[name], secure);
+    if (key) {
+      return {
+        path: memberPath(path, name),
+        message: `Secure storage key ${key} cannot be sent in ${destination}`,
       };
     }
   }

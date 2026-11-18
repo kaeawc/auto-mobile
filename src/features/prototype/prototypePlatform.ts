@@ -31,8 +31,7 @@ import {
   prototypeNotificationsCallError,
 } from "./prototypeNotifications";
 import {
-  prototypeSecureStorageEmitError,
-  prototypeSecureStorageRequestError,
+  prototypeSecureStorageActionError,
   prototypeSecureStorageError,
 } from "./prototypeSecureStorage";
 import { prototypeLocationBlockError } from "./prototypeLocationBlock";
@@ -805,9 +804,7 @@ export function prototypePlatformError(
   }
   for (const { value, path } of actions) {
     const found =
-      emitNameError(value, path) ??
-      prototypeSecureStorageEmitError(value, path, root) ??
-      prototypeSecureStorageRequestError(value, path, root);
+      emitNameError(value, path) ?? prototypeSecureStorageActionError(value, path, root);
     if (found) {
       return found;
     }

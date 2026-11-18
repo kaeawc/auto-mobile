@@ -175,6 +175,7 @@ public final class PrototypePlatformRegistry {
         deviceStatus: [any PrototypePlatformModule] = [],
         location: (any PrototypeLocationSource)? = nil,
         sensors: (any PrototypeSensorSource)? = nil,
+        permissions: (any PrototypeNotificationAuthorizationSource)? = nil,
         biometric: (any PrototypeBiometricSource)? = nil
     )
         -> PrototypePlatformRegistry
@@ -189,6 +190,7 @@ public final class PrototypePlatformRegistry {
         if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
         if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
         if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
+        if let permissions { modules.append(PrototypePermissionsModule(source: permissions)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 
@@ -201,6 +203,7 @@ public final class PrototypePlatformRegistry {
         deviceStatus: [any PrototypePlatformModule] = [],
         location: (any PrototypeLocationSource)? = nil,
         sensors: (any PrototypeSensorSource)? = nil,
+        permissions: (any PrototypeNotificationAuthorizationSource)? = nil,
         biometric: (any PrototypeBiometricSource)? = nil
     )
         -> PrototypePlatformRegistry
@@ -214,6 +217,7 @@ public final class PrototypePlatformRegistry {
         if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
         if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
         if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
+        if let permissions { modules.append(PrototypePermissionsModule(source: permissions)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 

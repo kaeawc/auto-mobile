@@ -134,8 +134,16 @@ public enum PrototypeLinkMatcher {
             }
         }
         // Strict standard-library decoding preserves a leading BOM, which Foundation strips.
-        // swiftlint:disable:next optional_data_string_conversion
-        return String(validating: bytes, as: UTF8.self)
+        var iterator = bytes.makeIterator()
+        var decoder = Unicode.UTF8()
+        var decoded = String()
+        while true {
+            switch decoder.decode(&iterator) {
+            case let .scalarValue(scalar): decoded.unicodeScalars.append(scalar)
+            case .emptyInput: return decoded
+            case .error: return nil
+            }
+        }
     }
 
     private struct Parts {

@@ -28,9 +28,9 @@ internal interface AndroidPermissionsGateway {
   fun request(deliver: (Boolean) -> Unit, cancel: () -> Unit): (() -> Unit)?
 }
 
-/** Session-local denial history; a launch alone is not evidence of a denial. */
+/** Session-local history of the system reporting that a permission rationale should be shown. */
 internal interface PrototypePermissionRequestStore {
-  var asked: Boolean
+  var rationaleSeen: Boolean
 }
 
 class AndroidPermissionsSource
@@ -56,7 +56,10 @@ internal constructor(
     if (closed || !gateway.foreground) PrototypePermissionState.UNAVAILABLE else authorization()
 
   private fun authorization(): PrototypePermissionState {
-    if (gateway.sdk >= 33 && gateway.granted) store.asked = false
+    if (gateway.sdk >= 33) {
+      if (gateway.granted) store.rationaleSeen = false
+      else if (gateway.rationale) store.rationaleSeen = true
+    }
     return when {
       gateway.sdk < 33 ->
         if (gateway.notificationsEnabled) PrototypePermissionState.GRANTED
@@ -64,7 +67,7 @@ internal constructor(
       gateway.granted ->
         if (gateway.notificationsEnabled) PrototypePermissionState.GRANTED
         else PrototypePermissionState.BLOCKED
-      !store.asked -> PrototypePermissionState.NOT_DETERMINED
+      !store.rationaleSeen -> PrototypePermissionState.NOT_DETERMINED
       gateway.rationale -> PrototypePermissionState.DENIED
       else -> PrototypePermissionState.BLOCKED
     }
@@ -111,7 +114,6 @@ internal constructor(
         else {
           // Reaching here proves launch succeeded and a result was delivered. Results may precede
           // ON_RESUME, so read authorization without the foreground gate.
-          store.asked = !granted
           emit(PrototypePermissionOutcome.Status(authorization()))
         }
       } finally {
@@ -125,13 +127,13 @@ internal constructor(
 
   override fun close() {
     closed = true
-    store.asked = false
+    store.rationaleSeen = false
     finish?.invoke()
   }
 }
 
 private class SessionPermissionRequestStore : PrototypePermissionRequestStore {
-  override var asked = false
+  override var rationaleSeen = false
 }
 
 internal class FrameworkPermissionsGateway(

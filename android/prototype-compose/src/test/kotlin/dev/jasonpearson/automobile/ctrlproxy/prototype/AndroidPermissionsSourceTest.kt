@@ -14,7 +14,7 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class AndroidPermissionsSourceTest {
   private class Store : PrototypePermissionRequestStore {
-    override var asked = false
+    override var rationaleSeen = false
   }
 
   private class Gateway : AndroidPermissionsGateway {
@@ -69,7 +69,6 @@ class AndroidPermissionsSourceTest {
       val store = Store()
       val source = AndroidPermissionsSource(gateway, store, StandardTestDispatcher(testScheduler))
       assertEquals(PrototypePermissionState.NOT_DETERMINED, source.status())
-      store.asked = true
       gateway.rationale = true
       assertEquals(PrototypePermissionState.DENIED, source.status())
       gateway.rationale = false
@@ -100,7 +99,7 @@ class AndroidPermissionsSourceTest {
       assertEquals(expected, source.status())
       assertEquals(PrototypePermissionOutcome.Status(expected), source.request().single())
       assertEquals(0, gateway.registrations)
-      assertFalse(store.asked)
+      assertFalse(store.rationaleSeen)
       source.close()
     }
   }
@@ -121,7 +120,7 @@ class AndroidPermissionsSourceTest {
       val source =
         AndroidPermissionsSource(
           gateway,
-          Store().apply { asked = true },
+          Store().apply { rationaleSeen = true },
           StandardTestDispatcher(testScheduler),
         )
       assertEquals(PrototypePermissionOutcome.Status(expected), source.request().single())
@@ -131,32 +130,54 @@ class AndroidPermissionsSourceTest {
   }
 
   @Test
-  fun `prompt records only delivered denials and re-reads the grant before resume then unregisters`() =
+  fun `prompt re-reads grant and rationale before resume then unregisters`() = runTest {
+    for (expected in
+      listOf(
+        PrototypePermissionState.GRANTED,
+        PrototypePermissionState.DENIED,
+        PrototypePermissionState.BLOCKED,
+      )) {
+      val gateway = Gateway()
+      val store = Store().apply { rationaleSeen = expected == PrototypePermissionState.BLOCKED }
+      if (store.rationaleSeen) gateway.rationale = true
+      val source = AndroidPermissionsSource(gateway, store, StandardTestDispatcher(testScheduler))
+      val pending = async { source.request().single() }
+      runCurrent()
+      assertEquals(expected == PrototypePermissionState.BLOCKED, store.rationaleSeen)
+      assertEquals(1, gateway.registrations)
+      assertFalse(pending.isCompleted)
+      gateway.foreground = false
+      gateway.granted = expected == PrototypePermissionState.GRANTED
+      gateway.rationale = expected == PrototypePermissionState.DENIED
+      gateway.deliver!!(gateway.granted)
+      assertEquals(PrototypePermissionOutcome.Status(expected), pending.await())
+      assertEquals(expected != PrototypePermissionState.GRANTED, store.rationaleSeen)
+      assertEquals(1, gateway.unregistrations)
+      source.close()
+      assertEquals(1, gateway.unregistrations)
+    }
+  }
+
+  @Test
+  fun `dismissed prompt remains undetermined and a second request registers a launcher`() =
     runTest {
-      for (expected in
-        listOf(
-          PrototypePermissionState.GRANTED,
-          PrototypePermissionState.DENIED,
-          PrototypePermissionState.BLOCKED,
-        )) {
-        val gateway = Gateway()
-        val store = Store()
-        val source = AndroidPermissionsSource(gateway, store, StandardTestDispatcher(testScheduler))
+      val gateway = Gateway()
+      val store = Store()
+      val source = AndroidPermissionsSource(gateway, store, StandardTestDispatcher(testScheduler))
+      repeat(2) { attempt ->
         val pending = async { source.request().single() }
         runCurrent()
-        assertFalse(store.asked)
-        assertEquals(1, gateway.registrations)
-        assertFalse(pending.isCompleted)
-        gateway.foreground = false
-        gateway.granted = expected == PrototypePermissionState.GRANTED
-        gateway.rationale = expected == PrototypePermissionState.DENIED
-        gateway.deliver!!(gateway.granted)
-        assertEquals(PrototypePermissionOutcome.Status(expected), pending.await())
-        assertEquals(expected != PrototypePermissionState.GRANTED, store.asked)
-        assertEquals(1, gateway.unregistrations)
-        source.close()
-        assertEquals(1, gateway.unregistrations)
+        assertEquals(attempt + 1, gateway.registrations)
+        gateway.deliver!!(false)
+        assertEquals(
+          PrototypePermissionOutcome.Status(PrototypePermissionState.NOT_DETERMINED),
+          pending.await(),
+        )
+        assertEquals(PrototypePermissionState.NOT_DETERMINED, source.status())
+        assertFalse(store.rationaleSeen)
+        assertEquals(attempt + 1, gateway.unregistrations)
       }
+      source.close()
     }
 
   @Test
@@ -219,11 +240,13 @@ class AndroidPermissionsSourceTest {
     val pending = async { first.request().single() }
     runCurrent()
     assertEquals(PrototypePermissionOutcome.Busy, second.request().single())
+    gateway.rationale = true
     gateway.deliver!!(false)
     assertEquals(
-      PrototypePermissionOutcome.Status(PrototypePermissionState.BLOCKED),
+      PrototypePermissionOutcome.Status(PrototypePermissionState.DENIED),
       pending.await(),
     )
+    gateway.rationale = false
     assertEquals(PrototypePermissionState.BLOCKED, first.status())
     assertEquals(PrototypePermissionState.NOT_DETERMINED, second.status())
     assertEquals(PrototypePermissionState.NOT_DETERMINED, parent.status())
@@ -239,11 +262,16 @@ class AndroidPermissionsSourceTest {
     val source = AndroidPermissionsSource(gateway, store, StandardTestDispatcher(testScheduler))
     val pending = async { source.request().single() }
     runCurrent()
+    gateway.rationale = true
     gateway.deliver!!(false)
-    pending.await()
-    assertTrue(store.asked)
+    assertEquals(
+      PrototypePermissionOutcome.Status(PrototypePermissionState.DENIED),
+      pending.await(),
+    )
+    assertTrue(store.rationaleSeen)
     source.close()
-    assertFalse(store.asked)
+    assertFalse(store.rationaleSeen)
+    gateway.rationale = false
     val reset = source.session()
     assertEquals(PrototypePermissionState.NOT_DETERMINED, reset.status())
     reset.close()
@@ -289,9 +317,11 @@ class AndroidPermissionsSourceTest {
         )
       }
       runCurrent()
+      gateway.rationale = true
       gateway.deliver!!(false)
       pending.await()
-      assertEquals(JsonPrimitive("blocked"), module.state.value["notifications"])
+      assertEquals(JsonPrimitive("denied"), module.state.value["notifications"])
+      gateway.rationale = false
       first.close()
       runCurrent()
       // The host reuses its module on reset; only the old runtime's session is closed.
@@ -322,19 +352,19 @@ class AndroidPermissionsSourceTest {
     )
     gateway.granted = false
     assertEquals(PrototypePermissionState.NOT_DETERMINED, source.status())
-    assertFalse(store.asked)
+    assertFalse(store.rationaleSeen)
     source.close()
   }
 
   @Test
   fun `observed settings grant clears a previous denial before a host revoke`() = runTest {
     val gateway = Gateway()
-    val store = Store().apply { asked = true }
+    val store = Store().apply { rationaleSeen = true }
     val source = AndroidPermissionsSource(gateway, store, StandardTestDispatcher(testScheduler))
     assertEquals(PrototypePermissionState.BLOCKED, source.status())
     gateway.granted = true
     assertEquals(PrototypePermissionState.GRANTED, source.status())
-    assertFalse(store.asked)
+    assertFalse(store.rationaleSeen)
     gateway.granted = false
     assertEquals(PrototypePermissionState.NOT_DETERMINED, source.status())
     source.close()
@@ -346,7 +376,7 @@ class AndroidPermissionsSourceTest {
     val store = Store()
     val failure = IllegalStateException("launch failed")
     gateway.launch = { deliver ->
-      assertFalse(store.asked)
+      assertFalse(store.rationaleSeen)
       deliver(false)
       throw failure
     }
@@ -355,7 +385,7 @@ class AndroidPermissionsSourceTest {
     // Coroutine stack-trace recovery may copy the exception across flowOn.
     assertEquals(failure.javaClass, thrown?.javaClass)
     assertEquals(failure.message, thrown?.message)
-    assertFalse(store.asked)
+    assertFalse(store.rationaleSeen)
     assertEquals(PrototypePermissionState.NOT_DETERMINED, source.status())
     source.close()
   }
@@ -377,10 +407,10 @@ class AndroidPermissionsSourceTest {
       assertEquals(1, gateway.unregistrations)
       lateResult(false)
       runCurrent()
-      assertFalse(store.asked)
+      assertFalse(store.rationaleSeen)
       source.close()
       lateResult(false)
-      assertFalse(store.asked)
+      assertFalse(store.rationaleSeen)
     }
 
   @Test

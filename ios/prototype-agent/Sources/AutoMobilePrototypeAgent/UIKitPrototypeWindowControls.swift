@@ -90,11 +90,130 @@
         }
     }
 
+    /// The registry owns coordinators, but never keeps scenes or their controllers alive.
+    @MainActor
+    private final class UIKitPrototypeOrientationDriver: PrototypeOrientationDriver {
+        private final class ControllerReference {
+            weak var controller: PrototypeWindowControlsViewController?
+            init(_ controller: PrototypeWindowControlsViewController) { self.controller = controller }
+        }
+
+        weak var scene: UIWindowScene?
+        private let hostMask: UIInterfaceOrientationMask
+        private var controllers: [ObjectIdentifier: ControllerReference] = [:]
+        private(set) var result = "unchanged"
+
+        init(scene: UIWindowScene, hostMask: UIInterfaceOrientationMask) {
+            self.scene = scene
+            self.hostMask = hostMask
+        }
+
+        var baseline: PrototypeOrientationBaseline {
+            switch scene?.interfaceOrientation {
+            case .portrait: .portrait
+            case .portraitUpsideDown: .portraitUpsideDown
+            case .landscapeLeft: .landscapeLeft
+            case .landscapeRight: .landscapeRight
+            default: .unknown
+            }
+        }
+
+        func register(owner: ObjectIdentifier, controller: PrototypeWindowControlsViewController) {
+            controllers[owner] = ControllerReference(controller)
+        }
+
+        func unregister(owner: ObjectIdentifier) {
+            if let controller = controllers.removeValue(forKey: owner)?.controller {
+                controller.orientationMask = nil
+                controller.setNeedsUpdateOfSupportedInterfaceOrientations()
+            }
+        }
+
+        func contains(controller: PrototypeWindowControlsViewController) -> Bool {
+            controllers.values.contains { $0.controller === controller }
+        }
+
+        func applyLock(_ orientation: PrototypeWindowOrientation) {
+            let mask: UIInterfaceOrientationMask = switch orientation {
+            case .portrait: .portrait
+            case .landscape: .landscape
+            case .unlocked: .all
+            }
+            for reference in controllers.values {
+                reference.controller?.orientationMask = mask
+                reference.controller?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            }
+            request(mask: mask, description: orientation.rawValue)
+        }
+
+        func restoreBaseline(_ baseline: PrototypeOrientationBaseline) {
+            let mask: UIInterfaceOrientationMask = switch baseline {
+            case .portrait: .portrait
+            case .portraitUpsideDown: .portraitUpsideDown
+            case .landscapeLeft: .landscapeLeft
+            case .landscapeRight: .landscapeRight
+            case .unknown: hostMask
+            }
+            let description = baseline == .unknown
+                ? "host" : "host (restore \(baseline.rawValue), mask \(mask.rawValue))"
+            request(mask: mask, description: description, includesMask: baseline == .unknown)
+        }
+
+        private func request(mask: UIInterfaceOrientationMask, description: String, includesMask: Bool = true) {
+            guard let scene else {
+                result = "unavailable: no window scene"
+                return
+            }
+            // Geometry updates have an error callback, not a success callback. Do not claim rotation.
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
+                NSLog("[AutoMobilePrototypeAgent] orientation request rejected: %@", error.localizedDescription)
+            }
+            result = "requested: \(description)" + (includesMask ? " (mask \(mask.rawValue))" : "")
+        }
+    }
+
+    @MainActor
+    private final class UIKitPrototypeSceneOrientationLock {
+        private static var scenes: [ObjectIdentifier: UIKitPrototypeSceneOrientationLock] = [:]
+        let driver: UIKitPrototypeOrientationDriver
+        let lock: PrototypeOrientationLock
+
+        private init(scene: UIWindowScene, hostMask: UIInterfaceOrientationMask) {
+            let driver = UIKitPrototypeOrientationDriver(scene: scene, hostMask: hostMask)
+            self.driver = driver
+            lock = PrototypeOrientationLock(driver: driver)
+        }
+
+        static func shared(scene: UIWindowScene, hostMask: UIInterfaceOrientationMask)
+            -> UIKitPrototypeSceneOrientationLock
+        {
+            scenes = scenes.filter { $0.value.driver.scene != nil && !$0.value.lock.isEmpty }
+            let key = ObjectIdentifier(scene)
+            if let existing = scenes[key] { return existing }
+            let entry = UIKitPrototypeSceneOrientationLock(scene: scene, hostMask: hostMask)
+            scenes[key] = entry
+            return entry
+        }
+
+        static func isControlling(_ controller: PrototypeWindowControlsViewController) -> Bool {
+            scenes.values.contains { $0.driver.contains(controller: controller) }
+        }
+
+        func release(owner: ObjectIdentifier) {
+            driver.unregister(owner: owner)
+            lock.release(owner: owner)
+            if lock.isEmpty, let scene = driver.scene {
+                let key = ObjectIdentifier(scene)
+                if Self.scenes[key] === self { Self.scenes.removeValue(forKey: key) }
+            }
+        }
+    }
+
     @MainActor
     final class UIKitPrototypeWindowChrome: PrototypeWindowChrome {
         private weak var window: UIWindow?
         private weak var controller: PrototypeWindowControlsViewController?
-        private var previousOrientations: UIInterfaceOrientationMask?
+        private var orientationLock: UIKitPrototypeSceneOrientationLock?
 
         init(window: UIWindow) { self.window = window }
 
@@ -112,36 +231,27 @@
         }
 
         func requestOrientation(_ orientation: PrototypeWindowOrientation?) -> String {
+            let owner = ObjectIdentifier(self)
+            guard let orientation else {
+                guard let orientationLock else { return "unchanged" }
+                orientationLock.release(owner: owner)
+                self.orientationLock = nil
+                return orientationLock.driver.result
+            }
             guard let window, let scene = window.windowScene else { return "unavailable: no window scene" }
-            let controller: PrototypeWindowControlsViewController
-            let mask: UIInterfaceOrientationMask
-            if let orientation {
-                guard let host = controlsController() else { return "unavailable: no root controller" }
-                controller = host
-                if previousOrientations == nil {
-                    // The overlay is not key: restore the underlying app's orientation policy.
-                    previousOrientations = scene.windows.first { $0.isKeyWindow && $0 !== window }?
-                        .rootViewController?.supportedInterfaceOrientations ?? host.supportedInterfaceOrientations
-                }
-                switch orientation {
-                case .portrait: mask = .portrait
-                case .landscape: mask = .landscape
-                case .unlocked: mask = .all
-                }
-                controller.orientationMask = mask
-            } else {
-                guard let host = self.controller, let previousOrientations else { return "unchanged" }
-                controller = host
-                mask = previousOrientations
-                controller.orientationMask = nil
-                self.previousOrientations = nil
+            guard let host = controlsController() else { return "unavailable: no root controller" }
+            if let orientationLock, orientationLock.driver.scene !== scene {
+                orientationLock.release(owner: owner)
+                self.orientationLock = nil
             }
-            controller.setNeedsUpdateOfSupportedInterfaceOrientations()
-            // Geometry updates have an error callback, not a success callback. Do not claim rotation.
-            scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
-                NSLog("[AutoMobilePrototypeAgent] orientation request rejected: %@", error.localizedDescription)
-            }
-            return "requested: \(orientation?.rawValue ?? "host") (mask \(mask.rawValue))"
+            // The overlay is not key: restore the underlying app's orientation policy.
+            let hostMask = scene.windows.first { $0.isKeyWindow && $0 !== window }?
+                .rootViewController?.supportedInterfaceOrientations ?? host.supportedInterfaceOrientations
+            let entry = orientationLock ?? UIKitPrototypeSceneOrientationLock.shared(scene: scene, hostMask: hostMask)
+            orientationLock = entry
+            entry.driver.register(owner: owner, controller: host)
+            entry.lock.acquire(owner: owner, orientation: orientation)
+            return entry.driver.result
         }
 
         func setStatusBar(_ style: PrototypeWindowStatusBar?) {
@@ -152,6 +262,11 @@
 
         func restore() {
             guard let controller else { return }
+            // Another embedded view may still own this same container.
+            guard !UIKitPrototypeSceneOrientationLock.isControlling(controller) else {
+                self.controller = nil
+                return
+            }
             // Do not replace a root the app installed while the prototype was shown.
             if let container = controller as? PrototypeWindowControlsContainer,
                window?.rootViewController === container

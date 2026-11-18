@@ -41,3 +41,4 @@ drives.
 - [Apple TV](apple-tv.md)
 - [Apple Watch](apple-watch.md)
 - [Apple Vision Pro simulator](visionos-simulator.md)
+- [CarPlay on iOS simulators](carplay.md)

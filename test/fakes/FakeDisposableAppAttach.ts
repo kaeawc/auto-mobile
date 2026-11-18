@@ -1,8 +1,13 @@
+import type { PrototypeAgentSocket } from "../../src/features/prototype/ios/prototypeAgentClient";
+import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "./FakeAdbExecutor";
 import { FakePrototypeAgentSocket } from "./FakePrototypeAgentSocket";
 
 /** A deterministic endpoint that flushes replay in the hello reply's socket chunk. */
-export class FakeDisposableAppSocket extends FakePrototypeAgentSocket {
+export class FakeDisposableAppSocket
+  extends FakePrototypeAgentSocket
+  implements PrototypeAgentSocket
+{
   capabilities = [
     "get_prototype_status",
     "patch_prototype",
@@ -31,7 +36,7 @@ export class FakeDisposableAppSocket extends FakePrototypeAgentSocket {
   }
 }
 
-export class FakeDisposableAppAdb extends FakeAdbExecutor {
+export class FakeDisposableAppAdb extends FakeAdbExecutor implements AdbExecutor {
   portOutput = "12345\n";
   override async execute(args: string[], options?: Parameters<FakeAdbExecutor["execute"]>[1]) {
     const result = super.execute(args, options);

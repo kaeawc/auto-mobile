@@ -430,15 +430,16 @@ final class PrototypeSensorsTests: XCTestCase {
     func testSharedRegistryPresentationsKeepSensorStateEventsAndTeardownIndependent() async throws {
         for dismissFirst in [true, false] {
             let source = SensorSource()
-            let clock = LocationClock()
-            let shared = PrototypePlatformRegistry(modules: [module(source)])
+            let clock = SensorClock()
+            let driverClock = LocationClock()
+            let shared = PrototypePlatformRegistry(modules: [module(source, clock: clock)])
             let first = shared.forPresentation()
             let second = shared.forPresentation()
             let firstSource = try XCTUnwrap(source.presentations.first)
             let secondSource = try XCTUnwrap(source.presentations.last)
             XCTAssertFalse(firstSource === secondSource)
-            let firstDriver = PrototypePlatformDriver(registry: first, clock: clock)
-            let secondDriver = PrototypePlatformDriver(registry: second, clock: clock)
+            let firstDriver = PrototypePlatformDriver(registry: first, clock: driverClock)
+            let secondDriver = PrototypePlatformDriver(registry: second, clock: driverClock)
             firstDriver.subscribe()
             first.configure(sensorsBlock: block(.steps, .shake), sessionID: 1)
             firstSource.report(.steps, .values(["steps": 4]))
@@ -467,6 +468,7 @@ final class PrototypeSensorsTests: XCTestCase {
             } else {
                 second.configure(sensorsBlock: nil)
                 secondDriver.stopEvents()
+                clock.monotonicMilliseconds = 1000
                 firstSource.report(.steps, .values(["steps": 5]))
                 XCTAssertEqual(first.snapshot["sensors"]?.objectFields?["steps"], .number(5))
                 firstDriver.stopEvents()

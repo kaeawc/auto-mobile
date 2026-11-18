@@ -83,8 +83,8 @@ passes transports yet, so nothing advertises the realtime capabilities. Lock ord
 lock is outer and the runtime's interaction lock inner. The runtime posts `update` (show and patch),
 `show` and `close` (dismiss) to one ordered inbox on its request scope, and `realtime.*` calls use
 the same inbox, outside the interaction lock. The sink takes the interaction lock and drops effects
-once the runtime is inactive; it publishes `/platform/realtime` and delivers `realtime.*` events
-directly rather than through the module's flows, so a status event and its `statusKey` write keep
+once the runtime is inactive. It publishes `/platform/realtime` and delivers `realtime.*` events
+directly, not through the module's flows. A status event and its `statusKey` write therefore keep
 their order against frames. Channel URL and header placeholders bind to the committed state and data
 at each show or patch.
 

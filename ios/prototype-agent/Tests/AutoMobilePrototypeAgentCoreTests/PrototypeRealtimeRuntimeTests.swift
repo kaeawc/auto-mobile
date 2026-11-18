@@ -148,6 +148,27 @@ final class PrototypeRealtimeRuntimeTests: XCTestCase {
         await drained(harness.module)
     }
 
+    func testDismissDuringOpenStatusDropsQueuedSends() async throws {
+        let harness = try RealtimeHarness(manual: true)
+        let connected = await harness.module.call(harness.call("connect"))
+        XCTAssertEqual(connected, .success(.object([:])))
+        let queued = await harness.module.call(harness.call("send", body: .string("dismissed")))
+        XCTAssertEqual(queued, .success(.object([:])))
+        let connection = try XCTUnwrap(harness.transport.connections.first)
+
+        await harness.mutex.lock()
+        let blocked = expectation(description: "open status waits for held runtime mutex")
+        harness.mutex.onWait = { blocked.fulfill() }
+        connection.listener.opened()
+        await fulfillment(of: [blocked], timeout: 1)
+        harness.module.close()
+        harness.mutex.unlock()
+        await drained(harness.module)
+
+        XCTAssertTrue(connection.sent.isEmpty)
+        XCTAssertEqual(connection.closes, [1001])
+    }
+
     func testManualCallsBoundedQueueDisconnectAndDismissSuppressQueuedWork() async throws {
         let harness = try RealtimeHarness(manual: true)
         await drained(harness.module)

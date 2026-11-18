@@ -158,15 +158,17 @@ final class PrototypeChannelController {
     }
 
     private func connect(_ slot: Slot) async throws {
+        let generation = slot.generation
         slot.closeCode = nil
         slot.closeReason = nil
         slot.error = nil
         try await status(slot, slot.attempt == 0 ? "connecting" : "reconnecting")
+        guard isCurrent(slot, generation) else { slot.queue = []; return }
         try await open(slot)
     }
 
     private func open(_ slot: Slot) async throws {
-        guard !closing else { return }
+        guard !closing, slots[slot.id] === slot else { slot.queue = []; return }
         slot.generation += 1
         let generation = slot.generation
         let listener = PrototypeChannelListener(
@@ -199,20 +201,21 @@ final class PrototypeChannelController {
     ) {
         guard let slot else { return }
         post { [weak self, weak slot] in
-            guard let self, let slot, !closing, slots[slot.id] === slot, slot.generation == generation else { return }
+            guard let self, let slot, isCurrent(slot, generation) else { return }
             try await work(self, slot)
         }
     }
 
     private func opened(_ slot: Slot) async throws {
+        let generation = slot.generation
         try await status(slot, "open")
+        guard isCurrent(slot, generation) else { slot.queue = []; return }
         for text in slot.queue {
             _ = slot.connection?.send(text)
         }
         slot.queue = []
-        let generation = slot.generation
         slot.timer = timer(5000) { [weak self, weak slot] in
-            guard let self, let slot, slot.generation == generation else { return }
+            guard let self, let slot, isCurrent(slot, generation) else { return }
             slot.attempt = 0
             try await publish(slot)
         }
@@ -220,9 +223,12 @@ final class PrototypeChannelController {
     }
 
     private func received(_ slot: Slot, text: String, event: String?, id: String?) async throws {
+        let generation = slot.generation
         if let id { slot.lastEventID = id }
         dirty.insert(slot.id)
-        defer { scheduleFlush() }
+        defer {
+            if isCurrent(slot, generation) { scheduleFlush() }
+        }
         guard text.utf8.count <= PrototypeChannelLimits.maxFrameBytes else { slot.framesDropped += 1; return }
         let decoded: JSONValue
         if slot.declaration["decode"] == .string("text") { decoded = .string(text) }
@@ -238,6 +244,7 @@ final class PrototypeChannelController {
         try await sink.commit(.init(
             channel: slot.id, declaration: slot.declaration, eventName: "realtime.frame", event: .object(fields)
         ))
+        guard isCurrent(slot, generation) else { slot.queue = []; return }
         if let actions = PrototypeChannelRoutes.match(slot.declaration["routes"], data: decoded, event: event) {
             window.append(.init(slot: slot, actions: actions, event: decoded))
         }
@@ -267,6 +274,7 @@ final class PrototypeChannelController {
     }
 
     private func ended(_ slot: Slot, code: Int?, reason: String?, error: PrototypeChannelError?) async throws {
+        let generation = slot.generation
         slot.timer?.cancel()
         slot.connection = nil
         slot.closeCode = code
@@ -283,16 +291,22 @@ final class PrototypeChannelController {
         if delay == nil {
             slot.queue = []
             try await status(slot, error == nil ? "closed" : "error")
-        } else if let delay {
+        } else {
             slot.attempt = next
             try await status(slot, "reconnecting")
-            let generation = slot.generation
+        }
+        guard isCurrent(slot, generation) else { slot.queue = []; return }
+        if let delay {
             slot.timer = timer(delay) { [weak self, weak slot] in
-                guard let self, let slot, slot.generation == generation else { return }
+                guard let self, let slot, isCurrent(slot, generation) else { return }
                 try await open(slot)
             }
         }
         try await callback(slot, callbackName)
+    }
+
+    private func isCurrent(_ slot: Slot, _ generation: Int) -> Bool {
+        !closing && slots[slot.id] === slot && slot.generation == generation
     }
 
     private func status(_ slot: Slot, _ value: String) async throws {

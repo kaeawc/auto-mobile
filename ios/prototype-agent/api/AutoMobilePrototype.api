@@ -186,6 +186,14 @@ AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public struct Plat
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public struct PrototypeMainBundleReader: PrototypeBundleReader
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public var capabilities: [String]
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public var requiredInfoPlistKeys: [String]
+AutoMobilePrototypeAgentCore/PrototypeRemoteImages.swift: public enum PrototypeRemoteImages
+AutoMobilePrototypeAgentCore/PrototypeRemoteImages.swift: public static let androidHeapDivisor = 8
+AutoMobilePrototypeAgentCore/PrototypeRemoteImages.swift: public static let capability = "prototype_remote_image_v1"
+AutoMobilePrototypeAgentCore/PrototypeRemoteImages.swift: public static let maxDiskBytes = 134_217_728
+AutoMobilePrototypeAgentCore/PrototypeRemoteImages.swift: public static let maxDownloadBytes = 8_388_608
+AutoMobilePrototypeAgentCore/PrototypeRemoteImages.swift: public static let maxIOSMemoryBytes = 67_108_864
+AutoMobilePrototypeAgentCore/PrototypeRemoteImages.swift: public static let maxLoads = 6
+AutoMobilePrototypeAgentCore/PrototypeRemoteImages.swift: public static let maxURLLength = 2048
 AutoMobilePrototypeAgentCore/PrototypeSession.swift: [PrototypeDismissReason] case user
 AutoMobilePrototypeAgentCore/PrototypeSession.swift: public enum PrototypeDismissReason: String, Sendable
 AutoMobilePrototypeAgentCore/PrototypeSession.swift: public let id: String

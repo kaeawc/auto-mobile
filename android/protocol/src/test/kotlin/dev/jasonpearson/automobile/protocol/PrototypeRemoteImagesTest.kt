@@ -59,11 +59,11 @@ class PrototypeRemoteImagesTest {
   }
 
   @Test
-  fun `component roots contribute primary and fallback asset references`() {
+  fun `bundle references include primary and fallback assets`() {
     val spec =
-      """{"id":"components","window":{"placement":{"type":"fullscreen"}},"root":{"type":"image","asset":"root"},"components":{"photo":{"root":{"type":"image","asset":{"light":"photo-light","dark":"photo-dark"},"placeholder":{"asset":"loading"},"error":{"asset":"failed"}}}}}"""
+      """{"id":"fallbacks","window":{"placement":{"type":"fullscreen"}},"root":{"type":"image","asset":{"light":"photo-light","dark":"photo-dark"},"placeholder":{"asset":"loading"},"error":{"asset":"failed"}}}"""
     assertEquals(
-      setOf("root", "photo-light", "photo-dark", "loading", "failed"),
+      setOf("photo-light", "photo-dark", "loading", "failed"),
       PrototypeBundleSpec.references(spec.toByteArray()).images,
     )
   }

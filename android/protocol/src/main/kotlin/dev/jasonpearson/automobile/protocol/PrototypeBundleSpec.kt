@@ -40,10 +40,7 @@ internal object PrototypeBundleSpec {
     val spec = value as JsonObject
     val images = linkedSetOf<String>()
     val fonts = linkedSetOf<String>()
-    val roots =
-      listOf(spec) +
-        (spec["components"] as? JsonObject).orEmpty().values.mapNotNull { it as? JsonObject }
-    for (root in roots) for (node in nodes(root)) {
+    for (node in nodes(spec)) {
       if (text(node["type"]) == "image") {
         addImage(node["asset"], images)
         addImage((node["placeholder"] as? JsonObject)?.get("asset"), images)

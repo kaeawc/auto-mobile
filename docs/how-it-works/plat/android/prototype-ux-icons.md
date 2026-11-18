@@ -19,9 +19,10 @@ The remote-image contract requires `prototype_remote_image_v1` for any `url`, `p
 `error`, `crossfade` or `via` field. No platform advertises this capability yet; support is validation only.
 Refused specs must replace `url` and remote-image options with a bundled `asset`.
 `url` is 1–2048 UTF-16 units and supports state, data, repeat and route text bindings.
-Only a whole-field binding skips static URL checks; literal text outside it still requires a valid URL. `via` is `device` (default) or `host`;
-`host` requires a static URL for fetch-and-upload. `placeholder` and `error` each contain exactly
-one of `asset` or `color` (hex or Material role). Their assets participate in missing-asset checks and asset budgets;
+Only a whole-field binding skips static URL checks; literal text outside it still requires a valid URL.
+The `via` field is `device` (default) or `host`. A `host` image requires a static URL for fetch-and-upload.
+The `placeholder` and `error` fields each contain exactly one of `asset` or `color` (hex or Material role).
+Their assets participate in missing-asset checks and asset budgets.
 URL images themselves do not consume `MAX_PROTOTYPE_IMAGES`.
 
 Static URLs reuse request URL validation, with credentials, whitespace and backslashes refused.

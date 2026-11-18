@@ -50,6 +50,7 @@ dependencies {
   implementation(libs.kotlinx.coroutines)
   implementation(libs.kotlinx.serialization)
   testImplementation(libs.junit)
+  testImplementation(libs.kotlinx.coroutines.test)
 }
 
 // Resolve both shipped variants, including transitive project edges.

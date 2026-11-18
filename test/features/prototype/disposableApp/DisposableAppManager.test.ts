@@ -242,3 +242,28 @@ describe("DisposableAppManager TTL and uninstall", () => {
     ]);
   });
 });
+
+test("generates one attach token per app and keeps it private on reinstall", async () => {
+  let generated = 0;
+  const token = "b".repeat(64);
+  const apps = new DisposableAppManager({
+    platforms: { android: { stamper, installer } },
+    registry,
+    timer,
+    attachTokens: {
+      next: () => {
+        generated++;
+        return token;
+      },
+    },
+  });
+  const first = await apps.install(input());
+  const second = await apps.install(input());
+  expect(generated).toBe(1);
+  expect(stamper.stamped.map((value) => value.attachToken)).toEqual([token, token]);
+  expect((await registry.list(DEVICE))[0]).toMatchObject({
+    specId: fixture.id,
+    attachToken: token,
+  });
+  expect(JSON.stringify([first, second, await apps.list(DEVICE, "android")])).not.toContain(token);
+});

@@ -190,6 +190,13 @@ The Android stamper packages a spec into a signed APK. The `prototype` actions `
 `DisposableAppManager`, built on the first such call. iOS refuses them until its stamper exists.
 The headless virtual device refuses them too.
 
+For a running Android disposable app, `patch`, `status`, `inspect` and `awaitEvent` with its
+spec id attach over `automobile-app-<appId>` instead of CtrlProxy. The host authenticates with a
+per-app token baked into `assets/prototype/attach-token`, reuses it for update-in-place installs,
+and replays buffered events after connecting. Launch the app with `launchApp` before attaching;
+a failed attach does not fall back to CtrlProxy. Other actions keep using CtrlProxy. The token is
+readable from the APK, so protection against other apps is limited by the APK file's readability.
+
 - **Identity.** The package is `dev.jasonpearson.automobile.app.<slug>_<sha256(slug) 8 hex>`.
   Hyphens in the slug become underscores because Android package segments allow only
   `[A-Za-z0-9_]`. A slug is lowercase hyphen-separated words of at most 48 characters that start

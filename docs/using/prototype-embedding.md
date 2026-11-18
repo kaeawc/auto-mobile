@@ -236,3 +236,9 @@ sample prototype on each platform. The Android sample requests `http://10.0.2.2:
 the Android emulator's host alias. The iOS sample uses the placeholder
 `http://192.168.1.10:8080/greeting`; replace `192.168.1.10` with the machine's LAN address. Both
 samples ship a generated `hero.png` image.
+
+For a running Android disposable prototype app, call `prototype` with `patch`, `status`,
+`inspect` or `awaitEvent` and the installed spec's `id` to access that app. Launch it first with
+`launchApp` using the app id returned by `prototype installApp`. If attaching fails, launch it
+again; reinstall with `prototype installApp` if its saved token is stale. Other actions use the
+prototype overlay.

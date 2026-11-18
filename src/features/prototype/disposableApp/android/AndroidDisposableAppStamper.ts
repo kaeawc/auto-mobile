@@ -38,6 +38,7 @@ export interface AndroidDisposableAppStampInput {
   permissions: readonly string[];
   enabledComponents: readonly string[];
   spec: string;
+  attachToken?: string;
   assets: readonly AndroidStampAsset[];
   signer: DisposableAppSigner;
 }
@@ -102,6 +103,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
           permissions: [...new Set(android.permissions)].sort(),
           enabledComponents: [...new Set(android.enabledComponents)].sort(),
           spec: JSON.parse(android.spec),
+          attachToken: android.attachToken,
           assets: android.assets
             .map((asset) => ({ id: asset.id, sha256: hash(asset.bytes) }))
             .sort((a, b) => a.id.localeCompare(b.id)),
@@ -127,6 +129,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
     return {
       template: await this.provider.resolve(input.template.name),
       appId: input.appId,
+      attachToken: input.attachToken,
       label: input.label,
       permissions: input.declarations.android.permissions,
       enabledComponents: [],
@@ -177,6 +180,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
         this.zip.assemble(templateBytes, await this.fs.readFileBuffer(linked), {
           spec: stableStringify(JSON.parse(input.spec)),
           assets: input.assets,
+          attachToken: input.attachToken,
           colors,
         }),
       );

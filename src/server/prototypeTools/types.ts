@@ -1,3 +1,5 @@
+import type { AndroidDisposableAppAttacher } from "../../features/prototype/disposableApp/android/AndroidDisposableAppAttacher";
+import type { DisposableAppRegistry } from "../../features/prototype/disposableApp/DisposableAppRegistry";
 import type { PrototypeDisposableApps } from "./disposableApps";
 import type { VirtualPrototypeDevice } from "../../features/prototype/headless/VirtualPrototypeDevice";
 import type { PrototypeTestSessionStore } from "../../db/prototypeTestSessionRepository";
@@ -47,6 +49,8 @@ export type PrototypeClient = AndroidPrototypeClient;
  * the injected agent's advertised capabilities.
  */
 export interface PrototypeTarget {
+  /** The installed app owns and validates its spec; this host need not have shown it. */
+  disposableApp?: true;
   transport: PrototypeTransport;
   android?: AndroidPrototypeTransport;
   ios?: Pick<
@@ -55,6 +59,8 @@ export interface PrototypeTarget {
   >;
 }
 export interface PrototypeToolDependencies {
+  disposableAppRegistry?: DisposableAppRegistry;
+  disposableAppAttacher?: Pick<AndroidDisposableAppAttacher, "attach">;
   testSessionStore?: PrototypeTestSessionStore;
   idGenerator?: IdGenerator;
   /** Replaces the host WebSocket and SSE transports for channels; tests supply a fake. */

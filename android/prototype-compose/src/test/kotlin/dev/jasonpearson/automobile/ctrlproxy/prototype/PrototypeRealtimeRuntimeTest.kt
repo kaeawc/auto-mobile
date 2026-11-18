@@ -226,6 +226,35 @@ class PrototypeRealtimeRuntimeTest {
     }
 
   @Test
+  fun `a flush blocked on the lock drops its actions when a replacement removes the channel`() =
+    runTest {
+      val lock = Mutex()
+      val transport = FakeTransport()
+      val runtime = runtime(transport, lock = lock)
+      runtime.shown()
+      runCurrent()
+      val first = transport.last
+      first.listener.onOpen(null)
+      first.listener.onFrame("""{"id":1,"text":"stale"}""", null, null)
+      runCurrent()
+
+      lock.withLock {
+        // The flush holds the controller lock and waits in the sink for the interaction lock.
+        advanceTimeBy(PrototypeChannelLimits.flushMs + 1L)
+        runCurrent()
+        runtime.replace(
+          spec().copy(channels = null, root = PrototypeTextNode(text = "no channels")),
+        )
+      }
+      runCurrent()
+
+      assertEquals(emptyList<String>(), warnings)
+      assertEquals(emptyList<String>(), runtime.messages())
+      assertNull(runtime.chat())
+      assertEquals(PrototypeChannelController.GOING_AWAY, first.closedWith)
+    }
+
+  @Test
   fun `realtime calls connect, send and disconnect a manual channel`() = runTest {
     val transport = FakeTransport()
     val events = mutableListOf<PrototypeEvent>()

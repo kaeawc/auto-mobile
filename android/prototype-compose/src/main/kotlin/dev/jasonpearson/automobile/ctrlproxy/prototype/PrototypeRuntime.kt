@@ -437,7 +437,8 @@ class PrototypeRuntime(
       }
 
       override suspend fun event(name: String, data: JsonObject) = exclusively {
-        if (!current.active) return@exclusively
+        val channel = (data["channel"] as? JsonPrimitive)?.content
+        if (channel == null || !channelLive(channel)) return@exclusively
         try {
           deliverPlatformEvent(name, data)
         } catch (refused: IllegalArgumentException) {
@@ -448,9 +449,17 @@ class PrototypeRuntime(
 
       override suspend fun run(channel: String, actions: JsonArray, event: JsonElement) =
         exclusively {
-          if (current.active) runChannelActions(channel, actions, event)
+          if (channelLive(channel)) runChannelActions(channel, actions, event)
         }
     }
+
+  /**
+   * Whether an effect for [channel] still applies, checked inside the interaction lock. A flush
+   * that waited for the lock while a replacement removed its channel holds the controller lock, so
+   * the controller cannot drop it first; its actions and events are dropped here instead.
+   */
+  private fun channelLive(channel: String): Boolean =
+    current.active && channel in current.spec.channels.orEmpty()
 
   private val realtimeModule = realtime?.let {
     PrototypeRealtimeModule(spec.id, it, realtimeSink, requestScope, newRequestId)

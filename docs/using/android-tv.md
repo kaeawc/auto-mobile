@@ -166,8 +166,8 @@ its own, `focusedElement.descendantLabel` is its child label: the `label` of its
   that cannot take focus keeps its own bounds. Without an owner, the target is the smallest
   focusable visible label match in the same window, exact labels first. A scrollable ancestor
   suppresses duplicate matches outside the label's parent row. Within that row, a matching
-  focusable sibling can still own the label. When no focusable label match applies, the nearest
-  unlabelled focusable sibling can own it instead. A sibling with its own label or a labelled child
+  focusable sibling can still own the label. When no focusable label match applies, a single
+  unlabelled focusable sibling in the row owns it; with two or more, none does. A sibling with its own label or a labelled child
   is excluded, except for a range control's value description covering the control itself.
   Otherwise the label keeps its bounds. Focus must reach the selected control; a focused row that
   only contains it does not count.

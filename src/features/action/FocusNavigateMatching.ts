@@ -218,7 +218,10 @@ function isRangeValueDescription(
   );
 }
 
-/** A matching or unlabelled focusable in this same parent row, nearest in hierarchy order. */
+/**
+ * A matching focusable in this same parent row (best match, nearest in hierarchy order), else
+ * the row's only unlabelled focusable. Several unlabelled candidates are ambiguous: none is pinned.
+ */
 export function focusLabelSibling(
   nodes: readonly FocusSiblingNode[],
   label: FocusSiblingNode,
@@ -230,20 +233,23 @@ export function focusLabelSibling(
   ) {
     return undefined;
   }
-  return nodes
-    .filter(
-      (node) =>
-        node !== label &&
-        node.parentIndex === label.parentIndex &&
-        isTruthyFlag(node.element?.focusable) &&
-        siblingLabelQualifies(nodes, node, target),
-    )
-    .sort(
-      (a, b) =>
-        siblingMatchRank(b, target) - siblingMatchRank(a, target) ||
-        Math.abs(a.index - label.index) - Math.abs(b.index - label.index) ||
-        a.index - b.index,
-    )[0]?.element;
+  const candidates = nodes.filter(
+    (node) =>
+      node !== label &&
+      node.parentIndex === label.parentIndex &&
+      isTruthyFlag(node.element?.focusable) &&
+      siblingLabelQualifies(nodes, node, target),
+  );
+  const matching = candidates.filter((node) => siblingMatchRank(node, target) > 0);
+  if (matching.length === 0) {
+    return candidates.length === 1 ? candidates[0].element : undefined;
+  }
+  return matching.sort(
+    (a, b) =>
+      siblingMatchRank(b, target) - siblingMatchRank(a, target) ||
+      Math.abs(a.index - label.index) - Math.abs(b.index - label.index) ||
+      a.index - b.index,
+  )[0]?.element;
 }
 
 const siblingHierarchy = new SearchableHierarchy();

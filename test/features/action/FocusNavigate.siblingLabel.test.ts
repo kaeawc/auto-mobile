@@ -183,13 +183,22 @@ test.each(["own text", "own description", "child label", "different parent"] as 
   },
 );
 
-test("sibling fallback breaks equal hierarchy-distance ties by hierarchy order", () => {
-  const later = { ...control, bounds: { left: 70, top: 10, right: 90, bottom: 30 } };
-  const hierarchy = tree({ ...row, node: [control, title, later] });
-  expect(
-    resolver.resolve({ ...flat(control, title, later), hierarchy }, { label: "Play" }),
-  ).toEqual(control.bounds);
-});
+test.each(["selector", "hierarchy", "bounds"] as const)(
+  "%s declines the sibling fallback when two unlabelled controls share the row",
+  (path) => {
+    const later = { ...control, bounds: { left: 70, top: 10, right: 90, bottom: 30 } };
+    const hierarchy = tree({ ...row, node: [control, title, later] });
+    const screen = {
+      ...flat(row, control, title, later),
+      ...(path === "bounds" ? {} : { hierarchy }),
+    };
+    expect(
+      path === "selector"
+        ? resolver.resolve(screen, { label: "Play" })
+        : firstMatchTarget(screen, { label: "Play" }).atBounds,
+    ).toEqual(title.bounds);
+  },
+);
 
 test("the flat focus loop accepts focus on the captured sibling control", async () => {
   const observer: FocusObserver = { read: async () => ({ focused: slider, elements }) };

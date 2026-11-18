@@ -375,3 +375,35 @@ test("captured sheet keeps landscape evidence under single-child backdrop wrappe
   });
   expect(extractHierarchyScreenSize(wrapped, true)).toEqual({ width: 951, height: 669 });
 });
+
+test("oversized content clipped by a portrait scroll viewport cannot prove landscape", () => {
+  const scrolledContent = (content: { left: number; top: number; right: number; bottom: number }) =>
+    wireCapture({
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 393, bottom: 852 },
+          node: [
+            {
+              bounds: { left: 0, top: 0, right: 393, bottom: 300 },
+              scrollable: "true",
+              node: [{ bounds: content }],
+            },
+          ],
+        },
+      },
+    });
+  for (const content of [
+    { left: 0, top: 0, right: 900, bottom: 900 },
+    { left: 0, top: 0, right: 852, bottom: 393 },
+    { left: 0, top: 0, right: 1200, bottom: 600 },
+  ]) {
+    expect(extractHierarchyScreenSize(scrolledContent(content), false)).toEqual({
+      width: 393,
+      height: 852,
+    });
+    expect(extractHierarchyScreenSize(scrolledContent(content), true)).toEqual({
+      width: 393,
+      height: 852,
+    });
+  }
+});

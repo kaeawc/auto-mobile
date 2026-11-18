@@ -47,6 +47,34 @@ beforeEach(() => {
 });
 
 describe("DisposableAppManager.install", () => {
+  test("installs an iOS authorization-only spec with the permissions capability", async () => {
+    const permissions = {
+      name: "base",
+      size: 1,
+      capabilities: ["prototype_platform_v1", "prototype_platform_permissions_v1"],
+    };
+    stamper = new FakeDisposableAppStamper([permissions]);
+    manager = new DisposableAppManager({
+      platforms: { ios: { stamper, installer } },
+      registry,
+      timer,
+    });
+    const result = await manager.install({
+      ...input(),
+      platform: "ios",
+      spec: {
+        requires: {
+          platform: ["notifications"],
+          permissions: [{ name: "notifications", purpose: "Send updates" }],
+        },
+        root: { type: "text", text: "{platform:/notifications/authorization}" },
+      },
+    });
+    expect(result.template).toBe("base");
+    expect(result.permissions.declared).toEqual(["notifications"]);
+    expect(stamper.stamped).toHaveLength(1);
+  });
+
   test("stamps the smallest covering template with the spec's declared permissions", async () => {
     const result = await manager.install(input({ permissions: "grantDeclared" }));
     const appId = disposableAppId("android", "feedly");

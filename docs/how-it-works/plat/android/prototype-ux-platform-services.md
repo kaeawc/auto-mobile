@@ -129,7 +129,8 @@ file maps each name to its Android manifest permissions and grant mechanism, and
 | `speech`             | `RECORD_AUDIO`                                   | `pm grant`        | `NSSpeechRecognitionUsageDescription`          | notGrantableOnSimulator |
 
 The `permissions` module (`prototype_platform_permissions_v1`) has one call, `permissions.request` with
-`names` (1-16 unique canonical names). A literal list may only name permissions declared in
+`names` (1-16 unique canonical names) and optional `options: {provisional?: boolean}` (default false).
+Android accepts and ignores these options. A literal list may only name permissions declared in
 `requires.permissions`; a bound list is checked by the runtime. State is `/platform/permissions/<name>`, one
 of `granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted` or `unavailable`, and
 `permissions.changed` carries `{name, state}` when a request changes authorization. It also fires when
@@ -139,15 +140,20 @@ runtimes do not advertise the module, since a grant there would go to CtrlProxy 
 iOS standalone hosts and ProtoViewer register `permissions` for `notifications`; borrowed-app sessions
 do not expose the module. Other canonical names return `unavailable`.
 The first status read establishes `/platform/permissions/notifications` asynchronously without prompting.
-Requests and foreground Settings re-reads publish only changed states. A request prompts with alert,
-sound and badge options only while authorization is `notDetermined`, then re-reads notification settings
+Requests and foreground Settings re-reads publish only changed states. A request uses alert,
+sound and badge options only while authorization is `notDetermined`; `options.provisional: true` adds
+provisional authorization without showing a prompt. It then re-reads notification settings
 for its result. iOS never re-prompts after a determination. Outside an app bundle with a bundle
 identifier, the source returns `unavailable` without accessing UserNotifications. No Info.plist key is
 required. One request may be in flight per module; a second returns `too_many_in_flight`. Request
 cancellation drops the late result while foreground observation stays active. The registry stops
-observation when its final observer releases it. The iOS driver uses the same
-platform-call deadline as other iOS modules. This module does not publish
-`/platform/notifications/authorization`; `provisional` authorization reads as `limited` here.
+observation when its final observer releases it. Permission requests have no platform-call deadline,
+including an explicit `timeoutMs`; `statusKey` stays `loading` until a result or cancellation.
+The same state is published at `/platform/notifications/authorization`, including the baseline and
+foreground re-reads, and cleared on stop. An authorization-only binding declares `notifications` in
+`requires.platform` and `requires.permissions` and uses the permissions capability on iOS.
+Other notification state, calls and handlers require the notifications capability.
+Provisional authorization reads as `limited`.
 
 | iOS `UNAuthorizationStatus` | State           |
 | --------------------------- | --------------- |
@@ -219,8 +225,8 @@ State is `/platform/notifications/{badge, active, pending, authorization}` plus
 `/platform/notifications/channels/<id>/blocked` (a boolean, readable only for a declared channel). The
 `active` key is at most 24 per prototype, and `authorization` uses the permission vocabulary (`granted`,
 `denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). Android hosts do not
-advertise this module. The `permissions` module above supplies notification authorization without
-publishing the notifications state tree.
+advertise this module. The `permissions` module above supplies notification authorization; iOS also
+publishes its authorization key without advertising notification delivery calls.
 
 Channels come from a root `notifications` block,
 `{channels: [{id, name, importance, description?, showBadge?}]}`. It holds 1-8 channels with unique

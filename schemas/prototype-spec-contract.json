@@ -24942,6 +24942,20 @@
                 "max": 16,
                 "unique": true
               }
+            },
+            "options": {
+              "optional": true,
+              "value": {
+                "kind": "object",
+                "fields": {
+                  "provisional": {
+                    "rule": {
+                      "kind": "boolean"
+                    },
+                    "optional": true
+                  }
+                }
+              }
             }
           },
           "permissions": [],

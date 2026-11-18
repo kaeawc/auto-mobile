@@ -40,7 +40,7 @@
             return state
         }
 
-        func request() async -> PrototypePermissionOutcome {
+        func request(provisional: Bool) async -> PrototypePermissionOutcome {
             guard available else { return .status(.unavailable) }
             guard pending == nil else { return .busy }
             let session = generation
@@ -54,9 +54,9 @@
                 await withCheckedContinuation { continuation in
                     guard !Task.isCancelled else { continuation.resume(returning: .cancelled); return }
                     self.pending = (id, continuation)
-                    UNUserNotificationCenter.current().requestAuthorization(
-                        options: [.alert, .sound, .badge]
-                    ) { [weak self] _, error in
+                    var options: UNAuthorizationOptions = [.alert, .sound, .badge]
+                    if provisional { options.insert(.provisional) }
+                    UNUserNotificationCenter.current().requestAuthorization(options: options) { [weak self] _, error in
                         let failed = error != nil
                         Task { @MainActor in
                             guard let self, self.pending?.id == id, session == self.generation else { return }

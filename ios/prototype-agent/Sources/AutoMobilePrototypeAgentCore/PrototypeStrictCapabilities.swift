@@ -8,7 +8,15 @@ enum PrototypeStrictCapabilities {
 
     static func required(_ spec: [String: JSONValue], includeAgentGates: Bool = false) -> Set<String> {
         var result = PrototypePlatformValidator.backendCapabilities(spec)
+        var authorizationRead = false
+        var fullNotifications = spec["notifications"] != nil
         func need(_ feature: String) { result.insert("prototype_\(feature)_v1") }
+        func platformRead(_ pointer: String) {
+            let tokens = PrototypeDataPointer.tokens(pointer)
+            guard tokens.first == "notifications" else { return }
+            if tokens == ["notifications", "authorization"] { authorizationRead = true }
+            else { fullNotifications = true }
+        }
         if PrototypeContractValidator.locatedActionTypes(.object(spec)).contains("hideKeyboard") {
             need("hide_keyboard")
         }
@@ -59,6 +67,7 @@ enum PrototypeStrictCapabilities {
             guard let fields = value.objectFields else { return }
             if fields.count == 1, fields["value"] != nil { return }
             func textBinding(_ text: String) {
+                PrototypePlatformValidator.placeholders(text).forEach(platformRead)
                 if text.contains("{t:") { need("strings") }
                 if PrototypeDataText.substitutionLength(text, data: nil).recognized { need("data_model") }
             }
@@ -75,6 +84,7 @@ enum PrototypeStrictCapabilities {
             if fields["scrollLinked"] != nil || fields["scrollTransition"] != nil { need("scroll_motion") }
             if PrototypeMotionV3.required(fields) { result.insert(PrototypeMotionV3.capability) }
             let type = fields["type"]?.stringValue ?? ""
+            if type.isEmpty, let pointer = fields["platform"]?.stringValue { platformRead(pointer) }
             if PrototypeStringConditions.uses(fields) { need("string_conditions") }
             let types = [
                 "startTimer": "timers",
@@ -165,6 +175,7 @@ enum PrototypeStrictCapabilities {
             if type == "emit", fields["context"] != nil { need("emit_context") }
             if type == "platform" {
                 need("platform")
+                if fields["call"]?.stringValue?.hasPrefix("notifications.") == true { fullNotifications = true }
                 if fields["call"] == .string("share.open") { need("platform_share") }
                 if let capability = PrototypePlatformValidator.callCapability(fields["call"]?.stringValue) {
                     result.insert(capability)
@@ -245,14 +256,26 @@ enum PrototypeStrictCapabilities {
         if let root = spec["root"] { scan(root) }
         if let handlers = spec["platform"] { scan(handlers) }
         for event in (spec["platform"]?.objectFields?["on"]?.objectFields ?? [:]).keys {
+            if event.hasPrefix("notifications.") { fullNotifications = true }
             if let capability = PrototypePlatformValidator.eventCapability(event) { result.insert(capability) }
         }
         for channel in (spec["channels"]?.objectFields ?? [:]).values { scan(channel) }
         if let scrim = spec["window"]?.objectFields?["placement"]?.objectFields?["scrim"],
            scrim.objectFields != nil { need("theme_modes") }
         if let requires = spec["requires"]?.objectFields {
+            let permissions: [JSONValue]
+            if case let .array(entries)? = requires["permissions"] { permissions = entries }
+            else { permissions = [] }
+            let notificationPermission = permissions.contains { $0.objectFields?["name"] == .string("notifications") }
             for module in PrototypeContractValidator
-                .strings(requires["platform"]) { need("platform"); need("platform_\(module)") }
+                .strings(requires["platform"])
+            {
+                need("platform")
+                // Authorization-only bindings use the permissions source without advertising delivery calls.
+                let permissionRead = module == "notifications" && authorizationRead && !fullNotifications &&
+                    notificationPermission
+                need("platform_\(permissionRead ? "permissions" : module)")
+            }
         }
         if spec["platform"] != nil { need("platform") }
         return result

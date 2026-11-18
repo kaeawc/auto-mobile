@@ -155,6 +155,7 @@ AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypeBundleRe
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func availability() -> PlatformAvailability
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func call(_ call: PlatformCall) async -> PlatformCallResult
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func configure(root: JSONValue?)
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func stop()
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var capability: String
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var events: AsyncStream<PlatformEvent>
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var name: String
@@ -167,6 +168,7 @@ AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public final class
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func configure(locationBlock: JSONValue?)
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func configure(root _: JSONValue?)
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func containsInfoPlistKey(_ key: String) -> Bool
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func stop()
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public init()
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public init(event: String, data: JSONValue)
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public init(modules: [any PrototypePlatformModule] = [], bundle: any PrototypeBundleReader = PrototypeMainBundleReader())

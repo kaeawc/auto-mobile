@@ -65,9 +65,12 @@ protocol PrototypeLocationSource: AnyObject {
         _ handler: @escaping @MainActor @Sendable (PrototypeLocationFix) -> Void
     )
     func stopUpdates()
+    func stop()
 }
 
 extension PrototypeLocationSource {
+    func stop() {}
+
     /// Sources without a configurable accuracy can keep their native best-available policy.
     func setUpdateAccuracy(_: String) {}
 }
@@ -83,6 +86,8 @@ final class PrototypeLocationModule: PrototypePlatformModule {
     private let clock: any PrototypeClock
     private var current: PrototypeLocationFix?
     private var block: JSONValue?
+    private var started = false
+    private var generation = 0
     private var updating = false
     private var lastUpdate: PrototypeLocationFix?
     private var deliveredAt: Int?
@@ -107,6 +112,8 @@ final class PrototypeLocationModule: PrototypePlatformModule {
     }
 
     var events: AsyncStream<PlatformEvent> {
+        started = true
+        startIfAuthorized()
         let (stream, continuation) = AsyncStream.makeStream(
             of: PlatformEvent.self, bufferingPolicy: .bufferingNewest(8)
         )
@@ -128,8 +135,12 @@ final class PrototypeLocationModule: PrototypePlatformModule {
         guard call.call == "location.request" else { return .failure(.unsupported, "Unknown call") }
         if case let .unavailable(reason) = availability() { return .failure(.unavailable, reason) }
         if let invalid = PrototypePlatformDriver.invalidArguments(call) { return invalid }
+        started = true
+        let requestGeneration = generation
         if source.authorization == .notDetermined { await source.requestAuthorization() }
-        guard !Task.isCancelled else { return .failure(.cancelled, "Location request cancelled") }
+        guard !Task.isCancelled, generation == requestGeneration else {
+            return .failure(.cancelled, "Location request cancelled")
+        }
         guard source.authorization.authorized else { return .failure(.permissionDenied, "Location permission denied") }
         let accuracy = call.args["accuracy"]?.stringValue ?? "precise"
         if accuracy == "precise", source.authorization == .authorizedApproximate,
@@ -137,7 +148,9 @@ final class PrototypeLocationModule: PrototypePlatformModule {
         {
             _ = await source.requestTemporaryFullAccuracy()
         }
-        guard !Task.isCancelled else { return .failure(.cancelled, "Location request cancelled") }
+        guard !Task.isCancelled, generation == requestGeneration else {
+            return .failure(.cancelled, "Location request cancelled")
+        }
         if case let .unavailable(reason) = availability() { return .failure(.unavailable, reason) }
         guard source.authorization.authorized else { return .failure(.permissionDenied, "Location permission denied") }
         startIfAuthorized()
@@ -152,6 +165,9 @@ final class PrototypeLocationModule: PrototypePlatformModule {
         do {
             var fix = try await source.requestFix(accuracy: accuracy)
             try Task.checkCancellation()
+            guard generation == requestGeneration else {
+                return .failure(.cancelled, "Location request cancelled")
+            }
             if source.authorization == .authorizedApproximate { fix.approximate = true }
             guard fix.valid else { return .failure(.platformError, "Invalid location fix") }
             current = fix
@@ -168,6 +184,25 @@ final class PrototypeLocationModule: PrototypePlatformModule {
         } catch {
             return .failure(.platformError, "Location request failed")
         }
+    }
+
+    func stop() {
+        guard started else { return }
+        started = false
+        generation += 1
+        updating = false
+        if hasUsage {
+            source.stopUpdates()
+            source.stop()
+        }
+        pending?.cancel()
+        pending = nil
+        subscribers.values.forEach { $0.finish() }
+        subscribers = [:]
+        current = nil
+        latest = nil
+        lastUpdate = nil
+        deliveredAt = nil
     }
 
     func configure(root: JSONValue?) {
@@ -187,9 +222,14 @@ final class PrototypeLocationModule: PrototypePlatformModule {
 
     private func startIfAuthorized() {
         guard !updating, block != nil, hasUsage, source.servicesEnabled, source.authorization.authorized else { return }
+        started = true
         updating = true
         source.setUpdateAccuracy(block?.objectFields?["accuracy"]?.stringValue ?? "precise")
-        source.startUpdates(minDistanceM: minDistance) { [weak self] fix in self?.receive(fix) }
+        let updateGeneration = generation
+        source.startUpdates(minDistanceM: minDistance) { [weak self] fix in
+            guard let self, generation == updateGeneration else { return }
+            receive(fix)
+        }
     }
 
     private func receive(_ fix: PrototypeLocationFix) {

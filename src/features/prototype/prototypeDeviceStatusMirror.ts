@@ -46,7 +46,8 @@ function statusModule(name: string): PrototypeStatusModule | undefined {
   return PROTOTYPE_STATUS_MODULES.find((module) => module === name);
 }
 
-function ruleAccepts(value: unknown, rule: Rule): boolean {
+/** Whether a status value passes its contract rule (number, boolean or enum). */
+export function prototypeStatusRuleAccepts(value: unknown, rule: Rule): boolean {
   switch (rule.kind) {
     case "number":
       return numberValid(value, rule);
@@ -75,7 +76,8 @@ function stateValid(
   state: Record<string, PrototypePlatformStateEntry>,
 ): boolean {
   return Object.entries(data).every(
-    ([key, value]) => Object.hasOwn(state, key) && ruleAccepts(value, state[key].value),
+    ([key, value]) =>
+      Object.hasOwn(state, key) && prototypeStatusRuleAccepts(value, state[key].value),
   );
 }
 

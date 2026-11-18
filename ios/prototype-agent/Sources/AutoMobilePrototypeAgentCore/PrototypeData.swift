@@ -262,7 +262,9 @@ enum PrototypeDataResolver {
         guard case var .object(fields) = root else { return root }
         PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind($0, data: data, platform: platform) }
         let lazy = fields["type"] == .string("list")
-        if !lazy, let value = fields["repeat"] { fields["repeat"] = resolveRepeat(value, repeats: &repeats) }
+        if !lazy, let value = fields["repeat"] { fields["repeat"] = resolveRepeat(
+            value, repeats: &repeats, retainSource: PrototypeRepeat.containsFieldSource(root)
+        ) }
         for key in ["visibleWhen", "enabledWhen", "errorWhen"] {
             if let value = fields[key] { fields[key] = resolveCondition(value, data: data, platform: platform) }
         }
@@ -303,11 +305,20 @@ enum PrototypeDataResolver {
         return .object(fields)
     }
 
-    private static func resolveRepeat(_ value: JSONValue, repeats: inout PrototypeRepeatData) -> JSONValue {
+    private static func resolveRepeat(
+        _ value: JSONValue, repeats: inout PrototypeRepeatData, retainSource: Bool
+    )
+        -> JSONValue
+    {
         guard case var .object(fields) = value, case let .object(source)? = fields["items"] else {
             return value
         }
-        fields["items"] = repeats.items(source["path"]?.stringValue ?? "")
+        guard let pointer = source["path"]?.stringValue else { return value }
+        if retainSource, case let .array(rows)? = PrototypeDataPointer.resolve(repeats.data, pointer: pointer) {
+            fields["_sourceItems"] =
+                .array(Array(rows.filter { $0.objectFields != nil }.prefix(PrototypeLimits.maxRepeatItems)))
+        }
+        fields["items"] = repeats.items(pointer)
         return .object(fields)
     }
 

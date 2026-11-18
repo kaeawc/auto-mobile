@@ -192,6 +192,7 @@ enum PrototypeStrictCapabilities {
                 }
                 if key == "repeat" {
                     if child.objectFields?["items"]?.objectFields?["derived"] != nil { need("derive") }
+                    if child.objectFields?["items"]?.objectFields?["field"] != nil { need("nested_repeat") }
                     if child.objectFields?["derive"] != nil { need("format") }
                     if child.objectFields?["stagger"] != nil { need("window_motion") }
                     if let repeatSpec = child.objectFields,

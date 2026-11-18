@@ -2,7 +2,7 @@
   "patterns": {
     "pathKey": "^[A-Za-z_][A-Za-z0-9_]*$(?![\\s\\S])",
     "stateKey": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])",
-    "boundKey": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:route\\.[A-Za-z_][A-Za-z0-9_]*|index|(?!route\\.)[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])",
+    "boundKey": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:route\\.[A-Za-z_][A-Za-z0-9_]*|index|outerIndex|(?!route\\.)[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])",
     "color": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$(?![\\s\\S])",
     "blankText": "^[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$(?![\\s\\S])",
     "numberToken": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$(?![\\s\\S])",
@@ -107,7 +107,8 @@
     "MAX_PROTOTYPE_NOTIFICATION_BYTES": 5120,
     "MAX_PROTOTYPE_NOTIFICATION_BADGE": 9999,
     "MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE": 24,
-    "MAX_PROTOTYPE_NOTIFICATION_UPDATES_PER_SECOND": 4
+    "MAX_PROTOTYPE_NOTIFICATION_UPDATES_PER_SECOND": 4,
+    "MAX_PROTOTYPE_INNER_REPEAT_ITEMS": 100
   },
   "definitions": {
     "authAccount": {
@@ -18371,7 +18372,21 @@
                 "item": {
                   "kind": "map",
                   "item": {
-                    "kind": "scalar"
+                    "kind": "choice",
+                    "options": [
+                      {
+                        "kind": "scalar"
+                      },
+                      {
+                        "kind": "array",
+                        "item": {
+                          "kind": "map",
+                          "item": {
+                            "kind": "scalar"
+                          }
+                        }
+                      }
+                    ]
                   }
                 },
                 "min": 1,
@@ -18393,6 +18408,17 @@
                 "kind": "object",
                 "fields": {
                   "derived": {
+                    "rule": {
+                      "kind": "key"
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "field": {
                     "rule": {
                       "kind": "key"
                     },

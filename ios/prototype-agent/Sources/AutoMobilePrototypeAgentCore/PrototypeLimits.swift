@@ -20,6 +20,7 @@ enum PrototypeLimits {
     static let maxDepth = 24
     static let maxTextSpans = 64
     static let maxRepeatItems = 128
+    static let maxInnerRepeatItems = PrototypeContractValidator.limit("MAX_PROTOTYPE_INNER_REPEAT_ITEMS")
     static let maxListItems = PrototypeContractValidator.limit("MAX_PROTOTYPE_LIST_ITEMS")
     static let maxRepeatPathCells = 65536
     static let maxSubstitutedTextLength = 16384
@@ -147,46 +148,44 @@ enum PrototypeLimits {
     )
         throws
     {
-        var repeats = PrototypeRepeatData(data: data)
-        var collections = PrototypeRepeatData(data: derivedValues)
         var total = 0
-        func visitCells(_ node: JSONValue, path: String, depth: Int) throws {
-            guard case let .object(fields) = node else { return }
+        func charge(_ rows: [JSONValue], path: String) throws {
+            var values = PrototypeRepeatData(data: ["rows": .array(rows)])
+            total += values.cells("/rows")
+            if total > maxRepeatPathCells { throw violation(path, "Repeat path cell limit exceeded") }
+        }
+        func visit(_ node: JSONValue, path: String, depth: Int, outer: [JSONValue]) throws {
+            guard let fields = node.objectFields else { return }
             if depth > maxDepth { throw violation(path, "Tree depth limit exceeded") }
-            if case let .object(spec)? = fields["repeat"],
-               case let .object(source)? = spec["items"]
-            {
-                let field: String
-                if let name = source["derived"]?.stringValue {
-                    field = "derived"
-                    total += collections.cells("/" + name)
-                } else if let pointer = source["path"]?.stringValue {
-                    field = "path"
-                    total += repeats.cells(pointer)
-                } else { field = "path" }
-                if total > maxRepeatPathCells {
-                    throw violation("\(path).repeat.items.\(field)", "Repeat path cell limit exceeded")
-                }
-            }
-            for name in ["header", "footer"] {
-                if let child = fields[name] { try visitCells(child, path: "\(path).\(name)", depth: depth + 1) }
-            }
-            if let child = fields["child"] {
-                try visitCells(child, path: "\(path).child", depth: depth + 1)
-            } else if case let .array(children)? = fields["children"] {
-                for (index, child) in children.enumerated() {
-                    try visitCells(child, path: "\(path).children[\(index)]", depth: depth + 1)
-                }
-            }
-            if case let .object(screens)? = fields["screens"] {
-                for name in screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
-                    if let screen = screens[name] {
-                        try visitCells(screen, path: PrototypeStacks.screenPath(path, name: name), depth: depth + 1)
+            var rows = outer
+            if let repeated = fields["repeat"]?.objectFields {
+                let source = repeated["items"]
+                if let field = source?.objectFields?["field"]?.stringValue {
+                    rows = []
+                    for item in outer {
+                        let inner = PrototypeStrictBindings.array(item.objectFields?[field])
+                        try charge(inner, path: "\(path).repeat.items.field")
+                        rows += inner
                     }
+                } else {
+                    let raw: JSONValue?
+                    let sourceField: String
+                    if let pointer = source?.objectFields?["path"]?.stringValue {
+                        raw = PrototypeDataPointer.resolve(data, pointer: pointer)
+                        sourceField = "path"
+                    } else if let name = source?.objectFields?["derived"]?.stringValue {
+                        raw = derivedValues[name]
+                        sourceField = "derived"
+                    } else { raw = source; sourceField = "" }
+                    rows = PrototypeStrictBindings.array(raw)
+                    if !sourceField.isEmpty { try charge(rows, path: "\(path).repeat.items.\(sourceField)") }
                 }
+            }
+            for child in PrototypeStrictRepeats.children(fields, path: path) {
+                try visit(.object(child.value), path: child.path, depth: depth + 1, outer: rows)
             }
         }
-        try visitCells(root, path: "root", depth: 1)
+        try visit(root, path: "root", depth: 1, outer: [])
     }
 
     /// Checks authored edges once, leaving depth and node errors to the existing visits.

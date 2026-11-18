@@ -538,3 +538,5 @@ export const PROTOTYPE_FORMAT_CAPABILITY = "prototype_format_v1";
 
 /** Native adaptive pane and navigation layouts. */
 export const PROTOTYPE_ADAPTIVE_CAPABILITY = "prototype_adaptive_v1";
+
+export const PROTOTYPE_NESTED_REPEAT_CAPABILITY = "prototype_nested_repeat_v1";

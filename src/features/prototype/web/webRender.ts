@@ -26,11 +26,7 @@ import {
 } from "./webCss";
 import { roleCss, toggleMark } from "./webToggleMark";
 import { bindPrototypeDataText, resolvePrototypeDataPointer } from "../prototypeData";
-import {
-  projectPrototypeDerivedItem,
-  resolvePrototypeDerived,
-  type PrototypeFormatEnvironment,
-} from "../prototypeFormat";
+import { resolvePrototypeDerived, type PrototypeFormatEnvironment } from "../prototypeFormat";
 import {
   bindText,
   bindTyped,
@@ -58,7 +54,7 @@ import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
 import { webModalLayers } from "./webModal";
-import { webRepeatRowsForScope } from "./webRepeat";
+import { webRepeatInstances } from "./webRepeat";
 import { searchBarFillAxes, webSelectionRenderers } from "./webSelection";
 import { webSheetLayers } from "./webSheet";
 import { webSkins, type WebSkinId } from "./webSkin";
@@ -311,22 +307,12 @@ function rowScopes(node: Raw, scope: WebRenderScope): WebRenderScope[] {
   if (!repeat) {
     return [scope];
   }
-  const alias = typeof repeat.as === "string" ? repeat.as : "item";
-  const derive = record(repeat.derive) as
-    | Parameters<typeof projectPrototypeDerivedItem>[0]
-    | undefined;
-  return webRepeatRowsForScope(node, scope).map((item, index) => {
-    const values = record(item) ?? {};
-    const instance: Instance = {
-      binding: { alias, index: true },
-      values: derive ? projectPrototypeDerivedItem(derive, values, scope.format) : values,
-      index,
-    };
-    return child(scope, {
+  return webRepeatInstances(node, scope).map((instance) =>
+    child(scope, {
       instances: [...scope.instances, instance],
       heightBound: scope.heightBound,
-    });
-  });
+    }),
+  );
 }
 
 export interface WebChildEntry {
@@ -1015,10 +1001,8 @@ export function preparedNode(
   if (!authored || typeof authored.type !== "string") {
     return undefined;
   }
-  const raw = scope.instances.reduce(
-    (current, instance) => bindStructure(current, path, instance),
-    authored,
-  );
+  const instance = scope.instances.at(-1);
+  const raw = instance ? bindStructure(authored, path, instance) : authored;
   const local = withPagerLocals(raw, scope, KIT);
   if (raw.visibleWhen !== undefined && !conditionHolds(raw.visibleWhen, presentation(local))) {
     return undefined;

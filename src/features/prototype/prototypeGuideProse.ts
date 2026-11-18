@@ -328,7 +328,7 @@ The path resolves to at most ${MAX_PROTOTYPE_LIST_ITEMS} objects; \`key\` is req
 are valid. Axis defaults to vertical; spacing/padding are nonnegative dp. One row template and
 optional header/footer each count once toward node/image limits, while per-item binding and text
 budgets still apply. Header/footer are ordinary nodes outside the row scope. Never nest lists,
-put a list in a repeat, or put a same-axis scroll above/below a list. Rows cannot nest repeats/pagers.
+put a list in a repeat, or put a same-axis scroll above/below a list. Rows may nest one container repeat using an item field array with prototype_nested_repeat_v1; pagers remain invalid.
 Only composed rows are in \`observe\`; use \`swipeOn\` to reach more. Row keys preserve identity.
 \`onEndReached\` fires for nonempty rows within \`endThreshold\` of the end (1–50, default 3), once
 per \`(rowCount,lastRowKey)\` signature; empty/no-change pages never refire. Signature state survives

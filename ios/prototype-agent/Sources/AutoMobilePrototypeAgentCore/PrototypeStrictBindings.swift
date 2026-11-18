@@ -4,6 +4,7 @@ struct PrototypeLocatedValue {
     let value: [String: JSONValue]
     let path: String
     var operandTemplated = false
+    var repeatItem: Int?
 }
 
 /// Located diagnostics for the binding rules also used for runtime state writes.
@@ -88,7 +89,11 @@ enum PrototypeStrictBindings {
             try PrototypeAdaptive.validate(node.value, path: node.path, state: state)
             if let field = try field(node.value, state: state) { throw PrototypeContractValidator.invalid(
                 "\(node.path).\(field)",
-                "Invalid control binding"
+                node.repeatItem.map { index in
+                    let message = (try? PrototypeStateValidator.bindingRejection(control(node.value), state)?.message)
+                        ?? "Invalid control binding"
+                    return "\(message) (repeat item \(index))"
+                } ?? "Invalid control binding"
             ) }
         }
         for node in nodes {

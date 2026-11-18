@@ -92,9 +92,10 @@ internal object PrototypeStrictPolicy {
         .filter { isSinkBinding(it, requests) || it in shares }
     var expandedBytes = 0L
     for (field in sinks) {
-      val scope = scopes.firstOrNull { field.path.startsWith("${it.path}.children[") }
+      val matching = PrototypeRepeatValidator.applicableScopes(scopes, field.path)
       expandedBytes +=
-        field.text.toByteArray(Charsets.UTF_8).size.toLong() * maxOf(1, scope?.items?.size ?: 1)
+        field.text.toByteArray(Charsets.UTF_8).size.toLong() *
+          maxOf(1, matching.sumOf { it.items.size })
       if (expandedBytes > 4194304)
         return PrototypeSpecError(
           field.path,
@@ -230,13 +231,22 @@ internal object PrototypeStrictPolicy {
     scopes: List<PrototypeRepeatValidator.Scope>,
     secure: Set<String>,
   ): Boolean {
-    val scope = scopes.firstOrNull { field.path.startsWith("${it.path}.children[") }
+    val matching = PrototypeRepeatValidator.applicableScopes(scopes, field.path)
     val texts =
-      if (scope == null || !PrototypeRepeatFields.hasPlaceholder(field.text, scope.alias))
-        listOf(field.text)
+      if (matching.isEmpty()) listOf(field.text)
       else
-        scope.items.mapIndexed { index, item ->
-          PrototypeRepeatTemplate.bind(field.text, scope.alias, item, index)
+        matching.flatMap { scope ->
+          // Literal state bindings still need a check when the repeat has no rows.
+          if (
+            PrototypeRepeatTemplate.segments(field.text, scope.alias, scope.outerAlias).all {
+              it is PrototypeRepeatSegment.Literal
+            }
+          )
+            listOf(field.text)
+          else
+            scope.items.mapIndexed { index, item ->
+              PrototypeRepeatTemplate.bind(field.text, scope.alias, item, index, scope.outerAlias)
+            }
         }
     return texts.any { text ->
       if (field.key) text in secure else secure.any { text.contains("{$it}") }
@@ -489,6 +499,8 @@ internal object PrototypeStrictPolicy {
 
     private fun repeatFeatures(child: JsonElement) {
       val repeatSpec = child as? JsonObject
+      if ((repeatSpec?.get("items") as? JsonObject)?.containsKey("field") == true)
+        need("nested_repeat")
       if (repeatSpec?.containsKey("derive") == true) need("format")
       if ((repeatSpec?.get("items") as? JsonObject)?.containsKey("derived") == true) need("derive")
       if (repeatSpec?.get("stagger") != null) need("window_motion")

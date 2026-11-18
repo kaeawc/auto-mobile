@@ -76,14 +76,10 @@ internal object PrototypeRepeatTextChecks {
       return it
     }
     val text = value.string() ?: return null
-    val authored = PrototypeRepeatTemplate.segments(text, scope.alias)
-    if (
-      kind == PrototypeBindableKind.DATA_OPERAND &&
-        authored.any { it !is PrototypeRepeatSegment.Literal }
-    ) {
-      return fail(path, "Repeat placeholder in a data condition operand is not supported")
-    }
-    unknownField(authored, path, scope)?.let {
+    if ("{outerIndex}" in text && scope.outerAlias == null)
+      return fail(path, "{outerIndex} outside an inner repeat template")
+    val authored = PrototypeRepeatTemplate.segments(text, scope.alias, scope.outerAlias)
+    placeholderError(authored, path, kind, scope)?.let {
       return it
     }
     var dataRecognized = false
@@ -96,7 +92,8 @@ internal object PrototypeRepeatTextChecks {
       else text
     if (resolved == null) return dataTextError(path, state)
     val segments =
-      if (resolved == text) authored else PrototypeRepeatTemplate.segments(resolved, scope.alias)
+      if (resolved == text) authored
+      else PrototypeRepeatTemplate.segments(resolved, scope.alias, scope.outerAlias)
     repeatTextError(BoundText(resolved, segments, path, dataRecognized), scope, state)?.let {
       return it
     }
@@ -105,6 +102,21 @@ internal object PrototypeRepeatTextChecks {
       PrototypeBindableKind.KEY -> invalidBoundKey(text, segments, path, scope)
       else -> null
     }
+  }
+
+  private fun placeholderError(
+    segments: List<PrototypeRepeatSegment>,
+    path: String,
+    kind: PrototypeBindableKind,
+    scope: Scope,
+  ): PrototypeSpecError? {
+    if (
+      kind == PrototypeBindableKind.DATA_OPERAND &&
+        segments.any { it !is PrototypeRepeatSegment.Literal }
+    ) {
+      return fail(path, "Repeat placeholder in a data condition operand is not supported")
+    }
+    return unknownField(segments, path, scope)
   }
 
   fun emitBindingError(
@@ -141,8 +153,9 @@ internal object PrototypeRepeatTextChecks {
   ): PrototypeSpecError? {
     val text = value.string()
     if (!kind.isDataPath() || text == null) return null
-    return PrototypeRepeatTemplate.dataPathPlaceholderMessage(text, scope.alias)?.let {
-      fail(path, it)
-    }
+    return PrototypeRepeatTemplate.dataPathPlaceholderMessage(text, scope.alias, scope.outerAlias)
+      ?.let {
+        fail(path, it)
+      }
   }
 }

@@ -71,7 +71,7 @@ extension PrototypeContractValidator {
                 guard let end = units[(index + 1)...].firstIndex(of: 125) else { return false }
                 let token = String(decoding: units[(index + 1) ..< end], as: UTF16.self)
                 let parts = token.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
-                guard token == "index" ||
+                guard token == "index" || token == "outerIndex" ||
                     (
                         parts
                             .count == 2 &&

@@ -228,6 +228,11 @@ struct PrototypeSpec: Decodable {
         try PrototypeLimits.guardAuthoredTree(raw)
         try PrototypeScrollMotion.validate(raw, data: data)
         try PrototypeRequestValidator.validate(raw, state: menuState)
+        if PrototypeStrictCapabilities.required(["root": raw]).contains(PrototypeAgentProtocol.nestedRepeatCapability) {
+            var repeats = PrototypeStrictRepeats(data: data, derivedValues: values)
+            try repeats.templates(raw.objectFields ?? [:], path: "root")
+            try repeats.expanded(raw.objectFields ?? [:], path: "root")
+        }
         try PrototypeLimits.guardRepeatPathCells(raw, data: data, derivedValues: values)
         try PrototypeMenus.validateAuthoredText(raw)
         try PrototypeLoadingStates.validate(raw)

@@ -66,6 +66,9 @@ internal object PrototypeRepeatTree {
       source != null,
       names,
       if (source?.text("derived") != null) "derived" else "path",
+      sourceItems =
+        if (pointer != null) data.source(pointer).orEmpty().filterIsInstance<JsonObject>()
+        else items,
     )
   }
 
@@ -125,25 +128,45 @@ internal object PrototypeRepeatTree {
     return null
   }
 
+  private fun templateNodeError(node: JsonObject, path: String, scope: Scope): PrototypeSpecError? {
+    if (node.text("type") == "list") return fail(path, "A list cannot sit inside a repeat template")
+    if (node.containsKey("repeat")) {
+      if (scope.outerAlias != null) return fail("$path.repeat", "Repeat nesting depth exceeds 2")
+      val repeat = node["repeat"] as? JsonObject
+      if ((repeat?.get("items") as? JsonObject)?.text("field") == null)
+        return fail("$path.repeat", "Nested repeat is not supported")
+      if (repeat.text("as") in setOf(scope.alias, "route"))
+        return fail(
+          "$path.repeat.as",
+          "Inner repeat alias must differ from the outer alias and route",
+        )
+    }
+    if (node.text("type") == "pager")
+      return fail(path, "Pager cannot appear inside a repeat template")
+    if (node.text("type") == "stack")
+      return fail(path, "Stack cannot appear inside a repeat template")
+    return null
+  }
+
   fun templateErrors(
     node: JsonObject,
     path: String,
     scope: Scope?,
     state: RepeatState,
   ): PrototypeSpecError? {
-    if (scope != null) {
-      if (node.text("type") == "list")
-        return fail(path, "A list cannot sit inside a repeat template")
-      if (node.containsKey("repeat")) return fail("$path.repeat", "Nested repeat is not supported")
-      if (node.text("type") == "pager")
-        return fail(path, "Pager cannot appear inside a repeat template")
-      if (node.text("type") == "stack")
-        return fail(path, "Stack cannot appear inside a repeat template")
-    }
+    if (scope != null)
+      templateNodeError(node, path, scope)?.let {
+        return it
+      }
     val own =
       if (scope != null) checkOwnFields(node, path, scope, state)
       else checkLiteralKeys(node, path, state)
     if (own != null) return own
+    val field = ((node["repeat"] as? JsonObject)?.get("items") as? JsonObject)?.text("field")
+    if (field != null)
+      return if (scope == null)
+        fail("$path.repeat.items.field", "Repeat field source requires an outer repeat template")
+      else PrototypeNestedRepeat.templateErrors(node, path, scope, field, state)
     repeatSourceError(node, path, state)?.let {
       return it
     }
@@ -203,19 +226,24 @@ internal object PrototypeRepeatTree {
       ?: PrototypeEffectRules.chargeExpanded(node, at, budget)
   }
 
+  data class Expansion(
+    val data: PrototypeRepeatData,
+    val repeatPath: String? = null,
+    val outer: Scope? = null,
+  )
+
   private fun expandedChildErrors(
     node: JsonObject,
     path: String,
     budget: Budget,
-    repeatPath: String?,
-    data: PrototypeRepeatData,
+    expansion: Expansion,
   ): PrototypeSpecError? {
     val stack = node["screens"] is JsonObject
     if (stack) budget.screens.enterStack()
     for (child in childrenOf(node, path)) {
       val screen = stack && child.path.startsWith("$path.screens[")
       if (screen) budget.screens.enterScreen()
-      expandedErrors(child.node, child.path, budget, repeatPath, data)?.let {
+      expandedErrors(child.node, child.path, budget, expansion)?.let {
         return it
       }
       if (screen) budget.screens.exitScreen()
@@ -229,16 +257,24 @@ internal object PrototypeRepeatTree {
     node: JsonObject,
     path: String,
     budget: Budget,
-    repeatPath: String?,
-    data: PrototypeRepeatData,
+    expansion: Expansion,
   ): PrototypeSpecError? {
+    val (data, repeatPath, outer) = expansion
     expandedNodeErrors(node, path, budget, repeatPath ?: path)?.let {
       return it
     }
-    val scope = scopeOf(node, path, data)
+    val field = ((node["repeat"] as? JsonObject)?.get("items") as? JsonObject)?.text("field")
+    val scope =
+      if (field != null && outer != null) PrototypeNestedRepeat.innerScope(node, path, outer, 0)
+      else scopeOf(node, path, data)
     val nestedPath = if (scope != null) "$path.repeat" else repeatPath
-    repeat(if (node.text("type") == "list") 1 else scope?.items?.size ?: 1) {
-      expandedChildErrors(node, path, budget, nestedPath, data)?.let {
+    repeat(if (node.text("type") == "list") 1 else scope?.items?.size ?: 1) { index ->
+      val single =
+        scope?.copy(
+          items = scope.items.drop(index).take(1),
+          sourceItems = scope.sourceItems.drop(index).take(1),
+        ) ?: outer
+      expandedChildErrors(node, path, budget, Expansion(data, nestedPath, single))?.let {
         return it
       }
     }

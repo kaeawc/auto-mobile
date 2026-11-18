@@ -136,16 +136,53 @@ object PrototypeDerivedText {
 
 /** Device-local projections must pass the value-dependent checks deferred by host validation. */
 object PrototypeDerivedRows {
-  fun validate(node: PrototypeNode, rows: List<Map<String, PrototypeScalar>>): PrototypeSpecError? {
+  fun validate(
+    node: PrototypeNode,
+    rows: List<Map<String, PrototypeScalar>>,
+    sourceItems: List<JsonObject>? = null,
+    outerAlias: String? = null,
+  ): PrototypeSpecError? {
     val json = PrototypeSpecValidator.json
     val encoded = json.encodeToJsonElement(PrototypeNode.serializer(), node).jsonObject
     val repeat = encoded["repeat"] as? JsonObject ?: return null
+    val projected = json.encodeToJsonElement(rows).jsonArray
+    val items =
+      JsonArray(
+        projected.mapIndexed { index, row ->
+          JsonObject(sourceItems?.getOrNull(index).orEmpty() + row.jsonObject)
+        },
+      )
     val materialized =
       JsonObject(
-        encoded +
-          ("repeat" to
-            JsonObject((repeat - "derive") + ("items" to json.encodeToJsonElement(rows)))),
+        encoded + ("repeat" to JsonObject((repeat - "derive") + ("items" to items))),
       )
-    return PrototypeRepeatValidator.validate(buildJsonObject { put("root", materialized) })
+    if (outerAlias == null)
+      return PrototypeRepeatValidator.validate(buildJsonObject { put("root", materialized) })
+    val data = PrototypeRepeatData(null)
+    val scope =
+      checkNotNull(PrototypeRepeatTree.scopeOf(materialized, "root", data))
+        .copy(
+          outerAlias = outerAlias,
+          outerItem =
+            items.firstOrNull()?.jsonObject?.let { row ->
+              JsonObject(
+                row
+                  .filterKeys { it.startsWith("outer.") }
+                  .mapKeys { it.key.removePrefix("outer.") },
+              )
+            },
+        )
+    for (child in PrototypeRepeatTree.childrenOf(materialized, "root")) {
+      PrototypeRepeatTree.templateErrors(
+          child.node,
+          child.path,
+          scope,
+          PrototypeRepeatTextChecks.RepeatState(data),
+        )
+        ?.let {
+          return it
+        }
+    }
+    return PrototypeRepeatTree.repeatKeyError(materialized, "root", scope)
   }
 }

@@ -34,9 +34,9 @@ import {
  *
  * A container with `repeat: {items, as}` instantiates its children once per item, so these checks
  * run over the raw tree after the contract walk: placeholders must name a field every item has,
- * state keys must bind to a literal key for every item, a template may not nest another `repeat`
- * or declare a pager, and the expanded tree must still fit the node and image limits. Depth is
- * unaffected because instances are siblings, never deeper.
+ * state keys must bind to a literal key for every item pair, repeats may nest once using a field
+ * source, templates may not declare a pager, and the expanded tree must fit the node and image
+ * limits. Instantiation preserves the authored depth.
  */
 export interface RepeatError {
   path: string;
@@ -48,7 +48,9 @@ interface Scope {
   path: string;
   binding: Binding;
   items: readonly Readonly<Raw>[];
-  pathBound?: "path" | "derived";
+  pathBound?: "path" | "derived" | "field";
+  outerItem?: Raw;
+  sourceItems?: readonly Readonly<Raw>[];
   derivedFields: ReadonlySet<string>;
 }
 
@@ -69,8 +71,15 @@ function unknownField(segments: Segment[], path: string, scope: Scope): RepeatEr
       continue;
     }
     const name = segment.name;
-    if (!scope.items.every((item) => Object.hasOwn(item, name))) {
-      return fail(path, `Unknown repeat field ${JSON.stringify(name)}`);
+    if (
+      name.startsWith("outer.") && scope.outerItem
+        ? !Object.hasOwn(scope.outerItem, name.slice(6))
+        : !scope.items.every((item) => Object.hasOwn(item, name))
+    ) {
+      return fail(
+        path,
+        `Unknown repeat field ${JSON.stringify(name.startsWith("outer.") ? name.slice(6) : name)}`,
+      );
     }
   }
   return undefined;
@@ -196,6 +205,9 @@ function fieldError(
   if (typeof value !== "string") {
     return undefined;
   }
+  if (value.includes("{outerIndex}") && !scope.binding.outerAlias) {
+    return fail(path, "{outerIndex} outside an inner repeat template");
+  }
   const authored = templateSegments(value, scope.binding);
   if (dataCondition && authored.some((segment) => segment.kind !== "literal")) {
     return fail(path, "Repeat placeholder in a data condition operand is not supported");
@@ -286,6 +298,9 @@ function literalPlaceholderError(
   if (typeof value !== "string") {
     return undefined;
   }
+  if (value.includes("{outerIndex}")) {
+    return fail(path, "{outerIndex} outside an inner repeat template");
+  }
   if (
     kind === "key" &&
     !STATE_KEY.test(
@@ -357,7 +372,9 @@ function scopeOf(node: Raw, path: string, data: PrototypeRepeatData): Scope | un
     return undefined;
   }
   const source = record(repeat.items);
+  const rawItems = typeof source?.path === "string" ? data.source(source.path) : undefined;
   return {
+    sourceItems: Array.isArray(rawItems) ? rawItems : undefined,
     path,
     binding: { alias: repeat.as, index: true },
     items: derivedValidationItems(scopeItems(repeat, data), repeat.derive),
@@ -366,12 +383,24 @@ function scopeOf(node: Raw, path: string, data: PrototypeRepeatData): Scope | un
   };
 }
 
-function templateNodeError(node: Raw, path: string): RepeatError | undefined {
+function templateNodeError(node: Raw, path: string, scope: Scope): RepeatError | undefined {
   if (node.type === "list") {
     return fail(path, "A list cannot sit inside a repeat template");
   }
   if (node.repeat !== undefined) {
-    return fail(`${path}.repeat`, "Nested repeat is not supported");
+    if (scope.binding.outerAlias) {
+      return fail(`${path}.repeat`, "Repeat nesting depth exceeds 2");
+    }
+    if (typeof record(record(node.repeat)?.items)?.field !== "string") {
+      return fail(`${path}.repeat`, "Nested repeat is not supported");
+    }
+    const alias = record(node.repeat)?.as;
+    if (alias === scope.binding.alias || alias === "route") {
+      return fail(
+        `${path}.repeat.as`,
+        "Inner repeat alias must differ from the outer alias and route",
+      );
+    }
   }
   if (node.type === "stack") {
     return fail(path, "Stack cannot appear inside a repeat template");
@@ -388,7 +417,7 @@ function templateErrors(
   state: RepeatState,
   scope?: Scope,
 ): RepeatError | undefined {
-  const nesting = scope ? templateNodeError(node, path) : undefined;
+  const nesting = scope ? templateNodeError(node, path, scope) : undefined;
   if (nesting) {
     return nesting;
   }
@@ -397,6 +426,21 @@ function templateErrors(
     : checkLiteralKeys(node, path, state);
   if (own) {
     return own;
+  }
+  return repeatTemplateChildrenErrors(node, path, state, scope);
+}
+
+function repeatTemplateChildrenErrors(
+  node: Raw,
+  path: string,
+  state: RepeatState,
+  scope?: Scope,
+): RepeatError | undefined {
+  const source = record(record(node.repeat)?.items);
+  if (typeof source?.field === "string") {
+    return scope
+      ? nestedTemplateErrors(node, path, state, { outer: scope, field: source.field })
+      : fail(`${path}.repeat.items.field`, "Repeat field source requires an outer repeat template");
   }
   const repeatError = repeatSourceErrors(node, path, state);
   if (repeatError) {
@@ -416,6 +460,109 @@ function templateErrors(
     }
   }
   return repeatIdentityError(node, path, ownScope);
+}
+
+/** One scope per outer item preserves inner indices, including empty arrays. */
+function innerScope(node: Raw, path: string, outer: Scope, index: number): Scope {
+  const repeat = record(node.repeat)!;
+  const field = String(record(repeat.items)?.field);
+  const outerItem = outer.items[index];
+  const source = (outer.sourceItems ?? outer.items)[index]?.[field];
+  const rows = Array.isArray(source)
+    ? source.filter((row): row is Raw => record(row) !== undefined)
+    : [];
+  const fields = Object.fromEntries(
+    Object.entries(outerItem ?? {}).map(([key, value]) => [`outer.${key}`, value]),
+  );
+  return {
+    path,
+    binding: { alias: String(repeat.as), index: true, outerAlias: outer.binding.alias },
+    outerItem,
+    pathBound: "field",
+    items: derivedValidationItems(rows, repeat.derive).map((row) => ({
+      ...row,
+      ...fields,
+      $outerIndex: index,
+    })),
+    sourceItems: rows,
+    derivedFields: new Set([
+      ...Object.keys(record(repeat.derive) ?? {}),
+      ...[...outer.derivedFields].map((name) => `outer.${name}`),
+    ]),
+  };
+}
+
+/** Source validation runs even when a template has no children. */
+function innerSourceError(
+  item: Readonly<Raw>,
+  field: string,
+  at: string,
+  state: RepeatState,
+): RepeatError | undefined {
+  if (!Object.hasOwn(item, field)) {
+    return fail(at, `Unknown repeat field ${JSON.stringify(field)}`);
+  }
+  const rows = item[field];
+  if (!Array.isArray(rows)) {
+    return fail(at, "Repeat field does not resolve to an array");
+  }
+  if (rows.length > contract.limits.MAX_PROTOTYPE_INNER_REPEAT_ITEMS) {
+    return fail(at, "Repeat field resolves to more than 100 items");
+  }
+  const invalid = rows.findIndex((row) => !record(row));
+  if (invalid >= 0) {
+    return fail(at, `Repeat field item ${invalid} is not an object`);
+  }
+  state.cells += new PrototypeRepeatData({ rows }).cells("/rows");
+  if (state.cells > contract.limits.MAX_PROTOTYPE_REPEAT_PATH_CELLS) {
+    return fail(at, "Repeat path cell limit exceeded");
+  }
+  return undefined;
+}
+
+function nestedTemplateErrors(
+  node: Raw,
+  path: string,
+  state: RepeatState,
+  { outer, field }: { outer: Scope; field: string },
+): RepeatError | undefined {
+  if (!outer.items.length) {
+    const scope: Scope = {
+      path,
+      binding: {
+        alias: String(record(node.repeat)?.as),
+        index: true,
+        outerAlias: outer.binding.alias,
+      },
+      items: [],
+      derivedFields: new Set(),
+    };
+    for (const child of childrenOf(node, path)) {
+      const error = templateErrors(child.node, child.path, state, scope);
+      if (error) {
+        return error;
+      }
+    }
+  }
+  for (let index = 0; index < outer.items.length; index++) {
+    const item = (outer.sourceItems ?? outer.items)[index];
+    const sourceError = innerSourceError(item, field, `${path}.repeat.items.field`, state);
+    if (sourceError) {
+      return sourceError;
+    }
+    const scope = innerScope(node, path, outer, index);
+    for (const child of childrenOf(node, path)) {
+      const error = templateErrors(child.node, child.path, state, scope);
+      if (error) {
+        return error;
+      }
+    }
+    const identity = repeatIdentityError(node, path, scope);
+    if (identity) {
+      return identity;
+    }
+  }
+  return undefined;
 }
 
 function repeatIdentityError(
@@ -567,22 +714,44 @@ function chargeExpandedNode(
   return undefined;
 }
 
+function expansionScope(
+  node: Raw,
+  path: string,
+  { data, outer }: { data: PrototypeRepeatData; outer?: Scope },
+): Scope | undefined {
+  const field = record(record(node.repeat)?.items)?.field;
+  return typeof field === "string" && outer
+    ? innerScope(node, path, outer, 0)
+    : scopeOf(node, path, data);
+}
+
 /** Walks the expanded tree; an overflow inside a template is reported at its `repeat`. */
 function expandedErrors(
   node: Raw,
   path: string,
   budget: Budget,
-  { data, repeatPath }: { data: PrototypeRepeatData; repeatPath?: string },
+  { data, repeatPath, outer }: { data: PrototypeRepeatData; repeatPath?: string; outer?: Scope },
 ): RepeatError | undefined {
   const overflow = chargeExpandedNode(node, path, budget, repeatPath ?? path);
   if (overflow) {
     return overflow;
   }
-  const scope = scopeOf(node, path, data);
+  const scope = expansionScope(node, path, { data, outer });
   const instances = scope && node.type !== "list" ? scope.items.length : 1;
   const nestedPath = scope ? `${path}.repeat` : repeatPath;
   for (let instance = 0; instance < instances; instance++) {
-    const error = expandedChildErrors(node, path, budget, { data, repeatPath: nestedPath });
+    const single = scope
+      ? {
+          ...scope,
+          items: scope.items.slice(instance, instance + 1),
+          sourceItems: (scope.sourceItems ?? scope.items).slice(instance, instance + 1),
+        }
+      : outer;
+    const error = expandedChildErrors(node, path, budget, {
+      data,
+      repeatPath: nestedPath,
+      outer: single,
+    });
     if (error) {
       return error;
     }
@@ -595,7 +764,7 @@ function expandedChildErrors(
   node: Raw,
   path: string,
   budget: Budget,
-  options: { data: PrototypeRepeatData; repeatPath?: string },
+  options: { data: PrototypeRepeatData; repeatPath?: string; outer?: Scope },
 ): RepeatError | undefined {
   const stack = record(node.screens) !== undefined;
   if (stack) {
@@ -654,13 +823,24 @@ export function repeatErrors(
   );
 }
 
-function collectScopes(node: Raw, path: string, scopes: Scope[], data: PrototypeRepeatData): void {
-  const scope = scopeOf(node, path, data);
-  if (scope) {
-    scopes.push(scope);
-  }
-  for (const child of childrenOf(node, path)) {
-    collectScopes(child.node, child.path, scopes, data);
+function collectScopes(
+  node: Raw,
+  path: string,
+  scopes: Scope[],
+  { data, outer }: { data: PrototypeRepeatData; outer?: Scope },
+): void {
+  const field = record(record(node.repeat)?.items)?.field;
+  const own =
+    typeof field === "string" && outer
+      ? outer.items.map((_item, index) => innerScope(node, path, outer, index))
+      : [scopeOf(node, path, data)];
+  for (const scope of own) {
+    if (scope) {
+      scopes.push(scope);
+    }
+    for (const child of childrenOf(node, path)) {
+      collectScopes(child.node, child.path, scopes, { data, outer: scope ?? outer });
+    }
   }
 }
 
@@ -695,41 +875,47 @@ export function repeatKeyInstances<T extends { value: Raw; path: string }>(
   const root = record(record(spec)?.root);
   const scopes: Scope[] = [];
   if (root) {
-    collectScopes(root, "root", scopes, data);
+    collectScopes(root, "root", scopes, { data });
   }
   return located.flatMap((entry) => {
-    const scope = scopes.find((candidate) => entry.path.startsWith(`${candidate.path}.children[`));
-    // A derived key cannot be bound to its device-local string during host validation.
-    if (
-      scope &&
-      checkedKeyValues(entry.value).some(
-        (key) => typeof key === "string" && hasDerivedField(key, scope),
-      )
-    ) {
-      return [];
-    }
-    const routeOperand =
-      typeof entry.value.value === "string" &&
-      templateFieldReferences(entry.value.value, { alias: "route", index: false }).length > 0;
-    const operandTemplated =
-      routeOperand ||
-      (scope !== undefined &&
+    const matches = scopes.filter((candidate) =>
+      entry.path.startsWith(`${candidate.path}.children[`),
+    );
+    const deepest = Math.max(0, ...matches.map((candidate) => candidate.path.length));
+    const applicable = matches.filter((candidate) => candidate.path.length === deepest);
+    return (applicable.length ? applicable : [undefined]).flatMap((scope) => {
+      // A derived key cannot be bound to its device-local string during host validation.
+      if (
+        scope &&
+        checkedKeyValues(entry.value).some(
+          (key) => typeof key === "string" && hasDerivedField(key, scope),
+        )
+      ) {
+        return [];
+      }
+      const routeOperand =
         typeof entry.value.value === "string" &&
-        hasPlaceholder(entry.value.value, scope.binding));
-    const templated =
-      scope &&
-      checkedKeyValues(entry.value).some(
-        (key) => typeof key === "string" && hasPlaceholder(key, scope.binding),
-      );
-    if (!scope || !templated) {
-      return [{ located: entry, value: entry.value, operandTemplated }];
-    }
-    return scope.items.map((item, index) => ({
-      located: entry,
-      value: bindCheckedKeys(entry.value, instance(scope, item, index)),
-      item: index,
-      operandTemplated,
-    }));
+        templateFieldReferences(entry.value.value, { alias: "route", index: false }).length > 0;
+      const operandTemplated =
+        routeOperand ||
+        (scope !== undefined &&
+          typeof entry.value.value === "string" &&
+          hasPlaceholder(entry.value.value, scope.binding));
+      const templated =
+        scope &&
+        checkedKeyValues(entry.value).some(
+          (key) => typeof key === "string" && hasPlaceholder(key, scope.binding),
+        );
+      if (!scope || !templated) {
+        return [{ located: entry, value: entry.value, operandTemplated }];
+      }
+      return scope.items.map((item, index) => ({
+        located: entry,
+        value: bindCheckedKeys(entry.value, instance(scope, item, index)),
+        item: index,
+        operandTemplated,
+      }));
+    });
   });
 }
 

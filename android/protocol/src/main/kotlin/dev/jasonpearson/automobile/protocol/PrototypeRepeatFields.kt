@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.protocol
 
-import dev.jasonpearson.automobile.protocol.PrototypeRepeatKeyBindings.bound
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatTextChecks.RepeatState
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatValidator.Scope
 import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.stateKeyPattern
@@ -16,9 +15,6 @@ internal object PrototypeRepeatFields {
 
   fun JsonElement?.string(): String? = (this as? JsonPrimitive)?.takeIf { it.isString }?.content
 
-  fun hasPlaceholder(text: String, alias: String): Boolean =
-    PrototypeRepeatTemplate.segments(text, alias).any { it !is PrototypeRepeatSegment.Literal }
-
   fun unknownField(
     segments: List<PrototypeRepeatSegment>,
     path: String,
@@ -26,8 +22,12 @@ internal object PrototypeRepeatFields {
   ): PrototypeSpecError? {
     val names = segments.filterIsInstance<PrototypeRepeatSegment.Field>().map { it.name }.distinct()
     for (name in names) {
-      if (!scope.items.all { it.containsKey(name) }) {
-        return fail(path, "Unknown repeat field ${JsonPrimitive(name)}")
+      val missing =
+        if (name.startsWith("outer.") && scope.outerItem != null)
+          !scope.outerItem.containsKey(name.removePrefix("outer."))
+        else !scope.items.all { it.containsKey(name) }
+      if (missing) {
+        return fail(path, "Unknown repeat field ${JsonPrimitive(name.removePrefix("outer."))}")
       }
     }
     return null
@@ -78,7 +78,7 @@ internal object PrototypeRepeatFields {
         segments.filterIsInstance<PrototypeRepeatSegment.Field>().any {
           !PrototypeSpecContract.pathKeyPattern.matches(
             "_" +
-              PrototypeRepeatTemplate.bind("{${scope.alias}.${it.name}}", scope.alias, item, index),
+              (item[it.name] as? JsonPrimitive)?.let(PrototypeRepeatTemplate::rendered).orEmpty(),
           )
         }
       if (invalidRepeatPart || !pattern.matches(bound)) {

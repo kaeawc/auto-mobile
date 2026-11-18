@@ -165,3 +165,14 @@ Clause values read state or a literal string/number. Missing fields and type mis
 Add `reduce: {"op":"count"}` or `{"op":"sum","field":"amount"}` (also `min` or `max`)
 to produce a scalar after limiting; empty reductions return zero. Scalars support `format`.
 Collections require `prototype_derive_v1`; update a renderer that refuses this capability.
+
+### Nested repeat
+
+Use `repeat: {"items":{"field":"lines"},"as":"line"}` on a container inside an outer
+repeat's template. `lines` must be an array of object rows on every outer item; empty arrays draw
+no inner rows. Inner arrays allow at most 100 items, and repeats allow two levels total.
+Use distinct aliases, excluding `route` for the inner alias. In the inner template, `{line.sku}`
+reads the inner row, `{order.id}` reads the outer row, `{index}` is the inner index and
+`{outerIndex}` is the outer index. `{outerIndex}` is valid only in an inner template.
+State keys may combine both aliases and indices, and must name valid declared keys for every pair.
+Nested repeats require `prototype_nested_repeat_v1`; update a renderer that refuses this capability.

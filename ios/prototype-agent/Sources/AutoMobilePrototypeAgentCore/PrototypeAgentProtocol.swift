@@ -74,6 +74,7 @@ enum PrototypeAgentProtocol {
         contentTransitionCapability,
         formatCapability,
         deriveCapability,
+        nestedRepeatCapability,
         menusCapability,
         tooltipCapability,
         drawerCapability,
@@ -115,6 +116,7 @@ enum PrototypeAgentProtocol {
     static let showInPlaceCapability = "prototype_show_in_place_v1"
     static let scrollMotionCapability = "prototype_scroll_motion_v1"
     static let deriveCapability = "prototype_derive_v1"
+    static let nestedRepeatCapability = "prototype_nested_repeat_v1"
     static let formatCapability = "prototype_format_v1"
     static let pagerStateKeyCapability = "prototype_pager_state_key_v1"
     static let layoutDirectionCapability = "prototype_layout_direction_v1"

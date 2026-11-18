@@ -1,0 +1,492 @@
+[
+  {
+    "name": "data orders with empty inner array",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "column",
+        "repeat": {
+          "items": {
+            "path": "/orders"
+          },
+          "as": "order"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line"
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{outerIndex}/{index} {order.id} {order.customer}: {line.sku} x{line.qty}"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "data": {
+      "orders": [
+        {
+          "id": "A",
+          "customer": "Ada",
+          "lines": [
+            {
+              "sku": "PEN",
+              "qty": 2,
+              "price": 3
+            },
+            {
+              "sku": "INK",
+              "qty": 1,
+              "price": 5
+            }
+          ]
+        },
+        {
+          "id": "B",
+          "customer": "Bo",
+          "lines": []
+        },
+        {
+          "id": "C",
+          "customer": "Cy",
+          "lines": [
+            {
+              "sku": "PAD",
+              "qty": 3,
+              "price": 4
+            }
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "rows": [
+        {
+          "outerIndex": 0,
+          "innerIndex": 0,
+          "texts": ["0/0 A Ada: PEN x2"]
+        },
+        {
+          "outerIndex": 0,
+          "innerIndex": 1,
+          "texts": ["0/1 A Ada: INK x1"]
+        },
+        {
+          "outerIndex": 2,
+          "innerIndex": 0,
+          "texts": ["2/0 C Cy: PAD x3"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "literal outer objects",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "column",
+        "repeat": {
+          "items": [
+            {
+              "id": "A",
+              "customer": "Ada",
+              "lines": [
+                {
+                  "sku": "PEN",
+                  "qty": 2,
+                  "price": 3
+                },
+                {
+                  "sku": "INK",
+                  "qty": 1,
+                  "price": 5
+                }
+              ]
+            },
+            {
+              "id": "B",
+              "customer": "Bo",
+              "lines": []
+            },
+            {
+              "id": "C",
+              "customer": "Cy",
+              "lines": [
+                {
+                  "sku": "PAD",
+                  "qty": 3,
+                  "price": 4
+                }
+              ]
+            }
+          ],
+          "as": "order"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line"
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{outerIndex}/{index} {order.id} {order.customer}: {line.sku} x{line.qty}"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "expected": {
+      "rows": [
+        {
+          "outerIndex": 0,
+          "innerIndex": 0,
+          "texts": ["0/0 A Ada: PEN x2"]
+        },
+        {
+          "outerIndex": 0,
+          "innerIndex": 1,
+          "texts": ["0/1 A Ada: INK x1"]
+        },
+        {
+          "outerIndex": 2,
+          "innerIndex": 0,
+          "texts": ["2/0 C Cy: PAD x3"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "derived outer collection",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "column",
+        "repeat": {
+          "items": {
+            "derived": "orders"
+          },
+          "as": "order"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line"
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{outerIndex}/{index} {order.id} {order.customer}: {line.sku} x{line.qty}"
+              }
+            ]
+          }
+        ]
+      },
+      "derive": {
+        "orders": {
+          "collection": {
+            "of": {
+              "data": "/orders"
+            }
+          }
+        }
+      }
+    },
+    "data": {
+      "orders": [
+        {
+          "id": "A",
+          "customer": "Ada",
+          "lines": [
+            {
+              "sku": "PEN",
+              "qty": 2,
+              "price": 3
+            },
+            {
+              "sku": "INK",
+              "qty": 1,
+              "price": 5
+            }
+          ]
+        },
+        {
+          "id": "B",
+          "customer": "Bo",
+          "lines": []
+        },
+        {
+          "id": "C",
+          "customer": "Cy",
+          "lines": [
+            {
+              "sku": "PAD",
+              "qty": 3,
+              "price": 4
+            }
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "rows": [
+        {
+          "outerIndex": 0,
+          "innerIndex": 0,
+          "texts": ["0/0 A Ada: PEN x2"]
+        },
+        {
+          "outerIndex": 0,
+          "innerIndex": 1,
+          "texts": ["0/1 A Ada: INK x1"]
+        },
+        {
+          "outerIndex": 2,
+          "innerIndex": 0,
+          "texts": ["2/0 C Cy: PAD x3"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "combined state keys",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "column",
+        "repeat": {
+          "items": {
+            "path": "/orders"
+          },
+          "as": "order"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line"
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{outerIndex}/{index} {order.id} {order.customer}: {line.sku} x{line.qty}"
+              },
+              {
+                "type": "switch",
+                "stateKey": "selected_{order.id}_{outerIndex}_{line.sku}_{index}"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "data": {
+      "orders": [
+        {
+          "id": "A",
+          "customer": "Ada",
+          "lines": [
+            {
+              "sku": "PEN",
+              "qty": 2,
+              "price": 3
+            },
+            {
+              "sku": "INK",
+              "qty": 1,
+              "price": 5
+            }
+          ]
+        },
+        {
+          "id": "B",
+          "customer": "Bo",
+          "lines": []
+        },
+        {
+          "id": "C",
+          "customer": "Cy",
+          "lines": [
+            {
+              "sku": "PAD",
+              "qty": 3,
+              "price": 4
+            }
+          ]
+        }
+      ]
+    },
+    "state": {
+      "selected_A_0_PEN_0": true,
+      "selected_A_0_INK_1": false,
+      "selected_C_2_PAD_0": true
+    },
+    "expected": {
+      "rows": [
+        {
+          "outerIndex": 0,
+          "innerIndex": 0,
+          "texts": ["0/0 A Ada: PEN x2"]
+        },
+        {
+          "outerIndex": 0,
+          "innerIndex": 1,
+          "texts": ["0/1 A Ada: INK x1"]
+        },
+        {
+          "outerIndex": 2,
+          "innerIndex": 0,
+          "texts": ["2/0 C Cy: PAD x3"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "empty outer array",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "column",
+        "repeat": {
+          "items": {
+            "path": "/orders"
+          },
+          "as": "order"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line"
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{outerIndex}/{index} {order.id} {order.customer}: {line.sku} x{line.qty}"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "data": {
+      "orders": []
+    },
+    "expected": {
+      "rows": []
+    }
+  },
+  {
+    "name": "both aliases and indices keep row fields distinct",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "column",
+        "repeat": {
+          "items": {
+            "path": "/orders"
+          },
+          "as": "order"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line"
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{outerIndex}/{index} {order.id} {order.customer}: {line.sku} x{line.qty}"
+              },
+              {
+                "type": "text",
+                "text": "row field {line.outerIndex}; outer {outerIndex}; inner {index}"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "data": {
+      "orders": [
+        {
+          "id": "A",
+          "customer": "{line.sku}",
+          "lines": [
+            {
+              "sku": "{order.id}",
+              "qty": 2,
+              "price": 3,
+              "outerIndex": 99
+            }
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "rows": [
+        {
+          "outerIndex": 0,
+          "innerIndex": 0,
+          "texts": ["0/0 A {line.sku}: {order.id} x2", "row field 99; outer 0; inner 0"]
+        }
+      ]
+    }
+  }
+]

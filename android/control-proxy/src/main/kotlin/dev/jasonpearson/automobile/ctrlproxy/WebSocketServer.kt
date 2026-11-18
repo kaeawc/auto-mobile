@@ -437,6 +437,7 @@ class WebSocketServer(
     add("prototype_linkify_v1")
     add("prototype_format_v1")
     add("prototype_derive_v1")
+    add("prototype_nested_repeat_v1")
     // Chat-list scrolls: reverse, stickToEnd, atEndKey, onStartReached and scrollTo (#14232).
     add("prototype_chat_scroll_v1")
   }

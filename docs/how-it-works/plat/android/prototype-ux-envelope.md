@@ -142,7 +142,10 @@ is missing.
   members whose names match `^[A-Za-z_][A-Za-z0-9_]{0,63}$`; nested members stay in data and are invisible to
   templates. Optional `repeat.key` names a projected field present in every item; rendered identities use
   scalar text rendering and must be unique (7 and "7" collide), for literal lists too. Per-item field,
-  state-key, action and expanded node/image checks still run. Templates cannot nest repeats or pagers.
+  state-key, action and expanded node/image checks still run. Templates may nest one container repeat with a `{field}` source and `prototype_nested_repeat_v1`;
+  the source resolves against each outer item, with at most 100 object rows per item. Inner bindings
+  include both aliases, `{index}` (inner) and `{outerIndex}` (outer). Expanded budgets charge every pair.
+  A third level and pagers are invalid.
 - `MAX_PROTOTYPE_REPEAT_PATH_CELLS` bounds the sum across path-bound repeats in pre-order after component
   expansion (empty templates included): each instantiated object item costs its projected scalar members, or
   one if none; literal repeats are free. After the three path-source checks, exceeding it fails at

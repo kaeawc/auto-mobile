@@ -53,8 +53,14 @@ enum PrototypeLazyList {
               case let .array(items)? = spec.items.resolve(data),
               items.indices.contains(index) else { return nil }
         let fields = PrototypeDataValues.project(items[index].objectFields ?? [:]).objectFields ?? [:]
-        let bound = PrototypeRepeatInstance(alias: spec.as, item: fields, index: index).bind(raw)
-        return (fields[spec.key]?.displayString ?? "", PrototypeDataResolver.resolveRoot(bound, data: data))
+        let instance = PrototypeRepeatInstance(
+            alias: spec.as, item: fields, index: index, sourceItem: items[index].objectFields
+        )
+        let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
+        let bound = PrototypeRepeat.expand(
+            resolved, outer: instance, formatter: FoundationPrototypeValueFormatter(), environment: .device()
+        )
+        return (fields[spec.key]?.displayString ?? "", bound)
     }
 
     static func row(node: PrototypeNode, data: [String: JSONValue]?, index: Int) throws -> Row? {

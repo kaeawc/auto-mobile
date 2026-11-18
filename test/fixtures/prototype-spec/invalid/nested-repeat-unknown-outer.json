@@ -1,0 +1,73 @@
+{
+  "spec": {
+    "id": "nested",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/orders"
+        },
+        "as": "order"
+      },
+      "children": [
+        {
+          "type": "column",
+          "repeat": {
+            "items": {
+              "field": "lines"
+            },
+            "as": "line"
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "{outerIndex}/{index} {order.id} {order.customer}: {line.sku} x{line.qty}"
+            }
+          ]
+        }
+      ]
+    },
+    "data": {
+      "orders": [
+        {
+          "id": "A",
+          "customer": "Ada",
+          "lines": [
+            {
+              "sku": "PEN",
+              "qty": 2,
+              "price": 3
+            },
+            {
+              "sku": "INK",
+              "qty": 1,
+              "price": 5
+            }
+          ]
+        },
+        {
+          "id": "B",
+          "lines": []
+        },
+        {
+          "id": "C",
+          "customer": "Cy",
+          "lines": [
+            {
+              "sku": "PAD",
+              "qty": 3,
+              "price": 4
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].children[0].text",
+  "expectedMessage": "Unknown repeat field \"customer\""
+}

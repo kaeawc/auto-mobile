@@ -38,6 +38,7 @@ export const PROTOTYPE_WEB_CAPABILITIES: readonly string[] = [
   "prototype_motion_tokens_v1",
   "prototype_motion_v2",
   "prototype_motion_v3",
+  "prototype_nested_repeat_v1",
   "prototype_network_device_v1",
   "prototype_network_upload_v1",
   "prototype_network_v1",

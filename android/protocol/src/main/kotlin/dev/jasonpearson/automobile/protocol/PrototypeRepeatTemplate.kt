@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.protocol
 
-import dev.jasonpearson.automobile.protocol.PrototypeRepeatFields.hasPlaceholder
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatFields.text
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatKeyBindings.bindKeys
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatKeyBindings.checkedKeys
@@ -38,13 +37,18 @@ sealed interface PrototypeRepeatSegment {
  * other brace text, including `{state_key}`, is left for the ordinary state interpolation.
  */
 object PrototypeRepeatTemplate {
-  fun segments(text: String, alias: String): List<PrototypeRepeatSegment> {
+  fun segments(
+    text: String,
+    alias: String,
+    outerAlias: String? = null,
+  ): List<PrototypeRepeatSegment> {
     val segments = mutableListOf<PrototypeRepeatSegment>()
     val literal = StringBuilder()
     var index = 0
     while (index < text.length) {
       val close = if (text[index] == '{') text.indexOf('}', index + 1) else -1
-      val token = if (close < 0) null else token(text.substring(index + 1, close), alias)
+      val token =
+        if (close < 0) null else token(text.substring(index + 1, close), alias, outerAlias)
       if (token == null) {
         literal.append(text[index])
         index++
@@ -59,8 +63,10 @@ object PrototypeRepeatTemplate {
     return segments
   }
 
-  fun fieldReferences(text: String, alias: String): List<String> =
-    segments(text, alias).filterIsInstance<PrototypeRepeatSegment.Field>().map { it.name }
+  fun fieldReferences(text: String, alias: String, outerAlias: String? = null): List<String> =
+    segments(text, alias, outerAlias).filterIsInstance<PrototypeRepeatSegment.Field>().map {
+      it.name
+    }
 
   /**
    * A state-key field: a literal key, or key characters mixed with at least one `{index}` or
@@ -88,8 +94,13 @@ object PrototypeRepeatTemplate {
   }
 
   /** [text] with `{index}` and `{alias.field}` bound to one item; unknown fields stay literal. */
-  fun bind(text: String, alias: String, item: Map<String, JsonElement>, index: Int): String =
-    PrototypeRepeatTokens.bind(segments(text, alias), alias, item, index)
+  fun bind(
+    text: String,
+    alias: String,
+    item: Map<String, JsonElement>,
+    index: Int,
+    outerAlias: String? = null,
+  ): String = PrototypeRepeatTokens.bind(segments(text, alias, outerAlias), alias, item, index)
 
   /**
    * CtrlProxy's repeat expander uses this typed binding operation; payload is never interpolated.
@@ -99,8 +110,9 @@ object PrototypeRepeatTemplate {
     alias: String,
     item: Map<String, JsonElement>,
     index: Int,
+    outerAlias: String? = null,
   ): Map<String, EmitContextBinding> = context.mapValues { (_, binding) ->
-    bindBinding(binding, alias, item, index)
+    bindBinding(binding, alias, item, index, outerAlias)
   }
 
   /** One emit-context style binding bound to a repeat row; also the value of a data action. */
@@ -109,6 +121,7 @@ object PrototypeRepeatTemplate {
     alias: String,
     item: Map<String, JsonElement>,
     index: Int,
+    outerAlias: String? = null,
   ): EmitContextBinding =
     when {
       "item" in binding ->
@@ -121,7 +134,13 @@ object PrototypeRepeatTemplate {
           binding +
             ("state" to
               JsonPrimitive(
-                bind(binding.getValue("state").jsonPrimitive.content, alias, item, index),
+                bind(
+                  binding.getValue("state").jsonPrimitive.content,
+                  alias,
+                  item,
+                  index,
+                  outerAlias,
+                ),
               )),
         )
       else -> binding
@@ -140,9 +159,9 @@ object PrototypeRepeatTemplate {
    * [alias], or null. Only a whole `{index}` segment binds; `{alias.field}` would let item content
    * inject pointer syntax.
    */
-  fun dataPathPlaceholderMessage(path: String, alias: String): String? =
+  fun dataPathPlaceholderMessage(path: String, alias: String, outerAlias: String? = null): String? =
     when {
-      segments(path, alias).any { it is PrototypeRepeatSegment.Field } ->
+      segments(path, alias, outerAlias).any { it is PrototypeRepeatSegment.Field } ->
         "Only a whole {index} segment may be a placeholder in a data path"
       path.split('/').any { INDEX_SEGMENT in it && it != INDEX_SEGMENT } ->
         "{index} must be a whole data path segment"
@@ -697,8 +716,8 @@ internal object PrototypeBindableFields {
 /**
  * Static checks for `repeat` on an already structurally valid spec, mirroring the TypeScript
  * validator: placeholders name a field every item has, state keys bind to a literal key for every
- * item, a template holds no nested `repeat` or pager, and the expanded tree still fits the node and
- * image limits. Depth is unchanged because instances are siblings.
+ * item, a template nests at most one field-sourced `repeat` and holds no pager, and the expanded
+ * tree still fits the node and image limits. Depth is unchanged because instances are siblings.
  */
 internal object PrototypeRepeatValidator {
   data class Scope(
@@ -708,6 +727,9 @@ internal object PrototypeRepeatValidator {
     val pathBound: Boolean = false,
     val derivedNames: Set<String> = emptySet(),
     val sourceKind: String = "path",
+    val outerAlias: String? = null,
+    val outerItem: JsonObject? = null,
+    val sourceItems: List<JsonObject> = items,
   )
 
   fun validate(
@@ -716,7 +738,7 @@ internal object PrototypeRepeatValidator {
   ): PrototypeSpecError? {
     val root = (spec as? JsonObject)?.get("root") as? JsonObject ?: return null
     return templateErrors(root, "root", null, RepeatState(data))
-      ?: expandedErrors(root, "root", Budget(), null, data)
+      ?: expandedErrors(root, "root", Budget(), PrototypeRepeatTree.Expansion(data))
   }
 
   /** Every repeat container in the spec, outermost first. */
@@ -726,11 +748,18 @@ internal object PrototypeRepeatValidator {
   ): List<Scope> {
     val root = (spec as? JsonObject)?.get("root") as? JsonObject ?: return emptyList()
     val scopes = mutableListOf<Scope>()
-    fun collect(node: JsonObject, path: String) {
-      scopeOf(node, path, data)?.let(scopes::add)
-      for (child in childrenOf(node, path)) collect(child.node, child.path)
+    fun collect(node: JsonObject, path: String, outer: Scope?) {
+      val field = ((node["repeat"] as? JsonObject)?.get("items") as? JsonObject)?.text("field")
+      val own =
+        if (field != null && outer != null)
+          outer.items.indices.map { PrototypeNestedRepeat.innerScope(node, path, outer, it) }
+        else listOf(scopeOf(node, path, data))
+      for (scope in own) {
+        if (scope != null) scopes.add(scope)
+        for (child in childrenOf(node, path)) collect(child.node, child.path, scope ?: outer)
+      }
     }
-    collect(root, "root")
+    collect(root, "root", null)
     return scopes
   }
 
@@ -744,25 +773,46 @@ internal object PrototypeRepeatValidator {
     value: JsonObject,
     path: String,
   ): List<Pair<JsonObject, Int?>> {
-    val scope = scopes.firstOrNull { path.startsWith("${it.path}.children[") }
-    if (
-      scope != null &&
-        checkedKeys(value).any { key ->
-          PrototypeRepeatTemplate.fieldReferences(key, scope.alias).any { it in scope.derivedNames }
-        }
-    )
-      return emptyList()
-    if (scope == null || checkedKeys(value).none { hasPlaceholder(it, scope.alias) }) {
-      return listOf(value to null)
-    }
-    return scope.items.mapIndexed { index, item -> bindKeys(value, scope, item, index) to index }
+    return applicableScopes(scopes, path)
+      .ifEmpty { listOf(null) }
+      .flatMap { scope ->
+        if (
+          scope != null &&
+            checkedKeys(value).any { key ->
+              PrototypeRepeatTemplate.fieldReferences(key, scope.alias, scope.outerAlias).any {
+                it in scope.derivedNames
+              }
+            }
+        )
+          emptyList()
+        else if (
+          scope == null ||
+            checkedKeys(value).none {
+              PrototypeRepeatTemplate.segments(it, scope.alias, scope.outerAlias).any { segment ->
+                segment !is PrototypeRepeatSegment.Literal
+              }
+            }
+        )
+          listOf(value to null)
+        else scope.items.mapIndexed { index, item -> bindKeys(value, scope, item, index) to index }
+      }
+  }
+
+  fun applicableScopes(scopes: List<Scope>, path: String): List<Scope> {
+    val matches = scopes.filter { path.startsWith("${it.path}.children[") }
+    val deepest = matches.maxOfOrNull { it.path.length }
+    return matches.filter { it.path.length == deepest }
   }
 
   /**
    * True when the entry's `value` operand holds a repeat placeholder, so its type is not static.
    */
   fun operandTemplated(scopes: List<Scope>, value: JsonObject, path: String): Boolean {
-    val scope = scopes.firstOrNull { path.startsWith("${it.path}.children[") } ?: return false
-    return value.text("value")?.let { hasPlaceholder(it, scope.alias) } == true
+    val scope = applicableScopes(scopes, path).firstOrNull() ?: return false
+    return value.text("value")?.let { text ->
+      PrototypeRepeatTemplate.segments(text, scope.alias, scope.outerAlias).any {
+        it !is PrototypeRepeatSegment.Literal
+      }
+    } == true
   }
 }

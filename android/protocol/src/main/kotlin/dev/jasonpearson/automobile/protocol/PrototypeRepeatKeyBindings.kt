@@ -32,7 +32,11 @@ internal object PrototypeRepeatKeyBindings {
   fun JsonObject.bound(field: String, scope: Scope, item: JsonObject, index: Int): JsonObject {
     val text = text(field) ?: return this
     return JsonObject(
-      this + (field to JsonPrimitive(PrototypeRepeatTemplate.bind(text, scope.alias, item, index))),
+      this +
+        (field to
+          JsonPrimitive(
+            PrototypeRepeatTemplate.bind(text, scope.alias, item, index, scope.outerAlias),
+          )),
     )
   }
 
@@ -64,7 +68,9 @@ internal object PrototypeRepeatKeyBindings {
               JsonArray(
                 keys.map { key ->
                   key.string()?.let {
-                    JsonPrimitive(PrototypeRepeatTemplate.bind(it, scope.alias, item, index))
+                    JsonPrimitive(
+                      PrototypeRepeatTemplate.bind(it, scope.alias, item, index, scope.outerAlias),
+                    )
                   } ?: key
                 },
               )),
@@ -79,7 +85,9 @@ internal object PrototypeRepeatKeyBindings {
       if (kind == PrototypeBindableKind.KEY)
         field.string()?.let {
           replacements[path] =
-            JsonPrimitive(PrototypeRepeatTemplate.bind(it, scope.alias, item, index))
+            JsonPrimitive(
+              PrototypeRepeatTemplate.bind(it, scope.alias, item, index, scope.outerAlias),
+            )
         }
       null
     }

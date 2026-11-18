@@ -99,6 +99,7 @@ class CommandAdvertisementTest {
       "prototype_linkify_v1",
       "prototype_format_v1",
       "prototype_derive_v1",
+      "prototype_nested_repeat_v1",
       "prototype_chat_scroll_v1",
       "prototype_adaptive_v1",
       "prototype_drawer_v1",
@@ -217,6 +218,7 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_linkify_v1"))
     assertTrue(commands.contains("prototype_format_v1"))
     assertTrue(commands.contains("prototype_derive_v1"))
+    assertTrue(commands.contains("prototype_nested_repeat_v1"))
     assertTrue(commands.contains("prototype_chat_scroll_v1"))
     assertTrue(commands.contains("prototype_emit_context_v1"))
     assertTrue(commands.contains("prototype_checks_v1"))

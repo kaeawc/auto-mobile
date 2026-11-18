@@ -67,9 +67,12 @@ internal object PrototypeDataValues {
       value != JsonNull &&
       (value.isString || value.booleanOrNull != null || value.doubleOrNull?.isFinite() == true)
 
-  fun project(item: JsonObject): JsonObject =
+  fun project(item: JsonObject, includeArrays: Boolean = false): JsonObject =
     JsonObject(
-      item.filter { (key, value) -> PrototypeRepeatTemplate.isFieldName(key) && isScalar(value) },
+      item.filter { (key, value) ->
+        PrototypeRepeatTemplate.isFieldName(key) &&
+          (isScalar(value) || (includeArrays && value is JsonArray))
+      },
     )
 
   fun rendered(value: JsonElement?): String =
@@ -195,12 +198,18 @@ internal class PrototypeRepeatData(
             PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS,
           ),
         )
-        .map(PrototypeDataValues::project)
+        .map { PrototypeDataValues.project(it) }
     }
 
   fun array(pointer: String): JsonArray =
     arrays.getOrPut(pointer) {
-      JsonArray(items(pointer).take(PrototypeSpecValidator.maxRepeatItems))
+      JsonArray(
+        source(pointer)
+          .orEmpty()
+          .filterIsInstance<JsonObject>()
+          .take(PrototypeSpecValidator.maxRepeatItems)
+          .map { PrototypeDataValues.project(it, includeArrays = true) },
+      )
     }
 }
 

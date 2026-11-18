@@ -1,8 +1,9 @@
+import { projectPrototypeDerivedItem, type PrototypeFormatEnvironment } from "../prototypeFormat";
 import { derivePrototypeValues } from "../prototypeDerive";
 import type { PrototypeDerivedEntry } from "../prototypeFormatSchema";
 import { prototypeRenderLimits } from "../prototypeRenderContract.generated";
 import { resolvePrototypeDataPointer } from "../prototypeData";
-import { record, type Raw } from "../prototypeTemplate";
+import { record, type Raw, type Instance } from "../prototypeTemplate";
 
 /** Repeat expansion is bounded so one spec cannot produce an unbounded page. */
 export const MAX_WEB_REPEAT_ITEMS = 200;
@@ -48,6 +49,7 @@ interface WebRepeatScope {
   spec: Raw;
   data: unknown;
   condition: { state: Raw };
+  instances?: readonly Instance[];
 }
 
 /** Resolve top-level collection bindings before the existing repeat row projection. */
@@ -57,5 +59,48 @@ export function webRepeatRowsForScope(node: Raw, scope: WebRepeatScope): unknown
     scope.data,
     scope.condition.state,
   );
-  return webRepeatRows(record(node.repeat) ?? {}, scope.data, webRepeatLimit(node), values);
+  const repeat = record(node.repeat) ?? {};
+  const field = record(repeat.items)?.field;
+  const nested = typeof field === "string";
+  const limit = nested
+    ? prototypeRenderLimits.MAX_PROTOTYPE_INNER_REPEAT_ITEMS
+    : webRepeatLimit(node);
+  return webRepeatRows(
+    nested ? { ...repeat, items: scope.instances?.at(-1)?.values[field] } : repeat,
+    scope.data,
+    limit,
+    values,
+  );
+}
+
+/** Bind one row with its enclosing item, retaining both aliases and both indices. */
+export function webRepeatInstances(
+  node: Raw,
+  scope: WebRepeatScope & { format: PrototypeFormatEnvironment },
+): Instance[] {
+  const repeat = record(node.repeat) ?? {};
+  const alias = typeof repeat.as === "string" ? repeat.as : "item";
+  const derive = record(repeat.derive) as
+    | Parameters<typeof projectPrototypeDerivedItem>[0]
+    | undefined;
+  const outer = scope.instances?.at(-1);
+  const outerFields = outer
+    ? {
+        ...Object.fromEntries(
+          Object.entries(outer.values).map(([name, value]) => [`outer.${name}`, value]),
+        ),
+        $outerIndex: outer.index,
+      }
+    : {};
+  return webRepeatRowsForScope(node, scope).map((item, index) => {
+    const values = record(item) ?? {};
+    return {
+      binding: { alias, index: true, ...(outer ? { outerAlias: outer.binding.alias } : {}) },
+      values: {
+        ...(derive ? projectPrototypeDerivedItem(derive, values, scope.format) : values),
+        ...outerFields,
+      },
+      index,
+    };
+  });
 }

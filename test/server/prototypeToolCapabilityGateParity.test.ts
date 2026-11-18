@@ -99,6 +99,21 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
   },
   prototype_semantics_v1: fixture({ ...label, semantics: { heading: true } }),
+  prototype_nested_repeat_v1: {
+    ...fixture({
+      type: "column",
+      repeat: { items: [{ lines: [{ sku: "a" }] }], as: "order" },
+      children: [
+        {
+          type: "column",
+          repeat: { items: { field: "lines" }, as: "line" },
+          children: [{ type: "text", text: "{line.sku}" }],
+        },
+      ],
+      id: "label",
+    }),
+    with: ["prototype_data_model_v1"],
+  },
   prototype_derive_v1: {
     minimalSpec: { ...base, derive: { results: { collection: { of: { data: "/rows" } } } } },
     ops: [],

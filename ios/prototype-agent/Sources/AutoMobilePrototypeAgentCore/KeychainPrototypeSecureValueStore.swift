@@ -53,7 +53,6 @@
             var list = query(id: id)
             list[kSecMatchLimit as String] = kSecMatchLimitAll
             list[kSecReturnAttributes as String] = true
-            list[kSecReturnData as String] = true
             let (status, result) = client.copyMatching(list)
             if status == errSecItemNotFound { return ([:], []) }
             // A failed enumeration cannot identify accounts safely. Preserve the items for a later read.
@@ -72,10 +71,8 @@
                     if [errSecAuthFailed, errSecDecode, errSecInteractionNotAllowed].contains(readStatus) {
                         throw Failure(status: readStatus)
                     }
-                    guard readStatus == errSecSuccess else {
-                        invalidated.insert(key)
-                        continue
-                    }
+                    // An unclassified read error says nothing about the stored value: keep the item.
+                    guard readStatus == errSecSuccess else { throw Failure(status: readStatus) }
                     data = value as? Data
                 }
                 if let data, let entry = try? JSONDecoder().decode(PrototypeSecureEntry.self, from: data) {

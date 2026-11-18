@@ -88,7 +88,8 @@ public final class PrototypePlatformRegistry {
     private var observers = 0
     private var embeddedRegistry: PrototypePlatformRegistry?
     private let parent: PrototypePlatformRegistry?
-    private let presentationModules: [any PrototypePlatformModule]
+    // Only presentation registries own these modules, even when the list is empty.
+    private let presentationModules: [any PrototypePlatformModule]?
 
     func retainSources() {
         observers += 1
@@ -100,7 +101,7 @@ public final class PrototypePlatformRegistry {
         observers -= 1
         if observers == 0 {
             if parent == nil { modules.values.forEach { $0.stop() } }
-            else { presentationModules.forEach { $0.stop() } }
+            else { presentationModules?.forEach { $0.stop() } }
         }
         // Global status streams outlive any one presentation; scoped streams stop independently.
         parent?.releaseSources()
@@ -117,13 +118,13 @@ public final class PrototypePlatformRegistry {
         }
         self.modules = accepted
         parent = nil
-        presentationModules = []
+        presentationModules = nil
     }
 
     private init(
         modules: [String: any PrototypePlatformModule],
         parent: PrototypePlatformRegistry,
-        presentationModules: [any PrototypePlatformModule]
+        presentationModules: [any PrototypePlatformModule]? = nil
     ) {
         self.modules = modules
         self.parent = parent
@@ -133,7 +134,7 @@ public final class PrototypePlatformRegistry {
     /// A model owns this registry's snapshots and streams for its lifetime. Read-only device status
     /// remains global; authored sensor/location configuration and pending calls are presentation-local.
     func forPresentation() -> PrototypePlatformRegistry {
-        if let parent { return parent.forPresentation() }
+        if presentationModules != nil, let parent { return parent.forPresentation() }
         var scoped = modules
         var owned: [any PrototypePlatformModule] = []
         if let sensors = modules["sensors"] as? PrototypeSensorsModule {
@@ -152,7 +153,7 @@ public final class PrototypePlatformRegistry {
     private init(acceptedModules: [String: any PrototypePlatformModule]) {
         modules = acceptedModules
         parent = nil
-        presentationModules = []
+        presentationModules = nil
     }
 
     public func configure(locationBlock: JSONValue?) {
@@ -234,6 +235,14 @@ public final class PrototypePlatformRegistry {
 
     var secureStorage: (any PrototypeSecureValueStore)? {
         (modules["secureStorage"] as? PrototypeSecureStorageModule)?.store
+    }
+
+    func withSecureStorage(_ store: any PrototypeSecureValueStore) -> PrototypePlatformRegistry {
+        if presentationModules != nil, let parent { return parent.withSecureStorage(store) }
+        let module = PrototypeSecureStorageModule(store: store)
+        var scoped = modules
+        scoped[module.name] = module
+        return PrototypePlatformRegistry(modules: scoped, parent: self)
     }
 
     /// Embedded presentations cannot access the host application's Keychain through this runtime.

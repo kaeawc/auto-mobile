@@ -131,16 +131,19 @@ final class KeychainPrototypeSecureValueStoreTests: XCTestCase {
         XCTAssertEqual(result.invalidated, ["state:token"])
     }
 
-    func testUnreadablePresentItemIsInvalidatedExceptTemporarySecurityFailures() throws {
+    func testPerAccountReadErrorsPropagateAndPreserveTheItem() throws {
         let client = FakeKeychainClient()
         client.items["dev.automobile.prototype.a"] = ["state:token": [kSecAttrAccount as String: "state:token"]]
         let store = KeychainPrototypeSecureValueStore(client: client)
-        client.accountStatus = errSecInternalComponent
-        XCTAssertEqual(try store.readAll(id: "a").invalidated, ["state:token"])
-        for status in [errSecAuthFailed, errSecDecode, errSecInteractionNotAllowed] {
+        for status in [errSecInternalComponent, errSecAuthFailed, errSecDecode, errSecInteractionNotAllowed] {
             client.accountStatus = status
-            XCTAssertThrowsError(try store.readAll(id: "a"))
+            XCTAssertThrowsError(try store.readAll(id: "a")) { error in
+                XCTAssertEqual((error as? KeychainPrototypeSecureValueStore.Failure)?.status, status)
+            }
         }
+        XCTAssertNotNil(client.items["dev.automobile.prototype.a"]?["state:token"])
+        XCTAssertTrue(client.deletions.isEmpty)
+
         client.accountStatus = errSecItemNotFound
         let result = try store.readAll(id: "a")
         XCTAssertTrue(result.entries.isEmpty)

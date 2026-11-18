@@ -5,6 +5,7 @@ final class FakeSecureValueStore: PrototypeSecureValueStore {
     var records: [String: [String: PrototypeSecureEntry]] = [:]
     var invalidated: Set<String> = []
     var writeFailure = false
+    var deleteAllFailure = false
     var reads: [String] = []
     var writes: [String] = []
     var deletes: [String] = []
@@ -28,6 +29,7 @@ final class FakeSecureValueStore: PrototypeSecureValueStore {
     }
 
     func deleteAll(id: String) throws -> Int {
+        if deleteAllFailure { throw Failure() }
         let count = Set(records[id]?.keys ?? [String: PrototypeSecureEntry]().keys).union(invalidated).count
         records[id] = nil
         invalidated = []

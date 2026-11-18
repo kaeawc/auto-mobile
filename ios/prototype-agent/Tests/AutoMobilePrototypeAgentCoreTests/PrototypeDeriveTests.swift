@@ -34,7 +34,7 @@ final class PrototypeDeriveTests: XCTestCase {
 
     func testAllSharedCollectionFixtures() throws {
         let cases = try fixtures()
-        XCTAssertEqual(cases.count, 35)
+        XCTAssertEqual(cases.count, 37)
         XCTAssertEqual(cases.filter { $0.error != nil }.count, 12)
         for fixture in cases where fixture.error == nil {
             let entries = try PrototypeDerivedCollections.entries(fixture.spec?.objectFields?["derive"])

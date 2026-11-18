@@ -291,6 +291,41 @@ class PrototypeRealtimeRuntimeTest {
   }
 
   @Test
+  fun `a refused platform-on frame handler leaves later frames flowing`() = runTest {
+    val base = spec()
+    val handled =
+      base.copy(
+        state = base.state.orEmpty() + ("last" to PrototypeScalar.Text("")),
+        platform =
+          PrototypePlatformHandlers(
+            mapOf(
+              "realtime.frame" to
+                listOf(
+                  PrototypeSetStateAction(
+                    "last",
+                    PrototypeScalar.Binding(obj("event" to JsonPrimitive("/data/text"))),
+                  ),
+                ),
+            ),
+          ),
+      )
+    val transport = FakeTransport()
+    val runtime = runtime(transport, handled)
+    runtime.shown()
+    runCurrent()
+    transport.last.listener.onOpen(null)
+    transport.last.listener.onFrame("""{"id":1}""", null, null)
+    transport.last.listener.onFrame("""{"id":2,"text":"after"}""", null, null)
+    advanceTimeBy(PrototypeChannelLimits.flushMs + 1L)
+    runCurrent()
+
+    assertEquals(1, warnings.size)
+    assertTrue(warnings.single(), warnings.single().startsWith("Refused realtime.frame handler"))
+    assertEquals(PrototypeScalar.Text("after"), runtime.current.state["last"])
+    assertEquals(2, runtime.chat()?.get("framesIn")?.jsonPrimitive?.content?.toInt())
+  }
+
+  @Test
   fun `removing the last channel drops its platform state and closes it`() = runTest {
     val transport = FakeTransport()
     val runtime = runtime(transport)

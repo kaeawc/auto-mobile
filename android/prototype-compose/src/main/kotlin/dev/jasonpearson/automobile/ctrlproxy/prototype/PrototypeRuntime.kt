@@ -408,7 +408,13 @@ class PrototypeRuntime(
       }
 
       override suspend fun event(name: String, data: JsonObject) = exclusively {
-        if (current.active) deliverPlatformEvent(name, data)
+        if (!current.active) return@exclusively
+        try {
+          deliverPlatformEvent(name, data)
+        } catch (refused: IllegalArgumentException) {
+          // A refused `platform.on` write changes nothing; the channel keeps delivering frames.
+          warn("Refused $name handler: ${refused.message}")
+        }
       }
 
       override suspend fun run(channel: String, actions: JsonArray, event: JsonElement) =

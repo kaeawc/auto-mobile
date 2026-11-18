@@ -40,6 +40,7 @@ export function lazyDisposableAppAttach(deps: PrototypeToolDependencies) {
     return attachMatch(device, args, registry);
   };
   return Object.assign(attach, {
+    forget: async (deviceId: string, appId: string) => attacher?.forget(deviceId, appId),
     release: async (deviceId: string) => attacher?.release(deviceId),
     dispose: async () => {
       disposed = true;

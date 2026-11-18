@@ -100,7 +100,11 @@ data class PrototypeStorageReport(
   val keys: List<PrototypeStorageKeyBytes>,
   val totalBytes: Int,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val skippedKeys: List<String>? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val secure: List<PrototypeStorageSecureMetadata>? = null,
 )
+
+@Serializable
+data class PrototypeStorageSecureMetadata(val key: String, val present: Boolean, val bytes: Int)
 
 @Serializable data class PrototypeStorageKeyBytes(val key: String, val bytes: Int)
 

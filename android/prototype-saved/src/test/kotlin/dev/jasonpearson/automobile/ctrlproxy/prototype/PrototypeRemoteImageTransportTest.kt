@@ -357,20 +357,52 @@ class PrototypeRemoteImageTransportTest {
   }
 
   @Test
-  fun `debug allows only literal HTTP loopback including redirects and never HTTPS loopback`() =
+  fun `debug allows literal HTTP loopback origin redirects and never HTTPS loopback`() =
     runBlocking {
       org.junit.Assume.assumeTrue(BuildConfig.DEBUG)
       val sent = mutableListOf<Request>()
       val transport = client {
         sent += it
-        if (it.url.isHttps) response(it, 302, "http://localhost:8080/a") else response(it)
+        if (it.url.encodedPath == "/start") response(it, 302, "http://localhost:8080/a")
+        else response(it)
       }
-      assertArrayEquals(synthesizedTransportPng(), transport.download("https://images.example/a"))
-      assertEquals(listOf("images.example", "localhost"), sent.map { it.url.host })
+      assertArrayEquals(
+        synthesizedTransportPng(),
+        transport.download("http://127.0.0.1:8080/start"),
+      )
+      assertEquals(listOf("127.0.0.1", "localhost"), sent.map { it.url.host })
       refused("Blocked destination hostname") { transport.download("https://localhost:8080/a") }
       refused("Remote image unavailable") { transport.download("http://127.1:8080/a") }
       assertEquals(2, sent.size)
     }
+
+  @Test
+  fun `public origin cannot redirect to debug loopback`() = runBlocking {
+    val sent = mutableListOf<Request>()
+    val transport = client {
+      sent += it
+      response(it, 302, "http://localhost:8080/a")
+    }
+    refused("Remote image unavailable") { transport.download("https://images.example/a") }
+    assertEquals(listOf("https://images.example/a"), sent.map { it.url.toString() })
+  }
+
+  @Test
+  fun `query only redirect preserves the image path`() = runBlocking {
+    val sent = mutableListOf<Request>()
+    val transport = client {
+      sent += it
+      if (sent.size == 1) response(it, 302, "?token=abc") else response(it)
+    }
+    assertArrayEquals(
+      synthesizedTransportPng(),
+      transport.download("https://images.example/photo.png"),
+    )
+    assertEquals(
+      listOf("https://images.example/photo.png", "https://images.example/photo.png?token=abc"),
+      sent.map { it.url.toString() },
+    )
+  }
 
   @Test
   fun `image transport refuses nonpublic and numeric HTTPS destinations with specific errors`() =

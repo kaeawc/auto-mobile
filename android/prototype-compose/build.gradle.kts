@@ -41,6 +41,7 @@ dependencies {
   // PrototypeHttpRequest.body exposes JsonElement, so host transports compile against it.
   api(libs.kotlinx.serialization)
   implementation(libs.androidx.core)
+  implementation(libs.androidx.exifinterface)
   implementation(libs.androidx.window)
   implementation(libs.androidx.activity.compose)
   implementation(libs.compose.ui.util)

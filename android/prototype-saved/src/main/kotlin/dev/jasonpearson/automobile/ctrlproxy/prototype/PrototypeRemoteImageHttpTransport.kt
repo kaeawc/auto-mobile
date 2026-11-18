@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import dev.jasonpearson.automobile.protocol.PrototypeRemoteImages
 import dev.jasonpearson.automobile.prototype.saved.BuildConfig
 import java.io.IOException
+import java.net.URI
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import okhttp3.HttpUrl
@@ -24,7 +25,8 @@ internal class PrototypeRemoteImageHttpTransport(
   private val localService = service(localPolicy)
 
   override suspend fun download(url: String): ByteArray {
-    var destination = checkedUrl(url)
+    var destination = checkedUrl(url, allowLoopback)
+    val requestAllowsLoopback = allowLoopback && !destination.isHttps
     for (hop in 0..MAX_REDIRECTS) {
       val policy = if (destination.isHttps) publicPolicy else localPolicy
       policy.check(destination.host, destination.port, emptyList()).requireAllowed()
@@ -40,20 +42,30 @@ internal class PrototypeRemoteImageHttpTransport(
       response.body()?.close()
       response.errorBody()?.close()
       if (location == null || hop == MAX_REDIRECTS) throw IOException("Remote image unavailable")
-      destination = redirect(destination, location)
+      destination = redirect(destination, location, requestAllowsLoopback)
     }
     throw IOException("Remote image unavailable")
   }
 
-  private fun redirect(destination: HttpUrl, location: String): HttpUrl =
+  private fun redirect(
+    destination: HttpUrl,
+    location: String,
+    requestAllowsLoopback: Boolean,
+  ): HttpUrl =
     try {
       // Validate the spelling before OkHttp canonicalizes numeric hosts into loopback literals.
-      checkedUrl(destination.toUri().resolve(location).toString())
+      when {
+        URI.create(location).isAbsolute -> checkedUrl(location, requestAllowsLoopback)
+        location.startsWith("//") ->
+          checkedUrl("${destination.scheme}:$location", requestAllowsLoopback)
+      }
+      val resolved = destination.resolve(location) ?: throw IOException("Remote image unavailable")
+      checkedUrl(resolved.toString(), requestAllowsLoopback)
     } catch (error: IllegalArgumentException) {
       throw IOException("Remote image unavailable", error)
     }
 
-  private fun checkedUrl(url: String): HttpUrl {
+  private fun checkedUrl(url: String, allowLoopback: Boolean): HttpUrl {
     if (!prototypeRemoteImageUrlAllowed(url, allowLoopback))
       throw IOException("Remote image unavailable")
     return url.toHttpUrlOrNull() ?: throw IOException("Remote image unavailable")

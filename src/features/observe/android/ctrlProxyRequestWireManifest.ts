@@ -22,6 +22,13 @@ export const CTRL_PROXY_REQUEST_FIELDS: {
     packageName: "required",
     fileName: "required",
   },
+  simulate_prototype_platform: {
+    type: "required",
+    requestId: "required",
+    id: "required",
+    event: "required",
+    data: "required",
+  },
   advance_prototype_clock: {
     type: "required",
     requestId: "required",

@@ -33,24 +33,30 @@ records `declined`. Simulated `entitlementsChanged` events work on a subscriptio
 `refund` events remove an entitlement and also apply to a non-consumable. The module raises
 `commerce.entitlementsChanged` only when the entitlements actually change.
 
-**Secure storage (#14321).** The `storage.secure` field lists up to 8 `state:` keys the runtime keeps in the Android
-Keystore or the iOS Keychain instead of plaintext storage. Each must be a declared state key holding a string,
-and it may not also appear in `storage.keys`. The list needs the `secureStorage` module
-(`prototype_platform_secureStorage_v1`) in `requires.platform`. Its one read-only key,
-`/platform/secureStorage/locked`, is true while a biometric-bound key is still locked.
-A `secureAuth: {"state:<key>": "biometric"}` entry binds a secure key to a `biometric.authenticate` and needs `biometric`
-in `requires.platform`. A secure key never leaves the device through an emit `context`: the validators refuse
-`{state: <secure key>}` there. A `request` may send one only with `allowSecureInRequest: true`. Otherwise the
-validators refuse a `{state: <secure key>}` binding in a header, query value or body (whole, form entry or
-multipart value), or a `{<secure key>}` placeholder in the URL, a header or a query value.
+**Secure storage (#14321).** `storage.secure` lists up to eight declared string `state:` keys,
+separate from `storage.keys`. It requires `secureStorage` in `requires.platform` and
+`prototype_platform_secureStorage_v1`. ProtoViewer, saved-prototype Activities and the disposable
+app shell register the module. CtrlProxy's injected overlay and unsupported embedded hosts refuse it.
+The module has no calls; `/platform/secureStorage/locked` is false. Biometric-bound `secureAuth`
+keys remain live-only and are neither persisted nor restored by this runtime.
 
-On a show, `restorePrototypeStorage` and its Kotlin and Swift twins apply the secure store's values under the
-same version and listing rules. A value restores only into a listed secure key, as a string of at most
-`MAX_PROTOTYPE_SECURE_VALUE_BYTES` (4096) UTF-8 bytes into a string state key, and a plaintext stored copy
-never fills one. The runtime does not read a biometric-bound key that holds a value: its state holds `""` and
-`locked` reports it until `biometric.authenticate` unlocks it. The runtime drops a key the store reports
-invalidated (biometric re-enrolment revoked its hardware key), and the spec's value stands. No production
-runtime advertises the module yet.
+Each value is limited to 4096 UTF-8 bytes and excluded from the plaintext document and its byte
+budget. An app-private file under `prototype-storage/secure/` holds a Base64-encoded AES-GCM
+ciphertext with a fresh random 12-byte IV. The 256-bit AES key stays in AndroidKeyStore under
+`dev.automobile.prototype.<slug>-<full-id-sha256>`, without user authentication. The full id also
+authenticates the ciphertext; ProtoViewer uses its library entry id to isolate duplicate imports.
+Writes sync a temporary file before atomic replacement. Missing or unusable keys and corrupt
+ciphertext leave values absent and produce a fixed warning without payloads or exception details.
+
+The [storage precedence and clearing rules](prototype-ux-storage.md) apply to both stores.
+Reset, `clearStorage` and deletion remove the secure file and its Keystore alias; dismissal retains
+them. Status, inspect, patch conflicts and events omit secure state values, including `change`
+payload values. Storage reports add optional `secure: [{key, present, bytes}]` metadata for
+persisted values. Neither values nor ciphertext appear in reports or runtime warnings.
+
+Secure keys cannot leave through an emit `context`. Requests may reference them only with
+`allowSecureInRequest: true`; otherwise validation refuses state bindings and text placeholders
+in URLs, headers, query values and bodies. See [request bindings](prototype-ux-request.md).
 
 **Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
 event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
@@ -74,9 +80,10 @@ Steps require `NSMotionUsageDescription`, available step counting and motion aut
 denied nor restricted. The `CMPedometer` source counts steps from each subscription's start date; the first callback
 already includes steps since that date, and restarting a subscription resets the baseline. Orientation uses
 magnetic north when available, omitting an invalid heading. CoreMotion acceleration is converted from g to m/s²
-before shake detection. iOS never subscribes to or publishes light readings. Hiding the prototype or changing
-its sensor block stops all sources, clears sensor state and resets filters and the shake cooldown. Callbacks
-from a stopped subscription cannot publish state or events into a later session.
+before shake detection. iOS never subscribes to or publishes light readings. Each iOS presentation owns its
+sensor state and subscriptions; motion and proximity hardware are shared until their final user stops.
+Hiding, replacing or re-showing it, even with an identical block or reset, stops its subscriptions and clears
+state, filters and the shake cooldown. Stopped subscriptions cannot publish into a later session.
 
 **Android biometric runtime support.** The [biometric module](prototype-ux-platform-device.md) is
 registered by Android Activity hosts (SavedPrototypeActivity, ProtoViewer and disposable apps). CtrlProxy overlays omit the capability and
@@ -128,6 +135,28 @@ of `granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted` or `
 `permissions.changed` carries `{name, state}` when a request changes authorization. It also fires when
 the user changes a permission in Settings and the app resumes. A call that needs a permission the user denied fails with `permission_denied` and never prompts implicitly. Overlay
 runtimes do not advertise the module, since a grant there would go to CtrlProxy or the borrowed host app.
+
+iOS standalone hosts and ProtoViewer register `permissions` for `notifications`; borrowed-app sessions
+do not expose the module. Other canonical names return `unavailable`.
+The first status read establishes `/platform/permissions/notifications` asynchronously without prompting.
+Requests and foreground Settings re-reads publish only changed states. A request prompts with alert,
+sound and badge options only while authorization is `notDetermined`, then re-reads notification settings
+for its result. iOS never re-prompts after a determination. Outside an app bundle with a bundle
+identifier, the source returns `unavailable` without accessing UserNotifications. No Info.plist key is
+required. One request may be in flight per module; a second returns `too_many_in_flight`. Request
+cancellation drops the late result while foreground observation stays active. The registry stops
+observation when its final observer releases it. The iOS driver uses the same
+platform-call deadline as other iOS modules. This module does not publish
+`/platform/notifications/authorization`; `provisional` authorization reads as `limited` here.
+
+| iOS `UNAuthorizationStatus` | State           |
+| --------------------------- | --------------- |
+| `notDetermined`             | `notDetermined` |
+| `denied`                    | `denied`        |
+| `authorized`                | `granted`       |
+| `provisional`               | `limited`       |
+| `ephemeral`                 | `granted`       |
+| Unknown future value        | `unavailable`   |
 
 Android Activity hosts register `permissions` for `notifications`: ProtoViewer, disposable apps and
 CtrlProxy's SavedPrototypeActivity advertise the capability. A plain Activity without an

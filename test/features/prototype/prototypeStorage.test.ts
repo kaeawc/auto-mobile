@@ -208,6 +208,22 @@ describe("device storage report", () => {
     expect(parsePrototypeStorageReport(withStack)).toEqual(withStack);
     expect(parsePrototypeStorageReport({ ...report, skippedKeys: ["stack:"] })).toBeUndefined();
   });
+  test("secure reports keep only presence and byte metadata", () => {
+    const secure = [{ key: "state:token", present: true, bytes: 19 }];
+    expect(parsePrototypeStorageReport({ ...report, secure })).toEqual({ ...report, secure });
+    const parsed = parsePrototypeStorageReport({
+      ...report,
+      secure: [{ ...secure[0], value: "private-token-14321" }],
+    });
+    expect(parsed).toEqual({ ...report, secure });
+    expect(JSON.stringify(parsed)).not.toContain("private-token-14321");
+    expect(
+      parsePrototypeStorageReport({ ...report, secure: [{ ...secure[0], bytes: -1 }] }),
+    ).toBeUndefined();
+    expect(
+      parsePrototypeStorageReport({ ...report, secure: [{ ...secure[0], present: "true" }] }),
+    ).toBeUndefined();
+  });
   test("stack report keys respect the storage key length limit", () => {
     const key = `stack:${"n".repeat(255)}`;
     const valid = { ...report, keys: [{ key, bytes: 1 }], skippedKeys: [key] };

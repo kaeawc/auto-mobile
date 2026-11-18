@@ -26,6 +26,17 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         )
     }
 
+    func testPermissionsIsAdvertisedOnlyThroughItsRegisteredModuleAtMinimumOS() {
+        struct MinimumOS: OSVersionProvider { let majorVersion = 17 }
+        let capability = "prototype_platform_permissions_v1"
+        XCTAssertFalse(PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS()).contains(capability))
+        XCTAssertFalse(AutoMobilePrototypeCapabilities.supported.contains(capability))
+        XCTAssertTrue(
+            PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS(), registryCapabilities: [capability])
+                .contains(capability)
+        )
+    }
+
     func testLayoutDirectionIsAdvertisedAtTheMinimumOS() {
         struct OS: OSVersionProvider { let majorVersion = 17 }
         XCTAssertTrue(PrototypeAgentProtocol.advertisedCapabilities(os: OS()).contains("prototype_layout_direction_v1"))
@@ -97,7 +108,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_audioRecorder_v1",
             // Contract only; the Viewer notification runtime is owed (#14282).
             "prototype_platform_notifications_v1",
-            // Contract only; the Viewer permission runtime is owed (#14299).
+            // Registered by the agent and Viewer registries, not the static list.
             "prototype_platform_permissions_v1",
             // Contract only; the scheduled notification runtimes are owed (#14283).
             "prototype_platform_notifications_scheduled_v1",

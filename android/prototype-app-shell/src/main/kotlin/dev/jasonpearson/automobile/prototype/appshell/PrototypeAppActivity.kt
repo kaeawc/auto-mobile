@@ -25,6 +25,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.LocalPrototypeRootBack
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBiometricModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePermissionsModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.PrototypeAssets
 import dev.jasonpearson.automobile.prototype.PrototypePlatform
@@ -78,6 +79,7 @@ class PrototypeAppActivity : ComponentActivity() {
             PrototypeLocationModule(AndroidLocationSource(this)),
             PrototypeBiometricModule(AndroidBiometricSource(this)),
             PrototypePermissionsModule(AndroidPermissionsSource(this)),
+            PrototypeSecureStorageModule.fileBacked(this),
           ),
         )
       }

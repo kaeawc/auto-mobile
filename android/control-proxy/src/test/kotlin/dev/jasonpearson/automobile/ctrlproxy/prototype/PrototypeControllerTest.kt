@@ -6,6 +6,8 @@ import dev.jasonpearson.automobile.ctrlproxy.NoOpCtrlProxyActions
 import dev.jasonpearson.automobile.ctrlproxy.prototypeResultFrame
 import dev.jasonpearson.automobile.ctrlproxy.prototypeStatusFrame
 import dev.jasonpearson.automobile.protocol.*
+import java.io.IOException
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -17,6 +19,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
@@ -73,6 +76,134 @@ class PrototypeControllerTest {
       PrototypeWindow(PrototypeFullscreenPlacement()),
       root = PrototypeTextNode(text = "{name}"),
     )
+
+  private class StorageResetFixture {
+    val registry = PrototypeStorageSessionRegistry()
+    val plain = FakePrototypeStorageStore()
+    val secure = ResetSecureStore()
+    val timer = FakePrototypeTimer()
+    val persistence =
+      PrototypeStoragePersistence(
+        PrototypeStorageBackends(plain, secure),
+        timer,
+        EmptyCoroutineContext,
+        registry = registry,
+      )
+    var purgeFailure: Exception? = null
+    val controller =
+      PrototypeController(
+        FakePrototypeHost(),
+        PrototypeResultSink { _, _, _ -> },
+        lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+        storage = persistence,
+        purgeSecureStorage = { id ->
+          val removed = secure.delete(id)
+          purgeFailure?.let { throw it }
+          removed
+        },
+        storageSessions = registry,
+      )
+
+    fun spec(token: String = "", count: Double = 0.0) =
+      PrototypeSpec(
+        "vault",
+        PrototypeWindow(PrototypeFullscreenPlacement()),
+        state =
+          mapOf("token" to PrototypeScalar.Text(token), "count" to PrototypeScalar.Numeric(count)),
+        storage = PrototypeStorageBlock(1, listOf("state:count"), secure = listOf("state:token")),
+        root = PrototypeTextNode(text = "Vault"),
+      )
+
+    fun assertStored(token: String, count: Int) {
+      assertEquals(JsonPrimitive(token), secure.value?.values?.get("state:token"))
+      assertEquals(JsonPrimitive(count), plain.stored("vault")?.values?.get("state:count"))
+    }
+  }
+
+  private class ResetSecureStore : PrototypeSecureValueStore {
+    var value: PrototypeStoredValues? = null
+
+    override fun load(id: String) = value
+
+    override fun save(id: String, stored: PrototypeStoredValues) {
+      value = stored
+    }
+
+    override fun delete(id: String): Int = (value?.values?.size ?: 0).also { value = null }
+  }
+
+  @Test
+  fun `reset clears saved Activity pending values and stores only later changes`() = runTest {
+    val fixture = StorageResetFixture()
+    val session = checkNotNull(fixture.persistence.open(fixture.spec()).session)
+    session.record(fixture.spec("stored", 1.0))
+    session.flush()
+    session.record(fixture.spec("pending", 2.0))
+    val pending = fixture.timer.tasks.last()
+
+    assertEquals(2, fixture.controller.clearStoredValues("vault"))
+    assertTrue(pending.cancelled)
+    // Even late delivery of the cancelled callback must not resurrect either store.
+    pending.action()
+    session.flush()
+    assertNull(fixture.secure.value)
+    assertNull(fixture.plain.stored("vault"))
+    assertNull(session.unsavedValues())
+    assertTrue(session.report().keys.isEmpty())
+    assertEquals(0, session.report().totalBytes)
+    assertTrue(checkNotNull(session.report().secure).none { it.present })
+    session.record(fixture.spec("pending", 2.0))
+    fixture.timer.advance(500L)
+    assertNull(fixture.secure.value)
+    assertNull(fixture.plain.stored("vault"))
+
+    session.record(fixture.spec("new", 3.0))
+    fixture.timer.advance(500L)
+    fixture.assertStored("new", 3)
+  }
+
+  @Test
+  fun `reset also clears an overlay session registered in the Activity registry`() = runTest {
+    val fixture = StorageResetFixture()
+    val original = fixture.spec()
+    val overlay = original.copy(storage = checkNotNull(original.storage).copy(secure = null))
+    fixture.controller.show("show", overlay)
+    val session = checkNotNull(fixture.controller.activeRuntime?.storage)
+    session.record(overlay.copy(state = mapOf("count" to PrototypeScalar.Numeric(1.0))))
+    session.flush()
+    session.record(overlay.copy(state = mapOf("count" to PrototypeScalar.Numeric(2.0))))
+    val pending = fixture.timer.tasks.last()
+
+    assertEquals(1, fixture.controller.clearStoredValues("vault"))
+    pending.action()
+    assertNull(fixture.plain.stored("vault"))
+    assertNull(session.unsavedValues())
+    session.record(overlay.copy(state = mapOf("count" to PrototypeScalar.Numeric(3.0))))
+    fixture.timer.advance(500L)
+    assertEquals(JsonPrimitive(3), fixture.plain.stored("vault")?.values?.get("state:count"))
+    fixture.controller.dismiss("dismiss", "vault", false)
+  }
+
+  @Test
+  fun `failed or cancelled purge resumes saved Activity pending values`() = runTest {
+    for (failure in listOf(IOException("purge failed"), CancellationException("purge cancelled"))) {
+      val fixture = StorageResetFixture()
+      val session = checkNotNull(fixture.persistence.open(fixture.spec()).session)
+      session.record(fixture.spec("stored", 1.0))
+      session.flush()
+      session.record(fixture.spec("pending", 2.0))
+      fixture.purgeFailure = failure
+
+      try {
+        fixture.controller.clearStoredValues("vault")
+        fail("Expected purge failure")
+      } catch (error: Exception) {
+        assertSame(failure, error)
+      }
+      fixture.timer.advance(500L)
+      fixture.assertStored("pending", 2)
+    }
+  }
 
   private class HiddenFixture {
     val host = FakePrototypeHost()

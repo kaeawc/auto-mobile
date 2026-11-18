@@ -155,6 +155,25 @@ describe("prototype simulate and timer reports", () => {
     expect(agent.requests).toEqual([]);
   });
 
+  test("Android generic event simulation is routed to the capable CtrlProxy", async () => {
+    proxy.setSupportedCommands(["prototype_platform_simulation_v1"]);
+    expect(
+      await call(android, {
+        action: "simulate",
+        id: "panel",
+        event: "test.tick",
+        data: { count: 7 },
+      }),
+    ).toMatchObject({ success: true });
+    expect(proxy.simulatePlatformRequests).toEqual([
+      { id: "panel", event: "test.tick", data: { count: 7 } },
+    ]);
+    expect(
+      await call(ios, { action: "simulate", id: "panel", event: "test.tick", data: {} }),
+    ).toMatchObject({ success: false, error: expect.stringContaining("Android") });
+    expect(agent.requests).toEqual([]);
+  });
+
   test("simulate needs id and bounded integer advanceTimeMs", () => {
     for (const input of [
       { action: "simulate", id: "proto" },
@@ -392,7 +411,6 @@ describe("prototype simulate and timer reports", () => {
       { action: "simulate", id: "np", event: "notifications.push", data: push, advanceTimeMs: 1 },
       { action: "simulate", id: "np", advanceTimeMs: 1, data: push },
       { action: "simulate", id: "np", advanceTimeMs: 1, transport: "auto" },
-      { action: "simulate", id: "np", event: "notifications.opened", data: push },
       { action: "simulate", id: "np", event: "notifications.push", data: push, transport: "fcm" },
       { action: "show", id: "np", event: "notifications.push", data: push },
     ];
@@ -438,9 +456,16 @@ describe("prototype simulate and timer reports", () => {
     for (const input of [
       { action: "simulate", id: "feed", event: "media.ended" },
       { action: "simulate", id: "feed", event: "media.ended", data: error, transport: "auto" },
-      { action: "simulate", id: "feed", event: "media.itemChanged", data: error },
     ]) {
       expect({ input, ok: prototypeSchema.safeParse(input).success }).toEqual({ input, ok: false });
+    }
+  });
+
+  test("other known notification and media events use the generic schema", () => {
+    for (const event of ["notifications.opened", "media.itemChanged"]) {
+      expect(
+        prototypeSchema.safeParse({ action: "simulate", id: "panel", event, data: {} }).success,
+      ).toBe(true);
     }
   });
 

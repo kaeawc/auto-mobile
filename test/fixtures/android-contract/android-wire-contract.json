@@ -1875,6 +1875,35 @@
       ]
     },
     {
+      "serialName": "simulate_prototype_platform",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "event",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "data",
+          "type": "json",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
       "serialName": "start_recording",
       "fields": [
         {
@@ -10261,6 +10290,32 @@
         "type": "list",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "secure",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeStorageSecureMetadata": [
+      {
+        "name": "key",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "present",
+        "type": "boolean",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "bytes",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeStyle": [

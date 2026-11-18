@@ -171,12 +171,17 @@
                 return
             }
             if controlledWindow !== prototypeWindow {
+                let chrome = UIKitPrototypeWindowChrome(window: prototypeWindow)
+                // Transfer only orientation before restoring the old runtime's other controls.
+                if let orientation = session.spec?.window.controls.orientation {
+                    _ = chrome.requestOrientation(orientation)
+                }
                 logWindowControls(windowControls?.apply(nil))
                 controlledWindow = prototypeWindow
                 windowControls = PrototypeWindowControlsRuntime(
                     idleTimer: UIKitPrototypeIdleTimer(),
                     screen: UIKitPrototypeScreen(screen: prototypeWindow.screen),
-                    chrome: UIKitPrototypeWindowChrome(window: prototypeWindow)
+                    chrome: chrome
                 )
             }
             logWindowControls(windowControls?.apply(session.spec?.window.controls))

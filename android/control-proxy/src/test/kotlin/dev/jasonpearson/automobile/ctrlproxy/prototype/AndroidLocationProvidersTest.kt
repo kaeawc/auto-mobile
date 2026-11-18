@@ -122,4 +122,21 @@ class AndroidLocationProvidersTest {
     assertEquals("disabled", error.reason)
     module.close()
   }
+
+  @Test
+  fun `services read before the grant still report enabled providers after it`() = runTest {
+    shadowOf(app).denyPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
+    val source = AndroidLocationSource(app)
+    assertTrue(source.servicesEnabled.value)
+    shadowOf(app).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
+    val fixes = mutableListOf<LocationFix>()
+    backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+      source.updates(PrototypeLocationAccuracy.PRECISE, 1000, 0.0).collect { fixes += it }
+    }
+    shadow.simulateLocation(location(LocationManager.NETWORK_PROVIDER, 2.0))
+    idle()
+    runCurrent()
+    assertEquals(listOf(2.0), fixes.map { it.latitude })
+    source.close()
+  }
 }

@@ -58,7 +58,12 @@ internal class AndroidLocationSource(private val context: Context) : PrototypeLo
 
   /** Re-reads mode and provider state; a provider toggle keeps location on but moves selection. */
   private fun refresh() {
-    val providers = manager.getProviders(true).filterTo(mutableSetOf()) { it in ALL_PROVIDERS }
+    // getProviders(true) drops providers the caller lacks permission for on older releases, so a
+    // snapshot taken before a grant would stay empty; isProviderEnabled reads the setting alone.
+    val providers =
+      manager.allProviders.filterTo(mutableSetOf()) {
+        it in ALL_PROVIDERS && manager.isProviderEnabled(it)
+      }
     enabledProviders.value = providers
     enabled.value = LocationManagerCompat.isLocationEnabled(manager) && providers.isNotEmpty()
   }

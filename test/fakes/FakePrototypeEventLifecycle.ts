@@ -1,12 +1,14 @@
 import type { PrototypeEventLifecycle } from "../../src/server/prototypeTools";
 
 export class FakePrototypeEventLifecycle implements PrototypeEventLifecycle {
-  private readonly sessions = new Set<(sessionUuid: string) => void>();
+  private readonly sessions = new Set<(sessionUuid: string, releasedDeviceId?: string) => void>();
   /** Unbound listeners per source (session manager); only the current source's fire. */
   private readonly unboundBySource = new Map<object, Set<(deviceId: string) => void>>();
   private unboundSource: object = {};
   private readonly devices = new Set<(deviceId: string) => void>();
-  subscribeSessionRelease(listener: (sessionUuid: string) => void): () => void {
+  subscribeSessionRelease(
+    listener: (sessionUuid: string, releasedDeviceId?: string) => void,
+  ): () => void {
     this.sessions.add(listener);
     return () => {
       this.sessions.delete(listener);
@@ -60,9 +62,9 @@ export class FakePrototypeEventLifecycle implements PrototypeEventLifecycle {
       this.devices.delete(listener);
     };
   }
-  releaseSession(sessionUuid: string): void {
+  releaseSession(sessionUuid: string, releasedDeviceId?: string): void {
     for (const listener of [...this.sessions]) {
-      listener(sessionUuid);
+      listener(sessionUuid, releasedDeviceId);
     }
   }
   removeDevice(deviceId: string): void {

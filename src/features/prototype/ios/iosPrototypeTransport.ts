@@ -199,6 +199,7 @@ export class IosPrototypeTransport implements PrototypeTransport {
       readonly cache: Pick<PrototypeAssetCache, "put" | "remove">;
       readonly puts?: PrototypeAssetPutLedger;
     },
+    private readonly platform: "android" | "ios" = "ios",
   ) {
     this.cachePuts = assetCache?.puts ?? new PrototypeAssetPutLedger();
   }
@@ -317,7 +318,10 @@ export class IosPrototypeTransport implements PrototypeTransport {
   }
 
   async patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypePatchReply> {
-    if (prototypeShaderFields(prototypeShaderPatchSpec(patch.ops)).length) {
+    if (
+      this.platform === "ios" &&
+      prototypeShaderFields(prototypeShaderPatchSpec(patch.ops)).length
+    ) {
       return {
         success: false,
         delivery: "unsent",
@@ -325,7 +329,11 @@ export class IosPrototypeTransport implements PrototypeTransport {
       };
     }
     if (!this.supportsCapability(PROTOTYPE_PATCH_CAPABILITY)) {
-      return { success: false, delivery: "unsent", error: prototypePatchUnsupportedMessage("ios") };
+      return {
+        success: false,
+        delivery: "unsent",
+        error: prototypePatchUnsupportedMessage(this.platform),
+      };
     }
     try {
       const reply = await this.request(
@@ -483,6 +491,10 @@ export class IosPrototypeTransport implements PrototypeTransport {
     }
   }
 
+  get eventInstanceId(): string | undefined {
+    return this.agent.handshake.appInstanceId;
+  }
+
   async status(): Promise<PrototypeDeviceStatus> {
     let result: PrototypeAgentResult;
     try {
@@ -490,7 +502,7 @@ export class IosPrototypeTransport implements PrototypeTransport {
         timeoutMs: IOS_PROTOTYPE_STATUS_TIMEOUT_MS,
       });
     } catch (error) {
-      if (error instanceof PrototypeAgentRequestTimeoutError) {
+      if (error instanceof PrototypeAgentRequestTimeoutError && this.platform === "ios") {
         throw new PrototypeAgentSuspendedError(error.timeoutMs, { cause: error });
       }
       throw error;

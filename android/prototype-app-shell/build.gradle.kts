@@ -31,6 +31,7 @@ android {
   flavorDimensions += "template"
   productFlavors { create("base") { dimension = "template" } }
   buildTypes {
+    // Listener access is gated by device identity and stamped opt-in, independent of debuggability.
     // Keep local debug builds on the same package identity as the release template.
     getByName("debug") { isDebuggable = false }
     getByName("release") { isMinifyEnabled = false }
@@ -50,6 +51,7 @@ dependencies {
   implementation(libs.kotlinx.coroutines)
   implementation(libs.kotlinx.serialization)
   testImplementation(libs.junit)
+  testImplementation(libs.kotlinx.coroutines.test)
 }
 
 // Resolve both shipped variants, including transitive project edges.

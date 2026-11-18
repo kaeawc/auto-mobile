@@ -111,6 +111,7 @@ class SavedPrototypeController(
       // place, and a retry of an entry that is already gone still removes the orphaned values.
       val held = storageSessions.quiesce(id)
       try {
+        held.awaitWrites()
         clearStorage(id)
       } catch (error: CancellationException) {
         held.resume()

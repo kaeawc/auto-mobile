@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.prototype
 
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onRoot
+import dev.jasonpearson.automobile.ctrlproxy.prototype.MemorySecureStore
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
 import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
@@ -38,9 +40,16 @@ class AutoMobilePrototypeFixturesTest(private val name: String, private val inpu
     val errors = mutableListOf<PrototypeLoadError>()
     val storage = FakePrototypeStorage()
     val network = PrototypeNetwork(FakePrototypeHttp())
+    val platform = PrototypePlatform(listOf(PrototypeSecureStorageModule(MemorySecureStore())))
     compose.setContent {
       host.Content {
-        AutoMobilePrototype(input, storage = storage, network = network, onError = { errors += it })
+        AutoMobilePrototype(
+          input,
+          storage = storage,
+          network = network,
+          platform = platform,
+          onError = { errors += it },
+        )
       }
     }
     compose.onRoot().assertExists()

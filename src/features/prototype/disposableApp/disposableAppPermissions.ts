@@ -68,8 +68,7 @@ export const DISPOSABLE_APP_IOS_USAGE_KEYS: Readonly<Record<string, string>> = {
   bluetooth: "NSBluetoothAlwaysUsageDescription",
   motion: "NSMotionUsageDescription",
   speech: "NSSpeechRecognitionUsageDescription",
-  nearbyWifi: "NSLocalNetworkUsageDescription",
-  // notifications has no usage key on iOS.
+  // notifications and nearbyWifi have no usage key on iOS.
 };
 
 /** Contract background kind → iOS `UIBackgroundModes` values. */

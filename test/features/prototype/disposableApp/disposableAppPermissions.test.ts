@@ -31,7 +31,10 @@ describe("disposableAppDeclarations", () => {
     expect(DISPOSABLE_APP_IOS_USAGE_KEYS).toEqual(
       Object.fromEntries(
         Object.entries(permissionMapping).flatMap(([name, mapping]) =>
-          mapping.ios.usageKey === null ? [] : [[name, mapping.ios.usageKey]],
+          // The installer deliberately keeps nearbyWifi out of the plist (iosPrototypeInstaller.test.ts).
+          mapping.ios.usageKey === null || name === "nearbyWifi"
+            ? []
+            : [[name, mapping.ios.usageKey]],
         ),
       ),
     );

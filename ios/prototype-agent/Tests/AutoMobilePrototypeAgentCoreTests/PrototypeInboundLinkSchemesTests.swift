@@ -6,9 +6,12 @@ final class PrototypeInboundLinkSchemesTests: XCTestCase {
     func testOnlyRegisteredPrototypeSchemesReachDelivery() throws {
         let schemes = ["AMP-demo", "com.app", "https", "automobile-proto", "amp-"]
         XCTAssertEqual(PrototypeInboundLinkSchemes.registered(schemes), ["amp-demo"])
-        XCTAssertTrue(PrototypeInboundLinkSchemes.accepts(try XCTUnwrap(URL(string: "AMP-demo://post/41")), schemes: schemes))
+        XCTAssertTrue(try PrototypeInboundLinkSchemes.accepts(
+            XCTUnwrap(URL(string: "AMP-demo://post/41")),
+            schemes: schemes
+        ))
         for url in ["com.app://cb?code=secret", "https://host/post/41", "amp-other://post/41", "file:///tmp/spec"] {
-            XCTAssertFalse(PrototypeInboundLinkSchemes.accepts(try XCTUnwrap(URL(string: url)), schemes: schemes))
+            XCTAssertFalse(try PrototypeInboundLinkSchemes.accepts(XCTUnwrap(URL(string: url)), schemes: schemes))
         }
     }
 

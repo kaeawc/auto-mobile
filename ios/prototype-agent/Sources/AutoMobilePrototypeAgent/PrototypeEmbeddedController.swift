@@ -33,7 +33,8 @@
                 }
                 loaded = try PrototypeEmbeddedSpec.load(
                     data: spec,
-                    supported: AutoMobilePrototypeCapabilities.supported + registry.capabilities
+                    supported: AutoMobilePrototypeCapabilities.supported + registry.capabilities + PrototypeURLDelivery
+                        .capabilities
                 )
                 loadError = nil
             } catch let error as PrototypeLoadError {

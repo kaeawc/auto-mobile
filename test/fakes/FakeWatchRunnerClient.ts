@@ -40,7 +40,10 @@ export class FakeWatchRunnerClient implements WatchRunnerClient {
 }
 
 /** A tap changes the screen, so the effect poll settles on its first read instead of waiting out its budget. */
-export class FakeScreenChangingAfterTapWatchRunner extends FakeWatchRunnerClient {
+export class FakeScreenChangingAfterTapWatchRunner
+  extends FakeWatchRunnerClient
+  implements WatchRunnerClient
+{
   private taps = 0;
   override async request(...args: Parameters<FakeWatchRunnerClient["request"]>): Promise<unknown> {
     if (args[0].type === "tap") {

@@ -16,6 +16,7 @@ import org.gradle.api.tasks.TaskAction
 
 plugins {
   id("automobile.android-application")
+  id("automobile.robolectric-sdk-pin")
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
 }
@@ -52,6 +53,7 @@ dependencies {
   implementation(libs.kotlinx.serialization)
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
+  testImplementation(libs.robolectric)
 }
 
 // Resolve both shipped variants, including transitive project edges.

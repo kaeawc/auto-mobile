@@ -20,6 +20,10 @@ import {
 } from "./disposableAppPermissions";
 import type { DisposableAppRecord, DisposableAppRegistry } from "./DisposableAppRegistry";
 import { type DisposableAppTemplate, selectDisposableAppTemplate } from "./disposableAppTemplates";
+import {
+  DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS,
+  DISPOSABLE_APP_UNINSTALL_STEP_MS,
+} from "./disposableAppUninstallBudget";
 
 /**
  * Host side of disposable prototype apps (#14184): install a spec as its own app, list the apps
@@ -92,6 +96,10 @@ export interface DisposableAppManagerDependencies {
   platforms: Partial<Record<DisposableAppPlatform, DisposableAppPlatformSupport>>;
   registry: DisposableAppRegistry;
   timer: Pick<Timer, "now">;
+  /** Bulk removal deadline; defaults to `DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS`. */
+  bulkUninstallBudgetMs?: number;
+  /** Worst case for one removal; defaults to `DISPOSABLE_APP_UNINSTALL_STEP_MS`. */
+  uninstallStepMs?: number;
 }
 
 export interface DisposableAppInstallInput {
@@ -146,6 +154,11 @@ export interface DisposableAppRemoval {
 export interface DisposableAppUninstallResult {
   removed: DisposableAppRemoval[];
   skipped: DisposableAppRemoval[];
+  /**
+   * Bulk targets not started because the call's deadline could not fit another removal. Present
+   * only when the call stopped early; call `uninstallApp` again with the same target to continue.
+   */
+  pending?: string[];
 }
 
 const REMOVED = Symbol("removed");
@@ -305,7 +318,15 @@ export class DisposableAppManager {
         ? [(await this.list(deviceId, platform)).map((entry) => entry.appId), "all"]
         : [await this.expiredIds(deviceId, platform), "expired"];
     const result: DisposableAppUninstallResult = { removed: [], skipped: [] };
-    for (const appId of ids) {
+    const stepMs = this.deps.uninstallStepMs ?? DISPOSABLE_APP_UNINSTALL_STEP_MS;
+    const deadline =
+      this.deps.timer.now() +
+      Math.max(this.deps.bulkUninstallBudgetMs ?? DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS, stepMs);
+    for (const [index, appId] of ids.entries()) {
+      if (this.deps.timer.now() + stepMs > deadline) {
+        result.pending = ids.slice(index);
+        break;
+      }
       const outcome = await this.removeOne(deviceId, platform, appId, reason);
       if (outcome === REMOVED) {
         result.removed.push({ appId, reason });

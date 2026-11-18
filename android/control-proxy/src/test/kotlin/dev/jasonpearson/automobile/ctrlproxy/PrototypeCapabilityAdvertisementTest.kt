@@ -72,12 +72,15 @@ class PrototypeCapabilityAdvertisementTest {
         "prototype_platform_links_v1",
         "prototype_platform_location_v1",
         "prototype_platform_power_v1",
+        "prototype_platform_sensors_v1",
         "prototype_platform_settings_v1",
         "prototype_platform_sound_v1",
         "prototype_platform_test_v1",
       ),
       overlay.registry.capabilities,
     )
+    assertTrue("prototype_platform_sensors_v1" in commands(overlay))
+    assertFalse("prototype_platform_sensors_v1" in commands(PrototypePlatform.None))
     assertTrue("prototype_platform_location_v1" in commands(overlay))
     assertFalse("prototype_platform_location_v1" in commands(PrototypePlatform.None))
     assertTrue(

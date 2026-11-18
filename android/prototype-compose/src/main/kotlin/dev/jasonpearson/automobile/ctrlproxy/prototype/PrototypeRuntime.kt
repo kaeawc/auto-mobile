@@ -285,13 +285,13 @@ class PrototypeRuntime(
   fun pauseTimers() {
     timerEngine.pause()
     platformForeground = false
-    locationModules().forEach { it.stopUpdates() }
+    stopPlatformUpdates()
   }
 
   fun resumeTimers() {
     timerEngine.resume()
     platformForeground = true
-    startLocationUpdates()
+    startPlatformUpdates()
   }
 
   fun timerReports(): List<PrototypeTimerReport> = timerEngine.reports()
@@ -376,7 +376,11 @@ class PrototypeRuntime(
 
   private val sessionModules =
     platform.registry.modules.map {
-      if (it is PrototypeLocationModule) it.session(requestScope) else it
+      when (it) {
+        is PrototypeLocationModule -> it.session(requestScope)
+        is PrototypeSensorsModule -> it.session(requestScope)
+        else -> it
+      }
     }
   val platformRegistry = PrototypePlatformRegistry(listOf(deviceModule) + sessionModules)
   private val platformDispatcher =
@@ -401,11 +405,22 @@ class PrototypeRuntime(
     return platformRegistry.modules.filterIsInstance<PrototypeLocationModule>()
   }
 
-  private fun startLocationUpdates() {
+  private fun sensorsModules() = platformRegistry.modules.filterIsInstance<PrototypeSensorsModule>()
+
+  private fun stopPlatformUpdates() {
+    locationModules().forEach { it.stopUpdates() }
+    sensorsModules().forEach { it.stopSensors() }
+  }
+
+  private fun startPlatformUpdates() {
     if (!platformModulesStarted || !platformForeground || !current.active) return
     val block = current.spec.location
     locationModules().forEach {
       if (block == null) it.stopUpdates() else it.startUpdates(PrototypeLocationConfig.of(block))
+    }
+    val sensors = current.spec.sensors
+    sensorsModules().forEach {
+      if (sensors == null) it.stopSensors() else it.startSensors(sensors)
     }
   }
 
@@ -413,13 +428,13 @@ class PrototypeRuntime(
   fun startPlatformModules() {
     platformDispatcher.subscribe()
     platformModulesStarted = true
-    startLocationUpdates()
+    startPlatformUpdates()
   }
 
   /** Hosts call this under their lock before replacement, reset or dismissal. */
   suspend fun cancelPlatformCalls() {
     platformModulesStarted = false
-    locationModules().forEach { it.stopUpdates() }
+    stopPlatformUpdates()
     platformDispatcher.cancel()
   }
 
@@ -442,7 +457,7 @@ class PrototypeRuntime(
     if (!current.active) return
     stateWriteValidator = null
     mutableSnapshot.value = replacementSnapshot(spec)
-    startLocationUpdates()
+    startPlatformUpdates()
   }
 
   /** Authoritative text replacement shares its epoch handling with patch commits. */
@@ -560,7 +575,7 @@ class PrototypeRuntime(
         revision = revision,
         stateRevisions = before.stateRevisions + changed.associateWith { revision },
       )
-    startLocationUpdates()
+    startPlatformUpdates()
     // The commit is authoritative even if an ancillary event sink fails. Cancellation propagates.
     storage?.record(current.spec, current.stacks)
     try {
@@ -578,6 +593,7 @@ class PrototypeRuntime(
 
   fun close() {
     locationModules().forEach { it.detach() }
+    sensorsModules().forEach { it.detach() }
     platformDispatcher.close()
     platformState.close()
     mutableSnapshot.value = current.copy(active = false)

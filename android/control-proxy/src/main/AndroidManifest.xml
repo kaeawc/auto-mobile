@@ -37,6 +37,9 @@
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
+  <!-- Prototype platform sensors uses the step counter when motion is granted (#14327). -->
+  <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
   <!-- Prototype /platform/connectivity reads the default network and Data Saver (#14273). -->
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 

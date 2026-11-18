@@ -64,8 +64,10 @@ The runtimes replay it from `test/fixtures/prototype-sensors/`.
 The root `sensors` block lists the sensors the device listens to, and needs `sensors` in `requires.platform`.
 In it, `shake`, `steps` and `proximity` take `{}`, while `orientation` (the three degree keys) and `light` take an optional
 `rateHz` of 1 to 30. The `steps` sensor also needs the `motion` permission in `requires.permissions`. A `/platform/sensors`
-read or a `sensors.shake` handler must name a sensor the block lists. No production runtime advertises the
-module.
+read or a `sensors.shake` handler must name a sensor the block lists. Android CtrlProxy advertises the module
+using platform sensors, with subscriptions only while the prototype is active and in the foreground. Steps
+remain absent without an `ACTIVITY_RECOGNITION` grant; the module does not request it. iOS does not yet
+advertise the module.
 
 **Voice notes (#14194, contract only).** The `audioRecorder` module
 (`prototype_platform_audioRecorder_v1`) records from the microphone, so every call needs `microphone`

@@ -51,6 +51,8 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHostLink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureValueStores
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageBackends
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeController
@@ -494,7 +496,10 @@ class CtrlProxy : AccessibilityService() {
   // scope and hit the disk on IO.
   internal val prototypeStorage by lazy {
     PrototypeStoragePersistence(
-      PrototypeStorageStores.inDirectory(prototypeStorageRoot(filesDir)),
+      PrototypeStorageBackends(
+        PrototypeStorageStores.inDirectory(prototypeStorageRoot(filesDir)),
+        PrototypeSecureValueStores.inDirectory(prototypeStorageRoot(filesDir)),
+      ),
       CoroutinePrototypeScheduler(serviceScope),
     )
   }

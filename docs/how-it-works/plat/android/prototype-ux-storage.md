@@ -10,6 +10,9 @@ names the values the device keeps for the prototype:
 "storage": { "version": 1, "keys": ["state:darkMode", "data:/cart"] }
 ```
 
+Secure state uses a separate [Keystore-backed store](prototype-ux-platform-services.md). Its values
+are excluded from plaintext storage and its byte budget.
+
 The capability is `prototype_storage_v1` (`PROTOTYPE_STORAGE_CAPABILITY`). A show, or a patch whose
 resulting spec contains `storage`, is refused on a device without it through the same gate registry
 as every other capability (`PROTOTYPE_SPEC_CAPABILITY_GATES`, field `storage`).

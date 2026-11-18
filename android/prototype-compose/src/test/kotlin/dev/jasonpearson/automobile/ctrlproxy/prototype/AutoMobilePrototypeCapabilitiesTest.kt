@@ -85,7 +85,7 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_layout_direction_v1",
       // Contract only; the fake identity provider runtime is owed (#14303).
       "prototype_platform_auth_v1",
-      // Contract only; the Keystore-backed secure storage runtime is owed (#14321).
+      // Activity hosts register secure storage; embedding remains opt-in.
       "prototype_platform_secureStorage_v1",
       // Contract only; the voice-note recorder runtimes are owed (#14194).
       "prototype_platform_audioRecorder_v1",
@@ -148,6 +148,17 @@ class AutoMobilePrototypeCapabilitiesTest {
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilitiesForSdk(32))
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilitiesForSdk(33))
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilities)
+  }
+
+  @Test
+  fun `secure storage is advertised only by a registered host module`() {
+    val module = PrototypeSecureStorageModule(MemorySecureStore())
+    val platform = dev.jasonpearson.automobile.prototype.PrototypePlatform(listOf(module))
+    assertTrue(
+      PrototypeSecureStorageModule.CAPABILITY in AutoMobilePrototype.capabilities(platform),
+    )
+    assertTrue(PrototypeSecureStorageModule.CAPABILITY !in AutoMobilePrototype.capabilities)
+    module.close()
   }
 
   @Test

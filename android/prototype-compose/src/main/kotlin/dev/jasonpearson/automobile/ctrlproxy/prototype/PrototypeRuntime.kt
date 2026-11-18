@@ -158,7 +158,7 @@ class PrototypeRuntime(
   private val nextRevision: (() -> Long)? = null,
   previousStacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
   /** Where a refused data write is explained; a seam so JVM tests need no `android.util.Log`. */
-  private val warn: (String) -> Unit = { Log.w("PrototypeRuntime", it) },
+  warn: (String) -> Unit = { Log.w("PrototypeRuntime", it) },
   /**
    * Keeps the spec's `storage` keys across shows (#12522). The [spec] passed in already carries the
    * restored values, so restoring is neither a write nor an event.
@@ -188,6 +188,18 @@ class PrototypeRuntime(
   private val requestHideKeyboard: suspend () -> Unit = {},
   monotonicMs: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
+  private val reportWarning = warn
+
+  private fun publicDiagnostic(message: String, fallback: String): String =
+    if (current.spec.storage?.secure.orEmpty().isEmpty()) message else fallback
+
+  private fun warn(message: String) =
+    reportWarning(publicDiagnostic(message, "Prototype action could not be completed"))
+
+  /** State safe for status, inspect, conflicts and events; rendering keeps device-local state. */
+  val publicState: Map<String, PrototypeScalar>
+    get() = prototypePublicState(current.spec)
+
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
     PrototypeSpecValidator.prepareStateWrites(it, runtimeJson)
@@ -395,7 +407,7 @@ class PrototypeRuntime(
       ::finishPlatformCall,
       ::deliverPlatformEvent,
       ::publishModuleState,
-      warn,
+      ::warn,
       platformLimiter,
       monotonicMs,
     )
@@ -524,7 +536,10 @@ class PrototypeRuntime(
           .distinct()
           .filter { key -> before.stateRevisions[key]?.let { it > baseRevision } == true }
       if (changed.isNotEmpty()) {
-        return PatchResult.Conflict(before.revision, before.state.filterKeys { it in changed })
+        return PatchResult.Conflict(
+          before.revision,
+          prototypePublicState(before.spec).filterKeys { it in changed },
+        )
       }
     }
     val patched =
@@ -880,16 +895,16 @@ class PrototypeRuntime(
         .flatMap { it.checkedKeys() }
         .filter { it in keys }
     mutableSnapshot.value = current.copy(shownErrors = current.shownErrors + changedChecks)
-    val state = current.state
+    val state = publicState
     fun json(key: String) =
       runtimeJson.encodeToJsonElement(PrototypeScalar.serializer(), state.getValue(key))
     val payload = buildJsonObject {
       if (keys.size == 1) {
         put("key", keys.single())
-        put("value", json(keys.single()))
+        if (keys.single() in state) put("value", json(keys.single()))
       } else {
         put("keys", buildJsonArray { keys.forEach { add(JsonPrimitive(it)) } })
-        put("values", buildJsonObject { keys.forEach { put(it, json(it)) } })
+        put("values", buildJsonObject { keys.filter { it in state }.forEach { put(it, json(it)) } })
       }
     }
     emit(kind = PrototypeEventKind.EMIT, name = "change", payload = payload)
@@ -1168,7 +1183,10 @@ class PrototypeRuntime(
             prepareStateWrites(bound).also { stateWriteValidator = it }
           }
       val error = validator.validate(checkNotNull(spec.state))
-      require(error == null) { error.toString() }
+      require(error == null) {
+        if (from.storage?.secure.orEmpty().isEmpty()) error.toString()
+        else "Prototype state write refused"
+      }
       spec
     }
 
@@ -1476,7 +1494,7 @@ class PrototypeRuntime(
         "error",
         buildJsonObject {
           put("code", failure.code.wireValue)
-          put("message", failure.message.take(512))
+          put("message", publicDiagnostic(failure.message, "Platform call failed").take(512))
           val allowedReason =
             failure.reason == "disabled" ||
               (call.action.call == "biometric.authenticate" &&
@@ -1686,7 +1704,8 @@ class PrototypeRuntime(
       RequestInFlight(
         newRequestId(),
         action.method ?: PrototypeRequests.DEFAULT_METHOD,
-        url,
+        // This URL is diagnostic metadata only; the transport keeps the resolved URL below.
+        publicDiagnostic(url, "[redacted]"),
         action.via ?: PrototypeHttpClients.VIA_HOST,
         action.into,
         action.statusKey,
@@ -1745,7 +1764,10 @@ class PrototypeRuntime(
             PrototypeRequestResponse.Failed(
               PrototypeRequestError(
                 PrototypeRequestErrorCode.NETWORK,
-                error.message ?: error.javaClass.simpleName,
+                publicDiagnostic(
+                  error.message ?: error.javaClass.simpleName,
+                  "Prototype request failed",
+                ),
               ),
             )
           }
@@ -1806,6 +1828,16 @@ class PrototypeRuntime(
     }
   }
 
+  private fun publicResponse(response: PrototypeRequestResponse): PrototypeRequestResponse =
+    if (response is PrototypeRequestResponse.Failed)
+      response.copy(
+        error =
+          response.error.copy(
+            message = publicDiagnostic(response.error.message, "Prototype request failed"),
+          ),
+      )
+    else response
+
   /**
    * The completion order of the contract: `into`, then `<into>__meta`, then `statusKey`, then the
    * `prototype_request` event, then `onSuccess` or `onError`.
@@ -1815,7 +1847,7 @@ class PrototypeRuntime(
     val result =
       PrototypeRequestOutcome.complete(
         request.into,
-        response,
+        publicResponse(response),
         request.append?.let {
           it.copy(maxItems = prototypeListMaxItemsFor(current.spec, it.to)?.toLong())
         },
@@ -1921,7 +1953,7 @@ class PrototypeRuntime(
         kind = kind,
         name = name,
         payload = payload,
-        state = current.state.toMap(),
+        state = publicState,
         pages = current.pages.toMap(),
         stacks = current.stacks.toMap(),
         context = resolved?.context,

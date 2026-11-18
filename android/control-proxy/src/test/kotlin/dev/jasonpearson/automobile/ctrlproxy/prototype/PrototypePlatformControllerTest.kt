@@ -53,6 +53,7 @@ class PrototypePlatformControllerTest {
     val platform = prototypeRuntimePlatform(controller.get())
     assertTrue(PrototypeBiometricModule.CAPABILITY in platform.registry.capabilities)
     assertTrue(PrototypePermissionsModule.CAPABILITY in platform.registry.capabilities)
+    assertTrue(PrototypeSecureStorageModule.CAPABILITY in platform.registry.capabilities)
     assertFalse("prototype_platform_notifications_v1" in platform.registry.capabilities)
     assertFalse(
       PrototypeBiometricModule.CAPABILITY in

@@ -514,6 +514,12 @@ class PrototypeController(
 
   private fun validate(spec: PrototypeSpec): PrototypeSpec {
     require(
+      "secureStorage" !in spec.requires?.platform.orEmpty() ||
+        PrototypeSecureStorageModule.CAPABILITY in platform.registry.capabilities,
+    ) {
+      "The secureStorage module requires an app-owned Activity host"
+    }
+    require(
       "permissions" !in spec.requires?.platform.orEmpty() ||
         PrototypePermissionsModule.CAPABILITY in platform.registry.capabilities,
     ) {
@@ -1164,7 +1170,7 @@ class PrototypeController(
     return PrototypeStatusEntry(
       id = id,
       persistent = runtime.persistent,
-      state = runtime.current.state.toMap(),
+      state = runtime.publicState,
       data = runtime.current.spec.data,
       pages = runtime.current.pages.toMap(),
       stacks = runtime.current.stacks.toMap(),

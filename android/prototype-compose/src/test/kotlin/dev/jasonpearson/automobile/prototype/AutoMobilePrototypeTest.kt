@@ -51,6 +51,32 @@ class AutoMobilePrototypeTest {
   }
 
   @Test
+  fun `secure storage without a registered module draws the typed unsupported error`() {
+    val input =
+      """{"id":"vault","window":{"placement":{"type":"fullscreen"}},"requires":{"platform":["secureStorage"]},"state":{"token":"","count":0},"storage":{"version":1,"keys":["state:count"],"secure":["state:token"]},"root":{"type":"text","testTag":"vault","text":"Vault"}}"""
+    val errors = mutableListOf<PrototypeLoadError>()
+    compose.setContent {
+      host.Content {
+        AutoMobilePrototype(
+          input,
+          onError = {
+            errors += it
+            DefaultPrototypeError(it)
+          },
+        )
+      }
+    }
+    compose.onNodeWithTag("vault").assertDoesNotExist()
+    compose
+      .onNodeWithText(
+        "Unsupported capabilities: prototype_platform_secureStorage_v1",
+        substring = true,
+      )
+      .assertIsDisplayed()
+    compose.runOnIdle { assertTrue(errors.last() is PrototypeLoadError.Invalid) }
+  }
+
+  @Test
   fun `default error content is visible`() {
     compose.setContent { host.Content { AutoMobilePrototype("{}") } }
     compose.onNodeWithText("Cannot load prototype at", substring = true).assertIsDisplayed()

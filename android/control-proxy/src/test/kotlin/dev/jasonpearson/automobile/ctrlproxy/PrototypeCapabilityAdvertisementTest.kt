@@ -82,6 +82,7 @@ class PrototypeCapabilityAdvertisementTest {
     assertFalse("prototype_platform_permissions_v1" in commands(overlay))
     assertFalse("prototype_platform_notifications_v1" in commands(overlay))
     assertFalse("prototype_platform_biometric_v1" in commands(overlay))
+    assertFalse("prototype_platform_secureStorage_v1" in commands(overlay))
     assertTrue("prototype_platform_sensors_v1" in commands(overlay))
     assertFalse("prototype_platform_sensors_v1" in commands(PrototypePlatform.None))
     assertTrue("prototype_platform_location_v1" in commands(overlay))

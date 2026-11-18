@@ -46,6 +46,8 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePermissionsModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeScheduledTask
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureValueStore
 import dev.jasonpearson.automobile.protocol.PrototypeLibraryProvenance
 import dev.jasonpearson.automobile.protocol.PrototypeWebView
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
@@ -130,6 +132,7 @@ class ViewerActivity : ComponentActivity() {
       ViewerContent(
         prototype,
         services.storage.namespace(prototype.entry.libraryId),
+        services.storage.secureNamespace(prototype.entry.libraryId),
         host,
         services.networkClient,
       )
@@ -299,6 +302,7 @@ class ViewerActivity : ComponentActivity() {
 private class ViewerContent(
   val prototype: LibraryPrototype,
   val storage: PrototypeStorage,
+  val secure: PrototypeSecureValueStore?,
   val host: EmbeddedPrototypeHost,
   client: PrototypeHttpClient,
 ) {
@@ -338,10 +342,11 @@ private class ViewerContent(
     val platform =
       remember(context, activity) {
         PrototypePlatform(
-          listOf(
+          listOfNotNull(
             PrototypeLocationModule(AndroidLocationSource(context)),
             PrototypeBiometricModule(AndroidBiometricSource(activity)),
             PrototypePermissionsModule(AndroidPermissionsSource(activity)),
+            secure?.let(::PrototypeSecureStorageModule),
           ),
         )
       }

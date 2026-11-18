@@ -19,6 +19,10 @@ import { DeviceState, type BiometricEnrollment } from "../features/utility/Devic
 import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import type { SessionManager } from "../daemon/sessionManager";
 import { runSessionBiometricMutation } from "./sessionBiometricEnrollment";
+import {
+  routePrototypeBiometric,
+  type PrototypeBiometricRoute,
+} from "../features/prototype/prototypeBiometricOverride";
 
 // Type definitions for better TypeScript support
 export type BiometricAuthArgs = z.output<typeof biometricAuthSchema>;
@@ -112,9 +116,14 @@ export const getIosSimulatorCapabilitiesHandler = async (
     }),
   );
 
-/** `daemon` is the session source the enrollment capture reads; tests inject one without a daemon. */
+/**
+ * `daemon` is the session source the enrollment capture reads; tests inject one without a daemon.
+ * `prototype` routes cancel/error to a shown prototype (#14328); no runtime accepts an override
+ * yet, so the server supplies none and those actions keep the in-app SDK path.
+ */
 export function registerBiometricTools(
   daemon: Pick<DaemonContext, "sessionManager"> = defaultDaemonContext,
+  prototype?: PrototypeBiometricRoute,
 ) {
   // Biometric auth handler
   const biometricAuthHandler = async (
@@ -123,6 +132,10 @@ export function registerBiometricTools(
     progress?: ProgressCallback,
   ) => {
     try {
+      const routed = await routePrototypeBiometric(prototype, device, args);
+      if (routed) {
+        return createStructuredToolResponse(routed);
+      }
       const capture = await captureBiometricEnrollment(device, args, daemon);
       const biometricAuth = new BiometricAuth(device);
       const result = await runSessionBiometricMutation(

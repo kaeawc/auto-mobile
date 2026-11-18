@@ -244,8 +244,8 @@ open or claim failed. The one exception is a schema that still needs this releas
 Every current daemon migrates once bound, so an unmigrated registry holds no table-only claim
 yet. The daemon remembers the last failed open's error until an open succeeds. A claim that
 finds no open to join is judged by that error. Recovery treats the refusal as deferred: it gives
-the device back, keeps the session pending and retries. The claim files decide with no registry
-file before bind, for watch and TV, and in files-only mode.
+the device back, keeps the session pending and retries. Before bind the claim files decide with no
+registry file or when no open was attempted, for watch and TV, and in files-only mode.
 
 The device-claims mirror skips
 reads, writes, opens and retries until daemon restart. Writers and ownership readers

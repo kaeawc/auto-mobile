@@ -50,9 +50,15 @@ describe("localClaimRegistryExpectation", () => {
   });
 
   test("before bind with a registry file, a busy, failed or timed-out open must not fall back", () => {
-    for (const error of [undefined, busy(), new Error("disk I/O error"), new Error("timed out")]) {
+    for (const error of [busy(), new Error("disk I/O error"), new Error("timed out")]) {
       expect(expectation({ fileExists: true })(error)).toBe(true);
     }
+    // A forgotten open's failure counts as the claim's own.
+    expect(expectation({ fileExists: true, lastOpenFailure: busy() })(undefined)).toBe(true);
+  });
+
+  test("before bind with a registry file but no open attempted, the claim files decide", () => {
+    expect(expectation({ fileExists: true })(undefined)).toBe(false);
   });
 
   test("before bind, a registry still waiting for this release's migrations leaves claims to the files", () => {
@@ -80,7 +86,7 @@ describe("localClaimRegistryExpectation", () => {
       },
       lastOpenFailure: () => undefined,
     });
-    expect(expect_(undefined)).toBe(true);
+    expect(expect_(busy())).toBe(true);
   });
 });
 
@@ -173,11 +179,21 @@ describe("pre-bind claims through the mirror (#11811, E1)", () => {
     expect(await forgotten.acquire(DEVICE, ME, live)).toEqual({ outcome: "unavailable" });
   });
 
+  test("with a registry file but no open attempted, the claim files decide", async () => {
+    const mirror = mirrorWith(
+      () => undefined,
+      async () => undefined,
+    );
+    expect(await mirror.acquire(DEVICE, ME, live)).toEqual({ outcome: "unavailable" });
+  });
+
   test("no registry file leaves the claim to the files", async () => {
     fileExists = false;
     const mirror = mirrorWith(
       () => undefined,
-      async () => undefined,
+      async () => {
+        throw busy();
+      },
     );
     expect(await mirror.acquire(DEVICE, ME, live)).toEqual({ outcome: "unavailable" });
   });

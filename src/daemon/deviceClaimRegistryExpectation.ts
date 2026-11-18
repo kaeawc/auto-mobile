@@ -18,11 +18,12 @@ export interface LocalClaimRegistryExpectationInputs {
  * decide is refused retryably instead of falling back to the claim files.
  *
  * - After bind: always, since bound daemons create and migrate the registry.
- * - Before bind, with no registry file: never; the files decide.
- * - Before bind, with a registry file: unless the registry still needs this release's migrations
- *   (no current daemon can have written a table-only claim yet, since every one migrates once
- *   bound) or has a schema this daemon does not know (files-only mode). A busy, failed or
- *   timed-out open or read must not fall back.
+ * - Before bind, with no registry file, or with no open attempted (no failure seen): the files
+ *   decide, as they did before claims tables.
+ * - Before bind, with a registry file and a failed open or claim: the registry must decide,
+ *   unless it still needs this release's migrations (no current daemon can have written a
+ *   table-only claim yet, since every one migrates once bound) or has a schema this daemon does
+ *   not know (files-only mode). A busy, failed or timed-out open or write must not fall back.
  */
 export function localClaimRegistryExpectation(
   inputs: LocalClaimRegistryExpectationInputs,
@@ -31,10 +32,12 @@ export function localClaimRegistryExpectation(
     if (inputs.socketBound()) {
       return true;
     }
-    if (!registryFilePresent(inputs.registryFileExists)) {
+    const failure = error ?? inputs.lastOpenFailure();
+    if (failure === undefined || !registryFilePresent(inputs.registryFileExists)) {
+      // No open was attempted before bind, or no registry exists: nothing could have decided.
       return false;
     }
-    return !leavesClaimsToFiles(error ?? inputs.lastOpenFailure());
+    return !leavesClaimsToFiles(failure);
   };
 }
 

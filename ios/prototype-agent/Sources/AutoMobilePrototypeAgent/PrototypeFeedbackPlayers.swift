@@ -66,7 +66,9 @@
         static func feedbackModules(
             secureStorage: (any PrototypeSecureValueStore)? = nil,
             includePermissions: Bool = true
-        ) -> PrototypePlatformRegistry {
+        )
+            -> PrototypePlatformRegistry
+        {
             feedbackModules(
                 haptics: UIKitHapticsPlayer(),
                 sound: SystemSoundPlayer(),

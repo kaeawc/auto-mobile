@@ -19,7 +19,8 @@ final class PrototypeSecureStorageBindingTests: XCTestCase {
 
     private func navigation(_ type: String, _ binding: String) -> String {
         type == "setStack"
-            ? #"{"type":"setStack","stack":"nav","path":[{"screen":"home"},{"screen":"detail","params":{"t":\#(binding)}}]}"#
+            ?
+            #"{"type":"setStack","stack":"nav","path":[{"screen":"home"},{"screen":"detail","params":{"t":\#(binding)}}]}"#
             : #"{"type":"\#(type)","stack":"nav","screen":"detail","params":{"t":\#(binding)}}"#
     }
 

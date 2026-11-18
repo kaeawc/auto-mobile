@@ -81,7 +81,12 @@ enum PrototypeSecureStorageRules {
         guard !secure.isEmpty, case let .string(type)? = fields["type"] else { return }
         switch type {
         case "push", "replace":
-            try validateBindingMap(fields["params"], path: "\(path).params", secure: secure, destination: "route params")
+            try validateBindingMap(
+                fields["params"],
+                path: "\(path).params",
+                secure: secure,
+                destination: "route params"
+            )
         case "setStack":
             guard case let .array(entries)? = fields["path"] else { return }
             for (index, entry) in entries.enumerated() {
@@ -99,7 +104,9 @@ enum PrototypeSecureStorageRules {
 
     private static func validateBindingMap(
         _ value: JSONValue?, path: String, secure: [String], destination: String
-    ) throws {
+    )
+        throws
+    {
         let bindings = value?.objectFields ?? [:]
         for name in bindings.keys.sorted() {
             guard case let .string(key)? = bindings[name]?.objectFields?["state"],

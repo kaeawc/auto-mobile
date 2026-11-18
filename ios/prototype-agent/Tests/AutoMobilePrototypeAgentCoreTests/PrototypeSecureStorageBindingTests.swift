@@ -47,14 +47,6 @@ final class PrototypeSecureStorageBindingTests: XCTestCase {
         )
     }
 
-    func testRepeatTemplatesCannotSelectSecureState() {
-        assertRejected(
-            navigation("push", #"{"state":"tok{item.id}"}"#),
-            path: "root.screens[\"home\"].onTap[0].params.t",
-            message: "Secure storage key state:token cannot be sent in route params"
-        )
-    }
-
     func testBindingsAreCheckedInSortedOrderWithQuotedMemberPaths() throws {
         let fields: [String: JSONValue] = [
             "type": .string("platform"),

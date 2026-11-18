@@ -56,7 +56,7 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_audio_v1",
       // CtrlProxy registers connectivity (#14273); the embedded renderer leaves it to the app.
       "prototype_platform_connectivity_v1",
-      // Contract only; the biometric prompt runtime is owed (#14328).
+      // Activity hosts register biometric; the embedded renderer leaves it to its host.
       "prototype_platform_biometric_v1",
       // CtrlProxy registers the settings launcher (#14320); the embedded renderer does not.
       "prototype_platform_settings_v1",

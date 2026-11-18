@@ -79,6 +79,7 @@ class PrototypeCapabilityAdvertisementTest {
       ),
       overlay.registry.capabilities,
     )
+    assertFalse("prototype_platform_biometric_v1" in commands(overlay))
     assertTrue("prototype_platform_sensors_v1" in commands(overlay))
     assertFalse("prototype_platform_sensors_v1" in commands(PrototypePlatform.None))
     assertTrue("prototype_platform_location_v1" in commands(overlay))

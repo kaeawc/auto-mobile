@@ -69,6 +69,18 @@ using platform sensors, with subscriptions only while the prototype is active an
 remain absent without an `ACTIVITY_RECOGNITION` grant; the module does not request it. iOS does not yet
 advertise the module.
 
+**Android biometric runtime support.** The [biometric module](prototype-ux-platform-device.md) is
+registered by Android Activity hosts (SavedPrototypeActivity, ProtoViewer and disposable apps). CtrlProxy overlays omit the capability and
+refuse these specs before show. Failures use `cancelled`, or `unavailable` with reason `lockout`,
+`not_enrolled` or `no_hardware`. Only a foreground Activity can start a prompt. Cancellation, timeout
+and host teardown dismiss it.
+
+API 28 checks only `PackageManager.FEATURE_FINGERPRINT` before showing the prompt; a missing feature
+returns `unavailable` with reason `no_hardware`. With that feature present, enrollment and lockout
+errors come from the prompt callback. API 29 adds device credentials, and API 30 selects
+`BIOMETRIC_STRONG | DEVICE_CREDENTIAL` when requested. Earlier Android versions and credential
+fallback on API 28 report `no_hardware`.
+
 **Voice notes (#14194, contract only).** The `audioRecorder` module
 (`prototype_platform_audioRecorder_v1`) records from the microphone, so every call needs `microphone`
 in `requires.permissions`. The `audioRecorder.start` call takes an optional `maxDurationMs` (whole number

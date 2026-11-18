@@ -81,12 +81,15 @@ runtimes copy, replayed from `test/fixtures/prototype-device-status/`:
 **Biometric prompt (#14328).** The `biometric` module (`prototype_platform_biometric_v1`) has one call,
 `biometric.authenticate` with `title` (required, 1-64 characters), `subtitle` (optional, 1-128) and
 `allowDeviceCredential` (optional boolean), and one event, `biometric.attemptFailed`, for a rejected
-attempt while the prompt stays up. It has no `/platform` state and needs no declared permission. The
+attempt while the prompt stays up. It has no `/platform` state and needs no `requires.permissions`
+entry. Android hosts declare the normal `USE_BIOMETRIC` manifest permission for framework prompts. The
 call proves presence only and returns no biometric data. Failures use the typed codes: `cancelled`, and
-`unavailable` for a locked-out, unenrolled or hardware-less device. The iOS agent and ProtoViewer
-register the module. Face ID requires the host's `NSFaceIDUsageDescription`; a missing key returns
-`unavailable` with reason `missing_usage_description`. Allowing device credentials selects the system
-passcode fallback, including on a device without enrolled biometrics.
+`unavailable` for a locked-out, unenrolled or hardware-less device. See
+[Android biometric runtime support](prototype-ux-platform-services.md)
+for host availability and error reasons. The iOS agent and ProtoViewer also register the module. Face ID
+requires the host's `NSFaceIDUsageDescription`; a missing key returns `unavailable` with reason
+`missing_usage_description`. Allowing device credentials selects the system passcode fallback, including
+on a device without enrolled biometrics.
 
 **Window controls (#14320).** Four optional root `window` fields need
 `prototype_platform_window_controls_v1`. They are not a platform module, so they need no

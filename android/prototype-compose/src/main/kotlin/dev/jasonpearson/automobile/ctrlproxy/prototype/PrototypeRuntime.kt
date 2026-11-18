@@ -377,6 +377,7 @@ class PrototypeRuntime(
   private val sessionModules =
     platform.registry.modules.map {
       when (it) {
+        is PrototypeBiometricModule -> it.session()
         is PrototypeLocationModule -> it.session(requestScope)
         is PrototypeSensorsModule -> it.session(requestScope)
         else -> it
@@ -438,8 +439,11 @@ class PrototypeRuntime(
     platformDispatcher.cancel()
   }
 
+  private fun shouldPublishModuleState(name: String, state: JsonObject) =
+    name != "biometric" && (name != "device" || state.isNotEmpty())
+
   private fun publishModuleState(name: String, state: JsonObject) {
-    if (!current.active || (name == "device" && state.isEmpty())) return
+    if (!current.active || !shouldPublishModuleState(name, state)) return
     val next = JsonObject(current.platformState + (name to state))
     if (next.toString().toByteArray(Charsets.UTF_8).size > PrototypeDeviceContract.maxStateBytes) {
       warn("Refused oversized platform state from $name")
@@ -1464,9 +1468,12 @@ class PrototypeRuntime(
         buildJsonObject {
           put("code", failure.code.wireValue)
           put("message", failure.message.take(512))
-          val disabled =
-            failure.code == PlatformErrorCode.UNAVAILABLE && failure.reason == "disabled"
-          if (disabled) put("reason", "disabled")
+          val allowedReason =
+            failure.reason == "disabled" ||
+              (call.action.call == "biometric.authenticate" &&
+                failure.reason in setOf("lockout", "not_enrolled", "no_hardware"))
+          if (failure.code == PlatformErrorCode.UNAVAILABLE && allowedReason)
+            put("reason", failure.reason)
         },
       )
     }

@@ -4,6 +4,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,7 +36,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.lifecycleScope
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidBiometricSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidLocationSource
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBiometricModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
@@ -329,9 +332,15 @@ private class ViewerContent(
     onError: (PrototypeLoadError) -> Unit,
   ) {
     val context = LocalContext.current
+    val activity = checkNotNull(LocalActivity.current)
     val platform =
-      remember(context) {
-        PrototypePlatform(listOf(PrototypeLocationModule(AndroidLocationSource(context))))
+      remember(context, activity) {
+        PrototypePlatform(
+          listOf(
+            PrototypeLocationModule(AndroidLocationSource(context)),
+            PrototypeBiometricModule(AndroidBiometricSource(activity)),
+          ),
+        )
       }
     DisposableEffect(platform) {
       onDispose { platform.registry.modules.forEach { it.close() } }

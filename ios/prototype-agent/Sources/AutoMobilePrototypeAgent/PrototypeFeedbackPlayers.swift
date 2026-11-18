@@ -69,7 +69,8 @@
                 connectivity: NWPathConnectivitySource(),
                 links: UIKitLinkOpener(),
                 settings: UIKitSettingsURLOpener(),
-                location: CLLocationManagerPrototypeLocationSource()
+                location: CLLocationManagerPrototypeLocationSource(),
+                sensors: CoreMotionPrototypeSensorSource()
             )
         }
     }

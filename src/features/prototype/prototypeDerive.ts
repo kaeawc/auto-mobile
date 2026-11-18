@@ -201,3 +201,62 @@ export function derivePrototypeValues(
   }
   return result;
 }
+
+interface DeriveRevision {
+  data: unknown;
+  state: Record<string, unknown>;
+  values: Record<string, unknown>;
+}
+const revisions = new WeakMap<object, DeriveRevision>();
+
+function changedStateKeys(
+  previous: Record<string, unknown>,
+  next: Record<string, unknown>,
+): Set<string> {
+  const keys = new Set([...Object.keys(previous), ...Object.keys(next)]);
+  return new Set(
+    [...keys].filter(
+      (key) =>
+        Object.hasOwn(previous, key) !== Object.hasOwn(next, key) ||
+        !Object.is(previous[key], next[key]),
+    ),
+  );
+}
+
+/**
+ * Derived values memoized per derive block: an unchanged data reference and shallow-equal state
+ * reuse the last values, and a change recomputes only the entries `affected` by it. Data is
+ * treated as immutable per revision; a new data reference invalidates every data-backed entry.
+ */
+export function memoizedPrototypeDerive(
+  derive: Record<string, PrototypeDerivedEntry> | undefined,
+  data: unknown,
+  state: Record<string, unknown>,
+  observer?: PrototypeDeriveObserver,
+): Record<string, unknown> {
+  if (!derive) {
+    return {};
+  }
+  const previous = revisions.get(derive);
+  const snapshot = { ...state };
+  if (!previous) {
+    const values = derivePrototypeValues(derive, data, snapshot, undefined, undefined, observer);
+    revisions.set(derive, { data, state: snapshot, values });
+    return values;
+  }
+  const stateKeys = changedStateKeys(previous.state, snapshot);
+  const dataChanged = !Object.is(previous.data, data);
+  if (!dataChanged && stateKeys.size === 0) {
+    return previous.values;
+  }
+  const values = derivePrototypeValues(
+    derive,
+    data,
+    snapshot,
+    previous.values,
+    { dataPointers: new Set(dataChanged ? [""] : []), stateKeys },
+    observer,
+  );
+  revisions.set(derive, { data, state: snapshot, values });
+  return values;
+}

@@ -77,6 +77,7 @@ final class PrototypeDeviceStatusModule: PrototypePlatformModule {
     private var reading: [String: JSONValue] = [:]
     private var delivered: [String: JSONValue]?
     private var started = false
+    private var generation = 0
     private var pending: PrototypeTimerHandle?
     private var subscribers: [Int: AsyncStream<PlatformEvent>.Continuation] = [:]
     private var nextSubscriber = 0
@@ -145,6 +146,7 @@ final class PrototypeDeviceStatusModule: PrototypePlatformModule {
     func stop() {
         guard started else { return }
         started = false
+        generation += 1
         source.stop()
         pending?.cancel()
         pending = nil
@@ -161,7 +163,11 @@ final class PrototypeDeviceStatusModule: PrototypePlatformModule {
     private func start() {
         guard !started else { return }
         started = true
-        source.start { [weak self] in self?.receive($0) }
+        let session = generation
+        source.start { [weak self] reading in
+            guard let self, generation == session else { return }
+            receive(reading)
+        }
     }
 
     private func receive(_ next: [String: JSONValue]) {
@@ -175,8 +181,12 @@ final class PrototypeDeviceStatusModule: PrototypePlatformModule {
         reading = next
         subscribers.values.forEach { $0.yield(.stateRefresh(name)) }
         pending?.cancel()
+        let session = generation
         pending = clock.schedule(afterMilliseconds: debounceMs) { [weak self] in
-            MainActor.assumeIsolated { self?.settle() }
+            MainActor.assumeIsolated {
+                guard let self, self.generation == session else { return }
+                self.settle()
+            }
         }
     }
 

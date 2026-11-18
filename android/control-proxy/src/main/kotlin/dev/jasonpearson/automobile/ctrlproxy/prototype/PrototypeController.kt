@@ -218,6 +218,7 @@ class PrototypeController(
   private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
   /** Device-compiled uniform declarations, checked even for hidden/styleWhen nodes. */
   private val validateShaders: (PrototypeNode) -> Unit = {},
+  private val uploadAssets: PrototypeAssetSource? = null,
   private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
     dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
 ) {
@@ -679,6 +680,7 @@ class PrototypeController(
           if (preservePages) previous?.runtime?.current?.stacks.orEmpty() else emptyMap(),
         storage = opened.session,
         httpClients = httpClients,
+        uploadAssets = uploadAssets,
         platform = platform,
         platformLimiter = platformLimiter,
         requestScope = requestScope,
@@ -1129,6 +1131,30 @@ class PrototypeController(
     } catch (error: Exception) {
       Log.w("PrototypeController", "Prototype storage clear failed", error)
       sink.send(requestId, false, error.message ?: "Prototype storage clear failed")
+    }
+  }
+
+  suspend fun simulatePlatformEvent(
+    requestId: String?,
+    id: String,
+    event: String,
+    data: JsonObject,
+  ) = mutex.withLock {
+    try {
+      check(!destroyed) { "Prototype host destroyed" }
+      val runtime = surfaces[id]?.runtime ?: error("Unknown prototype: $id")
+      val supported = runtime.simulatePlatformEvent(event, data)
+      if (supported) syncAfterChange(runtime)
+      sink.send(
+        requestId,
+        supported,
+        if (supported) null else "unsupported: module does not support simulation of $event",
+      )
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("PrototypeController", "Prototype platform simulation failed", error)
+      sink.send(requestId, false, error.message ?: "Prototype platform simulation failed")
     }
   }
 

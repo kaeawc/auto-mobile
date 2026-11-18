@@ -655,7 +655,7 @@ fit 128 UTF-8 bytes; MIME types are type/subtype tokens. Contact fields are \`na
 fit 65536 UTF-8 bytes. \`into\` receives \`{outcome:"shared"|"unknown",target?,items}\`;
 its text summary keeps 2048 Unicode scalars. \`statusKey,onSuccess,onError\` use platform-call
 semantics. Real system sheets, cancellation callbacks and queued fake outcomes are owed;
-\`platformMode\` and \`prototype simulate\` are not accepted yet.
+\`platformMode\` and simulated sharing call outcomes are not accepted yet.
 
 ### Requests
 

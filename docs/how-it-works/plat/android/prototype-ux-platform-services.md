@@ -182,7 +182,7 @@ launch delivers a denial, and is cleared on reset or teardown and whenever a gra
 | API 33+, denial recorded and no rationale (including user-fixed denial) | `blocked`       |
 
 `POST_NOTIFICATIONS` is a runtime permission starting at API 33. Earlier versions never prompt;
-Settings alone controls notification availability. Already-granted and blocked requests return their
+Settings alone controls it. Granted and blocked requests return their
 state without a prompt. This runtime does not publish `/platform/notifications/authorization` or
 advertise the notifications module.
 
@@ -206,7 +206,7 @@ calls:
 - `notifications.cancel` takes `id`, `group` or `all: true`.
 - `notifications.setBadge` takes `count` (0-9999).
 
-The `style` argument is discriminated by `type`, like every other union in the spec. It is `bigText`,
+The `style` argument is discriminated by `type`: `bigText`,
 `bigPicture` with `image`, `inbox` with 1-6 `lines` and an optional `summary`, or `messaging`. A
 `messaging` style has `self`, an optional `conversationTitle` and 1-7 `messages` of
 `{from?, text, image?}`, where an absent `from` is the user. The `actions` argument holds 1-3 buttons of
@@ -220,7 +220,7 @@ State is `/platform/notifications/{badge, active, pending, authorization}` plus
 `active` key is at most 24 per prototype, and `authorization` uses the permission vocabulary (`granted`,
 `denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). Android hosts do not
 advertise this module. The `permissions` module above supplies notification authorization without
-publishing the notifications state tree.
+this state tree.
 
 Channels come from a root `notifications` block,
 `{channels: [{id, name, importance, description?, showBadge?}]}`. It holds 1-8 channels with unique

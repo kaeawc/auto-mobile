@@ -1,4 +1,4 @@
-import { GUIDE_PLATFORM_NAMESPACES } from "./prototypeGuideProseMore";
+import { GUIDE_DISPOSABLE_APPS, GUIDE_PLATFORM_NAMESPACES } from "./prototypeGuideProseMore";
 import { GUIDE_MOTION_V3 } from "./prototypeGuideMotionV3";
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
 import {
@@ -422,22 +422,7 @@ attached to this host (no \`awaitEvent\`, \`patch\` or \`inspect\`). \`{action:"
 that \`libraryId\` launches it on Android or an iOS simulator. It needs ProtoViewer installed.
 If ProtoViewer is absent, too old for this route, or its inbox cannot be used, \`save\`
 keeps the platform save path. A timeout after delivery may still have saved the entry; check
-ProtoViewer before retrying.
-
-## Disposable apps
-
-\`installApp\` (Android) installs \`spec\` or \`specPath\` as its own app:
-\`app: {slug, label, icon?: {backgroundColor}, ttlHours?, permissions?, reset?}\`. The id is
-always \`dev.jasonpearson.automobile.app.<slug>_<8 hex>\`; you choose only the slug. Declared
-permissions come only from the spec's \`requires.permissions\`. \`permissions\` is \`prompt\` (the
-default), \`grantDeclared\` or \`{grant, deny}\` naming declared permissions. \`ttlHours\` defaults to
-72; 0 keeps the app. Re-installing a slug updates it in place and keeps its storage unless
-\`reset: true\`. The result \`disposableApp\` has \`appId\`, \`template\`, \`expiresAt\` and
-\`permissions\`; then use \`launchApp\`, \`observe\`, \`tapOn\` and \`terminateApp\` with that \`appId\`.
-\`listApps\` returns \`disposableApps\`, this host's records joined with the device's packages
-under the prefix. \`uninstallApp\` takes exactly one of \`appId\`, \`all: true\` or \`expired: true\`
-and returns \`uninstalled: {removed, skipped}\`; it refuses ids outside the prefix and apps signed
-by another key. \`deleteSaved\` never removes a disposable app.
+ProtoViewer before retrying.${GUIDE_DISPOSABLE_APPS}
 
 ## Fullscreen host chrome
 

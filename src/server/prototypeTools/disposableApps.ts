@@ -51,6 +51,19 @@ export function defaultDisposableAppManager(
   });
 }
 
+/**
+ * The injected manager, or the daemon's built on the first disposable-app call, so other actions
+ * never construct the Android stamper.
+ */
+export function lazyDisposableApps(
+  dependencies: { disposableApps?: PrototypeDisposableApps; adbFactory?: AdbClientFactory },
+  timer: Pick<Timer, "now">,
+): () => PrototypeDisposableApps {
+  let apps = dependencies.disposableApps;
+  return () =>
+    (apps ??= defaultDisposableAppManager({ adbFactory: dependencies.adbFactory, timer }));
+}
+
 type PrototypeArgs = z.infer<typeof prototypeSchema>;
 
 function uninstallTarget(args: PrototypeArgs): DisposableAppUninstallTarget {

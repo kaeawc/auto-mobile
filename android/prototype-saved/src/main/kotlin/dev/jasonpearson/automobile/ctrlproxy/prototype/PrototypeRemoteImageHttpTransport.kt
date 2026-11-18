@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.PrototypeRemoteImages
+import dev.jasonpearson.automobile.prototype.saved.BuildConfig
 import java.io.IOException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -13,10 +14,10 @@ import retrofit2.Response
 
 /** Uses the request service and its DNS/socket enforcement, with the stricter image policy. */
 internal class PrototypeRemoteImageHttpTransport(
-  private val allowLoopback: Boolean,
   policy: PrototypeDestinationPolicy,
   service: (PrototypeDestinationPolicy) -> PrototypeHttpService,
 ) : PrototypeRemoteImageTransport {
+  private val allowLoopback = BuildConfig.DEBUG
   private val publicPolicy = imagePolicy(policy, false)
   private val localPolicy = imagePolicy(policy, allowLoopback)
   private val publicService = service(publicPolicy)

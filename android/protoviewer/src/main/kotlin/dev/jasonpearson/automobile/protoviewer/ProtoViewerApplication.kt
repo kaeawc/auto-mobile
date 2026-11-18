@@ -152,7 +152,6 @@ class ProtoViewerServices(
   allowedClient: () -> PrototypeHttpClient = {
     RetrofitPrototypeHttpClient(
       OkHttpClient(),
-      allowLoopbackImages = BuildConfig.DEBUG,
     )
   },
   val renderWatchdog: RenderWatchdog = DeadlineRenderWatchdog(),
@@ -174,7 +173,6 @@ class ProtoViewerServices(
         transport,
         FilePrototypeRemoteImageStore(imageContext.cacheDir.resolve("prototype-remote-images")),
         BitmapPrototypeImageDecoder(),
-        allowLoopback = BuildConfig.DEBUG,
       )
     else null
   }

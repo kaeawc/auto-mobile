@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.PrototypeRemoteImageCounts
 import dev.jasonpearson.automobile.protocol.PrototypeRemoteImages
+import dev.jasonpearson.automobile.prototype.BuildConfig
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -51,7 +52,6 @@ class CachedPrototypeRemoteImageLoader(
   private val transport: PrototypeRemoteImageTransport,
   private val store: PrototypeRemoteImageStore,
   decoder: PrototypeImageDecoder,
-  private val allowLoopback: Boolean = false,
   maxDecodedBytes: Long =
     Runtime.getRuntime().maxMemory() /
       PrototypeRemoteImages.PROTOTYPE_REMOTE_IMAGE_ANDROID_HEAP_DIVISOR,
@@ -60,7 +60,7 @@ class CachedPrototypeRemoteImageLoader(
   private val cache = PrototypeImageCache(store, decoder, maxDecodedBytes, dispatcher)
   private val limited = LimitedPrototypeRemoteImageLoader { url, target ->
     withContext(dispatcher) {
-      if (!prototypeRemoteImageUrlAllowed(url, allowLoopback)) PrototypeImageState.Missing
+      if (!prototypeRemoteImageUrlAllowed(url, BuildConfig.DEBUG)) PrototypeImageState.Missing
       else {
         cache.peek(url, target)?.takeIf { it is PrototypeImageState.Ready }
           ?: loadUncached(url, target)

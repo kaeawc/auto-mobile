@@ -26,13 +26,17 @@ internal fun PrototypeEgressDecision.requireAllowed() {
 
 /** Device-side egress policy. Address parsing never performs a DNS lookup. */
 class PrototypeEgressPolicy(
-  private val daemonPorts: Set<Int> = (3000..3010).toSet() + 8765,
+  private val daemonPorts: Set<Int> = DEFAULT_DAEMON_PORTS,
   private val allowLoopback: Boolean = false,
   private val blockPrivateNetworks: Boolean = false,
 ) : PrototypeDestinationPolicy {
   /** Retains the host's protected ports while enabling the image contract's stricter ranges. */
   internal fun forRemoteImages(allowLoopback: Boolean): PrototypeEgressPolicy =
-    PrototypeEgressPolicy(daemonPorts, allowLoopback, blockPrivateNetworks = true)
+    PrototypeEgressPolicy(
+      daemonPorts + DEFAULT_DAEMON_PORTS,
+      allowLoopback,
+      blockPrivateNetworks = true,
+    )
 
   override fun check(
     host: String,
@@ -122,6 +126,8 @@ class PrototypeEgressPolicy(
   }
 
   internal companion object {
+    private val DEFAULT_DAEMON_PORTS = (3000..3010).toSet() + 8765
+
     /** Canonicalize legacy IPv4 before OkHttp can hand the host to a resolver. */
     fun normalize(url: HttpUrl): HttpUrl {
       val bytes = literalBytes(url.host.trimEnd('.')) ?: return url

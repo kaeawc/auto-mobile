@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
+import dev.jasonpearson.automobile.prototype.BuildConfig
 import java.io.IOException
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.*
@@ -64,6 +65,24 @@ class PrototypeRemoteImageLoaderTest {
     }
 
     override fun setChangeListener(listener: PrototypeAssetChangeListener?) = Unit
+  }
+
+  @Test
+  fun `release refuses loopback before store or transport`() = runTest {
+    var downloads = 0
+    val loader =
+      CachedPrototypeRemoteImageLoader(
+        {
+          downloads++
+          prototypeRemoteImageTestPng()
+        },
+        MemoryImageStore(),
+        { _, _ -> image },
+        dispatcher = UnconfinedTestDispatcher(testScheduler),
+      )
+    val state = loader.load("http://localhost:8080/i", target)
+    assertEquals(BuildConfig.DEBUG, state is PrototypeImageState.Ready)
+    assertEquals(if (BuildConfig.DEBUG) 1 else 0, downloads)
   }
 
   @Test

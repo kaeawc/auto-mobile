@@ -135,11 +135,9 @@ class RetrofitPrototypeHttpClient(
   /** Expected non-errors, such as a body that is not JSON. */
   private val debug: (String) -> Unit = { Log.d(TAG, it) },
   private val policy: PrototypeDestinationPolicy = PrototypeEgressPolicy(),
-  allowLoopbackImages: Boolean = false,
 ) :
   PrototypeHttpClient,
   PrototypeRemoteImageTransport by PrototypeRemoteImageHttpTransport(
-    allowLoopbackImages,
     policy,
     { policy -> createService(client, policy, image = true) },
   ) {

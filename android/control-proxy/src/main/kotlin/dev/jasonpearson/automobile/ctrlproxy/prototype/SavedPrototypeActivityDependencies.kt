@@ -113,7 +113,14 @@ internal object SavedPrototypeActivityDependencies {
       }
     return PrototypeNetwork(
       device =
-        adapt(clients.device, clients.remoteImages ?: PrototypeDeviceNetwork.images(context)),
+        adapt(
+          clients.device,
+          clients.remoteImages
+            ?: (clients.device as? PrototypeRemoteImageProvider)?.remoteImages
+            ?: if (clients.device === PrototypeDeviceNetwork.device)
+              PrototypeDeviceNetwork.images(context)
+            else null,
+        ),
       hostHandler = adapt(clients.host),
     )
   }

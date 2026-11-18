@@ -18,7 +18,10 @@ android {
 
   defaultConfig { testInstrumentationRunner = null }
 
-  buildFeatures { compose = true }
+  buildFeatures {
+    compose = true
+    buildConfig = true
+  }
 
   testOptions { unitTests.isIncludeAndroidResources = true }
 }

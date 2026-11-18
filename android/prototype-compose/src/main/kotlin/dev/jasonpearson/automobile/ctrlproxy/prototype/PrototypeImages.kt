@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -36,6 +38,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeDimension
 import dev.jasonpearson.automobile.protocol.PrototypeImageNode
 import dev.jasonpearson.automobile.protocol.PrototypeItem
 import dev.jasonpearson.automobile.protocol.PrototypeStyle
+import java.io.IOException
 
 /** Supplied by [PrototypeRuntimeContent]; null (previews, tests) draws every image as missing. */
 internal val LocalPrototypeImageCache = compositionLocalOf<PrototypeImageCache?> { null }
@@ -59,13 +62,14 @@ internal class BitmapPrototypeImage(val bitmap: Bitmap) : PrototypeDecodedImage 
 
 /**
  * [BitmapFactory] decoding with `inSampleSize` chosen by [prototypeImageSampleSize], so only a
- * display-sized bitmap is ever allocated (never the full-resolution one). Needs real Android bitmap
- * decoding, so it is verified on a device rather than in JVM unit tests; the sampling, caching and
- * fallback logic around it is unit tested with a fake decoder.
+ * display-sized bitmap is allocated within both pixel and byte budgets. EXIF orientation is applied
+ * after sampling; the sizing and transform math can run without Android bitmap decoding.
  */
 @InternalAutoMobilePrototypeApi
-class BitmapPrototypeImageDecoder(private val maxPixels: Long = DEFAULT_MAX_DECODED_PIXELS) :
-  PrototypeImageDecoder {
+class BitmapPrototypeImageDecoder(
+  private val maxPixels: Long = DEFAULT_MAX_DECODED_PIXELS,
+  private val maxDecodedBytes: Long = DEFAULT_MAX_DECODED_BYTES,
+) : PrototypeImageDecoder {
   override fun decode(bytes: ByteArray, target: PrototypeImageTarget): PrototypeDecodedImage? =
     try {
       decodeSampled(bytes, target)
@@ -80,23 +84,59 @@ class BitmapPrototypeImageDecoder(private val maxPixels: Long = DEFAULT_MAX_DECO
   ): PrototypeDecodedImage? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-      Log.w(TAG, "Prototype image bytes are not decodable (${bytes.size} bytes)")
-      return null
-    }
-    val sampleSize = prototypeImageSampleSize(bounds.outWidth, bounds.outHeight, target, maxPixels)
-    if (!prototypeImageFitsBudget(bounds.outWidth, bounds.outHeight, sampleSize, maxPixels)) {
-      // The sample size is capped, so a header claiming absurd dimensions stays over budget.
-      Log.w(TAG, "Prototype image ${bounds.outWidth}x${bounds.outHeight} exceeds the decode budget")
+    // Bounds do not reliably report the eventual config. Reserve RGBA_F16's 8 bytes/pixel
+    // even for an ARGB_8888 candidate: a high-bit-depth source can override inPreferredConfig.
+    val pixelBudget = prototypeImagePixelBudget(maxPixels, maxDecodedBytes, 8)
+    val orientation = imageOrientation(bytes)
+    val decodeTarget =
+      if (orientation in 5..8) PrototypeImageTarget(target.heightPx, target.widthPx) else target
+    val sampleSize =
+      prototypeImageSampleSize(bounds.outWidth, bounds.outHeight, decodeTarget, pixelBudget)
+    if (!prototypeImageFitsBudget(bounds.outWidth, bounds.outHeight, sampleSize, pixelBudget)) {
+      Log.w(TAG, "Prototype image has unreadable or over-budget dimensions")
       return null
     }
     val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.let(::BitmapPrototypeImage)
+    val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
+    if (decoded.allocationByteCount.toLong() > maxDecodedBytes) {
+      decoded.recycle()
+      return null
+    }
+    val oriented = orient(decoded, orientation)
+    if (oriented.allocationByteCount.toLong() > maxDecodedBytes) {
+      oriented.recycle()
+      return null
+    }
+    return BitmapPrototypeImage(oriented)
+  }
+
+  private fun imageOrientation(bytes: ByteArray): Int =
+    try {
+      bytes.inputStream().use {
+        ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)
+      }
+    } catch (_: IOException) {
+      // Some supported bitmap formats carry no EXIF; their pixels already have normal orientation.
+      1
+    }
+
+  private fun orient(bitmap: Bitmap, orientation: Int): Bitmap {
+    if (orientation !in 2..8) return bitmap
+    val matrix =
+      Matrix().apply { setValues(prototypeImageOrientationMatrix(orientation).toFloatArray()) }
+    try {
+      return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, false)
+    } finally {
+      // The source has never been published to the renderer or cache.
+      bitmap.recycle()
+    }
   }
 
   companion object {
     /** 4 Mi pixels, 16 MiB as ARGB_8888: above a 1080x2400 screen (about 2.6 Mi pixels). */
     const val DEFAULT_MAX_DECODED_PIXELS = 4L * 1024 * 1024
+
+    const val DEFAULT_MAX_DECODED_BYTES = 16L * 1024 * 1024
 
     private const val TAG = "PrototypeImageDecoder"
   }

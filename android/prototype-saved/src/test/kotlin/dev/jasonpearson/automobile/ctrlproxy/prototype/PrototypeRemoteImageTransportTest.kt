@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
+import dev.jasonpearson.automobile.prototype.saved.BuildConfig
 import java.io.IOException
 import java.net.InetAddress
 import kotlinx.coroutines.runBlocking
@@ -47,7 +48,6 @@ class PrototypeRemoteImageTransportTest {
 
   private fun client(
     policy: PrototypeDestinationPolicy = PrototypeEgressPolicy(),
-    allowLoopback: Boolean = false,
     reply: (Request) -> Response,
   ) =
     RetrofitPrototypeHttpClient(
@@ -56,7 +56,6 @@ class PrototypeRemoteImageTransportTest {
         .addInterceptor { reply(it.request()) }
         .build(),
       policy = policy,
-      allowLoopbackImages = allowLoopback,
       warn = { _, _ -> error("No per-image logs") },
       debug = { error("No per-image logs") },
     )
@@ -76,12 +75,12 @@ class PrototypeRemoteImageTransportTest {
       .apply { location?.let { header("Location", it) } }
       .build()
 
-  private suspend fun refused(block: suspend () -> Unit) {
+  private suspend fun refused(expected: String? = null, block: suspend () -> Unit) {
     try {
       block()
       fail("Expected refusal")
     } catch (error: IOException) {
-      assertNotNull(error.message)
+      if (expected == null) assertNotNull(error.message) else assertEquals(expected, error.message)
     }
   }
 
@@ -93,7 +92,7 @@ class PrototypeRemoteImageTransportTest {
         calls++
         response(it)
       }
-    refused { transport.download("https://images.example/private") }
+    refused("blocked") { transport.download("https://images.example/private") }
     assertEquals(0, calls)
   }
 
@@ -104,7 +103,7 @@ class PrototypeRemoteImageTransportTest {
       sent += it
       response(it, 302, "https://169.254.169.254/private")
     }
-    refused { transport.download("https://images.example/private") }
+    refused("Blocked destination address") { transport.download("https://images.example/private") }
     assertEquals(1, sent.size)
     assertNull(sent.single().header("Cookie"))
     assertNull(sent.single().header("Referer"))
@@ -186,27 +185,37 @@ class PrototypeRemoteImageTransportTest {
     val local = InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))
     val public = InetAddress.getByAddress(byteArrayOf(8, 8, 8, 8))
     assertEquals(PrototypeEgressDecision.Allow, policy.check("localhost", 8080, listOf(local)))
-    assertTrue(policy.check("localhost", 8765, listOf(local)) is PrototypeEgressDecision.Blocked)
-    assertTrue(policy.check("localhost", 8080, listOf(public)) is PrototypeEgressDecision.Blocked)
-    assertTrue(
-      PrototypeEgressPolicy().check("localhost", 8080, listOf(local))
-        is PrototypeEgressDecision.Blocked,
+    assertEquals(
+      PrototypeEgressDecision.Blocked("Blocked destination hostname"),
+      policy.check("localhost", 8765, listOf(local)),
+    )
+    assertEquals(
+      PrototypeEgressDecision.Blocked("Blocked destination hostname"),
+      policy.check("localhost", 8080, listOf(public)),
+    )
+    assertEquals(
+      PrototypeEgressDecision.Blocked("Blocked destination hostname"),
+      PrototypeEgressPolicy().check("localhost", 8080, listOf(local)),
     )
   }
 
   @Test
-  fun `cleartext is loopback only and production refuses it even with permissive egress`() =
-    runBlocking {
-      var calls = 0
-      val transport =
-        client(policy = { _, _, _ -> PrototypeEgressDecision.Allow }) {
-          calls++
-          response(it)
-        }
-      refused { transport.download("http://localhost:8080/i") }
-      refused { transport.download("http://images.example/i") }
-      assertEquals(0, calls)
+  fun `release cannot enable loopback even with permissive egress`() = runBlocking {
+    var calls = 0
+    val transport =
+      client(policy = { _, _, _ -> PrototypeEgressDecision.Allow }) {
+        calls++
+        response(it)
+      }
+    if (BuildConfig.DEBUG) {
+      assertArrayEquals(synthesizedTransportPng(), transport.download("http://localhost:8080/i"))
+      calls = 0
+    } else {
+      refused("Remote image unavailable") { transport.download("http://localhost:8080/i") }
     }
+    refused("Remote image unavailable") { transport.download("http://images.example/i") }
+    assertEquals(0, calls)
+  }
 
   /** The actual renderer binding path feeds the actual HTTP transport through the loader. */
   @Test
@@ -333,7 +342,11 @@ class PrototypeRemoteImageTransportTest {
         "ff02::1",
         "::ffff:10.0.0.1",
       )) {
-      assertTrue(host, policy.check(host, 443, emptyList()) is PrototypeEgressDecision.Blocked)
+      assertEquals(
+        host,
+        PrototypeEgressDecision.Blocked("Blocked destination address"),
+        policy.check(host, 443, emptyList()),
+      )
     }
     assertEquals(
       PrototypeEgressDecision.Allow,
@@ -344,18 +357,74 @@ class PrototypeRemoteImageTransportTest {
   @Test
   fun `debug allows only literal HTTP loopback including redirects and never HTTPS loopback`() =
     runBlocking {
+      org.junit.Assume.assumeTrue(BuildConfig.DEBUG)
       val sent = mutableListOf<Request>()
-      val transport =
-        client(allowLoopback = true) {
-          sent += it
-          if (it.url.isHttps) response(it, 302, "http://localhost:8080/a") else response(it)
-        }
+      val transport = client {
+        sent += it
+        if (it.url.isHttps) response(it, 302, "http://localhost:8080/a") else response(it)
+      }
       assertArrayEquals(synthesizedTransportPng(), transport.download("https://images.example/a"))
       assertEquals(listOf("images.example", "localhost"), sent.map { it.url.host })
-      refused { transport.download("https://localhost:8080/a") }
-      refused { transport.download("http://127.1:8080/a") }
+      refused("Blocked destination hostname") { transport.download("https://localhost:8080/a") }
+      refused("Remote image unavailable") { transport.download("http://127.1:8080/a") }
       assertEquals(2, sent.size)
     }
+
+  @Test
+  fun `image transport refuses nonpublic and numeric HTTPS destinations with specific errors`() =
+    runBlocking {
+      val transport = client { error("Blocked target must not reach HTTP") }
+      for (host in
+        listOf(
+          "100.64.0.0",
+          "100.127.255.255",
+          "[::ffff:10.0.0.1]",
+          "[::ffff:127.0.0.1]",
+          "[fe80::1]",
+          "2130706433",
+          "0x7f000001",
+          "127.1",
+          "0177.0.0.1",
+        )) {
+        refused("Blocked destination address") { transport.download("https://$host/i") }
+      }
+      refused("Ambiguous numeric destination") { transport.download("https://09.0.0.1/i") }
+    }
+
+  @Test
+  fun `debug loopback cannot reach daemon ports including host supplied protected ports`() =
+    runBlocking {
+      val transport = client { error("Daemon port must not reach HTTP") }
+      for (port in (3000..3010).toList() + 8765) {
+        for (host in listOf("localhost", "127.0.0.1", "[::1]")) {
+          val expected =
+            if (!BuildConfig.DEBUG) "Remote image unavailable"
+            else if (host == "localhost") "Blocked destination hostname"
+            else "Blocked destination address"
+          refused(expected) { transport.download("http://$host:$port/i") }
+        }
+      }
+      val custom =
+        client(policy = PrototypeEgressPolicy(setOf(8123))) { error("Custom daemon port") }
+      for (port in listOf(8123, 8765, 3000)) {
+        refused(
+          if (BuildConfig.DEBUG) "Blocked destination hostname" else "Remote image unavailable",
+        ) {
+          custom.download("http://localhost:$port/i")
+        }
+      }
+    }
+
+  @Test
+  fun `redirect to a blocked numeric destination is rechecked before HTTP`() = runBlocking {
+    var calls = 0
+    val transport = client {
+      calls++
+      response(it, 302, "https://0x7f000001/i")
+    }
+    refused("Blocked destination address") { transport.download("https://images.example/i") }
+    assertEquals(1, calls)
+  }
 
   private suspend fun kotlinx.coroutines.test.TestScope.assertImageError(
     transport: PrototypeRemoteImageTransport,
@@ -377,7 +446,6 @@ class PrototypeRemoteImageTransportTest {
         transport,
         store,
         { _, _ -> error("Refused image cannot decode") },
-        allowLoopback = true,
         dispatcher = UnconfinedTestDispatcher(testScheduler),
       )
     val activity = PrototypeRemoteImageActivity()

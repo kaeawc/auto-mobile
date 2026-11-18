@@ -405,6 +405,41 @@ final class PrototypeLazyListTests: XCTestCase {
         XCTAssertEqual(try rowText(json, index: 1), "One")
     }
 
+    func testLazyRowValuesContainingTokensStayLiteral() throws {
+        let data =
+            #"{"secret":"LEAK","rows":[{"name":"Zero"},{"name":"One"}],"posts":[{"id":"a","name":"unused"},{"id":"b","name":"{data:/secret}"}]}"#
+        XCTAssertEqual(try rowText(lazySpec(text: "{row.name}", data: data), index: 1), "{data:/secret}")
+        let json = lazySpec(text: "{row.name} {data:/rows/{index}/name}", data: data)
+        XCTAssertEqual(try rowText(json, index: 1), "{data:/secret} One")
+    }
+
+    func testLazyRowValuesContainingPlatformAndRowTokensStayLiteral() throws {
+        let json = lazySpec(
+            text: "{row.name}",
+            data: #"{"posts":[{"id":"a","name":"{platform:/name} {row.id} {index}"}]}"#
+        )
+        XCTAssertEqual(try rowText(json, index: 0), "{platform:/name} {row.id} {index}")
+    }
+
+    func testLazyNestedRowValuesStayLiteralWithInnerIndexAndOuterAlias() throws {
+        let json = #"""
+        {"id":"nested","window":{"placement":{"type":"fullscreen"}},
+         "data":{"secret":"LEAK","names":["Zero","One"],"posts":[{"id":"a","name":"{platform:/name}",
+         "cells":[{"id":"c","name":"{data:/secret}"},{"id":"d","name":"{cell.id}"}]}]},
+         "root":{"type":"list","repeat":{"items":{"path":"/posts"},"as":"row","key":"id"},
+         "children":[{"type":"column","repeat":{"items":{"field":"cells"},"as":"cell"},
+         "children":[{"type":"text","text":"{cell.name} {row.name} {data:/names/{index}}"}]}]}}
+        """#
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(json.utf8))
+        let row = try XCTUnwrap(PrototypeLazyList.resolvedRow(node: spec.root, data: spec.data, index: 0))
+        guard case let .array(children)? = row.json.objectFields?["children"] else {
+            return XCTFail("Expected expanded inner rows")
+        }
+        XCTAssertEqual(children.map { $0.objectFields?["text"]?.stringValue }, [
+            "{data:/secret} {platform:/name} Zero", "{cell.id} {platform:/name} One",
+        ])
+    }
+
     func testRowFieldBindsInsideDataPointerBeforeResolving() throws {
         let json = lazySpec(
             text: "{data:/byId/{row.id}/title}",

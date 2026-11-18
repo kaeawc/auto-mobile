@@ -94,11 +94,13 @@ enum PrototypeRepeat {
 
     static func expand(
         _ node: JSONValue, outer: PrototypeRepeatInstance?, formatter: PrototypeValueFormatter,
-        environment: PrototypeFormatEnvironment
+        environment: PrototypeFormatEnvironment,
+        bindText: ((String, PrototypeRepeatInstance) -> String)? = nil
     )
         -> JSONValue
     {
-        guard var fields = (outer?.bind(node, descendants: false) ?? node).objectFields else { return node }
+        guard var fields = (outer?.bind(node, descendants: false, bindText: bindText) ?? node).objectFields
+        else { return node }
         let lazy = fields["type"] == .string("list")
         if !lazy, case let .array(children)? = fields["children"] {
             if let spec = fields["repeat"]?.objectFields {
@@ -106,7 +108,9 @@ enum PrototypeRepeat {
                     of: spec, formatter: formatter, environment: environment, outer: outer
                 ).flatMap { instance in
                     children.enumerated().map { index, child in
-                        var bound = expand(child, outer: instance, formatter: formatter, environment: environment)
+                        var bound = expand(
+                            child, outer: instance, formatter: formatter, environment: environment, bindText: bindText
+                        )
                         if var anchored = bound.objectFields, let identity = instance.identity {
                             // Every template child needs an identity; only the first is a scroll anchor.
                             anchored[identityField] = .string("\(identity)/children[\(index)]")
@@ -120,7 +124,7 @@ enum PrototypeRepeat {
                 })
             } else {
                 fields["children"] = .array(children.map {
-                    expand($0, outer: outer, formatter: formatter, environment: environment)
+                    expand($0, outer: outer, formatter: formatter, environment: environment, bindText: bindText)
                 })
             }
         }
@@ -128,12 +132,14 @@ enum PrototypeRepeat {
         let slots = fields["type"] == .string("adaptive") ? PrototypeAdaptive.slots : ["child", "header", "footer"]
         for name in slots {
             if let child = fields[name] {
-                fields[name] = expand(child, outer: outer, formatter: formatter, environment: environment)
+                fields[name] = expand(
+                    child, outer: outer, formatter: formatter, environment: environment, bindText: bindText
+                )
             }
         }
         if let screens = fields["screens"]?.objectFields {
             fields["screens"] = .object(screens.mapValues {
-                expand($0, outer: outer, formatter: formatter, environment: environment)
+                expand($0, outer: outer, formatter: formatter, environment: environment, bindText: bindText)
             })
         }
         return .object(fields)
@@ -678,9 +684,14 @@ struct PrototypeRepeatInstance {
     var identity: String?
 
     /// One template node bound to this instance; descendants are bound too.
-    func bind(_ node: JSONValue, descendants: Bool = true) -> JSONValue {
+    func bind(
+        _ node: JSONValue, descendants: Bool = true,
+        bindText: ((String, PrototypeRepeatInstance) -> String)? = nil
+    )
+        -> JSONValue
+    {
         guard case var .object(fields) = node else { return node }
-        PrototypeRepeat.bindTextFields(&fields, transform: interpolate)
+        PrototypeRepeat.bindTextFields(&fields) { bindText?($0, self) ?? interpolate($0) }
         bindComponentActions(&fields)
         if fields["type"] == .string("pasteButton"), let into = fields["into"]?.stringValue {
             fields["into"] = .string(bindDataPath(into))
@@ -714,11 +725,11 @@ struct PrototypeRepeatInstance {
         }
         guard descendants else { return .object(fields) }
         if case let .array(children)? = fields["children"] {
-            fields["children"] = .array(children.map { bind($0) })
+            fields["children"] = .array(children.map { bind($0, bindText: bindText) })
         }
-        if let child = fields["child"] { fields["child"] = bind(child) }
+        if let child = fields["child"] { fields["child"] = bind(child, bindText: bindText) }
         if case let .object(screens)? = fields["screens"] {
-            fields["screens"] = .object(screens.mapValues { bind($0) })
+            fields["screens"] = .object(screens.mapValues { bind($0, bindText: bindText) })
         }
         return .object(fields)
     }

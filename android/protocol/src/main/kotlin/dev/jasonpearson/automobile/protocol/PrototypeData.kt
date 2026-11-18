@@ -221,14 +221,19 @@ internal object PrototypeDataText {
   fun pointers(text: String, namespace: String): List<String> =
     placeholders(text, namespace).map { it.pointer }
 
-  private fun placeholders(text: String, namespace: String = "data"): List<Placeholder> {
+  private fun placeholders(
+    text: String,
+    namespace: String = "data",
+    bindRow: ((String) -> String)? = null,
+  ): List<Placeholder> {
     val found = mutableListOf<Placeholder>()
     var cursor = 0
     while (cursor < text.length) {
-      val close = closingBrace(text, cursor, namespace)
+      val close = closingBrace(text, cursor, namespace, bindRow != null)
       val inner = if (close < 0) "" else text.substring(cursor + 1, close)
-      val pointer =
+      val authoredPointer =
         if (inner.startsWith("$namespace:")) inner.substring(namespace.length + 1) else ""
+      val pointer = bindRow?.invoke(authoredPointer) ?: authoredPointer
       if (PrototypeDataPointer.isValid(pointer)) {
         found.add(Placeholder(cursor, close + 1, pointer))
         cursor = close + 1
@@ -239,15 +244,25 @@ internal object PrototypeDataText {
     return found
   }
 
-  private fun closingBrace(text: String, cursor: Int, namespace: String): Int {
+  private fun closingBrace(
+    text: String,
+    cursor: Int,
+    namespace: String,
+    nested: Boolean,
+  ): Int {
     if (text[cursor] != '{' || !text.startsWith("$namespace:", cursor + 1)) return -1
     val end =
       minOf(
         text.length,
         cursor + 3 + namespace.length + PrototypeSpecValidator.MAX_PROTOTYPE_DATA_POINTER_LENGTH,
       )
+    var depth = 0
     for (index in cursor + 1 until end) {
-      if (text[index] == '}') return index
+      if (nested && text[index] == '{') depth++
+      if (text[index] == '}') {
+        if (depth == 0) return index
+        depth--
+      }
     }
     return -1
   }
@@ -304,19 +319,22 @@ internal object PrototypeDataText {
     data: JsonObject?,
     platform: JsonObject?,
     deferData: Boolean = false,
+    bindRow: ((String) -> String)? = null,
   ): String {
     val sources =
-      (if (deferData) emptyList() else placeholders(text).map { it to data }) +
-        placeholders(text, "platform").map { it to platform }
+      (if (deferData) emptyList() else placeholders(text, bindRow = bindRow).map { it to data }) +
+        placeholders(text, "platform", bindRow).map { it to platform }
     return buildString {
       var cursor = 0
       for ((span, source) in sources.sortedBy { it.first.start }) {
         if (span.start < cursor) continue
-        append(text.substring(cursor, span.start))
+        val literal = text.substring(cursor, span.start)
+        append(bindRow?.invoke(literal) ?: literal)
         append(PrototypeDataValues.rendered(PrototypeDataPointer.resolve(source, span.pointer)))
         cursor = span.end
       }
-      append(text.substring(cursor))
+      val literal = text.substring(cursor)
+      append(bindRow?.invoke(literal) ?: literal)
     }
   }
 
@@ -335,7 +353,9 @@ internal object PrototypeDataText {
   }
 }
 
-/** Pure resolution of data sources and conditions, with lazy text bound after row tokens. */
+/**
+ * Pure resolution of sources and conditions; authored lazy-row text is deferred to the renderer.
+ */
 object PrototypeDataResolver {
   fun resolveRoot(root: JsonObject, data: JsonObject?, platform: JsonObject? = null): JsonObject =
     resolveRoot(root, data, PrototypeRepeatData(data), platform, Pass.ALL)
@@ -345,12 +365,14 @@ object PrototypeDataResolver {
     DEFER_ROW_TEXT,
   }
 
-  /** Resolves only this node's text after its lazy row tokens have bound. */
+  /** Fills authored text tokens once, preserving row-bound actions and runtime metadata. */
   fun resolveNodeText(
     root: JsonObject,
     data: JsonObject?,
     platform: JsonObject? = null,
-  ): JsonObject = textFields(root, data, platform)
+    template: JsonObject = root,
+    bindRow: ((String) -> String)? = null,
+  ): JsonObject = textFields(root, data, platform, template = template, bindRow = bindRow)
 
   private fun resolveRoot(
     root: JsonObject,
@@ -448,14 +470,15 @@ object PrototypeDataResolver {
     node: JsonObject,
     data: JsonObject?,
     platform: JsonObject?,
-    deferData: Boolean = false,
+    template: JsonObject = node,
+    bindRow: ((String) -> String)? = null,
   ): JsonObject {
     val replacements = mutableMapOf<String, JsonElement>()
-    PrototypeBindableFields.first<Boolean>(node, "") { value, path, kind ->
+    PrototypeBindableFields.first<Boolean>(template, "") { value, path, kind ->
       val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
       if (kind == PrototypeBindableKind.TEXT && text != null) {
         replacements[path] =
-          JsonPrimitive(PrototypeDataText.bindSources(text, data, platform, deferData))
+          JsonPrimitive(PrototypeDataText.bindSources(text, data, platform, bindRow = bindRow))
       }
       null
     }

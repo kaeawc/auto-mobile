@@ -62,12 +62,17 @@ enum PrototypeLazyList {
             alias: spec.as, item: fields, index: index, sourceItem: items[index].objectFields,
             identity: fields[spec.key]?.displayString
         )
-        // Row tokens bind first, so `{data:/rows/{index}/name}` is a complete pointer before it resolves.
+        // Fill authored text tokens once; only authored pointers bind row context before lookup.
         let sources = PrototypeDataResolver.resolveRepeatSources(raw, data: data)
         let expanded = PrototypeRepeat.expand(
-            sources, outer: instance, formatter: FoundationPrototypeValueFormatter(), environment: .device()
+            sources, outer: instance, formatter: FoundationPrototypeValueFormatter(), environment: .device(),
+            bindText: { text, row in
+                PrototypeDataText.bind(text, data: data, platform: spec.platformSnapshot, bindRow: row.interpolate)
+            }
         )
-        let bound = PrototypeDataResolver.resolveRoot(expanded, data: data, platform: spec.platformSnapshot)
+        let bound = PrototypeDataResolver.resolveRoot(
+            expanded, data: data, platform: spec.platformSnapshot, resolveText: false
+        )
         return (fields[spec.key]?.displayString ?? "", bound)
     }
 

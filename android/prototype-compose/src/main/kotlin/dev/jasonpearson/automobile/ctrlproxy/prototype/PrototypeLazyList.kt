@@ -199,19 +199,24 @@ private class PrototypeListKeys(var keys: List<String>, var hasHeader: Boolean)
 
 private val listNodeJson = Json { ignoreUnknownKeys = false }
 
-/** Resolve each node after row binding, including children bound by a nested repeat. */
+internal class PrototypeListTextSources(val data: JsonObject?, val platform: JsonObject?)
+
+/** Fill text from the authored template, never scanning values inserted by row binding. */
 internal fun resolvePrototypeListNodeText(
   node: PrototypeNode,
+  template: PrototypeNode,
   data: JsonObject?,
-  platform: JsonObject? = null,
+  platform: JsonObject?,
+  bindRow: (String) -> String,
 ): PrototypeNode {
   val json = listNodeJson
   val raw = json.encodeToJsonElement(PrototypeNode.serializer(), node).jsonObject
-  val resolved = PrototypeDataResolver.resolveNodeText(raw, data, platform)
+  val authored = json.encodeToJsonElement(PrototypeNode.serializer(), template).jsonObject
+  val resolved = PrototypeDataResolver.resolveNodeText(raw, data, platform, authored, bindRow)
   if (resolved == raw) return node
   val decoded = json.decodeFromJsonElement(PrototypeNode.serializer(), resolved)
   // The wire format omits runtime repeat metadata. Keep bound repeats and descendants intact;
-  // each descendant resolves its own text only after its row tokens have bound.
+  // each descendant fills its own authored text with its repeat context.
   return restorePrototypeListContainerChildren(node, decoded)
 }
 

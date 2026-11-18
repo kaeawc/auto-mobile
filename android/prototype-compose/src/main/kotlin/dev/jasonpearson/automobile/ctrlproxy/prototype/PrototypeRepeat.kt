@@ -106,6 +106,7 @@ private data class RepeatInstance(
   val index: Int,
   val source: JsonObject = JsonObject(emptyMap()),
   val outerAlias: String? = null,
+  val textSources: PrototypeListTextSources? = null,
 )
 
 private fun PrototypeNode.repeatSpec(): PrototypeRepeat? =
@@ -155,6 +156,7 @@ internal fun prototypeChildEntries(
   path: String,
   bind: Boolean = true,
   formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
+  textSources: PrototypeListTextSources? = null,
 ): List<PrototypeChildEntry> {
   if (node is PrototypeAdaptiveNode) return adaptiveChildEntries(node, path)
   if (node is PrototypeListNode)
@@ -176,16 +178,17 @@ internal fun prototypeChildEntries(
     }
   }
   val rows = projectedRepeatRows(node, repeat, path, bind, formatter)
-  return repeatedChildEntries(children, repeat, rows, path, bind)
+  return repeat.repeatedChildEntries(children, rows, path, bind, textSources)
 }
 
-private fun repeatedChildEntries(
+private fun PrototypeRepeat.repeatedChildEntries(
   children: List<PrototypeNode>,
-  repeat: PrototypeRepeat,
   rows: List<Map<String, PrototypeScalar>>,
   path: String,
   bind: Boolean,
+  textSources: PrototypeListTextSources?,
 ): List<PrototypeChildEntry> {
+  val repeat = this
   return rows.flatMapIndexed { itemIndex, projected ->
     val instance =
       RepeatInstance(
@@ -195,13 +198,14 @@ private fun repeatedChildEntries(
         repeat.sourceItems?.getOrNull(itemIndex)
           ?: JsonObject(projected.mapValues { EmitContextResolver.scalar(it.value) }),
         repeat.outerAlias,
+        textSources,
       )
     val identity =
       if (bind) repeat.key?.let { projected[it]?.renderedText() } ?: itemIndex.toString()
       else itemIndex.toString()
     children.mapIndexed { index, child ->
       PrototypeChildEntry(
-        if (bind || repeat.sourceItems != null) child.bound(instance) else child,
+        if (bind || repeat.sourceItems != null) child.boundWithText(instance) else child,
         "$path.repeat[$identity].children[$index]",
         if (child.visibleWhen != null) (itemIndex * (repeat.stagger ?: 0)).coerceAtMost(600) else 0,
       )
@@ -235,6 +239,18 @@ private fun projectedRepeatRows(
   val error = PrototypeDerivedRows.validate(node, rows, repeat.sourceItems, repeat.outerAlias)
   require(error == null) { "$path${error?.path?.removePrefix("root")}: ${error?.message}" }
   return rows
+}
+
+private fun PrototypeNode.boundWithText(instance: RepeatInstance): PrototypeNode {
+  val bound = bound(instance)
+  val sources = instance.textSources ?: return bound
+  return resolvePrototypeListNodeText(
+    bound,
+    this,
+    sources.data,
+    sources.platform,
+    instance::interpolate,
+  )
 }
 
 private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
@@ -281,7 +297,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
   val styleWhen = styleWhen?.map { PrototypeStyleWhen(it.`when`.bound(instance), it.style) }
   val visibleWhen = visibleWhen?.bound(instance)
   val shared = shared?.let { it.copy(key = instance.interpolate(it.key)) }
-  fun List<PrototypeNode>.bound() = if (nested != null) this else map { it.bound(instance) }
+  fun List<PrototypeNode>.bound() = if (nested != null) this else map { it.boundWithText(instance) }
   return when (this) {
     is PrototypeBoxNode ->
       copy(
@@ -364,7 +380,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         shared = shared,
         visibleWhen = visibleWhen,
-        screens = screens.mapValues { (_, child) -> child.bound(instance) },
+        screens = screens.mapValues { (_, child) -> child.boundWithText(instance) },
       )
     is PrototypePagerNode ->
       copy(
@@ -443,7 +459,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
               onRefresh = it.onRefresh.map { action -> action.bound(instance) },
             )
           },
-        child = child.bound(instance),
+        child = child.boundWithText(instance),
       )
     is PrototypeTooltipNode ->
       copy(
@@ -462,7 +478,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
-        child = child.bound(instance),
+        child = child.boundWithText(instance),
       )
     is PrototypeBottomSheetNode ->
       copy(
@@ -473,7 +489,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
-        child = child.bound(instance),
+        child = child.boundWithText(instance),
       )
     is PrototypeImageNode ->
       copy(
@@ -519,7 +535,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         placeholder = placeholder?.let(instance::interpolate),
         trailingActions = trailingActions?.map { it.bound(instance) },
         onSubmit = onSubmit?.map { it.bound(instance) },
-        child = child?.bound(instance),
+        child = child?.boundWithText(instance),
       )
     is PrototypeTextFieldNode ->
       copy(
@@ -555,11 +571,11 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         shared = shared,
         visibleWhen = visibleWhen,
-        list = list?.bound(instance),
-        detail = detail?.bound(instance),
-        content = content?.bound(instance),
-        main = main?.bound(instance),
-        supporting = supporting?.bound(instance),
+        list = list?.boundWithText(instance),
+        detail = detail?.boundWithText(instance),
+        content = content?.boundWithText(instance),
+        main = main?.boundWithText(instance),
+        supporting = supporting?.boundWithText(instance),
         selectionKey = selectionKey?.let(instance::interpolate),
         stateKey = stateKey?.let(instance::interpolate),
         openKey = openKey?.let(instance::interpolate),
@@ -711,7 +727,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         text = text?.let(instance::interpolate),
         confirm = confirm.bound(instance),
         dismiss = dismiss?.bound(instance),
-        child = child?.bound(instance),
+        child = child?.boundWithText(instance),
       )
     is PrototypeIconButtonNode ->
       copy(
@@ -1079,10 +1095,11 @@ internal fun bindPrototypeListRow(
   node: PrototypeListNode,
   item: JsonObject,
   index: Int,
+  textSources: PrototypeListTextSources? = null,
 ): PrototypeNode =
   node.children
     .single()
-    .bound(
+    .boundWithText(
       RepeatInstance(
         node.repeat.`as`,
         item
@@ -1095,5 +1112,6 @@ internal fun bindPrototypeListRow(
           },
         index,
         source = item,
+        textSources = textSources,
       ),
     )

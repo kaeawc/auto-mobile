@@ -213,6 +213,37 @@ class PrototypeLazyListTest {
   }
 
   @Test
+  fun `lazy row values containing tokens stay literal`() {
+    val input =
+      dataList(
+        "{row.name} {data:/rows/{index}/title}",
+        """{"rows":[{"id":"a","name":"unused","title":"First"},{"id":"b","name":"{data:/secret}","title":"Second"}],"secret":"LEAK"}""",
+      )
+    val model = checkNotNull(mapPrototypeSpec(PrototypeDataResolver.resolve(input)).root.list)
+    assertEquals("{data:/secret} Second", model.render(model.rows[1], 1).text)
+    val literal =
+      input.copy(
+        root =
+          (input.root as PrototypeListNode).copy(
+            children = listOf(PrototypeTextNode(text = "{row.name}")),
+          ),
+      )
+    val literalModel = checkNotNull(mapPrototypeSpec(literal).root.list)
+    assertEquals("{data:/secret}", literalModel.render(literalModel.rows[1], 1).text)
+  }
+
+  @Test
+  fun `lazy row values containing platform and row tokens stay literal`() {
+    val input =
+      dataList(
+        "{row.name}",
+        """{"rows":[{"id":"a","name":"{platform:/name} {row.id} {index}"}]}""",
+      )
+    val model = checkNotNull(mapPrototypeSpec(input).root.list)
+    assertEquals("{platform:/name} {row.id} {index}", model.render(model.rows.single(), 0).text)
+  }
+
+  @Test
   fun `lazy data values containing row and data tokens stay literal`() {
     val input =
       dataList(
@@ -244,19 +275,20 @@ class PrototypeLazyListTest {
     val base =
       dataList(
         "unused",
-        """{"rows":[{"id":"a","cells":[{"id":"c"}]}],"label":"Cell","titles":{"c":"{cell.id} {row.id}"}}""",
+        """{"rows":[{"id":"a","cells":[{"id":"c","name":"{data:/secret}"}]}],"secret":"LEAK","label":"Cell","titles":{"c":"{cell.id} {row.id}"}}""",
       )
     val template =
       PrototypeColumnNode(
         semantics = PrototypeSemantics(label = "{data:/label}"),
         repeat = PrototypeRepeat(emptyList(), "cell", itemsField = "cells"),
-        children = listOf(PrototypeTextNode(text = "{row.id}: {data:/titles/{cell.id}}")),
+        children =
+          listOf(PrototypeTextNode(text = "{cell.name} {row.id}: {data:/titles/{cell.id}}")),
       )
     val input = base.copy(root = (base.root as PrototypeListNode).copy(children = listOf(template)))
     val model = checkNotNull(mapPrototypeSpec(input).root.list)
     val row = model.render(model.rows.single(), 0)
     assertEquals("Cell", row.contentDescription)
-    assertEquals("a: {cell.id} {row.id}", row.children.single().text)
+    assertEquals("{data:/secret} a: {cell.id} {row.id}", row.children.single().text)
   }
 
   @Test

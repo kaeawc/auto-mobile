@@ -19,6 +19,11 @@ struct PrototypeListRepeat: Decodable {
     let items: Items
     let `as`: String
     let key: String
+    let platformSnapshot: [String: JSONValue]?
+    enum CodingKeys: String, CodingKey {
+        case items, `as`, key
+        case platformSnapshot = "_platform"
+    }
 }
 
 /// Resolved independently so a renderer can compose rows without expanding the authored tree.
@@ -62,7 +67,7 @@ enum PrototypeLazyList {
         let expanded = PrototypeRepeat.expand(
             sources, outer: instance, formatter: FoundationPrototypeValueFormatter(), environment: .device()
         )
-        let bound = PrototypeDataResolver.resolveRoot(expanded, data: data)
+        let bound = PrototypeDataResolver.resolveRoot(expanded, data: data, platform: spec.platformSnapshot)
         return (fields[spec.key]?.displayString ?? "", bound)
     }
 

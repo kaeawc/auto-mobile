@@ -237,6 +237,7 @@ internal class PrototypeNodeMapping(
   private val formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
   private val fillWindowRoot: Boolean = false,
   private val resolveRowData: Boolean = false,
+  private val rowPlatform: JsonObject? = null,
   private val derivedValues: Map<String, kotlinx.serialization.json.JsonElement?> =
     PrototypeDerive.evaluate(
       derive,
@@ -266,7 +267,7 @@ internal class PrototypeNodeMapping(
     pagerState: Map<String, PrototypeScalar>? = null,
     staggerDelayMs: Int = 0,
   ): PrototypeRenderNode {
-    val node = if (resolveRowData) resolvePrototypeListNodeText(node, data) else node
+    val node = if (resolveRowData) resolvePrototypeListNodeText(node, data, rowPlatform) else node
     val localState =
       derivedState +
         (if (node is PrototypePagerNode)
@@ -434,6 +435,7 @@ internal class PrototypeNodeMapping(
                   derivedValues = derivedValues,
                   formatter = formatter,
                   resolveRowData = true,
+                  rowPlatform = list.repeat.platformSnapshot,
                 )
                 .map(
                   bindPrototypeListRow(list, item, index),

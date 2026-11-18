@@ -115,8 +115,12 @@ class PrototypeLazyListTest {
       )
     val resolved = PrototypeDataResolver.resolveRoot(root, null, obj("""{"name":"Android"}"""))
     assertEquals(
-      JsonPrimitive("Android: {data:/items/{index}/name}"),
+      JsonPrimitive("{platform:/name}: {data:/items/{index}/name}"),
       resolved.getValue("children").jsonArray.single().jsonObject["text"],
+    )
+    assertEquals(
+      obj("""{"name":"Android"}"""),
+      resolved.getValue("repeat").jsonObject["_platform"],
     )
   }
 

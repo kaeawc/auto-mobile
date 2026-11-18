@@ -752,7 +752,9 @@ internal object PrototypeRepeatValidator {
       val field = ((node["repeat"] as? JsonObject)?.get("items") as? JsonObject)?.text("field")
       val own =
         if (field != null && outer != null)
-          outer.items.indices.map { PrototypeNestedRepeat.innerScope(node, path, outer, it) }
+          (0 until maxOf(1, outer.items.size)).map {
+            PrototypeNestedRepeat.innerScope(node, path, outer, it)
+          }
         else listOf(scopeOf(node, path, data))
       for (scope in own) {
         if (scope != null) scopes.add(scope)

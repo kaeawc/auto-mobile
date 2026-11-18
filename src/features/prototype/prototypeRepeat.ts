@@ -227,9 +227,8 @@ function fieldError(
   if (resolved === undefined) {
     return dataTextError(path, state);
   }
-  const segments = resolved === value ? authored : templateSegments(resolved, scope.binding);
   const repeated = repeatTextError(
-    { text: resolved, segments, dataRecognized },
+    { text: resolved, segments: authored, dataRecognized },
     path,
     scope,
     state,
@@ -375,7 +374,12 @@ function scopeOf(node: Raw, path: string, data: PrototypeRepeatData): Scope | un
     return undefined;
   }
   const source = record(repeat.items);
-  const rawItems = typeof source?.path === "string" ? data.source(source.path) : undefined;
+  const rawItems =
+    typeof source?.path === "string"
+      ? data.source(source.path)
+      : typeof source?.derived === "string"
+        ? data.derived[source.derived]
+        : undefined;
   return {
     sourceItems: Array.isArray(rawItems) ? rawItems : undefined,
     path,
@@ -482,7 +486,7 @@ function innerScope(node: Raw, path: string, outer: Scope, index: number): Scope
     binding: { alias: String(repeat.as), index: true, outerAlias: outer.binding.alias },
     outerItem,
     pathBound: "field",
-    items: derivedValidationItems(rows, repeat.derive).map((row) => ({
+    items: derivedValidationItems(rows.map(projectPrototypeDataItem), repeat.derive).map((row) => ({
       ...row,
       ...fields,
       $outerIndex: index,
@@ -736,14 +740,30 @@ function expandedErrors(
   node: Raw,
   path: string,
   budget: Budget,
-  { data, repeatPath, outer }: { data: PrototypeRepeatData; repeatPath?: string; outer?: Scope },
+  {
+    data,
+    repeatPath,
+    outer,
+    templateCounted = false,
+  }: {
+    data: PrototypeRepeatData;
+    repeatPath?: string;
+    outer?: Scope;
+    templateCounted?: boolean;
+  },
 ): RepeatError | undefined {
-  const overflow = chargeExpandedNode(node, path, budget, repeatPath ?? path);
+  const overflow = templateCounted
+    ? undefined
+    : chargeExpandedNode(node, path, budget, repeatPath ?? path);
   if (overflow) {
     return overflow;
   }
   const scope = expansionScope(node, path, { data, outer });
-  const instances = scope && node.type !== "list" ? scope.items.length : 1;
+  const instances = scope
+    ? node.type === "list"
+      ? Math.max(1, scope.items.length)
+      : scope.items.length
+    : 1;
   const nestedPath = scope ? `${path}.repeat` : repeatPath;
   for (let instance = 0; instance < instances; instance++) {
     const single = scope
@@ -757,6 +777,7 @@ function expandedErrors(
       data,
       repeatPath: nestedPath,
       outer: single,
+      templateCounted: node.type === "list" ? instance > 0 : scope ? false : templateCounted,
     });
     if (error) {
       return error;
@@ -770,13 +791,25 @@ function expandedChildErrors(
   node: Raw,
   path: string,
   budget: Budget,
-  options: { data: PrototypeRepeatData; repeatPath?: string; outer?: Scope },
+  options: {
+    data: PrototypeRepeatData;
+    repeatPath?: string;
+    outer?: Scope;
+    templateCounted?: boolean;
+  },
 ): RepeatError | undefined {
   const stack = record(node.screens) !== undefined;
   if (stack) {
     budget.screens.enterStack();
   }
   for (const child of childrenOf(node, path)) {
+    if (
+      node.type === "list" &&
+      options.templateCounted &&
+      !child.path.startsWith(`${path}.children[`)
+    ) {
+      continue;
+    }
     const screen = stack && child.path.startsWith(`${path}.screens[`);
     if (screen) {
       budget.screens.enterScreen();
@@ -838,7 +871,9 @@ function collectScopes(
   const field = record(record(node.repeat)?.items)?.field;
   const own =
     typeof field === "string" && outer
-      ? outer.items.map((_item, index) => innerScope(node, path, outer, index))
+      ? Array.from({ length: Math.max(1, outer.items.length) }, (_item, index) =>
+          innerScope(node, path, outer, index),
+        )
       : [scopeOf(node, path, data)];
   for (const scope of own) {
     if (scope) {

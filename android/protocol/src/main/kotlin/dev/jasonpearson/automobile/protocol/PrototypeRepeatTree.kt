@@ -48,10 +48,11 @@ internal object PrototypeRepeatTree {
     val alias = repeat.text("as") ?: return null
     val source = repeat["items"] as? JsonObject
     val pointer = source?.text("path")
+    val derived = source?.text("derived")
     val items =
       if (pointer != null) data.items(pointer)
       else
-        source?.text("derived")?.let { name ->
+        derived?.let { name ->
           // Derived rows are data rows: templates see only their named scalars, as for a path.
           (data.derived[name] as? JsonArray)
             .orEmpty()
@@ -69,9 +70,11 @@ internal object PrototypeRepeatTree {
       projected,
       source != null,
       names,
-      if (source?.text("derived") != null) "derived" else "path",
+      if (derived != null) "derived" else "path",
       sourceItems =
         if (pointer != null) data.source(pointer).orEmpty().filterIsInstance<JsonObject>()
+        else if (derived != null)
+          (data.derived[derived] as? JsonArray).orEmpty().filterIsInstance<JsonObject>()
         else items,
     )
   }

@@ -266,8 +266,8 @@ enum PrototypeDataResolver {
         return resolveRoot(root, data: data, platform: nil, repeats: &repeats, pass: .repeatsOnly)
     }
 
-    /// `deferDataText` binds platform text and conditions, leaving data text for per-row binding.
-    private enum Pass { case all, repeatsOnly, deferDataText }
+    /// Lazy rows keep authored text until row tokens bind; conditions resolve at show time.
+    private enum Pass { case all, repeatsOnly, deferRowText }
 
     private static func resolveRoot(
         _ root: JSONValue, data: [String: JSONValue]?, platform: [String: JSONValue]?,
@@ -276,12 +276,16 @@ enum PrototypeDataResolver {
         -> JSONValue
     {
         guard case var .object(fields) = root else { return root }
-        if pass != .repeatsOnly { PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind(
+        if pass == .all { PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind(
             $0,
             data: data,
-            platform: platform, deferData: pass == .deferDataText
+            platform: platform
         ) } }
         let lazy = fields["type"] == .string("list")
+        if lazy, pass == .all, let platform, var repeated = fields["repeat"]?.objectFields {
+            repeated["_platform"] = .object(platform)
+            fields["repeat"] = .object(repeated)
+        }
         if !lazy, let value = fields["repeat"] { fields["repeat"] = resolveRepeat(
             value, repeats: &repeats, retainSource: PrototypeRepeat.containsFieldSource(root)
         ) }
@@ -307,9 +311,8 @@ enum PrototypeDataResolver {
                 ) }
             }
         } else if case let .array(children)? = fields["children"] {
-            // Bind platform text now, but keep data pointers raw: each row binds `{index}` and
-            // `{row.x}` first, then resolves, so a pointer such as `{data:/rows/{index}/name}` stays whole.
-            let rowPass: Pass = pass == .all && lazy ? .deferDataText : pass
+            // Insert source values after row binding so their braces remain literal.
+            let rowPass: Pass = pass == .all && lazy ? .deferRowText : pass
             fields["children"] = .array(children
                 .map { resolveRoot($0, data: data, platform: platform, repeats: &repeats, pass: rowPass) })
         }

@@ -224,6 +224,22 @@ class PrototypeLazyListTest {
   }
 
   @Test
+  fun `lazy platform values containing row and data tokens stay literal`() {
+    val input =
+      dataList(
+        "{platform:/name} {row.id} {data:/other}",
+        """{"rows":[{"id":"a","x":"Expanded"}],"other":"Resolved"}""",
+      )
+    val literal = "{row.x} {index} {data:/other}"
+    val platform = JsonObject(mapOf("name" to JsonPrimitive(literal)))
+    val resolved = PrototypeDataResolver.resolve(input, platform)
+    val model = checkNotNull(mapPrototypeSpec(resolved).root.list)
+    assertEquals("$literal a Resolved", model.render(model.rows.single(), 0).text)
+    val again = PrototypeDataResolver.resolve(resolved)
+    assertEquals(platform, (again.root as PrototypeListNode).repeat.platformSnapshot)
+  }
+
+  @Test
   fun `nested repeat binds inner row data last and retains its outer alias`() {
     val base =
       dataList(

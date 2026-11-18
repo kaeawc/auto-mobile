@@ -342,12 +342,15 @@ object PrototypeDataResolver {
 
   private enum class Pass {
     ALL,
-    DEFER_DATA_TEXT,
+    DEFER_ROW_TEXT,
   }
 
   /** Resolves only this node's text after its lazy row tokens have bound. */
-  fun resolveNodeText(root: JsonObject, data: JsonObject?): JsonObject =
-    textFields(root, data, null)
+  fun resolveNodeText(
+    root: JsonObject,
+    data: JsonObject?,
+    platform: JsonObject? = null,
+  ): JsonObject = textFields(root, data, platform)
 
   private fun resolveRoot(
     root: JsonObject,
@@ -356,14 +359,18 @@ object PrototypeDataResolver {
     platform: JsonObject?,
     pass: Pass,
   ): JsonObject {
-    val own = textFields(root, data, platform, deferData = pass == Pass.DEFER_DATA_TEXT)
+    val own = if (pass == Pass.DEFER_ROW_TEXT) root else textFields(root, data, platform)
     val resolved =
       JsonObject(
         own.mapValues { (key, value) ->
           when (key) {
             "repeat" ->
-              if ((root["type"] as? JsonPrimitive)?.content == "list") value
-              else resolveRepeat(value, repeats)
+              if ((root["type"] as? JsonPrimitive)?.content == "list") {
+                val repeat = value as? JsonObject
+                if (repeat != null && platform != null)
+                  JsonObject(repeat + ("_platform" to platform))
+                else value
+              } else resolveRepeat(value, repeats)
             "enabledWhen",
             "visibleWhen",
             "errorWhen" -> resolveCondition(value, data, platform)
@@ -372,10 +379,10 @@ object PrototypeDataResolver {
           }
         },
       )
-    // Only row-template children defer data text; headers and footers resolve at the root.
+    // Snapshot platform reads with the list; resolve text only after binding each row.
     val lazy = root["type"] == JsonPrimitive("list")
     return mapChildren(resolved) { child, rowTemplate ->
-      val childPass = if (lazy && rowTemplate) Pass.DEFER_DATA_TEXT else pass
+      val childPass = if (lazy && rowTemplate) Pass.DEFER_ROW_TEXT else pass
       resolveRoot(child, data, repeats, platform, childPass)
     }
   }

@@ -98,7 +98,7 @@ enum PrototypeBundleCapabilities {
             if let repeated = node["repeat"]?.objectFields,
                repeated["items"]?.objectFields != nil || repeated["key"] != nil { need("data_model") }
             if node["repeat"]?.objectFields?["items"]?.objectFields?["derived"] != nil { need("derive") }
-            if node["repeat"]?.objectFields?["items"]?.objectFields?["field"] != nil { need("nested_repeat") }
+            if PrototypeRepeat.requiresNestedCapability(node["repeat"]) { need("nested_repeat") }
             if node["repeat"]?.objectFields?["derive"] != nil { need("format") }
             if node["span"] != nil { need("flow_grid") }
             if node["onLongPress"] != nil || node["onDoubleTap"] != nil { need("gestures") }

@@ -6,6 +6,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import fixtures from "../../fixtures/prototype-spec/repeat/nested.json";
 import sourceFixtures from "../../fixtures/prototype-spec/repeat/nested-sources.json";
 import cellLimitFixture from "../../fixtures/prototype-spec/repeat/nested-cell-limit.json";
+import literalArrayFixture from "../../fixtures/prototype-spec/repeat/nested-literal-unused-array.json";
+import { repeatErrors } from "../../../src/features/prototype/prototypeRepeat";
+import { prototypeNestedRepeatFields } from "../../../src/features/prototype/prototypeFormatCapability";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PrototypeRepeatData } from "../../../src/features/prototype/prototypeData";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
@@ -195,6 +198,114 @@ test("strict policy refuses the new gate", () => {
     success: false,
     error: { path: "$", message: expect.stringContaining("prototype_nested_repeat_v1") },
   });
+});
+
+test("unused literal array fields require the nested capability in both host gates", () => {
+  expect(validatePrototypeSpec(literalArrayFixture).success).toBe(true);
+  expect(prototypeNestedRepeatFields(literalArrayFixture)).toEqual(["root.repeat.items"]);
+  const required = prototypeGateCapabilities(literalArrayFixture);
+  expect(required).toContain("prototype_nested_repeat_v1");
+  expect(
+    validatePrototypeSpec(literalArrayFixture, {
+      requiredCapabilities: prototypeGateCapabilities,
+      supportedCapabilities: required.filter((name) => name !== "prototype_nested_repeat_v1"),
+    }),
+  ).toMatchObject({
+    success: false,
+    error: { message: expect.stringContaining("prototype_nested_repeat_v1") },
+  });
+});
+
+test("empty outer sources keep inner state key scopes for controls and actions", () => {
+  for (const outerCount of [0, 1]) {
+    const spec = nestedSpec(outerCount, 0, {
+      type: "checkbox",
+      stateKey: "checked_{line.id}",
+      onTap: [
+        { type: "toggle", key: "checked_{line.id}" },
+        { type: "increment", key: "count_{line.id}" },
+      ],
+    });
+    expect(validatePrototypeSpec(spec)).toMatchObject({ success: true });
+  }
+});
+
+test("substituted text budget is shared across inner template siblings", () => {
+  const spec = nestedSpec(1, 100);
+  const order = (record(spec.data)!.orders as Raw[])[0]!;
+  order.lines = Array.from({ length: 100 }, () => ({ sku: "x".repeat(16000) }));
+  const inner = (record(spec.root)!.children as Raw[])[0]!;
+  inner.children = [{ type: "text", text: "{line.sku}" }];
+  expect(repeatErrors(spec)).toBeUndefined();
+  inner.children = Array.from({ length: 3 }, () => ({ type: "text", text: "{line.sku}" }));
+  expect(repeatErrors(spec)?.message).toBe("Substituted text total limit exceeded");
+});
+
+test("lazy outer lists charge nested expansion for later rows and the template once", () => {
+  const spec = nestedSpec(2, 0, { type: "image", asset: "photo" });
+  const root = record(spec.root)!;
+  root.type = "list";
+  record(root.repeat)!.key = "id";
+  const orders = record(spec.data)!.orders as Raw[];
+  orders[1]!.lines = Array.from({ length: 33 }, (_, sku) => ({ sku }));
+  expect(validatePrototypeSpec(spec)).toMatchObject({
+    success: false,
+    error: { message: "Expanded image limit exceeded" },
+  });
+  orders[1]!.lines = [{ sku: 1 }];
+  expect(validatePrototypeSpec(spec).success).toBe(true);
+  record(spec.data)!.orders = Array.from({ length: 100 }, (_, id) => ({ id, lines: [] }));
+  root.header = { type: "image", asset: "photo" };
+  root.children = [
+    { type: "column", children: [...(root.children as Raw[]), { type: "image", asset: "photo" }] },
+  ];
+  expect(validatePrototypeSpec(spec).success).toBe(true);
+});
+
+test("data values containing {row.x} stay inert during fieldError validation", () => {
+  const child: Raw = { type: "text", text: "{data:/literal} {row.qty}" };
+  const spec = {
+    id: "inert-data",
+    window: { placement: { type: "fullscreen" } },
+    data: {
+      literal: "{row.x}",
+      rows: [{ x: "x".repeat(contract.limits.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH), qty: 2 }],
+    },
+    root: { type: "column", repeat: { items: { path: "/rows" }, as: "row" }, children: [child] },
+  };
+  expect(validatePrototypeSpec(spec)).toMatchObject({ success: true });
+  expect(toHtml(renderPrototypeStill(spec).element)).toContain("{row.x} 2");
+  child.text = "{row.x}{row.qty}";
+  expect(repeatErrors(spec)?.message).toBe("Substituted text length limit exceeded");
+});
+
+test("web lazy row platform values render tokens literally", () => {
+  const spec = nestedSpec(1, 0);
+  const root = record(spec.root)!;
+  root.type = "list";
+  record(root.repeat)!.key = "id";
+  root.children = [{ type: "text", text: "{platform:/name} {order.id}" }];
+  const scope: WebRenderScope = {
+    style: { mode: "light", palette: prototypeRolePalette({}, "light"), parentAxis: "column" },
+    condition: {
+      state: {},
+      platform: "android",
+      platformState: { "/name": "{order.id} {index} {data:/secret}" },
+    },
+    data: { ...record(spec.data), secret: "expanded" },
+    spec,
+    format: { locale: "en-US", timeZone: "UTC", nowMs: 0 },
+    instances: [],
+    inBox: false,
+    unsupported: [],
+    screenWidth: 412,
+    screenHeight: 915,
+    layers: [],
+  };
+  const row = webRepeatInstances(root, scope)[0]!;
+  expect(bound("{platform:/name} {order.id}", { ...scope, instances: [row] })).toBe(
+    "{order.id} {index} {data:/secret} 0",
+  );
 });
 
 test("motion budgets count every nested instance", () => {

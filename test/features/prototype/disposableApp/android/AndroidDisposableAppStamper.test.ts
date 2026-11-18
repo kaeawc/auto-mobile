@@ -154,3 +154,14 @@ test("ZIP assembly patches stamped colours into resources.arsc", () => {
     }),
   ).toThrow("resources.arsc");
 });
+
+test("inbound scheme stamp inputs invalidate the APK cache", async () => {
+  const { fs, stamper } = setup();
+  const input = stampInput();
+  await fs.writeFileBuffer(input.template.apkPath, Buffer.from("template"));
+  const first = await stamper.stamp(input);
+  expect((await stamper.stamp({ ...input, slug: "reader" })).apkPath).not.toBe(first.apkPath);
+  expect((await stamper.stamp({ ...input, extraLinkSchemes: ["reader"] })).apkPath).not.toBe(
+    first.apkPath,
+  );
+});

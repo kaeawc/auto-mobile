@@ -264,8 +264,8 @@ data class PrototypeSpec(
   val derive: Map<String, PrototypeDerivedEntry>? = null,
   /** The state keys and `/data` pointers the device keeps across shows (#12522). */
   val storage: PrototypeStorageBlock? = null,
-  /** What the spec needs from the platform before show (#14294). */
-  val requires: PrototypeRequires? = null,
+  /** Capability declarations or platform requirements checked before show (#14294). */
+  @Serializable(with = PrototypeRequiresSerializer::class) val requires: PrototypeRequires? = null,
   /** `platform.on`: action lists run when a platform event is delivered (#14294). */
   val platform: PrototypePlatformHandlers? = null,
   /** Validated channel declarations; no transport is installed by the contract slice. */
@@ -283,6 +283,8 @@ data class PrototypeSpec(
   /** Declared media players (#14253); contract only, no runtime plays them yet. */
   val media: JsonObject? = null,
   val strings: JsonObject? = null,
+  /** Validated inbound entries; the runtime binds them only while opening a registered URL. */
+  val links: JsonArray? = null,
 )
 
 /** The root `requires` block (#14294): platform modules, permissions and background needs. */
@@ -291,6 +293,7 @@ data class PrototypeRequires(
   val platform: List<String>? = null,
   val permissions: List<PrototypePermissionRequirement>? = null,
   val background: List<String>? = null,
+  @kotlinx.serialization.Transient val capabilities: List<String> = emptyList(),
 )
 
 /** One declared permission: a canonical [name] and the [purpose] shown to the user. */

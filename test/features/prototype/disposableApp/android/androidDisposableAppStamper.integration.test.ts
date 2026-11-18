@@ -28,6 +28,7 @@ test.skipIf(!configured || !tools || !keytool)(
         template,
         appId: "dev.jasonpearson.automobile.app.integration",
         label: "Feedly",
+        slug: "feedly",
         icon: { backgroundColor: "#FFC62828" },
         permissions: [],
         enabledComponents: [],

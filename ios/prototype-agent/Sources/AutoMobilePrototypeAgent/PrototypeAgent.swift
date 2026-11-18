@@ -5,9 +5,10 @@ import UIKit
 private let prototypeLog = Logger(subsystem: "dev.jasonpearson.automobile.prototype-agent", category: "prototype")
 
 /// Entry point called from the dyld constructor in Loader.c. The constructor runs before
-/// UIApplication exists, so everything waits for the main run loop.
+/// UIApplication exists: install delegate hooks without creating it, then boot on the main run loop.
 @_cdecl("am_prototype_agent_start")
 public func amPrototypeAgentStart() {
+    MainActor.assumeIsolated { PrototypeURLDelivery.install() }
     DispatchQueue.main.async {
         PrototypeAgent.shared.boot()
     }
@@ -16,6 +17,7 @@ public func amPrototypeAgentStart() {
 /// For an app linking the agent directly (the viewer); run instead of, not after, the Loader.c injection constructor.
 @_cdecl("am_prototype_agent_start_standalone")
 public func amPrototypeAgentStartStandalone() {
+    MainActor.assumeIsolated { PrototypeURLDelivery.install() }
     DispatchQueue.main.async {
         PrototypeAgent.bootStandalone()
     }
@@ -174,6 +176,7 @@ final class PrototypeAgent: NSObject {
         guard instance == nil else { return }
         let agent = PrototypeAgent(model: model)
         instance = agent
+        PrototypeURLDelivery.hookExistingDelegates()
         agent.viewerHosted = true
         agent.booted = true
         agent.viewerSaveBack = PrototypeViewerSaveBack(savedSpecId: savedSpecId, layoutDirectory: layoutDirectory)
@@ -214,6 +217,7 @@ final class PrototypeAgent: NSObject {
         server.onClientCountChanged = { [weak agent] count in agent?.clientCountChanged(count) }
         agent.server = server
         agent.installRequestDriver()
+        PrototypeURLDelivery.inbox.attach(model)
         server.start()
     }
 
@@ -284,6 +288,7 @@ final class PrototypeAgent: NSObject {
             return
         }
 
+        PrototypeURLDelivery.hookExistingDelegates()
         booted = true
         testHooksEnabled = PrototypeTestHooks.isEnabled(environment: ProcessInfo.processInfo.environment)
         NSLog(
@@ -324,6 +329,7 @@ final class PrototypeAgent: NSObject {
         server.start()
         self.server = server
         installRequestDriver()
+        PrototypeURLDelivery.inbox.attach(model)
     }
 
     /// Wires the `request` action (#12529): `via: "host"` calls go out as `prototype_request` frames

@@ -137,7 +137,14 @@ transition as a real tap, including on part identifiers.
   precedence.
 - **Back stack.** Back-stack entries stay mounted, transparent, non-interactive and
   accessibility-hidden, preserving scroll positions on pop within the bounded stack depth; the agent
-  releases removed entries after motion.
+  releases removed entries after motion. Inbound `links` require only `prototype_links_v1` and resolve
+  against the app's `CFBundleURLTypes` schemes. Matching links bind captures and typed query values
+  into the tap executor, including `setStack`; Back returns to the entry below the linked screen.
+  `link_opened` precedes actions; `link_unmatched` runs none. Both URLs omit every declared secret
+  query value. An absent optional binding refuses the complete action list after acceptance.
+  Injected agents intercept scene and application URL delegate callbacks, preserving host callbacks;
+  cold URLs wait for the first spec before rendering. ProtoViewer forwards its existing `onOpenURL`
+  callback and registers `amp-demo` for prototype links alongside its separate MCP scheme.
   Navigation posts a screen-changed accessibility notification targeting the new native screen
   container after layout; accessibility escape uses the same animated pop path. Wrap a stack in a box
   to animate its own visibility.

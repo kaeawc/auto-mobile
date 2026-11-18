@@ -99,7 +99,9 @@ schemes; HTTP(S) also needs an explicit host registration. Nothing registers ver
 The event contract defines `link_opened {url,entry}` (entry is the path pattern) and
 `link_unmatched {url}` with no actions on an unmatched URL. Event URLs omit secret query values.
 These are core navigation events, independent of `prototype_platform_v1` and outbound `links.open`.
-The schema, gates and pure resolver are available; native runtime delivery is not wired.
+Android routes cold-start URLs before publishing the first prototype frame and warm URLs through
+`onNewIntent`. The shell registers `amp-<slug>`; the stamp writes the same schemes into its intent
+filter and runtime metadata. A spec without `prototype_links_v1` ignores inbound URLs.
 
 ## Stack transitions
 

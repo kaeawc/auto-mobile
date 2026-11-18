@@ -4,7 +4,7 @@ import java.net.URI
 import java.util.Locale
 
 /** Registration guard; raw URLs still use the matcher's custom authority/path semantics. */
-internal object PrototypeLinkResolver {
+object PrototypeLinkResolver {
   data class Web(val scheme: String, val host: String)
 
   data class Registration(val schemes: List<String>, val web: List<Web> = emptyList())

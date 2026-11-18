@@ -253,7 +253,11 @@ struct LibraryView: View {
     }
 
     private func receiveURL(_ url: URL) {
-        guard url.scheme?.lowercased() == "automobile-proto" else { receive(url, source: .share); return }
+        guard url.scheme?.lowercased() == "automobile-proto" else {
+            if url.isFileURL { receive(url, source: .share) }
+            else { PrototypeURLDelivery.receive(url) }
+            return
+        }
         // Even malformed MCP URLs are consumed: they must never enter the share-file alert path.
         guard let command = PrototypeMcpRequest.parse(url) else {
             libraryLog.warning("Ignoring MCP URL with unusable request id")

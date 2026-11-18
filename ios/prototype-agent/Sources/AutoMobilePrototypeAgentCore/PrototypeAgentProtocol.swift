@@ -100,6 +100,7 @@ enum PrototypeAgentProtocol {
         backdropCapability,
         layoutDirectionCapability,
         timersCapability,
+        "prototype_links_v1",
         "prototype_platform_v1",
         "prototype_platform_clipboard_v1",
         "prototype_platform_device_v1",

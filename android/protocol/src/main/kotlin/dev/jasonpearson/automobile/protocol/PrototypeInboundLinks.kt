@@ -142,12 +142,4 @@ internal object PrototypeInboundLinks {
     }
     return null
   }
-
-  /** Preserve the existing typed runtime surface until routing is wired in a later phase. */
-  fun runtimeModel(value: JsonElement): JsonElement {
-    val spec = value.jsonObject
-    return JsonObject(
-      spec.filterKeys { it != "links" && !(it == "requires" && spec[it] is JsonArray) },
-    )
-  }
 }

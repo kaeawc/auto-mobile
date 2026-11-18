@@ -148,7 +148,7 @@ internal object PrototypeSpecInput {
         json.decodeFromJsonElement<PrototypeSpec>(
           stripPlatformNamespaces(
             normalizeIntegers(
-              PrototypeInboundLinks.runtimeModel(value),
+              value,
               definitions.getValue("spec").jsonObject,
             ),
           ),

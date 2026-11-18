@@ -212,7 +212,7 @@ object PrototypeSpecValidator {
           val stored = json.parseToJsonElement(PrototypeStrictJson.prepare(encodedState))
           if (!validNumberTokens(stored)) fail("", "Invalid JSON")
           else
-            storedStateError(stored, stateRule, value, keyframeKeys)
+            storedStateError(stored, stateRule, value, keyframeKeys, context)
               // Node rules run before binding checks, as platform rules do in full validation.
               ?: mediaNodeError(
                 JsonObject(value + ("state" to stored)),
@@ -248,8 +248,14 @@ object PrototypeSpecValidator {
     stateRule: JsonObject,
     value: JsonObject,
     keyframeKeys: List<Pair<String, String>>,
+    context: Context,
   ): PrototypeSpecError? =
     walk(stored, stateRule, "state", Context(), 0)
+      // Inbound setState bindings must still fit the candidate state's scalar types.
+      // Run before the remaining semantic checks, matching full structural validation.
+      ?: value["links"]?.let {
+        PrototypeInboundLinks.error(JsonObject(value + ("state" to stored)), context)
+      }
       ?: PrototypeKeyframesRules.unknownTriggerKey(keyframeKeys, stored as? JsonObject)
       ?: PrototypeStorageValidation.error(
         JsonObject(value + ("state" to stored)),

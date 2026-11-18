@@ -44,6 +44,7 @@ object AutoMobilePrototype {
       "prototype_lazy_list_v1",
       "prototype_icon_effects_v1",
       "prototype_linkify_v1",
+      "prototype_links_v1",
       "prototype_loading_states_v1",
       "prototype_menus_v1",
       "prototype_motion_v2",

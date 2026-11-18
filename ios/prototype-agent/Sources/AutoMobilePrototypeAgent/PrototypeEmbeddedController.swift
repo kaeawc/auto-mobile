@@ -70,6 +70,7 @@
             model.setDeviceDark(UITraitCollection.current.userInterfaceStyle == .dark)
             model.setDeviceLocales(SystemPrototypeLocaleProvider().preferredLanguages)
             model.show(loaded.spec, locale: options.locale, specBytes: loaded.bytes)
+            PrototypeURLDelivery.inbox.attach(model)
         }
 
         override func viewDidLayoutSubviews() {
@@ -94,6 +95,7 @@
         }
 
         func stop() {
+            PrototypeURLDelivery.inbox.detach(model)
             model.onEmbeddedEvent = nil
             model.dismiss(reason: .user) // Cancels in-flight requests without a synthetic host dismissal callback.
             model.flushStorage()

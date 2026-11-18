@@ -1,10 +1,13 @@
 import { Builder, parseStringPromise } from "xml2js";
+import { assertDisposableAppSlug } from "../disposableAppId";
 import { ActionableError, toActionableError } from "../../../../models/ActionableError";
 
 export interface AndroidManifestStampInput {
   templatePackage: string;
   appId: string;
   label: string;
+  slug: string;
+  extraLinkSchemes?: readonly string[];
   permissions: readonly string[];
   enabledComponents: readonly string[];
 }
@@ -19,6 +22,7 @@ export async function stampAndroidManifest(
   input: AndroidManifestStampInput,
 ): Promise<string> {
   try {
+    assertDisposableAppSlug(input.slug);
     const document: { manifest: XmlNode } = await parseStringPromise(xml, { explicitArray: true });
     const manifest = document.manifest;
     if (!manifest || !Array.isArray(manifest.application) || manifest.application.length !== 1) {
@@ -28,6 +32,42 @@ export async function stampAndroidManifest(
     manifest.$ = { ...manifest.$, package: input.appId };
     const application = manifest.application[0]!;
     application.$ = { ...application.$, "android:label": input.label };
+    const activity = (application.activity as XmlNode[] | undefined)?.find(
+      (node) =>
+        node.$?.["android:name"] ===
+        "dev.jasonpearson.automobile.prototype.appshell.PrototypeAppActivity",
+    );
+    if (activity) {
+      const schemes = [...new Set([`amp-${input.slug}`, ...(input.extraLinkSchemes ?? [])])];
+      if (schemes.some((scheme) => !/^[a-z][a-z0-9+.-]*$/.test(scheme))) {
+        throw new ActionableError("Invalid Android inbound link scheme.");
+      }
+      const filters = (activity["intent-filter"] as XmlNode[] | undefined) ?? [];
+      activity["intent-filter"] = filters.filter(
+        (filter) =>
+          !(filter.action as XmlNode[] | undefined)?.some(
+            (action) => action.$?.["android:name"] === "android.intent.action.VIEW",
+          ),
+      );
+      activity["intent-filter"].push({
+        action: [{ $: { "android:name": "android.intent.action.VIEW" } }],
+        category: ["android.intent.category.DEFAULT", "android.intent.category.BROWSABLE"].map(
+          (name) => ({ $: { "android:name": name } }),
+        ),
+        data: schemes.map((scheme) => ({ $: { "android:scheme": scheme } })),
+      });
+      activity["meta-data"] = [
+        ...((activity["meta-data"] as XmlNode[] | undefined) ?? []).filter(
+          (node) => node.$?.["android:name"] !== "automobile.prototype.linkSchemes",
+        ),
+        {
+          $: {
+            "android:name": "automobile.prototype.linkSchemes",
+            "android:value": schemes.join(","),
+          },
+        },
+      ];
+    }
     delete manifest["uses-permission-sdk-23"];
     manifest["uses-permission"] = [
       ...new Set(["android.permission.INTERNET", ...input.permissions]),

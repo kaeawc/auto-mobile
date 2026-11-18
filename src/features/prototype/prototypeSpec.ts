@@ -9,7 +9,11 @@ export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { buildRouteSchema, setStackActionSchema } from "./prototypeRouteSchema";
 import { themeSchema } from "./prototypeThemeSchema";
 import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
-import { prototypeDeriveSchema, prototypeRepeatDeriveSchema } from "./prototypeFormatSchema";
+import {
+  prototypeDeriveSchema,
+  prototypeRepeatDeriveSchema,
+  prototypeRepeatItemsSchema,
+} from "./prototypeFormatSchema";
 import { prototypeScrollMotionShape } from "./prototypeScrollMotionSchema";
 import {
   prototypePlatformNamespaceShape,
@@ -210,16 +214,9 @@ export const commonNodeShape = {
   safeAreaPadding: safeAreaPaddingSchema.optional(),
 };
 // A literal list template: the container's children are instantiated once per item.
-const repeatItemSchema = z.record(
-  keySchema,
-  z.union([z.string(), z.number().finite(), z.boolean()]),
-);
 const repeatSchema = z
   .object({
-    items: z.union([
-      z.array(repeatItemSchema).min(1).max(128),
-      z.object({ path: pointerSchema }).strict(),
-    ]),
+    items: prototypeRepeatItemsSchema,
     as: keySchema,
     derive: prototypeRepeatDeriveSchema.optional(),
     key: keySchema.optional(),

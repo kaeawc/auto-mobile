@@ -6,6 +6,7 @@ import contract from "../../schemas/prototype-spec-contract.json";
  * not bundle the whole contract JSON (#16451). Add a name here before reading a new limit there.
  */
 export const renderContractLimitNames = [
+  "MAX_PROTOTYPE_DATA_ARRAY_ITEMS",
   "MAX_PROTOTYPE_DATA_POINTER_LENGTH",
   "MAX_PROTOTYPE_LIST_ITEMS",
   "MAX_PROTOTYPE_NODES",

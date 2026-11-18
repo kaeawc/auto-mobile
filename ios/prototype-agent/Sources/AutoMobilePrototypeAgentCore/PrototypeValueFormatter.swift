@@ -21,12 +21,36 @@ struct PrototypeValueFormat: Codable, Sendable {
 /// The contract constrains sources differently at the spec and repeat boundaries.
 struct PrototypeDerivedEntry: Codable, Sendable {
     let of: [String: JSONValue]
-    let format: PrototypeValueFormat
+    let collection: [String: JSONValue]?
+    let reduce: [String: JSONValue]?
+    let format: PrototypeValueFormat?
     let locale: String?
     let timeZone: String?
 
+    enum CodingKeys: String, CodingKey { case of, collection, reduce, format, locale, timeZone }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        of = try container.decodeIfPresent([String: JSONValue].self, forKey: .of) ?? [:]
+        collection = try container.decodeIfPresent([String: JSONValue].self, forKey: .collection)
+        reduce = try container.decodeIfPresent([String: JSONValue].self, forKey: .reduce)
+        format = try container.decodeIfPresent(PrototypeValueFormat.self, forKey: .format)
+        locale = try container.decodeIfPresent(String.self, forKey: .locale)
+        timeZone = try container.decodeIfPresent(String.self, forKey: .timeZone)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if collection == nil { try container.encode(of, forKey: .of) }
+        try container.encodeIfPresent(collection, forKey: .collection)
+        try container.encodeIfPresent(reduce, forKey: .reduce)
+        try container.encodeIfPresent(format, forKey: .format)
+        try container.encodeIfPresent(locale, forKey: .locale)
+        try container.encodeIfPresent(timeZone, forKey: .timeZone)
+    }
+
     func environment(_ defaults: PrototypeFormatEnvironment) -> PrototypeFormatEnvironment? {
-        if format.date != nil || format.time != nil {
+        if format?.date != nil || format?.time != nil {
             guard timeZone == nil || TimeZone(identifier: timeZone ?? "") != nil else { return nil }
         }
         return PrototypeFormatEnvironment(
@@ -45,7 +69,9 @@ struct PrototypeFormatEnvironment {
     static func device(
         clock: PrototypeClock = SystemPrototypeClock(),
         recording: PrototypeRecordingMode = .current
-    ) -> Self {
+    )
+        -> Self
+    {
         recording.formatEnvironment(device: Self(
             locale: .autoupdatingCurrent,
             timeZone: .current,
@@ -192,12 +218,9 @@ enum PrototypeDerivedValues {
         -> String
     {
         guard let env = entry.environment(environment) else { return "" }
-        let input: JSONValue?
-        if let value = entry.of["value"] { input = value }
-        else if let pointer = entry.of["data"]?
-            .stringValue { input = PrototypeDataPointer.resolve(data, pointer: pointer) }
-        else { input = entry.of["state"]?.stringValue.flatMap { state[$0] } }
-        return formatter.format(input, format: entry.format, environment: env)
+        let input = PrototypeDerive.value(entry, data: data, state: state)
+        guard let format = entry.format else { return PrototypeDerive.text(input) }
+        return formatter.format(input, format: format, environment: env)
     }
 
     /// Read every source from the original row. Relative strings refresh only on (re)build.
@@ -210,8 +233,8 @@ enum PrototypeDerivedValues {
         var projected = item
         for (name, entry) in derive {
             let input = entry.of["value"] ?? entry.of["item"]?.stringValue.flatMap { item[$0] }
-            projected[name] = .string(entry.environment(environment).map {
-                formatter.format(input, format: entry.format, environment: $0)
+            projected[name] = .string(entry.environment(environment).map { env in
+                entry.format.map { format in formatter.format(input, format: format, environment: env) } ?? ""
             } ?? "")
         }
         return projected
@@ -225,9 +248,21 @@ struct PrototypeDerivedContext {
     var formatter: PrototypeValueFormatter = FoundationPrototypeValueFormatter()
     var environment: PrototypeFormatEnvironment = .device()
 
+    var values: [String: JSONValue]?
+
     func resolve(_ name: String, state: [String: JSONValue]) -> String? {
-        entries[name].map {
-            PrototypeDerivedValues.resolve($0, state: state, data: data, formatter: formatter, environment: environment)
+        guard let entry = entries[name] else { return nil }
+        guard let values else {
+            return PrototypeDerivedValues.resolve(
+                entry,
+                state: state,
+                data: data,
+                formatter: formatter,
+                environment: environment
+            )
         }
+        guard let env = entry.environment(environment) else { return "" }
+        guard let format = entry.format else { return PrototypeDerive.text(values[name]) }
+        return formatter.format(values[name], format: format, environment: env)
     }
 }

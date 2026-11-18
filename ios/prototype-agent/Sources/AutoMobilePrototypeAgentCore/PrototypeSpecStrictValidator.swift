@@ -21,17 +21,26 @@ public enum PrototypeSpecStrictValidator {
             let modelData = fields["data"]?.objectFields
             try PrototypeRoutes.validate(fields, context: context)
             try PrototypeStrings.validate(spec: fields, nodes: context.locatedNodes)
-            try PrototypeLazyList.validate(root: root, data: modelData, state: state)
+            let entries = try PrototypeDerivedCollections.entries(fields["derive"])
+            let derivedValues = PrototypeDerive.evaluate(entries, data: modelData, state: state)
+            let collections = PrototypeDerivedCollections.bind(root, values: derivedValues)
             try PrototypeLazyList.validateAppend(actions: context.actions, data: modelData)
-            try PrototypeDerivedValidator.validate(derive: fields["derive"], root: root, data: modelData)
+            try PrototypeDerivedValidator.validate(
+                derive: fields["derive"],
+                root: root,
+                data: modelData,
+                state: state,
+                values: derivedValues
+            )
+            try PrototypeLazyList.validate(root: collections, data: modelData, state: state)
             try PrototypeScrollMotion.validate(root, data: modelData)
             try PrototypeSharedElementPlan.validate(context.locatedNodes, data: modelData, actions: context.actions)
             try PrototypeStrictSemantics.layout(context)
             try PrototypeStrictSemantics.pagerStateKeys(context)
-            var repeats = PrototypeStrictRepeats(data: modelData)
+            var repeats = PrototypeStrictRepeats(data: modelData, derivedValues: derivedValues)
             try repeats.templates(root.objectFields ?? [:], path: "root")
-            try PrototypeLimits.guardRepeatPathCells(root, data: modelData)
-            try PrototypeLimits.guardSubstitutedText(root, data: modelData)
+            try PrototypeLimits.guardRepeatPathCells(root, data: modelData, derivedValues: derivedValues)
+            try PrototypeLimits.guardSubstitutedText(collections, data: modelData)
             try repeats.expanded(root.objectFields ?? [:], path: "root")
             try PrototypeStrictSemantics.storage(fields, context: context)
             try PrototypeDataWrite.validate(actions: context.actions, data: modelData)
@@ -70,8 +79,8 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeChecks.validate(nodes: nodes, actions: actions, state: state)
             try PrototypeLimits.guardAuthoredTree(root)
             try PrototypeMenus.validateAuthoredText(root)
-            try PrototypeRepeat.validateEmitContexts(root, data: modelData)
-            let resolved = PrototypeDataResolver.resolveRoot(root, data: modelData)
+            try PrototypeRepeat.validateEmitContexts(collections, data: modelData)
+            let resolved = PrototypeDataResolver.resolveRoot(collections, data: modelData)
             try PrototypeLimits.guardTree(resolved)
             let expanded = PrototypeRepeat.expand(resolved)
             try PrototypeBarScroll.validate(expanded)
@@ -194,7 +203,7 @@ public enum PrototypeSpecStrictValidator {
         for node in nodes where node.value["type"] == .string("webView") {
             append(node.value["url"], path: "\(node.path).url", request: true)
         }
-                func shareStrings(_ raw: JSONValue, path: String) {
+        func shareStrings(_ raw: JSONValue, path: String) {
             switch raw {
             case let .string(text): bindings.append((text, path, false, false))
             case let .array(array): for (index, entry) in array.enumerated() {

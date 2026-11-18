@@ -48,6 +48,8 @@ import {
   MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS,
   MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
   MIN_INSTALL_APP_MCP_TIMEOUT_MS,
+  MIN_PROTOTYPE_INSTALL_APP_MCP_TIMEOUT_MS,
+  MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS,
   INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS,
   MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS,
   OBSERVE_MCP_TIMEOUT_ENV_VAR,
@@ -1673,6 +1675,19 @@ describe("argument budget deadline gaps", () => {
           Math.max(PROTOVIEWER_DEFAULT_TIMEOUT_MS + headroom, DEFAULT_MCP_REQUEST_TIMEOUT_MS),
         );
       }
+    });
+    test("installApp budgets stamping and one transfer; uninstallApp budgets one uninstall command", () => {
+      expect(resolve({ action: "installApp" })).toBe(MIN_PROTOTYPE_INSTALL_APP_MCP_TIMEOUT_MS);
+      expect(MIN_PROTOTYPE_INSTALL_APP_MCP_TIMEOUT_MS).toBeGreaterThan(
+        ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
+      );
+      expect(resolve({ action: "uninstallApp", all: true })).toBe(
+        MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS,
+      );
+      expect(MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS).toBeGreaterThan(
+        ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
+      );
+      expect(resolve({ action: "listApps" })).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
     });
     test("other prototype actions and a larger request timeout are unchanged", () => {
       for (const action of [

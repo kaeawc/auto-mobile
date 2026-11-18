@@ -117,6 +117,9 @@ const DEVICE_ONLY_ACTIONS = new Set([
   "open",
   "clearStorage",
   "simulate",
+  "installApp",
+  "listApps",
+  "uninstallApp",
 ]);
 
 /** Why the virtual device refuses a call before anything runs, or undefined when it can run it. */
@@ -125,7 +128,7 @@ export function headlessPrototypeRefusal(args: {
   display?: unknown;
 }): string | undefined {
   if (DEVICE_ONLY_ACTIONS.has(args.action)) {
-    return `${args.action} needs a real device: the headless virtual device has no saved prototypes, storage or prototype clock. Run without AUTOMOBILE_HEADLESS/--headless on an Android device or iOS simulator.`;
+    return `${args.action} needs a real device: the headless virtual device has no saved prototypes, installed apps, storage or prototype clock. Run without AUTOMOBILE_HEADLESS/--headless on an Android device or iOS simulator.`;
   }
   if (args.display !== undefined) {
     return "display needs a real Android device: the headless virtual device has one display. Omit display.";

@@ -66,17 +66,6 @@ test.each(existingLabels)(
   },
 );
 
-// These paths returned the titles before sibling-order disambiguation; only selector is a regression.
-test.skip.each(existingLabels.slice(0, 2))(
-  "baseline hierarchy and flat paths do not pin the captured $label control",
-  ({ label, bounds }) => {
-    expect(firstMatchTarget({ focused: slider, elements, hierarchy }, { label }).atBounds).toEqual(
-      bounds,
-    );
-    expect(firstMatchTarget({ focused: slider, elements }, { label }).atBounds).toEqual(bounds);
-  },
-);
-
 test.each(["Readout-less slider", "Back"])(
   "the pinned focus loop accepts the captured %s control in zero steps",
   async (label) => {
@@ -134,9 +123,32 @@ test.each(["text", "content-desc"])(
   },
 );
 
-test("a label owns its only following unlabelled control despite an earlier candidate", () => {
+test("a label cannot claim its following unlabelled control when an earlier candidate exists", () => {
   const nodes = siblingNodes(control, labelElement, { ...control }, nextLabel);
-  expect(focusLabelSibling(nodes, nodes[2])).toBe(nodes[3].element);
+  expect(focusLabelSibling(nodes, nodes[2])).toBeUndefined();
+});
+
+test("control-first pairs in a shared parent remain ambiguous for both labels", () => {
+  const nodes = siblingNodes(control, labelElement, { ...control }, nextLabel);
+  expect(focusLabelSibling(nodes, nodes[2])).toBeUndefined();
+  expect(focusLabelSibling(nodes, nodes[4])).toBeUndefined();
+});
+
+test("label-first pairs in a shared parent each own their following control", () => {
+  const nodes = siblingNodes(labelElement, control, nextLabel, { ...control });
+  expect(focusLabelSibling(nodes, nodes[1])).toBe(nodes[2].element);
+  expect(focusLabelSibling(nodes, nodes[3])).toBe(nodes[4].element);
+});
+
+test.each([
+  { name: "a control-first prefix", preceding: [control, labelElement, { ...control }] },
+  {
+    name: "multiple controls after the previous label",
+    preceding: [labelElement, control, { ...control }],
+  },
+])("$name leaves the next label's following control ambiguous", ({ preceding }) => {
+  const nodes = siblingNodes(...preceding, nextLabel, { ...control });
+  expect(focusLabelSibling(nodes, nodes[4])).toBeUndefined();
 });
 
 test("the single-candidate fallback still permits a control before its label", () => {

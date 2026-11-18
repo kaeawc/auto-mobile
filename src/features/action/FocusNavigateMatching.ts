@@ -218,12 +218,30 @@ function isRangeValueDescription(
   );
 }
 
-/** The label's following segment must contain exactly one qualifying unlabelled control. */
+/** A label can own one following control only if preceding candidates are already claimed. */
 function followingLabelSibling(
   nodes: readonly FocusSiblingNode[],
   label: FocusSiblingNode,
   candidates: readonly FocusSiblingNode[],
 ): Element | undefined {
+  const candidateIndices = new Set(candidates.map((node) => node.index));
+  let precedingCount = 0;
+  let previousLabelCanOwn = false;
+  for (const node of nodes) {
+    if (node.parentIndex !== label.parentIndex || node.index >= label.index) {
+      continue;
+    }
+    if (hasLabel(node.element)) {
+      // A single candidate can belong to the preceding label only if that label was unambiguous.
+      previousLabelCanOwn = precedingCount === 0 || (precedingCount === 1 && previousLabelCanOwn);
+      precedingCount = 0;
+    } else if (candidateIndices.has(node.index)) {
+      precedingCount++;
+    }
+  }
+  if (precedingCount > 0 && !(precedingCount === 1 && previousLabelCanOwn)) {
+    return undefined;
+  }
   const nextLabel = nodes.find(
     (node) =>
       node.parentIndex === label.parentIndex && node.index > label.index && hasLabel(node.element),

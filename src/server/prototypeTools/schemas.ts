@@ -1,12 +1,10 @@
+import { prototypeOwnKeyRecord } from "../../features/prototype/prototypeOwnKeyRecord";
 import {
   MAX_MOCK_DOCUMENT_BYTES,
   MOCK_BACKEND_ID,
 } from "../../features/prototype/prototypeMockSchema";
 import { validatePrototypeSimulateInput } from "../prototypeSimulateAction";
-import {
-  PROTOTYPE_PUSH_TRANSPORTS,
-  PROTOTYPE_SIMULATE_EVENTS,
-} from "../../features/prototype/prototypePushSimulate";
+import { PROTOTYPE_PUSH_TRANSPORTS } from "../../features/prototype/prototypePushSimulate";
 import { z as specZ } from "zod/v3";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../features/prototype/protoViewer/protoViewerDevice";
 import { prototypeContractPatterns } from "../../features/prototype/prototypeContractPatterns";
@@ -375,16 +373,17 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .optional()
         .describe("simulate only: advance the prototype clock without waiting"),
       event: z
-        .enum(PROTOTYPE_SIMULATE_EVENTS)
+        .string()
+        .min(1)
+        .max(128)
         .optional()
         .describe(
-          "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push, media.statusChanged|ended|error drives a media player",
+          "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push, media.statusChanged|ended|error drives a media player; other known module events require Android prototype_platform_simulation_v1 and a module that supports simulation",
         ),
-      data: z
-        .record(z.string(), z.unknown())
+      data: prototypeOwnKeyRecord(z.string(), z.unknown())
         .optional()
         .describe(
-          "simulate event only: notifications.push takes the push payload {type, data?, notification?: {title, body?, channel?, group?, badge?}}, at most 4096 bytes of compact JSON; media.* takes {player, status? (buffering|ready|ended|error), code? (for error), advanceMs? (fake engine only: advance its clock first)}",
+          "simulate event only: other module events take their event data schema where defined, otherwise any JSON object, within the 4096-byte delivered emit budget; notifications.push takes the push payload {type, data?, notification?: {title, body?, channel?, group?, badge?}}, at most 4096 bytes of compact JSON; media.* takes {player, status? (buffering|ready|ended|error), code? (for error), advanceMs? (fake engine only: advance its clock first)}",
         ),
       transport: z
         .enum(PROTOTYPE_PUSH_TRANSPORTS)

@@ -1,3 +1,5 @@
+import type { PrototypeJson } from "./prototypeJson";
+import { prototypePlatformSimulationUnsupportedMessage } from "./prototypePlatformSimulation";
 import type { PrototypePatchReply, PrototypePatchRequest } from "./prototypePatchWire";
 import type { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import type { PrototypeAssetRequestOptions } from "../observe/android/CtrlProxyPrototypes";
@@ -41,6 +43,7 @@ export type AndroidPrototypeClient = Pick<
       | "attachPrototypeChannelHost"
       | "requestClearPrototypeStorage"
       | "requestAdvancePrototypeClock"
+      | "requestSimulatePrototypePlatform"
     >
   >;
 
@@ -100,6 +103,18 @@ export class AndroidPrototypeTransport implements PrototypeTransport {
       throw new ActionableError("Update the connected CtrlProxy to simulate prototype timers");
     }
     return this.client.requestAdvancePrototypeClock(id, advanceTimeMs, timeoutMs);
+  }
+
+  simulatePlatformEvent(
+    id: string,
+    event: string,
+    data: Record<string, PrototypeJson>,
+    timeoutMs?: number,
+  ): Promise<PrototypeResult> {
+    if (!this.client.requestSimulatePrototypePlatform) {
+      throw new ActionableError(prototypePlatformSimulationUnsupportedMessage());
+    }
+    return this.client.requestSimulatePrototypePlatform({ id, event, data }, timeoutMs);
   }
 
   /** Wipes the values CtrlProxy stored for `id` (#12522); needs prototype_storage_v1. */

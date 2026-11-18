@@ -1126,6 +1126,30 @@ class PrototypeController(
     }
   }
 
+  suspend fun simulatePlatformEvent(
+    requestId: String?,
+    id: String,
+    event: String,
+    data: JsonObject,
+  ) = mutex.withLock {
+    try {
+      check(!destroyed) { "Prototype host destroyed" }
+      val runtime = surfaces[id]?.runtime ?: error("Unknown prototype: $id")
+      val supported = runtime.simulatePlatformEvent(event, data)
+      if (supported) syncAfterChange(runtime)
+      sink.send(
+        requestId,
+        supported,
+        if (supported) null else "unsupported: module does not support simulation of $event",
+      )
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("PrototypeController", "Prototype platform simulation failed", error)
+      sink.send(requestId, false, error.message ?: "Prototype platform simulation failed")
+    }
+  }
+
   suspend fun advanceClock(requestId: String?, id: String, advanceTimeMs: Int) = mutex.withLock {
     try {
       check(!destroyed) { "Prototype host destroyed" }

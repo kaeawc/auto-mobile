@@ -112,6 +112,73 @@ class PrototypeLocationModuleTest {
   }
 
   @Test
+  fun `pending request ends unavailable disabled when services turn off`() = runTest {
+    val source = FakePrototypeLocationSource().apply { read = { _, _ -> awaitCancellation() } }
+    val module = PrototypeLocationModule(source, scope = backgroundScope)
+    val result = async { module.call(request()) }
+    runCurrent()
+    assertFalse(result.isCompleted)
+    source.servicesEnabled.value = false
+    runCurrent()
+    val error = failure(result.getCompleted())
+    assertEquals(PlatformErrorCode.UNAVAILABLE, error.code)
+    assertEquals("disabled", error.reason)
+    // Completed by the toggle, not by a timeout: no virtual time passed.
+    assertEquals(0L, currentTime)
+    module.close()
+  }
+
+  @Test
+  fun `permission granted while shown registers updates for the same config`() = runTest {
+    val source = FakePrototypeLocationSource().apply { grant = PrototypeLocationGrant.NONE }
+    // A frozen clock throttles every fix after the first within one subscription.
+    val module = PrototypeLocationModule(source, { 0L }, backgroundScope)
+    module.startUpdates(PrototypeLocationConfig())
+    runCurrent()
+    assertEquals(0, source.activeSubscriptions)
+    module.startUpdates(PrototypeLocationConfig())
+    runCurrent()
+    assertEquals(0, source.activeSubscriptions)
+    source.grant = PrototypeLocationGrant.PRECISE
+    module.startUpdates(PrototypeLocationConfig())
+    runCurrent()
+    assertEquals(1, source.activeSubscriptions)
+    val events = mutableListOf<PlatformEvent>()
+    backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+      module.events.collect { events += it }
+    }
+    source.readings.emit(fix)
+    runCurrent()
+    assertEquals(1, events.size)
+    // An unchanged grant keeps the live subscription, so its throttle still drops the next fix.
+    module.startUpdates(PrototypeLocationConfig())
+    runCurrent()
+    source.readings.emit(fix.copy(latitude = 45.0))
+    runCurrent()
+    assertEquals(1, events.size)
+    assertEquals(1, source.activeSubscriptions)
+    module.close()
+  }
+
+  @Test
+  fun `a granted request re-registers updates that started without permission`() = runTest {
+    val source =
+      FakePrototypeLocationSource().apply {
+        grant = PrototypeLocationGrant.NONE
+        fix = this@PrototypeLocationModuleTest.fix
+      }
+    val module = PrototypeLocationModule(source, scope = backgroundScope)
+    module.startUpdates(PrototypeLocationConfig())
+    runCurrent()
+    assertEquals(0, source.activeSubscriptions)
+    source.grant = PrototypeLocationGrant.PRECISE
+    assertTrue(module.call(request()) is PlatformCallResult.Success)
+    runCurrent()
+    assertEquals(1, source.activeSubscriptions)
+    module.close()
+  }
+
+  @Test
   fun `fix ranges match the reference reducer and optional values remain optional`() = runTest {
     val source = FakePrototypeLocationSource()
     val module = PrototypeLocationModule(source, scope = backgroundScope)

@@ -21,7 +21,6 @@ import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import java.util.concurrent.Executor
 import kotlin.coroutines.resume
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.suspendCancellableCoroutine
 
@@ -29,6 +28,10 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 internal class AndroidLocationSource(private val context: Context) : PrototypeLocationSource {
   private val manager by lazy { context.getSystemService(LocationManager::class.java) }
   private val enabled = MutableStateFlow(false)
+  // Enabled platform providers; each change re-selects the provider of every live subscription.
+  private val enabledProviders = MutableStateFlow<Set<String>>(emptySet())
+  // Bumped by close() so every subscription's provider loop observes `closed` and ends.
+  private val closings = MutableStateFlow(0)
   private var registered = false
   private val cancellations = mutableSetOf<() -> Unit>()
   @Volatile private var closed = false
@@ -49,14 +52,26 @@ internal class AndroidLocationSource(private val context: Context) : PrototypeLo
   private val receiver =
     object : BroadcastReceiver() {
       override fun onReceive(context: Context, intent: Intent) {
-        enabled.value = LocationManagerCompat.isLocationEnabled(manager)
+        refresh()
       }
     }
+
+  /** Re-reads mode and provider state; a provider toggle keeps location on but moves selection. */
+  private fun refresh() {
+    // getProviders(true) drops providers the caller lacks permission for on older releases, so a
+    // snapshot taken before a grant would stay empty; isProviderEnabled reads the setting alone.
+    val providers =
+      manager.allProviders.filterTo(mutableSetOf()) {
+        it in ALL_PROVIDERS && manager.isProviderEnabled(it)
+      }
+    enabledProviders.value = providers
+    enabled.value = LocationManagerCompat.isLocationEnabled(manager) && providers.isNotEmpty()
+  }
 
   @Synchronized
   private fun start() {
     if (registered || closed) return
-    enabled.value = LocationManagerCompat.isLocationEnabled(manager)
+    refresh()
     ContextCompat.registerReceiver(
       context,
       receiver,
@@ -71,14 +86,22 @@ internal class AndroidLocationSource(private val context: Context) : PrototypeLo
   private fun granted(permission: String) =
     ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
 
-  private fun provider(accuracy: PrototypeLocationAccuracy) =
-    locationProvider(Build.VERSION.SDK_INT, accuracy, grant, manager.allProviders)
+  private fun provider(accuracy: PrototypeLocationAccuracy): String? {
+    start()
+    return locationProvider(
+      Build.VERSION.SDK_INT,
+      accuracy,
+      grant,
+      manager.allProviders,
+      enabledProviders.value,
+    )
+  }
 
   @SuppressLint("MissingPermission") // The module checks grants; revocation propagates as denial.
   override suspend fun current(accuracy: PrototypeLocationAccuracy, maxAgeMs: Long): LocationFix? {
     check(!closed) { "Location source closed" }
     val provider = provider(accuracy)
-    if (maxAgeMs > 0) {
+    if (maxAgeMs > 0 && provider != null) {
       val cached = manager.getLastKnownLocation(provider)
       if (cached != null) {
         val age = (SystemClock.elapsedRealtimeNanos() - cached.elapsedRealtimeNanos) / 1_000_000
@@ -86,8 +109,11 @@ internal class AndroidLocationSource(private val context: Context) : PrototypeLo
       }
     }
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+      // Re-selects when the provider turns off; the module ends the wait if services turn off.
       return updates(accuracy, 1000, 0.0).firstOrNull()
     }
+    // No enabled provider: report no fix now instead of waiting for the dispatcher timeout.
+    if (provider == null) return null
     return suspendCancellableCoroutine { continuation ->
       val signal = CancellationSignal()
       val cancel: () -> Unit = {
@@ -117,7 +143,7 @@ internal class AndroidLocationSource(private val context: Context) : PrototypeLo
     accuracy: PrototypeLocationAccuracy,
     minIntervalMs: Long,
     minDistanceM: Double,
-  ): Flow<LocationFix> = callbackFlow {
+  ): Flow<LocationFix> = channelFlow {
     check(!closed) { "Location source closed" }
     val listener =
       object : LocationListener {
@@ -125,43 +151,26 @@ internal class AndroidLocationSource(private val context: Context) : PrototypeLo
           trySend(reading(location))
         }
 
-        override fun onProviderEnabled(provider: String) = Unit
+        // Toggles re-read provider state so the selection below moves off a disabled provider.
+        override fun onProviderEnabled(provider: String) = refresh()
 
-        override fun onProviderDisabled(provider: String) = Unit
+        override fun onProviderDisabled(provider: String) = refresh()
 
         @Deprecated("Not delivered on Android Q and later")
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
       }
-    val cancel: () -> Unit = { channel.close() }
-    synchronized(cancellations) { cancellations += cancel }
+    var selected: String? = null
     try {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        val request =
-          LocationRequest.Builder(minIntervalMs)
-            .setMinUpdateIntervalMillis(minIntervalMs)
-            .setMinUpdateDistanceMeters(minDistanceM.toFloat())
-            .setQuality(
-              if (
-                accuracy == PrototypeLocationAccuracy.PRECISE &&
-                  grant == PrototypeLocationGrant.PRECISE
-              )
-                LocationRequest.QUALITY_HIGH_ACCURACY
-              else LocationRequest.QUALITY_BALANCED_POWER_ACCURACY,
-            )
-            .build()
-        manager.requestLocationUpdates(provider(accuracy), request, Executor { it.run() }, listener)
-      } else {
-        manager.requestLocationUpdates(
-          provider(accuracy),
-          minIntervalMs,
-          minDistanceM.toFloat(),
-          listener,
-          Looper.getMainLooper(),
-        )
-      }
-      awaitClose {}
+      start()
+      combine(enabledProviders, closings) { _, _ -> provider(accuracy) }
+        .takeWhile { !closed }
+        .distinctUntilChanged()
+        .collect { next ->
+          if (selected != null) manager.removeUpdates(listener)
+          selected = next
+          if (next != null) register(next, accuracy, minIntervalMs, minDistanceM, listener)
+        }
     } finally {
-      synchronized(cancellations) { cancellations -= cancel }
       try {
         manager.removeUpdates(listener)
       } catch (error: SecurityException) {
@@ -170,9 +179,44 @@ internal class AndroidLocationSource(private val context: Context) : PrototypeLo
     }
   }
 
+  @SuppressLint("MissingPermission") // Callers run inside updates(), which types denial.
+  private fun register(
+    provider: String,
+    accuracy: PrototypeLocationAccuracy,
+    minIntervalMs: Long,
+    minDistanceM: Double,
+    listener: LocationListener,
+  ) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      val request =
+        LocationRequest.Builder(minIntervalMs)
+          .setMinUpdateIntervalMillis(minIntervalMs)
+          .setMinUpdateDistanceMeters(minDistanceM.toFloat())
+          .setQuality(
+            if (
+              accuracy == PrototypeLocationAccuracy.PRECISE &&
+                grant == PrototypeLocationGrant.PRECISE
+            )
+              LocationRequest.QUALITY_HIGH_ACCURACY
+            else LocationRequest.QUALITY_BALANCED_POWER_ACCURACY,
+          )
+          .build()
+      manager.requestLocationUpdates(provider, request, Executor { it.run() }, listener)
+    } else {
+      manager.requestLocationUpdates(
+        provider,
+        minIntervalMs,
+        minDistanceM.toFloat(),
+        listener,
+        Looper.getMainLooper(),
+      )
+    }
+  }
+
   @Synchronized
   override fun close() {
     closed = true
+    closings.value++
     val pending =
       synchronized(cancellations) { cancellations.toList().also { cancellations.clear() } }
     pending.forEach { it() }
@@ -210,7 +254,8 @@ internal fun locationProvider(
   accuracy: PrototypeLocationAccuracy,
   grant: PrototypeLocationGrant,
   available: Collection<String> = ALL_PROVIDERS,
-): String {
+  enabled: Collection<String> = available,
+): String? {
   val preferred =
     when {
       sdk >= 31 ->
@@ -225,7 +270,8 @@ internal fun locationProvider(
       else -> listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
     }
   // AOSP images have no network provider; the platform fuzzes a coarse-only grant on GPS itself.
-  return preferred.firstOrNull { it in available } ?: preferred.first()
+  // A disabled provider never delivers (network-only mode on API 24-27 disables GPS): skip it.
+  return preferred.firstOrNull { it in available && it in enabled }
 }
 
 private val ALL_PROVIDERS =

@@ -432,15 +432,7 @@ class WebSocketServer(
     add("prototype_reduced_motion_v1")
     add("prototype_shared_element_v1")
     add("prototype_shared_element_v2")
-    // Line, area, bar and ring charts over /data arrays (#14209).
-    add("prototype_chart_v1")
-    add("prototype_lazy_list_v1")
-    // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).
-    add("prototype_linkify_v1")
-    add("prototype_format_v1")
-    add("prototype_derive_v1")
-    // Chat-list scrolls: reverse, stickToEnd, atEndKey, onStartReached and scrollTo (#14232).
-    add("prototype_chat_scroll_v1")
+    addPrototypeContentFlags()
   }
 
   /** Prototype runtime flags: checks, appearance, persistence, storage and timers. */
@@ -1453,4 +1445,17 @@ class WebSocketServer(
       )
     }
   }
+}
+
+/** Prototype charts, lists and text content flags, in their wire order. */
+private fun MutableList<String>.addPrototypeContentFlags() {
+  // Line, area, bar and ring charts over /data arrays (#14209).
+  add("prototype_chart_v1")
+  add("prototype_lazy_list_v1")
+  // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).
+  add("prototype_linkify_v1")
+  add("prototype_format_v1")
+  add("prototype_derive_v1")
+  // Chat-list scrolls: reverse, stickToEnd, atEndKey, onStartReached and scrollTo (#14232).
+  add("prototype_chat_scroll_v1")
 }

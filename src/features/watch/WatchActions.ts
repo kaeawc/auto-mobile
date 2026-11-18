@@ -1,6 +1,7 @@
 import { ActionableError } from "../../models/ActionableError";
 import type {
   Element,
+  ViewHierarchyResult,
   BootedDevice,
   Platform,
   SwipeOnOptions,
@@ -10,7 +11,12 @@ import type {
   TapOnElementOptions,
   TapOnElementResult,
 } from "../../models";
-import { defaultTimer } from "../../utils/SystemTimer";
+import { nodeAttributes } from "../../models/ViewHierarchyResult";
+import type { TapEffect } from "../../models/TapOnElementResult";
+import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
+import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import {
   matches,
   matchWatchTapCandidates,
@@ -19,7 +25,7 @@ import {
   tapSmartStackAt,
   tapSmartStackOn,
 } from "./WatchSmartStackTap";
-import { normalizeWatchHierarchy } from "./WatchHierarchy";
+import { normalizeWatchHierarchy, rejectWatchAlertCoveredTap } from "./WatchHierarchy";
 import { type WatchCommand, type WatchRunnerClient } from "./WatchRunnerClient";
 import { WatchRunnerError } from "./WatchRunnerError";
 import { watchRunners } from "./WatchRunnerRegistry";
@@ -126,6 +132,70 @@ async function elements(
   return watchHierarchyElements(hierarchy);
 }
 
+/** Only direct taps use hierarchy effects; sendKeys already polls the runner's focus state. */
+interface WatchTapObservationOptions {
+  preferTextInput?: boolean;
+  timer?: Timer;
+  observeEffect?: boolean;
+}
+
+function watchTapFingerprint(hierarchy: ViewHierarchyResult): string | null {
+  // A hidden/empty root is not evidence of an unchanged screen.
+  const root = hierarchy.hierarchy.node;
+  return root && nodeAttributes(root).class ? hierarchyFingerprint(hierarchy) : null;
+}
+
+async function readWatchTapFingerprint(
+  client: WatchRunnerClient,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  try {
+    return watchTapFingerprint(normalizeWatchHierarchy(await client.hierarchy(signal)));
+  } catch (error) {
+    logger.warn("Could not observe the watch tap hierarchy", error);
+    return null;
+  }
+}
+
+async function watchTapEffect(
+  client: WatchRunnerClient,
+  before: string | null,
+  timer: Timer,
+  signal?: AbortSignal,
+): Promise<TapEffect> {
+  const insufficient: TapEffect = {
+    screenChanged: false,
+    basis: "insufficient observation data",
+  };
+  if (before === null) {
+    logger.warn("Watch tap effect has insufficient pre-tap hierarchy data");
+    return insufficient;
+  }
+  const deadline = timer.now() + 1000;
+  try {
+    for (;;) {
+      // Let the client's request timeout and signal bound each read, even past the settle deadline.
+      const after = await client.hierarchy(signal);
+      const fingerprint = watchTapFingerprint(normalizeWatchHierarchy(after));
+      if (fingerprint === null) {
+        logger.warn("Watch tap effect has insufficient post-tap hierarchy data");
+        return insufficient;
+      }
+      if (fingerprint !== before) {
+        return { screenChanged: true, basis: "viewHierarchy changed" };
+      }
+      const remaining = deadline - timer.now();
+      if (remaining <= 0) {
+        return { screenChanged: false, basis: "viewHierarchy unchanged" };
+      }
+      await timer.sleep(Math.min(150, remaining));
+    }
+  } catch (error) {
+    logger.warn(`Could not observe the watch tap effect: ${errorMessage(error)}`, error);
+    return insufficient;
+  }
+}
+
 /** Stable input-first ordering for sendKeys; ordinary taps retain hierarchy order. */
 export function orderWatchTapCandidates(
   candidates: readonly Element[],
@@ -151,20 +221,12 @@ function validateWatchTapOn(options: TapOnElementOptions): void {
   }
 }
 
-export async function watchTapOn(
-  deviceId: string,
+function resolveWatchTapTarget(
+  hierarchy: ViewHierarchyResult,
   options: TapOnElementOptions,
-  signal?: AbortSignal,
-  preferTextInput = false,
-): Promise<TapOnElementResult> {
-  validateWatchTapOn(options);
-  signal?.throwIfAborted();
-  const client = watchRunners.require(deviceId);
-  const stack = await readOpenSmartStack(client, () => defaultTimer.now(), signal);
-  if (stack) {
-    return tapSmartStackOn(client, stack, options, signal);
-  }
-  const { all, available } = await elements(client, signal);
+  preferTextInput: boolean,
+): { element: Element; command: WatchCommand } {
+  const { all, available } = watchHierarchyElements(hierarchy);
   const candidates = orderWatchTapCandidates(
     matchWatchTapCandidates(available, options),
     options.text !== undefined && preferTextInput,
@@ -175,17 +237,47 @@ export async function watchTapOn(
       "No watch element matched; observe and check the identifier or exact text.",
     );
   }
+  rejectWatchAlertCoveredTap(hierarchy, element);
+  return { element, command: watchTapCommand(element, all) };
+}
+
+function watchTapCommand(element: Element, all: Element[]): WatchCommand {
   const { left, top, right, bottom } = element.bounds;
   const x = (left + right) / 2;
   const y = (top + bottom) / 2;
-  await client.request(
-    element["resource-id"] &&
-      all.filter((candidate) => candidate["resource-id"] === element["resource-id"]).length === 1
-      ? { type: "tap", identifier: element["resource-id"] }
-      : { type: "tap", x, y },
-    signal,
-  );
-  return { success: true, action: "tap", element };
+  return element["resource-id"] &&
+    all.filter((candidate) => candidate["resource-id"] === element["resource-id"]).length === 1
+    ? { type: "tap", identifier: element["resource-id"] }
+    : { type: "tap", x, y };
+}
+
+export async function watchTapOn(
+  deviceId: string,
+  options: TapOnElementOptions,
+  signal?: AbortSignal,
+  {
+    preferTextInput = false,
+    timer = defaultTimer,
+    observeEffect = true,
+  }: WatchTapObservationOptions = {},
+): Promise<TapOnElementResult> {
+  validateWatchTapOn(options);
+  signal?.throwIfAborted();
+  const client = watchRunners.require(deviceId);
+  const stack = await readOpenSmartStack(client, () => timer.now(), signal);
+  if (stack) {
+    return tapSmartStackOn(client, stack, options, signal);
+  }
+  const hierarchy = normalizeWatchHierarchy(await client.hierarchy(signal));
+  const before = observeEffect ? watchTapFingerprint(hierarchy) : null;
+  const { element, command } = resolveWatchTapTarget(hierarchy, options, preferTextInput);
+  await client.request(command, signal);
+  return {
+    success: true,
+    action: "tap",
+    element,
+    ...(observeEffect ? { effect: await watchTapEffect(client, before, timer, signal) } : {}),
+  };
 }
 
 function validateWatchTapAt(
@@ -214,17 +306,25 @@ export async function watchTapAt(
   deviceId: string,
   options: TapAtOptions,
   signal?: AbortSignal,
+  timer: Timer = defaultTimer,
 ): Promise<TapAtResult> {
   validateWatchTapAt(options);
   signal?.throwIfAborted();
   const client = watchRunners.require(deviceId);
-  const stack = await readOpenSmartStack(client, () => defaultTimer.now(), signal);
+  const stack = await readOpenSmartStack(client, () => timer.now(), signal);
   if (stack) {
     await tapSmartStackAt(client, stack.hierarchy, options, signal);
-  } else {
-    await client.request({ type: "tap", x: options.x, y: options.y }, signal);
+    return { success: true, x: options.x, y: options.y, action: "tap" };
   }
-  return { success: true, x: options.x, y: options.y, action: "tap" };
+  const before = await readWatchTapFingerprint(client, signal);
+  await client.request({ type: "tap", x: options.x, y: options.y }, signal);
+  return {
+    success: true,
+    x: options.x,
+    y: options.y,
+    action: "tap",
+    effect: await watchTapEffect(client, before, timer, signal),
+  };
 }
 
 function validateWatchSwipe(options: SwipeOnOptions): number {

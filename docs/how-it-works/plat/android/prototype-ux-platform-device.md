@@ -89,7 +89,9 @@ fixtures:
 - A seed is refused with its input path in `real` mode. It is also refused for a key outside the
   state table, a key the platform does not report (`ringer` on iOS) or a value its rule refuses.
 
-The `simulate` state action that drives this on a device is not built.
+On Android, `DeviceStatusTracker` applies the override in front of every status source and checks
+seeds against the contract's state table. The `simulate` state action that drives it on a device is
+not built.
 
 **Biometric prompt (#14328).** The `biometric` module (`prototype_platform_biometric_v1`) has one call,
 `biometric.authenticate` with `title` (required, 1-64 characters), `subtitle` (optional, 1-128) and

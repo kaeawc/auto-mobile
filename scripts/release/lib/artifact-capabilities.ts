@@ -59,11 +59,13 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
   "android-ctrlproxy-apk": {
     prototype_layout_direction_v1:
       "Per-prototype direction is implemented only by the iOS prototype agent",
+    prototype_links_v1: "Inbound links have a validated contract only; runtime routing is deferred",
     prototype_platform_share_v1:
       "Share has a validated contract only; Android does not implement the system share sheet yet",
   },
   "ios-runner": {},
   "prototype-agent-dylib": {
+    prototype_links_v1: "Inbound links have a validated contract only; runtime routing is deferred",
     prototype_platform_share_v1:
       "Share has a validated contract only; the iOS agent does not implement the system share sheet yet",
     prototype_chat_scroll_v1:

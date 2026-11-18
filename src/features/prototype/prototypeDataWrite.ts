@@ -257,7 +257,7 @@ export function applyPrototypeDataWrite(
 /** The binding forms a device resolves at the action; `item` and `index` are bound by repeat first. */
 export type PrototypeRuntimeDataActionValue = Exclude<
   PrototypeDataActionValue,
-  { item: string } | { index: true }
+  { item: string } | { index: true } | { link: string }
 >;
 
 export interface PrototypeDataWriteInputs {

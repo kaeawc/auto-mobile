@@ -259,6 +259,8 @@ internal object PrototypeStrictPolicy {
   fun required(spec: JsonObject): Set<String> {
     val scanner = CapabilityScanner()
     scanner.envelope(spec)
+    if ("links" in spec) scanner.result.add("prototype_links_v1")
+    spec["links"]?.let { scanner.scan(it) }
     spec["root"]?.let { scanner.scan(it) }
     (spec["channels"] as? JsonObject).orEmpty().values.forEach { scanner.scan(it) }
     scanner.platform(spec)

@@ -932,6 +932,25 @@ const specSchema = z
     motion: z.enum(["none", "standard", "reduced", "expressive"]).optional(),
     storage: prototypeStorageSchema.optional(),
     requires: prototypeRequiresSchema.optional(),
+    links: z
+      .array(
+        z
+          .object({
+            path: z.string().min(1),
+            query: z
+              .record(
+                z.union([
+                  z.string(),
+                  z.object({ type: z.string(), secret: z.boolean().optional() }).strict(),
+                ]),
+              )
+              .optional(),
+            actions: z.array(actionSchema).min(1).max(32),
+          })
+          .strict(),
+      )
+      .max(32)
+      .optional(),
     platform: prototypePlatformHandlersSchema.optional(),
     channels: prototypeChannelsSchema(() => actionSchema).optional(),
     ...prototypeRootBlockFields(),

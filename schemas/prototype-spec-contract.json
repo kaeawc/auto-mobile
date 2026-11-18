@@ -1655,6 +1655,17 @@
                           "optional": false
                         }
                       }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "link": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
                     }
                   ]
                 }
@@ -1771,6 +1782,17 @@
                               "kind": "pointer"
                             }
                           ]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "link": {
+                        "rule": {
+                          "kind": "key"
                         },
                         "optional": false
                       }
@@ -2126,6 +2148,17 @@
                         "optional": false
                       }
                     }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "link": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
                   }
                 ]
               },
@@ -2249,6 +2282,17 @@
                               "kind": "pointer"
                             }
                           ]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "link": {
+                        "rule": {
+                          "kind": "key"
                         },
                         "optional": false
                       }
@@ -2380,6 +2424,17 @@
                           "optional": false
                         }
                       }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "link": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
                     }
                   ]
                 }
@@ -2450,6 +2505,17 @@
                           "rule": {
                             "kind": "json",
                             "maxDepth": 24
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "link": {
+                          "rule": {
+                            "kind": "key"
                           },
                           "optional": false
                         }
@@ -2624,10 +2690,32 @@
                                     "optional": false
                                   }
                                 }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "link": {
+                                    "rule": {
+                                      "kind": "key"
+                                    },
+                                    "optional": false
+                                  }
+                                }
                               }
                             ]
                           },
                           "minEntries": 1
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "link": {
+                        "rule": {
+                          "kind": "key"
                         },
                         "optional": false
                       }
@@ -2841,6 +2929,17 @@
                     {
                       "kind": "string",
                       "max": 64
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "link": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
                     }
                   ]
                 }
@@ -3139,6 +3238,17 @@
                         "optional": false
                       }
                     }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "link": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
                   }
                 ]
               },
@@ -3262,6 +3372,17 @@
                               "kind": "pointer"
                             }
                           ]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "link": {
+                        "rule": {
+                          "kind": "key"
                         },
                         "optional": false
                       }
@@ -17235,8 +17356,69 @@
         },
         "requires": {
           "rule": {
-            "kind": "ref",
-            "name": "platformRequires"
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "object",
+                "fields": {
+                  "platform": {
+                    "rule": {
+                      "kind": "array",
+                      "min": 1,
+                      "max": 32,
+                      "unique": true,
+                      "item": {
+                        "kind": "string",
+                        "max": 64
+                      }
+                    },
+                    "optional": true
+                  },
+                  "permissions": {
+                    "rule": {
+                      "kind": "array",
+                      "min": 1,
+                      "max": 16,
+                      "item": {
+                        "kind": "ref",
+                        "name": "platformPermission"
+                      }
+                    },
+                    "optional": true
+                  },
+                  "background": {
+                    "rule": {
+                      "kind": "array",
+                      "min": 1,
+                      "max": 8,
+                      "unique": true,
+                      "item": {
+                        "kind": "enum",
+                        "values": [
+                          "audio",
+                          "location",
+                          "call",
+                          "connectedDevice",
+                          "transfer",
+                          "camera",
+                          "microphone",
+                          "remoteNotification"
+                        ]
+                      }
+                    },
+                    "optional": true
+                  }
+                }
+              },
+              {
+                "kind": "array",
+                "min": 1,
+                "max": 128,
+                "item": {
+                  "kind": "string"
+                }
+              }
+            ]
           },
           "optional": true
         },
@@ -17314,6 +17496,17 @@
           "rule": {
             "kind": "ref",
             "name": "media"
+          },
+          "optional": true
+        },
+        "links": {
+          "rule": {
+            "kind": "array",
+            "max": 32,
+            "item": {
+              "kind": "ref",
+              "name": "prototypeLink"
+            }
           },
           "optional": true
         }
@@ -19094,6 +19287,17 @@
                     "kind": "pointer"
                   }
                 ]
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "link": {
+              "rule": {
+                "kind": "key"
               },
               "optional": false
             }
@@ -20931,6 +21135,17 @@
               "optional": false
             }
           }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "link": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            }
+          }
         }
       ]
     },
@@ -21249,6 +21464,17 @@
                 "optional": false
               }
             }
+          },
+          {
+            "kind": "object",
+            "fields": {
+              "link": {
+                "rule": {
+                  "kind": "key"
+                },
+                "optional": false
+              }
+            }
           }
         ]
       }
@@ -21447,6 +21673,17 @@
               "rule": {
                 "kind": "json",
                 "maxDepth": 24
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "link": {
+              "rule": {
+                "kind": "key"
               },
               "optional": false
             }
@@ -22312,6 +22549,60 @@
           "optional": true
         }
       }
+    },
+    "prototypeLink": {
+      "kind": "object",
+      "fields": {
+        "path": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "query": {
+          "rule": {
+            "kind": "record",
+            "item": {
+              "kind": "choice",
+              "options": [
+                {
+                  "kind": "string"
+                },
+                {
+                  "kind": "object",
+                  "fields": {
+                    "type": {
+                      "rule": {
+                        "kind": "string"
+                      },
+                      "optional": false
+                    },
+                    "secret": {
+                      "rule": {
+                        "kind": "boolean"
+                      },
+                      "optional": true
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "optional": true
+        },
+        "actions": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 32,
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            }
+          },
+          "optional": false
+        }
+      }
     }
   },
   "eventKinds": [
@@ -22321,7 +22612,9 @@
     "appearance_changed",
     "screen_changed",
     "change",
-    "validation_failed"
+    "validation_failed",
+    "link_opened",
+    "link_unmatched"
   ],
   "platformModules": {
     "test": {
@@ -25474,6 +25767,34 @@
             }
           },
           "optional": true
+        }
+      }
+    },
+    "link_opened": {
+      "kind": "object",
+      "fields": {
+        "url": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "entry": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      }
+    },
+    "link_unmatched": {
+      "kind": "object",
+      "fields": {
+        "url": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
         }
       }
     }

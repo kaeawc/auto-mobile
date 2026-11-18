@@ -25,6 +25,7 @@ export const prototypeDataActionValueSchema = z.union([
   z.object({ index: z.literal(true) }).strict(),
   z.object({ data: pointerSchema }).strict(),
   z.object({ value: prototypeJsonSchema }).strict(),
+  z.object({ link: keySchema }).strict(),
 ]);
 export type PrototypeDataActionValue = z.infer<typeof prototypeDataActionValueSchema>;
 /**
@@ -110,6 +111,7 @@ export const setStateValueSchema = z.union([
   z.number().finite(),
   z.boolean(),
   prototypeMatchBindingSchema,
+  z.object({ link: keySchema }).strict(),
   z.object({ event: z.union([z.literal(""), pointerSchema]) }).strict(),
   z.object({ platform: pointerSchema }).strict(),
 ]);

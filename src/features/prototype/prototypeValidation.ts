@@ -1,3 +1,4 @@
+import { prototypeInboundLinksError } from "./prototypeInboundLinks";
 import { prototypeGlassObjectError } from "./prototypeGlass";
 import { iconNames, prototypeIconNameError } from "./prototypeIconNames";
 import { excludeAccessoryReferences } from "./prototypeBindingValidation";
@@ -868,7 +869,9 @@ function behaviourErrors(
 
 function walkedError(value: unknown, context: Context): PrototypeValidationError | undefined {
   return (
-    walk(value, definitions.spec, "", { context, depth: 0 }) ?? excludeAccessoryReferences(context)
+    walk(value, definitions.spec, "", { context, depth: 0 }) ??
+    excludeAccessoryReferences(context) ??
+    prototypeInboundLinksError(value, context.nodes, context.actions)
   );
 }
 

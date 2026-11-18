@@ -86,6 +86,21 @@ Runtime (shared by `PrototypeRuntime` on Android and the iOS session; pure helpe
   kept paths win over storage. Restoring emits no `screen_changed`; the restored top's onEnter runs
   as the show's first entry.
 
+## Inbound link contract
+
+Root `links` accepts up to 32 ordered `{path,query?,actions}` entries with
+`requires:["prototype_links_v1"]`. Paths contain literals or `{name}` captures; query declarations
+use `string`, `int`, `number` or `boolean`, optionally suffixed `?`. A declaration may instead be
+`{type:"string?",secret:true}`. Entry actions read captures and declared query values through
+`{link:"name"}`; captures must be used and route parameter types must agree. The shared matcher
+validates the table and selects the first match. A registration guard rejects unregistered
+schemes; HTTP(S) also needs an explicit host registration. Nothing registers verified HTTPS yet.
+
+The event contract defines `link_opened {url,entry}` (entry is the path pattern) and
+`link_unmatched {url}` with no actions on an unmatched URL. Event URLs omit secret query values.
+These are core navigation events, independent of `prototype_platform_v1` and outbound `links.open`.
+The schema, gates and pure resolver are available; native runtime delivery is not wired.
+
 ## Stack transitions
 
 `prototype_stack_transitions_v1` gates every explicit stack `transition` and push/replace

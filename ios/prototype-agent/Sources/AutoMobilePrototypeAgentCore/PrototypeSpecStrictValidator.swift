@@ -19,6 +19,7 @@ public enum PrototypeSpecStrictValidator {
             else { throw PrototypeContractValidator.invalid("$", "Expected prototype envelope") }
             let state = fields["state"]?.objectFields ?? [:]
             let modelData = fields["data"]?.objectFields
+            try PrototypeInboundLinks.validate(fields, context: context)
             try PrototypeRoutes.validate(fields, context: context)
             try PrototypeStrings.validate(spec: fields, nodes: context.locatedNodes)
             let entries = try PrototypeDerivedCollections.entries(fields["derive"])
@@ -57,6 +58,7 @@ public enum PrototypeSpecStrictValidator {
                 sensors: fields["sensors"],
                 notifications: fields["notifications"],
                 media: fields["media"],
+                links: fields["links"],
                 root: root,
                 state: state
             )

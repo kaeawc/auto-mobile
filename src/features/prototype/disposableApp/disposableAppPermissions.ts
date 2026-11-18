@@ -98,6 +98,10 @@ function sortedUnique(values: Iterable<string>): string[] {
   return [...new Set(values)].sort();
 }
 
+function moduleRequirements(requires: ReturnType<typeof prototypeRequiresSchema.parse>) {
+  return Array.isArray(requires) ? {} : requires;
+}
+
 export function disposableAppDeclarations(spec: PrototypeJson): DisposableAppDeclarations {
   const raw = spec && typeof spec === "object" && !Array.isArray(spec) ? (spec.requires ?? {}) : {};
   const parsed = prototypeRequiresSchema.safeParse(raw);
@@ -106,10 +110,11 @@ export function disposableAppDeclarations(spec: PrototypeJson): DisposableAppDec
       `The spec's requires block is invalid, so the disposable app's permissions cannot be derived: ${parsed.error.issues[0]?.message ?? "unknown error"}. Validate the spec and retry.`,
     );
   }
-  const permissionEntries = parsed.data.permissions ?? [];
+  const declarations = moduleRequirements(parsed.data);
+  const permissionEntries = declarations.permissions ?? [];
   const permissions = sortedUnique(permissionEntries.map((entry) => entry.name));
-  const background = sortedUnique(parsed.data.background ?? []);
-  const modules = parsed.data.platform ?? [];
+  const background = sortedUnique(declarations.background ?? []);
+  const modules = declarations.platform ?? [];
   const services = background.flatMap((kind) => DISPOSABLE_APP_ANDROID_BACKGROUND[kind] ?? []);
   return {
     permissions,

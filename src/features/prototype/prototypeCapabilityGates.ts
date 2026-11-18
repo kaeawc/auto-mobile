@@ -277,6 +277,12 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypeContentTransitionUnsupportedMessage,
   },
   {
+    capability: "prototype_links_v1",
+    fields: (spec) => (Object.hasOwn(record(spec) ?? {}, "links") ? ["links"] : []),
+    unsupportedMessage: (fields) =>
+      `The device does not advertise prototype_links_v1, required by ${fields[0]}. Nothing was shown.`,
+  },
+  {
     capability: PROTOTYPE_ROUTES_CAPABILITY,
     fields: prototypeRouteFields,
     unsupportedMessage: (fields) =>

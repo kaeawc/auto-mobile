@@ -428,6 +428,16 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
       uses,
     );
   }
+  if (Array.isArray(root.links)) {
+    root.links.forEach((entry, index) => {
+      scanValue(
+        record(entry)?.actions,
+        `links[${index}].actions`,
+        { inHandler: false, inTimer: false, inNode: false, userGesture: false },
+        uses,
+      );
+    });
+  }
   for (const { node, path } of prototypeSpecNodeRoots(root)) {
     scanValue(
       node,

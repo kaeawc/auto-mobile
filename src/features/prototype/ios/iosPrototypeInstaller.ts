@@ -81,7 +81,7 @@ function permissionUsageStrings(spec: PrototypeJson): Record<string, string> {
     spec && typeof spec === "object" && !Array.isArray(spec) ? (spec.requires ?? {}) : {},
   );
   const strings: Record<string, string> = {};
-  for (const permission of requires.permissions ?? []) {
+  for (const permission of Array.isArray(requires) ? [] : (requires.permissions ?? [])) {
     // Notifications and nearbyWifi have no iOS Info.plist usage key.
     const key = DISPOSABLE_APP_IOS_USAGE_KEYS[permission.name];
     if (key) {

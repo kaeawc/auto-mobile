@@ -44,6 +44,7 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_realtime_v1",
       "prototype_platform_realtime_device_v1",
       "prototype_platform_test_v1",
+      "prototype_links_v1", // Contract only; inbound routing is deferred.
       "prototype_platform_share_v1", // Contract only; system share sheet runtime is owed.
       "prototype_backdrop_v1",
       "prototype_platform_haptics_v1",

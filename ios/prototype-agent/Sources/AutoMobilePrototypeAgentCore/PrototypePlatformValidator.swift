@@ -233,7 +233,7 @@ enum PrototypePlatformValidator {
         commerce: JSONValue? = nil,
         storage: JSONValue? = nil, location: JSONValue? = nil, sensors: JSONValue? = nil,
         notifications: JSONValue? = nil,
-        media: JSONValue? = nil, root: JSONValue,
+        media: JSONValue? = nil, links: JSONValue? = nil, root: JSONValue,
         state: [String: JSONValue]
     )
         throws
@@ -266,6 +266,17 @@ enum PrototypePlatformValidator {
             ) }
             try scan(handler, path: path, context: ScanContext(inHandler: true), declared: declared, state: state)
         }
+        for (index, entry) in PrototypeStrictBindings.array(links).enumerated() {
+            if let actions = entry.objectFields?["actions"] {
+                try scan(
+                    actions,
+                    path: "links[\(index)].actions",
+                    context: ScanContext(),
+                    declared: declared,
+                    state: state
+                )
+            }
+        }
         try scan(root, path: "root", context: ScanContext(), declared: declared, state: state)
     }
 
@@ -287,6 +298,7 @@ enum PrototypePlatformValidator {
     private static func validateRequires(_ raw: JSONValue?) throws -> Declared {
         var declared = Declared()
         guard let raw else { return declared }
+        if case .array = raw { return declared }
         guard case let .object(fields) = raw else { throw fail("requires", "Expected object") }
         for key in sorted(Set(fields.keys).union(["platform", "permissions", "background"])) {
             let path = "requires.\(key)"

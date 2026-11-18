@@ -1,0 +1,82 @@
+{
+  "spec": {
+    "id": "links",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": ["prototype_links_v1"],
+    "root": {
+      "type": "stack",
+      "id": "main",
+      "start": "feed",
+      "screens": {
+        "feed": {
+          "type": "text",
+          "text": "Feed",
+          "onTap": [
+            {
+              "type": "setStack",
+              "stack": "main",
+              "path": [
+                {
+                  "screen": "feed"
+                },
+                {
+                  "screen": "post",
+                  "params": {
+                    "postId": {
+                      "link": "postId"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "post": {
+          "type": "text",
+          "text": "Post {route.postId}"
+        }
+      },
+      "routes": {
+        "feed": {},
+        "post": {
+          "params": {
+            "postId": "string"
+          }
+        }
+      }
+    },
+    "links": [
+      {
+        "path": "/post/{postId}",
+        "query": {
+          "ref": "string?"
+        },
+        "actions": [
+          {
+            "type": "setStack",
+            "stack": "main",
+            "path": [
+              {
+                "screen": "feed"
+              },
+              {
+                "screen": "post",
+                "params": {
+                  "postId": {
+                    "link": "postId"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "expectedPath": "root.screens[\"feed\"].onTap[0]",
+  "expectedMessage": "Unknown link binding"
+}

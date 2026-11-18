@@ -17,6 +17,7 @@ enum PrototypeStrictCapabilities {
             if spec["window"]?.objectFields?["chrome"] != nil { need("window_chrome") }
             if spec["window"]?.objectFields?["transition"] != nil { need("window_motion") }
         }
+        if spec["links"] != nil { need("links") }
         if spec["strings"] != nil { need("strings") }
         for key in ["window", "theme"] {
             if let block = spec[key]?.objectFields, block["ios"] != nil || block["android"] != nil {
@@ -243,6 +244,7 @@ enum PrototypeStrictCapabilities {
             }
         }
         if let root = spec["root"] { scan(root) }
+        if let links = spec["links"] { scan(links) }
         if let handlers = spec["platform"] { scan(handlers) }
         for event in (spec["platform"]?.objectFields?["on"]?.objectFields ?? [:]).keys {
             if let capability = PrototypePlatformValidator.eventCapability(event) { result.insert(capability) }

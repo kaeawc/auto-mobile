@@ -135,6 +135,9 @@
     "linkify-repeat-empty.json",
     "linkify-repeat-rows.json",
     "linkify-timeline.json",
+    "links-bindings.json",
+    "links-routes.json",
+    "links-secret-query.json",
     "list-basic.json",
     "list-empty.json",
     "list-header-footer.json",
@@ -1035,6 +1038,15 @@
     "linkify-repeat-unknown-field.json",
     "linkify-unknown-kind.json",
     "linkify-with-spans.json",
+    "links-duplicate.json",
+    "links-limit.json",
+    "links-literal-capture.json",
+    "links-outside-scope.json",
+    "links-requires.json",
+    "links-state-type.json",
+    "links-type.json",
+    "links-unknown.json",
+    "links-unused.json",
     "list-duplicate-key.json",
     "list-horizontal-refresh.json",
     "list-in-list.json",
@@ -2048,6 +2060,7 @@
     "strict-gate-prototype_layout_direction_v1.json",
     "strict-gate-prototype_lazy_list_v1.json",
     "strict-gate-prototype_linkify_v1.json",
+    "strict-gate-prototype_links_v1.json",
     "strict-gate-prototype_loading_states_v1.json",
     "strict-gate-prototype_loops_v1.json",
     "strict-gate-prototype_menus_v1.json",
@@ -3628,6 +3641,14 @@
     "platform-permissions-request.json": [
       "prototype_platform_permissions_v1",
       "prototype_platform_v1"
+    ],
+    "links-routes.json": ["prototype_links_v1", "prototype_routes_v1", "prototype_stack_v1"],
+    "links-secret-query.json": ["prototype_links_v1", "prototype_routes_v1", "prototype_stack_v1"],
+    "links-bindings.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_emit_context_v1",
+      "prototype_links_v1"
     ]
   }
 }

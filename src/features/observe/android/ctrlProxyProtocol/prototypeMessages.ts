@@ -293,6 +293,8 @@ export const PROTOTYPE_EVENT_KINDS = [
   "emit",
   "page_changed",
   "screen_changed",
+  "link_opened",
+  "link_unmatched",
   "dismissed",
   "appearance_changed",
   "change",

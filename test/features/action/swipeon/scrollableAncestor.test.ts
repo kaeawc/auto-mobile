@@ -108,6 +108,44 @@ describe("resolveScrollableSwipeTarget", () => {
     });
   }
 
+  for (const direction of horizontalDirections) {
+    test(`iOS ${direction} escalates a named cell to a horizontal UICollectionView carousel`, () => {
+      const { parent, resolve } = fixture({
+        $: { class: "UICollectionView", orientation: "horizontal", scrollable: "true" },
+        role: "list",
+      });
+      const target = resolve(direction, "ios");
+      expect(target.class).toBe("UICollectionView");
+      expect(target.bounds).toEqual(parent.bounds);
+    });
+
+    test(`iOS ${direction} escalates a page to a horizontal paging collection view`, () => {
+      const { parent, resolve } = fixture({
+        $: { class: "UICollectionView", orientation: "horizontal", scrollable: "true" },
+      });
+      const target = resolve(direction, "ios");
+      expect(target.class).toBe("UICollectionView");
+      expect(target.bounds).toEqual(parent.bounds);
+    });
+
+    test(`iOS ${direction} keeps the row under a vertical-orientation list`, () => {
+      const { element, resolve } = fixture({
+        $: { class: "UITableView", orientation: "vertical", scrollable: "true" },
+      });
+      expect(resolve(direction, "ios")).toBe(element);
+    });
+
+    test(`iOS ${direction} escalates past a vertical list to an outer horizontal carousel`, () => {
+      const { resolve } = fixture(
+        { class: "UICollectionView", role: "list", scrollable: "true" },
+        { $: { class: "UICollectionView", orientation: "horizontal", scrollable: "true" } },
+      );
+      const target = resolve(direction, "ios");
+      expect(target.class).toBe("UICollectionView");
+      expect(target.orientation).toBe("horizontal");
+    });
+  }
+
   test("an omitted platform preserves the previous escalation behavior", () => {
     const { resolve } = fixture({ class: "UICollectionView", role: "list", scrollable: "true" });
     expect(resolve("left").class).toBe("UICollectionView");

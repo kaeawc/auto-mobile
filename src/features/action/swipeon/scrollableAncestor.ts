@@ -8,18 +8,25 @@ import { getHierarchyNodeSource } from "../../observe/output/elementProvenance";
 /** Whether `element` can scroll in `direction`: the same test auto-target applies to its candidates. */
 export type ScrollsInDirection = (element: Element, direction: SwipeDirection) => boolean;
 
-/** iOS lists scroll vertically; horizontal row gestures reveal swipe actions (#18564). */
+/**
+ * iOS lists scroll vertically; horizontal row gestures reveal swipe actions (#18564). A list that
+ * reports a horizontal axis (a carousel or paging collection view) still takes the swipe (#10752),
+ * so only vertical or unknown-axis lists are skipped.
+ */
 function isHorizontalIosListSwipe(
   element: Element,
   direction: SwipeDirection,
   platform: Platform | undefined,
+  scrollsInDirection: ScrollsInDirection,
 ): boolean {
   return (
     platform === "ios" &&
     (direction === "left" || direction === "right") &&
     (element.class === "UICollectionView" ||
       element.class === "UITableView" ||
-      element.role === "list")
+      element.role === "list") &&
+    // A known horizontal axis cannot scroll vertically; vertical and unknown axes can.
+    scrollsInDirection(element, "up")
   );
 }
 
@@ -81,7 +88,7 @@ export function resolveScrollableSwipeTarget({
       const candidate = parser.parseNodeBounds(ancestor);
       if (
         candidate &&
-        !isHorizontalIosListSwipe(candidate, direction, platform) &&
+        !isHorizontalIosListSwipe(candidate, direction, platform, scrollsInDirection) &&
         scrollsInDirection(candidate, direction)
       ) {
         return candidate;

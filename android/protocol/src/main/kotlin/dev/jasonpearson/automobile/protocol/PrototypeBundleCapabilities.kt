@@ -92,18 +92,11 @@ internal object PrototypeBundleCapabilities {
 
   private fun actions(action: JsonObject, caps: MutableSet<String>) {
     val type = text(action["type"])
+    dataActions(action, caps)
     if (PrototypeChannels.needsRealtimeCapability(action))
       caps.add("prototype_platform_realtime_v1")
     when (type) {
       "request" -> request(action, caps)
-      "prependData" -> {
-        caps.add("prototype_data_actions_v1")
-        caps.add("prototype_lazy_list_v1")
-      }
-      "setData",
-      "appendData",
-      "upsertData",
-      "removeData" -> caps.add("prototype_data_actions_v1")
       "startTimer",
       "cancelTimer" -> caps.add("prototype_timers_v1")
       "push",
@@ -115,6 +108,13 @@ internal object PrototypeBundleCapabilities {
       "hideKeyboard" -> caps.add("prototype_hide_keyboard_v1")
       "emit" -> if ("context" in action) caps.add("prototype_emit_context_v1")
     }
+  }
+
+  private fun dataActions(action: JsonObject, caps: MutableSet<String>) {
+    val type = text(action["type"])
+    if (type in PrototypeDataRules.dataActionTypes) caps.add("prototype_data_actions_v1")
+    if (type == "prependData") caps.add("prototype_lazy_list_v1")
+    if (PrototypeDataRules.isKeyedAction(action)) caps.add("prototype_data_actions_v2")
   }
 
   private fun fields(node: JsonObject, caps: MutableSet<String>) {

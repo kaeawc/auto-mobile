@@ -331,8 +331,9 @@ export const GUIDE_PLATFORM = `## Platform features
 A spec reaches a platform feature through a module. Declare every module it uses in a root \`requires: {platform: [<module>], permissions?: [{name, purpose}], background?: [...]}\`; a call, handler or read of an undeclared module fails validation with a path, and a call's permissions must appear in \`requires.permissions\`. The host reads \`requires\` before show and refuses a device that lacks a module's capability, before anything is drawn.
 
 - **Call.** \`{type:"platform", call:"<module>.<op>", args, into?, statusKey?, timeoutMs?, onSuccess?, onError?}\` in any action list. \`args\` are strict per call; values are \`{value}\`, \`{state}\`, \`{data}\`, \`{platform}\`, \`{item}\`/\`{index}\` in a repeat, or \`{event}\` in a handler. \`into\` (a \`/data\` path) and \`statusKey\` (a declared string state key that moves loading, then success or error) behave as for \`request\`. A failure writes one of unsupported, unavailable, permission_denied, invalid_args, cancelled, timeout, too_many_in_flight or platform_error to \`<into>__meta.error\`. Each finished call is an emit event \`prototype_platform\` (\`{callId, call, outcome, error?, durationMs}\`).
-- **Handler.** A root \`platform: {on: {"<module>.<event>": [actions]}}\`. Inside a handler only, \`{event: "/pointer"}\` reads the event's data. Handlers run atomically like a tap and may use \`push\`, \`pop\`, data actions and further calls. A delivered event is an emit event \`prototype_platform_event\` (\`{event, data, truncated?}\`).
+- **Handler.** A root \`platform: {on: {"<module>.<event>": [actions]}}\`. Inside a handler only, \`{event: "/pointer"}\` reads the event's data. Handlers run atomically like a tap and may use \`push\`, \`pop\`, data actions and further calls. A delivered event is an emit event \`prototype_platform_event\` (\`{event, data, truncated?, simulated?}\`).
 - **Read.** \`/platform/<module>/<key>\` is device-owned, read-only JSON: \`{platform:/device/os}\` in text, \`{platform: "/device/widthClass", equals: "expanded"}\` as a condition, \`{platform: pointer}\` as a value. It is not patchable or stored and is not part of the \`/data\` revision log.
+- **Simulate.** \`prototype {action:"simulate",id,event:"test.tick",data:{count:7}}\` injects a known module event on Android with \`prototype_platform_simulation_v1\`. The module must opt in (debug \`test.tick\` does), and be declared in \`requires.platform\`. Data follows its event schema where defined, otherwise accepts any JSON object; the delivered payload including \`simulated:true\` must fit 4096 UTF-8 bytes. Injection updates module state, runs the ordinary handler and reports \`prototype_platform_event\`. Unsupported modules fail without delivery. Push and media events keep their dedicated routes. Call outcomes and \`platformMode\` remain unavailable.
 - **Names.** Authored emit names cannot start with \`prototype_\`.
 
 Each module needs \`prototype_platform_v1\` plus its own capability; a device without either refuses show, patch and \`replaceNode\` and names the capability. The table below is generated from the contract, so it lists every module, call, event and key a spec may name; a device can run only the modules whose capabilities it advertises:
@@ -437,3 +438,22 @@ it advertises \`mediaLibrary\` without the capture capability.
   }
 }
 \`\`\``;
+
+/** Disposable prototype apps (#14184), appended to the saved prototypes section. */
+export const GUIDE_DISPOSABLE_APPS = `
+
+## Disposable apps
+
+\`installApp\` (Android) installs \`spec\` or \`specPath\` as its own app:
+\`app: {slug, label, icon?: {backgroundColor}, ttlHours?, permissions?, reset?}\`. The id is
+always \`dev.jasonpearson.automobile.app.<slug>_<8 hex>\`; you choose only the slug. Declared
+permissions come only from the spec's \`requires.permissions\`. \`permissions\` is \`prompt\` (the
+default), \`grantDeclared\` or \`{grant, deny}\` naming declared permissions. \`ttlHours\` defaults to
+72; 0 keeps the app. Re-installing a slug updates it in place and keeps its storage unless
+\`reset: true\`. The result \`disposableApp\` has \`appId\`, \`template\`, \`expiresAt\` and
+\`permissions\`; then use \`launchApp\`, \`observe\`, \`tapOn\` and \`terminateApp\` with that \`appId\`.
+\`listApps\` returns \`disposableApps\`, this host's records joined with the device's packages
+under the prefix. \`uninstallApp\` takes exactly one of \`appId\`, \`all: true\` or \`expired: true\`
+and returns \`uninstalled: {removed, skipped, pending?}\`; it refuses ids outside the prefix and apps
+signed by another key. A bulk call that runs out of time lists the apps it did not start in
+\`pending\`; call it again with the same target to continue. \`deleteSaved\` never removes a disposable app.`;

@@ -45,7 +45,10 @@ android {
     disable += "ProtectedPermissions"
   }
 
-  buildFeatures { compose = true }
+  buildFeatures {
+    compose = true
+    buildConfig = true
+  }
 
   // Robolectric needs merged resources to render Compose Material 3 off-device. The
   // verifyRobolectricSdkPin guard checks the properties pin; the guard caps pins at SDK 35 (36+

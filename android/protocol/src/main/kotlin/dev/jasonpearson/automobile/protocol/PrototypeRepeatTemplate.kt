@@ -302,6 +302,21 @@ internal object PrototypeBindableFields {
     return null
   }
 
+  private fun <T : Any> Visitor<T>.dataAction(
+    action: JsonObject,
+    path: String,
+    hasValue: Boolean,
+  ): T? {
+    field(action, "path", path, PrototypeBindableKind.DATA_PATH)?.let {
+      return it
+    }
+    if (hasValue)
+      binding(action["value"], "$path.value")?.let {
+        return it
+      }
+    return binding((action["where"] as? JsonObject)?.get("equals"), "$path.where.equals")
+  }
+
   private fun <T : Any> Visitor<T>.requestBody(value: JsonElement?, path: String): T? {
     val body = value as? JsonObject ?: return null
     val parts = body["multipart"] as? JsonArray
@@ -394,10 +409,8 @@ internal object PrototypeBindableFields {
         "setData",
         "appendData",
         "upsertData",
-        "prependData" ->
-          field(action, "path", path, PrototypeBindableKind.DATA_PATH)
-            ?: binding(action["value"], "$path.value")
-        "removeData" -> field(action, "path", path, PrototypeBindableKind.DATA_PATH)
+        "prependData",
+        "removeData" -> dataAction(action, path, type != "removeData")
         "startTimer" -> actionLists(action, listOf("actions"), path)
         "request" -> request(action, path)
         "platform" -> platform(action, path)

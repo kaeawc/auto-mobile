@@ -99,8 +99,7 @@ Rules for the `map` node (#14309) and its renderers (#14310, #14311):
 - **Styles.** `mapStyle` is a closed list, never a URL (`style` is the shared node style). The default is `plain`: offline and deterministic (a
   background colour, an optional grid and graticule, then markers and polylines), with no network. CI and every
   screenshot test use it. The `streets` style draws tiles from the runtime's configured source. The runtimes do not offer `satellite`.
-  On iOS, MapKit always fetches Apple tiles, so MapLibre iOS draws `plain` there, or an
-  `MKTileOverlay` with `canReplaceMapContent` serving local tiles.
+  On iOS, MapKit draws `plain` with an `MKTileOverlay` whose `canReplaceMapContent` serves local tiles.
 - **Tile source.** The `streets` source is configured once per runtime (ProtoViewer settings, or the daemon
   pushing configuration to a disposable app), never per spec. The public OpenStreetMap tile server is never
   used.
@@ -112,8 +111,8 @@ Rules for the `map` node (#14309) and its renderers (#14310, #14311):
   Only the configured tile origin is contacted, and the runtime draws the data attribution outside spec
   control.
 
-The `map` node (#14309, contract only: no renderer draws it and no runtime advertises
-`prototype_platform_map_v1`) needs `map` in `requires.platform`:
+The `map` node needs `map` in `requires.platform`. iOS renders it with MapKit and advertises
+`prototype_platform_map_v1`; Google and MapLibre backend capabilities are not advertised on iOS:
 
 ```json
 {

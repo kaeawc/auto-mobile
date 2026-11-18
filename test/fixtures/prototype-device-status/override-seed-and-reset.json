@@ -1,0 +1,74 @@
+{
+  "description": "A seed in fake mode overrides the real level and keeps the unseeded key; a real reading while fake is hidden; switching back to real shows the latest reading at once.",
+  "module": "battery",
+  "platform": "android",
+  "inputs": [
+    {
+      "timestampMs": 0,
+      "reading": {
+        "level": 80,
+        "state": "unplugged"
+      }
+    },
+    {
+      "timestampMs": 100,
+      "mode": "fake"
+    },
+    {
+      "timestampMs": 200,
+      "seed": {
+        "level": 10
+      }
+    },
+    {
+      "timestampMs": 300,
+      "reading": {
+        "level": 79,
+        "state": "unplugged"
+      }
+    },
+    {
+      "timestampMs": 1000,
+      "mode": "real"
+    }
+  ],
+  "expectedUpdates": [
+    {
+      "timestampMs": 0,
+      "values": {
+        "level": 80,
+        "state": "unplugged"
+      }
+    },
+    {
+      "timestampMs": 200,
+      "values": {
+        "level": 10,
+        "state": "unplugged"
+      }
+    },
+    {
+      "timestampMs": 1000,
+      "values": {
+        "level": 79,
+        "state": "unplugged"
+      }
+    }
+  ],
+  "expectedEvents": [
+    {
+      "timestampMs": 700,
+      "values": {
+        "level": 10,
+        "state": "unplugged"
+      }
+    },
+    {
+      "timestampMs": 1500,
+      "values": {
+        "level": 79,
+        "state": "unplugged"
+      }
+    }
+  ]
+}

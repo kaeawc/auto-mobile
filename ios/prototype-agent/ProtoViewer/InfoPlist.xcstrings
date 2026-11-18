@@ -22,6 +22,17 @@
           }
         }
       }
+    },
+    "NSFaceIDUsageDescription": {
+      "comment": "System Face ID prompt for an explicit prototype authentication request.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm your identity when a prototype asks you to authenticate."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

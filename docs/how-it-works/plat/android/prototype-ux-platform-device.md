@@ -78,6 +78,19 @@ runtimes copy, replayed from `test/fixtures/prototype-device-status/`:
   not activate or reconfigure the host session.
 - `ringer` is Android `AudioManager.RINGER_MODE_*`: silent, vibrate or normal.
 
+The simulate override is normative too. `prototypeDeviceStatusOverride.ts` is the reference for
+`simulate` state seeding (#14300) on these modules, replayed from the same directory's `override-*`
+fixtures:
+
+- In `fake` platform mode, the shown values freeze at the last reading. Later real readings are held
+  back, and a seed merges into the shown values; a `null` seed value removes the key.
+- Switching back to `real` drops the override and shows the latest reading at once. Each change of
+  the shown values is debounced into `<module>.changed` like a real reading.
+- A seed is refused with its input path in `real` mode. It is also refused for a key outside the
+  state table, a key the platform does not report (`ringer` on iOS) or a value its rule refuses.
+
+The `simulate` state action that drives this on a device is not built.
+
 **Biometric prompt (#14328).** The `biometric` module (`prototype_platform_biometric_v1`) has one call,
 `biometric.authenticate` with `title` (required, 1-64 characters), `subtitle` (optional, 1-128) and
 `allowDeviceCredential` (optional boolean), and one event, `biometric.attemptFailed`, for a rejected
@@ -86,7 +99,11 @@ entry. Android hosts declare the normal `USE_BIOMETRIC` manifest permission for 
 call proves presence only and returns no biometric data. Failures use the typed codes: `cancelled`, and
 `unavailable` for a locked-out, unenrolled or hardware-less device. See
 [Android biometric runtime support](prototype-ux-platform-services.md)
-for host availability and error reasons.
+for host availability and error reasons. The iOS agent and ProtoViewer also register the module. Face ID
+requires the host's `NSFaceIDUsageDescription`; a missing key returns `unavailable` with reason
+`missing_usage_description`. A saved iOS app keeps that key only when its spec lists `biometric` in
+`requires.platform`. Allowing device credentials selects the system passcode fallback, including
+on a device without enrolled biometrics.
 
 **Window controls (#14320).** Four optional root `window` fields need
 `prototype_platform_window_controls_v1`. They are not a platform module, so they need no

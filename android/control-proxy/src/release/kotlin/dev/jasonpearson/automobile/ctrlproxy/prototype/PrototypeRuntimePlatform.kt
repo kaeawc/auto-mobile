@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.app.Activity
 import android.content.Context
+import androidx.activity.ComponentActivity
 import dev.jasonpearson.automobile.prototype.*
 
 /**
@@ -17,6 +18,10 @@ internal fun prototypeRuntimePlatform(
       listOfNotNull(clipboard?.let { PrototypeClipboardModule(it) }) +
       listOfNotNull(
         (context as? Activity)?.let { PrototypeBiometricModule(AndroidBiometricSource(it)) },
+        (context as? Activity)?.let { PrototypeSecureStorageModule.fileBacked(it) },
+        (context as? ComponentActivity)?.let {
+          PrototypePermissionsModule(AndroidPermissionsSource(it))
+        },
       ) +
       PrototypeLocationModule(AndroidLocationSource(context)) +
       PrototypeSensorsModule(AndroidSensorSource(context)) +

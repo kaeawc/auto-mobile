@@ -27,8 +27,12 @@ Keep the `using` / `how-it-works` / `devlog` split. Add a short "Get started" gr
 AutoMobile" by task (explore, app and device state, audits, devices and sessions, CI hosts,
 debugging, integrations, platforms, prototyping) and make "Tools" the reference group. Group "How
 it Works" by subsystem (MCP server, sessions and devices, Android, Apple, prototyping platform),
-with maintainer pages last under "Maintaining AutoMobile". Turn on Material's
-`navigation.sections`, `navigation.indexes` and `navigation.prune`; leave `navigation.tabs` off.
+with maintainer pages last under "Maintaining AutoMobile".
+
+The top level is six folders: Get started, Using AutoMobile, Tools, How it Works, Devlog and
+Contributing. Material's `navigation.indexes` is on. Tabs, sections and prune stay off. Sections
+renders every top-level group as an open header, which made the first version read as dozens of
+top-level entries. Prune turns a closed folder into a plain link.
 
 Test authoring stays off the navigation until recording and authoring tests is easy. The UI test
 pages and the JUnit and XCTestRunner runner pages are still built at their URLs but are not linked

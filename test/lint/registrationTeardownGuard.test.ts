@@ -88,6 +88,11 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
       excludes: ["/test/", "/androidTest/"],
       pairs: [
         {
+          name: "Permission result",
+          register: /activityResultRegistry\.register\s*\(/,
+          teardown: /launcher\.unregister\s*\(/,
+        },
+        {
           name: "Biometric prompt",
           register: /\.authenticate\(\s*cancellation,/,
           teardown: /cancellation\.cancel\s*\(/,
@@ -214,6 +219,25 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
       }
     }
     expect(offenders, offenders.join("\n")).toEqual([]);
+  });
+
+  test("permission-result registrations require launcher teardown", () => {
+    const pair = SCOPES.find((scope) => scope.lang === "kotlin")!.pairs.find(
+      (candidate) => candidate.name === "Permission result",
+    )!;
+    expect(
+      pair.register.test("activity.activityResultRegistry.register(\n key, contract) {}"),
+    ).toBe(true);
+    expect(pair.teardown.test("return { launcher.unregister() }")).toBe(true);
+    expect(pair.teardown.test("return {} ")).toBe(false);
+    const source = readGuardFile(
+      join(
+        ROOT,
+        "android/prototype-compose/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/AndroidPermissionsSource.kt",
+      ),
+    );
+    expect(pair.register.test(source)).toBe(true);
+    expect(pair.teardown.test(source)).toBe(true);
   });
 
   test("biometric prompt registrations require cancellation even after formatting", () => {

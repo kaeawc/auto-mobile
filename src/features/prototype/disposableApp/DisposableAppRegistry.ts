@@ -12,6 +12,11 @@ const recordSchema = z
   .object({
     appId: z.string().min(1),
     slug: z.string().min(1),
+    specId: z.string().optional(),
+    attachToken: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
     platform: z.enum(["android", "ios"]),
     label: z.string(),
     specSha256: z.string().regex(/^[0-9a-f]{64}$/),

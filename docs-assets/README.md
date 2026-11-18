@@ -9,8 +9,9 @@ browser-ready `.js` is generated rather than hand-edited.
 | -------------------------- | -------------------------------------------- | ------------------------------------------------------------------------- |
 | `usage-data.ts`            | `usage-data.js`                              | `docs/metrics/usage-data.md` — download charts in `#dl-metrics`           |
 | `prompt-form.ts`           | `prompt-form.js`                             | `docs/using/agent-examples.md` — copyable-prompt UI and live placeholders |
+| `tool-table.ts`            | `tool-table.js`                              | `docs/tools.md` and tool pages — description toggle, hidden on phones     |
 
-Both outputs are referenced from `mkdocs.yml` via `extra_javascript`.
+All outputs are referenced from `mkdocs.yml` via `extra_javascript`.
 
 ## Regenerating
 

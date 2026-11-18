@@ -1,3 +1,4 @@
+export const PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY = "prototype_platform_simulation_v1";
 export const PROTOTYPE_TIMERS_CAPABILITY = "prototype_timers_v1";
 /** Android control-proxy capability negotiation and request/response registries. */
 import type { CtrlProxyRequestType } from "./requestMessages";
@@ -94,6 +95,7 @@ export const PROTOTYPE_CHECKS_CAPABILITY = "prototype_checks_v1";
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
 /** setData/appendData/prependData/removeData on `/data`, each write reported as a `change` event. */
 export const PROTOTYPE_DATA_ACTIONS_CAPABILITY = "prototype_data_actions_v1";
+export const PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY = "prototype_data_actions_v2";
 /** The `request` action (#12523); see prototypeRequest.ts. A `via: "device"` one also needs the second. */
 export const PROTOTYPE_NETWORK_CAPABILITY = "prototype_network_v1";
 export const PROTOTYPE_NETWORK_DEVICE_CAPABILITY = "prototype_network_device_v1";
@@ -483,6 +485,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   list_saved_prototypes: true,
   delete_saved_prototype: true,
   advance_prototype_clock: true,
+  simulate_prototype_platform: true,
   clear_prototype_storage: true,
   put_prototype_asset: true,
   remove_prototype_asset: true,

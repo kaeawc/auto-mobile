@@ -186,9 +186,7 @@ theme:
     - content.code.copy
     - content.code.select
     - content.tabs.link
-    - navigation.sections
     - navigation.indexes
-    - navigation.prune
     - navigation.footer
     - search.suggest
 
@@ -198,6 +196,7 @@ extra_css:
 
 extra_javascript:
   - assets/javascripts/prompt-form.js
+  - assets/javascripts/tool-table.js
   - assets/javascripts/usage-data.js
 
 markdown_extensions:

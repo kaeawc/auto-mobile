@@ -52,18 +52,23 @@ final class PrototypeLazyListTests: XCTestCase {
     }
 
     func testSharedDataWrites() throws {
-        for raw in try PrototypeStrictBindings.array(read("list-writes/data-writes.json")) {
+        for raw in try PrototypeStrictBindings.array(read("list-writes/data-writes.json")) + PrototypeStrictBindings
+            .array(read("data/keyed-writes.json"))
+        {
             let fixture = try XCTUnwrap(raw.objectFields)
             let write = try XCTUnwrap(fixture["write"]?.objectFields)
             let expected = try XCTUnwrap(fixture["expected"]?.objectFields)
             let name = fixture["name"]?.stringValue ?? ""
             let op = try XCTUnwrap(PrototypeDataWrite.Operation(rawValue: write["op"]?.stringValue ?? ""))
+            let match = write["where"]?.objectFields
+                .map { PrototypeDataWrite.Match(field: $0["field"]?.stringValue ?? "", equals: $0["equals"] ?? .null) }
             let result = PrototypeDataWrite.applyWindowed(
                 fixture["before"]?.objectFields,
                 op: op,
                 path: write["path"]?.stringValue ?? "",
                 value: write["value"],
-                maxItems: write["maxItems"]?.numberValue, key: write["key"]?.stringValue
+                maxItems: write["maxItems"]?.numberValue, key: write["key"]?.stringValue, where: match,
+                member: write["member"]?.stringValue
             )
             switch result {
             case let .success(applied):

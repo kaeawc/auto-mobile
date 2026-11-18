@@ -1,4 +1,4 @@
-import { GUIDE_PLATFORM_NAMESPACES } from "./prototypeGuideProseMore";
+import { GUIDE_DISPOSABLE_APPS, GUIDE_PLATFORM_NAMESPACES } from "./prototypeGuideProseMore";
 import { GUIDE_MOTION_V3 } from "./prototypeGuideMotionV3";
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
 import {
@@ -422,7 +422,7 @@ attached to this host (no \`awaitEvent\`, \`patch\` or \`inspect\`). \`{action:"
 that \`libraryId\` launches it on Android or an iOS simulator. It needs ProtoViewer installed.
 If ProtoViewer is absent, too old for this route, or its inbox cannot be used, \`save\`
 keeps the platform save path. A timeout after delivery may still have saved the entry; check
-ProtoViewer before retrying.
+ProtoViewer before retrying.${GUIDE_DISPOSABLE_APPS}
 
 ## Fullscreen host chrome
 
@@ -655,7 +655,7 @@ fit 128 UTF-8 bytes; MIME types are type/subtype tokens. Contact fields are \`na
 fit 65536 UTF-8 bytes. \`into\` receives \`{outcome:"shared"|"unknown",target?,items}\`;
 its text summary keeps 2048 Unicode scalars. \`statusKey,onSuccess,onError\` use platform-call
 semantics. Real system sheets, cancellation callbacks and queued fake outcomes are owed;
-\`platformMode\` and \`prototype simulate\` are not accepted yet.
+\`platformMode\` and simulated sharing call outcomes are not accepted yet.
 
 ### Requests
 

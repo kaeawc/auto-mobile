@@ -21,6 +21,17 @@ import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "./observationRes
 import { WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS } from "../features/observe/waitForTimeout";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../features/prototype/protoViewer/protoViewerDevice";
 import {
+  INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS,
+  resolvePrototypeAppBudgetMs,
+} from "./prototypeAppMcpTimeout";
+export {
+  DISPOSABLE_APP_STAMP_MCP_ALLOWANCE_MS,
+  INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS,
+  MIN_PROTOTYPE_BULK_UNINSTALL_APP_MCP_TIMEOUT_MS,
+  MIN_PROTOTYPE_INSTALL_APP_MCP_TIMEOUT_MS,
+  MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS,
+} from "./prototypeAppMcpTimeout";
+import {
   APP_FILE_PUSH_TIMEOUT_MS,
   FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
 } from "../features/storage/fileTransferTimeout";
@@ -186,9 +197,6 @@ export const MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS = 90_000;
  * Android has already removed the package, causing a false failure.
  */
 export const MIN_UNINSTALL_APP_MCP_TIMEOUT_MS = 60_000;
-
-/** Headroom for install inventory, force-stop, user restoration and verification. */
-export const INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS = 30_000;
 
 /**
  * Floor for `installApp` — Android downgrade recovery can consume three full
@@ -429,11 +437,15 @@ function resolvePrototypeAssetUploadBudgetMs(args: Record<string, unknown>): num
 }
 
 function resolvePrototypeAwaitBudgetMs(args: Record<string, unknown>): number {
-  // `awaitEvent` waits, `save` and `open` may wait on ProtoViewer, and only `show` with `assets`
-  // uploads; every other prototype action keeps the default deadline. The tool's own maximum bounds the wait, so a larger value
+  // `awaitEvent` waits, `save` and `open` may wait on ProtoViewer, only `show` with `assets`
+  // uploads, and `installApp`/`uninstallApp` run adb package commands; every other prototype
+  // action keeps the default deadline. The tool's own maximum bounds the wait, so a larger value
   // (rejected by its schema anyway) cannot inflate the deadline past that maximum plus headroom.
   if (args.action === "show") {
     return resolvePrototypeAssetUploadBudgetMs(args);
+  }
+  if (args.action === "installApp" || args.action === "uninstallApp") {
+    return resolvePrototypeAppBudgetMs(args);
   }
   if (args.action === "save" || args.action === "open") {
     // On Android with ProtoViewer installed these wait for the app's result file (#13621).

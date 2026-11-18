@@ -24,6 +24,8 @@ struct PrototypeResolvedEmitContext: Equatable, Sendable {
 struct PrototypeEmitContext: Decodable {
     let bindings: [String: JSONValue]
 
+    init(bindings: [String: JSONValue]) { self.bindings = bindings }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let raw = try container.decode(JSONValue.self)
@@ -91,7 +93,9 @@ struct PrototypeEmitContext: Decodable {
     /// Validators refuse an authored entry under one of these names.
     func resolve(
         _ inputs: some PrototypeEmitContextInputs, handlerContext: [String: JSONValue] = [:]
-    ) -> PrototypeResolvedEmitContext {
+    )
+        -> PrototypeResolvedEmitContext
+    {
         // Resolve every entry before deciding whether truncation is needed.
         var complete = bindings.mapValues { raw -> JSONValue in
             guard case let .object(binding) = raw else { return .null }

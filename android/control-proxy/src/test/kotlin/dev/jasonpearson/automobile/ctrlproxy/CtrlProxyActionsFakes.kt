@@ -18,6 +18,7 @@ import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
 import dev.jasonpearson.automobile.protocol.SetPreference
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 
 /**
  * No-op [CtrlProxyActions] base for tests that only care about a couple of actions — subclass and
@@ -189,6 +190,13 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
   override suspend fun listSavedPrototypes(requestId: String?) = Unit
 
   override suspend fun deleteSavedPrototype(requestId: String?, id: String) = Unit
+
+  override suspend fun simulatePrototypePlatform(
+    requestId: String?,
+    id: String,
+    event: String,
+    data: JsonObject,
+  ) = Unit
 
   override suspend fun advancePrototypeClock(requestId: String?, id: String, advanceTimeMs: Int) =
     Unit
@@ -528,6 +536,13 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override suspend fun deleteSavedPrototype(requestId: String?, id: String) =
     record("deleteSavedPrototype", requestId, id)
+
+  override suspend fun simulatePrototypePlatform(
+    requestId: String?,
+    id: String,
+    event: String,
+    data: JsonObject,
+  ) = record("simulatePrototypePlatform", requestId, id, event, data)
 
   override suspend fun advancePrototypeClock(requestId: String?, id: String, advanceTimeMs: Int) =
     record("advancePrototypeClock", requestId, id, advanceTimeMs)

@@ -109,7 +109,9 @@ struct PrototypeSpec: Decodable {
     /// Declared media players (#14253), retained for contract validation; no player is created.
     let media: JSONValue?
     let locationBlock: JSONValue?
+    let sensorsBlock: JSONValue?
     let platformHandlers: [String: JSONValue]
+    let declaredPermissions: Set<String>
     private(set) var platformState: [String: JSONValue] = [:]
     /// The route params `{route.<name>}` placeholders are bound to in `root` (#14188); empty at decode.
     private(set) var routeScope: PrototypeRouteBinder.Scope = [:]
@@ -144,6 +146,7 @@ struct PrototypeSpec: Decodable {
         channels = try container.decodeIfPresent(JSONValue.self, forKey: .channels)
         media = try container.decodeIfPresent(JSONValue.self, forKey: .media)
         locationBlock = try container.decodeIfPresent(JSONValue.self, forKey: .location)
+        sensorsBlock = try container.decodeIfPresent(JSONValue.self, forKey: .sensors)
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         // The host validator owns the strict shape; a malformed block means "no storage" here.
@@ -157,9 +160,15 @@ struct PrototypeSpec: Decodable {
         // Menus validate against state, but state is decoded (and checked) after root to keep the
         // key order; a state that does not decode is reported at its own turn below.
         let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state))
+        let requires = try container.decodeIfPresent(JSONValue.self, forKey: .requires)
+        if case let .array(permissions)? = requires?.objectFields?["permissions"] {
+            declaredPermissions = Set(permissions.compactMap { $0.objectFields?["name"]?.stringValue })
+        } else {
+            declaredPermissions = []
+        }
         // Validate platform vocabulary before resolving device-owned reads.
         try PrototypePlatformValidator.validate(
-            requires: container.decodeIfPresent(JSONValue.self, forKey: .requires),
+            requires: requires,
             handlers: container.decodeIfPresent(JSONValue.self, forKey: .platform),
             channels: channels,
             auth: container.decodeIfPresent(JSONValue.self, forKey: .auth),
@@ -276,10 +285,12 @@ struct PrototypeSpec: Decodable {
         channels = spec.channels
         media = spec.media
         locationBlock = spec.locationBlock
+        sensorsBlock = spec.sensorsBlock
         platformHandlers = spec.platformHandlers
         platformState = spec.platformState
         routeScope = spec.routeScope
         id = spec.id
+        declaredPermissions = spec.declaredPermissions
         strings = spec.strings
         locales = spec.locales
         window = spec.window
@@ -1022,6 +1033,16 @@ final class PrototypeNode: Decodable {
     let yRange: PrototypeChartRange?
     let xLabels: String?
     let goal: Double?
+    /// Map definitions retain their contract JSON until resolved against current /data.
+    let camera: JSONValue?
+    let markers: JSONValue?
+    let polylines: [JSONValue]?
+    let mapStyle: String?
+    let backend: String?
+    let fit: String?
+    let showUserLocation: Bool?
+    let onMarkerTap: [JSONValue]?
+    let onCameraIdle: [String: JSONValue]?
     /// Gesture-only nodes have the same touch target and accessibility semantics as tap nodes.
     var isInteractive: Bool {
         onTap != nil || onLongPress != nil || onDoubleTap != nil
@@ -1057,6 +1078,7 @@ final class PrototypeNode: Decodable {
              trailingIcon,
              imeAction, yRange, xLabels, goal
         case filter, fadeEdges, edgeEffect, ios
+        case camera, markers, polylines, mapStyle, backend, fit, showUserLocation, onMarkerTap, onCameraIdle
         case chartSeries = "series"
     }
 
@@ -1219,6 +1241,15 @@ final class PrototypeNode: Decodable {
         yRange = try container.decodeIfPresent(PrototypeChartRange.self, forKey: .yRange)
         xLabels = try container.decodeIfPresent(String.self, forKey: .xLabels)
         goal = try container.decodeIfPresent(Double.self, forKey: .goal)
+        camera = try container.decodeIfPresent(JSONValue.self, forKey: .camera)
+        markers = try container.decodeIfPresent(JSONValue.self, forKey: .markers)
+        polylines = try container.decodeIfPresent([JSONValue].self, forKey: .polylines)
+        mapStyle = try container.decodeIfPresent(String.self, forKey: .mapStyle)
+        backend = try container.decodeIfPresent(String.self, forKey: .backend)
+        fit = try container.decodeIfPresent(String.self, forKey: .fit)
+        showUserLocation = try container.decodeIfPresent(Bool.self, forKey: .showUserLocation)
+        onMarkerTap = try container.decodeIfPresent([JSONValue].self, forKey: .onMarkerTap)
+        onCameraIdle = try container.decodeIfPresent([String: JSONValue].self, forKey: .onCameraIdle)
     }
 
     /// Android's `resolvePrototypeStyle`: every `styleWhen` entry whose condition holds is merged over

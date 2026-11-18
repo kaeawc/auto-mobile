@@ -86,14 +86,23 @@ public final class PrototypePlatformRegistry {
 
     let modules: [String: any PrototypePlatformModule]
     private var observers = 0
+    private let parent: PrototypePlatformRegistry?
+    private let presentationModules: [any PrototypePlatformModule]
 
-    func retainSources() { observers += 1 }
+    func retainSources() {
+        observers += 1
+        parent?.retainSources()
+    }
 
     func releaseSources() {
         guard observers > 0 else { return }
         observers -= 1
-        // The system registry is shared by presentations; only the final observer tears it down.
-        if observers == 0 { modules.values.forEach { $0.stop() } }
+        if observers == 0 {
+            if parent == nil { modules.values.forEach { $0.stop() } }
+            else { presentationModules.forEach { $0.stop() } }
+        }
+        // Global status streams outlive any one presentation; scoped streams stop independently.
+        parent?.releaseSources()
     }
 
     public init(
@@ -106,10 +115,51 @@ public final class PrototypePlatformRegistry {
             accepted[module.name] = module
         }
         self.modules = accepted
+        parent = nil
+        presentationModules = []
+    }
+
+    private init(
+        modules: [String: any PrototypePlatformModule],
+        parent: PrototypePlatformRegistry,
+        presentationModules: [any PrototypePlatformModule]
+    ) {
+        self.modules = modules
+        self.parent = parent
+        self.presentationModules = presentationModules
+    }
+
+    /// A model owns this registry's snapshots and streams for its lifetime. Read-only device status
+    /// remains global; authored sensor/location configuration and pending calls are presentation-local.
+    func forPresentation() -> PrototypePlatformRegistry {
+        if let parent { return parent.forPresentation() }
+        var scoped = modules
+        var owned: [any PrototypePlatformModule] = []
+        if let sensors = modules["sensors"] as? PrototypeSensorsModule {
+            let module = sensors.forPresentation()
+            scoped[module.name] = module
+            owned.append(module)
+        }
+        if let location = modules["location"] as? PrototypeLocationModule {
+            let module = location.forPresentation()
+            scoped[module.name] = module
+            owned.append(module)
+        }
+        return PrototypePlatformRegistry(modules: scoped, parent: self, presentationModules: owned)
     }
 
     public func configure(locationBlock: JSONValue?) {
         modules["location"]?.configure(root: locationBlock)
+    }
+
+    public func configure(sensorsBlock: JSONValue?) {
+        configure(sensorsBlock: sensorsBlock, sessionID: 0)
+    }
+
+    func configure(sensorsBlock: JSONValue?, sessionID: Int = 0) {
+        if let sensors = modules["sensors"] as? PrototypeSensorsModule {
+            sensors.configure(root: sensorsBlock, sessionID: sessionID)
+        } else { modules["sensors"]?.configure(root: sensorsBlock) }
     }
 
     public var capabilities: [String] { Set(modules.values.map(\.capability)).sorted() }
@@ -123,7 +173,10 @@ public final class PrototypePlatformRegistry {
         settings: any PrototypeSettingsURLOpener,
         bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
         deviceStatus: [any PrototypePlatformModule] = [],
-        location: (any PrototypeLocationSource)? = nil
+        location: (any PrototypeLocationSource)? = nil,
+        sensors: (any PrototypeSensorSource)? = nil,
+        permissions: (any PrototypeNotificationAuthorizationSource)? = nil,
+        biometric: (any PrototypeBiometricSource)? = nil
     )
         -> PrototypePlatformRegistry
     {
@@ -135,6 +188,9 @@ public final class PrototypePlatformRegistry {
             PrototypeSettingsModule(opener: settings),
         ] + deviceStatus
         if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
+        if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
+        if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
+        if let permissions { modules.append(PrototypePermissionsModule(source: permissions)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 
@@ -145,7 +201,10 @@ public final class PrototypePlatformRegistry {
         settings: any PrototypeSettingsURLOpener,
         bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
         deviceStatus: [any PrototypePlatformModule] = [],
-        location: (any PrototypeLocationSource)? = nil
+        location: (any PrototypeLocationSource)? = nil,
+        sensors: (any PrototypeSensorSource)? = nil,
+        permissions: (any PrototypeNotificationAuthorizationSource)? = nil,
+        biometric: (any PrototypeBiometricSource)? = nil
     )
         -> PrototypePlatformRegistry
     {
@@ -156,6 +215,9 @@ public final class PrototypePlatformRegistry {
             PrototypeSettingsModule(opener: settings),
         ] + deviceStatus
         if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
+        if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
+        if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
+        if let permissions { modules.append(PrototypePermissionsModule(source: permissions)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 

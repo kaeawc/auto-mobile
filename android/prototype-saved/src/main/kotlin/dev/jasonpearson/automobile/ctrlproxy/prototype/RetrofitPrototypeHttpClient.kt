@@ -13,6 +13,7 @@ import java.net.Proxy
 import java.net.UnknownServiceException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -136,6 +137,8 @@ class RetrofitPrototypeHttpClient(
   private val debug: (String) -> Unit = { Log.d(TAG, it) },
   private val policy: PrototypeDestinationPolicy = PrototypeEgressPolicy(),
 ) : PrototypeHttpClient {
+  internal var uploadBodies = PrototypeUploadRequestBodies(clock)
+
   private val service: PrototypeHttpService =
     Retrofit.Builder()
       .baseUrl(PLACEHOLDER_BASE_URL.toHttpUrl())
@@ -168,7 +171,7 @@ class RetrofitPrototypeHttpClient(
           "Not an absolute URL: ${request.url}",
         )
     return try {
-      followRedirects(request, url, started)
+      withPrototypeUploadErrors(started, clock) { followRedirects(request, url, started) }
     } catch (error: CancellationException) {
       throw error
     } catch (error: PrototypeBlockedDestinationException) {
@@ -208,7 +211,9 @@ class RetrofitPrototypeHttpClient(
     initialUrl: HttpUrl,
     started: Long,
   ): PrototypeRequestResponse {
-    var request = initial
+    // A 307/308 re-sends the whole body, and each send counts up from 0 again: one shared,
+    // non-decreasing reporter keeps the upload percent from going backwards across hops.
+    var request = initial.copy(onUploadProgress = initial.onUploadProgress?.let(::nonDecreasing))
     var url = initialUrl
     for (hop in 0..MAX_REDIRECTS) {
       validate(request, url)
@@ -235,17 +240,19 @@ class RetrofitPrototypeHttpClient(
       val remaining = initial.timeoutMs - (clock() - started)
       if (remaining <= 0) throw InterruptedIOException("Request timed out")
       request =
-        request.copy(
-          url = next.toString(),
-          method = if (toGet) "GET" else request.method,
-          body = if (toGet) null else request.body,
-          headers =
-            request.headers.filterKeys {
-              (sameOrigin || !it.equals("Authorization", true)) &&
-                !(toGet && it.lowercase() in ENTITY_HEADERS)
-            },
-          timeoutMs = remaining.coerceAtMost(initial.timeoutMs.toLong()).toInt(),
-        )
+        request
+          .forRedirect(toGet)
+          .copy(
+            url = next.toString(),
+            method = if (toGet) "GET" else request.method,
+            body = if (toGet) null else request.body,
+            headers =
+              request.headers.filterKeys {
+                (sameOrigin || !it.equals("Authorization", true)) &&
+                  !(toGet && it.lowercase() in ENTITY_HEADERS)
+              },
+            timeoutMs = remaining.coerceAtMost(initial.timeoutMs.toLong()).toInt(),
+          )
       url = next
     }
     throw IOException("Too many redirects")
@@ -278,8 +285,12 @@ class RetrofitPrototypeHttpClient(
   /** The raw call; an HTTP error status is a [Response], not an exception. */
   private suspend fun call(request: PrototypeHttpRequest, url: String): Response<*> {
     val timeout = PrototypeCallTimeout(request.timeoutMs.toLong())
-    val headers = request.headers
-    val body by lazy { requestBody(request.body) }
+    // OkHttp owns the multipart Content-Type, including its generated boundary. An authored
+    // Content-Type must never override it. Form and raw uploads likewise carry their own type.
+    val headers =
+      if (request.uploadBody == null) request.headers
+      else request.headers.filterKeys { !it.equals("Content-Type", true) }
+    val body by lazy { uploadRequestBody(request) }
     return when (request.method) {
       "GET" -> service.get(url, headers, timeout)
       "HEAD" -> service.head(url, headers, timeout)
@@ -287,20 +298,15 @@ class RetrofitPrototypeHttpClient(
       "PUT" -> service.put(url, headers, body, timeout)
       "PATCH" -> service.patch(url, headers, body, timeout)
       "DELETE" ->
-        if (request.body == null) service.delete(url, headers, timeout)
+        if (request.body == null && request.uploadBody == null)
+          service.delete(url, headers, timeout)
         else service.deleteWithBody(url, headers, body, timeout)
       else -> throw IllegalArgumentException("Unsupported method ${request.method}")
     }
   }
 
-  private fun requestBody(body: JsonElement?): RequestBody =
-    when {
-      body == null -> EMPTY_BODY
-      body is JsonPrimitive && body.isString -> body.content.toRequestBody(TEXT)
-      else ->
-        JSON_CODEC.encodeToString(JsonElement.serializer(), PrototypeRequests.sortedKeys(body))
-          .toRequestBody(JSON)
-    }
+  internal fun uploadRequestBody(request: PrototypeHttpRequest): RequestBody =
+    if (request.uploadBody == null) requestBody(request.body) else uploadBodies.create(request)
 
   private fun received(
     response: Response<*>,
@@ -458,3 +464,45 @@ class RetrofitPrototypeHttpClient(
     val JSON: MediaType = "application/json; charset=utf-8".toMediaType()
   }
 }
+
+/** Forwards only percents above the highest one already reported, across every send. */
+internal fun nonDecreasing(progress: (Int) -> Unit): (Int) -> Unit {
+  val highest = AtomicInteger(-1)
+  return { percent ->
+    val value = percent.coerceIn(0, 100)
+    if (highest.getAndAccumulate(value, ::maxOf) < value) progress(value)
+  }
+}
+
+private fun PrototypeHttpRequest.forRedirect(toGet: Boolean): PrototypeHttpRequest =
+  if (toGet) copy(uploadBody = null, onUploadProgress = null) else this
+
+private suspend fun withPrototypeUploadErrors(
+  started: Long,
+  clock: () -> Long,
+  execute: suspend () -> PrototypeRequestResponse,
+): PrototypeRequestResponse =
+  try {
+    execute()
+  } catch (error: PrototypeUploadException) {
+    PrototypeRequestResponse.Failed(
+      PrototypeRequestError(
+        PrototypeRequestErrorCode.INVALID_REQUEST,
+        error.message ?: "Invalid upload asset",
+      ),
+      clock() - started,
+    )
+  }
+
+private fun requestBody(body: JsonElement?): RequestBody =
+  when {
+    body == null -> RetrofitPrototypeHttpClient.EMPTY_BODY
+    body is JsonPrimitive && body.isString ->
+      body.content.toRequestBody(RetrofitPrototypeHttpClient.TEXT)
+    else ->
+      RetrofitPrototypeHttpClient.JSON_CODEC.encodeToString(
+          JsonElement.serializer(),
+          PrototypeRequests.sortedKeys(body),
+        )
+        .toRequestBody(RetrofitPrototypeHttpClient.JSON)
+  }

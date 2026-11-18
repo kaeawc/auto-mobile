@@ -19,6 +19,7 @@ import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
 import dev.jasonpearson.automobile.protocol.SetPreference
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 
 /**
  * The device actions a decoded [dev.jasonpearson.automobile.protocol.WebSocketRequest] can trigger.
@@ -192,6 +193,13 @@ interface CtrlProxyActions {
   suspend fun listSavedPrototypes(requestId: String?)
 
   suspend fun deleteSavedPrototype(requestId: String?, id: String)
+
+  suspend fun simulatePrototypePlatform(
+    requestId: String?,
+    id: String,
+    event: String,
+    data: JsonObject,
+  )
 
   suspend fun advancePrototypeClock(requestId: String?, id: String, advanceTimeMs: Int)
 

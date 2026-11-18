@@ -53,12 +53,91 @@ enum PrototypeLocationSourceError: Error {
 }
 
 @MainActor
+protocol PrototypeLocationStreamActions: AnyObject {
+    func setDesiredAccuracy(_ accuracy: Double)
+    func startUpdates()
+    func stopUpdates()
+    func requestLocation()
+}
+
+/// Arbitrates one-shot and continuous consumers of a single native location manager.
+@MainActor
+struct PrototypeLocationStreamArbiter {
+    var updateAccuracy: Double
+    private var desiredAccuracy: Double
+    private var waiterCount = 0
+    private var updating = false
+
+    init(updateAccuracy: Double) {
+        self.updateAccuracy = updateAccuracy
+        desiredAccuracy = updateAccuracy
+    }
+
+    mutating func requestFix(accuracy: Double, using actions: any PrototypeLocationStreamActions) {
+        desiredAccuracy = waiterCount == 0
+            ? (updating ? min(accuracy, updateAccuracy) : accuracy) : min(desiredAccuracy, accuracy)
+        actions.setDesiredAccuracy(desiredAccuracy)
+        waiterCount += 1
+        if waiterCount == 1 {
+            // A continuous stream swallows requestLocation, so pause it until the waiters leave.
+            if updating { actions.stopUpdates() }
+            actions.requestLocation()
+        }
+    }
+
+    mutating func cancelFix(using actions: any PrototypeLocationStreamActions) {
+        guard waiterCount > 0 else { return }
+        waiterCount -= 1
+        if waiterCount == 0 { resumeOrStop(using: actions) }
+    }
+
+    mutating func finishFixes(using actions: any PrototypeLocationStreamActions) {
+        let hadWaiters = waiterCount > 0
+        waiterCount = 0
+        // Ordinary stream fixes (including late callbacks after cancellation) need no restart.
+        if hadWaiters { resumeOrStop(using: actions) }
+        else if !updating { actions.stopUpdates() }
+    }
+
+    mutating func startUpdates(using actions: any PrototypeLocationStreamActions) {
+        updating = true
+        desiredAccuracy = waiterCount == 0 ? updateAccuracy : min(desiredAccuracy, updateAccuracy)
+        actions.setDesiredAccuracy(desiredAccuracy)
+        actions.startUpdates()
+    }
+
+    mutating func stopUpdates(using actions: any PrototypeLocationStreamActions) {
+        updating = false
+        actions.stopUpdates()
+        // Stopping continuous updates also cancels requestLocation on the shared manager.
+        if waiterCount > 0 { actions.requestLocation() }
+    }
+
+    mutating func stop(using actions: any PrototypeLocationStreamActions) {
+        // Full shutdown cancels one-shot consumers as well as continuous updates.
+        waiterCount = 0
+        stopUpdates(using: actions)
+    }
+
+    private mutating func resumeOrStop(using actions: any PrototypeLocationStreamActions) {
+        if updating {
+            desiredAccuracy = updateAccuracy
+            actions.setDesiredAccuracy(desiredAccuracy)
+            actions.startUpdates()
+        } else { actions.stopUpdates() }
+    }
+}
+
+@MainActor
 protocol PrototypeLocationSource: AnyObject {
+    /// A presentation owns its manager, authorization handlers and pending requests.
+    func makePresentationSource() -> any PrototypeLocationSource
     var servicesEnabled: Bool { get }
     var authorization: PrototypeLocationAuthorization { get }
     func requestAuthorization() async
     func requestFix(accuracy: String) async throws -> PrototypeLocationFix
     func requestTemporaryFullAccuracy() async -> Bool
+    func setAuthorizationChangeHandler(_ handler: (@MainActor @Sendable () -> Void)?)
     func setUpdateAccuracy(_ accuracy: String)
     func startUpdates(
         minDistanceM: Double,
@@ -69,6 +148,7 @@ protocol PrototypeLocationSource: AnyObject {
 }
 
 extension PrototypeLocationSource {
+    func setAuthorizationChangeHandler(_: (@MainActor @Sendable () -> Void)?) {}
     func stop() {}
 
     /// Sources without a configurable accuracy can keep their native best-available policy.
@@ -131,6 +211,10 @@ final class PrototypeLocationModule: PrototypePlatformModule {
         return source.servicesEnabled ? .ready : .unavailable("disabled")
     }
 
+    func forPresentation() -> PrototypeLocationModule {
+        PrototypeLocationModule(source: source.makePresentationSource(), bundle: bundle, clock: clock)
+    }
+
     func call(_ call: PlatformCall) async -> PlatformCallResult {
         guard call.call == "location.request" else { return .failure(.unsupported, "Unknown call") }
         if case let .unavailable(reason) = availability() { return .failure(.unavailable, reason) }
@@ -187,9 +271,10 @@ final class PrototypeLocationModule: PrototypePlatformModule {
     }
 
     func stop() {
+        generation += 1
+        source.setAuthorizationChangeHandler(nil)
         guard started else { return }
         started = false
-        generation += 1
         updating = false
         if hasUsage {
             source.stopUpdates()
@@ -206,14 +291,33 @@ final class PrototypeLocationModule: PrototypePlatformModule {
     }
 
     func configure(root: JSONValue?) {
-        if updating { source.stopUpdates() }
+        // Invalidate before stop: synchronous and queued callbacks belong to the old configuration.
+        generation += 1
+        let wasUpdating = updating
         updating = false
+        if wasUpdating { source.stopUpdates() }
         pending?.cancel()
         pending = nil
         latest = nil
         lastUpdate = nil
         deliveredAt = nil
+        let hadCurrent = current != nil
+        current = nil
         block = root
+        let configuration = generation
+        // Register even with services disabled so a later authorization/services change can start us.
+        // Missing usage descriptions and construction must never create the host location manager.
+        if root != nil, hasUsage {
+            source.setAuthorizationChangeHandler { [weak self] in
+                guard let self, generation == configuration else { return }
+                if updating, !self.source.authorization.authorized {
+                    self.source.stopUpdates()
+                    updating = false
+                }
+                startIfAuthorized()
+            }
+        } else { source.setAuthorizationChangeHandler(nil) }
+        if hadCurrent { refresh() }
         startIfAuthorized()
     }
 
@@ -248,8 +352,12 @@ final class PrototypeLocationModule: PrototypePlatformModule {
         if elapsed >= minInterval {
             deliver()
         } else if pending == nil {
+            let updateGeneration = generation
             pending = clock.schedule(afterMilliseconds: minInterval - elapsed) { [weak self] in
-                MainActor.assumeIsolated { self?.deliver() }
+                MainActor.assumeIsolated {
+                    guard let self, self.generation == updateGeneration else { return }
+                    self.deliver()
+                }
             }
         }
     }

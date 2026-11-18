@@ -323,6 +323,7 @@ internal constructor(
   private val values = LinkedHashMap(stored)
   private val secureValues = LinkedHashMap(secureStored)
   private var persistedSecureValues: Map<String, JsonElement> = LinkedHashMap(securePersisted)
+  private var secureBaselineStale = false
   private val secureLastSeen = HashMap(secureBaseline)
 
   /** What the disk holds, as far as this session knows: the last document it wrote or loaded. */
@@ -452,16 +453,12 @@ internal constructor(
         withContext(io) {
           if (document.values.isEmpty()) store.delete(id)
           else store.save(id, document.copy(secure = emptyMap()))
-          if (
-            secureStore != null && synchronized(lock) { document.secure != persistedSecureValues }
-          ) {
-            if (document.secure.isEmpty()) secureStore.delete(id)
-            else secureStore.save(id, PrototypeStoredValues(version, document.secure))
-          }
+          writeSecure(document)
         }
         synchronized(lock) {
           persistedValues = LinkedHashMap(document.values)
           persistedSecureValues = LinkedHashMap(document.secure)
+          if (generation == snapshotGeneration) secureBaselineStale = false
         }
       }
     } catch (error: CancellationException) {
@@ -472,6 +469,14 @@ internal constructor(
       if (secureKeys.isNotEmpty()) warn.warn("Could not store prototype values", null)
       else warn.warn("Could not store the values of $id: ${error.message}", error)
     }
+  }
+
+  private fun writeSecure(document: PrototypeStoredValues) {
+    if (secureStore == null) return
+    if (!synchronized(lock) { secureBaselineStale || document.secure != persistedSecureValues })
+      return
+    if (document.secure.isEmpty()) secureStore.delete(id)
+    else secureStore.save(id, PrototypeStoredValues(version, document.secure))
   }
 
   private fun markDirtyUnlessCleared(snapshotGeneration: Long) =
@@ -530,12 +535,10 @@ internal constructor(
   suspend fun clear(): Int {
     val forgotten = LinkedHashMap<String, JsonElement>()
     val secureForgotten = LinkedHashMap<String, JsonElement>()
-    val wasDirty: Boolean
     val removed =
       synchronized(lock) {
         pending?.cancel()
         pending = null
-        wasDirty = dirty
         dirty = false
         generation++
         forgotten.putAll(values)
@@ -555,15 +558,16 @@ internal constructor(
         }
       }
     } catch (error: CancellationException) {
-      restoreAfterFailedClear(forgotten, secureForgotten, wasDirty)
+      restoreAfterFailedClear(forgotten, secureForgotten)
       throw error
     } catch (error: IOException) {
-      restoreAfterFailedClear(forgotten, secureForgotten, wasDirty)
+      restoreAfterFailedClear(forgotten, secureForgotten)
       throw error
     }
     synchronized(lock) {
       persistedValues = LinkedHashMap()
       persistedSecureValues = LinkedHashMap()
+      secureBaselineStale = false
     }
     return removed
   }
@@ -571,7 +575,6 @@ internal constructor(
   private fun restoreAfterFailedClear(
     forgotten: Map<String, JsonElement>,
     secureForgotten: Map<String, JsonElement>,
-    wasDirty: Boolean,
   ) =
     synchronized(lock) {
       for ((key, value) in forgotten) {
@@ -580,7 +583,8 @@ internal constructor(
         sizes[key] = PrototypeStorageRestorer.entryBytes(key, value)
       }
       for ((key, value) in secureForgotten) secureValues.putIfAbsent(key, value)
-      if (wasDirty || values.isNotEmpty() || secureValues.isNotEmpty()) markDirty()
+      secureBaselineStale = true
+      markDirty()
     }
 
   fun report(): PrototypeStorageReport =
@@ -594,7 +598,7 @@ internal constructor(
         secure =
           secureKeys
             .map { key ->
-              val value = persistedSecureValues[key]
+              val value = if (secureBaselineStale) null else persistedSecureValues[key]
               PrototypeStorageSecureMetadata(
                 key,
                 value != null,

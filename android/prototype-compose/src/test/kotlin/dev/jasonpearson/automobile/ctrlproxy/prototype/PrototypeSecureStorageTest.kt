@@ -107,6 +107,27 @@ class PrototypeSecureStorageTest {
   }
 
   @Test
+  fun `failed clear rewrites secure values after deletion removes them`() = runTest {
+    val original = spec()
+    val session = persistence().open(original).session!!
+    session.record(changed(original))
+    session.flush()
+    secure.failDeleteAfterRemoving = true
+    try {
+      session.clear()
+      fail("Expected secure deletion to fail")
+    } catch (_: IOException) {}
+    assertTrue(secure.values.isEmpty())
+    assertTrue(session.report().secure!!.all { !it.present && it.bytes == 0 })
+    session.flush()
+    assertEquals(JsonPrimitive(SECRET), secure.values.getValue(original.id).values["state:token"])
+    assertEquals(
+      PrototypeStorageSecureMetadata("state:token", true, SECRET.length),
+      session.report().secure!!.first(),
+    )
+  }
+
+  @Test
   fun `dismiss flushes secure changes and retains them for the next show`() = runTest {
     val opened = persistence().open(spec())
     var sequence = 0L
@@ -218,6 +239,7 @@ class PrototypeSecureStorageTest {
 internal class MemorySecureStore : PrototypeSecureValueStore {
   val values = mutableMapOf<String, PrototypeStoredValues>()
   var fail = false
+  var failDeleteAfterRemoving = false
 
   override fun load(id: String) = values[id]
 
@@ -226,7 +248,11 @@ internal class MemorySecureStore : PrototypeSecureValueStore {
     values[id] = stored
   }
 
-  override fun delete(id: String): Int = values.remove(id)?.values?.size ?: 0
+  override fun delete(id: String): Int {
+    val removed = values.remove(id)?.values?.size ?: 0
+    if (failDeleteAfterRemoving) throw IOException("Secure deletion failed after removal")
+    return removed
+  }
 }
 
 private class MemoryPlainStore : PrototypeStorageStore {

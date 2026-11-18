@@ -352,6 +352,9 @@ final class PrototypeAgent: NSObject {
         driver.onComplete = { [weak model] requestId, response in
             model?.completeRequest(requestId, response)
         }
+        driver.onUploadProgress = { [weak model] id, key, value in
+            model?.writeUploadProgress(id, key: key, value: value)
+        }
         model.requestDriver = driver
     }
 
@@ -777,7 +780,7 @@ final class PrototypeAgent: NSObject {
               let data = Data(base64Encoded: base64),
               let image = UIImage(data: data)
         else { return result(false, "Asset must carry an id and a base64 PNG, JPEG or WebP image") }
-        model.putAsset(id, image)
+        model.putAsset(id, image, data: data)
         result(true)
     }
 

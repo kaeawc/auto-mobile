@@ -24,7 +24,7 @@
 
         func registerImage(id: String, data: Data) -> Bool {
             guard let image = UIImage(data: data) else { return false }
-            model.putAsset(id, image)
+            model.putAsset(id, image, data: data)
             return true
         }
 

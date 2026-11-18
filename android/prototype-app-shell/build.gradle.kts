@@ -54,6 +54,7 @@ dependencies {
   testImplementation(libs.junit)
   testImplementation(libs.robolectric)
   testImplementation(libs.kotlinx.coroutines.test)
+  testImplementation(libs.robolectric)
 }
 
 // Resolve both shipped variants, including transitive project edges.

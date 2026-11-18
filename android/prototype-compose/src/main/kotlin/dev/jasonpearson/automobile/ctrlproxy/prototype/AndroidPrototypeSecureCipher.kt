@@ -2,9 +2,11 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.util.Log
 import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.security.SecureRandom
+import java.security.UnrecoverableKeyException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -17,15 +19,23 @@ internal interface PrototypeSecureKeyProvider {
   fun delete(alias: String)
 }
 
-internal class AndroidPrototypeSecureKeyProvider : PrototypeSecureKeyProvider {
+/** The AndroidKeyStore operations the provider uses; JVM tests fake entry corruption. */
+internal interface PrototypeKeystoreEntries {
+  /** Throws [UnrecoverableKeyException] when the entry exists but cannot be read back. */
+  fun get(alias: String): SecretKey?
+
+  fun generate(alias: String): SecretKey
+
+  fun delete(alias: String)
+}
+
+internal class AndroidKeystoreEntries : PrototypeKeystoreEntries {
   private fun store() = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
 
-  override fun key(alias: String, create: Boolean): SecretKey? {
-    (store().getKey(alias, null) as? SecretKey)?.let {
-      return it
-    }
-    if (!create) return null
-    return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").run {
+  override fun get(alias: String): SecretKey? = store().getKey(alias, null) as? SecretKey
+
+  override fun generate(alias: String): SecretKey =
+    KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").run {
       init(
         KeyGenParameterSpec.Builder(
             alias,
@@ -40,9 +50,36 @@ internal class AndroidPrototypeSecureKeyProvider : PrototypeSecureKeyProvider {
       )
       generateKey()
     }
-  }
 
   override fun delete(alias: String) = store().deleteEntry(alias)
+}
+
+/**
+ * Self-heals an entry that a restore or corruption left unrecoverable: its ciphertext can never be
+ * read again, so the alias is deleted (and recreated when a write needs it) instead of failing
+ * every save until the user resets.
+ */
+internal class AndroidPrototypeSecureKeyProvider(
+  private val entries: PrototypeKeystoreEntries = AndroidKeystoreEntries(),
+  private val warn: PrototypeStorageWarn = PrototypeStorageWarn { message, _ ->
+    Log.w("PrototypeStorage", message)
+  },
+) : PrototypeSecureKeyProvider {
+  override fun key(alias: String, create: Boolean): SecretKey? {
+    val existing =
+      try {
+        entries.get(alias)
+      } catch (ignored: UnrecoverableKeyException) {
+        // The entry is unusable and the provider message may name it; never forward the cause.
+        warn.warn("Secure storage key was unrecoverable; stored secure values were discarded", null)
+        entries.delete(alias)
+        null
+      }
+    if (existing != null) return existing
+    return if (create) entries.generate(alias) else null
+  }
+
+  override fun delete(alias: String) = entries.delete(alias)
 }
 
 internal class PrototypeSecureCipher(

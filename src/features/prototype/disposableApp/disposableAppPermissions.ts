@@ -1,5 +1,7 @@
 import { ActionableError } from "../../../models/ActionableError";
 import type { PrototypeJson } from "../prototypeJson";
+import { expandPrototypeComponents } from "../prototypeComponents";
+import { prototypePlatformError } from "../prototypePlatform";
 import { prototypeRequiresSchema } from "../prototypePlatformSchema";
 
 /**
@@ -102,6 +104,21 @@ function moduleRequirements(requires: ReturnType<typeof prototypeRequiresSchema.
   return Array.isArray(requires) ? {} : requires;
 }
 
+function assertSpecPermissionsDeclared(spec: PrototypeJson): void {
+  // Tool callers already validate the schema. Reuse the platform semantic rules here so direct
+  // manager callers cannot bypass call/node permission checks, including inside components.
+  const expansion = expandPrototypeComponents(spec);
+  const problem = expansion.success
+    ? prototypePlatformError(expansion.spec, [], () => undefined)
+    : expansion.error;
+  if (problem) {
+    const path = expansion.success ? expansion.locate(problem.path) : problem.path;
+    throw new ActionableError(
+      `Cannot derive disposable app permissions at ${path}: ${problem.message}. If a permission is required, declare it in requires.permissions and retry.`,
+    );
+  }
+}
+
 export function disposableAppDeclarations(spec: PrototypeJson): DisposableAppDeclarations {
   const raw = spec && typeof spec === "object" && !Array.isArray(spec) ? (spec.requires ?? {}) : {};
   const parsed = prototypeRequiresSchema.safeParse(raw);
@@ -110,6 +127,7 @@ export function disposableAppDeclarations(spec: PrototypeJson): DisposableAppDec
       `The spec's requires block is invalid, so the disposable app's permissions cannot be derived: ${parsed.error.issues[0]?.message ?? "unknown error"}. Validate the spec and retry.`,
     );
   }
+  assertSpecPermissionsDeclared(spec);
   const declarations = moduleRequirements(parsed.data);
   const permissionEntries = declarations.permissions ?? [];
   const permissions = sortedUnique(permissionEntries.map((entry) => entry.name));

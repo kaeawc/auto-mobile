@@ -48,7 +48,8 @@ class PrototypeRuntimeIsolationTest {
     val file = File("src/main/AndroidManifest.xml")
     assertTrue("Expected module manifest at ${file.absolutePath}", file.isFile)
     val factory = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
-    val permissions = factory.newDocumentBuilder().parse(file).getElementsByTagName("uses-permission")
+    val permissions =
+      factory.newDocumentBuilder().parse(file).getElementsByTagName("uses-permission")
     val declared =
       (0 until permissions.length)
         .map {
@@ -60,10 +61,19 @@ class PrototypeRuntimeIsolationTest {
       assertTrue("$name has no contract permissions", needed.isNotEmpty())
       needed.forEach { permission ->
         val manifest =
-          permissionMapping.getValue(permission).jsonObject.getValue("android").jsonObject
-            .getValue("manifest").jsonArray.map { it.jsonPrimitive.content }
+          permissionMapping
+            .getValue(permission)
+            .jsonObject
+            .getValue("android")
+            .jsonObject
+            .getValue("manifest")
+            .jsonArray
+            .map { it.jsonPrimitive.content }
         manifest.forEach {
-          assertTrue("$name needs $permission mapped to $it in CtrlProxy's manifest", it in declared)
+          assertTrue(
+            "$name needs $permission mapped to $it in CtrlProxy's manifest",
+            it in declared,
+          )
         }
       }
     }
@@ -95,36 +105,50 @@ class PrototypeRuntimeIsolationTest {
             it.jsonObject["capability"]?.jsonPrimitive?.content
           }
       capabilities.forEach { capability ->
-        assertFalse("$name registry advertises $capability", capability in overlay.registry.capabilities)
+        assertFalse(
+          "$name registry advertises $capability",
+          capability in overlay.registry.capabilities,
+        )
         assertFalse("$name server advertises $capability", capability in commands)
       }
     }
     EXPECTED_PERMISSIONED_MODULES.forEach { name ->
-      assertTrue(modules.getValue(name).jsonObject.getValue("capability").jsonPrimitive.content in commands)
+      assertTrue(
+        modules.getValue(name).jsonObject.getValue("capability").jsonPrimitive.content in commands,
+      )
     }
   }
 
   companion object {
     private const val ANDROID_NAMESPACE = "http://schemas.android.com/apk/res/android"
     private val EXPECTED_PERMISSIONED_MODULES = setOf("location")
-    private val modules = resource("/prototype-spec-contract.json").getValue("platformModules").jsonObject
+    private val modules =
+      resource("/prototype-spec-contract.json").getValue("platformModules").jsonObject
     // Both canonical JSON files are already packaged by :protocol as classpath resources.
     private val permissionMapping = resource("/prototype-platform-permissions.json")
     private val permissionedModules =
       modules.filterValues { callPermissions(it.jsonObject).isNotEmpty() }.keys
 
     private fun callPermissions(module: JsonObject): Set<String> =
-      module.getValue("calls").jsonObject.values.flatMap {
-        it.jsonObject.getValue("permissions").jsonArray.map { permission -> permission.jsonPrimitive.content }
-      }.toSet()
+      module
+        .getValue("calls")
+        .jsonObject
+        .values
+        .flatMap {
+          it.jsonObject.getValue("permissions").jsonArray.map { permission ->
+            permission.jsonPrimitive.content
+          }
+        }
+        .toSet()
 
     private fun resource(path: String): JsonObject =
       Json.parseToJsonElement(
-        checkNotNull(PrototypeRuntimeIsolationTest::class.java.getResourceAsStream(path)) {
-            "Missing test resource $path"
-          }
-          .bufferedReader()
-          .use { it.readText() },
-      ).jsonObject
+          checkNotNull(PrototypeRuntimeIsolationTest::class.java.getResourceAsStream(path)) {
+              "Missing test resource $path"
+            }
+            .bufferedReader()
+            .use { it.readText() },
+        )
+        .jsonObject
   }
 }

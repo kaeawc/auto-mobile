@@ -25,34 +25,17 @@ AutoMobile does not open or close the window for you.
 
 ## Register your CarPlay scene
 
-Register the interface controller when the CarPlay scene connects, and unregister it when the scene
-disconnects:
+Call `registerCarPlay` when your CarPlay scene connects, passing the interface controller it
+receives, and `unregisterCarPlay` when the scene disconnects:
 
 ```swift
-import AutoMobileSDK
-import CarPlay
-
-final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
-    func templateApplicationScene(
-        _: CPTemplateApplicationScene,
-        didConnect interfaceController: CPInterfaceController
-    ) {
-        AutoMobileSDK.shared.registerCarPlay(interfaceController: interfaceController)
-        // Set your root template as usual.
-    }
-
-    func templateApplicationScene(
-        _: CPTemplateApplicationScene,
-        didDisconnectInterfaceController _: CPInterfaceController
-    ) {
-        AutoMobileSDK.shared.unregisterCarPlay()
-    }
-}
+AutoMobileSDK.shared.registerCarPlay(interfaceController: interfaceController)
+AutoMobileSDK.shared.unregisterCarPlay()
 ```
 
-Registration does nothing in a Release build. The SDK holds the controller weakly, so it never
-keeps a CarPlay session alive. Your app still needs its own CarPlay entitlement and scene
-configuration; the SDK does not add them.
+Registration does nothing in a Release build. Your app still needs its own CarPlay entitlement and
+scene configuration; the SDK does not add them. For how the SDK reads the templates, see
+[CarPlay templates and actions](../how-it-works/plat/ios/carplay-template-snapshot.md).
 
 ## Read the templates
 

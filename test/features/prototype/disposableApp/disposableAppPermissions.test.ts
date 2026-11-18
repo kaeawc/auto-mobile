@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import contract from "../../../../schemas/prototype-spec-contract.json";
+import permissionMapping from "../../../../schemas/prototype-platform-permissions.json";
 import {
   DISPOSABLE_APP_ANDROID_BACKGROUND,
   DISPOSABLE_APP_ANDROID_MODULE_PERMISSIONS,
   DISPOSABLE_APP_ANDROID_PERMISSIONS,
   DISPOSABLE_APP_IOS_BACKGROUND_MODES,
+  DISPOSABLE_APP_IOS_USAGE_KEYS,
   disposableAppDeclarations,
   resolveDisposableAppGrants,
 } from "../../../../src/features/prototype/disposableApp/disposableAppPermissions";
@@ -17,6 +19,24 @@ const biometricFixture = prototypeJsonSchema.parse(biometricFixtureJson);
 const P = "android.permission.";
 
 describe("disposableAppDeclarations", () => {
+  test("permission tables match the canonical manifest and usage keys exactly", () => {
+    expect(DISPOSABLE_APP_ANDROID_PERMISSIONS).toEqual(
+      Object.fromEntries(
+        Object.entries(permissionMapping).map(([name, mapping]) => [
+          name,
+          mapping.android.manifest,
+        ]),
+      ),
+    );
+    expect(DISPOSABLE_APP_IOS_USAGE_KEYS).toEqual(
+      Object.fromEntries(
+        Object.entries(permissionMapping).flatMap(([name, mapping]) =>
+          mapping.ios.usageKey === null ? [] : [[name, mapping.ios.usageKey]],
+        ),
+      ),
+    );
+  });
+
   test("derives every platform list from the fixture's requires block", () => {
     const declarations = disposableAppDeclarations(fixture);
     expect(declarations.permissions).toEqual(["camera", "notifications"]);

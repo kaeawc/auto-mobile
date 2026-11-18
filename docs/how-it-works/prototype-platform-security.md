@@ -67,15 +67,20 @@ notifications to 10 per 60000 ms. Both iOS and Android runtimes enforce each mod
 installer derives Info.plist usage strings from `requires.permissions`, strips inherited usage
 strings and background modes, and omits `UIBackgroundModes` until the shared background vocabulary
 has an unambiguous Apple mapping. The iOS agent capability table is tested against the contract's
-per-call permissions (#15642). The Android stamper (#14185) and CtrlProxy capability table (#15642)
-are _not yet enforced_.
+per-call permissions (#15642). The Android stamper rebuilds manifest permissions from the spec's
+declarations. The install path refuses calls and nodes needing undeclared permissions before
+stamping. The CtrlProxy capability table is tested against the contract and its manifest.
 
-- CtrlProxy and the iOS prototype agent never advertise permissioned modules. They offer only
-  modules that need no permission and no identity of their own.
+- CtrlProxy advertises a permissioned module only when it is in an explicit allow-list (currently
+  `location`) and its required manifest permissions are declared in CtrlProxy's manifest. The debug
+  `test` module uses synthetic permissions without accessing protected APIs.
+- The iOS prototype agent never advertises permissioned modules. It offers only modules that need
+  no permission and no identity of their own.
 - The injected iOS agent never calls TCC APIs, and Info.plist filtering keeps usage strings out of
   an app that did not declare them.
-- A per-prototype disposable app holds exactly the permissions the spec's `requires.permissions`
-  declares and is uninstalled on delete or expiry.
+- A per-prototype disposable app derives permission and background declarations from the spec's
+  `requires.permissions` and `requires.background`, plus required install-time module permissions
+  and Android's `INTERNET`, and is uninstalled on delete or expiry.
 - Capability gates run before show, so an unsupported module is refused with its capability name
   instead of being drawn and silently ignored. This part is enforced.
 

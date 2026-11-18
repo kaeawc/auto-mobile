@@ -141,12 +141,12 @@ do not expose the module. Other canonical names return `unavailable`.
 The first status read establishes `/platform/permissions/notifications` asynchronously without prompting.
 Requests and foreground Settings re-reads publish only changed states. A request prompts with alert,
 sound and badge options only while authorization is `notDetermined`, then re-reads notification settings
-for its result. iOS never re-prompts after a determination. Outside an app bundle with a bundle
+for its result. Outside an app bundle with a bundle
 identifier, the source returns `unavailable` without accessing UserNotifications. No Info.plist key is
 required. One request may be in flight per module; a second returns `too_many_in_flight`. Request
 cancellation drops the late result while foreground observation stays active. The registry stops
-observation when its final observer releases it. The iOS driver uses the same
-platform-call deadline as other iOS modules. This module does not publish
+observation when its final observer releases it. It uses the shared iOS
+platform-call deadline. This module does not publish
 `/platform/notifications/authorization`; `provisional` authorization reads as `limited` here.
 
 | iOS `UNAuthorizationStatus` | State           |

@@ -26,9 +26,9 @@ struct PrototypeAction: Decodable, Sendable {
     let key: String?
     /// `upsertData`'s cap on the array it writes.
     let maxItems: Int?
-    /// `setState`'s literal; for `setData`/`appendData`/`prependData` the binding object (`{value}`, `{state}`,
-    /// `{data}`), with `item`/`index` already bound to `{value}` by repeat expansion.
-    let value: JSONValue?
+    /// `setState`'s literal or event/platform binding; for `setData`/`appendData`/`prependData` the binding
+    /// object, with `item`/`index` already bound to `{value}` by repeat expansion.
+    var value: JSONValue?
     /// `increment`/`decrement` step; 1 when omitted.
     let incrementAmount: Double?
     let requireValid: [String]?

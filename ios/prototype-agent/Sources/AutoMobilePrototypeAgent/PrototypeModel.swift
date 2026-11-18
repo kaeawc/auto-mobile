@@ -267,6 +267,7 @@
         @ObservationIgnored let platformRegistry: PrototypePlatformRegistry
         @ObservationIgnored private lazy var platformDriver: PrototypePlatformDriver = {
             let driver = PrototypePlatformDriver(registry: platformRegistry, clock: clock)
+            driver.realtime = realtimeModule
             driver.onComplete = { [weak self] id, result, duration in
                 self?.apply(activity: false) { $0.completePlatformCall(
                     id,
@@ -287,6 +288,9 @@
 
         private func updatePlatformState(_ snapshot: [String: JSONValue]) {
             var combined = snapshot
+            if realtimeConfig != nil, let realtime = session.spec?.platformState["realtime"] {
+                combined["realtime"] = realtime
+            }
             combined.merge(deviceState.snapshot) { _, device in device }
             apply(activity: false) { session in
                 do { try session.setPlatformState(combined) }
@@ -358,6 +362,27 @@
             escapeReveal.reveal()
         }
 
+        @ObservationIgnored private let realtimeConfig: PrototypeRealtimeConfig?
+        @ObservationIgnored private lazy var realtimeModule: PrototypeRealtimeModule? = {
+            guard let realtimeConfig else { return nil }
+            let sink = PrototypeChannelSink(
+                // A synchronous MainActor apply is the production exclusive section: it cannot
+                // suspend or re-enter the controller. Core tests inject a non-reentrant async mutex.
+                exclusively: { work in try work() },
+                isCurrent: { [weak self] channel in
+                    self?.session.isShown == true &&
+                        self?.session.spec?.channels?.objectFields?[channel] != nil
+                },
+                apply: { [weak self] effect in
+                    self?.apply(activity: false) { session in
+                        do { return try session.applyChannelEffect(effect) }
+                        catch { NSLog("Prototype realtime sink failed: %@", String(describing: error)); return [] }
+                    }
+                }
+            )
+            return PrototypeRealtimeModule(config: realtimeConfig, sink: sink, clock: clock)
+        }()
+
         @ObservationIgnored private let clock: PrototypeClock
 
         /// Stored values (#12526): restored by `show`, written back after changes and on dismissal. Nil
@@ -372,8 +397,10 @@
             clock: PrototypeClock = SystemPrototypeClock(),
             mode: PrototypeLifecycleMode = .session,
             storage: PrototypeStorageCoordinator? = nil,
-            registry: PrototypePlatformRegistry = .system
+            registry: PrototypePlatformRegistry = .system,
+            realtime: PrototypeRealtimeConfig? = nil
         ) {
+            realtimeConfig = realtime
             platformRegistry = registry.forPresentation()
             self.clock = clock
             self.mode = mode
@@ -451,10 +478,17 @@
             platformDriver.resetSessionEvents()
             platformRegistry.configure(locationBlock: (prepared?.spec ?? spec).locationBlock)
             platformRegistry.configure(sensorsBlock: (prepared?.spec ?? spec).sensorsBlock, sessionID: showRevision + 1)
+            var platform = platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }
+            if realtimeConfig != nil, session.isShown, session.spec?.id == spec.id,
+               let realtime = session.spec?.platformState["realtime"]?.objectFields
+            {
+                platform["realtime"] = .object(realtime.filter { spec.channels?.objectFields?[$0.key] != nil })
+            }
             let seeded: PrototypeSpec
-            do { seeded = try (prepared?.spec ?? spec).replacingPlatform(
-                platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }
-            ) } catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
+            do { seeded = try (prepared?.spec ?? spec).replacingPlatform(platform) } catch { NSLog(
+                "Prototype platform seed failed: %@",
+                String(describing: error)
+            ); return }
             next.show(
                 seeded, reset: reset, appearance: appearance, locale: locale, specBytes: specBytes,
                 restoredState: prepared?.state, restoredStacks: prepared?.stacks
@@ -467,6 +501,9 @@
             let viewCommands = next.takeViewCommands()
             listAnchors = PrototypeStackListAnchorStore()
             publish(next, replacingSpec: true)
+            realtimeModule?.begin(prototypeID: spec.id)
+            realtimeModule?.update(session.resolvedChannels)
+            realtimeModule?.show()
             let timestamp = Int(Date().timeIntervalSince1970 * 1000)
             for var event in lifecycleEvents {
                 event.wireTimestamp = timestamp
@@ -500,6 +537,7 @@
                 outcome = result
                 return events
             }
+            realtimeModule?.update(session.resolvedChannels)
             return outcome
         }
 
@@ -760,6 +798,7 @@
                 onEvent?(event.wireObject(timestamp: timestamp))
             }
             if wasShown, !session.isShown {
+                realtimeModule?.close()
                 platformRegistry.configure(locationBlock: nil)
                 platformRegistry.configure(sensorsBlock: nil)
                 hitRects.removeAll()

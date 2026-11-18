@@ -127,6 +127,8 @@ struct PrototypeInFlightRequest {
     let onSuccess: [PrototypeAction]
     let onError: [PrototypeAction]
     var append: PrototypeRequestAppend? = nil
+    /// The initiating handler event, restored before the follow-up list is planned and run.
+    let eventData: JSONValue?
 }
 
 /// The session's request bookkeeping: ids, who is waiting, and the commands for the driver.

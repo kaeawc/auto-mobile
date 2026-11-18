@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.*
 
 @InternalAutoMobilePrototypeApi
@@ -187,6 +188,8 @@ class PrototypeRuntime(
     PrototypeRequestLimiter(PrototypePlatformCalls.maxInFlight),
   private val requestHideKeyboard: suspend () -> Unit = {},
   monotonicMs: () -> Long = { System.nanoTime() / 1_000_000L },
+  /** Realtime channel transports (#14269); null leaves the runtime without a `realtime` module. */
+  realtime: PrototypeRealtimeConfig? = null,
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
@@ -214,6 +217,11 @@ class PrototypeRuntime(
 
   /** Called only after the host accepts the show. A preserving replacement seeds without firing. */
   suspend fun shown(preservingState: Boolean = false) {
+    // Posted first, so a realtime call this show makes queues behind its declarations.
+    realtimeModule?.let {
+      it.update(channelDeclarations(current.spec))
+      it.show()
+    }
     appeared = if (preservingState) visibleAppearances().keys else emptySet()
     // Each stack's first screen enters once per show (#14188); a preserving show skips only the
     // stacks whose paths it kept, so a stack new to the replacement still enters. A stack an
@@ -303,7 +311,8 @@ class PrototypeRuntime(
         deliverPlatformEvent(name, data)
       }
       .also { if (initialPlatformState.isNotEmpty()) it.update(initialPlatformState) }
-  private var eventData: JsonObject? = null
+  /** The handler event; a realtime route's event is its decoded frame, which may be any JSON. */
+  private var eventData: JsonElement? = null
 
   private suspend fun deliverPlatformEvent(name: String, data: JsonObject) {
     if (!current.active || name.substringBefore('.') !in current.spec.requires?.platform.orEmpty())
@@ -384,7 +393,34 @@ class PrototypeRuntime(
         else -> it
       }
     }
-  val platformRegistry = PrototypePlatformRegistry(listOf(deviceModule) + sessionModules)
+
+  /**
+   * Where this runtime's channel controller lands its effects. The controller calls it under its
+   * own lock, so this takes the interaction lock inside it and never the reverse; like
+   * [settleRequest], an effect arriving after dismissal is dropped.
+   */
+  private val realtimeSink =
+    object : PrototypeChannelSink {
+      override suspend fun state(channel: String, state: JsonObject) = exclusively {
+        if (current.active) publishRealtimeState(channel, state)
+      }
+
+      override suspend fun event(name: String, data: JsonObject) = exclusively {
+        if (current.active) deliverPlatformEvent(name, data)
+      }
+
+      override suspend fun run(channel: String, actions: JsonArray, event: JsonElement) =
+        exclusively {
+          if (current.active) runChannelActions(channel, actions, event)
+        }
+    }
+
+  private val realtimeModule = realtime?.let {
+    PrototypeRealtimeModule(spec.id, it, realtimeSink, requestScope, newRequestId)
+  }
+
+  val platformRegistry =
+    PrototypePlatformRegistry(listOf(deviceModule) + listOfNotNull(realtimeModule) + sessionModules)
   private val platformDispatcher =
     PrototypePlatformDispatcher(
       platformRegistry,
@@ -463,6 +499,7 @@ class PrototypeRuntime(
     stateWriteValidator = null
     mutableSnapshot.value = replacementSnapshot(spec)
     startPlatformUpdates()
+    realtimeModule?.update(channelDeclarations(current.spec))
   }
 
   /** Authoritative text replacement shares its epoch handling with patch commits. */
@@ -581,6 +618,7 @@ class PrototypeRuntime(
         stateRevisions = before.stateRevisions + changed.associateWith { revision },
       )
     startPlatformUpdates()
+    realtimeModule?.update(channelDeclarations(current.spec))
     // The commit is authoritative even if an ancillary event sink fails. Cancellation propagates.
     storage?.record(current.spec, current.stacks)
     try {
@@ -601,6 +639,7 @@ class PrototypeRuntime(
     locationModules().forEach { it.detach() }
     sensorsModules().forEach { it.detach() }
     platformDispatcher.close()
+    realtimeModule?.close()
     platformState.close()
     mutableSnapshot.value = current.copy(active = false)
     timerEngine.cancelAll()
@@ -1453,7 +1492,7 @@ class PrototypeRuntime(
       action,
       if (invalid == null) JsonObject(args) else null,
       invalid,
-      eventData,
+      eventData as? JsonObject,
       owningNodeId(current.spec, action),
     )
   }
@@ -1693,7 +1732,7 @@ class PrototypeRuntime(
         clock(),
         action.onSuccess,
         action.onError,
-        eventData,
+        eventData as? JsonObject,
         action.append,
       )
     }
@@ -1938,6 +1977,53 @@ class PrototypeRuntime(
   private val checkedNodeCache =
     PrototypeCheckedNodeCache(AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)))
 
+  // ---- realtime channels (#14269) ----
+
+  /** The spec's channels with URL and header placeholders bound to the committed state and data. */
+  private fun channelDeclarations(spec: PrototypeSpec): Map<String, PrototypeChannelDeclaration> =
+    spec.channels
+      .orEmpty()
+      .mapNotNull { (id, channel) ->
+        val declaration =
+          PrototypeChannelDeclaration.parse(
+            runtimeJson.encodeToJsonElement(PrototypeChannel.serializer(), channel).jsonObject,
+          ) ?: return@mapNotNull null
+        id to
+          declaration.copy(
+            url = requestText(declaration.url),
+            headers = declaration.headers.mapValues { requestText(it.value) },
+          )
+      }
+      .toMap()
+
+  /** `/platform/realtime/<channel>`, keeping only channels the current spec still declares. */
+  private fun publishRealtimeState(channel: String, state: JsonObject) {
+    val declared = current.spec.channels.orEmpty().keys
+    val previous = current.platformState[PrototypeRealtimeModule.NAME] as? JsonObject
+    val channels = previous.orEmpty().filterKeys { it in declared && it != channel }
+    publishModuleState(PrototypeRealtimeModule.NAME, JsonObject(channels + (channel to state)))
+  }
+
+  /** A route, callback or `statusKey` list, applied as one write with [event] as its event. */
+  private suspend fun runChannelActions(channel: String, actions: JsonArray, event: JsonElement) {
+    val previousEvent = eventData
+    eventData = event
+    try {
+      val decoded = runtimeJson.decodeFromJsonElement(channelActions, actions)
+      if (decoded.isEmpty() || !requireValid(decoded)) return
+      run(decoded, plannedWrites(decoded, current.spec))
+      runAppearances()
+    } catch (refused: IllegalArgumentException) {
+      // A refused write changes nothing; the rest of the channel keeps running.
+      warn("Refused channel $channel actions: ${refused.message}")
+    } finally {
+      eventData = previousEvent
+      interactionRevision = null
+      // A channel writes outside handle(), so a stored key it changed is recorded here (#12522).
+      if (current.active) storage?.record(current.spec, current.stacks)
+    }
+  }
+
   private fun checkedNodes(): List<PrototypeNode> = checkedNodeCache.nodes(current.spec)
 
   private fun validity(): Map<String, Boolean> = prototypeValidity(checkedNodes(), current.state)
@@ -2005,7 +2091,9 @@ class PrototypeRuntime(
 
   init {
     for (module in platformRegistry.modules) {
-      if (module !== deviceModule) publishModuleState(module.name, module.state.value)
+      if (module !== deviceModule && module !== realtimeModule) {
+        publishModuleState(module.name, module.state.value)
+      }
     }
   }
 }
@@ -2038,6 +2126,8 @@ private fun normalizePagerState(spec: PrototypeSpec): PrototypeSpec {
 }
 
 private val runtimeJson = Json { classDiscriminator = "type" }
+
+private val channelActions = ListSerializer(PrototypeAction.serializer())
 
 private val EMPTY_ROUTE_PARAMS = JsonObject(emptyMap())
 

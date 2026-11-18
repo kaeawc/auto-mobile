@@ -34,13 +34,24 @@ final class PrototypeRemoteImagesTests: XCTestCase {
                     XCTAssertEqual(assets, ["loading"])
                     XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(
                         data: data,
-                        supportedCapabilities: []
+                        supportedCapabilities: Set(PrototypeAgentProtocol.advertisedCapabilities())
                     ))
                 }
             } else {
                 XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: data), fixture.name)
             }
         }
+    }
+
+    func testRemoteImagesAreNotAdvertised() {
+        struct OS: OSVersionProvider { let majorVersion: Int }
+        for version in [17, 18, 26] {
+            XCTAssertFalse(
+                PrototypeAgentProtocol.advertisedCapabilities(os: OS(majorVersion: version))
+                    .contains(PrototypeRemoteImages.capability)
+            )
+        }
+        XCTAssertFalse(AutoMobilePrototypeCapabilities.supported.contains(PrototypeRemoteImages.capability))
     }
 
     func testCanonicalLimits() throws {

@@ -16,7 +16,8 @@ reported in `missingAssets`. Bytes, MIME types, URLs, cache paths and screenshot
 properties.
 
 The remote-image contract requires `prototype_remote_image_v1` for any `url`, `placeholder`,
-`error`, `crossfade` or `via` field. `url` is 1–2048 UTF-16 units, with the same state, data,
+`error`, `crossfade` or `via` field. This capability is not yet advertised on any platform: support is
+validation only, so specs requiring it are refused until a renderer implements it. `url` is 1–2048 UTF-16 units, with the same state, data,
 repeat and route text bindings as other strings. `via` is `device` (default) or `host`;
 `host` requires a static URL for fetch-and-upload. `placeholder` and `error` each contain exactly
 one of `asset` or `color` (hex or Material role). Their assets participate in missing-asset checks and asset budgets;

@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { knownPrototypeCapabilities } from "../../src/features/prototype/prototypeCapabilityGates";
 
 /**
- * The capabilities the web library advertises (#16453): every one this release's host can name.
+ * The capabilities the web library advertises (#16453), excluding validation-only contracts.
  * Generated because the gate table's import closure is not browser-safe.
  */
 export const webCapabilitiesOutputPath =
@@ -18,9 +18,12 @@ export function renderPrototypeWebCapabilities(capabilities: readonly string[]):
     "// Generated from knownPrototypeCapabilities() in prototypeCapabilityGates.ts; do not edit.",
     `// Regenerate: ${REGENERATE}`,
     "",
-    "/** Every capability an embed envelope's `requires` can name as of this release. */",
+    "/** Capabilities advertised by this release of the web library. */",
     "export const PROTOTYPE_WEB_CAPABILITIES: readonly string[] = [",
-    ...[...capabilities].sort().map((capability) => `  ${JSON.stringify(capability)},`),
+    ...capabilities
+      .filter((capability) => capability !== "prototype_remote_image_v1")
+      .sort()
+      .map((capability) => `  ${JSON.stringify(capability)},`),
     "];",
     "",
   ].join("\n");

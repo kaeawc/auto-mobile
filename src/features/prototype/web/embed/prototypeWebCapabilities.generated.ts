@@ -1,7 +1,7 @@
 // Generated from knownPrototypeCapabilities() in prototypeCapabilityGates.ts; do not edit.
 // Regenerate: bun scripts/prototype/generate-prototype-web-capabilities.ts
 
-/** Every capability an embed envelope's `requires` can name as of this release. */
+/** Capabilities advertised by this release of the web library. */
 export const PROTOTYPE_WEB_CAPABILITIES: readonly string[] = [
   "prototype_adaptive_v1",
   "prototype_anchor_v1",
@@ -89,7 +89,6 @@ export const PROTOTYPE_WEB_CAPABILITIES: readonly string[] = [
   "prototype_platform_window_controls_v1",
   "prototype_reduced_motion_v1",
   "prototype_refresh_v1",
-  "prototype_remote_image_v1",
   "prototype_rich_text_v1",
   "prototype_routes_v1",
   "prototype_scroll_edge_effect_v1",

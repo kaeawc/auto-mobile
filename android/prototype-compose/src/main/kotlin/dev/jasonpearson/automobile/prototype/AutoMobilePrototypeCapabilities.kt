@@ -62,7 +62,6 @@ object AutoMobilePrototype {
       "prototype_scroll_motion_v1",
       "prototype_search_bar_v1",
       "prototype_semantics_v1",
-      "prototype_remote_image_v1",
       "prototype_shared_element_v1",
       "prototype_stack_patterns_v1",
       "prototype_shared_element_v2",

@@ -1,3 +1,4 @@
+import specCapabilities from "../fixtures/prototype-capabilities/spec-capabilities.json";
 import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -1519,3 +1520,20 @@ for (const platform of ["android", "ios"] as const) {
     );
   });
 }
+
+test.each(["android", "ios"] as const)(
+  "%s refuses remote images with all implemented spec capabilities advertised",
+  async (platform) => {
+    advertise(
+      ...specCapabilities.filter((capability) => capability !== "prototype_remote_image_v1"),
+    );
+    const device: BootedDevice = { platform, deviceId: `remote-${platform}`, name: "Fake" };
+    const { minimalSpec, ops } = fixtures.prototype_remote_image_v1;
+    const refused = await show(device, minimalSpec);
+    expect(refused.success).toBe(false);
+    expect(refused.error).toContain("does not advertise prototype_remote_image_v1");
+    expect((await show(device, base)).success).toBe(true);
+    expect(await patch(device, ops)).toEqual({ success: false, error: refused.error });
+    expect(requests(device)).toEqual([]);
+  },
+);

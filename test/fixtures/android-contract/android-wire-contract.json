@@ -1875,6 +1875,35 @@
       ]
     },
     {
+      "serialName": "simulate_prototype_platform",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "event",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "data",
+          "type": "json",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
       "serialName": "start_recording",
       "fields": [
         {

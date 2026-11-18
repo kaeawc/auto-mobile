@@ -299,6 +299,30 @@ class PrototypeRuntime(
 
   suspend fun advanceClock(ms: Int): Int = timerEngine.advance(ms)
 
+  /** Host-only injection, deliberately absent from the spec action vocabulary. */
+  suspend fun simulatePlatformEvent(name: String, data: JsonObject): Boolean {
+    check(current.active) { "Prototype is inactive" }
+    val owner = PrototypePlatformCalls.eventOwner(name)
+    require(owner != null) { "Unknown platform event: $name; use a known module event" }
+    require(owner in current.spec.requires?.platform.orEmpty()) {
+      "Declare $owner in requires.platform before simulation"
+    }
+    val payload = buildJsonObject {
+      put("event", name)
+      put("data", data)
+      put("simulated", true)
+    }
+    require(
+      payload.toString().toByteArray(Charsets.UTF_8).size <=
+        PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
+    ) {
+      "simulate event payload exceeds the 4096-byte emit budget; reduce data"
+    }
+    return platformDispatcher.simulate(
+      dev.jasonpearson.automobile.prototype.PlatformEvent(name, data),
+    )
+  }
+
   private val platformState =
     PrototypePlatformState(CoroutinePrototypeScheduler(requestScope), exclusively) { name, data ->
         deliverPlatformEvent(name, data)
@@ -306,7 +330,11 @@ class PrototypeRuntime(
       .also { if (initialPlatformState.isNotEmpty()) it.update(initialPlatformState) }
   private var eventData: JsonObject? = null
 
-  private suspend fun deliverPlatformEvent(name: String, data: JsonObject) {
+  private suspend fun deliverPlatformEvent(
+    name: String,
+    data: JsonObject,
+    simulated: Boolean = false,
+  ) {
     if (!current.active || name.substringBefore('.') !in current.spec.requires?.platform.orEmpty())
       return
     val previousEvent = eventData
@@ -320,6 +348,7 @@ class PrototypeRuntime(
     var payload = buildJsonObject {
       put("event", name)
       put("data", data)
+      if (simulated) put("simulated", true)
     }
     if (
       payload.toString().toByteArray(Charsets.UTF_8).size >
@@ -329,6 +358,7 @@ class PrototypeRuntime(
         put("event", name)
         put("data", JsonObject(emptyMap()))
         put("truncated", true)
+        if (simulated) put("simulated", true)
       }
     }
     emit(PrototypeEventKind.EMIT, PrototypePlatform.DELIVERED_EVENT_NAME, payload)

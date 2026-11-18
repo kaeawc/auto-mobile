@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.protocol
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Sealed class hierarchy for all inbound WebSocket messages from MCP server to Android.
@@ -852,4 +853,14 @@ data class AdvancePrototypeClock(
   override val requestId: String? = null,
   val id: String,
   val advanceTimeMs: Int,
+) : WebSocketRequest()
+
+/** Host-only injection; never a prototype spec action. */
+@Serializable
+@SerialName("simulate_prototype_platform")
+data class SimulatePrototypePlatform(
+  override val requestId: String? = null,
+  val id: String,
+  val event: String,
+  val data: JsonObject,
 ) : WebSocketRequest()

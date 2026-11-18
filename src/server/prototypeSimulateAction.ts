@@ -1,5 +1,12 @@
 import {
+  prototypePlatformSimulationIssue,
+  prototypePlatformSimulationUnsupportedMessage,
+} from "../features/prototype/prototypePlatformSimulation";
+import type { SimulatePrototypePlatformMessage } from "../features/observe/android/ctrlProxyProtocol/prototypeMessages";
+import { PROTOTYPE_PUSH_EVENT } from "../features/prototype/prototypePushSimulate";
+import {
   PROTOTYPE_TIMERS_CAPABILITY,
+  PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY,
   type PrototypeResult,
 } from "../features/observe/android/ctrlProxyProtocol";
 import type { AndroidPrototypeTransport } from "../features/prototype/androidPrototypeTransport";
@@ -22,7 +29,10 @@ import { logger } from "../utils/logger";
 import type { z } from "zod/v4";
 import type { prototypeSchema } from "./prototypeTools/schemas";
 export interface PrototypeSimulateTarget {
-  android?: Pick<AndroidPrototypeTransport, "supportsCommand" | "advanceClock">;
+  android?: Pick<
+    AndroidPrototypeTransport,
+    "supportsCommand" | "advanceClock" | "simulatePlatformEvent"
+  >;
   ios?: Pick<IosPrototypeTransport, "supportsCapability" | "advanceClock">;
   /** Push delivery routes; no runtime accepts a simulated push yet, so devices supply none. */
   push?: PrototypePushRoutes;
@@ -59,7 +69,7 @@ export async function performPrototypeSimulate(
       timeoutMs: args.timeoutMs,
     });
   }
-  if (args.event !== undefined) {
+  if (args.event === PROTOTYPE_PUSH_EVENT) {
     return simulatePrototypePush(target.push ?? {}, {
       id: args.id!,
       data: args.data,
@@ -67,7 +77,39 @@ export async function performPrototypeSimulate(
       timeoutMs: args.timeoutMs,
     });
   }
+  if (args.event !== undefined) {
+    return simulatePlatformEvent(target, args);
+  }
   return advancePrototypeClock(target, args);
+}
+async function simulatePlatformEvent(
+  target: PrototypeSimulateTarget,
+  args: PrototypeSimulateInput,
+): Promise<PrototypeClockOutput> {
+  const issue = prototypePlatformSimulationIssue(args.event!, args.data);
+  if (issue) {
+    return { success: false, error: issue[1] };
+  }
+  try {
+    if (
+      !target.android ||
+      !(await target.android.supportsCommand(PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY))
+    ) {
+      return { success: false, error: prototypePlatformSimulationUnsupportedMessage() };
+    }
+    const reply = await target.android.simulatePlatformEvent(
+      args.id!,
+      args.event!,
+      args.data as SimulatePrototypePlatformMessage["data"] /* validated by prototypePlatformSimulationIssue */,
+      args.timeoutMs,
+    );
+    return reply.success
+      ? { success: true }
+      : { success: false, error: reply.error ?? "simulate failed" };
+  } catch (error) {
+    logger.warn("[prototype] platform simulate request failed", error);
+    return { success: false, error: toActionableError(error, "simulate failed").message };
+  }
 }
 async function advancePrototypeClock(
   target: PrototypeSimulateTarget,
@@ -141,18 +183,27 @@ function simulateInputIssue(value: {
   if ((value.advanceTimeMs === undefined) === (value.event === undefined)) {
     return ["advanceTimeMs", "simulate requires exactly one of advanceTimeMs or event"];
   }
-  if (value.event !== undefined && value.data === undefined) {
+  if (value.event !== undefined) {
+    return simulateEventInputIssue(value.event, value.data, value.transport);
+  }
+  if (value.data !== undefined || value.transport !== undefined) {
+    return [value.data === undefined ? "transport" : "data", "data and transport need event"];
+  }
+  return undefined;
+}
+function simulateEventInputIssue(
+  event: string,
+  data: unknown,
+  transport?: string,
+): [string, string] | undefined {
+  if (data === undefined) {
     return ["data", "simulate event requires data (the event payload)"];
   }
-  if (
-    value.transport !== undefined &&
-    value.event !== undefined &&
-    isPrototypeMediaSimEvent(value.event)
-  ) {
+  if (transport !== undefined && event !== PROTOTYPE_PUSH_EVENT) {
     return ["transport", "transport is only for notifications.push"];
   }
-  if (value.event === undefined && (value.data !== undefined || value.transport !== undefined)) {
-    return [value.data === undefined ? "transport" : "data", "data and transport need event"];
+  if (event !== PROTOTYPE_PUSH_EVENT && !isPrototypeMediaSimEvent(event)) {
+    return prototypePlatformSimulationIssue(event, data);
   }
   return undefined;
 }

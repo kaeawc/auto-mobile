@@ -177,6 +177,17 @@ export interface RemovePrototypeAssetMessage {
   id: string;
 }
 
+export interface SimulatePrototypePlatformMessage {
+  type: "simulate_prototype_platform";
+  requestId: string;
+  id: string;
+  event: string;
+  data: Record<string, PrototypeJson>;
+}
+export type PrototypePlatformSimulationRequest = Pick<
+  SimulatePrototypePlatformMessage,
+  "id" | "event" | "data"
+>;
 export interface AdvancePrototypeClockMessage {
   type: "advance_prototype_clock";
   requestId: string;

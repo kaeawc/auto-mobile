@@ -274,6 +274,7 @@ public final class dev.jasonpearson.automobile.prototype.PrototypeClipboardModul
   public dev.jasonpearson.automobile.prototype.PlatformAvailability$Ready availability();
   public void close();
   public java.lang.Object call(dev.jasonpearson.automobile.prototype.PlatformCall, kotlin.coroutines.Continuation<? super dev.jasonpearson.automobile.prototype.PlatformCallResult>);
+  public java.lang.Object simulate(dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation<? super java.lang.Boolean>);
   public dev.jasonpearson.automobile.prototype.PlatformAvailability availability();
 }
 Compiled from "PrototypeLoadError.kt"
@@ -365,14 +366,21 @@ public final class dev.jasonpearson.automobile.prototype.PrototypePlatform {
   public static final dev.jasonpearson.automobile.prototype.PrototypePlatform access$getNone$cp();
 }
 Compiled from "PrototypePlatform.kt"
+public final class dev.jasonpearson.automobile.prototype.PrototypePlatformModule$DefaultImpls {
+  public static java.lang.Object simulate(dev.jasonpearson.automobile.prototype.PrototypePlatformModule, dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation<? super java.lang.Boolean>);
+}
+Compiled from "PrototypePlatform.kt"
 public interface dev.jasonpearson.automobile.prototype.PrototypePlatformModule {
   public abstract java.lang.String getName();
   public abstract java.lang.String getCapability();
   public abstract dev.jasonpearson.automobile.prototype.PlatformAvailability availability();
   public abstract java.lang.Object call(dev.jasonpearson.automobile.prototype.PlatformCall, kotlin.coroutines.Continuation<? super dev.jasonpearson.automobile.prototype.PlatformCallResult>);
+  public default java.lang.Object simulate(dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation<? super java.lang.Boolean>);
+  public static java.lang.Object simulate$suspendImpl(dev.jasonpearson.automobile.prototype.PrototypePlatformModule, dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation<? super java.lang.Boolean>);
   public abstract kotlinx.coroutines.flow.Flow<dev.jasonpearson.automobile.prototype.PlatformEvent> getEvents();
   public abstract kotlinx.coroutines.flow.StateFlow<kotlinx.serialization.json.JsonObject> getState();
   public abstract void close();
+  public static java.lang.Object access$simulate$jd(dev.jasonpearson.automobile.prototype.PrototypePlatformModule, dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation);
 }
 Compiled from "PrototypePlatform.kt"
 public final class dev.jasonpearson.automobile.prototype.PrototypePlatformRegistry {

@@ -5,7 +5,7 @@ import { validatePrototypePushPayload, type PrototypePushPayload } from "./proto
 
 /** The push event `prototype simulate` delivers (#14285). */
 export const PROTOTYPE_PUSH_EVENT = "notifications.push";
-/** Every platform event `prototype simulate` can deliver: the push and the media events (#14257). */
+/** Events with dedicated push and media simulation routes (#14257). */
 export const PROTOTYPE_SIMULATE_EVENTS = [
   PROTOTYPE_PUSH_EVENT,
   ...PROTOTYPE_MEDIA_SIM_EVENTS,

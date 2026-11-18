@@ -30,10 +30,10 @@ private final class DeviceStatusClock: PrototypeClock {
 }
 
 @MainActor
-private final class FakeDeviceStatusSource: PrototypeDeviceStatusSource {
+final class FakeDeviceStatusSource: PrototypeDeviceStatusSource {
     private(set) var starts = 0
     private(set) var stops = 0
-    private var update: (@MainActor @Sendable ([String: JSONValue]) -> Void)?
+    private(set) var update: (@MainActor @Sendable ([String: JSONValue]) -> Void)?
     let initial: [String: JSONValue]
     init(_ initial: [String: JSONValue]) { self.initial = initial }
 

@@ -350,6 +350,20 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         '{"type":"advance_prototype_clock","requestId":"timer","id":"panel","advanceTimeMs":100}',
     },
     {
+      builder: "simulatePrototypePlatform",
+      name: "simulate prototype platform event",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.simulatePrototypePlatform({
+          requestId: "sim",
+          id: "panel",
+          event: "test.tick",
+          data: { count: 7 },
+        }),
+      ),
+      expected:
+        '{"type":"simulate_prototype_platform","requestId":"sim","id":"panel","event":"test.tick","data":{"count":7}}',
+    },
+    {
       builder: "clearPrototypeStorage",
       name: "clear storage",
       actual: serializeCtrlProxyRequest(
@@ -1123,9 +1137,9 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   // total builder count is pinned. Ship builder #45 without a row and this fails — not a silently
   // uncovered send site. `request_two_finger_swipe` has no builder here by design (it goes through
   // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
-  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 57", () => {
+  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 58", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
-    expect(builderNames.length).toBe(57);
+    expect(builderNames.length).toBe(58);
     const covered = new Set(cases.map((row) => row.builder));
     expect<unknown>([...covered].sort()).toEqual([...builderNames].sort());
   });

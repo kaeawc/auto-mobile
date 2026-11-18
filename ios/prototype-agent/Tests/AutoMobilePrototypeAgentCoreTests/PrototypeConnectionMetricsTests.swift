@@ -122,7 +122,9 @@ final class PrototypeConnectionMetricsTests: XCTestCase {
     private static func codeAfterLateRejection(
         _ call: PrototypeURLSessionCall,
         afterInstall: (@Sendable () async throws -> Void)? = nil
-    ) async -> PrototypeRequestErrorCode? {
+    )
+        async -> PrototypeRequestErrorCode?
+    {
         do {
             let _: PrototypeHttpResponse = try await withCheckedThrowingContinuation { continuation in
                 call.install(continuation)

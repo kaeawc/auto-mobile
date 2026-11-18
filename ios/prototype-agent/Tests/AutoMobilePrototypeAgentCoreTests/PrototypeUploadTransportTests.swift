@@ -50,23 +50,14 @@ final class PrototypeUploadTransportTests: XCTestCase {
         XCTAssertTrue(text.contains("Content-Type: image/png\r\n"))
     }
 
-    func testMultipartQuotedPairParserPreservesLiteralBackslashesInFieldNames() throws {
-        let upload = try resolve(#"{"multipart":[{"name":"a\\b\\","value":{"value":"ok"}}]}"#)
+    func testMultipartLeavesBackslashesAloneLikeOkHttp() throws {
+        // OkHttp MultipartBody.appendQuotedString escapes only \n, \r and " (to %0A, %0D, %22).
+        let upload = try resolve(
+            #"{"multipart":[{"name":"a\\b","filename":"c\\d\"e","file":{"asset":"hero"}}]}"#,
+            assets: ["hero": Data([42])]
+        )
         let text = try XCTUnwrap(String(data: upload.data, encoding: .utf8))
-        let start = try XCTUnwrap(text.range(of: "name=\""))
-        // Decode MIME quoted-pairs, as a receiving multipart parser does.
-        var parsed = ""
-        var escaped = false
-        var closed = false
-        for character in text[start.upperBound...] {
-            if escaped { parsed.append(character); escaped = false }
-            else if character == "\\" { escaped = true }
-            else if character == "\"" { closed = true; break }
-            else { parsed.append(character) }
-        }
-        XCTAssertTrue(closed)
-        XCTAssertFalse(escaped)
-        XCTAssertEqual(parsed, "a\\b\\")
+        XCTAssertTrue(text.contains(#"name="a\b"; filename="c\d%22e""#))
     }
 
     func testFormEncoderPreservesEveryByteEscapeAndUnescapedCharacter() {

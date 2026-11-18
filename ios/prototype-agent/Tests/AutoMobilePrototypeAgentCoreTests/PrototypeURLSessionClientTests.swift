@@ -664,10 +664,10 @@ extension PrototypeURLSessionClientTests {
         var replay = Data()
         var buffer = [UInt8](repeating: 0, count: 4)
         while true {
-            let count = stream.read(&buffer, maxLength: buffer.count)
-            XCTAssertGreaterThanOrEqual(count, 0)
-            if count <= 0 { break }
-            replay.append(buffer, count: count)
+            let bytesRead = stream.read(&buffer, maxLength: buffer.count)
+            XCTAssertGreaterThanOrEqual(bytesRead, 0)
+            if bytesRead <= 0 { break }
+            replay.append(buffer, count: bytesRead)
         }
         XCTAssertEqual(replay, Data("json body".utf8))
     }

@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.prototype.PlatformError
 import dev.jasonpearson.automobile.prototype.PlatformErrorCode
 import dev.jasonpearson.automobile.prototype.PlatformEvent
 import dev.jasonpearson.automobile.prototype.PrototypePlatformModule
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.random.Random
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -45,7 +46,7 @@ class PrototypeRealtimeConfig(
 internal class PrototypeRealtimeModule(
   prototypeId: String,
   config: PrototypeRealtimeConfig,
-  sink: PrototypeChannelSink,
+  private val sink: PrototypeChannelSink,
   scope: CoroutineScope,
   newId: () -> String,
 ) : PrototypePlatformModule {
@@ -62,7 +63,19 @@ internal class PrototypeRealtimeModule(
   private val inbox = Channel<suspend () -> Unit>(Channel.UNLIMITED)
 
   init {
-    scope.launch { for (work in inbox) work() }
+    // Each entry is isolated: a throw ends that entry only, so a later close() still runs.
+    scope.launch {
+      for (work in inbox) {
+        try {
+          work()
+        } catch (cancelled: CancellationException) {
+          throw cancelled
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+          // The controller isolates its own work; this catches what escapes a lifecycle call.
+          sink.warn("Realtime inbox work failed: ${error.message}")
+        }
+      }
+    }
   }
 
   /** The spec's channels as declared at a show or patch; unchanged ones are left alone. */
@@ -87,19 +100,28 @@ internal class PrototypeRealtimeModule(
     val body = if (call.call == SEND) sendText(call.args) ?: return invalid("body") else null
     val result = CompletableDeferred<PrototypeChannelError?>()
     val caller = currentCoroutineContext()[Job]
+    // A call cancelled (timed out or dismissed) while it waited does nothing: checked when it
+    // leaves the inbox and again under the controller lock, where a blocked flush may hold it.
+    val wanted = { caller?.isActive != false }
     val queued =
       inbox
         .trySend {
-          // A call cancelled (timed out or dismissed) while it waited in the inbox does nothing.
-          if (caller?.isActive == false) return@trySend
-          result.complete(
-            when (call.call) {
-              CONNECT -> controller.connect(channel)
-              DISCONNECT -> controller.disconnect(channel)
-              SEND -> controller.send(channel, checkNotNull(body))
-              else -> unsupported(call.call)
-            },
-          )
+          if (!wanted()) return@trySend
+          try {
+            result.complete(
+              when (call.call) {
+                CONNECT -> controller.connect(channel, wanted)
+                DISCONNECT -> controller.disconnect(channel)
+                SEND -> controller.send(channel, checkNotNull(body), wanted)
+                else -> unsupported(call.call)
+              },
+            )
+          } finally {
+            // Whatever the controller threw, the caller is answered instead of waiting it out.
+            result.complete(
+              PrototypeChannelError(PrototypeChannelError.NETWORK, "The realtime call failed"),
+            )
+          }
         }
         .isSuccess
     if (!queued) {

@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import dev.jasonpearson.automobile.protocol.PrototypeChannelCoalescer
 import dev.jasonpearson.automobile.protocol.PrototypeChannelLimits
 import dev.jasonpearson.automobile.protocol.PrototypeChannelRoutes
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.random.Random
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -49,6 +50,9 @@ interface PrototypeChannelSink {
 
   /** Route, callback or `statusKey` actions to apply with [event] as the handler's event. */
   suspend fun run(channel: String, actions: JsonArray, event: JsonElement)
+
+  /** An unexpected throw from the sink or a transport, isolated so the channels keep running. */
+  fun warn(message: String) = Unit
 }
 
 /**
@@ -113,7 +117,22 @@ class PrototypeChannelController(
     get() = closed || closing
 
   init {
-    scope.launch { for (work in inbox) lock.withLock { if (!ended) work() } }
+    scope.launch { for (work in inbox) lock.withLock { if (!ended) isolated("inbox", work) } }
+  }
+
+  /**
+   * Runs one piece of controller work so that a throw from the sink or a transport ends only that
+   * work: the inbox keeps draining and [close] still closes every connection.
+   */
+  private suspend fun isolated(what: String, work: suspend () -> Unit) {
+    try {
+      work()
+    } catch (cancelled: CancellationException) {
+      throw cancelled
+    } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+      // A sink handler or transport may throw anything; the other channels keep running.
+      sink.warn("Realtime $what failed: ${error.message}")
+    }
   }
 
   /**
@@ -159,15 +178,20 @@ class PrototypeChannelController(
     }
   }
 
-  /** `realtime.connect`: null once connecting (or already live), else why not. */
-  suspend fun connect(channel: String): PrototypeChannelError? = lock.withLock {
-    val slot = slots[channel] ?: return@withLock unknown(channel)
-    if (!ended && !slot.status.active) {
-      slot.attempt = 0
-      connect(slot)
+  /**
+   * `realtime.connect`: null once connecting (or already live), else why not. [wanted] is checked
+   * under the lock, so a call whose caller gave up while it waited for the lock does nothing.
+   */
+  suspend fun connect(channel: String, wanted: () -> Boolean = { true }): PrototypeChannelError? =
+    lock.withLock {
+      val slot = slots[channel] ?: return@withLock unknown(channel)
+      if (!wanted()) return@withLock abandoned()
+      if (!ended && !slot.status.active) {
+        slot.attempt = 0
+        connect(slot)
+      }
+      null
     }
-    null
-  }
 
   /** `realtime.disconnect`: closes the connection with 1000 and drops queued sends. */
   suspend fun disconnect(channel: String): PrototypeChannelError? = lock.withLock {
@@ -182,9 +206,18 @@ class PrototypeChannelController(
     null
   }
 
-  /** `realtime.send`: sent when open, queued while (re)connecting, refused otherwise. */
-  suspend fun send(channel: String, data: String): PrototypeChannelError? = lock.withLock {
+  /**
+   * `realtime.send`: sent when open, queued while (re)connecting, refused otherwise. Like
+   * [connect], a send whose caller gave up ([wanted] false) while it waited for the lock never goes
+   * out.
+   */
+  suspend fun send(
+    channel: String,
+    data: String,
+    wanted: () -> Boolean = { true },
+  ): PrototypeChannelError? = lock.withLock {
     val slot = slots[channel] ?: return@withLock unknown(channel)
+    if (!wanted()) return@withLock abandoned()
     if (ended) {
       return@withLock PrototypeChannelError(
         PrototypeChannelError.NETWORK,
@@ -266,7 +299,21 @@ class PrototypeChannelController(
         headers = declaration.headers,
         lastEventId = slot.lastEventId.takeIf { declaration.kind == PrototypeChannelKind.SSE },
       )
-    slot.connection = transports.forVia(declaration.via).open(request, listener(slot, generation))
+    val listener = listener(slot, generation)
+    slot.connection =
+      try {
+        transports.forVia(declaration.via).open(request, listener)
+      } catch (@Suppress("TooGenericExceptionCaught") error: RuntimeException) {
+        // A transport that throws instead of reporting fails this attempt like a network error,
+        // so the channel backs off and reconnects as usual.
+        sink.warn("Realtime channel ${slot.id} failed to open: ${error.message}")
+        listener.onClosed(
+          null,
+          null,
+          PrototypeChannelError(PrototypeChannelError.NETWORK, error.message ?: "open failed"),
+        )
+        null
+      }
   }
 
   private fun listener(slot: Slot, generation: Long) =
@@ -437,8 +484,11 @@ class PrototypeChannelController(
 
   private fun timer(millis: Long, work: suspend () -> Unit): Job = scope.launch {
     delay(millis)
-    lock.withLock { if (!ended) work() }
+    lock.withLock { if (!ended) isolated("timer", work) }
   }
+
+  private fun abandoned() =
+    PrototypeChannelError(PrototypeChannelError.NETWORK, "The caller stopped waiting")
 
   private fun unknown(channel: String) =
     PrototypeChannelError(

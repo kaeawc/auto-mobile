@@ -9,13 +9,16 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceApp
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceLocale
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
 import dev.jasonpearson.automobile.ctrlproxy.prototype.DefaultPrototypeHost
+import dev.jasonpearson.automobile.ctrlproxy.prototype.OkHttpPrototypeChannelTransport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdropSupport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdrops
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeChannelTransports
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClients
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeInset
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRealtimeConfig
 import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
@@ -88,10 +91,20 @@ internal fun CtrlProxy.createPrototypeController(): PrototypeController {
         host = hostPrototypeHttp,
         device = RetrofitPrototypeHttpClient(OkHttpClient()),
       ),
+    realtime = prototypeRealtime(),
     requestScope = serviceScope,
     platform = prototypePlatform,
   )
 }
+
+/** `via: "host"` relays over the host socket; `via: "device"` opens OkHttp's WebSocket or SSE. */
+private fun CtrlProxy.prototypeRealtime() =
+  PrototypeRealtimeConfig(
+    PrototypeChannelTransports(
+      host = hostPrototypeChannels,
+      device = OkHttpPrototypeChannelTransport(OkHttpClient()),
+    ),
+  )
 
 /**
  * The prototype lifecycle, fed the lock gate, observer session and client count from the service.

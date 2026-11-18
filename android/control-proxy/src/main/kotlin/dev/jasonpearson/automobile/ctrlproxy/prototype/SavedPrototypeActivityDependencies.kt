@@ -85,6 +85,14 @@ internal object SavedPrototypeActivityDependencies {
   private fun defaultHttpClients(): PrototypeHttpClients =
     PrototypeHttpClients.forSavedPrototype(RetrofitPrototypeHttpClient(OkHttpClient()))
 
+  /** The transports behind a saved prototype's `channels` (#14269): device only. */
+  @Volatile var realtime: () -> PrototypeRealtimeConfig? = ::defaultRealtime
+
+  private fun defaultRealtime(): PrototypeRealtimeConfig =
+    PrototypeRealtimeConfig(
+      PrototypeChannelTransports.forSavedPrototype(OkHttpPrototypeChannelTransport(OkHttpClient())),
+    )
+
   /** Both public routes adapt the saved transports, including the typed host refusal. */
   fun network(): PrototypeNetwork {
     val clients = httpClients()
@@ -115,5 +123,6 @@ internal object SavedPrototypeActivityDependencies {
     clock = System::currentTimeMillis
     eventSink = defaultEventSink
     httpClients = ::defaultHttpClients
+    realtime = ::defaultRealtime
   }
 }

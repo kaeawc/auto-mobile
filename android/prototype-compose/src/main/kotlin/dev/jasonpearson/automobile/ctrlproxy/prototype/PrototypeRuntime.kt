@@ -451,6 +451,8 @@ class PrototypeRuntime(
         exclusively {
           if (channelLive(channel)) runChannelActions(channel, actions, event)
         }
+
+      override fun warn(message: String) = this@PrototypeRuntime.warn(message)
     }
 
   /**
@@ -2004,16 +2006,17 @@ class PrototypeRuntime(
     )
     val followUps = (if (result.succeeded) request.onSuccess else request.onError).orEmpty()
     if (followUps.isEmpty() || !current.active || !requireValid(followUps)) return
-    val followUpWrites =
-      try {
-        plannedWrites(followUps, current.spec)
-      } catch (error: IllegalArgumentException) {
-        warn("Refused the follow-up of request ${request.requestId}: ${error.message}")
-        return
-      }
+    // Planning binds `{event}` setState values too, so the captured event is set before it.
     val previousEvent = eventData
     eventData = request.eventContext
     try {
+      val followUpWrites =
+        try {
+          plannedWrites(followUps, current.spec)
+        } catch (error: IllegalArgumentException) {
+          warn("Refused the follow-up of request ${request.requestId}: ${error.message}")
+          return
+        }
       run(followUps, followUpWrites)
     } finally {
       eventData = previousEvent

@@ -161,6 +161,7 @@ class SavedPrototypeActivity : ComponentActivity() {
           clock = SavedPrototypeActivityDependencies.clock
           nextSequence = SavedPrototypeEvents::nextSequence
           storageRegistry = PrototypeStorageSessionRegistry.Shared
+          realtime = SavedPrototypeActivityDependencies.realtime()
           flushScope = SavedPrototypeActivityDependencies.flushScope
           // Default delivery uses public onEvent. Await injected suspending sinks inside the
           // runtime so consecutive events cannot overtake one another.

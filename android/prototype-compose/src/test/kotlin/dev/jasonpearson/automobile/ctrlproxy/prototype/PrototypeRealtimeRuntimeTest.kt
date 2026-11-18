@@ -12,6 +12,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -71,11 +72,19 @@ class PrototypeRealtimeRuntimeTest {
 
   private class FakeTransport : PrototypeChannelTransport {
     val opened = mutableListOf<FakeConnection>()
+    /** How many of the next opens throw instead of reporting. */
+    var throwing = 0
 
     override fun open(
       request: PrototypeChannelOpenRequest,
       listener: PrototypeChannelListener,
-    ): PrototypeChannelConnection = FakeConnection(request, listener).also { opened += it }
+    ): PrototypeChannelConnection {
+      if (throwing > 0) {
+        throwing--
+        throw IllegalStateException("transport exploded")
+      }
+      return FakeConnection(request, listener).also { opened += it }
+    }
 
     val last: FakeConnection
       get() = opened.last()
@@ -126,6 +135,7 @@ class PrototypeRealtimeRuntimeTest {
     spec: PrototypeSpec = spec(),
     lock: Mutex = Mutex(),
     events: MutableList<PrototypeEvent> = mutableListOf(),
+    httpClients: PrototypeHttpClients = PrototypeHttpClients.Unavailable,
   ): PrototypeRuntime {
     var id = 0
     var seq = 0L
@@ -139,6 +149,7 @@ class PrototypeRealtimeRuntimeTest {
         exclusively = { lock.withLock { it() } },
         newRequestId = { "id-${++id}" },
         warn = { warnings += it },
+        httpClients = httpClients,
         realtime =
           PrototypeRealtimeConfig(PrototypeChannelTransports(transport, transport), Random(0)),
       )
@@ -468,5 +479,151 @@ class PrototypeRealtimeRuntimeTest {
     assertEquals(PrototypeChannelController.GOING_AWAY, connection.closedWith)
     assertEquals(emptyList<String>(), runtime.messages())
     assertNull(runtime.current.platformState["realtime"]?.jsonObject?.get("late"))
+  }
+
+  @Test
+  fun `a request started by a status handler binds its follow-up to the captured event`() =
+    runTest {
+      val base = spec()
+      val followed =
+        base.copy(
+          state = base.state.orEmpty() + ("captured" to PrototypeScalar.Text("")),
+          platform =
+            PrototypePlatformHandlers(
+              mapOf(
+                "realtime.status" to
+                  listOf(
+                    PrototypeRequestAction(
+                      url = "https://example.test/ack",
+                      onSuccess =
+                        listOf(
+                          PrototypeSetStateAction(
+                            "captured",
+                            PrototypeScalar.Binding(obj("event" to JsonPrimitive("/status"))),
+                          ),
+                        ),
+                    ),
+                  ),
+              ),
+            ),
+        )
+      val http = PrototypeHttpClient {
+        PrototypeRequestResponse.Received(200, emptyMap(), JsonObject(emptyMap()), 1)
+      }
+      val transport = FakeTransport()
+      val runtime = runtime(transport, followed, httpClients = PrototypeHttpClients(http, http))
+      runtime.shown()
+      runCurrent()
+      transport.last.listener.onOpen(null)
+      runCurrent()
+
+      assertEquals(emptyList<String>(), warnings)
+      assertEquals(PrototypeScalar.Text("open"), runtime.current.state["captured"])
+    }
+
+  @Test
+  fun `a transport that throws fails one attempt and the channel keeps working`() = runTest {
+    val transport = FakeTransport().apply { throwing = 1 }
+    val runtime = runtime(transport)
+    runtime.shown()
+    runCurrent()
+    assertEquals(1, warnings.size)
+    assertTrue(warnings.single(), "transport exploded" in warnings.single())
+    assertTrue(transport.opened.isEmpty())
+    warnings.clear()
+
+    // The failed attempt backs off and reconnects; both inboxes are still draining.
+    advanceTimeBy(60_000)
+    runCurrent()
+    val connection = transport.last
+    connection.listener.onOpen(null)
+    runCurrent()
+    runtime.handle(PrototypeInteraction.Tap(listOf(send("after"))))
+    runCurrent()
+    assertEquals(listOf("after"), connection.sent)
+
+    runtime.finishDismissal(PrototypeDismissReason.USER)
+    runCurrent()
+    assertEquals(emptyList<String>(), warnings)
+    assertEquals(PrototypeChannelController.GOING_AWAY, connection.closedWith)
+  }
+
+  @Test
+  fun `a send whose caller timed out while it waited for the controller never goes out`() =
+    runTest {
+      val lock = Mutex()
+      val transport = FakeTransport()
+      val runtime = runtime(transport, lock = lock)
+      runtime.shown()
+      runCurrent()
+      val connection = transport.last
+      connection.listener.onOpen(null)
+      runCurrent()
+      val module =
+        runtime.platformRegistry.modules.filterIsInstance<PrototypeRealtimeModule>().single()
+      var result: PlatformCallResult? = null
+      var finished = false
+
+      lock.withLock {
+        // The frame's event waits in the sink for the interaction lock, holding the controller's.
+        connection.listener.onFrame("""{"id":1,"text":"blocked"}""", null, null)
+        runCurrent()
+        backgroundScope.launch {
+          result =
+            withTimeoutOrNull(10) {
+              module.call(
+                PlatformCall(
+                  "send-1",
+                  PrototypeRealtimeModule.SEND,
+                  obj("channel" to JsonPrimitive("chat"), "body" to JsonPrimitive("late")),
+                ),
+              )
+            }
+          finished = true
+        }
+        advanceTimeBy(11)
+        runCurrent()
+        assertTrue(finished)
+      }
+      runCurrent()
+
+      assertNull(result)
+      assertEquals(emptyList<String>(), connection.sent)
+      assertNull(connection.closedWith)
+      assertEquals(emptyList<String>(), warnings)
+    }
+
+  @Test
+  fun `a frame for a channel a commit removed lands nothing`() = runTest {
+    val lock = Mutex()
+    val transport = FakeTransport()
+    val routeless =
+      spec().let { base ->
+        base.copy(channels = base.channels!!.mapValues { it.value.copy(routes = null) })
+      }
+    val runtime = runtime(transport, routeless, lock = lock)
+    runtime.shown()
+    runCurrent()
+    val first = transport.last
+    first.listener.onOpen(null)
+    first.listener.onFrame("""{"id":1,"text":"stale"}""", null, null)
+    runCurrent()
+
+    lock.withLock {
+      // The flush publishes the frame's snapshot and waits in the sink for the interaction lock.
+      advanceTimeBy(PrototypeChannelLimits.flushMs + 1L)
+      runCurrent()
+      runtime.replace(spec().copy(channels = null, root = PrototypeTextNode(text = "no channels")))
+    }
+    runCurrent()
+    // A frame the old connection reports after the commit is dropped too.
+    first.listener.onFrame("""{"id":2,"text":"later"}""", null, null)
+    advanceTimeBy(PrototypeChannelLimits.flushMs + 1L)
+    runCurrent()
+
+    assertEquals(emptyList<String>(), warnings)
+    assertNull(runtime.chat())
+    assertNull(runtime.current.platformState["realtime"]?.jsonObject?.get("chat"))
+    assertEquals(PrototypeChannelController.GOING_AWAY, first.closedWith)
   }
 }

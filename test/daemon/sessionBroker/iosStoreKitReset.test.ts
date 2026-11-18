@@ -19,6 +19,7 @@ import { deviceToolMutations } from "../../../src/server/deviceMutationAdapters"
 import { StoreKitMutationPriorReader } from "../../../src/server/deviceMutationStoreKitPriorReader";
 import { FakeIosResidueInspector } from "../../fakes/FakeIosResidueInspector";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { InMemoryStoreKitClearedSessions } from "../../../src/features/storekit/StoreKitClearedSessions";
 
 const UDID = "11111111-2222-4333-8444-555555555555";
 const IOS: BootedDevice = { deviceId: UDID, platform: "ios", name: "iPhone" };
@@ -147,15 +148,22 @@ describe("runner StoreKit session reset", () => {
   const clear = (result: CtrlProxyStoreKitResult) => {
     const sender = new FakeStoreKitSender(result);
     const devices: BootedDevice[] = [];
+    const cleared = new InMemoryStoreKitClearedSessions();
     const reset = new RunnerStoreKitSessionReset((device) => {
       devices.push(device);
       return sender;
-    });
+    }, cleared);
     return {
       sender,
       devices,
+      cleared,
       run: () => reset.clear(UDID, "com.example.shop", new AbortController().signal),
     };
+  };
+  const NO_SESSION = {
+    success: false,
+    totalTimeMs: 1,
+    error: "no storekit session for bundleId; call load first",
   };
 
   test("sends clear for the bundle id to the device's runner", async () => {
@@ -169,12 +177,23 @@ describe("runner StoreKit session reset", () => {
     expect(rig.sender.requests[0]?.options?.timeoutMs).toBeGreaterThan(0);
   });
 
-  test("a runner with no session for the bundle id is already clean", async () => {
-    await clear({
-      success: false,
-      totalTimeMs: 1,
-      error: "no storekit session for bundleId; call load first",
-    }).run();
+  test("a confirmed clear marks the bundle cleared on that device", async () => {
+    const rig = clear({ success: true, totalTimeMs: 1, transactions: [] });
+    await rig.run();
+    expect(rig.cleared.isCleared(UDID, "com.example.shop")).toBe(true);
+  });
+
+  test("no runner session after a confirmed clear with no change since is already clean", async () => {
+    const rig = clear(NO_SESSION);
+    rig.cleared.markCleared(UDID, "com.example.shop");
+    await rig.run();
+  });
+
+  test("no runner session without a confirmed clear throws so the reset erases (runner restart)", async () => {
+    const rig = clear(NO_SESSION);
+    await expect(rig.run()).rejects.toThrow("may still hold its StoreKit state");
+    rig.cleared.markCleared(UDID, "com.example.other");
+    await expect(rig.run()).rejects.toThrow("may still hold its StoreKit state");
   });
 
   test.each([

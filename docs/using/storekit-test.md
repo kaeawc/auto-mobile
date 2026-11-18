@@ -36,10 +36,14 @@ fails the call before anything reaches the device.
    Purchases the app starts itself keep failing until `clear` or another `load`.
 4. `clear` resets the session, returns the final transactions and ends the session.
 
-The session lasts as long as the runner, until `clear` or until your device session is released:
-release clears the StoreKit session of every `appId` you used, so the next session on the same
-simulator starts with no purchases and no simulated error. StoreKit Testing applies it to the runner's own target
+The session lasts as long as the runner, until `clear` or until your device session is released.
+Release clears the StoreKit session of every `appId` you used. The next session on the same
+simulator then starts with no purchases and no simulated error. When release cannot confirm that,
+it erases the simulator instead. StoreKit Testing applies the session to the runner's own target
 app, so your app sees the purchases only when it runs as that target.
+
+On a device another session holds, `list` without a session reads only an already-open runner
+connection. If none is open, it fails and leaves the device as it is.
 
 Two calls for the same `appId` cannot overlap: the second fails until the first finishes. Retry
 it.
@@ -48,6 +52,9 @@ it.
 
 The result has `success`, `action`, `appId`, `transactions` when the action returns them, and
 `error` when it failed.
+
+`retryable: false` means the runner received the action but did not answer in time, so it may
+still apply. A timed-out `buy` can still complete. Call `list` before you retry it.
 
 `unsupported` is set, with nothing changed on the device, when StoreKit Testing cannot run:
 

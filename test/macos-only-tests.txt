@@ -41,6 +41,7 @@ portable test/utils/ios-cmdline-tools/DeviceAppManagerLaunchPreconditions.drift.
 portable test/features/observe/ios/ctrlProxyWireScan.test.ts             # repo wire scanner plus a Windows path-separator guard
 portable test/features/observe/ios/observationBridgeState.test.ts        # pure parser plus the capability probe over fakes
 portable test/features/observe/ios/CtrlProxySdkObservation.test.ts      # delegate and decoder over the delegate harness
+portable test/features/observe/ios/CtrlProxyStoreKit.test.ts           # request builder over the delegate harness and fake timer
 portable test/features/observe/ios/CtrlProxySdkWebView.test.ts          # delegate and decoder over the delegate harness
 portable test/features/observe/ios/webViewBridgeScript.test.ts        # runs the SDK page script against a fake DOM
 portable test/features/observe/ios/iosSdkObservationMerge.test.ts       # pure hierarchy merge over fixtures

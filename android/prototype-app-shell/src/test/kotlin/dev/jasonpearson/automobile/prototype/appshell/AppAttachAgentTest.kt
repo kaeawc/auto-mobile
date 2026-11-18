@@ -56,6 +56,7 @@ class AppAttachAgentTest {
 
   private class Target : AttachTarget {
     override val appInstanceId = "test-instance"
+    override val showingId = "test-showing"
     val patches = mutableListOf<Triple<String, Long?, JsonArray>>()
     var reply = PrototypeResult(0, success = true, revision = 7)
 
@@ -112,6 +113,7 @@ class AppAttachAgentTest {
       backgroundScope.launch { process.agent.serve(second) }
       runCurrent()
       assertEquals("test-instance", second.written.first()["appInstanceId"]?.jsonPrimitive?.content)
+      assertEquals("test-showing", second.written.first()["showingId"]?.jsonPrimitive?.content)
       assertEquals(
         listOf(1L, 2L),
         second.written.drop(1).map { it.getValue("sequence").jsonPrimitive.long },
@@ -232,6 +234,7 @@ class AppAttachAgentTest {
         put("type", "hello_result")
         put("agentVersion", "0.1.0")
         put("appInstanceId", "test-instance")
+        put("showingId", "test-showing")
         put("protocolVersion", 1)
         put("droppedEvents", 0)
         put(

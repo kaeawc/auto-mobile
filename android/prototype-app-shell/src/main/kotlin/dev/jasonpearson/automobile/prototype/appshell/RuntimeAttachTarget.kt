@@ -16,7 +16,15 @@ internal class RuntimeAttachTarget(
   private val ledger: AttachEventLedger,
   private val deviceDark: () -> Boolean,
 ) : AttachTarget {
+  override var showingId: String? = null
+    private set
+
   var runtime: PrototypeRuntime? = null
+    set(value) {
+      if (value != null && value !== field) showingId = ledger.nextShowingId()
+      field = value
+    }
+
   override val appInstanceId: String
     get() = ledger.appInstanceId
 
@@ -55,6 +63,7 @@ internal class RuntimeAttachTarget(
       val current = runtime?.takeIf { it.current.active }
       if (current == null)
         buildJsonObject {
+          showingId?.let { put("showingId", it) }
           put("shown", false)
           put("id", JsonNull)
           put("pages", JsonObject(emptyMap()))
@@ -82,7 +91,8 @@ internal class RuntimeAttachTarget(
           )
         JsonObject(
           attachJson.encodeToJsonElement(PrototypeStatusEntry.serializer(), entry).jsonObject +
-            ("shown" to JsonPrimitive(true)),
+            ("shown" to JsonPrimitive(true)) +
+            ("showingId" to JsonPrimitive(showingId)),
         )
       }
     }

@@ -22,6 +22,8 @@ final class ManualRequestClock: PrototypeClock {
         }
     }
 
+    var nowMilliseconds = 0
+    var monotonicMilliseconds: Int { nowMilliseconds }
     private(set) var handles: [Handle] = []
 
     func schedule(afterMilliseconds: Int, _ fire: @escaping () -> Void) -> PrototypeTimerHandle {
@@ -39,24 +41,62 @@ final class FakeHttpClient: PrototypeHttpClient, @unchecked Sendable {
     private let lock = NSLock()
     private var continuations: [Int: CheckedContinuation<PrototypeHttpResponse, Error>] = [:]
     private var calls: [PrototypeHttpRequest] = []
+    private var progress: [Int: PrototypeUploadProgressCallback] = [:]
     private var cancelledCalls: Set<Int> = []
+    private var readyCalls: Set<Int> = []
+    private var requestWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
 
     var requests: [PrototypeHttpRequest] { lock.withLock { calls } }
     var cancelled: Set<Int> { lock.withLock { cancelledCalls } }
 
     func perform(_ request: PrototypeHttpRequest) async throws -> PrototypeHttpResponse {
+        try await perform(request, delivery: PrototypeDeliveryCheck(), uploadProgress: nil)
+    }
+
+    func perform(
+        _ request: PrototypeHttpRequest, delivery _: PrototypeDeliveryCheck,
+        uploadProgress: PrototypeUploadProgressCallback?
+    )
+        async throws -> PrototypeHttpResponse
+    {
         let index = lock.withLock { () -> Int in
+            let index = calls.count
             calls.append(request)
-            return calls.count - 1
+            progress[index] = uploadProgress
+            return index
         }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                lock.withLock { continuations[index] = continuation }
+                let waiting = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+                    continuations[index] = continuation
+                    readyCalls.insert(index)
+                    let waiting = requestWaiters.filter { $0.0 <= readyCalls.count }.map(\.1)
+                    requestWaiters.removeAll { $0.0 <= readyCalls.count }
+                    return waiting
+                }
+                for waiter in waiting {
+                    waiter.resume()
+                }
                 if Task.isCancelled { cancel(index) }
             }
         } onCancel: {
             cancel(index)
         }
+    }
+
+    func waitForRequests(_ count: Int) async {
+        await withCheckedContinuation { waiter in
+            let ready = lock.withLock {
+                if readyCalls.count >= count { return true }
+                requestWaiters.append((count, waiter))
+                return false
+            }
+            if ready { waiter.resume() }
+        }
+    }
+
+    func sendProgress(_ index: Int, sent: Int64, expected: Int64 = 100) {
+        lock.withLock { progress[index] }?(sent, expected)
     }
 
     private func cancel(_ index: Int) {
@@ -106,6 +146,9 @@ final class RequestHarness {
             guard hostConnected else { return false }
             hostFrames.append(frame)
             return true
+        }
+        driver.onUploadProgress = { [unowned self] id, key, value in
+            apply { $0.writeUploadProgress(id, key: key, value: value) }
         }
         driver.onComplete = { [unowned self] requestId, response in
             apply { $0.completeRequest(requestId, response) }
@@ -164,9 +207,7 @@ final class RequestHarness {
 
     /// Lets the tasks the driver started reach their first suspension.
     func waitForDeviceCalls(_ count: Int) async {
-        for _ in 0 ..< 200 where client.requests.count < count {
-            await Task.yield()
-        }
+        await client.waitForRequests(count)
     }
 }
 

@@ -31,6 +31,10 @@ final class PrototypeRequestDriver {
     private var hostRoute: HostRoute
     private var hostWatchdogs: [String: PrototypeTimerHandle] = [:]
     private var deviceTasks: [String: Task<Void, Never>] = [:]
+    private var uploadProgress = PrototypeUploadProgress()
+    private var uploadJobs: [String: PrototypeRequestJob] = [:]
+    /// Request id, state key and accepted percentage; delivered through a normal session transition.
+    var onUploadProgress: (@MainActor (String, String, Int) -> Void)?
     private var notices: [Task<Void, Never>] = []
     /// Delivers a completion to the session; set by its owner.
     var onComplete: Complete?
@@ -75,6 +79,7 @@ final class PrototypeRequestDriver {
                 cancelHost(requestId)
                 settleHost(requestId)?.cancel()
                 deviceTasks.removeValue(forKey: requestId)?.cancel()
+                finishUpload(requestId)
             }
         }
     }
@@ -133,6 +138,10 @@ final class PrototypeRequestDriver {
     // MARK: Host
 
     private func startHost(_ job: PrototypeRequestJob) {
+        guard job.uploadBody == nil else {
+            announce(job.requestId, .failed(PrototypeUploadResolver.hostRefusal, durationMs: 0))
+            return
+        }
         switch hostRoute {
         case let .daemon(sendToHost): startDaemon(job, sendToHost: sendToHost)
         case let .handler(client): startClient(job, client: client)
@@ -179,10 +188,26 @@ final class PrototypeRequestDriver {
     private func startClient(_ job: PrototypeRequestJob, client: any PrototypeHttpClient) {
         let request = PrototypeHttpRequest(job: job)
         let check = PrototypeDeliveryCheck()
+        if job.uploadBody != nil, let key = job.progressKey {
+            uploadJobs[job.requestId] = job
+            let reset = uploadProgress.reset(key: key, requestId: job.requestId, nowMs: clock.monotonicMilliseconds)
+            onUploadProgress?(job.requestId, key, reset)
+        }
+        let progress: PrototypeUploadProgressCallback = { [weak self] sent, expected in
+            let percent = expected > 0 ? Int(min(100, max(0, Double(sent) / Double(expected) * 100))) : 0
+            Task { @MainActor [weak self] in
+                guard check.obsoleteFailure() == nil else { return }
+                self?.advanceUpload(job.requestId, percent)
+            }
+        }
         deviceTasks[job.requestId] = Task { [weak self] in
             let response: PrototypeRequestResponse
             do {
-                response = try await client.perform(request, delivery: check).requestResponse(for: job.method)
+                response = try await client.perform(
+                    request,
+                    delivery: check,
+                    uploadProgress: job.uploadBody == nil ? nil : progress
+                ).requestResponse(for: job.method)
             } catch let failure as PrototypeHttpFailure {
                 response = .failed(failure.error, durationMs: failure.durationMs)
             } catch {
@@ -198,11 +223,28 @@ final class PrototypeRequestDriver {
     ) {
         // A cancelled call was removed before its task ended: its answer is not wanted.
         guard deviceTasks.removeValue(forKey: requestId) != nil else { return }
+        if check.obsoleteFailure() == nil, case .received = response {
+            advanceUpload(requestId, 100, completed: true)
+        }
+        finishUpload(requestId)
         if let failure = check.obsoleteFailure() {
             deliver(requestId, .failed(failure.error, durationMs: failure.durationMs))
         } else {
             deliver(requestId, response)
         }
+    }
+
+    private func advanceUpload(_ requestId: String, _ value: Int, completed: Bool = false) {
+        guard let job = uploadJobs[requestId], let key = job.progressKey,
+              let accepted = uploadProgress.advance(
+                  key: key, requestId: requestId, value: value, nowMs: clock.monotonicMilliseconds, completed: completed
+              ) else { return }
+        onUploadProgress?(requestId, key, accepted)
+    }
+
+    private func finishUpload(_ requestId: String) {
+        guard let job = uploadJobs.removeValue(forKey: requestId), let key = job.progressKey else { return }
+        uploadProgress.finish(key: key, requestId: requestId)
     }
 
     // MARK: Delivery

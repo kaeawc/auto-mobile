@@ -94,7 +94,7 @@ The iOS saved prototype is its own app, so `deleteSaved` uninstalls it and its s
 
 ## Request action capability
 
-Advertises `prototype_network_v1` and `prototype_network_device_v1` for `request`
+Advertises `prototype_network_v1`, `prototype_network_device_v1` and `prototype_network_upload_v1` for `request`
 ([contract](../android/prototype-ux-request.md#request-action-12523)). The `PrototypeSession` type twins the host's
 `applyPrototypeRequestOutcome`. A tap resolves bindings against committed state/data
 (`PrototypeRequestResolver`, twin of `resolvePrototypeRequest`). It binds `{key}` and `{data:/pointer}` in

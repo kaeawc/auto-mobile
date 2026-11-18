@@ -25,7 +25,8 @@ AutoMobile does not open or close the window for you.
 
 ## Register your CarPlay scene
 
-Call `registerCarPlay` when your CarPlay scene connects, passing the interface controller it
+Call `AutoMobileSDK.shared.initialize()` early in your app's launch; it starts the SDK's HTTP
+server. Then call `registerCarPlay` when your CarPlay scene connects, passing the interface controller it
 receives, and `unregisterCarPlay` when the scene disconnects:
 
 ```swift
@@ -40,14 +41,23 @@ scene configuration; the SDK does not add them. For how the SDK reads the templa
 ## Read the templates
 
 The SDK serves the routes on port 8766 on the host, as long as no other simulator holds that port.
-Send `X-AutoMobile-Simulator-UDID: <udid>` so a reply from a different simulator's app is refused
-with HTTP 409 `wrong_simulator` instead of being read by mistake:
+It also listens on a port between 40000 and 40999 chosen from the simulator's UDID. When several
+simulators are booted, 8766 may belong to another app: find your app's port with
+`lsof -nP -iTCP -sTCP:LISTEN` and use it in place of 8766.
+
+Set `UDID` to your simulator's UDID, from `xcrun simctl list devices booted`. With the
+`X-AutoMobile-Simulator-UDID` header, a different simulator's app refuses the request with HTTP 409
+`wrong_simulator`. Without the header, the request reaches whichever app holds the port, so stop
+when `UDID` is empty:
 
 ```bash
+: "${UDID:?Set UDID to the target simulator UDID}"
 curl -s -H "X-AutoMobile-Simulator-UDID: $UDID" http://127.0.0.1:8766/carplay/templates
 ```
 
-The routes answer while your app is in the background, because CarPlay can stay active then.
+`GET /carplay/templates` answers while your app is in the background, because CarPlay can stay
+active then. `POST /carplay/action` needs the app in the foreground; otherwise it returns HTTP 409
+`app_not_active`.
 
 | Field       | Meaning                                                                   |
 | ----------- | ------------------------------------------------------------------------- |
@@ -65,8 +75,9 @@ Images are never included. The tree describes the templates your app set, not th
 drew.
 
 A snapshot holds at most 50 items in any collection, 500 nodes and 6 levels. IDs are paths such as
-`stack/0/sections/1/items/0` or `stack/0/tabs/1`. They name positions in the current snapshot only,
-so read a fresh snapshot after the stack changes.
+`stack/0/sections/1/items/0` or `stack/0/tabs/1`. They name positions in the current snapshot only:
+after any change to the templates, including reordered rows, an old ID can name a different element.
+Read a fresh snapshot before each action.
 
 ## Act on a template
 
@@ -81,12 +92,12 @@ request returns HTTP 200 with `status`, an optional `reason` and the full `templ
 after the action. If your app updates its templates later, for example after a network call, read
 the templates again.
 
-| `status`      | Meaning                                                                                      | What to do                                     |
-| ------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `ok`          | The handler ran, the tab was selected, or the stack was popped.                              | Check the returned `templates`.                |
-| `not_found`   | No node has that `id` in the current templates.                                              | Read the templates again and use a fresh `id`. |
-| `failed`      | The element is disabled, a list row has no handler, or the pop failed.                       | Enable the element or add a handler.           |
-| `unsupported` | The app has not registered, the controller is gone, or the node has no public selection API. | See `reason`.                                  |
+| `status`      | Meaning                                                                                      | What to do                                                                                              |
+| ------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `ok`          | The handler ran, the tab was selected, or the stack was popped.                              | Check the returned `templates`.                                                                         |
+| `not_found`   | No node has that `id` in the current templates, or the node is past a size limit.            | Read the templates again and use a fresh `id`. If `truncated` is true, the element may be out of reach. |
+| `failed`      | The element is disabled, a list row has no handler, or the pop failed.                       | Enable the element or add a handler.                                                                    |
+| `unsupported` | The app has not registered, the controller is gone, or the node has no public selection API. | See `reason`.                                                                                           |
 
 Grid buttons, bar buttons and text buttons return `unsupported`: CarPlay gives no public way to
 trigger their handlers from outside. Malformed JSON, an unknown `action`, or `select` without an

@@ -186,6 +186,8 @@ fun PrototypeRuntimeContent(
         LocalPrototypeStackScrollStores provides scrollStores,
         LocalPrototypeTextEpochs provides snapshot.textEpochs,
         LocalPrototypeScrollRequests provides snapshot.scrollRequests,
+        LocalPrototypeRemoteImages provides runtime.remoteImages,
+        LocalPrototypeRemoteImageActivity provides runtime.remoteImageActivity,
         LocalPrototypeImageCache provides images,
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
@@ -2087,7 +2089,9 @@ internal fun SemanticsPropertyReceiver.applyPrototypeAuthoredSemantics(
     authored.label?.let { contentDescription = it }
     authored.hint?.let {
       if (!node.source?.onTap.isNullOrEmpty()) onClick(label = it, action = null)
-      else stateDescription = listOfNotNull(state, it).joinToString(", ")
+      // Remote images reserve stateDescription for loading/loaded/error.
+      else if ((node.source as? PrototypeImageNode)?.url == null)
+        stateDescription = listOfNotNull(state, it).joinToString(", ")
     }
   }
 }

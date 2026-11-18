@@ -1522,7 +1522,7 @@ for (const platform of ["android", "ios"] as const) {
 }
 
 test.each(["android", "ios"] as const)(
-  "%s refuses remote images with all implemented spec capabilities advertised",
+  "%s refuses remote images when the capability is absent",
   async (platform) => {
     advertise(
       ...specCapabilities.filter((capability) => capability !== "prototype_remote_image_v1"),
@@ -1545,3 +1545,15 @@ test.each(["android", "ios"] as const)(
     expect(requests(device)).toEqual([]);
   },
 );
+
+test("Android remote image capability accepts show and patch", async () => {
+  advertise(...specCapabilities);
+  agent.handshake.capabilities = agent.handshake.capabilities.filter(
+    (capability) => capability !== "prototype_remote_image_v1",
+  );
+  const device: BootedDevice = { platform: "android", deviceId: "remote-android", name: "Fake" };
+  const { minimalSpec, ops } = fixtures.prototype_remote_image_v1;
+  expect((await show(device, minimalSpec)).success).toBe(true);
+  expect((await patch(device, ops)).success).toBe(true);
+  expect(agent.requests).toEqual([]);
+});

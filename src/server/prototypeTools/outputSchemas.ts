@@ -135,6 +135,13 @@ const lastResultSchema = z.object({
     .optional()
     .describe("Effects omitted or frozen by the device, with their paths and reasons"),
   storage: prototypeStorageOutputField,
+  images: z
+    .object({
+      loaded: z.number().int().nonnegative(),
+      failed: z.number().int().nonnegative(),
+      pending: z.number().int().nonnegative(),
+    })
+    .optional(),
   shaderFailures: z.record(z.string(), z.string()).optional(),
   timers: z
     .array(

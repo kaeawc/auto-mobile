@@ -27,6 +27,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -184,15 +186,17 @@ internal fun prototypeAuthoredImageSize(node: PrototypeRenderNode): DpSize? {
 @Composable
 internal fun PrototypeImageContent(node: PrototypeRenderNode, modifier: Modifier) {
   val source = node.source as? PrototypeImageNode ?: return
-  if (prototypeAuthoredImageSize(node) != null) {
+  val imageModifier =
+    if (source.url != null) modifier.semantics(mergeDescendants = true) {} else modifier
+  if (source.url == null && prototypeAuthoredImageSize(node) != null) {
     val target = prototypeAuthoredImageTarget(node.style.source)
-    Box(modifier.defaultMinSize(24.dp, 24.dp)) { PrototypeImageBody(node, source, target) }
+    Box(imageModifier.defaultMinSize(24.dp, 24.dp)) { PrototypeImageBody(node, source, target) }
   } else {
     LocalPrototypeRenderWorkProbe.current?.invoke(
       PrototypeRenderWork.IMAGE_SUBCOMPOSITION,
       node.identity,
     )
-    BoxWithConstraints(modifier.defaultMinSize(24.dp, 24.dp)) {
+    BoxWithConstraints(imageModifier.defaultMinSize(24.dp, 24.dp)) {
       PrototypeImageBody(node, source, prototypeImageTarget(constraints))
     }
   }
@@ -222,6 +226,10 @@ private fun PrototypeImageBody(
   source: PrototypeImageNode,
   target: PrototypeImageTarget,
 ) {
+  if (source.url != null) {
+    RemoteImageBody(node, source, target)
+    return
+  }
   val background =
     prototypeThemedColor(node.style.background, node.style.source.background)
       ?: prototypePlaceholderColor(MaterialTheme.colorScheme)
@@ -309,3 +317,87 @@ private fun NavigationPlaceholder() {
 
 /** Nav icons are drawn at 24 dp; decode for up to xxxhdpi so they stay sharp on any display. */
 private val NAVIGATION_ICON_TARGET = PrototypeImageTarget(96, 96)
+
+internal val LocalPrototypeRemoteImages = compositionLocalOf<PrototypeRemoteImageLoader?> { null }
+internal val LocalPrototypeRemoteImageActivity =
+  compositionLocalOf<PrototypeRemoteImageActivity?> { null }
+
+@Composable
+private fun rememberRemoteImage(
+  url: String,
+  target: PrototypeImageTarget,
+  enabled: Boolean,
+): PrototypeImageState {
+  val loader = LocalPrototypeRemoteImages.current.takeIf { enabled }
+  val activity = LocalPrototypeRemoteImageActivity.current
+  val session = remember(loader, url, target, activity) { PrototypeRemoteImageSession(activity) }
+  androidx.compose.runtime.LaunchedEffect(session) { session.load(loader, url, target) }
+  androidx.compose.runtime.DisposableEffect(session) { onDispose { session.close() } }
+  return session.state.collectAsState().value
+}
+
+@Composable
+private fun RemoteImageBody(
+  node: PrototypeRenderNode,
+  source: PrototypeImageNode,
+  target: PrototypeImageTarget,
+) {
+  val state = rememberRemoteImage(checkNotNull(source.url), target, source.via != "host")
+  Box(Modifier.semantics { stateDescription = prototypeRemoteImageDescription(state) }) {
+    if (source.crossfade == true && LocalPrototypeMotion.current) {
+      androidx.compose.animation.Crossfade(targetState = state, label = "prototype image") { shown
+        ->
+        RemoteImagePixels(node, source, target, shown)
+      }
+    } else RemoteImagePixels(node, source, target, state)
+  }
+}
+
+@Composable
+private fun RemoteImagePixels(
+  node: PrototypeRenderNode,
+  source: PrototypeImageNode,
+  target: PrototypeImageTarget,
+  state: PrototypeImageState,
+) {
+  val image = (state as? PrototypeImageState.Ready)?.image as? BitmapPrototypeImage
+  if (image != null) {
+    Image(
+      image.imageBitmap,
+      contentDescription = null,
+      modifier =
+        fillAuthoredAxes(node.style.source)
+          .prototypeZoomable(source.zoomable)
+          .prototypeImageTint(prototypeThemedColor(null, source.filter?.tint)),
+      contentScale = prototypeContentScale(source.contentScale),
+      colorFilter = source.filter?.let { prototypeImageColorFilter(it.saturation) },
+    )
+    return
+  }
+  val fallback =
+    if (state == PrototypeImageState.Loading) source.placeholder
+    else source.error ?: source.placeholder
+  val asset = (fallback?.get("asset") as? kotlinx.serialization.json.JsonPrimitive)?.content
+  val fallbackState = asset?.let { rememberPrototypeImage(it, target) }
+  val fallbackImage = (fallbackState as? PrototypeImageState.Ready)?.image as? BitmapPrototypeImage
+  if (fallbackImage != null) {
+    Image(
+      fallbackImage.imageBitmap,
+      contentDescription = null,
+      modifier = fillAuthoredAxes(node.style.source),
+      contentScale = prototypeContentScale(source.contentScale),
+    )
+  } else {
+    val color = (fallback?.get("color") as? kotlinx.serialization.json.JsonPrimitive)?.content
+    Box(
+      fillAuthoredAxes(node.style.source)
+        .defaultMinSize(24.dp, 24.dp)
+        .background(
+          prototypeThemedColor(
+            null,
+            color?.let { dev.jasonpearson.automobile.protocol.PrototypeModeValue.Single(it) },
+          ) ?: prototypePlaceholderColor(MaterialTheme.colorScheme),
+        ),
+    )
+  }
+}

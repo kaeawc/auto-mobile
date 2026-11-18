@@ -382,6 +382,11 @@ class PrototypeRuntime(
   /** The running animations of this prototype's window, published in its window metadata. */
   @InternalAutoMobilePrototypeApi val motionActivity = PrototypeMotionActivity()
 
+  val remoteImages: PrototypeRemoteImageLoader?
+    get() = httpClients.remoteImages
+
+  val remoteImageActivity = PrototypeRemoteImageActivity()
+
   /** Effects that stopped animating over the frame budget (#15129), reported by `inspect`. */
   @InternalAutoMobilePrototypeApi val effectHealth = PrototypeEffectHealth()
 

@@ -11,7 +11,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import okhttp3.OkHttpClient
 
 /** Credential-encrypted app-private root shared by saving and shortcut publishing. */
 fun savedPrototypeRoot(context: Context): File = File(context.filesDir, "saved-prototypes")
@@ -83,27 +82,40 @@ internal object SavedPrototypeActivityDependencies {
   @Volatile var httpClients: () -> PrototypeHttpClients = ::defaultHttpClients
 
   private fun defaultHttpClients(): PrototypeHttpClients =
-    PrototypeHttpClients.forSavedPrototype(RetrofitPrototypeHttpClient(OkHttpClient()))
+    PrototypeHttpClients.forSavedPrototype(PrototypeDeviceNetwork.device)
 
   /** Both public routes adapt the saved transports, including the typed host refusal. */
-  fun network(): PrototypeNetwork {
+  fun network(context: Context): PrototypeNetwork {
     val clients = httpClients()
-    fun adapt(client: PrototypeHttpClient) = EmbeddedHttpClient { request ->
-      client.execute(
-        PrototypeHttpRequest(
-          request.requestId,
-          request.prototypeId,
-          request.method,
-          request.url,
-          request.headers,
-          request.body,
-          request.timeoutMs,
-          request.uploadBody,
-          request.onUploadProgress,
-        ),
-      )
-    }
-    return PrototypeNetwork(device = adapt(clients.device), hostHandler = adapt(clients.host))
+    fun adapt(
+      client: PrototypeHttpClient,
+      images: PrototypeRemoteImageLoader? = null,
+    ): EmbeddedHttpClient =
+      object : EmbeddedHttpClient, PrototypeRemoteImageProvider {
+        override val remoteImages = images
+
+        override suspend fun execute(
+          request: dev.jasonpearson.automobile.prototype.PrototypeHttpRequest,
+        ) =
+          client.execute(
+            PrototypeHttpRequest(
+              request.requestId,
+              request.prototypeId,
+              request.method,
+              request.url,
+              request.headers,
+              request.body,
+              request.timeoutMs,
+              request.uploadBody,
+              request.onUploadProgress,
+            ),
+          )
+      }
+    return PrototypeNetwork(
+      device =
+        adapt(clients.device, clients.remoteImages ?: PrototypeDeviceNetwork.images(context)),
+      hostHandler = adapt(clients.host),
+    )
   }
 
   fun reset() {

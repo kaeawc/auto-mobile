@@ -58,6 +58,7 @@ object AutoMobilePrototype {
       "prototype_platform_v1",
       "prototype_reduced_motion_v1",
       "prototype_refresh_v1",
+      "prototype_remote_image_v1",
       "prototype_rich_text_v1",
       "prototype_routes_v1",
       "prototype_scroll_motion_v1",

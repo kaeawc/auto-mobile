@@ -386,6 +386,7 @@ class WebSocketServer(
     // http or https host. Without it a host refuses a spec that asks for via "device".
     add("prototype_network_device_v1")
     add("prototype_network_upload_v1")
+    add("prototype_remote_image_v1")
     add("prototype_platform_clipboard_v1")
     add("prototype_platform_device_v1")
     add("prototype_platform_v1")

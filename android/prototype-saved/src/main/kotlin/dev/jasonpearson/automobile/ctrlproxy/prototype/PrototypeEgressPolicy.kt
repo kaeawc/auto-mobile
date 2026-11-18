@@ -27,13 +27,27 @@ internal fun PrototypeEgressDecision.requireAllowed() {
 /** Device-side egress policy. Address parsing never performs a DNS lookup. */
 class PrototypeEgressPolicy(
   private val daemonPorts: Set<Int> = (3000..3010).toSet() + 8765,
+  private val allowLoopback: Boolean = false,
+  private val blockPrivateNetworks: Boolean = false,
 ) : PrototypeDestinationPolicy {
+  /** Retains the host's protected ports while enabling the image contract's stricter ranges. */
+  internal fun forRemoteImages(allowLoopback: Boolean): PrototypeEgressPolicy =
+    PrototypeEgressPolicy(daemonPorts, allowLoopback, blockPrivateNetworks = true)
+
   override fun check(
     host: String,
     port: Int,
     resolvedAddresses: List<InetAddress>,
   ): PrototypeEgressDecision {
     val name = host.removeSurrounding("[", "]").trimEnd('.').lowercase()
+    // Development fixtures may reach adb-reversed loopback, never a protected daemon port.
+    if (
+      allowLoopback &&
+        port !in daemonPorts &&
+        name in setOf("localhost", "127.0.0.1", "::1") &&
+        resolvedAddresses.all { it.isLoopbackAddress }
+    )
+      return PrototypeEgressDecision.Allow
     if (name == "localhost" || name.endsWith(".localhost")) {
       return PrototypeEgressDecision.Blocked("Blocked destination hostname")
     }
@@ -42,7 +56,9 @@ class PrototypeEgressPolicy(
       return PrototypeEgressDecision.Blocked("Ambiguous numeric destination")
     }
     val addresses = resolvedAddresses.map { it.address } + listOfNotNull(literal)
-    if (addresses.any { blockedAddress(it) }) {
+    if (
+      addresses.any { blockedAddress(it) || (blockPrivateNetworks && nonPublicImageAddress(it)) }
+    ) {
       return PrototypeEgressDecision.Blocked("Blocked destination address")
     }
     if (port in daemonPorts && addresses.any { privateAddress(it) }) {
@@ -65,6 +81,16 @@ class PrototypeEgressPolicy(
       (b.take(4) == listOf(0x20, 0x01, 0, 0)) ||
       (embeddedIpv4(bytes)?.let { blockedAddress(it) } == true)
   }
+
+  /** Image loading is stricter than authored requests, which may intentionally reach a LAN. */
+  private fun nonPublicImageAddress(bytes: ByteArray): Boolean =
+    privateAddress(bytes) ||
+      (bytes.size == 4 && (bytes[0].toInt() and 0xff) >= 224) ||
+      (bytes.size == 16 && (bytes[0].toInt() and 0xff) == 0xff) ||
+      (embeddedImageIpv4(bytes)?.let { nonPublicImageAddress(it) } == true)
+
+  private fun embeddedImageIpv4(bytes: ByteArray): ByteArray? =
+    if (bytes.size == 16) embeddedIpv4(bytes) else null
 
   private fun privateAddress(bytes: ByteArray): Boolean {
     val b = bytes.map { it.toInt() and 0xff }

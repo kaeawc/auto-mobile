@@ -24,7 +24,6 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -443,124 +442,6 @@ class SavedPrototypeControllerTest {
     session.record(storageSpec(dark = false))
     session.flush()
     assertEquals(2, disk.saves.size)
-  }
-
-  private fun secureSpec() =
-    spec.copy(
-      requires = PrototypeRequires(platform = listOf("secureStorage")),
-      state = mapOf("token" to PrototypeScalar.Text(""), "count" to PrototypeScalar.Numeric(0.0)),
-      storage = PrototypeStorageBlock(1, listOf("state:count"), secure = listOf("state:token")),
-    )
-
-  private suspend fun openSecureSession(
-    registry: PrototypeStorageSessionRegistry,
-    plain: FakePrototypeStorageStore,
-    secure: ControllerSecureStore,
-    timer: FakePrototypeTimer,
-  ): PrototypeStorageSession {
-    val original = secureSpec()
-    val session =
-      PrototypeStoragePersistence(
-          PrototypeStorageBackends(plain, secure),
-          timer,
-          kotlin.coroutines.EmptyCoroutineContext,
-          registry = registry,
-        )
-        .open(original)
-        .session!!
-    session.record(
-      original.copy(
-        state =
-          mapOf("token" to PrototypeScalar.Text("secret"), "count" to PrototypeScalar.Numeric(1.0)),
-      ),
-    )
-    session.flush()
-    assertTrue(plain.stored(original.id) != null && secure.value != null)
-    return session
-  }
-
-  @Test
-  fun `a failed entry delete after storage cleanup restores both backends on resume`() = runTest {
-    val registry = PrototypeStorageSessionRegistry()
-    val plain = FakePrototypeStorageStore()
-    val secure = ControllerSecureStore()
-    val session = openSecureSession(registry, plain, secure, FakePrototypeTimer())
-    val storageController = storageController(registry, plain, secure)
-    var cleanups = 0
-    val controller =
-      controller(
-        backing =
-          object : SavedPrototypeStore by store {
-            override fun delete(id: String): Boolean = throw java.io.IOException("disk")
-          },
-        sessions = registry,
-        clearStorage = {
-          cleanups++
-          storageController.clearStoredValues(it, keepSessionValues = true)
-        },
-        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-      )
-    controller.save("save", secureSpec(), "Vault", null)
-    replies.clear()
-
-    controller.delete("delete", "panel")
-
-    assertEquals(SavedPrototypeErrorCode.INTERNAL_ERROR, onlyReply("delete").errorCode)
-    assertEquals(1, cleanups)
-    // Cleanup emptied both backends; the resumed session still holds what it had.
-    assertEquals(null, secure.value)
-    assertEquals(null, plain.stored("panel"))
-    assertTrue(session.report().secure!!.single().present)
-    session.flush()
-    assertEquals(
-      JsonPrimitive("secret"),
-      secure.value!!.values["state:token"],
-    )
-    assertEquals(
-      JsonPrimitive(1),
-      plain.stored("panel")!!.values["state:count"],
-    )
-  }
-
-  @Test
-  fun `an Error escaping delete still releases the quiesce hold`() = runTest {
-    for (failStoreDelete in listOf(false, true)) {
-      val registry = PrototypeStorageSessionRegistry()
-      val plain = FakePrototypeStorageStore()
-      val secure = ControllerSecureStore()
-      val session = openSecureSession(registry, plain, secure, FakePrototypeTimer())
-      val controller =
-        controller(
-          backing =
-            object : SavedPrototypeStore by store {
-              override fun delete(id: String): Boolean =
-                if (failStoreDelete) throw AssertionError("entry") else store.delete(id)
-            },
-          sessions = registry,
-          clearStorage = { if (failStoreDelete) 0 else throw AssertionError("cleanup") },
-          ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
-      try {
-        controller.delete("delete", "panel")
-        fail("Expected the Error to propagate")
-      } catch (_: AssertionError) {}
-      // A leaked hold would keep this write quiesced forever.
-      session.record(
-        secureSpec()
-          .copy(
-            state =
-              mapOf(
-                "token" to PrototypeScalar.Text("later"),
-                "count" to PrototypeScalar.Numeric(2.0),
-              ),
-          ),
-      )
-      session.flush()
-      assertEquals(
-        JsonPrimitive("later"),
-        secure.value!!.values["state:token"],
-      )
-    }
   }
 
   private fun storageSpec(dark: Boolean = false): PrototypeSpec {

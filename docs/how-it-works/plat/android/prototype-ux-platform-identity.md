@@ -119,8 +119,8 @@ precise reading. Its coordinates are rounded to two decimal places, its `accurac
 `altitudeM`, `speedMps` and `bearingDeg`. On iOS the system reduces the fix itself; a precise request under reduced accuracy asks for
 temporary full accuracy only when the host declares `NSLocationTemporaryUsageDescriptionDictionary`. Failures
 use the typed codes `permission_denied`, `unavailable`, `timeout` and `platform_error`. The `unavailable` code
-carries a `reason`: `disabled` on both platforms (location services off, or on Android below API 31 a coarse-only grant with no
-network provider), and on iOS also
+carries a `reason`. On both platforms it can be `disabled`: location services are off, or, on Android below API 31, a
+coarse-only grant has no network provider. On iOS it can also be
 `missing_usage_description` (the host has no `NSLocationWhenInUseUsageDescription`; the runtime then never touches
 Core Location and reports `servicesEnabled: false`).
 

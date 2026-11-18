@@ -385,11 +385,12 @@ class PrototypeRemoteImageTransportTest {
           "[fe80::1]",
           "2130706433",
           "0x7f000001",
-          "127.1",
           "0177.0.0.1",
         )) {
         refused("Blocked destination address") { transport.download("https://$host/i") }
       }
+      // URI has no host for abbreviated dotted IPv4, so URL validation refuses it before egress.
+      refused("Remote image unavailable") { transport.download("https://127.1/i") }
       refused("Ambiguous numeric destination") { transport.download("https://09.0.0.1/i") }
     }
 

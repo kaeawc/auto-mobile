@@ -109,6 +109,7 @@ struct PrototypeSpec: Decodable {
     /// Declared media players (#14253), retained for contract validation; no player is created.
     let media: JSONValue?
     let locationBlock: JSONValue?
+    let sensorsBlock: JSONValue?
     let platformHandlers: [String: JSONValue]
     private(set) var platformState: [String: JSONValue] = [:]
     /// The route params `{route.<name>}` placeholders are bound to in `root` (#14188); empty at decode.
@@ -144,6 +145,7 @@ struct PrototypeSpec: Decodable {
         channels = try container.decodeIfPresent(JSONValue.self, forKey: .channels)
         media = try container.decodeIfPresent(JSONValue.self, forKey: .media)
         locationBlock = try container.decodeIfPresent(JSONValue.self, forKey: .location)
+        sensorsBlock = try container.decodeIfPresent(JSONValue.self, forKey: .sensors)
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         // The host validator owns the strict shape; a malformed block means "no storage" here.
@@ -271,6 +273,7 @@ struct PrototypeSpec: Decodable {
         channels = spec.channels
         media = spec.media
         locationBlock = spec.locationBlock
+        sensorsBlock = spec.sensorsBlock
         platformHandlers = spec.platformHandlers
         platformState = spec.platformState
         routeScope = spec.routeScope

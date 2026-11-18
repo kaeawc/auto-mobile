@@ -363,7 +363,9 @@ export class IosPrototypeTransport implements PrototypeTransport {
       throw new ActionableError(prototypePlatformSimulationUnsupportedMessage());
     }
     const issue = prototypePlatformSimulationIssue(event, data);
-    if (issue) throw new ActionableError(issue[1]);
+    if (issue) {
+      throw new ActionableError(issue[1]);
+    }
     const message = simulatePrototypePlatformMessage({ id, event, data });
     return toPrototypeResult(
       await this.request(

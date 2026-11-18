@@ -245,6 +245,14 @@ function siblingLayoutTokens(
       if (candidateIndices.has(node.index)) {
         return [{ node, kind: "control" }];
       }
+      if (isTruthyFlag(node.element?.clickable) && !isTruthyFlag(node.element?.focusable)) {
+        return [{ node, kind: "barrier" }];
+      }
+      if (
+        nodes.some((child) => isDescendant(nodes, child, node) && isActionable(child.element ?? {}))
+      ) {
+        return [{ node, kind: "barrier" }];
+      }
       if (!isIndependentlyLabelledSibling(nodes, node)) {
         return [];
       }
@@ -252,13 +260,22 @@ function siblingLayoutTokens(
     });
 }
 
-/** Every barrier-delimited segment must match (L+ C)* L*. */
+/**
+ * Every barrier-delimited segment must match (L+ C)* L*, and a label run between two controls
+ * longer than the first row's leading run is ambiguous (a trailing summary or the next title).
+ */
 function isLabelFirstSiblingLayout(tokens: readonly FocusSiblingToken[]): boolean {
   let previous: FocusSiblingToken["kind"] = "barrier";
+  let run = 0;
+  let firstRun: number | undefined;
   for (const { kind } of tokens) {
-    if (kind === "control" && previous !== "label") {
-      return false;
+    if (kind === "control") {
+      if (previous !== "label" || (firstRun !== undefined && run > firstRun)) {
+        return false;
+      }
+      firstRun ??= run;
     }
+    run = kind === "label" ? run + 1 : 0;
     previous = kind;
   }
   return true;

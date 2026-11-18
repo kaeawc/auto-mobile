@@ -277,3 +277,44 @@ test("a label run cannot cross a labelled focusable barrier", () => {
   expect(focusLabelSibling(nodes, nodes[3])).toBe(nodes[4].element);
   expect(focusLabelSibling(nodes, nodes[5])).toBe(nodes[6].element);
 });
+
+const rowNodes = (...elements: Element[]) => siblingNodes(...elements);
+const titled = (text: string): Element => ({ ...labelElement, text });
+
+test("a clickable non-focusable sibling is an ownership barrier", () => {
+  const nodes = rowNodes(
+    { clickable: true, text: "Back", bounds: labelElement.bounds },
+    { ...control },
+    titled("WiFi"),
+    { ...control },
+    titled("Bluetooth"),
+    { ...control },
+  );
+  expect(focusLabelSibling(nodes, nodes[3])).toBeUndefined();
+});
+
+test("title-first rows with trailing summaries stay ambiguous", () => {
+  const nodes = rowNodes(
+    titled("WiFi title"),
+    { ...control },
+    titled("WiFi summary"),
+    titled("Bluetooth title"),
+    { ...control },
+    titled("Bluetooth summary"),
+  );
+  expect(focusLabelSibling(nodes, nodes[3])).toBeUndefined();
+});
+
+test("a wrapper holding another control is an ownership barrier", () => {
+  const nodes = [
+    { index: 0, element: { bounds: { left: 0, top: 0, right: 100, bottom: 100 } } },
+    { index: 1, parentIndex: 0, element: titled("WiFi") },
+    { index: 2, parentIndex: 0, element: { bounds: labelElement.bounds } },
+    { index: 3, parentIndex: 2, element: { ...control } },
+    { index: 4, parentIndex: 0, element: titled("Bluetooth") },
+    { index: 5, parentIndex: 0, element: { ...control } },
+    { index: 6, parentIndex: 0, element: titled("Airplane") },
+    { index: 7, parentIndex: 0, element: { ...control } },
+  ];
+  expect(focusLabelSibling(nodes, nodes[1])).toBeUndefined();
+});

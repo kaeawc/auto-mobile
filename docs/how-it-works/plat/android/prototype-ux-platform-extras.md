@@ -206,16 +206,18 @@ replace an authenticated live peer. Status and patch conflicts redact `storage.s
 
 Events replay at least once. A process-scoped agent retains its listener, buffer, sequence ledger
 and `appInstanceId` across reconnects and Activity recreation. Activities rebind targets;
-a new process resets identity and epoch. `hello_result` reports identity and an optional `showingId`; a new showing clears terminal state, keeping pending events.
+a new process resets identity and epoch. `hello_result` reports identity and an optional `showingId`. A showing id changes when the Activity
+mounts a new runtime. It clears a dismissal on a same-process remount. Pending events are kept.
+Older apps without `showingId` keep process-only identity.
 One daemon-host attacher serves every MCP registration and retains app/device cursors. `hello` sends `appInstanceId` and
 `lastAcknowledgedSequence` (initially zero); `{type: "ack", sequence, appInstanceId}` acknowledges
-matching instances after subscriber delivery. Epochs initialize before replay; status reconciles
+matching instances after subscriber delivery. Epochs initialize before replay. Status reconciles
 only its app. The 256-event
 buffer closes on overflow for replay. Device cleanup and host disposal close sockets and remove
-adb forwards and forget device cursors; uninstall forgets the app.
+adb forwards and forget device cursors. Uninstall and reinstall each forget only that app's cursors.
 
 Events stay buffered until acknowledged and replay on the next hello,
-and the host de-duplicates replays. The app retains 200 events,
+and the host de-duplicates replays by sequence, within the connection and coordinator. The app retains 200 events,
 drops the oldest on overflow, and reports cumulative `droppedEvents` in hello and status;
 sequence gaps expose missing events. A separate writer uses a 256-frame queue and five-second
 write deadline. Queue overflow or blocked writes close the peer; events and requests continue, retaining replay.

@@ -249,7 +249,11 @@ function siblingLayoutTokens(
         return [{ node, kind: "barrier" }];
       }
       if (
-        nodes.some((child) => isDescendant(nodes, child, node) && isActionable(child.element ?? {}))
+        nodes.some(
+          (child) =>
+            isDescendant(nodes, child, node) &&
+            (child.element ? isActionable(child.element) : false),
+        )
       ) {
         return [{ node, kind: "barrier" }];
       }

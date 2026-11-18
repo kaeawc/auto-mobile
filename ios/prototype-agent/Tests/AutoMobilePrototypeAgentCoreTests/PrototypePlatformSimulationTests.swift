@@ -51,6 +51,14 @@ private final class NoSimulationModule: PrototypePlatformModule {
 }
 
 final class PrototypePlatformSimulationTests: XCTestCase {
+    private struct RefusalCase {
+        let id: String
+        let event: String
+        let data: JSONValue
+        let session: PrototypeSession
+        let hint: String
+    }
+
     private func fixture() throws -> [String: JSONValue] {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -131,25 +139,31 @@ final class PrototypePlatformSimulationTests: XCTestCase {
         let shown = try session()
         var inactive = shown
         _ = inactive.dismiss(reason: .agent)
-        let cases: [(String, String, JSONValue, PrototypeSession, String)] = try [
-            ("p", "test.missing", .object([:]), shown, "Unknown"),
-            ("p", "missing.tick", .object([:]), shown, "Unknown"),
-            ("p", "test.tick", .object([:]), session(declared: false), "requires.platform"),
-            ("p", "test.tick", .object(["text": .string(String(repeating: "😀", count: 1024))]), shown, "4096-byte"),
-            ("p", "test.tick", .array([]), shown, "JSON object"),
-            ("p", "test.tick", .null, shown, "JSON object"),
-            ("other", "test.tick", .object([:]), shown, "inactive"),
-            ("p", "test.tick", .object([:]), inactive, "inactive"),
+        let cases: [RefusalCase] = try [
+            .init(id: "p", event: "test.missing", data: .object([:]), session: shown, hint: "Unknown"),
+            .init(id: "p", event: "missing.tick", data: .object([:]), session: shown, hint: "Unknown"),
+            .init(id: "p", event: "test.tick", data: .object([:]), session: session(declared: false), hint: "requires.platform"),
+            .init(
+                id: "p",
+                event: "test.tick",
+                data: .object(["text": .string(String(repeating: "😀", count: 1024))]),
+                session: shown,
+                hint: "4096-byte"
+            ),
+            .init(id: "p", event: "test.tick", data: .array([]), session: shown, hint: "JSON object"),
+            .init(id: "p", event: "test.tick", data: .null, session: shown, hint: "JSON object"),
+            .init(id: "other", event: "test.tick", data: .object([:]), session: shown, hint: "inactive"),
+            .init(id: "p", event: "test.tick", data: .object([:]), session: inactive, hint: "inactive"),
         ]
-        for (id, event, data, session, hint) in cases {
+        for refusal in cases {
             let error = PrototypePlatformSimulation.apply(
-                id: id,
-                event: event,
-                data: data,
-                session: session,
+                id: refusal.id,
+                event: refusal.event,
+                data: refusal.data,
+                session: refusal.session,
                 registry: registry
             ) { _ in XCTFail("refused event delivered") }
-            XCTAssertTrue(error?.contains(hint) == true, error ?? "accepted")
+            XCTAssertTrue(error?.contains(refusal.hint) == true, error ?? "accepted")
             XCTAssertEqual(module.mutations, 0)
             XCTAssertEqual(module.state, [:])
         }

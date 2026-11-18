@@ -130,6 +130,8 @@ struct PrototypeLocationStreamArbiter {
 
 @MainActor
 protocol PrototypeLocationSource: AnyObject {
+    /// A presentation owns its manager, authorization handlers and pending requests.
+    func makePresentationSource() -> any PrototypeLocationSource
     var servicesEnabled: Bool { get }
     var authorization: PrototypeLocationAuthorization { get }
     func requestAuthorization() async
@@ -209,6 +211,10 @@ final class PrototypeLocationModule: PrototypePlatformModule {
         return source.servicesEnabled ? .ready : .unavailable("disabled")
     }
 
+    func forPresentation() -> PrototypeLocationModule {
+        PrototypeLocationModule(source: source.makePresentationSource(), bundle: bundle, clock: clock)
+    }
+
     func call(_ call: PlatformCall) async -> PlatformCallResult {
         guard call.call == "location.request" else { return .failure(.unsupported, "Unknown call") }
         if case let .unavailable(reason) = availability() { return .failure(.unavailable, reason) }
@@ -265,10 +271,10 @@ final class PrototypeLocationModule: PrototypePlatformModule {
     }
 
     func stop() {
+        generation += 1
         source.setAuthorizationChangeHandler(nil)
         guard started else { return }
         started = false
-        generation += 1
         updating = false
         if hasUsage {
             source.stopUpdates()
@@ -285,19 +291,25 @@ final class PrototypeLocationModule: PrototypePlatformModule {
     }
 
     func configure(root: JSONValue?) {
-        if updating { source.stopUpdates() }
+        // Invalidate before stop: synchronous and queued callbacks belong to the old configuration.
+        generation += 1
+        let wasUpdating = updating
         updating = false
+        if wasUpdating { source.stopUpdates() }
         pending?.cancel()
         pending = nil
         latest = nil
         lastUpdate = nil
         deliveredAt = nil
+        let hadCurrent = current != nil
+        current = nil
         block = root
+        let configuration = generation
         // Register even with services disabled so a later authorization/services change can start us.
         // Missing usage descriptions and construction must never create the host location manager.
         if root != nil, hasUsage {
             source.setAuthorizationChangeHandler { [weak self] in
-                guard let self else { return }
+                guard let self, generation == configuration else { return }
                 if updating, !self.source.authorization.authorized {
                     self.source.stopUpdates()
                     updating = false
@@ -305,6 +317,7 @@ final class PrototypeLocationModule: PrototypePlatformModule {
                 startIfAuthorized()
             }
         } else { source.setAuthorizationChangeHandler(nil) }
+        if hadCurrent { refresh() }
         startIfAuthorized()
     }
 
@@ -339,8 +352,12 @@ final class PrototypeLocationModule: PrototypePlatformModule {
         if elapsed >= minInterval {
             deliver()
         } else if pending == nil {
+            let updateGeneration = generation
             pending = clock.schedule(afterMilliseconds: minInterval - elapsed) { [weak self] in
-                MainActor.assumeIsolated { self?.deliver() }
+                MainActor.assumeIsolated {
+                    guard let self, generation == updateGeneration else { return }
+                    deliver()
+                }
             }
         }
     }

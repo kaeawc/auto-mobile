@@ -66,6 +66,8 @@
         private var generation = 0
         private var proximityObserver: (any NSObjectProtocol)?
 
+        func makePresentationSource() -> any PrototypeSensorSource { CoreMotionPrototypeSensorSource() }
+
         var stepsAllowed: Bool {
             guard Bundle.main.object(forInfoDictionaryKey: "NSMotionUsageDescription") != nil else { return false }
             return switch CMPedometer.authorizationStatus() {

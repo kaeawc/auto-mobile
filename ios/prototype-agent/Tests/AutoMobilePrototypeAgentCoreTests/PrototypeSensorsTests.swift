@@ -21,6 +21,15 @@ private final class SensorSource: PrototypeSensorSource {
     var handlers: [PrototypeSensor: @MainActor @Sendable (PrototypeSensorSample) -> Void] = [:]
     var stops = 0
     var duringStop: (@MainActor () -> Void)?
+    var presentations: [SensorSource] = []
+
+    func makePresentationSource() -> any PrototypeSensorSource {
+        let source = SensorSource()
+        source.available = available
+        source.stepsAllowed = stepsAllowed
+        presentations.append(source)
+        return source
+    }
 
     func hasSensor(_ sensor: PrototypeSensor) -> Bool {
         queries.append(sensor)
@@ -318,6 +327,153 @@ final class PrototypeSensorsTests: XCTestCase {
             PlatformEvent(event: "sensors.shake", data: .object([:])),
         ])
         module.configure(root: nil)
+    }
+
+    func testIdenticalBlockInNewShowSessionResetsStepsFiltersAndShakeCooldown() async throws {
+        // Exercise the UIKit-free session with the same tokens supplied by PrototypeModel.show.
+        let url = PrototypeSpecFixtures.directory.appendingPathComponent("valid/sensors-block-rates.json")
+        let fixture = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: url))
+        for reset in [false, true] {
+            var fields = try XCTUnwrap(fixture.objectFields)
+            fields["id"] = .string("A")
+            let firstSpec = try JSONDecoder().decode(PrototypeSpec.self, from: JSONEncoder().encode(fields))
+            fields["id"] = .string(reset ? "A" : "B")
+            let nextSpec = try JSONDecoder().decode(PrototypeSpec.self, from: JSONEncoder().encode(fields))
+            var session = PrototypeSession()
+            session.show(firstSpec)
+            let source = SensorSource()
+            let clock = SensorClock()
+            let registry = PrototypePlatformRegistry(modules: [module(source, clock: clock)])
+            let original = try XCTUnwrap(firstSpec.sensorsBlock)
+            XCTAssertEqual(nextSpec.sensorsBlock, original)
+            registry.configure(sensorsBlock: original, sessionID: 1)
+            source.report(.orientation, .values(["pitchDeg": 1]))
+            source.report(.steps, .values(["steps": 10]))
+            source.report(.shake, .acceleration(x: 30, y: 0, z: 0))
+            let old = source.handlers
+            source.duringStop = {
+                old[.steps]?(.values(["steps": 999]))
+                old[.shake]?(.acceleration(x: 30, y: 0, z: 0))
+            }
+            registry.configure(sensorsBlock: nextSpec.sensorsBlock, sessionID: 2)
+            try session.show(nextSpec.replacingPlatform(registry.snapshot), reset: reset)
+            XCTAssertEqual(session.spec?.id, reset ? "A" : "B")
+            XCTAssertEqual(session.spec?.platformState["sensors"], .object([:]))
+            let stream = registry.modules["sensors"]?.events
+            clock.monotonicMilliseconds = 1
+            old[.orientation]?(.values(["pitchDeg": 99]))
+            old[.steps]?(.values(["steps": 999]))
+            old[.shake]?(.acceleration(x: 30, y: 0, z: 0))
+            XCTAssertEqual(registry.snapshot["sensors"], .object([:]))
+            source.report(.orientation, .values(["pitchDeg": 1]))
+            source.report(.steps, .values(["steps": 2]))
+            source.report(.shake, .acceleration(x: 30, y: 0, z: 0))
+            XCTAssertEqual(registry.snapshot["sensors"]?.objectFields?["steps"], .number(2))
+            guard let stream else { return XCTFail("Missing sensor stream") }
+            let received = await bufferedEvents(stream)
+            XCTAssertEqual(received, [
+                .stateRefresh("sensors"), .stateRefresh("sensors"),
+                PlatformEvent(event: "sensors.shake", data: .object([:])),
+            ])
+            registry.configure(sensorsBlock: nil)
+        }
+    }
+
+    func testIdenticalBlockInSameSessionPreservesSubscriptionAndState() {
+        let source = SensorSource()
+        let registry = PrototypePlatformRegistry(modules: [module(source)])
+        let original = block(.steps, .shake)
+        registry.configure(sensorsBlock: original, sessionID: 7)
+        source.report(.steps, .values(["steps": 10]))
+        let starts = source.starts.count
+        let stops = source.stops
+        registry.configure(sensorsBlock: original, sessionID: 7)
+        XCTAssertEqual(source.starts.count, starts)
+        XCTAssertEqual(source.stops, stops)
+        XCTAssertEqual(registry.snapshot["sensors"]?.objectFields?["steps"], .number(10))
+        registry.configure(sensorsBlock: nil)
+    }
+
+    func testNewSessionDropsBufferedSensorEventsAndKeepsSharedStatusRunning() async {
+        let source = SensorSource()
+        let statusSource = FakeDeviceStatusSource(["value": .number(0)])
+        let clock = LocationClock()
+        let registry = PrototypePlatformRegistry(modules: [
+            module(source), PrototypeDeviceStatusModule.battery(source: statusSource, clock: clock),
+        ])
+        let driver = PrototypePlatformDriver(registry: registry, clock: clock)
+        registry.configure(sensorsBlock: block(.shake), sessionID: 1)
+        driver.subscribe()
+        var delivered: [PlatformEvent] = []
+        driver.onEvent = { delivered.append($0) }
+        await withCheckedContinuation { ready in
+            var resumed = false
+            driver.onState = { snapshot in
+                if !resumed, snapshot["sensors"]?.objectFields?["pitchDeg"] == .number(1) {
+                    resumed = true
+                    ready.resume()
+                }
+            }
+            source.report(.shake, .acceleration(x: 30, y: 0, z: 0))
+            driver.resetSessionEvents()
+            registry.configure(sensorsBlock: block(.orientation), sessionID: 2)
+            driver.subscribe()
+            source.report(.orientation, .values(["pitchDeg": 1]))
+        }
+        XCTAssertTrue(delivered.isEmpty, "The old buffered shake must not reach the new session")
+        XCTAssertEqual(statusSource.starts, 1)
+        XCTAssertEqual(statusSource.stops, 0)
+        driver.stopEvents()
+        XCTAssertEqual(statusSource.stops, 1)
+    }
+
+    func testSharedRegistryPresentationsKeepSensorStateEventsAndTeardownIndependent() async throws {
+        for dismissFirst in [true, false] {
+            let source = SensorSource()
+            let clock = LocationClock()
+            let shared = PrototypePlatformRegistry(modules: [module(source)])
+            let first = shared.forPresentation()
+            let second = shared.forPresentation()
+            let firstSource = try XCTUnwrap(source.presentations.first)
+            let secondSource = try XCTUnwrap(source.presentations.last)
+            XCTAssertFalse(firstSource === secondSource)
+            let firstDriver = PrototypePlatformDriver(registry: first, clock: clock)
+            let secondDriver = PrototypePlatformDriver(registry: second, clock: clock)
+            firstDriver.subscribe()
+            first.configure(sensorsBlock: block(.steps, .shake), sessionID: 1)
+            firstSource.report(.steps, .values(["steps": 4]))
+            let stops = firstSource.stops
+            secondDriver.subscribe()
+            second.configure(sensorsBlock: block(.orientation), sessionID: 1)
+            XCTAssertEqual(firstSource.stops, stops, "Showing B must not restart A")
+            XCTAssertNotNil(firstSource.handlers[.steps])
+            let firstStream = try XCTUnwrap(first.modules["sensors"]).events
+            let secondStream = try XCTUnwrap(second.modules["sensors"]).events
+            firstSource.report(.shake, .acceleration(x: 30, y: 0, z: 0))
+            secondSource.report(.orientation, .values(["pitchDeg": 8]))
+            XCTAssertEqual(first.snapshot["sensors"]?.objectFields?["steps"], .number(4))
+            XCTAssertNil(first.snapshot["sensors"]?.objectFields?["pitchDeg"])
+            XCTAssertNil(second.snapshot["sensors"]?.objectFields?["steps"])
+            let firstEvents = await bufferedEvents(firstStream)
+            let secondEvents = await bufferedEvents(secondStream)
+            XCTAssertEqual(firstEvents, [PlatformEvent(event: "sensors.shake", data: .object([:]))])
+            XCTAssertEqual(secondEvents, [.stateRefresh("sensors")])
+            if dismissFirst {
+                first.configure(sensorsBlock: nil)
+                firstDriver.stopEvents()
+                secondSource.report(.orientation, .values(["rollDeg": 9]))
+                XCTAssertEqual(second.snapshot["sensors"]?.objectFields?["rollDeg"], .number(9))
+                secondDriver.stopEvents()
+            } else {
+                second.configure(sensorsBlock: nil)
+                secondDriver.stopEvents()
+                firstSource.report(.steps, .values(["steps": 5]))
+                XCTAssertEqual(first.snapshot["sensors"]?.objectFields?["steps"], .number(5))
+                firstDriver.stopEvents()
+            }
+            XCTAssertTrue(firstSource.handlers.isEmpty)
+            XCTAssertTrue(secondSource.handlers.isEmpty)
+        }
     }
 
     func testContinuousKeysHaveIndependentWindowsAndIgnoreInvalidOrForeignValues() {

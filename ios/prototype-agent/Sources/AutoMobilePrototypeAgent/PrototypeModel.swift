@@ -374,7 +374,7 @@
             storage: PrototypeStorageCoordinator? = nil,
             registry: PrototypePlatformRegistry = .system
         ) {
-            platformRegistry = registry
+            platformRegistry = registry.forPresentation()
             self.clock = clock
             self.mode = mode
             self.storage = storage
@@ -446,6 +446,11 @@
             // Stored values replace the spec's for the keys it lists before the first draw, and emit
             // nothing (#12526); the session only receives the result.
             let prepared = storage?.prepare(spec)
+            // Drop buffered location/sensor events from the old session while keeping global and
+            // host-supplied streams alive. New state must be seeded before the first draw.
+            platformDriver.resetSessionEvents()
+            platformRegistry.configure(locationBlock: (prepared?.spec ?? spec).locationBlock)
+            platformRegistry.configure(sensorsBlock: (prepared?.spec ?? spec).sensorsBlock, sessionID: showRevision + 1)
             let seeded: PrototypeSpec
             do { seeded = try (prepared?.spec ?? spec).replacingPlatform(
                 platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }
@@ -469,11 +474,8 @@
                 onEvent?(event.wireObject(timestamp: timestamp))
             }
             platformDriver.perform(platformCommands)
-            // Keep consuming the module stream for the model lifetime: cancelling an AsyncStream
-            // iterator terminates it. Hidden sessions drop events; the next show seeds fresh state.
+            // A fresh stream cannot deliver the previous session's buffered shake/location events.
             platformDriver.subscribe()
-            platformRegistry.configure(locationBlock: seeded.locationBlock)
-            platformRegistry.configure(sensorsBlock: seeded.sensorsBlock)
             deviceState.reset()
             if let lastDeviceState { updateDeviceState(lastDeviceState) }
             timers.perform(timerCommands)

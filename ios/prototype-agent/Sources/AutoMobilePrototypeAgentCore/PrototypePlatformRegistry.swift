@@ -86,14 +86,23 @@ public final class PrototypePlatformRegistry {
 
     let modules: [String: any PrototypePlatformModule]
     private var observers = 0
+    private let parent: PrototypePlatformRegistry?
+    private let presentationModules: [any PrototypePlatformModule]
 
-    func retainSources() { observers += 1 }
+    func retainSources() {
+        observers += 1
+        parent?.retainSources()
+    }
 
     func releaseSources() {
         guard observers > 0 else { return }
         observers -= 1
-        // The system registry is shared by presentations; only the final observer tears it down.
-        if observers == 0 { modules.values.forEach { $0.stop() } }
+        if observers == 0 {
+            if parent == nil { modules.values.forEach { $0.stop() } }
+            else { presentationModules.forEach { $0.stop() } }
+        }
+        // Global status streams outlive any one presentation; scoped streams stop independently.
+        parent?.releaseSources()
     }
 
     public init(
@@ -106,6 +115,37 @@ public final class PrototypePlatformRegistry {
             accepted[module.name] = module
         }
         self.modules = accepted
+        parent = nil
+        presentationModules = []
+    }
+
+    private init(
+        modules: [String: any PrototypePlatformModule],
+        parent: PrototypePlatformRegistry,
+        presentationModules: [any PrototypePlatformModule]
+    ) {
+        self.modules = modules
+        self.parent = parent
+        self.presentationModules = presentationModules
+    }
+
+    /// A model owns this registry's snapshots and streams for its lifetime. Read-only device status
+    /// remains global; authored sensor/location configuration and pending calls are presentation-local.
+    func forPresentation() -> PrototypePlatformRegistry {
+        if let parent { return parent.forPresentation() }
+        var scoped = modules
+        var owned: [any PrototypePlatformModule] = []
+        if let sensors = modules["sensors"] as? PrototypeSensorsModule {
+            let module = sensors.forPresentation()
+            scoped[module.name] = module
+            owned.append(module)
+        }
+        if let location = modules["location"] as? PrototypeLocationModule {
+            let module = location.forPresentation()
+            scoped[module.name] = module
+            owned.append(module)
+        }
+        return PrototypePlatformRegistry(modules: scoped, parent: self, presentationModules: owned)
     }
 
     public func configure(locationBlock: JSONValue?) {
@@ -113,7 +153,13 @@ public final class PrototypePlatformRegistry {
     }
 
     public func configure(sensorsBlock: JSONValue?) {
-        modules["sensors"]?.configure(root: sensorsBlock)
+        configure(sensorsBlock: sensorsBlock, sessionID: 0)
+    }
+
+    func configure(sensorsBlock: JSONValue?, sessionID: Int = 0) {
+        if let sensors = modules["sensors"] as? PrototypeSensorsModule {
+            sensors.configure(root: sensorsBlock, sessionID: sessionID)
+        } else { modules["sensors"]?.configure(root: sensorsBlock) }
     }
 
     public var capabilities: [String] { Set(modules.values.map(\.capability)).sorted() }

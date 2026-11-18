@@ -48,7 +48,7 @@ final class PrototypeRemoteImagesTests: XCTestCase {
                     var assets: Set<String> = []
                     decoded.root.collectAssets(into: &assets)
                     XCTAssertEqual(assets, ["loading"])
-                    XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(
+                    XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(
                         data: data,
                         supportedCapabilities: Set(PrototypeAgentProtocol.advertisedCapabilities())
                     ))
@@ -86,15 +86,15 @@ final class PrototypeRemoteImagesTests: XCTestCase {
         XCTAssertEqual(PrototypePlatformValidator.placeholders("{data:/photos/a}{platform:/device/os}"), ["/device/os"])
     }
 
-    func testRemoteImagesAreNotAdvertised() {
+    func testRemoteImagesAreAdvertised() {
         struct OS: OSVersionProvider { let majorVersion: Int }
         for version in [17, 18, 26] {
-            XCTAssertFalse(
+            XCTAssertTrue(
                 PrototypeAgentProtocol.advertisedCapabilities(os: OS(majorVersion: version))
                     .contains(PrototypeRemoteImages.capability)
             )
         }
-        XCTAssertFalse(AutoMobilePrototypeCapabilities.supported.contains(PrototypeRemoteImages.capability))
+        XCTAssertTrue(AutoMobilePrototypeCapabilities.supported.contains(PrototypeRemoteImages.capability))
     }
 
     func testCanonicalLimits() throws {

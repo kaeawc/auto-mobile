@@ -9,6 +9,7 @@
     @Observable
     final class PrototypeModel {
         @ObservationIgnored private(set) var session = PrototypeSession()
+        var remoteImages = PrototypeRemoteImageLoader.shared
         var nativeZoomStacks: Set<String> = []
         var design: PrototypeDesign { spec?.theme?.design ?? .platform }
         let iconMotionActivity = PrototypeIconMotionActivity()

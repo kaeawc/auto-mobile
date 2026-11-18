@@ -132,7 +132,10 @@ describe("Android artifact policy", () => {
 
   test("a missing allowlisted permission also fails (equality, not subset)", async () => {
     const runner = androidRunner("protoviewer-release", (manifest) =>
-      manifest.replace(/ *E: uses-permission \(line=13\)\n.*\n/, ""),
+      manifest.replace(
+        / *E: uses-permission \(line=\d+\)\n.*"android.permission.ACCESS_LOCAL_NETWORK".*\n/,
+        "",
+      ),
     );
     const failures = await androidFailures(runner);
     expect(failures[0].message).toContain("missing: android.permission.ACCESS_LOCAL_NETWORK");

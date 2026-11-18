@@ -210,6 +210,7 @@ export class ScrollUntilVisible {
       hierarchy,
       element,
       direction,
+      platform: this.deps.device.platform,
       parser: this.parser,
       scrollsInDirection: (candidate, dir) => this.autoTarget.scrollsInDirection(candidate, dir),
     });

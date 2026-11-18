@@ -142,6 +142,22 @@
             streamArbiter.stopUpdates(using: manager)
         }
 
+        func stop() {
+            update = nil
+            authorizationChangeHandler = nil
+            let authorizations = authorizationWaiters
+            let fixes = fixWaiters
+            let accuracies = accuracyWaiters
+            authorizationWaiters.removeAll()
+            fixWaiters.removeAll()
+            accuracyWaiters.removeAll()
+            accuracyRequest = nil
+            streamArbiter.stop(using: manager)
+            authorizations.values.forEach { $0.resume() }
+            fixes.values.forEach { $0.resume(throwing: CancellationError()) }
+            accuracies.values.forEach { $0.resume(returning: false) }
+        }
+
         func locationManagerDidChangeAuthorization(_: CLLocationManager) {
             guard authorization != .notDetermined else { return }
             let waiters = authorizationWaiters

@@ -49,7 +49,7 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
     private var values: [String: JSONValue] = [:]
     private(set) var observation: Task<Void, Never>?
     private var generation = 0
-    private var requestSequence = 0
+    private var permissionSequences: [String: Int] = [:]
     private var nextRequest = 0
     private var pending: (id: Int, continuation: CheckedContinuation<PlatformCallResult, Never>)?
     private(set) var requestTask: Task<Void, Never>?
@@ -123,23 +123,22 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
         let session = generation
         let changes = source.changes
         observation = Task { [weak self, source] in
-            guard let sequence = self?.requestSequence else { return }
+            guard let sequence = self?.permissionSequences["notifications", default: 0] else { return }
             let initial = await source.status()
             guard let self, !Task.isCancelled, session == generation else { return }
-            if sequence == requestSequence { initialize(initial) }
+            if sequence == permissionSequences["notifications", default: 0] { initialize(initial) }
             for await _ in changes {
                 guard !Task.isCancelled, session == generation else { return }
-                let sequence = requestSequence
+                let sequence = permissionSequences["notifications", default: 0]
                 let state = await source.status()
                 guard !Task.isCancelled, session == generation else { return }
-                guard sequence == requestSequence else { continue }
+                guard sequence == permissionSequences["notifications", default: 0] else { continue }
                 publish("notifications", state)
             }
         }
     }
 
     private func initialize(_ state: PrototypePermissionState) {
-        guard values["notifications"] == nil else { return }
         // The framework reads asynchronously. The first reading is a baseline, not a change.
         values["notifications"] = .string(state.rawValue)
         subscribers.values.forEach { $0.yield(.stateRefresh(name)) }
@@ -164,7 +163,7 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
             case .cancelled: return .failure(.cancelled, "Permission request cancelled")
             case .platformError: return .failure(.platformError, "Permission request failed")
             }
-            requestSequence += 1
+            permissionSequences[name, default: 0] += 1
             publish(name, state)
             results[name] = .string(state.rawValue)
         }
@@ -174,7 +173,11 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
     private func notificationRequest(id: Int) async -> PrototypePermissionOutcome {
         let current = await source.status()
         guard active(id) else { return .cancelled }
-        initialize(current)
+        if values["notifications"] == nil {
+            // A request can establish the baseline before the initial read, even if prompting fails.
+            permissionSequences["notifications", default: 0] += 1
+            initialize(current)
+        }
         return current == .notDetermined ? await source.request() : .status(current)
     }
 

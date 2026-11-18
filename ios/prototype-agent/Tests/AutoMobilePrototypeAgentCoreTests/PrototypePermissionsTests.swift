@@ -249,15 +249,21 @@ final class PrototypePermissionsTests: XCTestCase {
         let oldRead = try XCTUnwrap(source.statusWaiter)
         source.statusWaiter = nil
         module.stop()
-        source.holdStatus = false
-        source.current = .denied
-        let restarted = module.events
+        // Keep the new baseline pending so it cannot mask a stale write from the stopped task.
+        let restarted: AsyncStream<PlatformEvent> = await withCheckedContinuation { ready in
+            let stream = module.events
+            source.read = { ready.resume(returning: stream) }
+        }
+        source.read = nil
+        let newRead = try XCTUnwrap(source.statusWaiter)
+        source.statusWaiter = nil
         var next = restarted.makeAsyncIterator()
-        let baseline = await next.next()
-        XCTAssertEqual(baseline, .stateRefresh("permissions"))
-        XCTAssertEqual(module.state["notifications"], .string("denied"))
         oldRead.resume(returning: .granted)
         await oldObservation.value
+        XCTAssertNil(module.state["notifications"])
+        newRead.resume(returning: .denied)
+        let baseline = await next.next()
+        XCTAssertEqual(baseline, .stateRefresh("permissions"))
         XCTAssertEqual(module.state["notifications"], .string("denied"))
         module.stop()
         var restartedEvents: [PlatformEvent] = []
@@ -274,9 +280,11 @@ final class PrototypePermissionsTests: XCTestCase {
     }
 
     func testRequestResultSupersedesEarlierReadsButKeepsLaterSettingsChanges() async throws {
-        for initial in [true, false] {
+        let scenarios: [(initial: Bool, granted: Bool)] = [(true, true), (false, true), (true, false)]
+        for (initial, granted) in scenarios {
             let source = PermissionTestSource()
             source.holdStatus = initial
+            if !granted { source.outcome = .platformError }
             let module = PrototypePermissionsModule(source: source)
             let stream: AsyncStream<PlatformEvent> = await withCheckedContinuation { ready in
                 let stream = module.events
@@ -298,17 +306,23 @@ final class PrototypePermissionsTests: XCTestCase {
             source.statusWaiter = nil
             source.holdStatus = false
             let actual = await module.call(call())
-            XCTAssertEqual(actual, result(["notifications": .granted]))
-            XCTAssertEqual(module.state["notifications"], .string("granted"))
+            let expectedState = JSONValue.string(granted ? "granted" : "notDetermined")
+            if granted {
+                XCTAssertEqual(actual, result(["notifications": .granted]))
+            } else {
+                XCTAssertEqual(actual, .failure(.platformError, "Permission request failed"))
+            }
+            XCTAssertEqual(module.state["notifications"], expectedState)
             // Starting the next read proves the observation has processed the stale result.
             source.holdStatus = true
             await withCheckedContinuation { (ready: CheckedContinuation<Void, Never>) in
                 source.read = { ready.resume() }
-                staleRead.resume(returning: .notDetermined)
+                // For the initial read, the sequence guard must prevent reinitializing the baseline.
+                staleRead.resume(returning: .limited)
                 source.continuation?.yield(())
             }
             source.read = nil
-            XCTAssertEqual(module.state["notifications"], .string("granted"))
+            XCTAssertEqual(module.state["notifications"], expectedState)
             let settingsRead = try XCTUnwrap(source.statusWaiter)
             source.statusWaiter = nil
             settingsRead.resume(returning: .denied)
@@ -319,9 +333,69 @@ final class PrototypePermissionsTests: XCTestCase {
                     if state == .string("denied") { break }
                 }
             }
-            XCTAssertEqual(changes, [.string("granted"), .string("denied")])
+            XCTAssertEqual(changes, granted ? [.string("granted"), .string("denied")] : [.string("denied")])
             XCTAssertEqual(module.state["notifications"], .string("denied"))
             module.stop()
+        }
+    }
+
+    func testCameraRequestPreservesPendingNotificationReads() async throws {
+        for initial in [true, false] {
+            let source = PermissionTestSource()
+            source.current = .limited
+            source.holdStatus = initial
+            let module = PrototypePermissionsModule(source: source)
+            let registry = PrototypePlatformRegistry(modules: [module])
+            let stream: AsyncStream<PlatformEvent> = await withCheckedContinuation { ready in
+                let stream = module.events
+                source.read = { ready.resume(returning: stream) }
+            }
+            source.read = nil
+            var events = stream.makeAsyncIterator()
+            if !initial {
+                let baseline = await events.next()
+                XCTAssertEqual(baseline, .stateRefresh("permissions"))
+                source.holdStatus = true
+                await withCheckedContinuation { (ready: CheckedContinuation<Void, Never>) in
+                    source.read = { ready.resume() }
+                    source.continuation?.yield(())
+                }
+                source.read = nil
+            }
+            let heldRead = try XCTUnwrap(source.statusWaiter)
+            source.statusWaiter = nil
+            let actual = await module.call(call(["camera"]))
+            XCTAssertEqual(actual, result(["camera": .unavailable]))
+            // The next status read is a barrier: the held result has been processed before asserting.
+            await withCheckedContinuation { (ready: CheckedContinuation<Void, Never>) in
+                source.read = { ready.resume() }
+                heldRead.resume(returning: .denied)
+                source.continuation?.yield(())
+            }
+            source.read = nil
+            XCTAssertEqual(registry.snapshot["permissions"]?.objectFields, [
+                "notifications": .string("denied"), "camera": .string("unavailable"),
+            ])
+            XCTAssertEqual(source.requests, 0)
+            let barrierRead = try XCTUnwrap(source.statusWaiter)
+            source.statusWaiter = nil
+            let observation = try XCTUnwrap(module.observation)
+            module.stop()
+            barrierRead.resume(returning: .denied)
+            await observation.value
+            var remaining: [PlatformEvent] = []
+            while let event = await events.next() {
+                remaining.append(event)
+            }
+            let camera = PlatformEvent(event: "permissions.changed", data: .object([
+                "name": .string("camera"), "state": .string("unavailable"),
+            ]))
+            let notification = initial ? PlatformEvent.stateRefresh("permissions") : PlatformEvent(
+                event: "permissions.changed", data: .object([
+                    "name": .string("notifications"), "state": .string("denied"),
+                ])
+            )
+            XCTAssertEqual(remaining, [camera, notification])
         }
     }
 

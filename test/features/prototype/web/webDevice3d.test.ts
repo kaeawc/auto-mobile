@@ -17,6 +17,9 @@ import {
   prototypeWebOrbitKey,
   prototypeWebPose,
   prototypeWebPostureAt,
+  prototypeWebReflowPosture,
+  prototypeWeb3dLayoutReflow,
+  type PrototypeWebReflowSelect,
 } from "../../../../src/features/prototype/web/webDevice3d";
 import { toHtml } from "../../../../src/features/prototype/web/webNodes";
 import {
@@ -101,6 +104,92 @@ describe("prototype web 3D pose rules (#16458)", () => {
   test("a tie keeps the posture listed first, and no postures shows none", () => {
     expect(prototypeWebPostureAt(45, BOOK_POSTURES)).toBe("closed");
     expect(prototypeWebPostureAt(90, [])).toBeUndefined();
+  });
+
+  test("a fold reflows to a posture view the page has and does not show (#16458)", () => {
+    const views = ["opened", "half_opened", "closed"];
+    expect(prototypeWebReflowPosture("half_opened", "opened", views)).toBe("half_opened");
+    expect(prototypeWebReflowPosture("opened", "half_opened", views)).toBe("opened");
+    expect(prototypeWebReflowPosture("opened", "opened", views)).toBeUndefined();
+    expect(prototypeWebReflowPosture("tent", "opened", views)).toBeUndefined();
+    expect(prototypeWebReflowPosture(undefined, "opened", views)).toBeUndefined();
+  });
+
+  test("shutting never reflows to the cover panel's closed view", () => {
+    expect(prototypeWebReflowPosture("closed", "half_opened", ["half_opened", "closed"])).toBe(
+      undefined,
+    );
+  });
+
+  test("the reflow rule is self-contained, as the inlined runtime needs", () => {
+    const inlined = new Function(`return (${prototypeWebReflowPosture.toString()})`)() as (
+      ...args: Parameters<typeof prototypeWebReflowPosture>
+    ) => string | undefined;
+    expect(inlined("half_opened", "opened", ["half_opened"])).toBe("half_opened");
+  });
+
+  test("a reflow chooses the posture with the framing kept, and leaving restores posture and screen", () => {
+    const changes: string[] = [];
+    /** A fake 2D select that records each change and whether framing was kept. */
+    const select = (name: string, value: string, values: string[]): PrototypeWebReflowSelect => {
+      const fake: PrototypeWebReflowSelect = {
+        value,
+        options: values.map((option) => ({ value: option })),
+        dataset: {},
+        dispatchEvent: () => {
+          const kept = fake.dataset.keepFraming === undefined ? "" : " (kept)";
+          changes.push(`${name}=${fake.value}${kept}`);
+          return true;
+        },
+      };
+      return fake;
+    };
+    const postures = select("posture", "opened", ["opened", "half_opened", "closed"]);
+    const screens = select("screen", "detail", ["home", "detail"]);
+    const reflow = prototypeWeb3dLayoutReflow(
+      {
+        querySelector: (selector) =>
+          selector.includes("layout-posture")
+            ? postures
+            : selector.includes("screen")
+              ? screens
+              : null,
+      },
+      prototypeWebReflowPosture,
+    );
+    reflow.enter("opened");
+    reflow.reflow("opened");
+    reflow.reflow("half_opened");
+    // The half_opened stack has no detail screen, so the 2D runtime moved it to the start.
+    screens.value = "home";
+    reflow.reflow("closed");
+    reflow.leave();
+    expect(changes).toEqual([
+      "posture=half_opened (kept)",
+      "posture=opened (kept)",
+      "screen=detail (kept)",
+    ]);
+    expect(postures.dataset.keepFraming).toBeUndefined();
+  });
+
+  test("leaving does not choose a screen the restored posture no longer offers", () => {
+    const changes: string[] = [];
+    const fake = (value: string, values: string[]): PrototypeWebReflowSelect => ({
+      value,
+      options: values.map((option) => ({ value: option })),
+      dataset: {},
+      dispatchEvent: () => changes.push(value) > 0,
+    });
+    // Entered on detail; the restored posture's stack offers only home now.
+    const screens = fake("detail", ["home"]);
+    const reflow = prototypeWeb3dLayoutReflow(
+      { querySelector: (selector) => (selector.includes("screen") ? screens : null) },
+      prototypeWebReflowPosture,
+    );
+    reflow.enter(undefined);
+    screens.value = "home";
+    reflow.leave();
+    expect(changes).toEqual([]);
   });
 
   test("arrow keys orbit by 5°, 15° with Shift; other keys do nothing", () => {

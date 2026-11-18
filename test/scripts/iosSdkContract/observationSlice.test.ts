@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import capturedObservation from "../../fixtures/ios-contract/observation-localbuild3.json";
 import type {
   ObservationHostAction,
@@ -6,6 +7,8 @@ import type {
 } from "../../../scripts/ios/sdk-contract/manifest";
 import {
   OBSERVATION_STEPS,
+  SDK_BRIDGE_READY_WAIT_MS,
+  waitForSdkBridge,
   TYPED_TEXT,
   judgeObservationCases,
   type ToolOutcome,
@@ -210,5 +213,78 @@ describe("observation slice (#5164 phase B)", () => {
     expect(judgeObservationCases(noLog, healthyOutcomes())).toEqual([
       expect.objectContaining({ boundary: "fixture-host" }),
     ]);
+  });
+});
+
+describe("SDK bridge readiness", () => {
+  test("the budget exceeds both negative discovery caches", () => {
+    expect(SDK_BRIDGE_READY_WAIT_MS).toBeGreaterThan(35_000);
+  });
+
+  for (const terminal of [
+    { result: { backend: "sdk" } },
+    { error: "multi_scene: multiple connected scenes" },
+  ] satisfies ToolOutcome[]) {
+    test(`waits through 34 seconds of cached fallback for ${terminal.error ?? "sdk"}`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const outcome = await waitForSdkBridge({
+        invoke: async () => (timer.now() < 34_000 ? { result: { backend: "xctest" } } : terminal),
+        timer,
+        pollMs: 1_000,
+        waitMs: SDK_BRIDGE_READY_WAIT_MS,
+        stopOnError: true,
+      });
+      expect(outcome).toBe(terminal);
+      expect(timer.now()).toBe(34_000);
+    });
+
+    test(`immediate ${terminal.error ?? "sdk"} does not sleep`, async () => {
+      const timer = new FakeTimer();
+      expect(
+        await waitForSdkBridge({
+          invoke: async () => terminal,
+          timer,
+          pollMs: 1_000,
+          waitMs: SDK_BRIDGE_READY_WAIT_MS,
+          stopOnError: true,
+        }),
+      ).toBe(terminal);
+      expect(timer.getSleepCallCount()).toBe(0);
+    });
+  }
+
+  test("never-ready returns the last outcome at the deadline", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let calls = 0;
+    let last: ToolOutcome = {};
+    const outcome = await waitForSdkBridge({
+      invoke: async () => {
+        last = { result: { backend: "xctest", attempt: ++calls } };
+        return last;
+      },
+      timer,
+      pollMs: 1_000,
+      waitMs: 3_000,
+      stopOnError: true,
+    });
+    expect(outcome).toBe(last);
+    expect(calls).toBe(4);
+    expect(timer.now()).toBe(3_000);
+  });
+
+  test("observation continues retrying errors until SDK is ready", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const outcome = await waitForSdkBridge({
+      invoke: async () => (timer.now() === 0 ? { error: "bridge unavailable" } : sdkTap),
+      timer,
+      pollMs: 1_000,
+      waitMs: SDK_BRIDGE_READY_WAIT_MS,
+      stopOnError: false,
+    });
+    expect(outcome).toBe(sdkTap);
+    expect(timer.getSleepHistory()).toEqual([1_000]);
   });
 });

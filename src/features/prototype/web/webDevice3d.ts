@@ -101,6 +101,22 @@ export function prototypeWebPostureAt(
   return best?.posture;
 }
 
+/**
+ * The posture view a fold reflows the page to when the hinge's layout changes, as a device
+ * reflows when its device state does: `layout` when the page has a view for it and does not show
+ * it already, else none. `closed` is never reflowed to, since its cover-panel view is not the
+ * folding inner panel, so shutting keeps the last open layout. Self-contained: it is inlined.
+ */
+export function prototypeWebReflowPosture(
+  layout: string | undefined,
+  shown: string,
+  available: readonly string[],
+): string | undefined {
+  return layout && layout !== shown && layout !== "closed" && available.includes(layout)
+    ? layout
+    : undefined;
+}
+
 /** What the page tells the 3D runtime about the frame's fold; undefined for a frame that does not fold. */
 export interface PrototypeWebFold {
   /** The hinge line in portrait; `at` is the hinge's centre as a share of its panel. */
@@ -429,18 +445,90 @@ export function prototypeWeb3dDragOrbit(
   viewport.addEventListener("pointercancel", end);
 }
 
+/** What the reflow needs of a 2D `<select>`: a page's select, or a fake under test. */
+export interface PrototypeWebReflowSelect {
+  value: string;
+  readonly options: ArrayLike<{ readonly value: string }>;
+  readonly dataset: DOMStringMap;
+  dispatchEvent(event: Event): boolean;
+}
+
+/**
+ * Reflow during a fold: a crossed posture threshold chooses that posture's view in the 2D
+ * runtime's posture select, which shows it, and the 3D runtime wraps it like any newly shown view.
+ * The select carries `data-keep-framing` while its change runs, so the 2D runtime keeps the user's
+ * zoom and pan rather than refitting. Leaving 3D restores the posture and screen 2D showed before entering, since a
+ * posture without that screen moved the screen to its stack's start. Self-contained: it is inlined.
+ */
+export function prototypeWeb3dLayoutReflow(
+  doc: { querySelector(selector: string): PrototypeWebReflowSelect | null },
+  reflowPosture: typeof prototypeWebReflowPosture,
+) {
+  const select = doc.querySelector('[data-control="layout-posture"]');
+  const screen = doc.querySelector('[data-control="screen"]');
+  const layouts = Array.from(select?.options ?? []).map((option) => option.value);
+  // The 2D posture and screen shown when 3D was entered, and the layout the hinge last showed.
+  let entry: { layout?: string; screen?: string } = {};
+  let last: string | undefined;
+  const choose = (target: PrototypeWebReflowSelect | null, value: string | undefined) => {
+    const offered = Array.from(target?.options ?? []).some((option) => option.value === value);
+    if (target && value !== undefined && offered && target.value !== value) {
+      target.value = value;
+      target.dataset.keepFraming = "";
+      target.dispatchEvent(new Event("change"));
+      delete target.dataset.keepFraming;
+    }
+  };
+  return {
+    /** The device starts flat, so a hinge already moved off flat reflows on the first pose. */
+    enter(flat: string | undefined) {
+      entry = { layout: select?.value, screen: screen?.value };
+      last = flat;
+    },
+    reflow(layout: string | undefined) {
+      if (select && layout !== last) {
+        last = layout;
+        choose(select, reflowPosture(layout, select.value, layouts));
+      }
+    },
+    leave() {
+      choose(select, entry.layout);
+      choose(screen, entry.screen);
+    },
+  };
+}
+
+/** Arrow keys on the focused viewport orbit while 3D is on. Self-contained: it is inlined. */
+export function prototypeWeb3dKeyOrbit(
+  viewport: HTMLElement,
+  isOn: () => boolean,
+  orbitBy: (delta: PrototypeWebOrbit) => void,
+  orbitKey: typeof prototypeWebOrbitKey,
+): void {
+  viewport.addEventListener("keydown", (event) => {
+    const move = orbitKey(event.key, event.shiftKey);
+    if (isOn() && move) {
+      event.preventDefault();
+      orbitBy(move);
+    }
+  });
+}
+
 /** The pure rules and DOM helpers the 3D runtime is handed as arguments, so they are unit-tested and inlined with it. */
 export interface PrototypeWeb3dRules {
   readonly pose: typeof prototypeWebPose;
   readonly orbit: typeof prototypeWebOrbit;
   readonly hingeLine: typeof prototypeWebHingeLine;
   readonly postureAt: typeof prototypeWebPostureAt;
+  readonly reflowPosture: typeof prototypeWebReflowPosture;
+  readonly layoutReflow: typeof prototypeWeb3dLayoutReflow;
   readonly wrap: typeof prototypeWeb3dWrap;
   readonly leaves: typeof prototypeWebLeaves;
   readonly unwrap: typeof prototypeWeb3dUnwrap;
   readonly bodyHinge: typeof prototypeWeb3dBodyHinge;
   readonly orbitKey: typeof prototypeWebOrbitKey;
   readonly dragOrbit: typeof prototypeWeb3dDragOrbit;
+  readonly keyOrbit: typeof prototypeWeb3dKeyOrbit;
   readonly flat: PrototypeWebOrbit;
   readonly start: PrototypeWebOrbit;
 }
@@ -490,6 +578,7 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
     hingeDegrees: Number(option.dataset.hinge),
   }));
   const hinge = rules.bodyHinge(doc.body);
+  const layoutReflow = rules.layoutReflow(doc, rules.reflowPosture);
   const state = { on: false, orbit: rules.flat, hinge: 180 };
   // Every visible view is wrapped: a rotate keeps the outgoing view shown through its turn while
   // the incoming one turns in, and both need their back plates and face rules (#16769).
@@ -538,10 +627,11 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
     doc.body.toggleAttribute("data-device3d", wraps.length > 0);
   };
   const apply = () => {
+    const layout = hinge && rules.postureAt(state.hinge, postures);
     if (state.on) {
       wrap();
+      layoutReflow.reflow(layout);
     }
-    const layout = hinge && rules.postureAt(state.hinge, postures);
     if (status) {
       status.textContent = state.on && layout ? `Hinge ${state.hinge}°, ${layout} layout` : "";
     }
@@ -563,6 +653,7 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
     }
   };
   const enter = () => {
+    layoutReflow.enter(rules.postureAt(180, postures));
     state.on = true;
     toggle.setAttribute("aria-pressed", "true");
     state.orbit = rules.flat;
@@ -581,6 +672,7 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
     state.orbit = rules.flat;
     moveHinge(180);
     apply();
+    layoutReflow.leave();
     const leaving = orbitBox;
     const exit = ++exits;
     const done = () => {
@@ -622,13 +714,7 @@ export function prototypeWeb3dRuntime(rules: PrototypeWeb3dRules): void {
     });
     apply();
   };
-  viewport.addEventListener("keydown", (event) => {
-    const move = rules.orbitKey(event.key, event.shiftKey);
-    if (state.on && move) {
-      event.preventDefault();
-      orbitBy(move);
-    }
-  });
+  rules.keyOrbit(viewport, () => state.on, orbitBy, rules.orbitKey);
   // Shift-drag orbits in 3D; a plain drag still reaches the 2D runtime's pan.
   rules.dragOrbit(viewport, () => state.on, orbitBy);
   // The 2D controls switch views: a hidden view is unwrapped, and in 3D a newly shown one is

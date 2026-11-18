@@ -130,7 +130,11 @@ The root `location` block `{accuracy?, minIntervalMs?, minDistanceM?}` subscribe
 It keeps `/platform/location/current` current while the prototype is shown and raises `location.updated` for each
 write. It writes at most once per `minIntervalMs` (whole milliseconds, 1000 to one hour) and only after moving
 `minDistanceM` (0 to 100 km). Like the call, the block needs `location` in both `requires.platform` and
-`requires.permissions`. The runtime delivers no updates in the background. No production runtime advertises the module.
+`requires.permissions`. The runtime delivers no updates in the background. CtrlProxy advertises it using platform
+`LocationManager`, without Play services. Android ProtoViewer and disposable-app registration are still owed.
+The iOS agent and ProtoViewer register the location module using `CLLocationManager`. It checks the host's
+usage description before accessing location and prompts only for an explicit request. The shared registry
+stops updates and pending requests when its final observer releases it; a later presentation can restart updates.
 
 The delivered `location.updated` event carries only `{accuracyM, approximate}`, so coordinates reach the host
 only when the spec emits them or writes them into `/data`. The reference the runtimes copy is `prototypeLocationEventSummary`

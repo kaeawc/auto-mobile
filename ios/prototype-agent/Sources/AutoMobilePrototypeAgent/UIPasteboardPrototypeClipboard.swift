@@ -38,7 +38,8 @@
                     PrototypeDeviceStatusModule.battery(source: UIDeviceBatterySource()),
                     PrototypeDeviceStatusModule.power(source: ProcessInfoPowerSource()),
                     PrototypeDeviceStatusModule.audio(source: AVAudioSessionAudioSource()),
-                ]
+                ],
+                location: CLLocationManagerPrototypeLocationSource()
             )
     }
 #endif

@@ -79,12 +79,33 @@ async function open(browser: Browser, html: string): Promise<{ page: Page; error
   return { page, errors };
 }
 
+/** A page with `<automobile-prototype>` from the element build, its spec in a child JSON script. */
+function elementPage(element: string, drawn: unknown): string {
+  const source = Buffer.from(element).toString("base64");
+  // `<` is escaped so the spec cannot close the script element it sits in.
+  const json = JSON.stringify(drawn).replaceAll("<", "\\u003c");
+  return `<!doctype html><meta charset="utf-8"><style>body{margin:0}automobile-prototype{width:${VIEWPORT.width}px;height:${VIEWPORT.height}px}</style>
+<automobile-prototype id="host" mode="light" zoom="1" controls="none"><script type="application/json">${json}</script></automobile-prototype>
+<script type="module">
+const host = document.getElementById("host");
+const events = [];
+for (const type of ["render", "orientationchange", "error"]) {
+  host.addEventListener(type, (event) => events.push([type, event.detail.orientation ?? event.detail.code ?? event.detail.unsupportedNodes.length]));
+}
+globalThis.__events = events;
+await import("data:text/javascript;base64,${source}");
+globalThis.__element = { events, state: host.state, defined: customElements.get("automobile-prototype") !== undefined };
+</script>`;
+}
+
 describeBrowser("prototype-web library build in headless Chromium (#16453)", () => {
   let browser: Browser;
   let library: string;
+  let element: string;
 
   beforeAll(async () => {
     library = await buildPrototypeWebLibrary();
+    element = await buildPrototypeWebLibrary(undefined, "element");
     browser = await chromium.launch();
   }, LAUNCH_TIMEOUT_MS);
 
@@ -184,6 +205,142 @@ describeBrowser("prototype-web library build in headless Chromium (#16453)", () 
         expect(drawn.events).toEqual([["error", "missingCapabilities"]]);
         const alert = await page.locator("#host [data-error]").textContent();
         expect(alert).toContain("prototype_from_the_future_v1");
+        expect(errors).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  test(
+    "<automobile-prototype> draws its child script's spec as mount does, and follows attributes",
+    async () => {
+      const mounted = await open(browser, libraryPage(library, spec));
+      const custom = await open(browser, elementPage(element, spec));
+      try {
+        await mounted.page.waitForFunction(
+          () => Reflect.get(globalThis, "__library") !== undefined,
+        );
+        await custom.page.waitForFunction(() => Reflect.get(globalThis, "__element") !== undefined);
+        const shown = await custom.page.evaluate(() => Reflect.get(globalThis, "__element"));
+        expect(shown.defined).toBe(true);
+        expect(shown.events).toEqual([["render", stillOf(spec).unsupportedNodes.length]]);
+        expect(shown.state).toMatchObject({ frame: "pixel-9", orientation: "portrait", scale: 1 });
+
+        const expected = await mounted.page.screenshot({ animations: "disabled", caret: "hide" });
+        const actual = await custom.page.screenshot({ animations: "disabled", caret: "hide" });
+        mkdirSync(OUT_DIR, { recursive: true });
+        writeFileSync(join(OUT_DIR, "library-element--reference-checkout.png"), actual);
+        const diff = diffPngs(expected, actual, { perPixelDelta: 0.1, pixelRatio: 0.001 });
+        expect(diff === "size_mismatch" ? "size_mismatch" : diff.match).toBe(true);
+
+        const rotated = await custom.page.evaluate(() => {
+          document.getElementById("host")!.setAttribute("orientation", "landscape");
+          return Reflect.get(globalThis, "__events").slice(-2);
+        });
+        expect(rotated).toEqual([
+          ["render", stillOf(spec).unsupportedNodes.length],
+          ["orientationchange", "landscape"],
+        ]);
+        expect({ mounted: mounted.errors, element: custom.errors }).toEqual({
+          mounted: [],
+          element: [],
+        });
+      } finally {
+        await mounted.page.close();
+        await custom.page.close();
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  test(
+    "<automobile-prototype> draws a spec set before the element module loaded",
+    async () => {
+      const source = Buffer.from(element).toString("base64");
+      const html = `<!doctype html><meta charset="utf-8"><automobile-prototype id="host" controls="none"></automobile-prototype>
+<script type="module">
+const host = document.getElementById("host");
+const events = [];
+host.addEventListener("render", () => events.push("render"));
+host.spec = ${JSON.stringify(spec)};
+await import("data:text/javascript;base64,${source}");
+globalThis.__early = { events, state: host.state, own: Object.prototype.hasOwnProperty.call(host, "spec") };
+</script>`;
+      const { page, errors } = await open(browser, html);
+      try {
+        await page.waitForFunction(() => Reflect.get(globalThis, "__early") !== undefined);
+        const early = await page.evaluate(() => Reflect.get(globalThis, "__early"));
+        expect(early.events).toEqual(["render"]);
+        expect(early.own).toBe(false);
+        expect(early.state).toMatchObject({ frame: "pixel-9", orientation: "portrait" });
+        expect(errors).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  test(
+    "<automobile-prototype> draws a JSON script appended after it connected",
+    async () => {
+      const source = Buffer.from(element).toString("base64");
+      const json = JSON.stringify(JSON.stringify(spec));
+      const html = `<!doctype html><meta charset="utf-8">
+<script type="module">
+await import("data:text/javascript;base64,${source}");
+const host = document.createElement("automobile-prototype");
+const events = [];
+host.addEventListener("render", () => events.push("render"));
+document.body.append(host);
+const before = host.state;
+const script = document.createElement("script");
+script.type = "application/json";
+script.textContent = ${json};
+host.append(script);
+await new Promise((resolve) => setTimeout(resolve, 0));
+globalThis.__late = { events, before: before ?? null, state: host.state };
+</script>`;
+      const { page, errors } = await open(browser, html);
+      try {
+        await page.waitForFunction(() => Reflect.get(globalThis, "__late") !== undefined);
+        const late = await page.evaluate(() => Reflect.get(globalThis, "__late"));
+        expect(late.before).toBeNull();
+        expect(late.events).toEqual(["render"]);
+        expect(late.state).toMatchObject({ frame: "pixel-9", orientation: "portrait" });
+        expect(errors).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  test(
+    "<automobile-prototype> reports an invalid JSON script appended after it connected",
+    async () => {
+      const source = Buffer.from(element).toString("base64");
+      const html = `<!doctype html><meta charset="utf-8">
+<script type="module">
+await import("data:text/javascript;base64,${source}");
+const host = document.createElement("automobile-prototype");
+const events = [];
+host.addEventListener("error", (event) => events.push(event.detail.code));
+document.body.append(host);
+const script = document.createElement("script");
+script.type = "application/json";
+script.textContent = "{not json";
+host.append(script);
+await new Promise((resolve) => setTimeout(resolve, 0));
+globalThis.__invalid = { events };
+</script>`;
+      const { page, errors } = await open(browser, html);
+      try {
+        await page.waitForFunction(() => Reflect.get(globalThis, "__invalid") !== undefined);
+        const invalid = await page.evaluate(() => Reflect.get(globalThis, "__invalid"));
+        expect(invalid.events).toEqual(["invalidInput"]);
         expect(errors).toEqual([]);
       } finally {
         await page.close();

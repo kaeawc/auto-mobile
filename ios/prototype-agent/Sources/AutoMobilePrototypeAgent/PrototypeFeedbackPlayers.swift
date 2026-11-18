@@ -60,8 +60,9 @@
     }
 
     extension PrototypePlatformRegistry {
-        /// The feedback, connectivity, device status, links and settings modules the agent and ProtoViewer
-        /// register; none needs a permission, an entitlement or an Info.plist key.
+        /// Production modules for the injected agent and ProtoViewer. Location checks the host's
+        /// usage description before accessing its source and prompts only for an explicit request.
+        /// Device status modules need no permission, entitlement or Info.plist key.
         static func feedbackModules() -> PrototypePlatformRegistry {
             feedbackModules(
                 haptics: UIKitHapticsPlayer(),
@@ -73,7 +74,8 @@
                     PrototypeDeviceStatusModule.battery(source: UIDeviceBatterySource()),
                     PrototypeDeviceStatusModule.power(source: ProcessInfoPowerSource()),
                     PrototypeDeviceStatusModule.audio(source: AVAudioSessionAudioSource()),
-                ]
+                ],
+                location: CLLocationManagerPrototypeLocationSource()
             )
         }
     }

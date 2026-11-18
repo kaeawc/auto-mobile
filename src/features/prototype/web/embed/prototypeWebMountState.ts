@@ -3,6 +3,7 @@ import { prototypeWebZoomScale } from "../webPageRuntime";
 import type { UnsupportedWebNode } from "../webRender";
 import type { StillTextSize } from "../webTextScale";
 import type { PrototypeWebError } from "./prototypeWebInput";
+import type { PrototypeWebFrame } from "./prototypeWebRender";
 
 /** A control `mount` can draw above the frame. */
 export type PrototypeWebControl = "rotate" | "zoom" | "screen";
@@ -51,8 +52,8 @@ export interface PrototypeMountEvents {
 export interface PrototypeMountOptions extends PrototypeMountEvents {
   /** A prototype spec, or an `automobile-prototype-embed` envelope. */
   readonly spec: unknown;
-  /** A device frame id (default `pixel-9`), or `false` for the screen alone. */
-  readonly frame?: string | false;
+  /** A device frame id (default `pixel-9`), a frame object, or `false` for the screen alone. */
+  readonly frame?: string | PrototypeWebFrame | false;
   readonly orientation?: WebOrientation;
   readonly zoom?: PrototypeWebZoom;
   /** `system` (the default) follows `prefers-color-scheme`. */

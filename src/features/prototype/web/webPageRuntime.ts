@@ -459,9 +459,10 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     state.revision = option?.dataset.latest ?? state.revision;
     fitView();
   });
+  // A posture the user picks refits; a 3D fold's reflow marks the select so zoom and pan stay.
   postureSelect?.addEventListener("change", () => {
     state.posture = postureSelect.value;
-    fitView();
+    (postureSelect.dataset.keepFraming === undefined ? fitView : apply)();
   });
   screenSelect?.addEventListener("change", () => {
     state.screen = screenSelect.value;

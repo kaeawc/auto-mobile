@@ -78,7 +78,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_map_maplibre_v1",
             // Contract only; the web view runtimes and the ProtoViewer import rule are owed (#14312).
             "prototype_platform_webview_v1",
-            // Contract only; the location runtimes are owed (#14325, #14326).
+            // Registered by the agent and Viewer registries, not the static list.
             "prototype_platform_location_v1",
             // Contract only; the system media picker and camera runtimes are owed (#14197).
             "prototype_platform_mediaLibrary_v1", "prototype_platform_camera_v1",

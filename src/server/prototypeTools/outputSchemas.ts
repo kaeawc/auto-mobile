@@ -442,6 +442,12 @@ export const prototypeOutputSchema = z.object({
     ),
   cleared: prototypeClearedOutputField,
   fired: z.number().int().min(0).max(10000).optional(),
+  actorSteps: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("simulate advanceTimeMs only: mock backend actor steps applied"),
   transport: z
     .enum(["connection", "system"])
     .optional()

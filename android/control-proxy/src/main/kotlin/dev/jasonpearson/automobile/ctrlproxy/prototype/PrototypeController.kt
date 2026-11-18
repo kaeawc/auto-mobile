@@ -759,8 +759,8 @@ class PrototypeController(
         remove(validated.id)
         put(validated.id, surface)
       }
-    runtime.startPlatformModules()
     if (blocked) runtime.pauseTimers()
+    runtime.startPlatformModules()
     armIdle(runtime)
     runtime.shown(preservingState = preservePages)
     syncAfterChange(runtime)

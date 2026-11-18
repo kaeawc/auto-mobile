@@ -1,3 +1,4 @@
+import type { PrototypeDisposableApps } from "./disposableApps";
 import type { VirtualPrototypeDevice } from "../../features/prototype/headless/VirtualPrototypeDevice";
 import type { PrototypeTestSessionStore } from "../../db/prototypeTestSessionRepository";
 import type { PrototypeChannelExecutor } from "../../features/prototype/PrototypeChannelExecutor";
@@ -98,6 +99,8 @@ export interface PrototypeToolDependencies {
   screenRoundFactory?: ScreenRoundReaderFactory;
   /** The live preview server serve, stop and status use (#17975); defaults to the daemon's. */
   preview?: PrototypePreviewBinding;
+  /** installApp, listApps and uninstallApp (#14184); defaults to the daemon's Android manager. */
+  disposableApps?: PrototypeDisposableApps;
 }
 
 export interface AnchorStage {

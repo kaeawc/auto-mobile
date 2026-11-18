@@ -17,7 +17,7 @@ final class PrototypeEmitContextTests: XCTestCase {
         let contextTruncated: Bool?
     }
 
-    /// A marker-tap fixture: Swift's node model has no `onMarkerTap`, so the spec stays raw JSON.
+    /// A marker-tap fixture retaining authored JSON for direct emit-context validation.
     private struct MarkerTapFixture: Decodable {
         let spec: JSONValue
         let state: [String: JSONValue]

@@ -707,6 +707,51 @@ export const prototypeOutputSchema = z.object({
     .describe(
       "serve, stop and status: the live preview server. status omits it until the first serve of this daemon",
     ),
+  disposableApp: z
+    .object({
+      appId: z.string().describe("Pass to launchApp, terminateApp, observe and uninstallApp"),
+      platform: z.enum(["android", "ios"]),
+      label: z.string(),
+      version: z.string(),
+      expiresAt: z.string().nullable().describe("ISO time it expires; null keeps it"),
+      template: z.string().describe("The smallest template flavor covering the spec's requires"),
+      permissions: z.object({
+        declared: z.array(z.string()),
+        granted: z.array(z.string()),
+        denied: z.array(z.string()),
+      }),
+      updated: z.boolean().describe("true when the slug was already installed and was updated"),
+      launched: z.literal(false),
+    })
+    .optional()
+    .describe("installApp only: the installed disposable app; launch it with launchApp"),
+  disposableApps: z
+    .array(
+      z.object({
+        appId: z.string(),
+        registered: z.boolean().describe("Recorded in this host's disposable app registry"),
+        installed: z.boolean().describe("Present on the device"),
+        expired: z.boolean(),
+        slug: z.string().optional(),
+        label: z.string().optional(),
+        template: z.string().optional(),
+        installedAt: z.string().optional(),
+        expiresAt: z.string().nullable().optional(),
+      }),
+    )
+    .optional()
+    .describe(
+      "listApps only: this host's registry joined with the device's packages under the reserved prefix",
+    ),
+  uninstalled: z
+    .object({
+      removed: z.array(z.object({ appId: z.string(), reason: z.string() })),
+      skipped: z
+        .array(z.object({ appId: z.string(), reason: z.string() }))
+        .describe("Apps left installed, with why (outside the prefix or another signer)"),
+    })
+    .optional()
+    .describe("uninstallApp only: each disposable app removed or left in place"),
   deviceDroppedEvents: z
     .number()
     .int()

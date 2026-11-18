@@ -34,6 +34,11 @@
                 connectivity: NWPathConnectivitySource(),
                 links: UIKitLinkOpener(),
                 settings: UIKitSettingsURLOpener(),
+                deviceStatus: [
+                    PrototypeDeviceStatusModule.battery(source: UIDeviceBatterySource()),
+                    PrototypeDeviceStatusModule.power(source: ProcessInfoPowerSource()),
+                    PrototypeDeviceStatusModule.audio(source: AVAudioSessionAudioSource()),
+                ],
                 location: CLLocationManagerPrototypeLocationSource(),
                 sensors: CoreMotionPrototypeSensorSource()
             )

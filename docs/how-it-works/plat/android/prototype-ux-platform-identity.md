@@ -144,7 +144,9 @@ register and advertise `prototype_platform_location_v1` using platform `Location
 Below API 31 GPS needs fine permission, so a coarse-only grant uses only the network provider and reports
 `unavailable` with reason `disabled` when none exists. Disposable apps do not advertise location. On iOS, the injected
 prototype agent, ProtoViewer and the Viewer app advertise it using `CLLocationManager`, and the runtime asks for
-authorization only on an explicit `location.request`.
+authorization only on an explicit `location.request`. The iOS runtime checks the host's usage description before
+accessing location. The shared registry stops updates and pending requests when its final observer releases it; a
+later presentation can restart updates.
 
 The delivered `location.updated` event carries only `{accuracyM, approximate}`, so coordinates reach the host
 only when the spec emits them or writes them into `/data`. The reference the runtimes copy is `prototypeLocationEventSummary`

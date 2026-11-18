@@ -43,17 +43,31 @@ final class LocationTestSource: PrototypeLocationSource {
     var afterPrompt: PrototypeLocationAuthorization = .authorizedPrecise
     var temporaryGrant = false
     var prompts = 0
+    var holdAuthorization = false
+    var authorizationRequested: (() -> Void)?
+    private var authorizationWaiter: CheckedContinuation<Void, Never>?
     var temporaryPrompts = 0
     var requests: [String] = []
     var distances: [Double] = []
     var updateAccuracies: [String] = []
     var stops = 0
+    var releases = 0
     var failure: PrototypeLocationSourceError?
     var fix = PrototypeLocationFix(latitude: 1, longitude: 2, accuracyM: 3, timestampMs: 0, approximate: false)
     var handler: (@MainActor @Sendable (PrototypeLocationFix) -> Void)?
     var servicesEnabled: Bool { touches += 1; return enabled }
     var authorization: PrototypeLocationAuthorization { touches += 1; return grant }
-    func requestAuthorization() async { touches += 1; prompts += 1; grant = afterPrompt }
+    func requestAuthorization() async {
+        touches += 1
+        prompts += 1
+        if holdAuthorization {
+            await withCheckedContinuation { continuation in
+                authorizationWaiter = continuation
+                authorizationRequested?()
+            }
+        }
+        grant = afterPrompt
+    }
     func requestFix(accuracy: String) async throws -> PrototypeLocationFix {
         touches += 1
         requests.append(accuracy)
@@ -80,6 +94,13 @@ final class LocationTestSource: PrototypeLocationSource {
     }
 
     func stopUpdates() { touches += 1; stops += 1; handler = nil }
+    func stop() {
+        releases += 1
+        handler = nil
+        let waiter = authorizationWaiter
+        authorizationWaiter = nil
+        waiter?.resume()
+    }
     func report(_ fix: PrototypeLocationFix) { handler?(fix) }
 }
 
@@ -96,6 +117,18 @@ private final class LocationRegistryServices: PrototypeHapticsPlayer, PrototypeS
     func open(_: URL) async -> Bool { false }
     func openExternally(_: URL) async -> Bool { false }
     func presentInApp(_: URL) -> Bool { false }
+}
+
+@MainActor
+private final class LocationRegistryStatusSource: PrototypeDeviceStatusSource {
+    var starts = 0
+    var stops = 0
+    func start(_ update: @escaping @MainActor @Sendable ([String: JSONValue]) -> Void) {
+        starts += 1
+        update(["state": .string("unknown")])
+    }
+
+    func stop() { stops += 1 }
 }
 
 @MainActor
@@ -120,7 +153,9 @@ final class PrototypeLocationTests: XCTestCase {
         module.configure(root: .object([:]))
         _ = module.events
         XCTAssertEqual(module.state["current"], .object([:]))
+        module.stop()
         XCTAssertEqual(source.touches, 0)
+        XCTAssertEqual(source.releases, 0)
     }
 
     func testDisabledServices() async {
@@ -272,6 +307,125 @@ final class PrototypeLocationTests: XCTestCase {
         XCTAssertEqual(module.state["current"], third.json)
     }
 
+    func testStopFinishesSubscribersCancelsDebounceAndRestarts() async {
+        let source = LocationTestSource()
+        let clock = LocationClock()
+        let module = module(source, clock: clock)
+        module.stop()
+        XCTAssertEqual(source.stops, 0)
+        XCTAssertEqual(source.releases, 0)
+        module.configure(root: .object([:]))
+        var events = module.events.makeAsyncIterator()
+        var second = module.events.makeAsyncIterator()
+        source.report(source.fix)
+        let moved = PrototypeLocationFix(latitude: 2, longitude: 2, accuracyM: 3, timestampMs: 1, approximate: false)
+        source.report(moved)
+        XCTAssertEqual(clock.live, 1)
+        let lateCallback = source.handler
+        module.stop()
+        module.stop()
+        XCTAssertEqual(source.stops, 1)
+        XCTAssertEqual(source.releases, 1)
+        XCTAssertNil(source.handler)
+        XCTAssertEqual(clock.live, 0)
+        lateCallback?(moved)
+        clock.advance(1000)
+        XCTAssertEqual(module.state["current"], .object([:]))
+        for _ in 0 ..< 2 {
+            let event = await events.next()
+            let other = await second.next()
+            XCTAssertNotNil(event)
+            XCTAssertEqual(event, other)
+        }
+        let end = await events.next()
+        let secondEnd = await second.next()
+        XCTAssertNil(end)
+        XCTAssertNil(secondEnd)
+
+        // A new subscriber reuses the authored block and establishes a fresh delivery baseline.
+        let restarted = module.events
+        XCTAssertEqual(source.distances.count, 2)
+        lateCallback?(moved)
+        XCTAssertEqual(module.state["current"], .object([:]))
+        source.report(source.fix)
+        XCTAssertEqual(module.state["current"], source.fix.json)
+        XCTAssertEqual(clock.live, 0)
+        module.stop()
+        let restartedEvents = await bufferedEvents(restarted)
+        XCTAssertEqual(restartedEvents.count, 2)
+        module.configure(root: .object(["accuracy": .string("approximate")]))
+        XCTAssertEqual(source.distances.count, 3)
+        XCTAssertEqual(source.updateAccuracies.last, "approximate")
+        module.stop()
+        XCTAssertEqual(source.stops, 3)
+        XCTAssertEqual(source.releases, 3)
+    }
+
+    func testStopFinishesUnconfiguredSubscribersWithoutStartingUpdates() async {
+        let source = LocationTestSource()
+        let module = module(source)
+        var events = module.events.makeAsyncIterator()
+        module.stop()
+        module.stop()
+        let end = await events.next()
+        XCTAssertNil(end)
+        XCTAssertTrue(source.distances.isEmpty)
+        XCTAssertEqual(source.releases, 1)
+        XCTAssertEqual(source.prompts, 0)
+    }
+
+    func testStopCancelsRequestWaitingForAuthorizationWithoutRestarting() async {
+        let source = LocationTestSource()
+        source.grant = .notDetermined
+        source.holdAuthorization = true
+        let module = module(source)
+        module.configure(root: .object([:]))
+        var request: Task<PlatformCallResult, Never>?
+        await withCheckedContinuation { ready in
+            source.authorizationRequested = { ready.resume() }
+            request = Task { await module.call(self.call()) }
+        }
+        module.stop()
+        guard let request else { return XCTFail("Expected pending request") }
+        let result = await request.value
+        XCTAssertEqual(result, .failure(.cancelled, "Location request cancelled"))
+        XCTAssertTrue(source.requests.isEmpty)
+        XCTAssertTrue(source.distances.isEmpty)
+        XCTAssertEqual(source.releases, 1)
+    }
+
+    func testSharedRegistryStopsStatusAndLocationOnlyAfterFinalObserver() {
+        let source = LocationTestSource()
+        let status = LocationRegistryStatusSource()
+        let clock = LocationClock()
+        let registry = PrototypePlatformRegistry(modules: [
+            PrototypeDeviceStatusModule.battery(source: status, clock: clock),
+            module(source, clock: clock),
+        ])
+        registry.configure(locationBlock: .object([:]))
+        let first = PrototypePlatformDriver(registry: registry, clock: clock)
+        let second = PrototypePlatformDriver(registry: registry, clock: clock)
+        first.subscribe()
+        first.subscribe()
+        second.subscribe()
+        first.stopEvents()
+        first.stopEvents()
+        XCTAssertEqual(status.stops, 0)
+        XCTAssertEqual(source.stops, 0)
+        second.stopEvents()
+        second.stopEvents()
+        XCTAssertEqual(status.stops, 1)
+        XCTAssertEqual(source.stops, 1)
+        XCTAssertEqual(source.releases, 1)
+        second.subscribe()
+        XCTAssertEqual(status.starts, 2)
+        XCTAssertEqual(source.distances.count, 2)
+        second.stopEvents()
+        XCTAssertEqual(status.stops, 2)
+        XCTAssertEqual(source.stops, 2)
+        XCTAssertEqual(source.releases, 2)
+    }
+
     func testSubscriptionsNeverPromptForAnyAuthorization() {
         let grants: [PrototypeLocationAuthorization] = [
             .notDetermined, .denied, .restricted, .authorizedApproximate, .authorizedPrecise,
@@ -365,17 +519,27 @@ final class PrototypeLocationTests: XCTestCase {
         let source = LocationTestSource()
         for supplied in [false, true] {
             let location: (any PrototypeLocationSource)? = supplied ? source : nil
+            let status = LocationRegistryStatusSource()
+            let deviceStatus: [any PrototypePlatformModule] = [
+                PrototypeDeviceStatusModule.battery(source: status),
+                PrototypeDeviceStatusModule.power(source: status),
+                PrototypeDeviceStatusModule.audio(source: status),
+            ]
             let registries = [
                 PrototypePlatformRegistry.feedbackModules(
                     haptics: services, sound: services, connectivity: services, links: services, settings: services,
-                    bundle: LocationBundle(), location: location
+                    bundle: LocationBundle(), deviceStatus: deviceStatus, location: location
                 ),
                 PrototypePlatformRegistry.systemModules(
                     clipboard: FakePrototypeClipboard(), connectivity: services, links: services, settings: services,
-                    bundle: LocationBundle(), location: location
+                    bundle: LocationBundle(), deviceStatus: deviceStatus, location: location
                 ),
             ]
             for registry in registries {
+                XCTAssertEqual(
+                    Set(registry.modules.keys).intersection(["battery", "power", "audio"]),
+                    Set(["battery", "power", "audio"])
+                )
                 XCTAssertEqual(registry.capabilities.contains("prototype_platform_location_v1"), supplied)
                 registry.configure(locationBlock: .object([:]))
                 registry.configure(locationBlock: nil)

@@ -255,6 +255,7 @@
     "realtime-review-menu-bindings.json",
     "realtime-sse.json",
     "reduced-motion.json",
+    "remote-image.json",
     "repeat-component-labels.json",
     "repeat-exact-node-limit.json",
     "repeat-literal-key.json",
@@ -2105,6 +2106,7 @@
     "strict-gate-prototype_platform_window_controls_v1.json",
     "strict-gate-prototype_reduced_motion_v1.json",
     "strict-gate-prototype_refresh_v1.json",
+    "strict-gate-prototype_remote_image_v1.json",
     "strict-gate-prototype_rich_text_v1.json",
     "strict-gate-prototype_routes_v1.json",
     "strict-gate-prototype_scroll_edge_effect_v1.json",
@@ -3628,6 +3630,7 @@
     "platform-permissions-request.json": [
       "prototype_platform_permissions_v1",
       "prototype_platform_v1"
-    ]
+    ],
+    "remote-image.json": ["prototype_remote_image_v1"]
   }
 }

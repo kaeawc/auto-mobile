@@ -1,3 +1,4 @@
+import { prototypeRemoteImageError } from "./prototypeRemoteImages";
 import { prototypeGlassObjectError } from "./prototypeGlass";
 import { iconNames, prototypeIconNameError } from "./prototypeIconNames";
 import { excludeAccessoryReferences } from "./prototypeBindingValidation";
@@ -856,6 +857,7 @@ function behaviourErrors(
     prototypeRequestsError(context.actions, data.data) ??
     hostVocabularyError(value, context) ??
     prototypeTimersError([...context.actions, ...componentTimers]) ??
+    prototypeRemoteImageError(context.nodes, data.state) ??
     prototypeLoadingStatesError(context.nodes) ??
     prototypeMotionErrors(context.nodes) ??
     prototypeKeyframesError(context.nodes, data) ??

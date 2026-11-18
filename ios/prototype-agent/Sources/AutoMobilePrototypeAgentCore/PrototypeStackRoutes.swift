@@ -334,7 +334,9 @@ enum PrototypeRouteBinder {
 
         private func componentFields(_ value: inout Object, type: String) {
             switch type {
-            case "image": field(&value, "asset")
+            case "image":
+                field(&value, "asset")
+                field(&value, "url")
             case "text":
                 field(&value, "text")
                 object(&value, "linkify") { actions(&$0) }

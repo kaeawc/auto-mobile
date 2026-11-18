@@ -231,7 +231,9 @@ struct PrototypeContractValidator {
             if let overflow = budget.charge(nodes: 1, images: 0) { throw Self.invalid(path, overflow.message) }
             if depth + 1 > PrototypeLimits.maxDepth { throw Self.invalid(path, "Tree depth limit exceeded") }
             let nodeImages: Int = switch node["type"] {
-            case .string("image"): max(1, Self.imageUses(node["asset"]))
+            case .string("image"): (node["url"] == nil ? max(1, Self.imageUses(node["asset"])) : 0) + Self
+                .imageUses(node["placeholder"]?.objectFields?["asset"]) + Self
+                .imageUses(node["error"]?.objectFields?["asset"])
             case .string("videoPlayer"): Self.imageUses(node["poster"])
             default: 0
             }

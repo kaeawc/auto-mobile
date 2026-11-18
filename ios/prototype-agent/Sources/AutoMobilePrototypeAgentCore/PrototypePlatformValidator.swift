@@ -464,7 +464,8 @@ enum PrototypePlatformValidator {
                 guard !opaqueKeys.contains(key) else { continue }
                 let memberPath = PrototypeLimits.dataMemberPath(path, key: key)
                 // A webView url binds placeholders like the host's webView visitor (#16573).
-                let webViewURL = key == "url" && fields["type"] == .string("webView")
+                let webViewURL = key == "url" && [JSONValue.string("webView"), .string("image")]
+                    .contains(fields["type"] ?? .null)
                 if textKeys.contains(key) || webViewURL, case let .string(text) = member {
                     for pointer in placeholders(text) {
                         try read(pointer, path: memberPath, declared: declared)

@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypeShader
 import dev.jasonpearson.automobile.protocol.PrototypeTabBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeTextNode
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * What a nav item draws, decided without Compose or Android. An item's `image` takes precedence;
@@ -71,7 +72,12 @@ fun prototypeAssetReferences(root: PrototypeNode): List<String> {
     prototypeNodeShaders(node).forEach { ids += it.asset }
     when (node) {
       // A {light, dark} asset pair (#11218) references both ids, whichever mode is drawn.
-      is PrototypeImageNode -> ids += node.asset.values
+      is PrototypeImageNode -> {
+        ids += node.asset?.values.orEmpty()
+        for (fallback in listOf(node.placeholder, node.error)) {
+          (fallback?.get("asset") as? JsonPrimitive)?.content?.let(ids::add)
+        }
+      }
       is PrototypeTabBarNode -> node.items.flatMapTo(ids) { it.image?.values.orEmpty() }
       is PrototypeBottomNavNode -> node.items.flatMapTo(ids) { it.image?.values.orEmpty() }
       else -> Unit

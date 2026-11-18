@@ -213,23 +213,34 @@ enum PrototypeDataText {
         return value.displayString
     }
 
+    static func stateKeys(_ text: String) -> [String] {
+        var keys: [String] = []
+        scan(Array(text.utf16), prefixOverride: "", valid: PrototypeRepeat.isFieldName) { _, _, key, _ in
+            keys.append(key)
+            return true
+        }
+        return keys
+    }
+
     /// Returning false stops the shared scanner before any oversized binding is constructed.
     private static func scan(
         _ units: [UInt16],
         includePlatform: Bool = false,
+        prefixOverride: String? = nil,
+        valid: (String) -> Bool = PrototypeDataPointer.isValid,
         visit: (Int, Int, String, Bool) -> Bool
     ) {
         var cursor = 0
         while cursor < units.count {
             let isPlatform = includePlatform && units.dropFirst(cursor + 1).starts(with: Array("platform:".utf16))
-            let prefix = Array((isPlatform ? "platform:" : "data:").utf16)
+            let prefix = Array((prefixOverride ?? (isPlatform ? "platform:" : "data:")).utf16)
             let end = min(units.count, cursor + 2 + prefix.count + PrototypeLimits.maxDataPointerLength)
             if units[cursor] == 123,
                units[(cursor + 1) ..< end].starts(with: prefix),
                let close = units[(cursor + 1) ..< end].firstIndex(of: 125)
             {
                 let pointer = String(decoding: units[(cursor + 1 + prefix.count) ..< close], as: UTF16.self)
-                if PrototypeDataPointer.isValid(pointer) {
+                if valid(pointer) {
                     guard visit(cursor, close, pointer, isPlatform) else { return }
                     cursor = close + 1
                     continue

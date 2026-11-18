@@ -71,6 +71,9 @@ enum PrototypeStrictCapabilities {
             if PrototypeStylePolishV2.themedBorder(fields) { need("theme_modes") }
             if PrototypeStylePolishV2.required(fields) { result.insert(PrototypeStylePolishV2.capability) }
             if fields["semantics"] != nil { need("semantics") }
+            if fields["type"] == .string("image"),
+               ["url", "placeholder", "error", "crossfade", "via"]
+               .contains(where: { fields[$0] != nil }) { need("remote_image") }
             if fields["onAppear"] != nil { need("timers") }
             if fields["scrollLinked"] != nil || fields["scrollTransition"] != nil { need("scroll_motion") }
             if PrototypeMotionV3.required(fields) { result.insert(PrototypeMotionV3.capability) }

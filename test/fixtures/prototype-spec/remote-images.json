@@ -1,0 +1,771 @@
+[
+  {
+    "name": "asset-only",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "asset": "photo"
+      }
+    }
+  },
+  {
+    "name": "static",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.com/a",
+        "placeholder": {
+          "asset": "loading"
+        },
+        "error": {
+          "color": "#123456"
+        },
+        "crossfade": true,
+        "via": "host"
+      }
+    }
+  },
+  {
+    "name": "loopback",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "http://127.0.0.1:8080/a"
+      }
+    }
+  },
+  {
+    "name": "state",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.com/{photo}"
+      },
+      "state": {
+        "photo": "a"
+      }
+    }
+  },
+  {
+    "name": "data",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.com/{data:/photo}"
+      },
+      "data": {
+        "photo": "a"
+      }
+    }
+  },
+  {
+    "name": "both",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "asset": "a",
+        "url": "https://example.com/a"
+      }
+    }
+  },
+  {
+    "name": "neither",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image"
+      }
+    }
+  },
+  {
+    "name": "ftp",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "ftp://example.com/a"
+      }
+    }
+  },
+  {
+    "name": "file",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "file://example.com/a"
+      }
+    }
+  },
+  {
+    "name": "javascript",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "javascript://example.com/a"
+      }
+    }
+  },
+  {
+    "name": "data",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "data://example.com/a"
+      }
+    }
+  },
+  {
+    "name": "userinfo",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://user:password@example.com/a"
+      }
+    }
+  },
+  {
+    "name": "cleartext",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "http://example.com/a"
+      }
+    }
+  },
+  {
+    "name": "oversized",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.com/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    }
+  },
+  {
+    "name": "unbound",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "column",
+        "repeat": {
+          "as": "item",
+          "items": [
+            {
+              "present": "x"
+            }
+          ]
+        },
+        "children": [
+          {
+            "type": "image",
+            "url": "https://example.com/{item.missing}"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "backslash",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.com\\evil/a"
+      }
+    }
+  },
+  {
+    "name": "whitespace",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.com/ a"
+      }
+    }
+  },
+  {
+    "name": "authority-template",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://{host}/a"
+      },
+      "state": {
+        "host": "example.com"
+      }
+    }
+  },
+  {
+    "name": "bound-host",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.com/{photo}",
+        "via": "host"
+      },
+      "state": {
+        "photo": "a"
+      }
+    }
+  },
+  {
+    "name": "request-oddity-alternateIpv4",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "http://0177.1/"
+      }
+    }
+  },
+  {
+    "name": "request-oddity-backslash",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https:\\\\example.com/x"
+      }
+    }
+  },
+  {
+    "name": "request-oddity-ipv6",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "http://[::1]/"
+      }
+    }
+  },
+  {
+    "name": "request-oddity-uppercase",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "HTTPS://example.com/"
+      }
+    }
+  },
+  {
+    "name": "request-oddity-userinfo",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://user:pass@example.com/x"
+      }
+    }
+  },
+  {
+    "name": "request-oddity-whitespace",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": " \thttps://example.com/\n"
+      }
+    }
+  },
+  {
+    "name": "request-oddity-templatedHost",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://{host}/"
+      },
+      "state": {
+        "host": "example.com"
+      }
+    }
+  },
+  {
+    "name": "whole-data",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "{data:/photo}"
+      },
+      "data": {
+        "photo": "https://example.com/a"
+      }
+    }
+  },
+  {
+    "name": "whole-state",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "{photo}"
+      },
+      "state": {
+        "photo": "https://example.com/a"
+      }
+    }
+  },
+  {
+    "name": "whole-repeat",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "column",
+        "repeat": {
+          "as": "item",
+          "items": [
+            {
+              "url": "https://example.com/a"
+            }
+          ]
+        },
+        "children": [
+          {
+            "type": "image",
+            "url": "{item.url}"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "bound-cleartext",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "state": {
+        "photo": "a"
+      },
+      "root": {
+        "type": "image",
+        "url": "http://example.com/{photo}"
+      }
+    }
+  },
+  {
+    "name": "bound-userinfo",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "state": {
+        "photo": "a"
+      },
+      "root": {
+        "type": "image",
+        "url": "https://user@example.com/{photo}"
+      }
+    }
+  },
+  {
+    "name": "fallback-both",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "state": {
+        "photo": "a"
+      },
+      "root": {
+        "type": "image",
+        "asset": "a",
+        "placeholder": {
+          "asset": "x",
+          "color": "#123456"
+        }
+      }
+    }
+  },
+  {
+    "name": "fallback-empty",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "state": {
+        "photo": "a"
+      },
+      "root": {
+        "type": "image",
+        "asset": "a",
+        "error": {}
+      }
+    }
+  },
+  {
+    "name": "route",
+    "valid": true,
+    "spec": {
+      "id": "routes",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "stack",
+        "id": "nav",
+        "start": "home",
+        "screens": {
+          "home": {
+            "type": "button",
+            "label": "Open",
+            "onTap": [
+              {
+                "type": "push",
+                "stack": "nav",
+                "screen": "detail",
+                "params": {
+                  "postId": "p1",
+                  "count": 1,
+                  "flag": true
+                }
+              },
+              {
+                "type": "replace",
+                "stack": "nav",
+                "screen": "home"
+              },
+              {
+                "type": "setStack",
+                "stack": "nav",
+                "path": [
+                  {
+                    "screen": "home"
+                  },
+                  {
+                    "screen": "detail",
+                    "params": {
+                      "postId": "p1",
+                      "count": 2,
+                      "flag": false
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "detail": {
+            "type": "image",
+            "url": "https://example.com/{route.postId}"
+          }
+        },
+        "routes": {
+          "home": {
+            "onEnter": [
+              {
+                "type": "emit",
+                "name": "home"
+              }
+            ]
+          },
+          "detail": {
+            "params": {
+              "postId": "string",
+              "count": "number",
+              "flag": "boolean"
+            },
+            "onEnter": [
+              {
+                "type": "emit",
+                "name": "entered"
+              }
+            ],
+            "onBack": [
+              {
+                "type": "pop",
+                "stack": "nav",
+                "force": true
+              }
+            ]
+          }
+        }
+      },
+      "storage": {
+        "version": 1,
+        "keys": ["stack:nav"]
+      }
+    }
+  },
+  {
+    "name": "unbound-state",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "{missing}"
+      }
+    }
+  },
+  {
+    "name": "fallback-role",
+    "valid": true,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.com/a",
+        "placeholder": {
+          "color": "surface"
+        }
+      }
+    }
+  },
+  {
+    "name": "unicode-space",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.com/\ufeffa"
+      }
+    }
+  },
+  {
+    "name": "fallback-asset-pair",
+    "valid": false,
+    "spec": {
+      "id": "remote",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "image",
+        "url": "https://example.com/a",
+        "error": {
+          "asset": {
+            "light": "a",
+            "dark": "b"
+          }
+        }
+      }
+    }
+  }
+]

@@ -69,6 +69,8 @@ export const nodeModelOptions = {
     },
     // A one-key media source union (#14253); the contract walk validates it.
     "videoPlayer.source": { kotlin: "JsonObject" },
+    "image.placeholder": { kotlin: "JsonObject" },
+    "image.error": { kotlin: "JsonObject" },
     // `true`, `false` or `"whenVisible"` (#14253).
     "videoPlayer.autoplay": { kotlin: "JsonElement" },
     // A literal camera or a `{data}` pointer to one (#14309); the contract walk validates it.

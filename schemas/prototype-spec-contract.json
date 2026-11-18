@@ -107,7 +107,13 @@
     "MAX_PROTOTYPE_NOTIFICATION_BYTES": 5120,
     "MAX_PROTOTYPE_NOTIFICATION_BADGE": 9999,
     "MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE": 24,
-    "MAX_PROTOTYPE_NOTIFICATION_UPDATES_PER_SECOND": 4
+    "MAX_PROTOTYPE_NOTIFICATION_UPDATES_PER_SECOND": 4,
+    "MAX_PROTOTYPE_REMOTE_IMAGE_URL_LENGTH": 2048,
+    "MAX_PROTOTYPE_REMOTE_IMAGE_DOWNLOAD_BYTES": 8388608,
+    "PROTOTYPE_REMOTE_IMAGE_ANDROID_HEAP_DIVISOR": 8,
+    "MAX_PROTOTYPE_REMOTE_IMAGE_IOS_MEMORY_BYTES": 67108864,
+    "MAX_PROTOTYPE_REMOTE_IMAGE_DISK_BYTES": 134217728,
+    "MAX_PROTOTYPE_REMOTE_IMAGE_LOADS": 6
   },
   "definitions": {
     "authAccount": {
@@ -5504,7 +5510,7 @@
                 "kind": "ref",
                 "name": "imageAsset"
               },
-              "optional": false
+              "optional": true
             },
             "contentScale": {
               "rule": {
@@ -5561,8 +5567,92 @@
                 "name": "loop"
               },
               "optional": true
+            },
+            "url": {
+              "rule": {
+                "kind": "string",
+                "min": 1,
+                "max": 2048
+              },
+              "optional": true
+            },
+            "crossfade": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "via": {
+              "rule": {
+                "kind": "enum",
+                "values": ["device", "host"]
+              },
+              "optional": true
+            },
+            "placeholder": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "asset": {
+                        "rule": {
+                          "kind": "string"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "color": {
+                        "rule": {
+                          "kind": "ref",
+                          "name": "colorToken"
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "error": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "asset": {
+                        "rule": {
+                          "kind": "string"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "color": {
+                        "rule": {
+                          "kind": "ref",
+                          "name": "colorToken"
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
             }
-          }
+          },
+          "exactlyOne": ["asset", "url"]
         },
         "icon": {
           "kind": "object",

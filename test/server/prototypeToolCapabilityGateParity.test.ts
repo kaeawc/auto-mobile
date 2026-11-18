@@ -63,6 +63,11 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     name: "home",
     effect: { type: "bounce" },
   }),
+  prototype_remote_image_v1: fixture({
+    type: "image",
+    id: "label",
+    url: "https://example.com/a",
+  }),
   prototype_style_polish_v2: fixture({ ...label, style: { cornerStyle: "continuous" } }),
   prototype_tooltip_v1: fixture({
     type: "column",

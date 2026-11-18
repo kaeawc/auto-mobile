@@ -301,6 +301,7 @@ internal object PrototypeStrictPolicy {
   // Each feature applies when its node type has any of the listed fields.
   private val typeFieldFeatures =
     mapOf(
+      "image" to mapOf("remote_image" to listOf("url", "placeholder", "error", "crossfade", "via")),
       "text" to mapOf("rich_text" to listOf("spans")),
       "textField" to
         mapOf(

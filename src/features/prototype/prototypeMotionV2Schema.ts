@@ -3,7 +3,7 @@ import { z } from "zod/v3";
 import { prototypeAnimateError } from "./prototypeMotionTokens";
 import { prototypeKeyframesSchema } from "./prototypeKeyframes";
 import { prototypeTransitionSchema } from "./prototypeChoreographySchema";
-import { imageAssetSchema } from "./prototypePresentationSchemas";
+import { colorTokenSchema, imageAssetSchema } from "./prototypePresentationSchemas";
 
 /** Every node's `transition` and `animate` (#14208), spread into the common node shape. */
 export const prototypeMotionNodeShape = {
@@ -30,7 +30,22 @@ export const prototypeMotionNodeShape = {
 /** The `image` node's own fields, with motion v2's `zoomable` (#14208). */
 export const prototypeImageShape = {
   type: z.enum(["image"]),
-  asset: imageAssetSchema,
+  asset: imageAssetSchema.optional(),
+  url: z.string().min(1).max(2048).optional(),
+  placeholder: z
+    .union([
+      z.object({ asset: z.string().min(1) }).strict(),
+      z.object({ color: colorTokenSchema }).strict(),
+    ])
+    .optional(),
+  error: z
+    .union([
+      z.object({ asset: z.string().min(1) }).strict(),
+      z.object({ color: colorTokenSchema }).strict(),
+    ])
+    .optional(),
+  crossfade: z.boolean().optional(),
+  via: z.enum(["device", "host"]).optional(),
   contentScale: z.enum(["fit", "crop", "fill"]).optional(),
   zoomable: z
     .object({ maxScale: z.number().finite().min(1).max(8) })

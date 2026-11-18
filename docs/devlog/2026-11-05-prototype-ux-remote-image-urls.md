@@ -31,5 +31,5 @@ Owner decision of 2026-10-31 (#14180):
 
 ## Consequences
 
-Not implemented when recorded: `image` accepts only `asset`. The `url` form, its validation and the
-egress behaviour are owed to the contract and the runtimes.
+The remote-image contract, validators and capability gate landed in #14181. URL loading, host
+fetch-and-upload, caches, egress enforcement and image-state reporting remain runtime work.

@@ -57,6 +57,17 @@ class HostPrototypeHttpClientTest {
     (response as PrototypeRequestResponse.Failed).error
 
   @Test
+  fun `uploads fail with device guidance without sending a host frame`() = runTest {
+    val result = client().execute(request().copy(
+      body = null,
+      uploadBody = PrototypeUploadBody.Form(mapOf("q" to "cats")),
+    ))
+    assertEquals(PrototypeRequestErrorCode.INVALID_REQUEST, failure(result).code)
+    assertTrue(failure(result).message.contains("device"))
+    assertTrue(frames.isEmpty())
+  }
+
+  @Test
   fun `the request frame carries everything the host needs`() = runTest {
     val client = client()
     val pending = async { client.execute(request()) }

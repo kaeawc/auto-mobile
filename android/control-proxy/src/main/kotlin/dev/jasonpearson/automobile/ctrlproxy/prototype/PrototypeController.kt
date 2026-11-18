@@ -218,6 +218,7 @@ class PrototypeController(
   private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
   /** Device-compiled uniform declarations, checked even for hidden/styleWhen nodes. */
   private val validateShaders: (PrototypeNode) -> Unit = {},
+  private val uploadAssets: PrototypeAssetSource? = null,
   private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
     dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
 ) {
@@ -679,6 +680,7 @@ class PrototypeController(
           if (preservePages) previous?.runtime?.current?.stacks.orEmpty() else emptyMap(),
         storage = opened.session,
         httpClients = httpClients,
+        uploadAssets = uploadAssets,
         platform = platform,
         platformLimiter = platformLimiter,
         requestScope = requestScope,

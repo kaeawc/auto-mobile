@@ -35,6 +35,36 @@ class PrototypeEmbeddedRoutingTest {
   }
 
   @Test
+  fun `embedded facade preserves upload body and progress callback`() = runTest {
+    val upload = PrototypeUploadBody.Form(mapOf("q" to "cats"))
+    val progress = mutableListOf<Int>()
+    val device = dev.jasonpearson.automobile.prototype.PrototypeHttpClient { request ->
+      assertSame(upload, request.uploadBody)
+      request.onUploadProgress!!.invoke(45)
+      PrototypeRequestResponse.Received(200, emptyMap(), null, 0)
+    }
+    dev.jasonpearson.automobile.prototype.PrototypeNetwork(device).clients().device.execute(
+      PrototypeHttpRequest(
+        "upload", "proto", "POST", "https://example.test", emptyMap(), null, 1000,
+        uploadBody = upload,
+        onUploadProgress = { progress += it },
+      ),
+    )
+    assertEquals(listOf(45), progress)
+  }
+
+  @Test
+  fun `embedded file resolver does not read the image byte resolver`() {
+    val file = File("unused-upload-file")
+    val assets = dev.jasonpearson.automobile.prototype.PrototypeAssets(
+      image = { error("Uploads must not read an entire asset") },
+    ).withUploadFiles { id -> if (id == "hero") file else null }
+    val source = dev.jasonpearson.automobile.prototype.EmbeddedPrototypeAssets(assets)
+    assertEquals(file, source.file("hero"))
+    assertNull(source.file("unknown"))
+  }
+
+  @Test
   fun `embedded routes reuse the exact supplied client instances`() {
     for (case in cases) {
       val name = case.getValue("name").jsonPrimitive.content

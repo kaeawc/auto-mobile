@@ -8,6 +8,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
+import dev.jasonpearson.automobile.protocol.PrototypeBundleSecretWarning
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.junit.Assert.*
 import org.junit.Before
@@ -101,6 +102,46 @@ class ImportActivityTest {
   }
 
   @Test
+  fun bundleCodeRejectionShowsTranslatedReasonNotTheToken() {
+    val rejected = LibraryImportResult.Rejected("bundle", "crc_mismatch")
+    compose.setContent { ImportStatus(importStatusText(null, rejected)) {} }
+    val context = ApplicationProvider.getApplicationContext<ProtoViewerApplication>()
+    compose
+      .onNodeWithText(
+        context.getString(
+          R.string.import_rejected,
+          "bundle",
+          context.getString(R.string.import_reason_integrity),
+        ),
+      )
+      .assertIsDisplayed()
+    compose.onNodeWithText("crc_mismatch", substring = true).assertDoesNotExist()
+  }
+
+  @Test
+  fun shareWarningsRenderAsTranslatedLines() {
+    val exported =
+      LibraryShareExport(
+        "p.zip",
+        listOf(
+          PrototypeBundleSecretWarning("credential_header", "$.root.headers.Authorization"),
+          PrototypeBundleSecretWarning("private_host", "$.root.url"),
+        ),
+      )
+    compose.setContent { ShareWarningDialog(exported, send = {}, cancel = {}) }
+    val context = ApplicationProvider.getApplicationContext<ProtoViewerApplication>()
+    compose
+      .onNodeWithText(
+        context.getString(
+          R.string.share_warning_credential_header,
+          "$.root.headers.Authorization",
+        ) + "\n" + context.getString(R.string.share_warning_private_host, "$.root.url"),
+      )
+      .assertIsDisplayed()
+    compose.onNodeWithText("credential_header", substring = true).assertDoesNotExist()
+  }
+
+  @Test
   fun ordinaryRejectionDoesNotOfferUpdate() {
     val rejected = LibraryImportResult.Rejected("spec.json", "Invalid")
     compose.setContent {
@@ -108,7 +149,13 @@ class ImportActivityTest {
     }
     val context = ApplicationProvider.getApplicationContext<ProtoViewerApplication>()
     compose
-      .onNodeWithText(context.getString(R.string.import_rejected, rejected.path, rejected.reason))
+      .onNodeWithText(
+        context.getString(
+          R.string.import_rejected,
+          rejected.path,
+          context.getString(R.string.import_reason_invalid),
+        ),
+      )
       .assertIsDisplayed()
     compose.onNodeWithText(context.getString(R.string.update_protoviewer)).assertDoesNotExist()
   }

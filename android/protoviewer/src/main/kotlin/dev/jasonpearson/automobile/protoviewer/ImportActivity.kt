@@ -146,7 +146,12 @@ internal fun importStatusText(shareFailure: Int?, failed: LibraryImportResult.Re
           R.string.import_requires_capabilities,
           failed.missingCapabilities.joinToString(", "),
         )
-    failed != null -> stringResource(R.string.import_rejected, failed.path, failed.reason)
+    failed != null ->
+      stringResource(
+        R.string.import_rejected,
+        failed.path,
+        stringResource(importRejectionReason(failed)),
+      )
     else -> stringResource(R.string.loading)
   }
 

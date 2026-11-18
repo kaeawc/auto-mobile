@@ -1747,8 +1747,12 @@ class PrototypeRuntime(
       else entry
     }
 
-  private fun canCarrySecure(action: PrototypeRequestAction): Boolean =
-    action.allowSecureInRequest == true || current.spec.storage?.secure.orEmpty().isNotEmpty()
+  /**
+   * Whether a response may echo a secure value, so its headers are dropped. Only a spec with secure
+   * keys holds any; `allowSecureInRequest` on a spec without them sends nothing secure.
+   */
+  private fun canCarrySecure(): Boolean =
+    current.spec.storage?.secure.orEmpty().isNotEmpty()
 
   /**
    * A `request` action: resolves its bindings against the committed state and data, moves
@@ -1778,7 +1782,7 @@ class PrototypeRuntime(
         action.onError,
         eventData,
         action.append,
-        canCarrySecure(action),
+        canCarrySecure(),
         action.progressKey,
       )
     }

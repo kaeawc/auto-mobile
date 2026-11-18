@@ -120,6 +120,76 @@ class PrototypeSecureValueStoreTest {
   }
 }
 
+/** AndroidKeyStore entries in memory; [corrupt] aliases throw like a restored, unusable entry. */
+private class FakeKeystoreEntries : PrototypeKeystoreEntries {
+  val keys = mutableMapOf<String, SecretKey>()
+  val corrupt = mutableSetOf<String>()
+  val deleted = mutableListOf<String>()
+  private var generated = 0
+
+  override fun get(alias: String): SecretKey? {
+    if (alias in corrupt) throw java.security.UnrecoverableKeyException("entry ${alias}")
+    return keys[alias]
+  }
+
+  override fun generate(alias: String): SecretKey =
+    SecretKeySpec(ByteArray(32) { (++generated).toByte() }, "AES").also { keys[alias] = it }
+
+  override fun delete(alias: String) {
+    deleted += alias
+    corrupt.remove(alias)
+    keys.remove(alias)
+  }
+}
+
+class AndroidPrototypeSecureKeyProviderTest {
+  @get:Rule val temp = TemporaryFolder()
+  private val entries = FakeKeystoreEntries()
+  private val warnings = mutableListOf<String>()
+  private val provider =
+    AndroidPrototypeSecureKeyProvider(
+      entries,
+      PrototypeStorageWarn { message, error ->
+        warnings += message
+        assertNull(error)
+      },
+    )
+
+  private fun store() =
+    FilePrototypeSecureValueStore(
+      temp.root,
+      PrototypeSecureCipher(provider),
+      PrototypeStorageWarn { message, _ -> warnings += message },
+    )
+
+  private val values =
+    PrototypeStoredValues(1, mapOf("state:token" to JsonPrimitive("private-token-14321")))
+
+  @Test
+  fun `an unrecoverable key is deleted and recreated and its old ciphertext is unreadable`() {
+    store().save("vault", values)
+    val alias = entries.keys.keys.single()
+    entries.corrupt += alias
+
+    assertNull(store().load("vault"))
+    assertEquals(listOf(alias), entries.deleted)
+    assertFalse(alias in entries.keys)
+
+    entries.corrupt += alias
+    store().save("vault", values.copy(version = 2))
+    assertEquals(2, store().load("vault")!!.version)
+    assertEquals(
+      listOf(
+        "Secure storage key was unrecoverable; stored secure values were discarded",
+        "Secure prototype values are unavailable",
+        "Secure storage key was unrecoverable; stored secure values were discarded",
+      ),
+      warnings,
+    )
+    assertFalse(warnings.any { it.contains(alias) || it.contains("private-token") })
+  }
+}
+
 internal class FakeSecureKeys(private val sharedKey: SecretKey? = null) :
   PrototypeSecureKeyProvider {
   val values = mutableMapOf<String, SecretKey>()

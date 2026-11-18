@@ -226,6 +226,21 @@ class PrototypeSecureStorageTest {
   }
 
   @Test
+  fun `report reflects live secure values inside the debounce window`() = runTest {
+    val original = spec()
+    val session = persistence().open(original).session!!
+    session.record(changed(original))
+    // The debounced write has not run: nothing is on disk yet, but the report is live.
+    assertTrue(secure.values.isEmpty())
+    assertEquals(
+      PrototypeStorageSecureMetadata("state:token", true, SECRET.length),
+      session.report().secure!!.first(),
+    )
+    session.record(changed(original).copy(state = original.state))
+    assertFalse(session.report().secure!!.first().present)
+  }
+
+  @Test
   fun `failed clear rewrites secure values after deletion removes them`() = runTest {
     val original = spec()
     val session = persistence().open(original).session!!
@@ -237,7 +252,11 @@ class PrototypeSecureStorageTest {
       fail("Expected secure deletion to fail")
     } catch (_: IOException) {}
     assertTrue(secure.values.isEmpty())
-    assertTrue(session.report().secure!!.all { !it.present && it.bytes == 0 })
+    // The live value was restored and is owed a write, so the report still lists it.
+    assertEquals(
+      PrototypeStorageSecureMetadata("state:token", true, SECRET.length),
+      session.report().secure!!.first(),
+    )
     session.flush()
     assertEquals(JsonPrimitive(SECRET), secure.values.getValue(original.id).values["state:token"])
     assertEquals(
@@ -491,7 +510,7 @@ class PrototypeSecureStorageTest {
       runCurrent()
       assertTrue(write.isCancelled)
       assertEquals(JsonPrimitive("B"), secure.values.getValue("vault").values["state:token"])
-      assertFalse(session.report().secure!!.first().present)
+      assertTrue(session.report().secure!!.first().present)
       secure.afterSave = {}
       session.record(changed(original, "A"))
       session.flush()

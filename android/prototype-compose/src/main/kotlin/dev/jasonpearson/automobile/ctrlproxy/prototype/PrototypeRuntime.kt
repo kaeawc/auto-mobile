@@ -378,6 +378,7 @@ class PrototypeRuntime(
     platform.registry.modules.map {
       when (it) {
         is PrototypeBiometricModule -> it.session()
+        is PrototypePermissionsModule -> it.session(requestScope)
         is PrototypeLocationModule -> it.session(requestScope)
         is PrototypeSensorsModule -> it.session(requestScope)
         else -> it
@@ -596,6 +597,7 @@ class PrototypeRuntime(
   private fun allocateRevision(): Long = nextRevision?.invoke() ?: (current.revision + 1L)
 
   fun close() {
+    platformRegistry.modules.filterIsInstance<PrototypePermissionsModule>().forEach { it.detach() }
     locationModules().forEach { it.detach() }
     sensorsModules().forEach { it.detach() }
     platformDispatcher.close()
@@ -1436,6 +1438,13 @@ class PrototypeRuntime(
           invalid = resolved.error.message
           break
         }
+      }
+    }
+    if (invalid == null && action.call == "permissions.request") {
+      val declared = current.spec.requires?.permissions.orEmpty().map { it.name }.toSet()
+      val names = args["names"] as? JsonArray
+      if (names.orEmpty().any { (it as? JsonPrimitive)?.content !in declared }) {
+        invalid = "Permission is not declared in requires.permissions"
       }
     }
     // Resolve against the state before loading, matching request actions (including self-bindings).

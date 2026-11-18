@@ -431,3 +431,21 @@ it advertises \`mediaLibrary\` without the capture capability.
   }
 }
 \`\`\``;
+
+/** Disposable prototype apps (#14184), appended to the saved prototypes section. */
+export const GUIDE_DISPOSABLE_APPS = `
+
+## Disposable apps
+
+\`installApp\` (Android) installs \`spec\` or \`specPath\` as its own app:
+\`app: {slug, label, icon?: {backgroundColor}, ttlHours?, permissions?, reset?}\`. The id is
+always \`dev.jasonpearson.automobile.app.<slug>_<8 hex>\`; you choose only the slug. Declared
+permissions come only from the spec's \`requires.permissions\`. \`permissions\` is \`prompt\` (the
+default), \`grantDeclared\` or \`{grant, deny}\` naming declared permissions. \`ttlHours\` defaults to
+72; 0 keeps the app. Re-installing a slug updates it in place and keeps its storage unless
+\`reset: true\`. The result \`disposableApp\` has \`appId\`, \`template\`, \`expiresAt\` and
+\`permissions\`; then use \`launchApp\`, \`observe\`, \`tapOn\` and \`terminateApp\` with that \`appId\`.
+\`listApps\` returns \`disposableApps\`, this host's records joined with the device's packages
+under the prefix. \`uninstallApp\` takes exactly one of \`appId\`, \`all: true\` or \`expired: true\`
+and returns \`uninstalled: {removed, skipped}\`; it refuses ids outside the prefix and apps signed
+by another key. \`deleteSaved\` never removes a disposable app.`;

@@ -1,4 +1,4 @@
-import { GUIDE_PLATFORM_NAMESPACES } from "./prototypeGuideProseMore";
+import { GUIDE_DISPOSABLE_APPS, GUIDE_PLATFORM_NAMESPACES } from "./prototypeGuideProseMore";
 import { GUIDE_MOTION_V3 } from "./prototypeGuideMotionV3";
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
 import {
@@ -422,7 +422,7 @@ attached to this host (no \`awaitEvent\`, \`patch\` or \`inspect\`). \`{action:"
 that \`libraryId\` launches it on Android or an iOS simulator. It needs ProtoViewer installed.
 If ProtoViewer is absent, too old for this route, or its inbox cannot be used, \`save\`
 keeps the platform save path. A timeout after delivery may still have saved the entry; check
-ProtoViewer before retrying.
+ProtoViewer before retrying.${GUIDE_DISPOSABLE_APPS}
 
 ## Fullscreen host chrome
 

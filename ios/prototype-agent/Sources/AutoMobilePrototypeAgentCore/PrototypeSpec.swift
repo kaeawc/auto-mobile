@@ -1019,6 +1019,16 @@ final class PrototypeNode: Decodable {
     let yRange: PrototypeChartRange?
     let xLabels: String?
     let goal: Double?
+    /// Map definitions retain their contract JSON until resolved against current /data.
+    let camera: JSONValue?
+    let markers: JSONValue?
+    let polylines: [JSONValue]?
+    let mapStyle: String?
+    let backend: String?
+    let fit: String?
+    let showUserLocation: Bool?
+    let onMarkerTap: [JSONValue]?
+    let onCameraIdle: [String: JSONValue]?
     /// Gesture-only nodes have the same touch target and accessibility semantics as tap nodes.
     var isInteractive: Bool {
         onTap != nil || onLongPress != nil || onDoubleTap != nil
@@ -1053,6 +1063,7 @@ final class PrototypeNode: Decodable {
              trailingIcon,
              imeAction, yRange, xLabels, goal
         case filter, fadeEdges, edgeEffect, ios
+        case camera, markers, polylines, mapStyle, backend, fit, showUserLocation, onMarkerTap, onCameraIdle
         case chartSeries = "series"
     }
 
@@ -1214,6 +1225,15 @@ final class PrototypeNode: Decodable {
         yRange = try container.decodeIfPresent(PrototypeChartRange.self, forKey: .yRange)
         xLabels = try container.decodeIfPresent(String.self, forKey: .xLabels)
         goal = try container.decodeIfPresent(Double.self, forKey: .goal)
+        camera = try container.decodeIfPresent(JSONValue.self, forKey: .camera)
+        markers = try container.decodeIfPresent(JSONValue.self, forKey: .markers)
+        polylines = try container.decodeIfPresent([JSONValue].self, forKey: .polylines)
+        mapStyle = try container.decodeIfPresent(String.self, forKey: .mapStyle)
+        backend = try container.decodeIfPresent(String.self, forKey: .backend)
+        fit = try container.decodeIfPresent(String.self, forKey: .fit)
+        showUserLocation = try container.decodeIfPresent(Bool.self, forKey: .showUserLocation)
+        onMarkerTap = try container.decodeIfPresent([JSONValue].self, forKey: .onMarkerTap)
+        onCameraIdle = try container.decodeIfPresent([String: JSONValue].self, forKey: .onCameraIdle)
     }
 
     /// Android's `resolvePrototypeStyle`: every `styleWhen` entry whose condition holds is merged over

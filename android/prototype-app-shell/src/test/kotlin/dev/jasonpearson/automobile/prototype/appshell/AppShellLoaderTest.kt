@@ -3,12 +3,32 @@ package dev.jasonpearson.automobile.prototype.appshell
 import dev.jasonpearson.automobile.protocol.PrototypeStoredValues
 import dev.jasonpearson.automobile.prototype.PrototypeStorage
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.BeforeClass
 import org.junit.Test
 
 class AppShellLoaderTest {
+  @Test
+  fun `permissions fixture loads and the template advertises its registered capability`() {
+    assertEquals(AppShellState.Ready(permissionsSpec), loader(permissionsSpec).load())
+    val file =
+      generateSequence(java.io.File(System.getProperty("user.dir")).absoluteFile) { it.parentFile }
+        .map { java.io.File(it, "android/prototype-app-shell/src/base/assets/capabilities.json") }
+        .first { it.isFile }
+    val capabilities =
+      kotlinx.serialization.json.Json.parseToJsonElement(file.readText())
+        .jsonObject
+        .getValue("capabilities")
+        .jsonArray
+        .map { it.jsonPrimitive.content }
+    org.junit.Assert.assertTrue("prototype_platform_permissions_v1" in capabilities)
+    org.junit.Assert.assertFalse("prototype_platform_notifications_v1" in capabilities)
+  }
+
   @Test
   fun `missing spec has a typed missing state`() {
     assertEquals(AppShellState.MissingSpec, loader(null).load())
@@ -62,10 +82,20 @@ class AppShellLoaderTest {
   companion object {
     private lateinit var validSpec: String
     private lateinit var biometricSpec: String
+    private lateinit var permissionsSpec: String
 
     @BeforeClass
     @JvmStatic
     fun prepareFixture() {
+      permissionsSpec =
+        generateSequence(java.io.File(System.getProperty("user.dir")).absoluteFile) {
+            it.parentFile
+          }
+          .map {
+            java.io.File(it, "test/fixtures/prototype-spec/valid/platform-permissions-request.json")
+          }
+          .first { it.isFile }
+          .readText()
       biometricSpec =
         generateSequence(java.io.File(System.getProperty("user.dir")).absoluteFile) {
             it.parentFile

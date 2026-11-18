@@ -41,6 +41,7 @@
                 ],
                 location: CLLocationManagerPrototypeLocationSource(),
                 sensors: CoreMotionPrototypeSensorSource(),
+                biometric: LAContextPrototypeBiometricSource(),
                 secureStorage: KeychainPrototypeSecureValueStore()
             )
     }

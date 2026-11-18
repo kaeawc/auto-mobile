@@ -559,13 +559,14 @@ struct PrototypeSession {
     }
 
     private mutating func runEmit(_ action: PrototypeAction) -> [PrototypeEvent] {
-        let context = action.context?.resolve(EmitContextInputs(
+        let authored = action.context ?? PrototypeEmitContext(bindings: [:])
+        let context = (action.context != nil || action.mapMarkerId != nil) ? authored.resolve(EmitContextInputs(
             state: state,
             pages: pages,
             dataModel: data,
             platformModel: spec?.platformState,
             eventData: platformEventData
-        ))
+        ), handlerContext: action.mapMarkerId.map { ["markerId": .string($0)] } ?? [:]) : nil
         return emit(kind: "emit", name: action.name, payload: action.payload ?? .null, context: context)
     }
 
@@ -1690,12 +1691,17 @@ extension PrototypeSession {
 
     private func platformMeta(_ result: PlatformCallResult, durationMs: Int) -> JSONValue {
         var fields: [String: JSONValue] = ["durationMs": .number(Double(max(0, durationMs)))]
+        if case let .success(value) = result, case let .bool(approximate)? = value.objectFields?["approximate"] {
+            fields["approximate"] = .bool(approximate)
+        }
         if case let .failure(code, message) = result {
             var error: [String: JSONValue] = [
                 "code": .string(code.rawValue),
                 "message": .string(PrototypeRequestEvent.cut(message, to: PrototypeLimits.maxRequestMessageLength)),
             ]
-            if code == .unavailable, ["missing_usage_description", "disabled"].contains(message) {
+            if code == .unavailable, ["missing_usage_description", "disabled"].contains(message)
+                || PrototypeBiometricUnavailableReason(rawValue: message) != nil
+            {
                 error["reason"] = .string(message)
             }
             fields["error"] = .object(error)

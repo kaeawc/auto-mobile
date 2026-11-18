@@ -54,6 +54,7 @@ enum PrototypeAgentProtocol {
         textFieldActionsCapability,
         carouselCapability,
         chartCapability,
+        "prototype_platform_map_v1",
         keyframesCapability,
         motionTokensCapability,
         "prototype_motion_v2",

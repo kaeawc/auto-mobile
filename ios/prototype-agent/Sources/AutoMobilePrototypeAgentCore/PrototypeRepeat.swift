@@ -640,6 +640,16 @@ struct PrototypeRepeatInstance {
             if case let .array(actions)? = fields["onSubmit"] {
                 fields["onSubmit"] = .array(actions.map(bindAction))
             }
+        case "map":
+            bindList("polylines", in: &fields) { bindString("path", in: &$0) }
+            if var camera = fields["camera"]?.objectFields {
+                bindString("data", in: &camera)
+                fields["camera"] = .object(camera)
+            }
+            if var markers = fields["markers"]?.objectFields {
+                bindString("path", in: &markers)
+                fields["markers"] = .object(markers)
+            }
         case "chart":
             // A repeat-bound series path takes the row's placeholders, as Android's repeat does.
             bindList("series", in: &fields) { bindString("path", in: &$0) }
@@ -836,7 +846,7 @@ struct PrototypeRepeatInstance {
 
     /// A string operand: text is interpolated, numbers and booleans pass through. A string that is
     /// exactly one placeholder keeps the item's own type.
-    private func interpolateScalar(_ value: JSONValue) -> JSONValue {
+    func interpolateScalar(_ value: JSONValue) -> JSONValue {
         guard case let .string(text) = value else { return value }
         let segments = PrototypeRepeat.segments(text, alias: alias)
         if segments.count == 1 {

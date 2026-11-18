@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBiometricModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEgressPolicy
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePermissionsModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeDirectoryStore
 import dev.jasonpearson.automobile.protocol.PrototypeBundleDirectoryFileSystem
@@ -187,4 +188,5 @@ internal val protoViewerCapabilities: Set<String>
   get() =
     AutoMobilePrototype.capabilities +
       PrototypeLocationModule.CAPABILITY +
-      PrototypeBiometricModule.CAPABILITY
+      PrototypeBiometricModule.CAPABILITY +
+      PrototypePermissionsModule.CAPABILITY

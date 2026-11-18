@@ -13,6 +13,7 @@ class ProtoViewerCapabilitiesTest {
   companion object {
     private lateinit var locationSpec: String
     private lateinit var biometricSpec: String
+    private lateinit var permissionsSpec: String
 
     @JvmStatic
     @BeforeClass
@@ -27,8 +28,24 @@ class ProtoViewerCapabilitiesTest {
           .map { File(it, "test/fixtures/prototype-spec/valid/platform-biometric.json") }
           .first { it.isFile }
           .readText()
+      permissionsSpec =
+        generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
+          .map { File(it, "test/fixtures/prototype-spec/valid/platform-permissions-request.json") }
+          .first { it.isFile }
+          .readText()
       Fixtures.spec
     }
+  }
+
+  @Test
+  fun reportedCapabilitiesAcceptPermissionsWithoutAdvertisingNotifications() {
+    val capabilities = protoViewerMcpAbout(42, "test").capabilities
+    assertTrue("prototype_platform_permissions_v1" in capabilities)
+    assertTrue("prototype_platform_notifications_v1" !in capabilities)
+    assertTrue(
+      PrototypeSpecValidator.validate(permissionsSpec, capabilities, library = true)
+        is PrototypeSpecValidation.Success,
+    )
   }
 
   @Test

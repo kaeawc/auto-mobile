@@ -8,11 +8,13 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeEffectReport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeResolveAppearance
 import dev.jasonpearson.automobile.protocol.*
 import dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost
+import java.util.UUID
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
 
 internal class RuntimeAttachTarget(
   private val host: EmbeddedPrototypeHost,
+  override val appInstanceId: String = UUID.randomUUID().toString(),
   private val deviceDark: () -> Boolean,
 ) : AttachTarget {
   var runtime: PrototypeRuntime? = null
@@ -36,7 +38,11 @@ internal class RuntimeAttachTarget(
               success = false,
               error = "conflict: state changed after baseRevision $baseRevision",
               revision = result.revision,
-              conflict = PrototypePatchConflict(result.revision, result.state),
+              conflict =
+                PrototypePatchConflict(
+                  result.revision,
+                  publicState(current.current.spec, result.state),
+                ),
             )
           is PrototypeRuntime.PatchResult.Applied ->
             PrototypeResult(0, success = true, revision = result.revision)
@@ -62,7 +68,7 @@ internal class RuntimeAttachTarget(
           PrototypeStatusEntry(
             id = snapshot.spec.id,
             persistent = isDevicePersistent(snapshot.spec),
-            state = snapshot.state.toMap(),
+            state = publicState(snapshot.spec, snapshot.state),
             data = snapshot.spec.data,
             pages = snapshot.pages.toMap(),
             stacks = snapshot.stacks.toMap(),
@@ -79,6 +85,17 @@ internal class RuntimeAttachTarget(
         )
       }
     }
+
+  // This checkout has no shared runtime publicState helper; keep this boundary local.
+  private fun publicState(
+    spec: PrototypeSpec,
+    state: Map<String, PrototypeScalar>,
+  ): Map<String, PrototypeScalar> {
+    val secure = spec.storage?.secure.orEmpty().map { it.removePrefix("state:") }.toSet()
+    return state.mapValues { (key, value) ->
+      if (key in secure) PrototypeScalar.Text("[redacted]") else value
+    }
+  }
 
   private fun validate(spec: JsonObject): PrototypeSpec =
     when (val validation = PrototypeSpecValidator.validate(spec.toString())) {

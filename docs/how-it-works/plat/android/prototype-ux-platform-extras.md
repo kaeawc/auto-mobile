@@ -191,11 +191,31 @@ The Android stamper packages a spec into a signed APK. The `prototype` actions `
 The headless virtual device refuses them too.
 
 For a running Android disposable app, `patch`, `status`, `inspect` and `awaitEvent` with its
-spec id attach over `automobile-app-<appId>` instead of CtrlProxy. The host authenticates with a
-per-app token baked into `assets/prototype/attach-token`, reuses it for update-in-place installs,
-and replays buffered events after connecting. Launch the app with `launchApp` before attaching;
-a failed attach does not fall back to CtrlProxy. Other actions keep using CtrlProxy. The token is
-readable from the APK, so protection against other apps is limited by the APK file's readability.
+spec id attach over `automobile-app-<appId>` instead of CtrlProxy. Multiple installed slugs with
+the same spec id are refused with their names. Launch the app with `launchApp` before attaching.
+If attachment fails, the host uses CtrlProxy only after a live inspect confirms that it shows
+that prototype; otherwise it returns attach guidance. Other actions keep using CtrlProxy.
+
+The listener requires a nonblank `assets/prototype/attach-token` and an emulator identity
+(kernel qemu flag or emulator build fingerprint/hardware). The stamper's explicit
+`allowPhysicalDeviceAttach: true` option writes `assets/prototype/attach-allow-physical-device`
+to permit physical devices. This applies to both debug and release templates, independently of
+APK debuggability. The token-in-APK model is development-only: anyone who can read the APK can
+recover its token. Reinstalling a slug in place reuses the token. A second connection cannot
+replace an authenticated live peer. Status and patch conflicts redact `storage.secure` state keys.
+
+Attach events use at-least-once delivery within the app process. `hello_result` includes a random
+`appInstanceId`, stable across socket reconnects. Identity changes reset the host's event epoch and high-water mark. `hello` carries `lastAcknowledgedSequence` (zero for a fresh
+connection); hello and `{type: "ack", sequence, appInstanceId}` acknowledgements apply only to the
+matching app instance. Acknowledgements follow subscriber delivery, so events awaiting the first
+subscriber remain unacknowledged. The host initializes the epoch before releasing buffered replay,
+retains subscriptions per source, and reconciles single-app status reports only against that app.
+
+Successful socket writes do not remove events: unacknowledged events replay on the next hello,
+and the host de-duplicates within the connection and coordinator. The app retains 200 events,
+drops the oldest on overflow, and reports cumulative `droppedEvents` in hello and status;
+sequence gaps expose missing events. A separate writer uses a 256-frame queue and five-second
+write deadline. Queue overflow or blocked writes close the peer; events and requests continue, retaining replay.
 
 - **Identity.** The package is `dev.jasonpearson.automobile.app.<slug>_<sha256(slug) 8 hex>`.
   Hyphens in the slug become underscores because Android package segments allow only

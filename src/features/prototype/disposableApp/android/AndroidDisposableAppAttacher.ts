@@ -106,7 +106,7 @@ export class AndroidDisposableAppAttacher {
         port,
         record.attachToken,
         this.deps.connector ?? new NodePrototypeAgentConnector(),
-        this.deps.timer ?? defaultTimer,
+        { timer: this.deps.timer ?? defaultTimer, acknowledgeEvents: true },
       );
       if (!client.handshake.capabilities.includes(PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY)) {
         client.close();

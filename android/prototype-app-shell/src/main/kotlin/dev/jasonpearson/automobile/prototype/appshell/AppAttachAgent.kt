@@ -2,20 +2,23 @@
 
 package dev.jasonpearson.automobile.prototype.appshell
 
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeOfflineEventBuffer
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.yield
 import kotlinx.serialization.json.*
 
 /**
@@ -30,6 +33,8 @@ internal interface AttachConnection {
 }
 
 internal interface AttachTarget {
+  val appInstanceId: String
+
   suspend fun patch(id: String, baseRevision: Long?, ops: JsonArray): PrototypeResult
 
   suspend fun status(): JsonObject
@@ -47,7 +52,7 @@ internal class AppAttachAgent(
   token: String?,
   private val target: AttachTarget,
   private val scope: CoroutineScope,
-  private val buffer: PrototypeOfflineEventBuffer = PrototypeOfflineEventBuffer(),
+  private val capacity: Int = 200,
   private val clock: () -> Long = System::currentTimeMillis,
   private val log: (String) -> Unit,
 ) {
@@ -57,7 +62,27 @@ internal class AppAttachAgent(
 
   private val delivery = Mutex()
   private val requests = Mutex()
-  private var active: AttachConnection? = null
+
+  init {
+    require(capacity in 1..200)
+  }
+
+  // Retained until host acknowledgement, including writes accepted only by adbd.
+  private val pending = ArrayDeque<PrototypeEvent>()
+  private var dropped = 0L
+  private var lastSequence = 0L
+  private var active: Session? = null
+
+  private class Session(val connection: AttachConnection) {
+    val outbound = Channel<String>(OUTBOUND_CAPACITY)
+    var writer: Job? = null
+
+    fun close() {
+      connection.close()
+      outbound.cancel()
+      writer?.cancel()
+    }
+  }
 
   suspend fun serve(connection: AttachConnection) {
     if (!enabled) {
@@ -72,37 +97,11 @@ internal class AppAttachAgent(
     try {
       val hello = withTimeoutOrNull(HELLO_TIMEOUT_MS) { connection.readLine(HELLO_MAX_BYTES) }
       deadline.cancel()
-      if (!authenticated(hello)) return
-      requests.withLock {
-        delivery.withLock {
-          active?.close()
-          active = connection
-          connection.write(
-            buildJsonObject {
-              put("type", "hello_result")
-              put("agentVersion", "0.1.0")
-              put("protocolVersion", 1)
-              put("capabilities", JsonArray(CAPABILITIES.map(::JsonPrimitive)))
-            }
-              .toString(),
-          )
-          replay(connection)
-        }
-      }
-      while (true) {
-        val line = connection.readLine() ?: break
-        requests.withLock {
-          // Replacement and execution share this lock, so obsolete peers cannot patch a new
-          // session.
-          if (delivery.withLock { active === connection }) {
-            val request = attachJson.parseToJsonElement(line).jsonObject
-            val result = handle(request)
-            delivery.withLock {
-              if (active === connection) connection.write(frame(result))
-            }
-          }
-        }
-      }
+      val authenticatedHello = authenticated(hello) ?: return
+      val session = registerSession(connection, authenticatedHello) ?: return
+      // Never perform transport I/O under delivery or requests. One writer preserves wire order.
+      session.writer = scope.launch(start = CoroutineStart.UNDISPATCHED) { writeOutbound(session) }
+      receiveRequests(session)
     } catch (error: CancellationException) {
       throw error
     } catch (_: Exception) {
@@ -112,18 +111,77 @@ internal class AppAttachAgent(
       deadline.cancel()
       connection.close()
       withContext(NonCancellable) {
-        delivery.withLock { if (active === connection) active = null }
+        delivery.withLock {
+          active
+            ?.takeIf { it.connection === connection }
+            ?.let {
+              active = null
+              it.close()
+            }
+        }
       }
     }
   }
 
-  private fun authenticated(line: String?): Boolean {
-    if (line == null || line.toByteArray(Charsets.UTF_8).size > HELLO_MAX_BYTES) return false
-    val hello = attachJson.parseToJsonElement(line) as? JsonObject ?: return false
-    if (hello["type"] != JsonPrimitive("hello")) return false
-    val supplied = hello["token"] as? JsonPrimitive ?: return false
-    return supplied.isString &&
-      MessageDigest.isEqual(tokenBytes, supplied.content.toByteArray(Charsets.UTF_8))
+  private suspend fun registerSession(
+    connection: AttachConnection,
+    hello: JsonObject,
+  ): Session? = delivery.withLock {
+    if (active != null) return@withLock null
+    if (hello["appInstanceId"] == JsonPrimitive(target.appInstanceId)) {
+      acknowledge(hello["lastAcknowledgedSequence"]?.jsonPrimitive?.longOrNull ?: 0)
+    }
+    Session(connection).also {
+      active = it
+      enqueue(
+        it,
+        buildJsonObject {
+          put("type", "hello_result")
+          put("agentVersion", "0.1.0")
+          put("appInstanceId", target.appInstanceId)
+          put("protocolVersion", 1)
+          put("capabilities", JsonArray(CAPABILITIES.map(::JsonPrimitive)))
+          put("droppedEvents", dropped)
+        }
+          .toString(),
+      )
+      pending.forEach { event -> enqueue(it, frame(event)) }
+    }
+  }
+
+  private suspend fun receiveRequests(session: Session) {
+    while (true) {
+      val line = session.connection.readLine() ?: break
+      requests.withLock {
+        if (delivery.withLock { active === session }) {
+          val request = attachJson.parseToJsonElement(line).jsonObject
+          if (request["type"] == JsonPrimitive("ack")) {
+            delivery.withLock {
+              if (request["appInstanceId"] == JsonPrimitive(target.appInstanceId)) {
+                acknowledge(request.getValue("sequence").jsonPrimitive.long)
+              }
+            }
+          } else {
+            val result = handle(request)
+            delivery.withLock {
+              if (active === session) enqueue(session, frame(result))
+            }
+          }
+        }
+      }
+      yield()
+    }
+  }
+
+  private fun authenticated(line: String?): JsonObject? {
+    if (line == null || line.toByteArray(Charsets.UTF_8).size > HELLO_MAX_BYTES) return null
+    val hello = attachJson.parseToJsonElement(line) as? JsonObject ?: return null
+    if (hello["type"] != JsonPrimitive("hello")) return null
+    val supplied = hello["token"] as? JsonPrimitive ?: return null
+    return hello.takeIf {
+      supplied.isString &&
+        MessageDigest.isEqual(tokenBytes, supplied.content.toByteArray(Charsets.UTF_8))
+    }
   }
 
   private suspend fun handle(request: JsonObject): PrototypeResult {
@@ -133,11 +191,11 @@ internal class AppAttachAgent(
       when (type) {
         "get_prototype_status" -> {
           val status = target.status()
-          val dropped = delivery.withLock { buffer.dropped }
+          val droppedCount = delivery.withLock { dropped }
           PrototypeResult(
             clock(),
             success = true,
-            status = JsonObject(status + ("droppedEvents" to JsonPrimitive(dropped))),
+            status = JsonObject(status + ("droppedEvents" to JsonPrimitive(droppedCount))),
           )
         }
         "patch_prototype" ->
@@ -152,32 +210,56 @@ internal class AppAttachAgent(
   }
 
   suspend fun emit(event: PrototypeEvent) = delivery.withLock {
-    val connection = active
-    buffer.add(event)
-    if (connection != null) {
-      try {
-        replay(connection)
-      } catch (error: CancellationException) {
-        throw error
-      } catch (_: Exception) {
-        log("Attach event delivery deferred until reconnect")
-      }
+    lastSequence = maxOf(lastSequence, event.sequence)
+    if (pending.size == capacity) {
+      pending.removeFirst()
+      dropped++
+    }
+    pending.addLast(event)
+    active?.let { enqueue(it, frame(event)) }
+  }
+
+  private fun acknowledge(sequence: Long) {
+    require(sequence in 0..lastSequence) { "Invalid attach acknowledgement" }
+    while (pending.firstOrNull()?.let { it.sequence <= sequence } == true) pending.removeFirst()
+  }
+
+  // Call only under delivery; a full queue drops the peer, never blocks the producer.
+  private fun enqueue(session: Session, frame: String) {
+    if (active === session && session.outbound.trySend(frame).isFailure) {
+      active = null
+      session.close()
     }
   }
 
-  private suspend fun replay(connection: AttachConnection) {
-    val pending = buffer.drain()
-    var next = 0
+  private suspend fun writeOutbound(session: Session) {
     try {
-      while (next < pending.size) {
-        connection.write(frame(pending[next]))
-        next++
+      for (line in session.outbound) {
+        // Android stream writes block. Closing the socket from a separate coroutine unblocks I/O.
+        val deadline = scope.launch {
+          delay(WRITE_TIMEOUT_MS)
+          session.connection.close()
+        }
+        try {
+          withTimeoutOrNull(WRITE_TIMEOUT_MS) {
+            session.connection.write(line)
+            true
+          } ?: error("Attach write timed out")
+        } finally {
+          deadline.cancel()
+        }
       }
+    } catch (error: CancellationException) {
+      throw error
+    } catch (_: Exception) {
+      log("Attach event delivery deferred until reconnect")
     } finally {
-      if (next < pending.size) {
-        buffer.restore(pending.subList(next, pending.size))
-        connection.close()
-        if (active === connection) active = null
+      session.connection.close()
+      withContext(NonCancellable) {
+        delivery.withLock {
+          if (active === session) active = null
+          session.outbound.cancel()
+        }
       }
     }
   }
@@ -186,6 +268,8 @@ internal class AppAttachAgent(
     attachJson.encodeToString(WebSocketResponse.serializer(), response)
 
   companion object {
+    const val OUTBOUND_CAPACITY = 256
+    const val WRITE_TIMEOUT_MS = 5000L
     const val HELLO_MAX_BYTES = 4096
     const val HELLO_TIMEOUT_MS = 5000L
     val CAPABILITIES =
@@ -195,6 +279,7 @@ internal class AppAttachAgent(
         "prototype_patch_v1",
         "prototype_inspect_v1",
         "prototype_persistence_replay_v1",
+        "prototype_event_ack_v1",
       )
   }
 }

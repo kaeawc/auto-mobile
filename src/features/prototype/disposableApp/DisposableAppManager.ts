@@ -37,6 +37,8 @@ export type DisposableAppIcon = { asset: string } | { backgroundColor: string };
 export interface DisposableAppStampInput {
   appId: string;
   attachToken?: string;
+  /** Development-only opt-in to expose attach on physical Android devices. */
+  allowPhysicalDeviceAttach?: boolean;
   slug: string;
   label: string;
   icon?: DisposableAppIcon;

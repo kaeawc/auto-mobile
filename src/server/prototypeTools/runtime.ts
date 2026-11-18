@@ -865,7 +865,21 @@ async function prototypeDeviceOutput(context: PrototypeDeviceContext) {
   const scope = prototypeScope(device, args);
   const pendingLive = disposableAgent(device, args);
   const live = pendingLive
-    ? await disposableAppTarget(device, pendingLive, { target: agentTarget })
+    ? await disposableAppTarget(device, pendingLive, {
+        target: agentTarget,
+        fallback: async () => {
+          const target = androidTarget(device);
+          const report = await deviceRequestAction(
+            { action: "inspect" },
+            { store, events, mocks: host.mocks },
+            device,
+            { target, scope, signal },
+          );
+          return report.success && store.shownIds(device.deviceId).includes(args.id ?? "")
+            ? target
+            : undefined;
+        },
+      })
     : undefined;
   if (live && "success" in live) {
     return respond(live);

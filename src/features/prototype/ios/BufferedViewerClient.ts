@@ -27,6 +27,9 @@ export class BufferedViewerClient implements PrototypeAgentClient {
         this.events.push(event);
       } else {
         this.listeners.forEach((listener) => listener(event));
+        if (this.listeners.size > 0) {
+          this.acknowledge(event);
+        }
       }
     });
     client.onClosed((error) => {
@@ -55,11 +58,18 @@ export class BufferedViewerClient implements PrototypeAgentClient {
       this.replayDelivered = true;
       // Keep live pushes queued during delivery, including reentrant pushes from the listener.
       while (this.events.length > 0) {
-        listener(this.events.shift()!);
+        const event = this.events.shift()!;
+        listener(event);
+        this.acknowledge(event);
       }
       this.buffering = false;
     }
     return () => this.listeners.delete(listener);
+  }
+  private acknowledge(event: PrototypeAgentMessage): void {
+    if (typeof event.sequence === "number") {
+      this.client.acknowledgeEventsThrough?.(event.sequence);
+    }
   }
   onClosed(listener: (error: Error) => void): () => void {
     if (this.closedError !== undefined) {

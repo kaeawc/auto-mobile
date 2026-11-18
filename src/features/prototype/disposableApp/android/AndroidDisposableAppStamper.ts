@@ -39,6 +39,8 @@ export interface AndroidDisposableAppStampInput {
   enabledComponents: readonly string[];
   spec: string;
   attachToken?: string;
+  /** Development-only opt-in to expose attach on physical Android devices. */
+  allowPhysicalDeviceAttach?: boolean;
   assets: readonly AndroidStampAsset[];
   signer: DisposableAppSigner;
 }
@@ -104,6 +106,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
           enabledComponents: [...new Set(android.enabledComponents)].sort(),
           spec: JSON.parse(android.spec),
           attachToken: android.attachToken,
+          allowPhysicalDeviceAttach: android.allowPhysicalDeviceAttach === true,
           assets: android.assets
             .map((asset) => ({ id: asset.id, sha256: hash(asset.bytes) }))
             .sort((a, b) => a.id.localeCompare(b.id)),
@@ -130,6 +133,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
       template: await this.provider.resolve(input.template.name),
       appId: input.appId,
       attachToken: input.attachToken,
+      allowPhysicalDeviceAttach: input.allowPhysicalDeviceAttach,
       label: input.label,
       permissions: input.declarations.android.permissions,
       enabledComponents: [],
@@ -181,6 +185,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
           spec: stableStringify(JSON.parse(input.spec)),
           assets: input.assets,
           attachToken: input.attachToken,
+          allowPhysicalDeviceAttach: input.allowPhysicalDeviceAttach,
           colors,
         }),
       );

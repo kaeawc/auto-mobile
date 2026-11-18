@@ -51,10 +51,16 @@ test("strict port, registry token hello, replay order, dedupe and close cleanup"
   const client = await pending;
   expect(await h.attacher.attach(device, appId)).toBe(client);
   expect(h.connector.ports).toEqual([12345]);
-  expect(h.socket.frames()).toEqual([{ type: "hello", token, protocolVersion: 1 }]);
+  expect(h.socket.frames()).toEqual([
+    { type: "hello", token, protocolVersion: 1, lastAcknowledgedSequence: 0 },
+  ]);
   const replay: unknown[] = [];
   client.onEvent((event) => replay.push(event.sequence));
   expect(replay).toEqual([1, 2]);
+  expect(h.socket.frames().slice(1)).toEqual([
+    { type: "ack", sequence: 1 },
+    { type: "ack", sequence: 2 },
+  ]);
   h.socket.closeFromAgent();
   await Promise.resolve();
   expect(h.adb.getExecutedArgv()).toEqual([
@@ -106,4 +112,60 @@ test("Android transport reuse does not misdiagnose a status timeout as iOS suspe
   agent.queueReplies(timeout);
   const transport = new IosPrototypeTransport(agent, undefined, "android");
   await expect(transport.status()).rejects.toBe(timeout);
+});
+
+test("host deduplicates repeated sequences and acknowledges only after dispatch", async () => {
+  const h = await setup();
+  h.socket.replay = [1, 1, 2].map((sequence) => ({ type: "prototype_event", sequence }));
+  const client = await h.attacher.attach(device, appId);
+  const seen: unknown[] = [];
+  client.onEvent((event) => {
+    if (event.sequence === 3) {
+      expect(h.socket.frames().at(-1)).toEqual({ type: "ack", sequence: 2 });
+    }
+    seen.push(event.sequence);
+  });
+  h.socket.push({ type: "prototype_event", sequence: 2 });
+  h.socket.push({ type: "prototype_event", sequence: 3 });
+  expect(seen).toEqual([1, 2, 3]);
+  expect(
+    h.socket
+      .frames()
+      .filter((frame) => frame.type === "ack")
+      .map((frame) => frame.sequence),
+  ).toEqual([1, 2, 2, 3]);
+  await h.attacher.release("d");
+});
+
+test("a new connection starts its acknowledgement at zero after app process restart", async () => {
+  const h = await setup();
+  h.socket.replay = [{ type: "prototype_event", sequence: 9 }];
+  await h.attacher.attach(device, appId);
+  h.socket.closeFromAgent();
+  const socket = new FakeDisposableAppSocket();
+  socket.replay = [{ type: "prototype_event", sequence: 1 }];
+  h.connector.connect = async () => socket;
+  const next = await h.attacher.attach(device, appId);
+  const seen: unknown[] = [];
+  next.onEvent((event) => seen.push(event.sequence));
+  expect(socket.frames()[0]).toMatchObject({ lastAcknowledgedSequence: 0 });
+  expect(seen).toEqual([1]);
+  await h.attacher.release("d");
+});
+
+test("detach before subscription leaves buffered events unacknowledged for replay", async () => {
+  const h = await setup();
+  h.socket.replay = [{ type: "prototype_event", sequence: 1 }];
+  await h.attacher.attach(device, appId);
+  expect(h.socket.frames().map((frame) => frame.type)).toEqual(["hello"]);
+  h.socket.closeFromAgent();
+  const socket = new FakeDisposableAppSocket();
+  socket.replay = [{ type: "prototype_event", sequence: 1 }];
+  h.connector.connect = async () => socket;
+  const next = await h.attacher.attach(device, appId);
+  const seen: unknown[] = [];
+  next.onEvent((event) => seen.push(event.sequence));
+  expect(seen).toEqual([1]);
+  expect(socket.frames().at(-1)).toEqual({ type: "ack", sequence: 1 });
+  await h.attacher.release("d");
 });

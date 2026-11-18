@@ -1,18 +1,18 @@
 # Embedding a prototype in an app
 
-You can drop a prototype shown with the `prototype` tool into a real Android or iOS app. The app
-uses the same renderer as CtrlProxy and the iOS prototype agent, published as a library. Every
-part of the spec keeps working: layout, theme, state, data, `request` actions, storage, images and
-fonts. AutoMobile generates only a short host file per app, and the renderer draws the rest.
+Embed a prototype shown with `prototype` in an Android or iOS app using the published renderer
+library shared with CtrlProxy and the iOS prototype agent. Layout, theme, state, data, `request`
+actions, storage, images and fonts keep working. AutoMobile generates a short host file; the
+renderer draws the rest.
 
 To view a prototype in a browser or export it as HTML, see
 [Prototype web preview](prototype-web-preview.md).
 
 ## Add the library
 
-**Android** (Jetpack Compose). The renderer is not on Maven Central yet. Build it from the release
-tag and publish it to your local Maven repository (`~/.m2`). This needs JDK 21 and an Android SDK
-(`ANDROID_HOME` set, or `sdk.dir` in `android/local.properties`):
+**Android** (Jetpack Compose). Until Maven Central publication, build the release tag and publish
+to local Maven (`~/.m2`). Requires JDK 21 and an Android SDK (`ANDROID_HOME` or `sdk.dir` in
+`android/local.properties`):
 
 ```bash
 git clone --depth 1 --branch <version> https://github.com/kaeawc/auto-mobile.git
@@ -39,8 +39,7 @@ extra keep rules.
 .product(name: "AutoMobilePrototype", package: "auto-mobile"),
 ```
 
-Use the version the resource reports (below): the first library version that renders the whole
-spec.
+Use the resource's reported version: the earliest that renders the whole spec.
 
 ## Read the native resource
 
@@ -75,11 +74,9 @@ shown in this daemon session.
 | `revision`     | A kept revision. Defaults to the latest.                                                                                                     |
 | `mcpSessionId` | Only revisions this MCP session produced. Defaults to every session's.                                                                       |
 
-The file is the same host the native resource generates. It builds the spec in as a string
-constant and adds a `@Preview` (Compose) or `#Preview` (SwiftUI) sized to the frame. Its header
-comment names the library to add and the capabilities the spec needs. It also lists each
-referenced image or font with the path the file loads it from and its
-`automobile:prototype/native/asset` URI.
+This native-resource host embeds the spec as a string constant, adding a frame-sized `@Preview`
+(Compose) or `#Preview` (SwiftUI). Its header lists the library, required capabilities, and each
+image or font's load path and `automobile:prototype/native/asset` URI.
 
 The file does not build in assets: add those files yourself. A saved prototype serves their bytes
 from the URI. Revisions, errors, `_meta` (without `variants`) and subscriptions work as for the
@@ -88,9 +85,9 @@ in this daemon session.
 
 ## Eject to code you own
 
-To replace a prototype with screens you write and style by hand, read `automobile:prototype/eject?id=<id>` once and edit
-the result. It takes the same `id`, `platform` and `deviceId` parameters as the native resource.
-Nothing syncs back to the spec.
+For manually styled screens, read `automobile:prototype/eject?id=<id>` and edit the result.
+It accepts the native resource's `id`, `platform` and `deviceId` parameters. Edits never sync back
+to the spec.
 
 The result is JSON:
 
@@ -140,9 +137,8 @@ suffix. The host file's path names the type; pick a plain id such as `checkoutFl
 On both platforms, a missing asset draws the renderer's placeholder and a missing spec shows its
 load-error view.
 
-An embedded prototype draws edge to edge inside the space the app gives it. An image with no
-authored size takes its natural size. Place the composable inside the content area of your screen,
-below any app bar or status bar. A custom layout that offsets it by less than the bar's height
+Embedded prototypes fill their allotted space edge to edge; unsized images use their natural
+size. Place the composable below app and status bars. Offsetting it by less than the bar's height
 hides the image row behind the bar.
 
 ## Requests
@@ -212,8 +208,7 @@ and reports `statusBar: "unsupported"` when the spec requested a status bar styl
 
 ## Capability errors
 
-An app may ship an older renderer than the spec needs. The renderer never draws such a spec partly.
-It shows a visible error state instead:
+Renderers older than the spec requires show a visible error instead of rendering partly:
 
 - On Android the `onError` slot draws it: the renderer's default view unless you pass your own.
 - On iOS the renderer shows its diagnostic and calls `onLoadError`.
@@ -237,10 +232,11 @@ the Android emulator's host alias. The iOS sample uses the placeholder
 `http://192.168.1.10:8080/greeting`; replace `192.168.1.10` with the machine's LAN address. Both
 samples ship a generated `hero.png` image.
 
-For a running Android disposable prototype app, call `prototype` with `patch`, `status`,
-`inspect` or `awaitEvent` and the installed spec's `id` to access that app. For `status` and
-`inspect`, `id` is optional and only selects a disposable app; it does not filter the returned
-prototypes. Without it, `status` reads host-local state and `inspect` queries the overlay. Launch the app first with
-`launchApp` using the app id returned by `prototype installApp`. If attaching fails, launch it
-again; reinstall with `prototype installApp` if its saved token is stale. Other actions use the
-prototype overlay.
+On Android emulators, access a running disposable app with `prototype` actions `patch`, `status`,
+`inspect` or `awaitEvent` and its installed spec's `id`. For `status` and `inspect`, optional `id`
+selects the app without filtering returned prototypes. Without it, `status` reads host-local state
+and `inspect` queries the overlay. First call `launchApp` with the app id from `prototype installApp`.
+
+If attachment fails, calls use an overlay showing that id. Otherwise relaunch; reinstall with
+`prototype installApp` for a stale saved token. Installed apps need distinct spec ids; ambiguous
+ids return conflicting app slugs. Other actions use the overlay.

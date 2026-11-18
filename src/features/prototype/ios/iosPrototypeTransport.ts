@@ -461,6 +461,10 @@ export class IosPrototypeTransport implements PrototypeTransport {
     }
   }
 
+  get eventInstanceId(): string | undefined {
+    return this.agent.handshake.appInstanceId;
+  }
+
   async status(): Promise<PrototypeDeviceStatus> {
     let result: PrototypeAgentResult;
     try {

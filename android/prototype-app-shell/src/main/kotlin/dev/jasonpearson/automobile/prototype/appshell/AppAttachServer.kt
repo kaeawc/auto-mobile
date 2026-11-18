@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.prototype.appshell
 
 import android.net.LocalServerSocket
 import android.net.LocalSocket
+import android.os.Build
 import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -77,8 +78,9 @@ private constructor(
       agent: AppAttachAgent,
       scope: CoroutineScope,
       io: CoroutineDispatcher = Dispatchers.IO,
+      policy: AttachDevicePolicy = AttachDevicePolicy(AndroidAttachDeviceEnvironment),
     ): AppAttachServer? {
-      if (!agent.enabled) return null
+      if (!agent.enabled || !policy.allowsListener()) return null
       return try {
         AppAttachServer(LocalServerSocket("automobile-app-$packageName"), agent, scope, io).also {
           it.start()
@@ -124,5 +126,24 @@ private class SocketConnection(
     } catch (_: IOException) {
       Log.d("PrototypeAppAttach", "Attach peer already closed")
     }
+  }
+}
+
+/** Build checks cover Android emulator variants; qemu is read without a hidden-API dependency. */
+internal object AndroidAttachDeviceEnvironment : AttachDeviceEnvironment {
+  override fun isEmulator(): Boolean {
+    val qemu =
+      try {
+        java.io.File("/proc/cmdline").readText().split(' ').any {
+          it == "androidboot.qemu=1" || it == "ro.kernel.qemu=1"
+        }
+      } catch (_: IOException) {
+        Log.d("PrototypeAppAttach", "Emulator kernel identity unavailable")
+        false
+      }
+    return qemu ||
+      Build.FINGERPRINT.startsWith("generic") ||
+      Build.FINGERPRINT.contains("emulator") ||
+      Build.HARDWARE in setOf("goldfish", "ranchu", "vbox86")
   }
 }

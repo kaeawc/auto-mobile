@@ -51,6 +51,7 @@ export interface PrototypeDeviceStatus {
 }
 
 export interface PrototypeTransport {
+  readonly eventInstanceId?: string;
   show(spec: PrototypeSpec, options?: PrototypeShowOptions): Promise<PrototypeResult>;
   dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult>;
   patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypePatchReply>;
@@ -64,15 +65,19 @@ export interface PrototypeTransport {
   onEvent(listener: (event: PrototypeEvent) => void): () => void;
 }
 
-// The event coordinator keeps one subscription per device and replaces it only when the source
-// object changes, so each transport must map to one stable source object.
+// Each transport maps to one stable source object for subscription ownership.
 const eventSources = new WeakMap<PrototypeTransport, PrototypeEventSource>();
 
 /** The coordinator's view of a transport; the same object for the same transport. */
 export function prototypeEventSource(transport: PrototypeTransport): PrototypeEventSource {
   let source = eventSources.get(transport);
   if (source === undefined) {
-    source = { onPrototypeEvent: (listener) => transport.onEvent(listener) };
+    source = {
+      get instanceId() {
+        return transport.eventInstanceId;
+      },
+      onPrototypeEvent: (listener) => transport.onEvent(listener),
+    };
     eventSources.set(transport, source);
   }
   return source;

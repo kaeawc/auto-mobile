@@ -14,6 +14,7 @@ export class FakeDisposableAppSocket
     "prototype_patch_v1",
     "prototype_inspect_v1",
     "prototype_persistence_replay_v1",
+    "prototype_event_ack_v1",
   ];
   replay: Record<string, unknown>[] = [];
   override write(data: string): void {

@@ -11,6 +11,8 @@ export interface AndroidStampAsset {
 export interface AndroidStampContent {
   spec: string;
   attachToken?: string;
+  /** Development-only opt-in to expose attach on physical Android devices. */
+  allowPhysicalDeviceAttach?: boolean;
   assets: readonly AndroidStampAsset[];
   /** ARGB values for named template `color` resources, e.g. the icon and splash background. */
   colors?: ReadonlyMap<string, number>;
@@ -39,9 +41,7 @@ export class DefaultAndroidStampZip implements AndroidStampZip {
     }
     zip.addFile("AndroidManifest.xml", manifest.getData());
     zip.addFile("assets/prototype/spec.json", Buffer.from(spec));
-    if (content.attachToken !== undefined) {
-      zip.addFile("assets/prototype/attach-token", Buffer.from(content.attachToken));
-    }
+    this.addAttachAssets(zip, content);
     const seen = new Set<string>();
     for (const asset of assets) {
       if (!/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/.test(asset.id) || seen.has(asset.id)) {
@@ -57,6 +57,14 @@ export class DefaultAndroidStampZip implements AndroidStampZip {
     resources.setData(patchArscColors(resources.getData(), colors));
     resources.header.method = 0;
     return zip.toBuffer();
+  }
+  private addAttachAssets(zip: AdmZip, content: AndroidStampContent): void {
+    if (content.attachToken !== undefined) {
+      zip.addFile("assets/prototype/attach-token", Buffer.from(content.attachToken));
+      if (content.allowPhysicalDeviceAttach === true) {
+        zip.addFile("assets/prototype/attach-allow-physical-device", Buffer.from("true"));
+      }
+    }
   }
 }
 function isSignature(name: string): boolean {

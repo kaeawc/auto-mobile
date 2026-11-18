@@ -77,7 +77,22 @@ class PrototypeAppActivity : ComponentActivity() {
     embeddedHost.onRuntime = { attachTarget.runtime = it }
     embeddedHost.nextSequence = { attachTarget.nextSequence() }
     embeddedHost.eventSink = PrototypeEventSink { agent.emit(it) }
-    attachServer = AppAttachServer.start(packageName, agent, attachScope)
+    val allowPhysicalDevice =
+      try {
+        assets.open("prototype/attach-allow-physical-device").bufferedReader(Charsets.UTF_8).use {
+          it.readText().trim() == "true"
+        }
+      } catch (_: IOException) {
+        Log.d("PrototypeAppShell", "Physical-device attach opt-in absent")
+        false
+      }
+    attachServer =
+      AppAttachServer.start(
+        packageName,
+        agent,
+        attachScope,
+        policy = AttachDevicePolicy(AndroidAttachDeviceEnvironment, allowPhysicalDevice),
+      )
     val source = ApkPrototypeSource(assets)
     val loader = AppShellLoader(source, PrototypeStorage.fileBacked(this))
     val prototypeAssets = PrototypeAssets(image = source::readAsset, font = source::readAsset)

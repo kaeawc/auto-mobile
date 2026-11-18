@@ -9,7 +9,7 @@ export async function connectBufferedPrototypeAgent(
   port: number,
   token: string,
   connector: PrototypeAgentConnector,
-  timer: Timer,
+  options: { timer: Timer; acknowledgeEvents?: boolean },
 ): Promise<BufferedViewerClient> {
   const socket = new HandshakeReplaySocket(await connector.connect(port));
   try {
@@ -17,7 +17,8 @@ export async function connectBufferedPrototypeAgent(
       port,
       token,
       connector: { connect: async () => socket },
-      timer,
+      timer: options.timer,
+      acknowledgeEvents: options.acknowledgeEvents,
     });
     const buffered = new BufferedViewerClient(raw);
     socket.release();

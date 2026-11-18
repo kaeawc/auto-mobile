@@ -180,7 +180,7 @@ export function createPrototypeViewerAttacher(
       },
     },
     connect: (port, token) =>
-      connectBufferedPrototypeAgent(port, token, connector, deps.timer ?? defaultTimer),
+      connectBufferedPrototypeAgent(port, token, connector, { timer: deps.timer ?? defaultTimer }),
     connections: deps.connections ?? prototypeViewerConnections,
   });
 }

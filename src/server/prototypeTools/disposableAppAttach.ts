@@ -1,5 +1,5 @@
 import { logger } from "../../utils/logger";
-import { toActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { PrototypeAgentClient } from "../../features/prototype/ios/prototypeAgentClient";
 import type { PrototypeTarget, PrototypeOutput } from "./types";
 import type { BootedDevice } from "../../models";
@@ -7,6 +7,8 @@ import { AndroidDisposableAppAttacher } from "../../features/prototype/disposabl
 import { FileDisposableAppRegistry } from "../../features/prototype/disposableApp/DisposableAppRegistry";
 import { NodeDisposableAppRegistryStore } from "../../features/prototype/disposableApp/NodeDisposableAppRegistryStore";
 import type { PrototypeToolDependencies } from "./types";
+
+class AmbiguousDisposableAppError extends ActionableError {}
 
 export function isDisposableAppAttachAction(
   device: BootedDevice,
@@ -42,9 +44,18 @@ export function lazyDisposableAppAttach(deps: PrototypeToolDependencies) {
     args: { id?: string },
     registry: NonNullable<PrototypeToolDependencies["disposableAppRegistry"]>,
   ) {
-    const match = (await registry.list(device.deviceId)).find(
+    const matches = (await registry.list(device.deviceId)).filter(
       (record) => record.platform === "android" && record.specId === args.id,
     );
+    if (matches.length > 1) {
+      throw new AmbiguousDisposableAppError(
+        `Prototype id "${args.id}" matches disposable app slugs: ${matches
+          .map((app) => app.slug)
+          .sort()
+          .join(", ")}. Use distinct spec ids or uninstall the conflicting apps.`,
+      );
+    }
+    const match = matches[0];
     if (!match) {
       return undefined;
     }
@@ -57,12 +68,13 @@ export function lazyDisposableAppAttach(deps: PrototypeToolDependencies) {
   }
 }
 
-/** Catch at the attach boundary without ever creating a CtrlProxy fallback on failure. */
+/** Preserve attach guidance unless CtrlProxy confirms that it is showing this id. */
 export async function disposableAppTarget(
   device: BootedDevice,
   pending: Promise<PrototypeAgentClient | undefined>,
   routes: {
     target(device: BootedDevice, agent: PrototypeAgentClient): PrototypeTarget;
+    fallback(): Promise<PrototypeTarget | undefined>;
   },
 ): Promise<PrototypeTarget | PrototypeOutput | undefined> {
   try {
@@ -70,6 +82,18 @@ export async function disposableAppTarget(
     return agent ? { ...routes.target(device, agent), disposableApp: true } : undefined;
   } catch (error) {
     logger.warn("Disposable prototype app attachment failed.");
+    let fallback: PrototypeTarget | undefined;
+    if (!(error instanceof AmbiguousDisposableAppError)) {
+      try {
+        fallback = await routes.fallback();
+      } catch {
+        // An optional CtrlProxy probe can fail when the app owns the foreground; keep attach guidance.
+        logger.debug("CtrlProxy fallback probe unavailable after disposable app attach failure.");
+      }
+    }
+    if (fallback) {
+      return fallback;
+    }
     return {
       success: false,
       error: toActionableError(error, "Could not attach disposable prototype app").message,

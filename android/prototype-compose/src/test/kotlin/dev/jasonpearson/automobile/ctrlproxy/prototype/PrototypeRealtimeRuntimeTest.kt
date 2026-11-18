@@ -4,9 +4,13 @@ import dev.jasonpearson.automobile.protocol.*
 import dev.jasonpearson.automobile.prototype.PlatformCall
 import dev.jasonpearson.automobile.prototype.PlatformCallResult
 import kotlin.random.Random
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -626,4 +630,34 @@ class PrototypeRealtimeRuntimeTest {
     assertNull(runtime.current.platformState["realtime"]?.jsonObject?.get("chat"))
     assertEquals(PrototypeChannelController.GOING_AWAY, first.closedWith)
   }
+
+  @Test
+  fun `closing after the host cancelled the request scope still closes the connections`() =
+    runTest {
+      // A saved prototype's activity cancels its scope in onDestroy before closing the runtime.
+      val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+      val transport = FakeTransport()
+      val runtime =
+        PrototypeRuntime(
+            spec(),
+            nextSequence = { 1L },
+            requestScope = scope,
+            warn = { warnings += it },
+            realtime =
+              PrototypeRealtimeConfig(PrototypeChannelTransports(transport, transport), Random(0)),
+          )
+          .also { it.startPlatformModules() }
+      runtime.shown()
+      runCurrent()
+      val connection = transport.last
+      connection.listener.onOpen(null)
+      runCurrent()
+
+      scope.cancel()
+      runtime.close()
+      runCurrent()
+
+      assertEquals(emptyList<String>(), warnings)
+      assertEquals(PrototypeChannelController.GOING_AWAY, connection.closedWith)
+    }
 }

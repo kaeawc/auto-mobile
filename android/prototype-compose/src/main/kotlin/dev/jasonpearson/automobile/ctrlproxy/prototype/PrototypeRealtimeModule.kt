@@ -11,7 +11,9 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.random.Random
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,7 +49,7 @@ internal class PrototypeRealtimeModule(
   prototypeId: String,
   config: PrototypeRealtimeConfig,
   private val sink: PrototypeChannelSink,
-  scope: CoroutineScope,
+  private val scope: CoroutineScope,
   newId: () -> String,
 ) : PrototypePlatformModule {
   override val name = NAME
@@ -88,11 +90,15 @@ internal class PrototypeRealtimeModule(
     inbox.trySend { controller.show() }
   }
 
-  /** Dismissal or replacement: closes every connection, then stops the inbox. */
+  /**
+   * Dismissal, replacement or a destroyed host: stops the inbox and closes every connection. The
+   * close does not go through the inbox and cannot be cancelled, because a host may cancel [scope]
+   * before closing its runtime (an activity's `onDestroy`), and the connections must still close.
+   */
   override fun close() {
     controller.beginClose()
-    inbox.trySend { controller.close() }
     inbox.close()
+    scope.launch(NonCancellable, start = CoroutineStart.UNDISPATCHED) { controller.close() }
   }
 
   override suspend fun call(call: PlatformCall): PlatformCallResult {

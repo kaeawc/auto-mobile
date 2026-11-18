@@ -61,7 +61,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_audio_v1",
             // Registered by the agent and Viewer registries (#14273), not the static list.
             "prototype_platform_connectivity_v1",
-            // Contract only; the biometric prompt runtime is owed (#14328).
+            // Registered by the agent and Viewer registries, not the static list.
             "prototype_platform_biometric_v1",
             // Registered by the agent and Viewer registries (#14238), not the static list.
             "prototype_platform_links_v1",

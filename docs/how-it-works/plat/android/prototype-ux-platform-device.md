@@ -83,8 +83,10 @@ runtimes copy, replayed from `test/fixtures/prototype-device-status/`:
 `allowDeviceCredential` (optional boolean), and one event, `biometric.attemptFailed`, for a rejected
 attempt while the prompt stays up. It has no `/platform` state and needs no declared permission. The
 call proves presence only and returns no biometric data. Failures use the typed codes: `cancelled`, and
-`unavailable` for a locked-out, unenrolled or hardware-less device. No production runtime advertises the
-module yet.
+`unavailable` for a locked-out, unenrolled or hardware-less device. The iOS agent and ProtoViewer
+register the module. Face ID requires the host's `NSFaceIDUsageDescription`; a missing key returns
+`unavailable` with reason `missing_usage_description`. Allowing device credentials selects the system
+passcode fallback, including on a device without enrolled biometrics.
 
 **Window controls (#14320).** Four optional root `window` fields need
 `prototype_platform_window_controls_v1`. They are not a platform module, so they need no

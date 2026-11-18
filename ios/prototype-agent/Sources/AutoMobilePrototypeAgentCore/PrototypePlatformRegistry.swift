@@ -123,7 +123,8 @@ public final class PrototypePlatformRegistry {
         settings: any PrototypeSettingsURLOpener,
         bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
         deviceStatus: [any PrototypePlatformModule] = [],
-        location: (any PrototypeLocationSource)? = nil
+        location: (any PrototypeLocationSource)? = nil,
+        biometric: (any PrototypeBiometricSource)? = nil
     )
         -> PrototypePlatformRegistry
     {
@@ -135,6 +136,7 @@ public final class PrototypePlatformRegistry {
             PrototypeSettingsModule(opener: settings),
         ] + deviceStatus
         if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
+        if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 
@@ -145,7 +147,8 @@ public final class PrototypePlatformRegistry {
         settings: any PrototypeSettingsURLOpener,
         bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
         deviceStatus: [any PrototypePlatformModule] = [],
-        location: (any PrototypeLocationSource)? = nil
+        location: (any PrototypeLocationSource)? = nil,
+        biometric: (any PrototypeBiometricSource)? = nil
     )
         -> PrototypePlatformRegistry
     {
@@ -156,6 +159,7 @@ public final class PrototypePlatformRegistry {
             PrototypeSettingsModule(opener: settings),
         ] + deviceStatus
         if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
+        if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 

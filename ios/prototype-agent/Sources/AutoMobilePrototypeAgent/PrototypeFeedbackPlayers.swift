@@ -75,7 +75,8 @@
                     PrototypeDeviceStatusModule.power(source: ProcessInfoPowerSource()),
                     PrototypeDeviceStatusModule.audio(source: AVAudioSessionAudioSource()),
                 ],
-                location: CLLocationManagerPrototypeLocationSource()
+                location: CLLocationManagerPrototypeLocationSource(),
+                biometric: LAContextPrototypeBiometricSource()
             )
         }
     }

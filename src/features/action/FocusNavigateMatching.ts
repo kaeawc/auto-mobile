@@ -227,57 +227,63 @@ function isRangeValueDescription(
   );
 }
 
-function labelMayOwnFollowing(
-  node: FocusSiblingNode,
-  precedingCount: number,
-  previousLabelCanOwn: boolean,
-): boolean {
-  // A single candidate can belong to the preceding label only if that label was unambiguous.
-  // A focusable label owns itself, not a following control.
-  return (
-    !isTruthyFlag(node.element?.focusable) &&
-    (precedingCount === 0 || (precedingCount === 1 && previousLabelCanOwn))
-  );
+interface FocusSiblingToken {
+  node: FocusSiblingNode;
+  kind: "control" | "label" | "barrier";
 }
 
-/** A label can own one following control only if preceding candidates are already claimed. */
+function siblingLayoutTokens(
+  nodes: readonly FocusSiblingNode[],
+  label: FocusSiblingNode,
+  candidates: readonly FocusSiblingNode[],
+): FocusSiblingToken[] {
+  const candidateIndices = new Set(candidates.map((node) => node.index));
+  return nodes
+    .filter((node) => node.parentIndex === label.parentIndex)
+    .sort((a, b) => a.index - b.index)
+    .flatMap((node): FocusSiblingToken[] => {
+      if (candidateIndices.has(node.index)) {
+        return [{ node, kind: "control" }];
+      }
+      if (!isIndependentlyLabelledSibling(nodes, node)) {
+        return [];
+      }
+      return [{ node, kind: isTruthyFlag(node.element?.focusable) ? "barrier" : "label" }];
+    });
+}
+
+/** Every barrier-delimited segment must match (L+ C)* L*. */
+function isLabelFirstSiblingLayout(tokens: readonly FocusSiblingToken[]): boolean {
+  let previous: FocusSiblingToken["kind"] = "barrier";
+  for (const { kind } of tokens) {
+    if (kind === "control" && previous !== "label") {
+      return false;
+    }
+    previous = kind;
+  }
+  return true;
+}
+
+/** All labels in a run own its following control only when the whole parent is label-first. */
 function followingLabelSibling(
   nodes: readonly FocusSiblingNode[],
   label: FocusSiblingNode,
   candidates: readonly FocusSiblingNode[],
 ): Element | undefined {
-  const candidateIndices = new Set(candidates.map((node) => node.index));
-  let precedingCount = 0;
-  let previousLabelCanOwn = false;
-  for (const node of nodes) {
-    if (node.parentIndex !== label.parentIndex || node.index >= label.index) {
-      continue;
-    }
-    if (isIndependentlyLabelledSibling(nodes, node)) {
-      previousLabelCanOwn = labelMayOwnFollowing(node, precedingCount, previousLabelCanOwn);
-      precedingCount = 0;
-    } else if (candidateIndices.has(node.index)) {
-      precedingCount++;
-    }
-  }
-  if (precedingCount > 0 && !(precedingCount === 1 && previousLabelCanOwn)) {
+  if (isTruthyFlag(label.element?.focusable)) {
     return undefined;
   }
-  const nextLabel = nodes.find(
-    (node) =>
-      node.parentIndex === label.parentIndex &&
-      node.index > label.index &&
-      isIndependentlyLabelledSibling(nodes, node),
-  );
-  const following = candidates.filter(
-    (node) => node.index > label.index && (!nextLabel || node.index < nextLabel.index),
-  );
-  return following.length === 1 ? following[0].element : undefined;
+  const tokens = siblingLayoutTokens(nodes, label, candidates);
+  if (!isLabelFirstSiblingLayout(tokens)) {
+    return undefined;
+  }
+  const following = tokens.find(({ node, kind }) => node.index > label.index && kind !== "label");
+  return following?.kind === "control" ? following.node.element : undefined;
 }
 
 /**
  * A matching focusable in this same parent row (best match, nearest in hierarchy order), else
- * its only unlabelled focusable, or the only one after the label before the next sibling label.
+ * its only unlabelled focusable, or the control after its label run in a label-first parent.
  */
 export function focusLabelSibling(
   nodes: readonly FocusSiblingNode[],

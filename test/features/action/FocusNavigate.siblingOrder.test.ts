@@ -179,3 +179,101 @@ test("a lone control after both labels (title, summary, switch) is owned by each
   expect(focusLabelSibling(nodes, nodes[1])).toBe(nodes[3].element);
   expect(focusLabelSibling(nodes, nodes[2])).toBe(nodes[3].element);
 });
+
+test("a lone control after its label is owned by the single-candidate fallback", () => {
+  const nodes = siblingNodes(labelElement, control);
+  expect(focusLabelSibling(nodes, nodes[1])).toBe(nodes[2].element);
+});
+
+test.each([
+  { name: "C C L C", elements: [control, { ...control }, labelElement, { ...control }] },
+  {
+    name: "L C C L C",
+    elements: [labelElement, control, { ...control }, nextLabel, { ...control }],
+  },
+  {
+    name: "C_wifi L_title L_summary C_bt L_bt",
+    elements: [
+      control,
+      labelElement,
+      { ...labelElement, text: "Summary" },
+      { ...control },
+      nextLabel,
+    ],
+  },
+])("$name leaves every label ambiguous", ({ elements }) => {
+  const nodes = siblingNodes(...elements);
+  for (const node of nodes.filter((node) => "text" in node.element && node.element.text)) {
+    expect(focusLabelSibling(nodes, node)).toBeUndefined();
+  }
+});
+
+test("a labelled focusable barrier separates valid label-first rows", () => {
+  const nodes = siblingNodes(labelElement, control, { ...control, text: "Back" }, nextLabel, {
+    ...control,
+  });
+  expect(focusLabelSibling(nodes, nodes[1])).toBe(nodes[2].element);
+  expect(focusLabelSibling(nodes, nodes[4])).toBe(nodes[5].element);
+  expect(focusLabelSibling(nodes, nodes[3])).toBeUndefined();
+});
+
+test("each title and summary in label-first rows owns its row's control", () => {
+  const nodes = siblingNodes(
+    labelElement,
+    { ...labelElement, text: "Summary" },
+    control,
+    nextLabel,
+    { ...labelElement, text: "Other summary" },
+    { ...control },
+  );
+  for (const index of [1, 2]) {
+    expect(focusLabelSibling(nodes, nodes[index])).toBe(nodes[3].element);
+  }
+  for (const index of [4, 5]) {
+    expect(focusLabelSibling(nodes, nodes[index])).toBe(nodes[6].element);
+  }
+});
+
+test("a focusable sibling with a descendant label is a barrier before control-first rows", () => {
+  const nodes = siblingNodes(
+    labelElement,
+    control,
+    { ...control },
+    nextLabel,
+    { ...control },
+    { ...labelElement, text: "Airplane mode" },
+  );
+  nodes.push({ index: 7, parentIndex: 2, element: { ...labelElement, text: "WiFi" } });
+  for (const index of [1, 4, 6]) {
+    expect(focusLabelSibling(nodes, nodes[index])).toBeUndefined();
+  }
+});
+
+test("unlabelled non-focusable and parked controls do not interrupt label runs", () => {
+  const nodes = siblingNodes(
+    labelElement,
+    { bounds: labelElement.bounds },
+    { ...control, bounds: { left: 200, top: 0, right: 250, bottom: 50 } },
+    control,
+    nextLabel,
+    { ...control },
+    { ...labelElement, text: "Trailing title" },
+  );
+  expect(focusLabelSibling(nodes, nodes[1])).toBe(nodes[4].element);
+  expect(focusLabelSibling(nodes, nodes[5])).toBe(nodes[6].element);
+  expect(focusLabelSibling(nodes, nodes[7])).toBeUndefined();
+});
+
+test("a label run cannot cross a labelled focusable barrier", () => {
+  const nodes = siblingNodes(
+    labelElement,
+    { ...control, text: "Back" },
+    nextLabel,
+    control,
+    { ...labelElement, text: "Final title" },
+    { ...control },
+  );
+  expect(focusLabelSibling(nodes, nodes[1])).toBeUndefined();
+  expect(focusLabelSibling(nodes, nodes[3])).toBe(nodes[4].element);
+  expect(focusLabelSibling(nodes, nodes[5])).toBe(nodes[6].element);
+});

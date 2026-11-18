@@ -169,9 +169,10 @@ its own, `focusedElement.descendantLabel` is its child label: the `label` of its
   row, a matching focusable sibling can still own the label.
 - When a title is not focusable, `focusNavigate` selects the control in its row. If only one
   unlabelled control shares the title's parent, any label there selects that control. If the
-  control comes after the title, it belongs to that title. When ownership is ambiguous, the title
-  keeps its own position. Focus must reach the selected control; a focused row that only contains
-  it does not count.
+  group has several controls, a title selects the control after it only when every control follows
+  a title (title, control, title, control...). If any control comes before its title or controls
+  are not separated by titles, ownership is ambiguous and the title keeps its own position. Focus
+  must reach the selected control; a focused row that only contains it does not count.
 
 ### Tapping on a TV
 

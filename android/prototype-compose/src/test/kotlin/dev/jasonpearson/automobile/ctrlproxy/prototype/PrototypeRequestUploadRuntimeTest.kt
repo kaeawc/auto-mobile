@@ -111,6 +111,77 @@ class PrototypeRequestUploadRuntimeTest {
     request("\"method\":\"POST\",\"via\":\"$via\",\"body\":$body,\"progressKey\":\"count\"")
 
   @Test
+  fun `successive upload progress updates get distinct revisions and conflict with stale patches`() =
+    runTest {
+      val runtime = runtime(spec(upload("""{"form":{"q":{"state":"q"}}}""")))
+      runtime.handle(tapOf(runtime))
+      runCurrent()
+      val progress = checkNotNull(device.requests.single().onUploadProgress)
+      val initialRevision = runtime.current.revision
+      progress(25)
+      runCurrent()
+      val base = runtime.current.revision
+      assertTrue(base > initialRevision)
+      assertEquals(base, runtime.current.stateRevisions["count"])
+      progress(50)
+      runCurrent()
+      val before = runtime.current
+      assertTrue(before.revision > base)
+      assertEquals(before.revision, before.stateRevisions["count"])
+      val json = Json { classDiscriminator = "type" }
+      val ops =
+        json.parseToJsonElement("""[{"op":"replace","path":"/state/count","value":0}]""").jsonArray
+      val result =
+        runtime.patch(base, ops, json) { value ->
+          (PrototypeSpecValidator.validate(value.toString()) as PrototypeSpecValidation.Success)
+            .spec
+        }
+      assertEquals(
+        PrototypeRuntime.PatchResult.Conflict(
+          before.revision,
+          mapOf("count" to PrototypeScalar.Numeric(50.0)),
+        ),
+        result,
+      )
+      assertSame(before, runtime.current)
+    }
+
+  @Test
+  fun `lower and equal upload progress leave state revision and events unchanged`() = runTest {
+    val runtime = runtime(spec(upload("""{"form":{"q":{"state":"q"}}}""")))
+    runtime.handle(tapOf(runtime))
+    runCurrent()
+    val progress = checkNotNull(device.requests.single().onUploadProgress)
+    progress(75)
+    runCurrent()
+    val before = runtime.current
+    val eventCount = events.size
+    assertEquals(PrototypeScalar.Numeric(75.0), before.state["count"])
+    for (percent in listOf(50, 75, -1)) {
+      progress(percent)
+      runCurrent()
+      assertSame(before, runtime.current)
+      assertEquals(eventCount, events.size)
+    }
+  }
+
+  @Test
+  fun `starting another upload resets previous progress to zero`() = runTest {
+    val runtime = runtime(spec(upload("""{"form":{"q":{"state":"q"}}}""")))
+    runtime.handle(tapOf(runtime))
+    runCurrent()
+    checkNotNull(device.requests.single().onUploadProgress).invoke(80)
+    runCurrent()
+    assertEquals(PrototypeScalar.Numeric(80.0), runtime.current.state["count"])
+    device.answer(0, received(JsonPrimitive("ok")))
+    runCurrent()
+    runtime.handle(tapOf(runtime))
+    runCurrent()
+    assertEquals(2, device.requests.size)
+    assertEquals(PrototypeScalar.Numeric(0.0), runtime.current.state["count"])
+  }
+
+  @Test
   fun `multipart resolves scalar bindings and streams the stored file with byte accounting`() =
     runTest {
       val file = File.createTempFile("prototype-upload", ".bin")

@@ -1777,7 +1777,7 @@ class PrototypeRuntime(
     action.statusKey?.let { key ->
       if (writeStatus(key, PrototypeRequests.STATUS_LOADING)) touched += key
     }
-    if (upload != null) action.progressKey?.let { writeUploadProgress(it, 0) }
+    if (upload != null) action.progressKey?.let { writeUploadProgress(it, 0, reset = true) }
   }
 
   private fun uploadProgressCallback(key: String?, started: RequestInFlight): ((Int) -> Unit)? =
@@ -1792,7 +1792,11 @@ class PrototypeRuntime(
                   owner.current.active &&
                   synchronized(owner.inFlight) { owner.inFlight[started.requestId] === started }
               ) {
-                owner.writeUploadProgress(key, percent)
+                try {
+                  owner.writeUploadProgress(key, percent)
+                } finally {
+                  owner.interactionRevision = null
+                }
               }
             }
           } while (started.owner !== owner)
@@ -1965,9 +1969,10 @@ class PrototypeRuntime(
     )
   }
 
-  private suspend fun writeUploadProgress(key: String, percent: Int) {
+  private suspend fun writeUploadProgress(key: String, percent: Int, reset: Boolean = false) {
     val value = PrototypeScalar.Numeric(percent.coerceIn(0, 100).toDouble())
-    if (current.state[key] !is PrototypeScalar.Numeric || current.state[key] == value) return
+    val previous = current.state[key] as? PrototypeScalar.Numeric ?: return
+    if (previous.value == value.value || (!reset && previous.value >= value.value)) return
     try {
       writeInteractionSpec(validated(current.spec, mapOf(key to value)))
       emitStateChange(listOf(key))

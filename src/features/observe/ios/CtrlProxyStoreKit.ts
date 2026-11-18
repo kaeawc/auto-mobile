@@ -91,6 +91,8 @@ export interface CtrlProxyStoreKitResult extends BaseResult {
   transactions?: StoreKitTransaction[];
   /** The connected runner predates `request_storekit`. */
   unsupported?: boolean;
+  /** Set on a timeout after the request frame was written: the runner may still apply it. */
+  dispatched?: boolean;
 }
 
 export const STOREKIT_TIMEOUT_MS = 15_000;
@@ -98,7 +100,15 @@ export const STOREKIT_TIMEOUT_MS = 15_000;
 export interface StoreKitRequestOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+  /**
+   * Use the runner's open socket only, never connect or set the runner up: a sessionless read of
+   * a device another session holds must not ready it (#10830).
+   */
+  requireExistingConnection?: boolean;
 }
+
+/** Actions that change no StoreKit state, so an unanswered request is safe to repeat. */
+const REPEATABLE_ACTIONS: ReadonlySet<StoreKitAction> = new Set(["list", "clear"]);
 
 export async function requestStoreKit(
   context: DelegateContext,
@@ -109,6 +119,7 @@ export async function requestStoreKit(
     error: string,
     extra: Partial<CtrlProxyStoreKitResult> = {},
   ): CtrlProxyStoreKitResult => ({ success: false, totalTimeMs: 0, error, ...extra });
+  let dispatched = false;
   return sendCommand<CtrlProxyStoreKitResult>(context, {
     idPrefix: "storeKit",
     responseType: "storekit_result",
@@ -117,10 +128,28 @@ export async function requestStoreKit(
     timeoutMs: options.timeoutMs ?? STOREKIT_TIMEOUT_MS,
     abortSignal: options.signal,
     cancelScreenshotBackoff: false,
-    notConnectedError: () => failure("Not connected to CtrlProxy"),
+    ...(options.requireExistingConnection ? { requireExistingConnection: true } : {}),
+    onDispatch: () => {
+      dispatched = true;
+    },
+    notConnectedError: () =>
+      failure(
+        options.requireExistingConnection
+          ? "Not connected to CtrlProxy; another session holds this device, so this read uses the runner's open connection only and does not start the runner"
+          : "Not connected to CtrlProxy",
+      ),
     unsupportedCommandError: (_type, error) => failure(error, { unsupported: true }),
     // A runner-reported failure (no session, bad parameter) is not an outdated runner.
     responseError: (error, totalTimeMs) => failure(error, { totalTimeMs }),
-    timeoutError: () => failure("Timeout waiting for storekit_result"),
+    // An unanswered mutation may still apply (a buy can complete): say so, and do not invite a retry.
+    timeoutError: () =>
+      failure(
+        dispatched && !REPEATABLE_ACTIONS.has(request.action)
+          ? `Timeout waiting for storekit_result; the ${request.action} was sent and may still apply, so check list before retrying`
+          : "Timeout waiting for storekit_result",
+        dispatched && !REPEATABLE_ACTIONS.has(request.action)
+          ? { dispatched: true, retryable: false }
+          : {},
+      ),
   });
 }

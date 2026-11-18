@@ -1,5 +1,6 @@
+import { SearchableHierarchy } from "../utility/SearchableNode";
 import type { Element } from "../../models/Element";
-import { boundsEqual, intersectBounds } from "../../utils/bounds";
+import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
 import { DefaultTextMatcher } from "../utility/TextMatcher";
 import { normalize } from "../utility/ElementResolverMatching";
 import { isTruthyFlag } from "../utility/elementProperties";
@@ -148,4 +149,148 @@ export function describeFocus(
     matches,
     containsTarget,
   };
+}
+
+/** The parent relation needed to identify a label's own row, without crossing containers. */
+interface FocusSiblingNode {
+  element?: Element;
+  index: number;
+  parentIndex?: number;
+}
+
+function hasLabel(element: Element | undefined): boolean {
+  return Boolean(
+    element && (stringProp(element, "text").trim() || stringProp(element, "content-desc").trim()),
+  );
+}
+
+function isDescendant(
+  nodes: readonly FocusSiblingNode[],
+  node: FocusSiblingNode,
+  parent: FocusSiblingNode,
+): boolean {
+  for (let index = node.parentIndex; index !== undefined; index = nodes[index]?.parentIndex) {
+    if (index === parent.index) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function siblingMatchRank(node: FocusSiblingNode, target?: FocusNavigateTarget): number {
+  if (!target || !node.element || !elementMatchesTarget(node.element, target)) {
+    return 0;
+  }
+  return elementMatchesTarget(node.element, { ...target, labelExact: true }) ? 2 : 1;
+}
+
+function siblingLabelQualifies(
+  nodes: readonly FocusSiblingNode[],
+  node: FocusSiblingNode,
+  target?: FocusNavigateTarget,
+): boolean {
+  if (siblingMatchRank(node, target)) {
+    return true;
+  }
+  if (hasLabel(node.element)) {
+    return false;
+  }
+  return !nodes.some(
+    (child) =>
+      hasLabel(child.element) &&
+      isDescendant(nodes, child, node) &&
+      !isRangeValueDescription(node.element, child.element),
+  );
+}
+
+/** A range control can serialize its own value announcement as a co-located child. */
+function isRangeValueDescription(
+  control: Element | undefined,
+  child: Element | undefined,
+): boolean {
+  return Boolean(
+    control &&
+    child &&
+    stringProp(control, "range-info") &&
+    !stringProp(child, "text") &&
+    !isActionable(child) &&
+    boundsEqual(control.bounds, child.bounds),
+  );
+}
+
+/**
+ * A matching focusable in this same parent row (best match, nearest in hierarchy order), else
+ * the row's only unlabelled focusable. Several unlabelled candidates are ambiguous: none is pinned.
+ */
+export function focusLabelSibling(
+  nodes: readonly FocusSiblingNode[],
+  label: FocusSiblingNode,
+  target?: FocusNavigateTarget,
+): Element | undefined {
+  if (
+    label.parentIndex === undefined ||
+    isTruthyFlag(nodes[label.parentIndex]?.element?.scrollable)
+  ) {
+    return undefined;
+  }
+  const rowBounds = nodes[label.parentIndex]?.element?.bounds;
+  const sizedRow = rowBounds && boundsArea(rowBounds) > 0 ? rowBounds : undefined;
+  const candidates = nodes.filter(
+    (node) =>
+      node !== label &&
+      node.parentIndex === label.parentIndex &&
+      // A sibling parked wholly outside its sized row is out of sight: it must neither
+      // win nor make a single visible candidate ambiguous (same rule as parkedOutOfSight).
+      !(sizedRow && node.element?.bounds && !intersectBounds(node.element.bounds, sizedRow)) &&
+      isTruthyFlag(node.element?.focusable) &&
+      siblingLabelQualifies(nodes, node, target),
+  );
+  const matching = candidates.filter((node) => siblingMatchRank(node, target) > 0);
+  if (matching.length === 0) {
+    return candidates.length === 1 ? candidates[0].element : undefined;
+  }
+  return matching.sort(
+    (a, b) =>
+      siblingMatchRank(b, target) - siblingMatchRank(a, target) ||
+      Math.abs(a.index - label.index) - Math.abs(b.index - label.index) ||
+      a.index - b.index,
+  )[0]?.element;
+}
+
+const siblingHierarchy = new SearchableHierarchy();
+
+/** Use captured parents when available; otherwise the smallest strict enclosure defines a row. */
+export function flatFocusLabelSibling(
+  screen: FocusScreen,
+  label: Element,
+  target?: FocusNavigateTarget,
+): Element | undefined {
+  if (screen.hierarchy) {
+    const nodes = siblingHierarchy.project(screen.hierarchy);
+    const chosen = nodes.find(
+      (node) =>
+        node.element &&
+        boundsEqual(node.element.bounds, label.bounds) &&
+        stringProp(node.element, "text") === stringProp(label, "text") &&
+        stringProp(node.element, "content-desc") === stringProp(label, "content-desc"),
+    );
+    return chosen && focusLabelSibling(nodes, chosen, target);
+  }
+  const nodes = screen.elements.map((element, index) => {
+    const parents = screen.elements
+      .filter(
+        (parent, parentIndex) =>
+          parent !== element &&
+          containsElement(parent, element) &&
+          (!boundsEqual(parent.bounds, element.bounds) || parentIndex < index),
+      )
+      .sort((a, b) => boundsArea(a.bounds) - boundsArea(b.bounds));
+    return {
+      element,
+      index,
+      parentIndex: parents[0] ? screen.elements.indexOf(parents[0]) : undefined,
+    };
+  });
+  const chosen = nodes.find((node) => node.element === label);
+  return chosen && focusLabelSibling(nodes, chosen, target);
 }

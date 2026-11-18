@@ -3,6 +3,8 @@ import { defineDeviceTool } from "./defineTool";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { StoreKitTest } from "../features/storekit/StoreKitTest";
+import { isSessionlessDeviceRead } from "../features/toolSelection/toolSelectionContext";
+import { appIdSchema } from "../utils/schemaHelpers";
 import {
   STOREKIT_ACTIONS,
   STOREKIT_SIMULATED_ERRORS,
@@ -21,7 +23,7 @@ const storeKitTestInput = z.object({
     .describe(
       "load (configPath) starts a session; buy (productId), refund (transactionId), expire (subscriptionId), setTimeRate (timeRate), setSimulatedError (simulatedError), disableDialogs (enabled), list, clear (ends the session)",
     ),
-  appId: z.string().min(1).describe("Bundle id that keys the StoreKit session"),
+  appId: appIdSchema.describe("Bundle id that keys the StoreKit session"),
   configPath: z
     .string()
     .min(1)
@@ -64,6 +66,7 @@ export const storeKitTestResultSchema = z
       .enum(["unsupported_platform", "unsupported_device", "unsupported_capability"])
       .optional(),
     error: z.string().optional(),
+    retryable: z.boolean().optional(),
   })
   .passthrough();
 
@@ -74,7 +77,12 @@ export function createStoreKitTestTool(storeKit: StoreKitTest = new StoreKitTest
       "Test in-app purchases with StoreKit Testing on an iOS simulator. load a .storekit configuration first (it resets the session, clears transactions and disables purchase dialogs); then buy, refund, expire, setTimeRate, setSimulatedError (unknown, paymentCancelled or storeProductNotAvailable, for the next purchase) or disableDialogs, list the transactions, and clear to end the session. buy, refund, expire, list and clear return transactions. The session is keyed by appId and lasts until clear or the device session's release; StoreKitTest applies it to the runner's target app. Android, other Apple platforms and physical iPhones return unsupported (unsupported_platform or unsupported_device) without a device call; a runner without request_storekit returns unsupported_capability.",
     input: storeKitTestInput,
     handler: async (device, args, _progress, signal) => {
-      const result = await storeKit.run(device, { ...args, ...(signal ? { signal } : {}) });
+      const result = await storeKit.run(device, {
+        ...args,
+        ...(signal ? { signal } : {}),
+        // On a device another session holds, list reads the runner's open socket only (#10830).
+        ...(isSessionlessDeviceRead() ? { connectOnly: true } : {}),
+      });
       return withIsErrorOnFailure(createStructuredToolResponse(result), result.success);
     },
     options: {

@@ -11,6 +11,9 @@ import { swipeScreenSize } from "../../../src/features/action/swipeon/iosChromeI
 import { DefaultElementGeometry } from "../../../src/features/utility/ElementGeometry";
 import { getScreenBounds } from "../../../src/utils/screenBounds";
 import demosRawHierarchy from "../../fixtures/ios-duo/issue8379-demos-raw-hierarchy.json";
+import modalSheetHierarchy from "../../fixtures/ios-duo/observe-inner-modal-sheet-hierarchy-18560.json";
+import { childrenOf, nodeAttributes, nodeBounds } from "../../../src/models/ViewHierarchyResult";
+import { parseBounds } from "../../../src/utils/bounds";
 import { wireCapture } from "../../helpers/wireCapture";
 test("outer application bounds stay authoritative when cleanup collapses wrappers to one button", () => {
   const hierarchy = {
@@ -306,4 +309,101 @@ test("an exactly swapped child still cannot extend past the swapped right edge",
       },
     }),
   ).toEqual({ width: 669, height: 951 });
+});
+
+function capturedModalSheetHierarchy(): ViewHierarchyResult {
+  return wireCapture(structuredClone(modalSheetHierarchy));
+}
+
+test("captured Duo modal sheet resolves landscape only with multi-panel evidence", () => {
+  expect(extractHierarchyScreenSize(capturedModalSheetHierarchy(), true)).toEqual({
+    width: 951,
+    height: 669,
+  });
+  expect(extractHierarchyScreenSize(capturedModalSheetHierarchy(), false)).toEqual({
+    width: 669,
+    height: 951,
+  });
+});
+
+test("captured modal backdrop does not turn portrait content into landscape evidence", () => {
+  const hierarchy = capturedModalSheetHierarchy();
+  const stack = childrenOf(hierarchy.hierarchy.node!);
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    const attributes = nodeAttributes(node);
+    const bounds = parseBounds(nodeBounds(node));
+    if (bounds && bounds.top < 951 && attributes["resource-id"] !== "PopoverDismissRegion") {
+      node.bounds = {
+        ...bounds,
+        left: Math.min(bounds.left, 668),
+        right: Math.min(bounds.right, 669),
+      };
+    }
+    stack.push(...childrenOf(node));
+  }
+  expect(extractHierarchyScreenSize(hierarchy, true)).toEqual({ width: 669, height: 951 });
+});
+
+test("rows at the root bottom are ignored while their children can prove horizontal overflow", () => {
+  const root = { left: 0, top: 0, right: 669, bottom: 951 };
+  const row = { bounds: { left: 0, top: 951, right: 1200, bottom: 1300 } };
+  const hierarchy = wireCapture({ hierarchy: { node: { bounds: root, node: [row] } } });
+  expect(extractHierarchyScreenSize(hierarchy, true)).toEqual({ width: 669, height: 951 });
+  const withChild = wireCapture({
+    hierarchy: {
+      node: {
+        bounds: root,
+        node: [{ ...row, node: { bounds: { left: 700, top: 20, right: 802, bottom: 80 } } }],
+      },
+    },
+  });
+  expect(extractHierarchyScreenSize(wireCapture(withChild), true)).toEqual({
+    width: 951,
+    height: 669,
+  });
+});
+
+test("captured sheet keeps landscape evidence under single-child backdrop wrappers", () => {
+  const hierarchy = capturedModalSheetHierarchy();
+  const root = hierarchy.hierarchy.node!;
+  const [backdrop, , scrollView] = childrenOf(root);
+  nodeAttributes(scrollView).scrollable = true;
+  const wrapped = wireCapture({
+    ...hierarchy,
+    hierarchy: { node: { ...root, node: { ...backdrop, node: scrollView } } },
+  });
+  expect(extractHierarchyScreenSize(wrapped, true)).toEqual({ width: 951, height: 669 });
+});
+
+test("oversized content clipped by a portrait scroll viewport cannot prove landscape", () => {
+  const scrolledContent = (content: { left: number; top: number; right: number; bottom: number }) =>
+    wireCapture({
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 393, bottom: 852 },
+          node: [
+            {
+              bounds: { left: 0, top: 0, right: 393, bottom: 300 },
+              scrollable: "true",
+              node: [{ bounds: content }],
+            },
+          ],
+        },
+      },
+    });
+  for (const content of [
+    { left: 0, top: 0, right: 900, bottom: 900 },
+    { left: 0, top: 0, right: 852, bottom: 393 },
+    { left: 0, top: 0, right: 1200, bottom: 600 },
+  ]) {
+    expect(extractHierarchyScreenSize(scrolledContent(content), false)).toEqual({
+      width: 393,
+      height: 852,
+    });
+    expect(extractHierarchyScreenSize(scrolledContent(content), true)).toEqual({
+      width: 393,
+      height: 852,
+    });
+  }
 });

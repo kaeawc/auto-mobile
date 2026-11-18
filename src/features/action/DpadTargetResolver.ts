@@ -7,7 +7,7 @@ import type { SearchableEntry } from "../utility/SearchableNode";
 import type { ElementResolution } from "../utility/ElementResolver";
 import type { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { compareSelectionRank } from "../utility/selectionRank";
-import { elementMatchesTarget } from "./FocusNavigateMatching";
+import { elementMatchesTarget, focusLabelSibling } from "./FocusNavigateMatching";
 
 /**
  * Picks a focus target for this screen read: its bounds, null when nothing matches, or undefined
@@ -38,7 +38,7 @@ export class SelectorDpadTargetResolver implements DpadTargetResolver {
         screen.hierarchy,
         { text: target.label },
         {
-          partialMatch: true,
+          partialMatch: !target.labelExact,
           caseSensitive: false,
           strategy: "first",
           intentAction: "inspect",
@@ -49,7 +49,9 @@ export class SelectorDpadTargetResolver implements DpadTargetResolver {
       if (!selection.element) {
         return null;
       }
-      return focusOwnerBounds(resolution, target.label) ?? selection.element.bounds;
+      return (
+        focusOwnerBounds(resolution, target.label, target.labelExact) ?? selection.element.bounds
+      );
     }
     if (target.elementId) {
       const { selection } = this.selector.selectWithResolution(
@@ -73,7 +75,7 @@ function isClickable(element: Element | undefined): boolean {
 
 /**
  * The nearest clickable or focusable ancestor of `entry`: the walk stops at the first one, and a
- * scrolling container ends it with no owner.
+ * scrolling container ends it without promoting focus ownership.
  */
 function nearestActionableAncestor(
   nodes: readonly SearchableEntry[],
@@ -82,7 +84,7 @@ function nearestActionableAncestor(
   for (let index = entry.parentIndex; index !== undefined; index = nodes[index]?.parentIndex) {
     const element = nodes[index]?.element;
     if (element && isTruthyFlag(element.scrollable)) {
-      return undefined;
+      return element;
     }
     if (isFocusable(element) || isClickable(element)) {
       return element;
@@ -96,7 +98,8 @@ function nearestActionableAncestor(
  * its own owner. A clickable, non-focusable choice is an independent control: it keeps its own
  * bounds, so a focused row around it never stands in for it. A pure label (neither focusable nor
  * clickable) is promoted to its nearest focusable ancestor; when the nearest actionable ancestor
- * is only clickable the label keeps its own bounds. A label with no actionable ancestor falls back to the
+ * is only clickable the label keeps its own bounds. A scrolling ancestor suppresses duplicate-label fallback, but permits a matching or unlabelled sibling in
+ * the same parent row. A label with no actionable ancestor falls back to the
  * best focusable candidate from the same resolution (so the same visibility filtering applies) in
  * the chosen element's window, exact before contains, then smallest area and hierarchy order.
  * Undefined keeps tapOn's own bounds.
@@ -104,6 +107,7 @@ function nearestActionableAncestor(
 export function focusOwnerBounds(
   resolution: Pick<ElementResolution, "chosen" | "candidates" | "snapshotNodes">,
   label: string,
+  labelExact = false,
 ): ElementBounds | undefined {
   const chosen = resolution.chosen;
   if (!chosen?.element) {
@@ -112,17 +116,42 @@ export function focusOwnerBounds(
   if (isTruthyFlag(chosen.element.focusable) || isClickable(chosen.element)) {
     return chosen.element.bounds;
   }
-  const ancestor = nearestActionableAncestor(resolution.snapshotNodes ?? [], chosen);
+  const nodes = resolution.snapshotNodes ?? [];
+  const ancestor = nearestActionableAncestor(nodes, chosen);
   if (ancestor) {
-    return isFocusable(ancestor) ? ancestor.bounds : chosen.element.bounds;
+    return ancestorFocusBounds(ancestor, chosen, { nodes, target: { label, labelExact } });
   }
-  const [best] = resolution.candidates
+  return (
+    focusableLabelBounds(resolution.candidates, chosen, { label, labelExact }) ??
+    focusLabelSibling(nodes, chosen)?.bounds
+  );
+}
+
+function ancestorFocusBounds(
+  ancestor: Element,
+  chosen: SearchableEntry,
+  { nodes, target }: { nodes: readonly SearchableEntry[]; target: FocusNavigateTarget },
+): ElementBounds | undefined {
+  if (isTruthyFlag(ancestor.scrollable)) {
+    return focusLabelSibling(nodes, chosen, target)?.bounds ?? chosen.element?.bounds;
+  }
+  return isFocusable(ancestor) ? ancestor.bounds : chosen.element?.bounds;
+}
+
+function focusableLabelBounds(
+  candidates: readonly SearchableEntry[],
+  chosen: SearchableEntry,
+  target: FocusNavigateTarget,
+): ElementBounds | undefined {
+  const [best] = candidates
     .flatMap((entry) =>
-      entry.windowRank === chosen.windowRank && isFocusable(entry.element)
+      entry.windowRank === chosen.windowRank &&
+      isFocusable(entry.element) &&
+      elementMatchesTarget(entry.element, target)
         ? [
             {
               element: entry.element,
-              exact: elementMatchesTarget(entry.element, { label, labelExact: true }),
+              exact: elementMatchesTarget(entry.element, { ...target, labelExact: true }),
               windowRank: entry.windowRank,
               area: boundsArea(entry.element.bounds),
               order: entry.index,

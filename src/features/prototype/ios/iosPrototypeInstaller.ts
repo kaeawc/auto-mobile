@@ -79,14 +79,18 @@ export interface PrototypeInstallInput {
 const FACE_ID_USAGE_KEY = "NSFaceIDUsageDescription";
 const DEFAULT_FACE_ID_USAGE = "Confirm your identity when a prototype asks you to authenticate.";
 
+function moduleRequires(spec: PrototypeJson) {
+  const parsed = prototypeRequiresSchema.parse(
+    spec && typeof spec === "object" && !Array.isArray(spec) ? (spec.requires ?? {}) : {},
+  );
+  return Array.isArray(parsed) ? {} : parsed;
+}
+
 function permissionUsageStrings(
   spec: PrototypeJson,
   templateFaceIdUsage: unknown,
 ): Record<string, string> {
-  const parsedRequires = prototypeRequiresSchema.parse(
-    spec && typeof spec === "object" && !Array.isArray(spec) ? (spec.requires ?? {}) : {},
-  );
-  const requires = Array.isArray(parsedRequires) ? {} : parsedRequires;
+  const requires = moduleRequires(spec);
   const strings: Record<string, string> = {};
   // A Face ID host without this key refuses biometric.authenticate (#14328), so a saved app that
   // declares the `biometric` module keeps the template's string, or gets the default.

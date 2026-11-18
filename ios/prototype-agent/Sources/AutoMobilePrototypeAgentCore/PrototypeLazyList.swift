@@ -57,10 +57,12 @@ enum PrototypeLazyList {
             alias: spec.as, item: fields, index: index, sourceItem: items[index].objectFields,
             identity: fields[spec.key]?.displayString
         )
-        let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
-        let bound = PrototypeRepeat.expand(
-            resolved, outer: instance, formatter: FoundationPrototypeValueFormatter(), environment: .device()
+        // Row tokens bind first, so `{data:/rows/{index}/name}` is a complete pointer before it resolves.
+        let sources = PrototypeDataResolver.resolveRepeatSources(raw, data: data)
+        let expanded = PrototypeRepeat.expand(
+            sources, outer: instance, formatter: FoundationPrototypeValueFormatter(), environment: .device()
         )
+        let bound = PrototypeDataResolver.resolveRoot(expanded, data: data)
         return (fields[spec.key]?.displayString ?? "", bound)
     }
 

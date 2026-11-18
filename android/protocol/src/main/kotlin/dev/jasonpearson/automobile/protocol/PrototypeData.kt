@@ -299,9 +299,15 @@ internal object PrototypeDataText {
       append(literal(text.substring(cursor)))
     }
 
-  fun bindSources(text: String, data: JsonObject?, platform: JsonObject?): String {
+  fun bindSources(
+    text: String,
+    data: JsonObject?,
+    platform: JsonObject?,
+    deferData: Boolean = false,
+  ): String {
     val sources =
-      placeholders(text).map { it to data } + placeholders(text, "platform").map { it to platform }
+      (if (deferData) emptyList() else placeholders(text).map { it to data }) +
+        placeholders(text, "platform").map { it to platform }
     return buildString {
       var cursor = 0
       for ((span, source) in sources.sortedBy { it.first.start }) {
@@ -329,18 +335,28 @@ internal object PrototypeDataText {
   }
 }
 
-/** Pure, one-time resolution before repeat expansion and state interpolation. */
+/** Pure resolution of data sources and conditions, with lazy text bound after row tokens. */
 object PrototypeDataResolver {
   fun resolveRoot(root: JsonObject, data: JsonObject?, platform: JsonObject? = null): JsonObject =
-    resolveRoot(root, data, PrototypeRepeatData(data), platform)
+    resolveRoot(root, data, PrototypeRepeatData(data), platform, Pass.ALL)
+
+  private enum class Pass {
+    ALL,
+    DEFER_DATA_TEXT,
+  }
+
+  /** Resolves only this node's text after its lazy row tokens have bound. */
+  fun resolveNodeText(root: JsonObject, data: JsonObject?): JsonObject =
+    textFields(root, data, null)
 
   private fun resolveRoot(
     root: JsonObject,
     data: JsonObject?,
     repeats: PrototypeRepeatData,
     platform: JsonObject?,
+    pass: Pass,
   ): JsonObject {
-    val own = textFields(root, data, platform)
+    val own = textFields(root, data, platform, deferData = pass == Pass.DEFER_DATA_TEXT)
     val resolved =
       JsonObject(
         own.mapValues { (key, value) ->
@@ -356,7 +372,12 @@ object PrototypeDataResolver {
           }
         },
       )
-    return mapChildren(resolved) { resolveRoot(it, data, repeats, platform) }
+    // Only row-template children defer data text; headers and footers resolve at the root.
+    val lazy = root["type"] == JsonPrimitive("list")
+    return mapChildren(resolved) { child, rowTemplate ->
+      val childPass = if (lazy && rowTemplate) Pass.DEFER_DATA_TEXT else pass
+      resolveRoot(child, data, repeats, platform, childPass)
+    }
   }
 
   fun resolve(spec: PrototypeSpec, platform: JsonObject? = null): PrototypeSpec {
@@ -416,12 +437,18 @@ object PrototypeDataResolver {
       },
     )
 
-  private fun textFields(node: JsonObject, data: JsonObject?, platform: JsonObject?): JsonObject {
+  private fun textFields(
+    node: JsonObject,
+    data: JsonObject?,
+    platform: JsonObject?,
+    deferData: Boolean = false,
+  ): JsonObject {
     val replacements = mutableMapOf<String, JsonElement>()
     PrototypeBindableFields.first<Boolean>(node, "") { value, path, kind ->
       val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
       if (kind == PrototypeBindableKind.TEXT && text != null) {
-        replacements[path] = JsonPrimitive(PrototypeDataText.bindSources(text, data, platform))
+        replacements[path] =
+          JsonPrimitive(PrototypeDataText.bindSources(text, data, platform, deferData))
       }
       null
     }
@@ -450,12 +477,15 @@ object PrototypeDataResolver {
         else -> value
       }
 
-  private fun mapChildren(node: JsonObject, transform: (JsonObject) -> JsonObject): JsonObject {
+  private fun mapChildren(
+    node: JsonObject,
+    transform: (JsonObject, Boolean) -> JsonObject,
+  ): JsonObject {
     if (node["type"] == JsonPrimitive("adaptive")) {
       val slots =
         listOf("list", "detail", "content", "main", "supporting")
           .mapNotNull { key ->
-            (node[key] as? JsonObject)?.let { key to transform(it) }
+            (node[key] as? JsonObject)?.let { key to transform(it, false) }
           }
           .toMap()
       return JsonObject(node + slots)
@@ -463,11 +493,11 @@ object PrototypeDataResolver {
     val extras =
       listOf("header", "footer")
         .mapNotNull { key ->
-          (node[key] as? JsonObject)?.let { key to transform(it) }
+          (node[key] as? JsonObject)?.let { key to transform(it, false) }
         }
         .toMap()
     val child = node["child"] as? JsonObject
-    if (child != null) return JsonObject(node + ("child" to transform(child)))
+    if (child != null) return JsonObject(node + ("child" to transform(child, false)))
     val screens = node["screens"] as? JsonObject
     if (screens != null)
       return JsonObject(
@@ -475,7 +505,7 @@ object PrototypeDataResolver {
           ("screens" to
             JsonObject(
               screens.mapValues { (_, entry) ->
-                if (entry is JsonObject) transform(entry) else entry
+                if (entry is JsonObject) transform(entry, false) else entry
               },
             )),
       )
@@ -486,7 +516,7 @@ object PrototypeDataResolver {
         ("children" to
           JsonArray(
             children.map { entry ->
-              if (entry is JsonObject) transform(entry) else entry
+              if (entry is JsonObject) transform(entry, true) else entry
             },
           )),
     )

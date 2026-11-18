@@ -250,25 +250,35 @@ enum PrototypeDataResolver {
         -> JSONValue
     {
         var repeats = PrototypeRepeatData(data: data)
-        return resolveRoot(root, data: data, platform: platform, repeats: &repeats)
+        return resolveRoot(root, data: data, platform: platform, repeats: &repeats, pass: .all)
     }
+
+    /// Resolves only `repeat` item sources, leaving every text and condition untouched, so a lazy row can
+    /// bind its row tokens before `{data:...}` pointers resolve and substituted values are never re-bound.
+    static func resolveRepeatSources(_ root: JSONValue, data: [String: JSONValue]?) -> JSONValue {
+        var repeats = PrototypeRepeatData(data: data)
+        return resolveRoot(root, data: data, platform: nil, repeats: &repeats, pass: .repeatsOnly)
+    }
+
+    /// `deferText` leaves text raw (conditions still resolve) for a lazy row template that binds per row.
+    private enum Pass { case all, repeatsOnly, deferText }
 
     private static func resolveRoot(
         _ root: JSONValue, data: [String: JSONValue]?, platform: [String: JSONValue]?,
-        repeats: inout PrototypeRepeatData
+        repeats: inout PrototypeRepeatData, pass: Pass
     )
         -> JSONValue
     {
         guard case var .object(fields) = root else { return root }
-        PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind($0, data: data, platform: platform) }
+        if pass == .all { PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind($0, data: data, platform: platform) } }
         let lazy = fields["type"] == .string("list")
         if !lazy, let value = fields["repeat"] { fields["repeat"] = resolveRepeat(
             value, repeats: &repeats, retainSource: PrototypeRepeat.containsFieldSource(root)
         ) }
-        for key in ["visibleWhen", "enabledWhen", "errorWhen"] {
+        for key in ["visibleWhen", "enabledWhen", "errorWhen"] where pass != .repeatsOnly {
             if let value = fields[key] { fields[key] = resolveCondition(value, data: data, platform: platform) }
         }
-        if case let .array(styles)? = fields["styleWhen"] {
+        if pass != .repeatsOnly, case let .array(styles)? = fields["styleWhen"] {
             fields["styleWhen"] = .array(styles.map { entry in
                 guard case var .object(style) = entry, let condition = style["when"] else { return entry }
                 style["when"] = resolveCondition(condition, data: data, platform: platform)
@@ -276,31 +286,34 @@ enum PrototypeDataResolver {
             })
         }
         if let child = fields["child"] {
-            fields["child"] = resolveRoot(child, data: data, platform: platform, repeats: &repeats)
+            fields["child"] = resolveRoot(child, data: data, platform: platform, repeats: &repeats, pass: pass)
         } else if fields["type"] == .string("adaptive") {
             for slot in PrototypeAdaptive.slots {
                 if let child = fields[slot] { fields[slot] = resolveRoot(
                     child,
                     data: data,
                     platform: platform,
-                    repeats: &repeats
+                    repeats: &repeats, pass: pass
                 ) }
             }
         } else if case let .array(children)? = fields["children"] {
+            // A lazy list's row template keeps its text raw: each row binds `{index}` and
+            // `{row.x}` first, then resolves, so a pointer such as `{data:/rows/{index}/name}` stays whole.
+            let rowPass: Pass = pass == .all && lazy ? .deferText : pass
             fields["children"] = .array(children
-                .map { resolveRoot($0, data: data, platform: platform, repeats: &repeats) })
+                .map { resolveRoot($0, data: data, platform: platform, repeats: &repeats, pass: rowPass) })
         }
         for name in ["header", "footer"] {
             if let child = fields[name] { fields[name] = resolveRoot(
                 child,
                 data: data,
                 platform: platform,
-                repeats: &repeats
+                repeats: &repeats, pass: pass
             ) }
         }
         if case let .object(screens)? = fields["screens"] {
             fields["screens"] = .object(screens
-                .mapValues { resolveRoot($0, data: data, platform: platform, repeats: &repeats) })
+                .mapValues { resolveRoot($0, data: data, platform: platform, repeats: &repeats, pass: pass) })
         }
         return .object(fields)
     }

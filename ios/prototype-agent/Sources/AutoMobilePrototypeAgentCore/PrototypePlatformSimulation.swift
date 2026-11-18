@@ -22,10 +22,10 @@ enum PrototypePlatformSimulation {
         }
         guard data.objectFields != nil else { return "simulate data must be a JSON object" }
         let payload = JSONValue.object(["event": .string(event), "data": data, "simulated": .bool(true)])
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.withoutEscapingSlashes]
-        guard let encoded = try? encoder.encode(payload) else { return "simulate data must contain only JSON values" }
-        guard encoded.count <= PrototypeLimits.maxEmitPayloadBytes else {
+        guard let byteCount = PrototypeEmitContext.jsonByteCount(payload) else {
+            return "simulate data must contain only JSON values"
+        }
+        guard byteCount <= PrototypeLimits.maxEmitPayloadBytes else {
             return "simulate event payload exceeds the 4096-byte emit budget; reduce data"
         }
         guard let module = registry.modules[name], module.supportsSimulation,

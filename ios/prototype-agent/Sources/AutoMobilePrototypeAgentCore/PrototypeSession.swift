@@ -458,9 +458,13 @@ struct PrototypeSession {
         guard let spec else { return [] }
         var payload = JSONValue.object(["event": .string(name), "data": data])
         if simulated { payload = .object(["event": .string(name), "data": data, "simulated": .bool(true)]) }
-        let encoder = JSONEncoder()
-        if simulated { encoder.outputFormatting = [.withoutEscapingSlashes] }
-        if try encoder.encode(payload).count > PrototypeLimits.maxEmitPayloadBytes {
+        let overBudget: Bool
+        if simulated {
+            overBudget = (PrototypeEmitContext.jsonByteCount(payload) ?? Int.max) > PrototypeLimits.maxEmitPayloadBytes
+        } else {
+            overBudget = try JSONEncoder().encode(payload).count > PrototypeLimits.maxEmitPayloadBytes
+        }
+        if overBudget {
             payload = .object(["event": .string(name), "data": .null, "truncated": .bool(true)])
         }
         if simulated, case var .object(fields) = payload {

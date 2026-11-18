@@ -133,6 +133,51 @@ final class PrototypePlatformSimulationTests: XCTestCase {
     }
 
     @MainActor
+    func testSimulationAcceptsHostByteLimitWithSmallExponent() throws {
+        let emptyData = JSONValue.object(["x": .number(1e-7), "text": .string("")])
+        let emptyPayload = JSONValue.object([
+            "event": .string("test.tick"), "data": emptyData, "simulated": .bool(true),
+        ])
+        let overhead = try XCTUnwrap(PrototypeEmitContext.jsonByteCount(emptyPayload))
+        let text = String(repeating: "a", count: PrototypeLimits.maxEmitPayloadBytes - overhead)
+        let data = JSONValue.object(["x": .number(1e-7), "text": .string(text)])
+        let payload = JSONValue.object([
+            "event": .string("test.tick"), "data": data, "simulated": .bool(true),
+        ])
+        XCTAssertEqual(PrototypeEmitContext.jsonByteCount(payload), 4096)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        XCTAssertGreaterThan(try encoder.encode(payload).count, 4096)
+
+        let module = SimulationModule()
+        let registry = PrototypePlatformRegistry(modules: [module])
+        var current = try session()
+        var delivered: [PlatformEvent] = []
+        XCTAssertNil(PrototypePlatformSimulation.apply(
+            id: "p", event: "test.tick", data: data, session: current, registry: registry
+        ) { delivered.append($0) })
+        XCTAssertEqual(module.mutations, 1)
+        XCTAssertEqual(module.state, data.objectFields)
+        XCTAssertEqual(delivered.count, 1)
+        let event = try XCTUnwrap(delivered.first)
+        let emitted = try current.deliverPlatformEvent(event.event, data: event.data, simulated: true)
+        let emittedPayload = try XCTUnwrap(emitted.first { $0.name == "prototype_platform_event" }?.payload)
+        XCTAssertEqual(emittedPayload.objectFields?["data"], data)
+        XCTAssertNil(emittedPayload.objectFields?["truncated"])
+        XCTAssertEqual(emittedPayload.objectFields?["simulated"], .bool(true))
+
+        delivered = []
+        let oversized = JSONValue.object(["x": .number(1e-7), "text": .string(text + "a")])
+        let refusal = PrototypePlatformSimulation.apply(
+            id: "p", event: "test.tick", data: oversized, session: current, registry: registry
+        ) { delivered.append($0) }
+        XCTAssertTrue(refusal?.contains("4096-byte") == true, refusal ?? "accepted")
+        XCTAssertTrue(delivered.isEmpty)
+        XCTAssertEqual(module.mutations, 1)
+        XCTAssertEqual(module.state, data.objectFields)
+    }
+
+    @MainActor
     func testRefusalsPrecedeMutationAndDelivery() throws {
         let module = SimulationModule()
         let registry = PrototypePlatformRegistry(modules: [module])

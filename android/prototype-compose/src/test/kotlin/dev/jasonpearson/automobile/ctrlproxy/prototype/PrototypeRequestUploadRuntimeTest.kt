@@ -182,6 +182,64 @@ class PrototypeRequestUploadRuntimeTest {
   }
 
   @Test
+  fun `a concurrent upload sharing progressKey cannot raise it after the newer reset`() = runTest {
+    val second =
+      """{"type":"request","url":"http://localhost:8080/other","into":"/data/other",""" +
+        """"method":"POST","via":"device","body":{"form":{"q":{"state":"q"}}},"progressKey":"count"}"""
+    val runtime = runtime(spec(upload("""{"form":{"q":{"state":"q"}}}""") + "," + second))
+    runtime.handle(tapOf(runtime))
+    runCurrent()
+    assertEquals(2, device.requests.size)
+    val (older, newer) = device.requests.map { checkNotNull(it.onUploadProgress) }
+    older(85)
+    runCurrent()
+    assertEquals(PrototypeScalar.Numeric(0.0), runtime.current.state["count"])
+    newer(40)
+    runCurrent()
+    assertEquals(PrototypeScalar.Numeric(40.0), runtime.current.state["count"])
+    device.answer(0, received(JsonPrimitive("ok")))
+    runCurrent()
+    assertEquals(PrototypeScalar.Numeric(40.0), runtime.current.state["count"])
+    device.answer(1, received(JsonPrimitive("ok")))
+    runCurrent()
+    assertEquals(PrototypeScalar.Numeric(100.0), runtime.current.state["count"])
+  }
+
+  @Test
+  fun `asset ids that try to escape the store fail before transport`() = runTest {
+    val asked = mutableListOf<String>()
+    val assets =
+      object : PrototypeAssetSource {
+        // Ids are store keys, never paths: an id that is not a stored key resolves to nothing.
+        override fun file(id: String): File? = null.also { asked += id }
+
+        override fun lookup(id: String): PrototypeAssetInfo? = error("Do not buffer uploads")
+
+        override fun read(id: String): ByteArray? = error("Do not buffer uploads")
+
+        override fun setChangeListener(listener: PrototypeAssetChangeListener?) = Unit
+      }
+    val escapes = listOf("../../etc/hosts", "/etc/hosts", "a/../../b")
+    for (id in escapes) {
+      val runtime =
+        runtime(
+          spec(upload("""{"file":{"asset":${JsonPrimitive(id)}},"contentType":"image/png"}""")),
+          assets = assets,
+        )
+      runtime.handle(tapOf(runtime))
+      runCurrent()
+    }
+    assertTrue(device.requests.isEmpty())
+    assertEquals(escapes, asked)
+    assertEquals(
+      List(escapes.size) { "invalid_request" },
+      requestEvents().map {
+        it.getValue("error").jsonObject.getValue("code").jsonPrimitive.content
+      },
+    )
+  }
+
+  @Test
   fun `multipart resolves scalar bindings and streams the stored file with byte accounting`() =
     runTest {
       val file = File.createTempFile("prototype-upload", ".bin")

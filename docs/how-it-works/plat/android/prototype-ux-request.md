@@ -45,8 +45,13 @@ Android device uploads require `prototype_network_upload_v1`. A body can be `{mu
 to 10 MiB in total. Multipart files default to the asset id as filename and
 `application/octet-stream`; OkHttp supplies the boundary and overrides an authored Content-Type.
 Bound strings are literal; other values use JSON text. `progressKey` names a declared number key:
-byte updates run at most 10 Hz, with completion setting 100. Events include total file bytes as
-`uploadBytes` (zero for forms). Host uploads fail as `invalid_request`; use `via: "device"`.
+byte updates run at most 10 Hz, with completion setting 100. The value never goes down during one
+upload, and only the upload that last reset the key to 0 writes it, so an older upload still in
+flight on the same key cannot raise it again. A 307 or 308 redirect sends the whole body again to
+the target (dropping `Authorization` across origins), and progress holds across the re-send. A 303,
+or a 301 or 302 after a `POST`, becomes a `GET` and drops the body. The `timeoutMs` budget spans every hop. Events
+include total file bytes as `uploadBytes` (zero for forms). Host uploads fail as
+`invalid_request`; use `via: "device"`.
 
 **Limits** live in the contract's `limits` and `src/features/prototype/prototypeRequestLimits.ts`
 reads them from there (the contract is the single source for the host executor, the validator and

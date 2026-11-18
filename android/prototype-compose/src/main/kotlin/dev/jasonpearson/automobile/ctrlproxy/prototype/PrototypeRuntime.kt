@@ -1706,6 +1706,13 @@ class PrototypeRuntime(
 
   private val inFlight = LinkedHashMap<String, RequestInFlight>()
 
+  /**
+   * The request id that last reset each `progressKey` to 0. Only that upload writes the key, so a
+   * concurrent upload sharing the key (non-overlapping `into`, so not superseded) cannot raise it
+   * again after the newer one reset it.
+   */
+  private val progressOwners = HashMap<String, String>()
+
   /** Dismissal ends every request without a trace: the runtime is closed, so nothing is sent. */
   private fun cancelRequests() {
     val jobs = synchronized(inFlight) { inFlight.values.map { it.job }.also { inFlight.clear() } }
@@ -1723,6 +1730,8 @@ class PrototypeRuntime(
   @InternalAutoMobilePrototypeApi
   fun handOverRequests(replacement: PrototypeRuntime) {
     val moved = synchronized(inFlight) { inFlight.values.toList().also { inFlight.clear() } }
+    val owners = synchronized(progressOwners) { progressOwners.toMap() }
+    synchronized(replacement.progressOwners) { replacement.progressOwners.putAll(owners) }
     moved.forEach { request ->
       requestLimiter.release()
       replacement.adoptRequest(request)
@@ -1825,7 +1834,7 @@ class PrototypeRuntime(
         )
       return finishRequest(started, PrototypeRequestResponse.Failed(error))
     }
-    writeRequestLoading(action, upload, touched)
+    writeRequestLoading(action, upload, started.requestId, touched)
     val request =
       PrototypeHttpRequest(
         requestId = started.requestId,
@@ -1852,12 +1861,14 @@ class PrototypeRuntime(
   private suspend fun writeRequestLoading(
     action: PrototypeRequestAction,
     upload: PrototypeUploadBody?,
+    requestId: String,
     touched: MutableSet<String>,
   ) {
     action.statusKey?.let { key ->
       if (writeStatus(key, PrototypeRequests.STATUS_LOADING)) touched += key
     }
-    if (upload != null) action.progressKey?.let { writeUploadProgress(it, 0, reset = true) }
+    if (upload != null)
+      action.progressKey?.let { writeUploadProgress(it, 0, requestId, reset = true) }
   }
 
   private fun uploadProgressCallback(key: String?, started: RequestInFlight): ((Int) -> Unit)? =
@@ -1873,7 +1884,7 @@ class PrototypeRuntime(
                   synchronized(owner.inFlight) { owner.inFlight[started.requestId] === started }
               ) {
                 try {
-                  owner.writeUploadProgress(key, percent)
+                  owner.writeUploadProgress(key, percent, started.requestId)
                 } finally {
                   owner.interactionRevision = null
                 }
@@ -2040,7 +2051,7 @@ class PrototypeRuntime(
     response: PrototypeRequestResponse,
   ) {
     if (request.uploadBytes != null && response is PrototypeRequestResponse.Received) {
-      request.progressKey?.let { writeUploadProgress(it, 100) }
+      request.progressKey?.let { writeUploadProgress(it, 100, request.requestId) }
     }
   }
 
@@ -2069,8 +2080,23 @@ class PrototypeRuntime(
     )
   }
 
-  /** Only writes a numeric percent to an existing numeric state key, never request values. */
-  private suspend fun writeUploadProgress(key: String, percent: Int, reset: Boolean = false) {
+  /**
+   * Only writes a numeric percent to an existing numeric state key, never request values. A [reset]
+   * makes [requestId] the key's owner; any other write from a request that does not own the key, or
+   * that would not raise it, is dropped.
+   */
+  private suspend fun writeUploadProgress(
+    key: String,
+    percent: Int,
+    requestId: String,
+    reset: Boolean = false,
+  ) {
+    val owned =
+      synchronized(progressOwners) {
+        if (reset) progressOwners[key] = requestId
+        progressOwners[key] == requestId
+      }
+    if (!owned) return
     val value = PrototypeScalar.Numeric(percent.coerceIn(0, 100).toDouble())
     val previous = current.state[key] as? PrototypeScalar.Numeric ?: return
     if (previous.value == value.value || (!reset && previous.value >= value.value)) return

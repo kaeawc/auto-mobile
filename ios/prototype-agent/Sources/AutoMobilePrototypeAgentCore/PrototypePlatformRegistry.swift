@@ -179,7 +179,10 @@ public final class PrototypePlatformRegistry {
     public var supportsSimulation: Bool { modules.values.contains { $0.supportsSimulation } }
 
     public var capabilities: [String] {
-        let simulation = supportsSimulation ? [PrototypeAgentProtocol.platformSimulationCapability] : []
+        let simulation = supportsSimulation ? [
+            PrototypeAgentProtocol.platformSimulationCapability,
+            PrototypeAgentProtocol.simulatePlatformRequest,
+        ] : []
         return Set(modules.values.map(\.capability) + simulation).sorted()
     }
 

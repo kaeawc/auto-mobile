@@ -432,6 +432,19 @@ test("iOS refuses stack navigation unsent without its capability", async () => {
 });
 
 describe("IosPrototypeTransport.simulatePlatformEvent", () => {
+  test("refuses a capability without request support before dispatch", async () => {
+    const calls: string[] = [];
+    const transport = new IosPrototypeTransport(
+      fakeAgent(["prototype_platform_simulation_v1"], calls, () => {
+        throw new Error("agent-level rejection");
+      }),
+    );
+    const result = transport.simulatePlatformEvent("p", "test.tick", {});
+    await expect(result).rejects.toBeInstanceOf(ActionableError);
+    await expect(result).rejects.toThrow("prototype_platform_simulation_v1");
+    expect(calls).toEqual([]);
+  });
+
   test("refuses missing capability without dispatch", async () => {
     const calls: string[] = [];
     const transport = new IosPrototypeTransport(fakeAgent([], calls));
@@ -444,7 +457,12 @@ describe("IosPrototypeTransport.simulatePlatformEvent", () => {
   test("validates and sends the shared wire body with the timeout", async () => {
     const requests: Parameters<PrototypeAgentClient["request"]>[] = [];
     const transport = new IosPrototypeTransport(
-      fakeAgent(["prototype_platform_simulation_v1"], [], undefined, requests),
+      fakeAgent(
+        ["prototype_platform_simulation_v1", "simulate_prototype_platform"],
+        [],
+        undefined,
+        requests,
+      ),
     );
     const data = { count: 7, nested: { label: "tick", values: [true, null] } };
     expect(await transport.simulatePlatformEvent("p", "test.tick", data, 200)).toMatchObject({

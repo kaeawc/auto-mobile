@@ -191,23 +191,30 @@ final class PrototypePlatformSimulationTests: XCTestCase {
     @MainActor
     func testRegistryOptInAndLaunchHooks() {
         let capability = PrototypeAgentProtocol.platformSimulationCapability
+        let request = PrototypeAgentProtocol.simulatePlatformRequest
         XCTAssertFalse(PrototypeAgentProtocol.capabilities.contains(capability))
+        XCTAssertFalse(PrototypeAgentProtocol.capabilities.contains(request))
         let production = PrototypePlatformRegistry(modules: [NoSimulationModule()])
         XCTAssertFalse(production.supportsSimulation)
         XCTAssertFalse(production.capabilities.contains(capability))
+        XCTAssertFalse(production.capabilities.contains(request))
         let base = PrototypePlatformRegistry()
         for environment in [[:], [PrototypeTestHooks.environmentKey: "0"]] {
             let registry = base.withTestHooks(environment: environment)
             XCTAssertNil(registry.modules["test"])
             XCTAssertFalse(registry.capabilities.contains(capability))
+            XCTAssertFalse(registry.capabilities.contains(request))
         }
         let enabled = base.withTestHooks(environment: [PrototypeTestHooks.environmentKey: "1"])
         XCTAssertTrue(enabled.modules["test"] is PrototypeTestPlatformModule)
         XCTAssertTrue(enabled.supportsSimulation)
-        XCTAssertTrue(
-            PrototypeAgentProtocol.advertisedCapabilities(registryCapabilities: enabled.capabilities)
-                .contains(capability)
-        )
+        for supported in [capability, request] {
+            XCTAssertTrue(enabled.capabilities.contains(supported))
+            XCTAssertTrue(
+                PrototypeAgentProtocol.advertisedCapabilities(registryCapabilities: enabled.capabilities)
+                    .contains(supported)
+            )
+        }
     }
 
     @MainActor

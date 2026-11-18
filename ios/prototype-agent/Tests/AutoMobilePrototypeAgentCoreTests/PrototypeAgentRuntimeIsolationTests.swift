@@ -86,6 +86,7 @@ final class PrototypeAgentRuntimeIsolationTests: XCTestCase {
         for registry in registries {
             XCTAssertFalse(registry.supportsSimulation)
             XCTAssertFalse(registry.capabilities.contains(PrototypeAgentProtocol.platformSimulationCapability))
+            XCTAssertFalse(registry.capabilities.contains(PrototypeAgentProtocol.simulatePlatformRequest))
             XCTAssertNil(registry.modules["test"])
             XCTAssertFalse(registry.modules.isEmpty)
             XCTAssertTrue(registry.capabilities.contains("prototype_platform_settings_v1"))
@@ -98,6 +99,8 @@ final class PrototypeAgentRuntimeIsolationTests: XCTestCase {
         let advertised = PrototypeAgentProtocol.advertisedCapabilities(
             os: OS(), registryCapabilities: registries.flatMap(\.capabilities)
         )
+        XCTAssertFalse(advertised.contains(PrototypeAgentProtocol.platformSimulationCapability))
+        XCTAssertFalse(advertised.contains(PrototypeAgentProtocol.simulatePlatformRequest))
         XCTAssertTrue(Set(advertised).isDisjoint(with: forbidden), "Permissioned capability advertised")
     }
 }

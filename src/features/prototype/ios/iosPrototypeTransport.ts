@@ -367,7 +367,10 @@ export class IosPrototypeTransport implements PrototypeTransport {
     data: PrototypePlatformSimulationRequest["data"],
     timeoutMs?: number,
   ): Promise<PrototypeResult> {
-    if (!this.supportsCapability(PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY)) {
+    if (
+      !this.supportsCapability(PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY) ||
+      !this.supportsCapability("simulate_prototype_platform")
+    ) {
       throw new ActionableError(prototypePlatformSimulationUnsupportedMessage());
     }
     const issue = prototypePlatformSimulationIssue(event, data);

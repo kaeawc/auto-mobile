@@ -31,13 +31,17 @@ Validation check) fails when:
   `debug` gate excepted);
 - `APPLE_PLATFORM_SUPPORTED_TOOLS` lists a tool that is not registered, or a
   device-aware tool whose input schema refuses a platform the gate admits;
-- a tool row's Requires cell on `docs/tools.md` or a tool page differs from the
+- a tool row's Platforms or Needs cell on `docs/tools.md` or a tool page differs from the
   definition, or the emoji key table between the `requires-key` markers on
   `docs/tools.md` differs from the generated key.
 
-The Requires cell renders each gate and each non-default platform as an emoji with
-its name as hover text, inside `<span class="tool-requires">`. The docs stylesheet
-keys on that class to keep those tables' tool names on one line.
+Each tool table ends with two generated columns. Platforms renders every
+`platform:*` entry as an emoji, inside `<span class="tool-platforms">`; Needs renders
+every other gate, inside `<span class="tool-needs">`. Each emoji carries its name as
+hover text, and an empty cell is `—`. The docs stylesheet and
+`docs-assets/src/tool-table.ts` find the tool tables by the `tool-platforms` class:
+the stylesheet keeps tool names on one line, and the script adds a description toggle
+that starts hidden on narrow screens.
 
 The pure checks live in `scripts/lib/toolRequirementsDrift.ts`.
 `bash scripts/update-tool-definitions.sh` regenerates both files and formats them.

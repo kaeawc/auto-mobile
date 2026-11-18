@@ -222,6 +222,9 @@ public enum PrototypeSpecStrictValidator {
             }
         }
         for action in actions {
+            if let selector = action.value["where"]?.objectFields {
+                append(selector["equals"], path: "\(action.path).where.equals")
+            }
             if action.value["type"] == .string("platform"), action.value["call"] == .string("share.open") {
                 for (name, binding) in action.value["args"]?.objectFields ?? [:] {
                     if let literal = binding

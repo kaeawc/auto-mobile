@@ -51,7 +51,8 @@ or sheet binding's scalar type at runtime (renderer-enforced, #9300).
 `setData {path, value}`, `appendData {path, value}`, `prependData {path, value}` and `removeData {path}` let a tap change `/data`
 on the device, so "add to cart" or "delete row" needs no agent round trip. They require
 `prototype_data_actions_v1` with `prototype_data_model_v1`; prepend also requires
-`prototype_lazy_list_v1`. The
+`prototype_lazy_list_v1`. Keyed `setData` and `removeData` additionally require
+`prototype_data_actions_v2`. The
 host refuses a show, or a patch whose resulting spec contains one, on a device without it. It uses
 the same gate registry as every other capability (`PROTOTYPE_SPEC_CAPABILITY_GATES`, checked on
 the complete result of `show`, `patch` and `replaceNode`).
@@ -63,24 +64,29 @@ the complete result of `show`, `patch` and `replaceNode`).
 - `value` takes the `emit.context` binding forms except `page`: `{value: json}` (the literal form),
   `{state: key}`, `{data: pointer}` and, in a repeat, `{item: field}` and `{index: true}`. A written
   value is data: no null.
+- `where: {field, equals: binding}` selects one object in the array at `path`, using JSON identity.
+  No match returns `not_found`; duplicate matches return `ambiguous_match`. `equals` uses
+  `{value}`, `{state}`, `{data}` or repeat `{item}`/`{index}` bindings. On `setData`, optional
+  `member` creates or replaces that object member; omitting it replaces the whole element.
+  `field` and `member` must be non-empty names without `/` or `~`; `member` requires `where`.
 - Semantics are one pure function, `applyPrototypeDataWrite` (`src/features/prototype/prototypeDataWrite.ts`),
   shared by the host mirror and meant for the device runtimes, `request` responses (#12523) and
   storage restores (#12522). The `set` op creates or replaces an object member or replaces an existing array
   element. The `append` op pushes one row onto an existing array. The `prepend` op inserts an ordered array at
   the start and trims from the end under maxItems. The `remove` op deletes an existing member or element and
   shifts later elements down. Errors are typed (`invalid_path`, `invalid_value`, `not_found`,
-  `not_array`, `limit_exceeded`) and change nothing. The data after a write must satisfy the data
+  `ambiguous_match`, `not_array`, `limit_exceeded`) and change nothing. The data after a write must satisfy the data
   depth and array limits and `MAX_PROTOTYPE_DATA_WRITE_BYTES`.
 - The validator checks pointer syntax and `{index}` placement and rejects a literal value data cannot
   hold. When the target has no `{index}` and resolves in the spec's own `data`, it also rejects an
-  `appendData` or `prependData` whose target is not an array. A target created only by an earlier write is the device's
+  `appendData`, `prependData` or keyed write whose target is not an array. A target created only by an earlier write is the device's
   to check.
 
 Each device write is reported on a `change` event, using existing wire fields so no event field is
 added:
 
 - `name` is the written `/data/...` path (for an append, the array);
-- `payload` is `{op: "set"|"append"|"extend"|"prepend"|"remove", value?, maxItems?, revision}`;
+- `payload` is `{op: "set"|"append"|"extend"|"prepend"|"remove", value?, where?, member?, maxItems?, revision}`;
 - `validity` may accompany it.
 
 A `change` whose name is a data path must carry a valid payload or the host drops it.
@@ -91,7 +97,9 @@ Android: `PrototypeRuntime.writeData` (over the shared `PrototypeDataWriter`, a 
 and `{data: ...}` bindings. A refused write (typed error, unresolvable value binding, rows the renderer
 cannot take) changes and emits nothing, is logged, and the rest of the list still runs. Each accepted write
 takes its own revision. The event carries the value only while the payload fits
-`MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`; otherwise it is left out and the host stops tracking the spec. With no
+`MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`; otherwise it is left out and the host stops tracking the spec.
+A keyed write whose selector metadata cannot fit that payload is refused before mutation.
+Keyed writes are never coalesced. With no
 host connected, a device-persistent prototype's write events wait in `PrototypeOfflineEventBuffer`.
 
 **Revisions and host patches.** The device has one revision counter per prototype, shared with iOS

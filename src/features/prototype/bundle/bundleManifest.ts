@@ -57,7 +57,7 @@ export function parseBundleManifest(bytes: Uint8Array): BundleManifest {
   const parsed = manifestSchema.safeParse(raw);
   bundleAssert(parsed.success, "manifest_invalid", "bundle.json");
   const manifest = parsed.data;
-  const requires = z.array(z.string().regex(/^[a-z][a-z0-9_]*$/)).safeParse(manifest.requires);
+  const requires = z.array(z.string().regex(/^[a-z][A-Za-z0-9_]*$/)).safeParse(manifest.requires);
   bundleAssert(requires.success, "requires_invalid", "bundle.json");
   bundleAssert(
     requires.data.every((name, index, all) => index === 0 || all[index - 1] < name),

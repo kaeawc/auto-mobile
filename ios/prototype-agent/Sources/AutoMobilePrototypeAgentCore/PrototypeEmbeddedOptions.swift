@@ -96,19 +96,32 @@ private struct EmbeddedHttpClient: PrototypeHttpClient {
     var nowMs: @Sendable () -> Double = { ProcessInfo.processInfo.systemUptime * 1000 }
 
     func perform(_ request: PrototypeHttpRequest) async throws -> PrototypeHttpResponse {
+        try await perform(request, delivery: PrototypeDeliveryCheck(), uploadProgress: nil)
+    }
+
+    func perform(
+        _ request: PrototypeHttpRequest, delivery _: PrototypeDeliveryCheck,
+        uploadProgress: PrototypeUploadProgressCallback?
+    )
+        async throws -> PrototypeHttpResponse
+    {
         let started = nowMs()
         func elapsed() -> Int { max(0, Int((nowMs() - started).rounded())) }
         if let problem = PrototypeHttpHeaderCheck.problem(in: request.headers) {
             throw PrototypeHttpFailure(error: problem, durationMs: 0)
         }
-        guard let urlRequest = PrototypeURLSessionClient.urlRequest(for: request) else {
+        guard var urlRequest = PrototypeURLSessionClient.urlRequest(for: request) else {
             throw PrototypeHttpFailure(error: .init(.invalidURL, "Not an absolute HTTP URL"), durationMs: 0)
         }
+        if let upload = request.uploadBody { urlRequest.httpBody = upload.data }
         let data: Data
         let response: HTTPURLResponse
         do {
             (data, response) = try await client(urlRequest)
             try Task.checkCancellation()
+            if let upload = request.uploadBody {
+                uploadProgress?(Int64(upload.data.count), Int64(upload.data.count))
+            }
         } catch {
             let code: PrototypeRequestErrorCode = error is CancellationError ||
                 (error as? URLError)?.code == .cancelled ? .cancelled :

@@ -143,7 +143,7 @@ The first status read establishes `/platform/permissions/notifications` asynchro
 Requests and foreground Settings re-reads publish only changed states. A request uses alert,
 sound and badge options only while authorization is `notDetermined`; `options.provisional: true` adds
 provisional authorization without showing a prompt. It then re-reads notification settings
-for its result. iOS never re-prompts after a determination. Outside an app bundle with a bundle
+for its result. Outside an app bundle with a bundle
 identifier, the source returns `unavailable` without accessing UserNotifications. No Info.plist key is
 required. One request may be in flight per module; a second returns `too_many_in_flight`. Request
 cancellation drops the late result while foreground observation stays active. The registry stops

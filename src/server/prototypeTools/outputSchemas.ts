@@ -749,6 +749,12 @@ export const prototypeOutputSchema = z.object({
       skipped: z
         .array(z.object({ appId: z.string(), reason: z.string() }))
         .describe("Apps left installed, with why (outside the prefix or another signer)"),
+      pending: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "all/expired only: apps not started before the call's deadline; call again with the same target",
+        ),
     })
     .optional()
     .describe("uninstallApp only: each disposable app removed or left in place"),

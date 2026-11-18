@@ -20,6 +20,10 @@ import {
 } from "./disposableAppPermissions";
 import type { DisposableAppRecord, DisposableAppRegistry } from "./DisposableAppRegistry";
 import { type DisposableAppTemplate, selectDisposableAppTemplate } from "./disposableAppTemplates";
+import {
+  DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS,
+  DISPOSABLE_APP_UNINSTALL_STEP_MS,
+} from "./disposableAppUninstallBudget";
 
 /**
  * Host side of disposable prototype apps (#14184): install a spec as its own app, list the apps
@@ -92,6 +96,10 @@ export interface DisposableAppManagerDependencies {
   platforms: Partial<Record<DisposableAppPlatform, DisposableAppPlatformSupport>>;
   registry: DisposableAppRegistry;
   timer: Pick<Timer, "now">;
+  /** Bulk removal deadline; defaults to `DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS`. */
+  bulkUninstallBudgetMs?: number;
+  /** Worst case for one removal; defaults to `DISPOSABLE_APP_UNINSTALL_STEP_MS`. */
+  uninstallStepMs?: number;
 }
 
 export interface DisposableAppInstallInput {
@@ -146,6 +154,12 @@ export interface DisposableAppRemoval {
 export interface DisposableAppUninstallResult {
   removed: DisposableAppRemoval[];
   skipped: DisposableAppRemoval[];
+  /**
+   * Bulk targets not started because the call's deadline could not fit another removal. Present
+   * only when the call stopped early; call `uninstallApp` again with the same target to continue:
+   * apps this call skipped are tried last next time, so the retry reaches the pending ones.
+   */
+  pending?: string[];
 }
 
 const REMOVED = Symbol("removed");
@@ -179,6 +193,11 @@ export class DisposableAppManager {
    * same-slug reinstall cannot delete the renewed installation.
    */
   private readonly appLocks = new Map<string, Promise<unknown>>();
+  /**
+   * Apps a bulk removal skipped (outside the prefix or another signer), per device. A later bulk
+   * call tries them last, so a deadline-bounded retry always reaches apps it can still remove.
+   */
+  private readonly bulkSkipped = new Map<string, Set<string>>();
 
   constructor(private readonly deps: DisposableAppManagerDependencies) {}
 
@@ -308,14 +327,55 @@ export class DisposableAppManager {
       "all" in target
         ? [(await this.list(deviceId, platform)).map((entry) => entry.appId), "all"]
         : [await this.expiredIds(deviceId, platform), "expired"];
+    return this.removeBulk(deviceId, platform, this.skippedLast(deviceId, ids), reason);
+  }
+
+  /** `ids` with the ones an earlier bulk call skipped on this device moved to the end. */
+  private skippedLast(deviceId: string, ids: string[]): string[] {
+    const skipped = this.bulkSkipped.get(deviceId) ?? new Set<string>();
+    return [
+      ...ids.filter((appId) => !skipped.has(appId)),
+      ...ids.filter((appId) => skipped.has(appId)),
+    ];
+  }
+
+  private recordBulkOutcome(deviceId: string, appId: string, skipped: boolean): void {
+    const ids = this.bulkSkipped.get(deviceId) ?? new Set<string>();
+    if (skipped) {
+      ids.add(appId);
+    } else {
+      ids.delete(appId);
+    }
+    this.bulkSkipped.set(deviceId, ids);
+  }
+
+  /**
+   * Removes `ids` in order until the bulk deadline cannot fit another worst-case step; the rest
+   * are returned as `pending`.
+   */
+  private async removeBulk(
+    deviceId: string,
+    platform: DisposableAppPlatform,
+    ids: string[],
+    reason: string,
+  ): Promise<DisposableAppUninstallResult> {
     const result: DisposableAppUninstallResult = { removed: [], skipped: [] };
-    for (const appId of ids) {
+    const stepMs = this.deps.uninstallStepMs ?? DISPOSABLE_APP_UNINSTALL_STEP_MS;
+    const deadline =
+      this.deps.timer.now() +
+      Math.max(this.deps.bulkUninstallBudgetMs ?? DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS, stepMs);
+    for (const [index, appId] of ids.entries()) {
+      if (this.deps.timer.now() + stepMs > deadline) {
+        result.pending = ids.slice(index);
+        break;
+      }
       const outcome = await this.removeOne(deviceId, platform, appId, reason);
       if (outcome === REMOVED) {
         result.removed.push({ appId, reason });
       } else if (outcome !== RENEWED) {
         result.skipped.push({ appId, reason: outcome });
       }
+      this.recordBulkOutcome(deviceId, appId, typeof outcome === "string");
     }
     return result;
   }

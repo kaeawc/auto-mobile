@@ -11,7 +11,9 @@ extension PrototypeStrictRepeats {
         let alias = repeated["as"]?.stringValue ?? "item"
         let derived = Set(repeated["derive"]?.objectFields?.keys ?? [:].keys)
         let outerDerived = Set(outer.derived.map { "outer.\($0)" })
-        let sources = outer.sourceItems
+        let sources = outer.sourceField == "derived"
+            ? outer.sourceItems.map { PrototypeDataValues.project($0).objectFields ?? [:] }
+            : outer.sourceItems
         if sources.isEmpty {
             let empty = Scope(
                 path: path, alias: alias, items: [], pathBound: true, sourceField: "field",

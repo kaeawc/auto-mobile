@@ -112,10 +112,11 @@ TTL counts as expired, so the runtime raises `auth.sessionExpired`. The token ap
 milliseconds, 0 to one day). The call needs `location` in `requires.permissions`. The `precise` value maps to
 `ACCESS_FINE_LOCATION` on Android and full accuracy on iOS, and `approximate` maps to `ACCESS_COARSE_LOCATION` and
 reduced accuracy. Its `into` receives `{latitude, longitude, accuracyM, altitudeM?, speedMps?, bearingDeg?,
-timestampMs, approximate}`. A grant of approximate only sets `approximate: true` rather than failing. On Android
-an approximate fix (an `approximate` request, or a coarse-only grant) is rounded to two decimal places, reports an
-`accuracyM` of at least 1500 and drops `altitudeM`, `speedMps` and `bearingDeg`, so a fine grant never leaks a
-precise reading. On iOS the system reduces the fix itself; a precise request under reduced accuracy asks for
+timestampMs, approximate}`. A grant of approximate only sets `approximate: true` rather than failing.
+
+On Android an `approximate` request or a coarse-only grant yields a coarse fix, so a fine grant never leaks a
+precise reading. Its coordinates are rounded to two decimal places, its `accuracyM` is at least 1500, and it drops
+`altitudeM`, `speedMps` and `bearingDeg`. On iOS the system reduces the fix itself; a precise request under reduced accuracy asks for
 temporary full accuracy only when the host declares `NSLocationTemporaryUsageDescriptionDictionary`. Failures
 use the typed codes `permission_denied`, `unavailable`, `timeout` and `platform_error`. The `unavailable` code
 carries a `reason`: `disabled` (location services off) on both platforms, and on iOS also

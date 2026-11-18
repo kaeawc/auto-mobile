@@ -190,14 +190,9 @@ class RuntimeAttachTargetTest {
     assertEquals(1L, applied.revision)
     val conflict = target.patch("panel", 0, JsonArray(ops("stale") + ops("stale-secret", "secret")))
     assertFalse(conflict.success)
+    // Runtime conflicts omit secure keys; status above masks them at the attach boundary.
     assertEquals(
-      PrototypePatchConflict(
-        1,
-        mapOf(
-          "secret" to PrototypeScalar.Text("[redacted]"),
-          "title" to PrototypeScalar.Text("changed"),
-        ),
-      ),
+      PrototypePatchConflict(1, mapOf("title" to PrototypeScalar.Text("changed"))),
       conflict.conflict,
     )
     val frame = attachJson.encodeToJsonElement(WebSocketResponse.serializer(), conflict).toString()

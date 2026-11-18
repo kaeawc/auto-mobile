@@ -51,9 +51,13 @@ internal object PrototypeRepeatTree {
     val items =
       if (pointer != null) data.items(pointer)
       else
-        ((source?.text("derived")?.let { data.derived[it] } ?: repeat["items"]) as? JsonArray)
-          .orEmpty()
-          .mapNotNull { it as? JsonObject }
+        source?.text("derived")?.let { name ->
+          // Derived rows are data rows: templates see only their named scalars, as for a path.
+          (data.derived[name] as? JsonArray)
+            .orEmpty()
+            .filterIsInstance<JsonObject>()
+            .map(PrototypeDataValues::project)
+        } ?: (repeat["items"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>()
     val names = (repeat["derive"] as? JsonObject)?.keys.orEmpty()
     // Only copy rows when derived fields are added; the projected list is otherwise shared.
     val projected =

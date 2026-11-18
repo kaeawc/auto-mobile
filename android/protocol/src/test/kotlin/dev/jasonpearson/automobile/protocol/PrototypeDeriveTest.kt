@@ -278,4 +278,44 @@ class PrototypeDeriveTest {
       indices.forEachIndexed { index, source -> assertSame(rows[source], result[index]) }
     }
   }
+
+  private fun repeatSpec(limit: String) =
+    Json.parseToJsonElement(
+        """
+        {"id":"collections","window":{"placement":{"type":"fullscreen"}},
+         "data":{"rows":[{"id":"a"},{"id":"b"}]},
+         "derive":{"rows":{"collection":{"of":{"data":"/rows"},"limit":$limit}}},
+         "root":{"type":"column","children":[
+           {"type":"column","repeat":{"items":{"derived":"rows"},"as":"row"},
+            "children":[{"type":"text","text":"{row.id}"}]},
+           {"type":"column","repeat":{"items":{"derived":"rows"},"as":"row"},
+            "children":[{"type":"text","text":"{row.id}"}]}]}}
+        """
+          .trimIndent(),
+      )
+      .jsonObject
+
+  @Test
+  fun `integral decimal limits validate and evaluate without crashing`() {
+    for (limit in listOf("1.0", "1e2")) {
+      val result = PrototypeSpecValidator.validate(repeatSpec(limit).toString())
+      assertTrue(result is PrototypeSpecValidation.Success, "$limit: $result")
+    }
+    val fractional = PrototypeSpecValidator.validate(repeatSpec("1.5").toString())
+    assertEquals(
+      PrototypeSpecError("derive.rows.collection.limit", "Invalid number value"),
+      (fractional as PrototypeSpecValidation.Failure).error,
+    )
+  }
+
+  @Test
+  fun `spec derived values evaluate once per spec revision`() {
+    val counter = Counter()
+    val spec = repeatSpec("1")
+    val first = PrototypeDerive.fromSpec(spec, counter)
+    assertSame(first, PrototypeDerive.fromSpec(spec, counter))
+    assertEquals(listOf("rows"), counter.names)
+    PrototypeDerive.fromSpec(repeatSpec("2"), counter)
+    assertEquals(listOf("rows", "rows"), counter.names)
+  }
 }

@@ -23,9 +23,18 @@ internal object PrototypeCollection {
         .filter { row -> filters.all { matches(row, it, state) } }
     val sort = collection["sort"] as? JsonObject
     val ordered = if (sort == null) rows else rows.sortedWith { a, b -> compareRows(a, b, sort) }
-    val limited = collection["limit"]?.jsonPrimitive?.int?.let(ordered::take) ?: ordered
+    val limited = limit(collection["limit"])?.let(ordered::take) ?: ordered
     return if (reduce == null) JsonArray(limited) else reduce(limited, reduce)
   }
+
+  /**
+   * Raw JSON may spell an integral limit as `1.0` or `1e2` before input normalization; read it as a
+   * double. A non-integral limit is left to the structural validator, which reports it.
+   */
+  internal fun limit(value: JsonElement?): Int? =
+    numeric(value)
+      ?.takeIf { it == kotlin.math.floor(it) && it >= 1.0 && it <= Int.MAX_VALUE }
+      ?.toInt()
 
   private fun numeric(value: JsonElement?): Double? =
     (value as? JsonPrimitive)?.takeUnless { it.isString }?.doubleOrNull?.takeIf { it.isFinite() }

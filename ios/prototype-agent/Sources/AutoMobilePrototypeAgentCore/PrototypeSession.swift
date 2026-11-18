@@ -698,7 +698,9 @@ struct PrototypeSession {
 
     private mutating func refreshDerivedState(since old: [String: JSONValue]) {
         guard let current = spec, !(current.derive ?? [:]).isEmpty else { return }
-        let keys = Set(old.keys).union(state.keys).filter { old[$0] != state[$0] }
+        // Collection matching compares Unicode scalars, so canonically equivalent spellings that
+        // `JSONValue ==` treats as equal must still invalidate.
+        let keys = Set(old.keys).union(state.keys).filter { !Self.scalarIdentical(old[$0], state[$0]) }
         guard !keys.isEmpty else { return }
         let changed = PrototypeDeriveChanges(stateKeys: Set(keys))
         guard (current.derive ?? [:]).values.contains(where: { PrototypeDerive.affected($0, changed: changed) })
@@ -711,6 +713,22 @@ struct PrototypeSession {
             $0.collection != nil && PrototypeDerive.affected($0, changed: changed)
         }) {
             rebuildNavigation(for: next.root, keepingPages: pages, keepingStacks: stacks)
+        }
+    }
+
+    /// `JSONValue` equality with strings compared by raw UTF-8 rather than canonical equivalence.
+    static func scalarIdentical(_ left: JSONValue?, _ right: JSONValue?) -> Bool {
+        switch (left, right) {
+        case let (.string(a)?, .string(b)?):
+            return a.utf8.elementsEqual(b.utf8)
+        case let (.array(a)?, .array(b)?):
+            return a.count == b.count && zip(a, b).allSatisfy { scalarIdentical($0, $1) }
+        case let (.object(a)?, .object(b)?):
+            return a.count == b.count && a.allSatisfy { key, value in
+                b[key].map { scalarIdentical(value, $0) } ?? false
+            }
+        default:
+            return left == right
         }
     }
 

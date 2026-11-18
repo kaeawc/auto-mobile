@@ -1,4 +1,4 @@
-import { derivePrototypeValues } from "./prototypeDerive";
+import { memoizedPrototypeDerive } from "./prototypeDerive";
 import type {
   PrototypeFormat,
   PrototypeDerivedEntry,
@@ -162,7 +162,7 @@ export function resolvePrototypeDerived(
   if (!entry) {
     return "";
   }
-  const input = derivePrototypeValues(spec.derive, context.data, context.state ?? {})[name];
+  const input = memoizedPrototypeDerive(spec.derive, context.data, context.state ?? {})[name];
   return entry.format
     ? (formatPrototypeValue(entry.format, input, environment(entry, context.env)) ?? "")
     : typeof input === "number" || typeof input === "string"

@@ -144,6 +144,16 @@ final class PrototypeDeriveTests: XCTestCase {
         try JSONDecoder().decode([String: PrototypeDerivedEntry].self, from: Data(text.utf8))
     }
 
+    func testDerivedInvalidationDistinguishesCanonicallyEquivalentStrings() {
+        let composed = JSONValue.string("\u{E9}")
+        let decomposed = JSONValue.string("e\u{301}")
+        XCTAssertEqual(composed, decomposed)
+        XCTAssertFalse(PrototypeSession.scalarIdentical(composed, decomposed))
+        XCTAssertFalse(PrototypeSession.scalarIdentical(.array([composed]), .array([decomposed])))
+        XCTAssertTrue(PrototypeSession.scalarIdentical(.object(["q": composed]), .object(["q": composed])))
+        XCTAssertTrue(PrototypeSession.scalarIdentical(nil, nil))
+    }
+
     private final class Observer: PrototypeDeriveObserver {
         var names: [String] = []
         func recomputed(name: String) { names.append(name) }

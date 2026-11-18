@@ -205,20 +205,17 @@ recover its token. Reinstalling a slug in place reuses the token. A second conne
 replace an authenticated live peer. Status and patch conflicts redact `storage.secure` state keys.
 
 Events replay at least once. A process-scoped agent retains its listener, buffer, sequence ledger
-and random `appInstanceId` across reconnects and Activity recreation. Activities rebind targets;
-a new process resets identity and epoch. `hello_result` and status optionally report a `showingId`
-that changes when the Activity mounts a new runtime, including a resumed remount after dismissal.
-A changed showing clears host terminal state while retaining pending events and the process cursor;
-older apps without it retain process-only identity. `hello_result` also reports process identity. One daemon-host attacher
-serves every MCP registration and retains app/device cursors. `hello` sends `appInstanceId` and
+and `appInstanceId` across reconnects and Activity recreation. Activities rebind targets;
+a new process resets identity and epoch. `hello_result` reports identity and an optional `showingId`; a new showing clears terminal state, keeping pending events.
+One daemon-host attacher serves every MCP registration and retains app/device cursors. `hello` sends `appInstanceId` and
 `lastAcknowledgedSequence` (initially zero); `{type: "ack", sequence, appInstanceId}` acknowledges
 matching instances after subscriber delivery. Epochs initialize before replay; status reconciles
-only its app. Between waits, events buffer unacknowledged until subscribed delivery. The 256-event
+only its app. The 256-event
 buffer closes on overflow for replay. Device cleanup and host disposal close sockets and remove
-adb forwards and forget device cursors; successful uninstall or reinstall forgets only that app.
+adb forwards and forget device cursors; uninstall forgets the app.
 
-Successful socket writes do not remove events: unacknowledged events replay on the next hello,
-and the host de-duplicates within the connection and coordinator. The app retains 200 events,
+Events stay buffered until acknowledged and replay on the next hello,
+and the host de-duplicates replays. The app retains 200 events,
 drops the oldest on overflow, and reports cumulative `droppedEvents` in hello and status;
 sequence gaps expose missing events. A separate writer uses a 256-frame queue and five-second
 write deadline. Queue overflow or blocked writes close the peer; events and requests continue, retaining replay.

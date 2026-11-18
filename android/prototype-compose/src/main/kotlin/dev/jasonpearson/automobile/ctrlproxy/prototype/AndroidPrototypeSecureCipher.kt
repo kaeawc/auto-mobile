@@ -1,8 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import android.util.Log
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.util.Log
 import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.security.SecureRandom

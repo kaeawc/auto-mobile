@@ -1751,8 +1751,7 @@ class PrototypeRuntime(
    * Whether a response may echo a secure value, so its headers are dropped. Only a spec with secure
    * keys holds any; `allowSecureInRequest` on a spec without them sends nothing secure.
    */
-  private fun canCarrySecure(): Boolean =
-    current.spec.storage?.secure.orEmpty().isNotEmpty()
+  private fun canCarrySecure(): Boolean = current.spec.storage?.secure.orEmpty().isNotEmpty()
 
   /**
    * A `request` action: resolves its bindings against the committed state and data, moves

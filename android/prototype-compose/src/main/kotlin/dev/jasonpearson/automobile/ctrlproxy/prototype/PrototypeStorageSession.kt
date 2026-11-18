@@ -620,7 +620,8 @@ internal constructor(
       persistedSecureValues = emptyMap()
       secureBaselineStale = true
       if (values.isNotEmpty() || secureValues.isNotEmpty()) dirty = true
-      // No write is scheduled here: the enclosing hold's resume schedules it, its invalidate drops it.
+      // No write is scheduled here: the enclosing hold's resume schedules it, its invalidate drops
+      // it.
       if (quiesceDepth > 0) quiesceDepth--
     }
   }

@@ -22,6 +22,8 @@ enum PrototypeSensorSample: Sendable {
 
 @MainActor
 protocol PrototypeSensorSource: AnyObject {
+    /// Independent handlers and step baseline; native implementations may share continuous hardware.
+    func makePresentationSource() -> any PrototypeSensorSource
     func hasSensor(_ sensor: PrototypeSensor) -> Bool
     /// False for denied/restricted motion authorization; notDetermined may start pedometer updates.
     var stepsAllowed: Bool { get }
@@ -69,6 +71,7 @@ final class PrototypeSensorsModule: PrototypePlatformModule {
     private let bundle: any PrototypeBundleReader
     private let clock: any PrototypeMonotonicClock
     private var block: JSONValue?
+    private var sessionID = 0
     private var generation = 0
     private var active: Set<PrototypeSensor> = []
     private var filters: [PrototypeSensor: PrototypeSensorFilter] = [:]
@@ -103,9 +106,19 @@ final class PrototypeSensorsModule: PrototypePlatformModule {
     func availability() -> PlatformAvailability { .ready }
     func call(_: PlatformCall) async -> PlatformCallResult { .failure(.unsupported, "Sensors has no calls") }
 
+    func forPresentation() -> PrototypeSensorsModule {
+        PrototypeSensorsModule(source: source.makePresentationSource(), bundle: bundle, clock: clock)
+    }
+
+    func stop() { configure(root: nil) }
+
     /// `root` is the decoded root `sensors` block, just as location receives its own block.
     func configure(root: JSONValue?) {
-        guard root == nil || root != block else { return }
+        configure(root: root, sessionID: 0)
+    }
+
+    func configure(root: JSONValue?, sessionID: Int = 0) {
+        guard root == nil || root != block || self.sessionID != sessionID else { return }
         // Invalidate before stopping: even a synchronous callback from stop belongs to the old session.
         generation += 1
         active.removeAll()
@@ -114,6 +127,7 @@ final class PrototypeSensorsModule: PrototypePlatformModule {
         lastShake = nil
         state.removeAll()
         block = root
+        self.sessionID = sessionID
         publish(.stateRefresh(name))
         guard let fields = root?.objectFields else { return }
         let session = generation

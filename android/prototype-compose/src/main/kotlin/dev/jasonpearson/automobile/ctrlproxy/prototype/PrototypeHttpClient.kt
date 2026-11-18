@@ -18,6 +18,8 @@ data class PrototypeHttpRequest(
   val headers: Map<String, String>,
   val body: JsonElement?,
   val timeoutMs: Int,
+  val uploadBody: PrototypeUploadBody? = null,
+  val onUploadProgress: ((Int) -> Unit)? = null,
 )
 
 /**

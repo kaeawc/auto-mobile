@@ -218,10 +218,13 @@ class PrototypeController(
   private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
   /** Device-compiled uniform declarations, checked even for hidden/styleWhen nodes. */
   private val validateShaders: (PrototypeNode) -> Unit = {},
+  private val uploadAssets: PrototypeAssetSource? = null,
   private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
     dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
   /** Explicit reset/removal may purge Activity storage without exposing it to overlay shows. */
   private val purgeSecureStorage: suspend (String) -> Int = { 0 },
+  private val storageSessions: PrototypeStorageSessionRegistry =
+    PrototypeStorageSessionRegistry.Shared,
 ) {
   // Asset cleanup must outlive service cancellation while retaining the injected worker dispatcher.
   private val assetCleanupScope = CoroutineScope(requestScope.coroutineContext + SupervisorJob())
@@ -687,6 +690,7 @@ class PrototypeController(
           if (preservePages) previous?.runtime?.current?.stacks.orEmpty() else emptyMap(),
         storage = opened.session,
         httpClients = httpClients,
+        uploadAssets = uploadAssets,
         platform = platform,
         platformLimiter = platformLimiter,
         requestScope = requestScope,
@@ -1140,6 +1144,30 @@ class PrototypeController(
     }
   }
 
+  suspend fun simulatePlatformEvent(
+    requestId: String?,
+    id: String,
+    event: String,
+    data: JsonObject,
+  ) = mutex.withLock {
+    try {
+      check(!destroyed) { "Prototype host destroyed" }
+      val runtime = surfaces[id]?.runtime ?: error("Unknown prototype: $id")
+      val supported = runtime.simulatePlatformEvent(event, data)
+      if (supported) syncAfterChange(runtime)
+      sink.send(
+        requestId,
+        supported,
+        if (supported) null else "unsupported: module does not support simulation of $event",
+      )
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("PrototypeController", "Prototype platform simulation failed", error)
+      sink.send(requestId, false, error.message ?: "Prototype platform simulation failed")
+    }
+  }
+
   suspend fun advanceClock(requestId: String?, id: String, advanceTimeMs: Int) = mutex.withLock {
     try {
       check(!destroyed) { "Prototype host destroyed" }
@@ -1161,10 +1189,18 @@ class PrototypeController(
 
   /** The stored keys removed for [id]; callers hold no controller state of their own. */
   suspend fun clearStoredValues(id: String): Int {
-    val secureRemoved = purgeSecureStorage(id)
-    val persistence = storage ?: return secureRemoved
-    val live = surfaces[id]?.runtime?.storage
-    return secureRemoved + (live?.clear() ?: persistence.clear(id))
+    val held = storageSessions.quiesce(id)
+    val removed =
+      try {
+        val secureRemoved = purgeSecureStorage(id)
+        val live = surfaces[id]?.runtime?.storage
+        secureRemoved + (live?.clear() ?: storage?.clear(id) ?: 0)
+      } catch (error: Throwable) {
+        held.resume()
+        throw error
+      }
+    held.reset()
+    return removed
   }
 
   private suspend fun statusOf(surface: Surface): PrototypeStatusEntry {

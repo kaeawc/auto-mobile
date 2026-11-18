@@ -311,6 +311,7 @@ private class ViewerContent(
   val sensitiveModules = PrototypeLibraryProvenance.sensitiveModules(prototype.saved.specJson)
   val assets =
     PrototypeAssets(image = prototype.saved::assetBytes, font = prototype.saved::assetBytes)
+      .withUploadFiles { id -> prototype.saved.fontFile(id) ?: prototype.saved.assetFile(id) }
   // The embedded renderer exposes a read-only request facade; the saved transport consumes
   // the shared runtime contract. Preserve every resolved field at this app boundary.
   val network =
@@ -326,6 +327,8 @@ private class ViewerContent(
               request.headers,
               request.body,
               request.timeoutMs,
+              request.uploadBody,
+              request.onUploadProgress,
             ),
           )
         },

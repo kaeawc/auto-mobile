@@ -1,6 +1,9 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
+import dev.jasonpearson.automobile.prototype.PlatformCallResult
+import dev.jasonpearson.automobile.prototype.PrototypePlatform as Platform
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -28,6 +31,66 @@ class PrototypeSecureRedactionTest {
       ) as PrototypeSpecValidation.Success)
       .spec
 
+  @Test
+  fun `platform args refuse secure state before dispatch and preserve ordinary bindings`() =
+    runTest {
+      val original = spec()
+      val events = mutableListOf<PrototypeEvent>()
+      val logs = mutableListOf<String>()
+      val module = FakePlatformModule("share")
+      module.execute = { PlatformCallResult.Success(JsonPrimitive("ok")) }
+      val action =
+        PrototypePlatformAction(
+          "share.open",
+          args = mapOf("text" to buildJsonObject { put("state", "token") }),
+          into = "/data/result",
+          onError = listOf(PrototypeEmitAction("refused")),
+        )
+      var sequence = 0L
+      var callId = 0
+      val runtime =
+        PrototypeRuntime(
+          original.copy(
+            state = original.state!! + ("token" to PrototypeScalar.Text(SECRET)),
+            requires = PrototypeRequires(platform = listOf("secureStorage", "share")),
+          ),
+          PrototypeEventSink { events += it },
+          { 42L },
+          { ++sequence },
+          warn = { logs += it },
+          requestScope = backgroundScope,
+          platform = Platform(listOf(module)),
+          newRequestId = { "secure-args-${++callId}" },
+          monotonicMs = { testScheduler.currentTime },
+        )
+      runtime.handle(PrototypeInteraction.Tap(listOf(action)))
+      runCurrent()
+      assertTrue(module.calls.isEmpty())
+      assertFalse("result" in runtime.current.spec.data.orEmpty())
+      val failed =
+        events.single { it.name == PrototypePlatform.CALL_EVENT_NAME }.payload!!.jsonObject
+      assertEquals(JsonPrimitive("invalid_args"), failed.getValue("error").jsonObject["code"])
+      assertTrue(events.any { it.name == "refused" })
+
+      for ((binding, expected) in
+        listOf(
+          buildJsonObject { put("state", "public") } to "hello",
+          buildJsonObject { put("value", "{token}") } to "{token}",
+        )) {
+        runtime.handle(
+          PrototypeInteraction.Tap(listOf(action.copy(args = mapOf("text" to binding)))),
+        )
+        runCurrent()
+        assertEquals(JsonPrimitive(expected), module.calls.last().args["text"])
+      }
+      assertEquals(2, module.calls.size)
+      assertFalse(
+        (events.joinToString { Json.encodeToString(it) } + runtime.current.spec.data + logs)
+          .contains(SECRET),
+      )
+      runtime.close()
+    }
+
   private fun conflictOps() = buildJsonArray {
     add(
       buildJsonObject {
@@ -37,6 +100,171 @@ class PrototypeSecureRedactionTest {
       },
     )
   }
+
+  private fun uploadRequest(
+    body: JsonObject = buildJsonObject {
+      put("form", buildJsonObject { put("t", buildJsonObject { put("state", "token") }) })
+    },
+  ) =
+    PrototypeRequestAction(
+      url = "https://example.invalid/upload",
+      method = "POST",
+      via = "device",
+      into = "/data/result",
+      body = body,
+      allowSecureInRequest = true,
+      progressKey = "pct",
+    )
+
+  private fun uploadSpec(request: PrototypeRequestAction): PrototypeSpec {
+    val original = spec()
+    return original.copy(
+      state =
+        original.state!! +
+          mapOf("token" to PrototypeScalar.Text(SECRET), "pct" to PrototypeScalar.Numeric(0.0)),
+      root = PrototypeButtonNode(label = "Upload", onTap = listOf(request)),
+    )
+  }
+
+  @Test
+  fun `secure form upload progress and transport failure never expose request values`() = runTest {
+    val events = mutableListOf<PrototypeEvent>()
+    val logs = mutableListOf<String>()
+    val requests = mutableListOf<PrototypeHttpRequest>()
+    val finish = CompletableDeferred<Unit>()
+    val client = PrototypeHttpClient {
+      requests += it
+      finish.await()
+      throw java.io.IOException(SECRET)
+    }
+    val request = uploadRequest()
+    var sequence = 0L
+    val runtime =
+      PrototypeRuntime(
+        uploadSpec(request),
+        PrototypeEventSink { events += it },
+        { 42L },
+        { ++sequence },
+        warn = { logs += it },
+        httpClients = PrototypeHttpClients(client, client),
+        requestScope = backgroundScope,
+      )
+    runtime.handle(PrototypeInteraction.Tap(listOf(request)))
+    runCurrent()
+    val sent = requests.single()
+    assertEquals(mapOf("t" to SECRET), (sent.uploadBody as PrototypeUploadBody.Form).entries)
+    val progress = checkNotNull(sent.onUploadProgress)
+    progress(25)
+    runCurrent()
+    assertEquals(PrototypeScalar.Numeric(25.0), runtime.current.state["pct"])
+    assertFalse(
+      (events.joinToString { Json.encodeToString(it) } + runtime.current.spec.data).contains(
+        SECRET,
+      ),
+    )
+    finish.complete(Unit)
+    runCurrent()
+    val event = events.single { it.name == PrototypeRequests.EVENT_NAME }.payload!!.jsonObject
+    val meta = runtime.current.spec.data!!.getValue("result__meta").jsonObject
+    assertEquals(
+      JsonPrimitive("Prototype request failed"),
+      event.getValue("error").jsonObject["message"],
+    )
+    assertEquals(event["error"], meta["error"])
+    assertTrue(logs.isNotEmpty())
+    assertFalse(
+      (events.joinToString { Json.encodeToString(it) } +
+          runtime.current.spec.data +
+          logs.joinToString())
+        .contains(SECRET),
+    )
+    runtime.close()
+  }
+
+  @Test
+  fun `secure upload binding and asset resolution failures are generic before transport`() =
+    runTest {
+      val bodies =
+        listOf(
+            """{"form":{"t":{"state":"token"},"missing":{"data":"/missing/$SECRET"}}}""",
+            """{"multipart":[{"name":"t","value":{"state":"token"}},""" +
+              """{"name":"file","file":{"asset":"$SECRET"}}]}""",
+          )
+          .map { Json.parseToJsonElement(it).jsonObject }
+      for (body in bodies) {
+        val events = mutableListOf<PrototypeEvent>()
+        val logs = mutableListOf<String>()
+        val client = PrototypeHttpClient { error("Resolution must fail before transport") }
+        val request = uploadRequest(body)
+        var sequence = 0L
+        val runtime =
+          PrototypeRuntime(
+            uploadSpec(request),
+            PrototypeEventSink { events += it },
+            { 42L },
+            { ++sequence },
+            warn = { logs += it },
+            httpClients = PrototypeHttpClients(client, client),
+            requestScope = backgroundScope,
+          )
+        runtime.handle(PrototypeInteraction.Tap(listOf(request)))
+        runCurrent()
+        val event = events.single { it.name == PrototypeRequests.EVENT_NAME }.payload!!.jsonObject
+        val meta = runtime.current.spec.data!!.getValue("result__meta").jsonObject
+        assertEquals(JsonPrimitive("invalid_request"), event.getValue("error").jsonObject["code"])
+        assertEquals(
+          JsonPrimitive("Prototype request failed"),
+          event.getValue("error").jsonObject["message"],
+        )
+        assertEquals(event["error"], meta["error"])
+        assertFalse(
+          (events.joinToString { Json.encodeToString(it) } +
+              runtime.current.spec.data +
+              logs.joinToString())
+            .contains(SECRET),
+        )
+        runtime.close()
+      }
+    }
+
+  @Test
+  fun `secure form upload response headers are empty in metadata and absent from events`() =
+    runTest {
+      val events = mutableListOf<PrototypeEvent>()
+      val logs = mutableListOf<String>()
+      val client = PrototypeHttpClient {
+        assertEquals(mapOf("t" to SECRET), (it.uploadBody as PrototypeUploadBody.Form).entries)
+        PrototypeRequestResponse.Received(200, mapOf("x-echo" to SECRET), JsonPrimitive("ok"), 9)
+      }
+      val request = uploadRequest()
+      var sequence = 0L
+      val runtime =
+        PrototypeRuntime(
+          uploadSpec(request),
+          PrototypeEventSink { events += it },
+          { 42L },
+          { ++sequence },
+          warn = { logs += it },
+          httpClients = PrototypeHttpClients(client, client),
+          requestScope = backgroundScope,
+        )
+      runtime.handle(PrototypeInteraction.Tap(listOf(request)))
+      runCurrent()
+      val meta = runtime.current.spec.data!!.getValue("result__meta").jsonObject
+      assertEquals(JsonObject(emptyMap()), meta["headers"])
+      assertEquals(JsonPrimitive(200), meta["status"])
+      assertEquals(JsonPrimitive("ok"), runtime.current.spec.data!!["result"])
+      val event = events.single { it.name == PrototypeRequests.EVENT_NAME }.payload!!.jsonObject
+      assertEquals(JsonPrimitive(200), event["status"])
+      assertFalse("headers" in event)
+      assertFalse(
+        (events.joinToString { Json.encodeToString(it) } +
+            runtime.current.spec.data +
+            logs.joinToString())
+          .contains(SECRET),
+      )
+      runtime.close()
+    }
 
   @Test
   fun `request failure metadata events and warnings cannot expose opted in secure arguments`() =

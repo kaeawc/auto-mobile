@@ -14,6 +14,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
@@ -69,6 +70,110 @@ class PrototypeSecureStorageTest {
         spec.state.orEmpty() +
           mapOf("token" to PrototypeScalar.Text(value), "pin" to PrototypeScalar.Text(SECRET)),
     )
+
+  @Test
+  fun `push refuses secure route params before events or plaintext persistence`() = runTest {
+    assertRouteBindingRefused { PrototypePushAction("nav", "detail", params = it) }
+  }
+
+  @Test
+  fun `replace refuses secure route params before events or plaintext persistence`() = runTest {
+    assertRouteBindingRefused { PrototypeReplaceAction("nav", "detail", params = it) }
+  }
+
+  @Test
+  fun `setStack refuses the whole path when a later entry binds secure state`() = runTest {
+    assertRouteBindingRefused {
+      PrototypeSetStackAction(
+        "nav",
+        listOf(PrototypeRouteEntry("home"), PrototypeRouteEntry("detail", it)),
+      )
+    }
+  }
+
+  private fun routeSpec(): PrototypeSpec {
+    val base = spec()
+    return base.copy(
+      state = base.state!! + ("public" to PrototypeScalar.Text("hello")),
+      storage = base.storage!!.copy(keys = listOf("stack:nav", "state:public")),
+      root =
+        PrototypeStackNode(
+          "nav",
+          start = "home",
+          screens =
+            mapOf(
+              "home" to PrototypeTextNode(text = "Home"),
+              "detail" to PrototypeTextNode(text = "Detail"),
+            ),
+          routes = mapOf("detail" to PrototypeRoute(params = mapOf("t" to "string"))),
+        ),
+    )
+  }
+
+  private suspend fun TestScope.assertRouteBindingRefused(
+    action: (Map<String, JsonElement>) -> PrototypeAction,
+  ) {
+    val opened = persistence().open(routeSpec())
+    val session = checkNotNull(opened.session)
+    val events = mutableListOf<PrototypeEvent>()
+    var sequence = 0L
+    val runtime =
+      PrototypeRuntime(
+        changed(opened.spec),
+        PrototypeEventSink { events += it },
+        { 42L },
+        { ++sequence },
+        warn = { warnings += it },
+        storage = session,
+        requestScope = backgroundScope,
+      )
+    val before = runtime.current.stacks
+    runtime.handle(
+      PrototypeInteraction.Tap(
+        listOf(action(mapOf("t" to buildJsonObject { put("state", "token") }))),
+      ),
+    )
+    assertEquals(before, runtime.current.stacks)
+    assertTrue(events.isEmpty())
+    // A state change on a listed key dirties storage, so the flush writes the stored stack too.
+    runtime.handle(
+      PrototypeInteraction.Tap(
+        listOf(PrototypeSetStateAction("public", PrototypeScalar.Text("x"))),
+      ),
+    )
+    session.flush()
+    val stored = checkNotNull(plain.value).values
+    // An unchanged stack is never rewritten; if it is stored it must be the original one.
+    stored["stack:nav"]?.let {
+      assertEquals(PrototypeRouteRuntime.storedValue(before.getValue("nav")), it)
+    }
+    assertFalse(
+      (events.joinToString { Json.encodeToString(it) } + stored + warnings).contains(SECRET),
+    )
+    assertTrue(warnings.isNotEmpty())
+    assertAcceptsPublicBinding(runtime, session, events, action)
+    runtime.close()
+  }
+
+  private suspend fun assertAcceptsPublicBinding(
+    runtime: PrototypeRuntime,
+    session: PrototypeStorageSession,
+    events: List<PrototypeEvent>,
+    action: (Map<String, JsonElement>) -> PrototypeAction,
+  ) {
+    runtime.handle(
+      PrototypeInteraction.Tap(
+        listOf(action(mapOf("t" to buildJsonObject { put("state", "public") }))),
+      ),
+    )
+    session.flush()
+    val stack = runtime.current.stacks.getValue("nav")
+    assertEquals(JsonPrimitive("x"), stack.paramsAt(stack.path.lastIndex)["t"])
+    assertTrue(events.any { it.kind == PrototypeEventKind.SCREEN_CHANGED })
+    assertFalse(
+      (events.joinToString { Json.encodeToString(it) } + plain.value + warnings).contains(SECRET),
+    )
+  }
 
   @Test
   fun `secure values round trip and restore before draw without plaintext entries`() = runTest {
@@ -250,6 +355,89 @@ class PrototypeSecureStorageTest {
   }
 
   @Test
+  fun `delete during secure load fences registration and both preparation writes`() = runTest {
+    assertPreparationFenced { registry -> registry.quiesce("vault").invalidate() }
+  }
+
+  @Test
+  fun `reset during secure load fences registration and both preparation writes`() = runTest {
+    assertPreparationFenced { registry -> registry.quiesce("vault").reset() }
+  }
+
+  @Test
+  fun `direct invalidation during secure load fences registration`() = runTest {
+    assertPreparationFenced { registry -> registry.invalidate("vault") }
+  }
+
+  @Test
+  fun `reset completing during secure load advances the preparation epoch`() = runTest {
+    val registry = PrototypeStorageSessionRegistry()
+    val held = registry.quiesce("vault")
+    assertPreparationFenced(registry) { held.reset() }
+  }
+
+  @Test
+  fun `preparation registered during cleanup cannot persist after reset completes`() = runTest {
+    val registry = PrototypeStorageSessionRegistry()
+    val held = registry.quiesce("vault")
+    secure.values["vault"] = PrototypeStoredValues(1, mapOf("state:token" to JsonPrimitive(SECRET)))
+    val opened = persistence(registry = registry).prepare(spec())
+    secure.delete("vault")
+    held.reset()
+    // Completing a hold twice must not affect a later, independent preparation.
+    held.resume()
+    opened.commit()
+    val session = checkNotNull(opened.session)
+    session.record(changed(spec(), "later"))
+    session.flush()
+    assertTrue(secure.values.isEmpty())
+
+    val fresh = checkNotNull(persistence(registry = registry).open(spec()).session)
+    fresh.record(changed(spec(), "new"))
+    fresh.flush()
+    assertEquals(JsonPrimitive("new"), secure.values.getValue("vault").values["state:token"])
+  }
+
+  private suspend fun assertPreparationFenced(
+    registry: PrototypeStorageSessionRegistry = PrototypeStorageSessionRegistry(),
+    fence: (PrototypeStorageSessionRegistry) -> Unit,
+  ) {
+    val original = spec()
+    plain.value =
+      PrototypeStoredValues(
+        1,
+        mapOf("state:count" to JsonPrimitive(1), "state:obsolete" to JsonPrimitive("old")),
+      )
+    secure.values[original.id] =
+      PrototypeStoredValues(
+        1,
+        mapOf("state:token" to JsonPrimitive(SECRET), "state:obsolete" to JsonPrimitive("old")),
+      )
+    secure.afterLoad = {
+      fence(registry)
+      secure.delete(original.id)
+      plain.delete(original.id)
+    }
+    val opened = persistence(registry = registry).prepare(original)
+    opened.commit()
+    assertTrue(secure.values.isEmpty())
+    assertNull(plain.value)
+    val session = checkNotNull(opened.session)
+    session.record(
+      changed(original, "later")
+        .copy(
+          state =
+            checkNotNull(changed(original, "later").state) +
+              ("count" to PrototypeScalar.Numeric(2.0)),
+        ),
+    )
+    session.flush()
+    assertTrue(secure.values.isEmpty())
+    assertNull(plain.value)
+    assertNull(session.unsavedValues())
+  }
+
+  @Test
   fun `accepted preparation prunes obsolete secure keys and retains the current token`() = runTest {
     secure.values["vault"] =
       PrototypeStoredValues(
@@ -367,8 +555,9 @@ internal class MemorySecureStore : PrototypeSecureValueStore {
   var fail = false
   var failDeleteAfterRemoving = false
   var afterSave: () -> Unit = {}
+  var afterLoad: () -> Unit = {}
 
-  override fun load(id: String) = values[id]
+  override fun load(id: String) = values[id].also { afterLoad() }
 
   override fun save(id: String, stored: PrototypeStoredValues) {
     if (fail) throw IOException("private-token-14321")

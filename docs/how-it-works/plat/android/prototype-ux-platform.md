@@ -91,6 +91,17 @@ simulated?}`, `data` cut to the 4 KiB emit budget with `truncated: true`. Await 
 requests (`prototypePlatformEvent.ts`). Authored emit names cannot start with `prototype_`, which
 generalizes the single reserved `prototype_request` name.
 
+**Host event simulation.** `prototype {action:"simulate",id,event:"test.tick",data:{count:7}}`
+uses the authenticated CtrlProxy connection and requires `prototype_platform_simulation_v1`.
+The event must exist in the contract's `platformModules` table. Existing event data schemas
+(currently `cast.*`) are enforced; other events accept any JSON object. The complete delivered
+payload, including `simulated:true`, must fit 4096 UTF-8 bytes. The module must be declared in `requires.platform`
+and opt in through `PrototypePlatformModule.simulate`; the default returns unsupported without
+mutations. Debug `TestPlatformModule` supports `test.tick`. The dispatcher publishes the module's
+state, runs the ordinary `platform.on` handler and reports `prototype_platform_event` with
+`simulated:true`. Injection is a host wire request, never a spec action. Push and media keep their
+existing routes. Call outcomes, state seeding, `platformMode` and iOS injection are unavailable.
+
 **Device state.** The `device` module exposes `/platform/device/widthClass` on both
 platforms: Android reports Material `compact` (<600dp), `medium` (600–839dp), or
 `expanded` (>=840dp); iOS reports `compact` or `regular` directly from

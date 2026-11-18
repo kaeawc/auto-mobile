@@ -38,35 +38,56 @@ private val logWarn = PrototypeStorageWarn { message, error ->
 
 /**
  * The live sessions of screens that own their storage outside the service (a saved prototype's
- * activity), by id, held weakly. Deleting a saved prototype silences every one of them first, so a
- * pending debounce or a later flush cannot recreate what the delete removed.
+ * activity), by id, held weakly. Deleting or resetting storage silences them first, so a pending
+ * debounce, preparation or later flush cannot recreate the removed values.
  */
 @InternalAutoMobilePrototypeApi
 class PrototypeStorageSessionRegistry {
   private val sessions = ArrayList<WeakReference<PrototypeStorageSession>>()
+  // Retain epochs even when no session is live: a preparation may still be loading its snapshot.
+  private val epochs = HashMap<String, Long>()
+  // Registrations during cleanup cannot adopt a snapshot from either side of the deletion.
+  private val quiescing = HashMap<String, Int>()
+
+  @Synchronized fun epoch(id: String): Long = epochs[id] ?: 0L
 
   @Synchronized
-  fun register(session: PrototypeStorageSession) {
+  fun register(session: PrototypeStorageSession, sinceEpoch: Long = epoch(session.id)) {
     sessions.removeAll { it.get() == null }
+    if (sinceEpoch != epoch(session.id) || session.id in quiescing) session.invalidate()
     sessions += WeakReference(session)
   }
 
   /**
    * Holds back every live session of [id] while its storage is cleaned up. The result either
-   * [QuiescedSessions.invalidate]s them for good (the delete went through) or
-   * [QuiescedSessions.resume]s them (it failed, and the prototype stays saved and persisting).
+   * [QuiescedSessions.invalidate]s them for good, [QuiescedSessions.reset]s their values on a
+   * reset, or [QuiescedSessions.resume]s them if cleanup failed.
    */
   @Synchronized
   fun quiesce(id: String): QuiescedSessions {
+    epochs[id] = epoch(id) + 1
+    quiescing[id] = (quiescing[id] ?: 0) + 1
     sessions.removeAll { it.get() == null }
     val live = sessions.mapNotNull { it.get() }.filter { it.id == id }
     live.forEach { it.quiesce() }
-    return QuiescedSessions(live)
+    var finished = false
+    return QuiescedSessions(live) { action ->
+      synchronized(this) {
+        if (!finished) {
+          action()
+          epochs[id] = epoch(id) + 1
+          val remaining = quiescing.getValue(id) - 1
+          if (remaining == 0) quiescing.remove(id) else quiescing[id] = remaining
+          finished = true
+        }
+      }
+    }
   }
 
   /** Stops every live session of [id] from writing again; returns how many were live. */
   @Synchronized
   fun invalidate(id: String): Int {
+    epochs[id] = epoch(id) + 1
     sessions.removeAll { it.get() == null }
     return sessions.mapNotNull { it.get() }.filter { it.id == id }.onEach { it.invalidate() }.size
   }
@@ -79,10 +100,17 @@ class PrototypeStorageSessionRegistry {
 
 /** Sessions held back by [PrototypeStorageSessionRegistry.quiesce]. */
 @InternalAutoMobilePrototypeApi
-class QuiescedSessions internal constructor(private val sessions: List<PrototypeStorageSession>) {
-  fun invalidate() = sessions.forEach { it.invalidate() }
+class QuiescedSessions
+internal constructor(
+  private val sessions: List<PrototypeStorageSession>,
+  private val finish: (() -> Unit) -> Unit,
+) {
+  fun invalidate() = finish { sessions.forEach { it.invalidate() } }
 
-  fun resume() = sessions.forEach { it.resume() }
+  fun resume() = finish { sessions.forEach { it.resume() } }
+
+  /** The reset succeeded: forget the old values and accept only subsequent changes. */
+  fun reset() = finish { sessions.forEach { it.reset() } }
 }
 
 /**
@@ -163,20 +191,13 @@ class PrototypeStoragePersistence(
     unsaved: PrototypeStoredValues? = null,
     fits: (PrototypeSpec) -> Boolean = { true },
   ): PrototypeStorageOpen {
+    val sinceEpoch = registry?.epoch(spec.id)
     val loaded = withContext(io) { store.load(spec.id) }
     val onDisk =
       when (loaded) {
         is PrototypeStorageLoad.Loaded -> loaded.stored
         PrototypeStorageLoad.Missing -> null
-        is PrototypeStorageLoad.Corrupt -> {
-          warn.warn(
-            if (spec.storage?.secure.orEmpty().isEmpty())
-              "Stored values of ${spec.id} are unusable, using the spec's: ${loaded.message}"
-            else "Stored prototype values are unusable, using the spec's",
-            null,
-          )
-          null
-        }
+        is PrototypeStorageLoad.Corrupt -> warnCorrupt(spec, loaded)
       }
     val stored =
       if (unsaved == null) onDisk
@@ -212,21 +233,33 @@ class PrototypeStoragePersistence(
         if (unsaved == null) kept
         else onDisk?.takeIf { it.version == spec.storage?.version }?.values.orEmpty(),
         secureValues,
+        sinceEpoch,
       )
     val plan: suspend () -> Unit = {
-      if (rewriteNeeded)
-        rewrite(spec.id, stored?.version, kept, spec.storage?.secure.orEmpty().isNotEmpty())
-      commitSecurePreparation(session, secureValues)
+      commitPreparation(session) {
+        if (rewriteNeeded)
+          rewrite(spec.id, stored?.version, kept, spec.storage?.secure.orEmpty().isNotEmpty())
+        secureValues.commit(secure)
+      }
     }
     return PrototypeStorageOpen(restore.spec, session, plan)
   }
 
-  private suspend fun commitSecurePreparation(
+  private fun warnCorrupt(spec: PrototypeSpec, loaded: PrototypeStorageLoad.Corrupt): Nothing? {
+    warn.warn(
+      if (spec.storage?.secure.orEmpty().isEmpty())
+        "Stored values of ${spec.id} are unusable, using the spec's: ${loaded.message}"
+      else "Stored prototype values are unusable, using the spec's",
+      null,
+    )
+    return null
+  }
+
+  private suspend fun commitPreparation(
     session: PrototypeStorageSession?,
-    preparation: PrototypeSecureStoragePreparation,
+    commit: () -> Unit,
   ) {
-    if (session != null) session.commitSecurePreparation { preparation.commit(secure) }
-    else withContext(io) { preparation.commit(secure) }
+    if (session != null) session.commitPreparation(commit) else withContext(io) { commit() }
   }
 
   private fun session(
@@ -234,6 +267,7 @@ class PrototypeStoragePersistence(
     kept: Map<String, JsonElement>,
     persisted: Map<String, JsonElement>,
     secureValues: PrototypeSecureStoragePreparation,
+    sinceEpoch: Long?,
   ): PrototypeStorageSession? {
     val block = spec.storage ?: return null
     return PrototypeStorageSession(
@@ -255,7 +289,7 @@ class PrototypeStoragePersistence(
         secureBaseline = secureCurrentValues(spec),
         persisted = persisted,
       )
-      .also { registry?.register(it) }
+      .also { if (sinceEpoch != null) registry?.register(it, sinceEpoch) }
   }
 
   /**
@@ -278,17 +312,15 @@ class PrototypeStoragePersistence(
       count + (secure?.delete(id) ?: 0)
     }
 
-  private suspend fun rewrite(
+  private fun rewrite(
     id: String,
     version: Int?,
     kept: Map<String, JsonElement>,
     redact: Boolean,
   ) {
     try {
-      withContext(io) {
-        if (kept.isEmpty() || version == null) store.delete(id)
-        else store.save(id, PrototypeStoredValues(version, kept))
-      }
+      if (kept.isEmpty() || version == null) store.delete(id)
+      else store.save(id, PrototypeStoredValues(version, kept))
     } catch (error: CancellationException) {
       throw error
     } catch (error: IOException) {
@@ -445,7 +477,7 @@ internal constructor(
   /**
    * A delete/reset since prepare makes its snapshot obsolete, even after a failed delete resumes.
    */
-  internal suspend fun commitSecurePreparation(commit: () -> Unit) = diskLock.withLock {
+  internal suspend fun commitPreparation(commit: () -> Unit) = diskLock.withLock {
     withContext(io) {
       // Quiesce takes this monitor before deleting. It cannot pass this check until the write
       // finishes, and a commit arriving after quiesce observes the changed generation.
@@ -537,6 +569,23 @@ internal constructor(
       if (!quiesced || invalidated) return
       quiesced = false
       invalidateSecureBaseline()
+    }
+  }
+
+  /** The storage was reset while quiesced; keep the seen-value baselines for future changes. */
+  internal fun reset() {
+    synchronized(lock) {
+      values.clear()
+      secureValues.clear()
+      sizes.clear()
+      skipped.clear()
+      dirty = false
+      pending?.cancel()
+      pending = null
+      persistedValues = emptyMap()
+      persistedSecureValues = emptyMap()
+      secureBaselineStale = false
+      quiesced = false
     }
   }
 

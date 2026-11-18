@@ -4,6 +4,55 @@ import XCTest
 /// The platform vocabulary backstop (#14294) rejects the shared fixtures at the host's paths, and
 /// its module table, permission and background names match the shared contract.
 final class PrototypePlatformTests: XCTestCase {
+    @MainActor
+    func testPresentationRegistriesShareDeviceStatusUntilFinalOwnerStops() {
+        for name in ["battery", "power", "audio"] {
+            let source = FakeDeviceStatusSource(["value": .number(0)])
+            let clock = LocationClock()
+            let status = PrototypeDeviceStatusModule(name: name, capability: name, source: source, clock: clock)
+            let shared = PrototypePlatformRegistry(modules: [status])
+            let first = shared.forPresentation()
+            let second = shared.forPresentation()
+            let firstDriver = PrototypePlatformDriver(registry: first, clock: clock)
+            let secondDriver = PrototypePlatformDriver(registry: second, clock: clock)
+            firstDriver.subscribe()
+            secondDriver.subscribe()
+            XCTAssertEqual(source.starts, 1)
+            first.configure(locationBlock: nil)
+            first.configure(sensorsBlock: nil)
+            firstDriver.stopEvents()
+            XCTAssertEqual(source.stops, 0)
+            source.report(["value": .number(1)])
+            XCTAssertEqual(second.snapshot[name]?.objectFields?["value"], .number(1))
+            secondDriver.stopEvents()
+            XCTAssertEqual(source.stops, 1)
+            XCTAssertEqual(clock.live, 0)
+        }
+    }
+
+    @MainActor
+    func testDeviceStatusRejectsCapturedCallbacksAfterStopAndRestart() throws {
+        for name in ["battery", "power", "audio"] {
+            let source = FakeDeviceStatusSource(["value": .number(0)])
+            let clock = LocationClock()
+            let status = PrototypeDeviceStatusModule(name: name, capability: name, source: source, clock: clock)
+            XCTAssertEqual(status.state, source.initial)
+            let old = try XCTUnwrap(source.update)
+            source.report(["value": .number(1)])
+            XCTAssertEqual(clock.live, 1)
+            status.stop()
+            XCTAssertEqual(status.state, source.initial)
+            old(["value": .number(99)])
+            XCTAssertEqual(status.state, source.initial)
+            XCTAssertEqual(clock.live, 0)
+            source.report(["value": .number(2)])
+            XCTAssertEqual(status.state["value"], .number(2))
+            clock.advance(status.debounceMs)
+            XCTAssertEqual(status.state["value"], .number(2))
+            status.stop()
+        }
+    }
+
     private var contract: [String: Any] {
         get throws {
             let url = PrototypeSpecFixtures.directory

@@ -80,9 +80,10 @@ Steps require `NSMotionUsageDescription`, available step counting and motion aut
 denied nor restricted. The `CMPedometer` source counts steps from each subscription's start date; the first callback
 already includes steps since that date, and restarting a subscription resets the baseline. Orientation uses
 magnetic north when available, omitting an invalid heading. CoreMotion acceleration is converted from g to m/s²
-before shake detection. iOS never subscribes to or publishes light readings. Hiding the prototype or changing
-its sensor block stops all sources, clears sensor state and resets filters and the shake cooldown. Callbacks
-from a stopped subscription cannot publish state or events into a later session.
+before shake detection. iOS never subscribes to or publishes light readings. Each iOS presentation owns its
+sensor state and subscriptions; motion and proximity hardware are shared until their final user stops.
+Hiding, replacing or re-showing it, even with an identical block or reset, stops its subscriptions and clears
+state, filters and the shake cooldown. Stopped subscriptions cannot publish into a later session.
 
 **Android biometric runtime support.** The [biometric module](prototype-ux-platform-device.md) is
 registered by Android Activity hosts (SavedPrototypeActivity, ProtoViewer and disposable apps). CtrlProxy overlays omit the capability and

@@ -76,7 +76,8 @@
                     PrototypeDeviceStatusModule.audio(source: AVAudioSessionAudioSource()),
                 ],
                 location: CLLocationManagerPrototypeLocationSource(),
-                sensors: CoreMotionPrototypeSensorSource()
+                sensors: CoreMotionPrototypeSensorSource(),
+                biometric: LAContextPrototypeBiometricSource()
             )
         }
     }

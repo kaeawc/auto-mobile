@@ -75,6 +75,7 @@ import dev.jasonpearson.automobile.protocol.SetNetworkMockRules
 import dev.jasonpearson.automobile.protocol.SetPreference
 import dev.jasonpearson.automobile.protocol.SetRecompositionTracking
 import dev.jasonpearson.automobile.protocol.ShowPrototype
+import dev.jasonpearson.automobile.protocol.SimulatePrototypePlatform
 import dev.jasonpearson.automobile.protocol.StartRecording
 import dev.jasonpearson.automobile.protocol.StopRecording
 import dev.jasonpearson.automobile.protocol.SubscribeStorage
@@ -290,8 +291,8 @@ class CtrlProxyMessageHandler(
       is PinSavedPrototype -> actions.pinSavedPrototype(request.requestId, request.id, request.icon)
       is ListSavedPrototypes -> actions.listSavedPrototypes(request.requestId)
       is DeleteSavedPrototype -> actions.deleteSavedPrototype(request.requestId, request.id)
-      is AdvancePrototypeClock ->
-        actions.advancePrototypeClock(request.requestId, request.id, request.advanceTimeMs)
+      is SimulatePrototypePlatform,
+      is AdvancePrototypeClock -> handlePrototypeSimulation(request)
       is ClearPrototypeStorage -> actions.clearPrototypeStorage(request.requestId, request.id)
       is PatchPrototype ->
         actions.patchPrototype(request.requestId, request.id, request.baseRevision, request.ops)
@@ -306,6 +307,21 @@ class CtrlProxyMessageHandler(
       else -> error("Unexpected prototype request")
     }
     return null
+  }
+
+  private suspend fun handlePrototypeSimulation(request: WebSocketRequest) {
+    when (request) {
+      is SimulatePrototypePlatform ->
+        actions.simulatePrototypePlatform(
+          request.requestId,
+          request.id,
+          request.event,
+          request.data,
+        )
+      is AdvancePrototypeClock ->
+        actions.advancePrototypeClock(request.requestId, request.id, request.advanceTimeMs)
+      else -> error("Unexpected prototype simulation request")
+    }
   }
 
   private suspend fun handleShowPrototype(request: ShowPrototype): WebSocketResponse? {
@@ -792,6 +808,7 @@ private class RequestRoute(request: WebSocketRequest) {
       is PinSavedPrototype,
       is ListSavedPrototypes,
       is DeleteSavedPrototype,
+      is SimulatePrototypePlatform,
       is AdvancePrototypeClock,
       is ClearPrototypeStorage,
       is PatchPrototype,

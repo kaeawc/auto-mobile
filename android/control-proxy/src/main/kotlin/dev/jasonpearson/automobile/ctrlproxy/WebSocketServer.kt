@@ -132,6 +132,7 @@ class WebSocketServer(
         "pin_saved_prototype",
         "clear_prototype_storage",
         "advance_prototype_clock",
+        "simulate_prototype_platform",
       ) + prototypeAssetRequestTypes
 
     /** Requests whose payload is typed user input, which may be a password. */
@@ -384,6 +385,7 @@ class WebSocketServer(
     // The device runs a via "device" request with its own HTTP stack (Retrofit over OkHttp), to any
     // http or https host. Without it a host refuses a spec that asks for via "device".
     add("prototype_network_device_v1")
+    add("prototype_network_upload_v1")
     add("prototype_platform_clipboard_v1")
     add("prototype_platform_device_v1")
     add("prototype_platform_v1")
@@ -469,6 +471,7 @@ class WebSocketServer(
     add("prototype_storage_v1")
     add("prototype_pager_state_key_v1")
     add("prototype_timers_v1")
+    add("prototype_platform_simulation_v1")
   }
 
   /** Prototype window, patch, anchor and screenshot flags. */

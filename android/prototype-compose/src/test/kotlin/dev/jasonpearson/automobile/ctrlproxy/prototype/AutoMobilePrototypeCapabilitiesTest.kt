@@ -40,7 +40,6 @@ class AutoMobilePrototypeCapabilitiesTest {
     setOf(
       "prototype_glass_v1", // Real backdrop blur is deferred to PR 2; never simulate glass.
       "prototype_scroll_edge_effect_v1", // Contract only until Android edge rendering in PR 2.
-      "prototype_network_upload_v1", // Contract only until upload execution ships.
       // Realtime transport, routing and lifecycle remain owed by the runtime slices.
       "prototype_platform_realtime_v1",
       "prototype_platform_realtime_device_v1",

@@ -33,6 +33,9 @@ private constructor(
   private val shaders: Map<String, ByteArray>,
   private val shader: (String) -> ByteArray?,
 ) {
+  internal var uploadFile: (String) -> File? = { null }
+    private set
+
   // Preserve the existing constructor and its default-argument ABI for embedding applications.
   @JvmOverloads
   constructor(
@@ -46,7 +49,12 @@ private constructor(
   fun withShaders(
     shaders: Map<String, ByteArray> = emptyMap(),
     shader: (String) -> ByteArray? = { null },
-  ): PrototypeAssets = PrototypeAssets(images, fonts, image, font, shaders, shader)
+  ): PrototypeAssets =
+    PrototypeAssets(images, fonts, image, font, shaders, shader).withUploadFiles(uploadFile)
+
+  /** File-backed assets for streaming request bodies. The app owns their lifetime. */
+  fun withUploadFiles(file: (String) -> File?): PrototypeAssets =
+    PrototypeAssets(images, fonts, image, font, shaders, shader).also { it.uploadFile = file }
 
   internal fun imageBytes(id: String): ByteArray? = images[id] ?: image(id)
 
@@ -96,7 +104,7 @@ internal class EmbeddedPrototypeAssets(private val assets: PrototypeAssets) : Pr
   override fun read(id: String, shader: Boolean): ByteArray? =
     if (shader) assets.shaderBytes(id) else assets.imageBytes(id)
 
-  override fun file(id: String): File? = fontFiles[id]
+  override fun file(id: String): File? = assets.uploadFile(id) ?: fontFiles[id]
 
   override fun setChangeListener(listener: PrototypeAssetChangeListener?) = Unit
 

@@ -72,6 +72,7 @@ internal fun CtrlProxy.createPrototypeController(): PrototypeController {
     hasAsset = { prototypeAssets.lookup(it) != null },
     validateShaders = { validatePrototypeShaderUniforms(it, prototypeAssets::lookup) },
     images = prototypeImages,
+    uploadAssets = prototypeAssets,
     // The host grants this appop before showing a window.layer "app" prototype.
     appLayerPermitted = {
       Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Settings.canDrawOverlays(this)

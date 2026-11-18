@@ -790,7 +790,7 @@
                 "id": spec?.id as Any? ?? NSNull(),
                 "pages": pages,
                 "stacks": stacks.mapValues(\.wireObject),
-                "state": JSONValue.object(state).foundationObject,
+                "state": JSONValue.object(session.publicState).foundationObject,
                 "assets": assets.keys.sorted(),
                 "lastSequence": session.lastSequence,
             ]

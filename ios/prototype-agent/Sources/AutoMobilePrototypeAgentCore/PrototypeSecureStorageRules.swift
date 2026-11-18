@@ -6,6 +6,16 @@ import Foundation
 /// `biometric` module, and no secure key may leave the device through an emit context or through a
 /// `request` that does not opt in with `allowSecureInRequest: true`.
 enum PrototypeSecureStorageRules {
+    /// Public snapshots omit secure values; storage reports their presence and byte count separately.
+    static func redact(state: [String: JSONValue], secure: [String]) -> [String: JSONValue] {
+        var result = state
+        for entry in secure {
+            guard case let .state(key)? = PrototypeStorageKey.parse(entry) else { continue }
+            result.removeValue(forKey: key)
+        }
+        return result
+    }
+
     static func validateBlock(_ storage: JSONValue?, requires: JSONValue?, state: [String: JSONValue]) throws {
         guard let block = storage?.objectFields else { return }
         let platform = PrototypeContractValidator.strings(requires?.objectFields?["platform"])
@@ -32,7 +42,9 @@ enum PrototypeSecureStorageRules {
 
     private static func validateList(
         _ secure: [JSONValue], keys: [String], platform: [String], state: [String: JSONValue]
-    ) throws {
+    )
+        throws
+    {
         guard platform.contains("secureStorage") else {
             throw PrototypeContractValidator.invalid(
                 "storage.secure", "storage.secure requires secureStorage in requires.platform"
@@ -153,7 +165,6 @@ enum PrototypeSecureStorageRules {
         }
         return nil
     }
-
 
     private static func keyError(_ entry: String?, state: [String: JSONValue], keys: [String]) -> String? {
         guard let entry, entry.hasPrefix("state:") else { return "Secure storage keys are state:<key>" }

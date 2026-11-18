@@ -78,6 +78,19 @@ runtimes copy, replayed from `test/fixtures/prototype-device-status/`:
   not activate or reconfigure the host session.
 - `ringer` is Android `AudioManager.RINGER_MODE_*`: silent, vibrate or normal.
 
+The simulate override is normative too. `prototypeDeviceStatusOverride.ts` is the reference for
+`simulate` state seeding (#14300) on these modules, replayed from the same directory's `override-*`
+fixtures:
+
+- In `fake` platform mode, the shown values freeze at the last reading. Later real readings are held
+  back, and a seed merges into the shown values; a `null` seed value removes the key.
+- Switching back to `real` drops the override and shows the latest reading at once. Each change of
+  the shown values is debounced into `<module>.changed` like a real reading.
+- A seed is refused, with its input path, in `real` mode, for a key outside the state table, for a key
+  the platform does not report (`ringer` on iOS) and for a value its contract rule refuses.
+
+The `simulate` state action that drives this on a device is not built.
+
 **Biometric prompt (#14328).** The `biometric` module (`prototype_platform_biometric_v1`) has one call,
 `biometric.authenticate` with `title` (required, 1-64 characters), `subtitle` (optional, 1-128) and
 `allowDeviceCredential` (optional boolean), and one event, `biometric.attemptFailed`, for a rejected

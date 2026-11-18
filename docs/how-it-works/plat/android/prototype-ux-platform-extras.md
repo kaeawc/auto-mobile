@@ -4,33 +4,33 @@ Part of [the agent-authored prototype specification](prototype-ux.md).
 
 ## Dead taps (`window.deadTaps`, `prototype_dead_tap_v1`)
 
-`window.deadTaps: true` enables `emit` events named `prototype_dead_tap`. The
-Android device advertises `prototype_dead_tap_v1`; this window option is a host
-preflight capability, not a strict-spec gate.
+`window.deadTaps: true` enables `emit` events named `prototype_dead_tap`. Android
+advertises `prototype_dead_tap_v1`, a host preflight capability, not a
+strict-spec gate.
 
 A root Final-pass observer reports single-pointer down/up gestures left
 unconsumed by descendants, with movement below touch slop. Scrolling, pager
 drags, multitouch and taps outside the content window never report. Interactive
 controls and dismissing scrims consume their gestures. Gesture-only nodes with
-nonempty long-press or double-tap actions mark their down as handled without
-consuming it, preserving ancestor clicks, and a single tap on them counts as
-handled. Passive text, boxes, images and spacers stay dead.
+long-press or double-tap actions mark their down handled without consuming it,
+preserving ancestor clicks. A single tap on one counts as handled even if its
+hold or double-tap action does not fire. Passive text, boxes, images and spacers stay dead.
 
 Payloads contain only `stack`, `screen`, `x` and `y`; coordinates are window-local
-dp rounded to one decimal. The deepest stack path supplies its id and top screen; equal depths choose the lexicographically lowest stack id. Both are null
+dp rounded to one decimal. The deepest stack supplies its id and top screen; ties pick the lowest stack id. Both are null
 without stacks. The event uses normal sequence allocation, state, pages and
 stacks, never typed text. Authored emits cannot use the
-reserved `prototype_` prefix. Disabling the option or closing the runtime stops reports.
+reserved `prototype_` prefix. Disabling it or closing the runtime stops reports.
 
 ## Value formatters (#14227)
 
-`derive` maps up to 32 STATE_KEY names to strict
+Optional `derive` maps up to 32 STATE_KEY names to strict
 `{of, format, locale?, timeZone?}` entries. `of` contains exactly one of
 `{data: "/pointer"}` (relative to data), `{state: "key"}`, or
 `{value: number|string}`. Every text field supporting `{data:/pointer}` also
 accepts `{derived:name}`; undeclared names are validation errors, unused entries
-are allowed, and malformed braces remain literal. Devices render these tokens in
-text node text, contentDescription, rich-text spans, button/FAB labels, topAppBar
+are allowed, and malformed braces remain literal. Devices render them in
+text, contentDescription, rich-text spans, button/FAB labels, topAppBar
 title, badge text, dialog title/text and snackbar text. Other text-kind fields
 (request url/headers/body, check messages, select/segmented/menu/searchBar labels)
 validate unknown names but display the token literally on devices.
@@ -195,7 +195,7 @@ entries and waits. Other actions use CtrlProxy.
 The listener requires a nonblank `assets/prototype/attach-token` and an emulator identity
 (kernel qemu flag or emulator build fingerprint/hardware). The stamper's explicit
 `allowPhysicalDeviceAttach: true` option writes `assets/prototype/attach-allow-physical-device`
-to permit physical devices. This applies to debug and release templates alike. The token-in-APK model is development-only: anyone who can read the APK can recover the token. Reinstalling in place reuses the token. A second connection cannot
+to permit physical devices. This applies to debug and release templates alike, independently of APK debuggability. The token-in-APK model is development-only: anyone who can read the APK can recover the token. Reinstalling a slug in place reuses the token. A second connection cannot
 replace an authenticated live peer. Status and patch conflicts redact `storage.secure` state keys.
 
 Events replay at least once. A process-scoped agent keeps its listener, buffer, sequence ledger

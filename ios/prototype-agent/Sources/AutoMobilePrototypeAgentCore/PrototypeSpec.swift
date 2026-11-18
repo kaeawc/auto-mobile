@@ -111,6 +111,7 @@ struct PrototypeSpec: Decodable {
     let locationBlock: JSONValue?
     let sensorsBlock: JSONValue?
     let platformHandlers: [String: JSONValue]
+    let declaredPermissions: Set<String>
     private(set) var platformState: [String: JSONValue] = [:]
     /// The route params `{route.<name>}` placeholders are bound to in `root` (#14188); empty at decode.
     private(set) var routeScope: PrototypeRouteBinder.Scope = [:]
@@ -159,9 +160,15 @@ struct PrototypeSpec: Decodable {
         // Menus validate against state, but state is decoded (and checked) after root to keep the
         // key order; a state that does not decode is reported at its own turn below.
         let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state))
+        let requires = try container.decodeIfPresent(JSONValue.self, forKey: .requires)
+        if case let .array(permissions)? = requires?.objectFields?["permissions"] {
+            declaredPermissions = Set(permissions.compactMap { $0.objectFields?["name"]?.stringValue })
+        } else {
+            declaredPermissions = []
+        }
         // Validate platform vocabulary before resolving device-owned reads.
         try PrototypePlatformValidator.validate(
-            requires: container.decodeIfPresent(JSONValue.self, forKey: .requires),
+            requires: requires,
             handlers: container.decodeIfPresent(JSONValue.self, forKey: .platform),
             channels: channels,
             auth: container.decodeIfPresent(JSONValue.self, forKey: .auth),
@@ -278,6 +285,7 @@ struct PrototypeSpec: Decodable {
         platformState = spec.platformState
         routeScope = spec.routeScope
         id = spec.id
+        declaredPermissions = spec.declaredPermissions
         strings = spec.strings
         locales = spec.locales
         window = spec.window

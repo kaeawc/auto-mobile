@@ -129,14 +129,16 @@ of `granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted` or `
 the user changes a permission in Settings and the app resumes. A call that needs a permission the user denied fails with `permission_denied` and never prompts implicitly. Overlay
 runtimes do not advertise the module, since a grant there would go to CtrlProxy or the borrowed host app.
 
-iOS app hosts register `permissions` for `notifications`; other canonical names return `unavailable`.
+iOS standalone hosts and ProtoViewer register `permissions` for `notifications`; borrowed-app sessions
+do not expose the module. Other canonical names return `unavailable`.
 The first status read establishes `/platform/permissions/notifications` asynchronously without prompting.
 Requests and foreground Settings re-reads publish only changed states. A request prompts with alert,
 sound and badge options only while authorization is `notDetermined`, then re-reads notification settings
 for its result. iOS never re-prompts after a determination. Outside an app bundle with a bundle
 identifier, the source returns `unavailable` without accessing UserNotifications. No Info.plist key is
-required. One request may be in flight per module; a second returns `too_many_in_flight`. Cancellation
-and teardown drop late callbacks and stop foreground observation. The iOS driver uses the same
+required. One request may be in flight per module; a second returns `too_many_in_flight`. Request
+cancellation drops the late result while foreground observation stays active. The registry stops
+observation when its final observer releases it. The iOS driver uses the same
 platform-call deadline as other iOS modules. This module does not publish
 `/platform/notifications/authorization`; `provisional` authorization reads as `limited` here.
 

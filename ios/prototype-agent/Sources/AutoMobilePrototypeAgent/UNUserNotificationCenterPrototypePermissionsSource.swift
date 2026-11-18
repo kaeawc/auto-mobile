@@ -5,8 +5,7 @@
     @MainActor
     final class UNUserNotificationCenterPrototypePermissionsSource: PrototypeNotificationAuthorizationSource {
         private var observer: (any NSObjectProtocol)?
-        private var foregroundRead: Task<Void, Never>?
-        private var continuation: AsyncStream<PrototypePermissionState>.Continuation?
+        private var continuation: AsyncStream<Void>.Continuation?
         private var generation = 0
         private var nextRequest = 0
         private var pending: (id: Int, continuation: CheckedContinuation<PrototypePermissionOutcome, Never>)?
@@ -18,10 +17,10 @@
             )
         }
 
-        var changes: AsyncStream<PrototypePermissionState> {
+        var changes: AsyncStream<Void> {
             continuation?.finish()
             let (stream, continuation) = AsyncStream.makeStream(
-                of: PrototypePermissionState.self, bufferingPolicy: .bufferingNewest(8)
+                of: Void.self, bufferingPolicy: .bufferingNewest(8)
             )
             self.continuation = continuation
             observeForeground()
@@ -76,8 +75,6 @@
 
         func stop() {
             generation += 1
-            foregroundRead?.cancel()
-            foregroundRead = nil
             if let observer { NotificationCenter.default.removeObserver(observer) }
             observer = nil
             continuation?.finish()
@@ -93,13 +90,7 @@
             ) { [weak self] _ in
                 Task { @MainActor in
                     guard let self, session == self.generation, self.pending == nil else { return }
-                    self.foregroundRead?.cancel()
-                    self.foregroundRead = Task { [weak self] in
-                        guard let self else { return }
-                        let state = await self.status()
-                        guard !Task.isCancelled, session == self.generation else { return }
-                        self.continuation?.yield(state)
-                    }
+                    self.continuation?.yield(())
                 }
             }
         }

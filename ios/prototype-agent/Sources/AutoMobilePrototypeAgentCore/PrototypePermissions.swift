@@ -34,7 +34,8 @@ protocol PrototypeNotificationAuthorizationSource: AnyObject {
     func status() async -> PrototypePermissionState
     /// Prompts only if still notDetermined and returns a fresh settings reading, never the grant Bool.
     func request() async -> PrototypePermissionOutcome
-    var changes: AsyncStream<PrototypePermissionState> { get }
+    /// Foreground signals; the module owns status reads and their ordering against request results.
+    var changes: AsyncStream<Void> { get }
     /// Releases observations and pending requests. Later reads may restart observation.
     func stop()
 }
@@ -46,11 +47,12 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
     let requiredInfoPlistKeys: [String] = []
     private let source: any PrototypeNotificationAuthorizationSource
     private var values: [String: JSONValue] = [:]
-    private var observation: Task<Void, Never>?
+    private(set) var observation: Task<Void, Never>?
     private var generation = 0
+    private var requestSequence = 0
     private var nextRequest = 0
     private var pending: (id: Int, continuation: CheckedContinuation<PlatformCallResult, Never>)?
-    private var requestTask: Task<Void, Never>?
+    private(set) var requestTask: Task<Void, Never>?
     private var subscribers: [Int: AsyncStream<PlatformEvent>.Continuation] = [:]
     private var nextSubscriber = 0
 
@@ -121,11 +123,16 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
         let session = generation
         let changes = source.changes
         observation = Task { [weak self, source] in
+            guard let sequence = self?.requestSequence else { return }
             let initial = await source.status()
             guard let self, !Task.isCancelled, session == generation else { return }
-            initialize(initial)
-            for await state in changes {
+            if sequence == requestSequence { initialize(initial) }
+            for await _ in changes {
                 guard !Task.isCancelled, session == generation else { return }
+                let sequence = requestSequence
+                let state = await source.status()
+                guard !Task.isCancelled, session == generation else { return }
+                guard sequence == requestSequence else { continue }
                 publish("notifications", state)
             }
         }
@@ -157,6 +164,7 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
             case .cancelled: return .failure(.cancelled, "Permission request cancelled")
             case .platformError: return .failure(.platformError, "Permission request failed")
             }
+            requestSequence += 1
             publish(name, state)
             results[name] = .string(state.rawValue)
         }

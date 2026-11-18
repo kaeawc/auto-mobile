@@ -21,12 +21,14 @@ final class FakeChannelTransport: PrototypeChannelTransport {
 
     var requests: [PrototypeChannelOpenRequest] = []
     var connections: [Connection] = []
+    var failOpen: Error?
     func open(
         _ request: PrototypeChannelOpenRequest,
         listener: PrototypeChannelListener
     )
-        -> any PrototypeChannelConnection
+        throws -> any PrototypeChannelConnection
     {
+        if let failOpen { throw failOpen }
         requests.append(request)
         let connection = Connection(listener)
         connections.append(connection)
@@ -112,7 +114,8 @@ final class RealtimeHarness {
         secondChannel: Bool = false,
         raw: Bool = false,
         coalesced: Bool = false,
-        sse: Bool = false
+        sse: Bool = false,
+        maxAttempts: Int = PrototypeChannelBackoff.defaultMaxAttempts
     )
         throws
     {
@@ -125,6 +128,7 @@ final class RealtimeHarness {
         {"kind":"\(sse ? "sse" : "websocket")","url":"\(sse ? "https" :
             "wss")://example.com/{room}","headers":{"X-Room":"{room}"},
          "statusKey":"status","connect":"\(manual ? "manual" : "onShow")","decode":"\(raw ? "text" : "json")",
+         "reconnect":{"maxAttempts":\(maxAttempts)},
          "routes":\(route)}
         """
         let bytes = Data("""

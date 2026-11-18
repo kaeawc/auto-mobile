@@ -162,10 +162,10 @@ final class PrototypeChannelController {
         slot.closeReason = nil
         slot.error = nil
         try await status(slot, slot.attempt == 0 ? "connecting" : "reconnecting")
-        try open(slot)
+        try await open(slot)
     }
 
-    private func open(_ slot: Slot) throws {
+    private func open(_ slot: Slot) async throws {
         guard !closing else { return }
         slot.generation += 1
         let generation = slot.generation
@@ -184,7 +184,13 @@ final class PrototypeChannelController {
             lastEventID: slot.declaration["kind"] == .string("sse") ? slot.lastEventID : nil
         )
         let transport = slot.declaration["via"] == .string("device") ? config.device : config.host
-        slot.connection = try transport.open(request, listener: listener)
+        do {
+            slot.connection = try transport.open(request, listener: listener)
+        } catch {
+            try await ended(slot, code: nil, reason: nil, error: PrototypeChannelError(
+                code: "transport", message: String(describing: error)
+            ))
+        }
     }
 
     private func enqueue(
@@ -283,7 +289,7 @@ final class PrototypeChannelController {
             let generation = slot.generation
             slot.timer = timer(delay) { [weak self, weak slot] in
                 guard let self, let slot, slot.generation == generation else { return }
-                try open(slot)
+                try await open(slot)
             }
         }
         try await callback(slot, callbackName)

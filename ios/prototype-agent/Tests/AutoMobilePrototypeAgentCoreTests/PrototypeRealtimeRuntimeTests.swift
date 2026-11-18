@@ -129,8 +129,11 @@ final class PrototypeRealtimeRuntimeTests: XCTestCase {
         var results: [PlatformCallResult] = []
         driver.onComplete = { _, result, _ in results.append(result) }
         driver.perform([.start(.init(call: harness.call("send", body: .string("expired")), timeoutMs: 10))])
-        // Give start() a chance to enqueue the call behind the blocked frame, without wall time.
-        await Task.yield()
+        // Fire the deadline only after the send has entered the inbox behind the blocked frame.
+        for _ in 0 ..< 1000 where harness.module.pendingCalls == 0 {
+            await Task.yield()
+        }
+        XCTAssertEqual(harness.module.pendingCalls, 1)
         for timer in harness.clock.live where timer.delay == 10 {
             timer.run()
         }
@@ -172,6 +175,77 @@ final class PrototypeRealtimeRuntimeTests: XCTestCase {
         await drained(harness.module)
         XCTAssertEqual(harness.transport.connections.last?.closes, [1001])
         XCTAssertTrue(harness.transport.connections.last?.sent.isEmpty == true)
+    }
+
+    func testThrowingInitialOpenRetriesAndRecovers() async throws {
+        let harness = try RealtimeHarness(manual: true)
+        await harness.module.settled()
+        harness.transport.failOpen = RealtimeHarness.Failure.injected
+        _ = await harness.module.call(harness.call("connect"))
+        XCTAssertTrue(harness.transport.requests.isEmpty)
+        XCTAssertTrue(harness.transport.connections.isEmpty)
+        XCTAssertEqual(harness.clock.live.map(\.delay), [250])
+        XCTAssertEqual(harness.session.state["status"], .string("reconnecting"))
+        harness.transport.failOpen = nil
+        try XCTUnwrap(harness.clock.live.first).run()
+        await harness.opened()
+        XCTAssertEqual(harness.transport.requests.count, 1)
+        XCTAssertEqual(harness.transport.connections.count, 1)
+        XCTAssertEqual(harness.session.state["status"], .string("open"))
+        harness.module.close()
+        await harness.module.settled()
+    }
+
+    func testThrowingReconnectOpenSchedulesNextAttempt() async throws {
+        let harness = try RealtimeHarness()
+        await harness.opened()
+        harness.transport.connections[0].listener.closed(nil, nil, .init(code: "network", message: "offline"))
+        await harness.module.settled()
+        XCTAssertEqual(harness.clock.live.map(\.delay), [250])
+
+        harness.transport.failOpen = RealtimeHarness.Failure.injected
+        try XCTUnwrap(harness.clock.live.first).run()
+        await harness.module.settled()
+        XCTAssertEqual(harness.transport.requests.count, 1)
+        XCTAssertEqual(harness.transport.connections.count, 1)
+        XCTAssertEqual(harness.clock.live.map(\.delay), [500])
+        XCTAssertEqual(harness.session.state["status"], .string("reconnecting"))
+
+        harness.transport.failOpen = nil
+        try XCTUnwrap(harness.clock.live.first).run()
+        await harness.module.settled()
+        XCTAssertEqual(harness.transport.requests.count, 2)
+        XCTAssertEqual(harness.transport.connections.count, 2)
+        harness.transport.connections[1].listener.opened()
+        await harness.module.settled()
+        XCTAssertEqual(harness.session.state["status"], .string("open"))
+        harness.module.close()
+        await harness.module.settled()
+    }
+
+    func testThrowingOpenExhaustsBackoffAndExplicitConnectReopens() async throws {
+        let harness = try RealtimeHarness(manual: true, maxAttempts: 1)
+        await harness.module.settled()
+        harness.transport.failOpen = RealtimeHarness.Failure.injected
+        _ = await harness.module.call(harness.call("connect"))
+        XCTAssertEqual(harness.clock.live.map(\.delay), [250])
+        XCTAssertEqual(harness.session.state["status"], .string("reconnecting"))
+        try XCTUnwrap(harness.clock.live.first).run()
+        await harness.module.settled()
+        XCTAssertTrue(harness.clock.live.isEmpty)
+        XCTAssertTrue(harness.transport.requests.isEmpty)
+        XCTAssertTrue(harness.transport.connections.isEmpty)
+        XCTAssertEqual(harness.session.state["status"], .string("error"))
+
+        harness.transport.failOpen = nil
+        _ = await harness.module.call(harness.call("connect"))
+        XCTAssertEqual(harness.transport.requests.count, 1)
+        XCTAssertEqual(harness.transport.connections.count, 1)
+        XCTAssertEqual(harness.session.state["status"], .string("connecting"))
+        await harness.opened()
+        XCTAssertEqual(harness.session.state["status"], .string("open"))
+        harness.module.close()
+        await harness.module.settled()
     }
 
     func testReconnectJitterStableResetAndFrameLimits() async throws {

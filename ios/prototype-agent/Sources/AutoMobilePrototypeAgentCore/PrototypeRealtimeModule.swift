@@ -14,6 +14,8 @@ final class PrototypeRealtimeModule: PrototypePlatformModule {
     private let clock: any PrototypeClock
     private var controller: PrototypeChannelController?
     private var tail: Task<Void, Never>?
+    /// Calls admitted to the inbox that have not yet returned, including those waiting on its tail.
+    private(set) var pendingCalls = 0
     private var owner = 0
     private var prototypeID: String?
     var onError: (Error) -> Void = { error in
@@ -90,6 +92,8 @@ final class PrototypeRealtimeModule: PrototypePlatformModule {
             }
         }
         tail = Task { _ = await queued.value }
+        pendingCalls += 1
+        defer { pendingCalls -= 1 }
         return await withTaskCancellationHandler {
             await queued.value
         } onCancel: {

@@ -238,7 +238,9 @@ the Android emulator's host alias. The iOS sample uses the placeholder
 samples ship a generated `hero.png` image.
 
 For a running Android disposable prototype app, call `prototype` with `patch`, `status`,
-`inspect` or `awaitEvent` and the installed spec's `id` to access that app. Launch it first with
+`inspect` or `awaitEvent` and the installed spec's `id` to access that app. For `status` and
+`inspect`, `id` is optional and only selects a disposable app; it does not filter the returned
+prototypes. Without it, `status` reads host-local state and `inspect` queries the overlay. Launch the app first with
 `launchApp` using the app id returned by `prototype installApp`. If attaching fails, launch it
 again; reinstall with `prototype installApp` if its saved token is stale. Other actions use the
 prototype overlay.

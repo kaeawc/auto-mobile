@@ -142,7 +142,13 @@ final class PrototypePlatformSimulationTests: XCTestCase {
         let cases: [RefusalCase] = try [
             .init(id: "p", event: "test.missing", data: .object([:]), session: shown, hint: "Unknown"),
             .init(id: "p", event: "missing.tick", data: .object([:]), session: shown, hint: "Unknown"),
-            .init(id: "p", event: "test.tick", data: .object([:]), session: session(declared: false), hint: "requires.platform"),
+            .init(
+                id: "p",
+                event: "test.tick",
+                data: .object([:]),
+                session: session(declared: false),
+                hint: "requires.platform"
+            ),
             .init(
                 id: "p",
                 event: "test.tick",

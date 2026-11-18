@@ -38,6 +38,18 @@ describe("packaged Android disposable-app template capabilities", () => {
     expect(selectDisposableAppTemplate(stack, [base]).name).toBe("base");
   });
 
+  test("refuses network requests, which the shell wires no transport for", () => {
+    const request = spec({
+      data: { feed: {} },
+      root: {
+        type: "button",
+        label: "Load",
+        onTap: [{ type: "request", url: "https://example.com/feed", into: "/data/feed" }],
+      },
+    });
+    expect(() => selectDisposableAppTemplate(request, [base])).toThrow(/prototype_network_v1/);
+  });
+
   test("refuses a module the shell does not register", () => {
     expect(() =>
       selectDisposableAppTemplate(spec({ requires: { platform: ["notifications"] } }), [base]),

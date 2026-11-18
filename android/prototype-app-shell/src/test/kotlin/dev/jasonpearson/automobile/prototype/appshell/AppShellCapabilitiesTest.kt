@@ -40,11 +40,14 @@ class AppShellCapabilitiesTest {
   }
 
   @Test
-  fun `the template never promises an SDK-gated or unregistered capability`() {
+  fun `the template never promises an SDK-gated, unregistered or unwired capability`() {
     val advertised = appShellTemplateCapabilities(platform)
     assertFalse("prototype_custom_shaders_v1" in advertised)
     assertFalse("prototype_platform_notifications_v1" in advertised)
     assertFalse("prototype_platform_test_v1" in advertised)
+    // The shell passes the renderer no network transport, so requests are never advertised.
+    APP_SHELL_UNWIRED_CAPABILITIES.forEach { assertFalse(it in advertised) }
+    assertTrue(platform.capabilities.containsAll(APP_SHELL_UNWIRED_CAPABILITIES))
   }
 
   private fun packagedCapabilities(): List<String> {

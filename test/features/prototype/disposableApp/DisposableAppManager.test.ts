@@ -208,6 +208,30 @@ describe("DisposableAppManager TTL and uninstall", () => {
     });
   });
 
+  test("a bulk retry tries apps it skipped last, so it reaches the pending ones", async () => {
+    const bounded = new DisposableAppManager({
+      platforms: { android: { stamper, installer } },
+      registry,
+      timer,
+      bulkUninstallBudgetMs: 2_000,
+      uninstallStepMs: 1_000,
+    });
+    const foreign = ["a", "b"].map((slug) => disposableAppId("android", slug)).sort();
+    for (const appId of foreign) {
+      installer.seed(DEVICE, appId, "someone-else");
+    }
+    await bounded.install(input({ slug: "z" }));
+    const owned = disposableAppId("android", "z");
+    installer.onInspect = () => timer.advanceTime(1_000);
+    const first = await bounded.uninstall(DEVICE, "android", { all: true });
+    expect(first.skipped.map((entry) => entry.appId)).toEqual(foreign);
+    expect(first.pending).toEqual([owned]);
+    const retry = await bounded.uninstall(DEVICE, "android", { all: true });
+    expect(retry.removed).toEqual([{ appId: owned, reason: "all" }]);
+    expect(retry.pending).toEqual([foreign[1]]);
+    expect(installer.uninstalls).toEqual([owned]);
+  });
+
   test("bulk removal always starts one app, and fast removals all fit", async () => {
     const tight = new DisposableAppManager({
       platforms: { android: { stamper, installer } },

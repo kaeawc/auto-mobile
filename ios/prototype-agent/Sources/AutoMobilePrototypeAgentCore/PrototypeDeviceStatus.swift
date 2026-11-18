@@ -184,8 +184,8 @@ final class PrototypeDeviceStatusModule: PrototypePlatformModule {
         let session = generation
         pending = clock.schedule(afterMilliseconds: debounceMs) { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, generation == session else { return }
-                settle()
+                guard let self, self.generation == session else { return }
+                self.settle()
             }
         }
     }

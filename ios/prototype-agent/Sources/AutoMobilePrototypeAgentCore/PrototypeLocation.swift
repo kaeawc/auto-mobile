@@ -355,8 +355,8 @@ final class PrototypeLocationModule: PrototypePlatformModule {
             let updateGeneration = generation
             pending = clock.schedule(afterMilliseconds: minInterval - elapsed) { [weak self] in
                 MainActor.assumeIsolated {
-                    guard let self, generation == updateGeneration else { return }
-                    deliver()
+                    guard let self, self.generation == updateGeneration else { return }
+                    self.deliver()
                 }
             }
         }

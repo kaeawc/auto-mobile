@@ -4,6 +4,7 @@ import { expect, test } from "bun:test";
 import fixtureData from "../../fixtures/prototype-spec/derive/collections.json";
 import {
   derivePrototypeValues,
+  memoizedPrototypeDerive,
   type PrototypeDeriveObserver,
 } from "../../../src/features/prototype/prototypeDerive";
 import { prototypeDeriveSchema } from "../../../src/features/prototype/prototypeFormatSchema";
@@ -219,4 +220,53 @@ test("changed ancestor and descendant pointers recompute only dependent entries"
     );
     expect(counter.names).toEqual(["results"]);
   }
+});
+
+test("memoized derive evaluates once per data/state revision across placeholders", () => {
+  const derive = prototypeDeriveSchema.parse({
+    total: {
+      collection: {
+        of: { data: "/rows" },
+        where: [{ field: "n", op: "gte", value: { state: "min" } }],
+      },
+      reduce: { op: "sum", field: "n" },
+    },
+    count: { collection: { of: { data: "/rows" } }, reduce: { op: "count" } },
+  });
+  const counter = new Counter();
+  const data = { rows: [{ n: 1 }, { n: 2 }, { n: 3 }] };
+  const state = { min: 2, query: "" };
+  for (let placeholder = 0; placeholder < 3; placeholder++) {
+    expect(memoizedPrototypeDerive(derive, data, { ...state }, counter)).toEqual({
+      total: 5,
+      count: 3,
+    });
+  }
+  expect(counter.names).toEqual(["total", "count"]);
+  counter.names = [];
+  memoizedPrototypeDerive(derive, data, { ...state, query: "x" }, counter);
+  expect(counter.names).toEqual([]);
+  memoizedPrototypeDerive(derive, data, { ...state, query: "x", min: 3 }, counter);
+  memoizedPrototypeDerive(derive, data, { ...state, query: "x", min: 3 }, counter);
+  expect(counter.names).toEqual(["total"]);
+  counter.names = [];
+  const next = { rows: [...data.rows, { n: 4 }] };
+  expect(memoizedPrototypeDerive(derive, next, { ...state, min: 3 }, counter)).toEqual({
+    total: 7,
+    count: 4,
+  });
+  expect(counter.names).toEqual(["total", "count"]);
+});
+
+test("resolvePrototypeDerived reuses one evaluation for every placeholder of a revision", () => {
+  const spec = {
+    derive: prototypeDeriveSchema.parse({
+      count: { collection: { of: { data: "/rows" } }, reduce: { op: "count" } },
+    }),
+  };
+  const data = { rows: [{ n: 1 }] };
+  const env = { locale: "en-US", timeZone: "UTC", nowMs: 0 };
+  const first = memoizedPrototypeDerive(spec.derive, data, {});
+  expect(resolvePrototypeDerived(spec, "count", { data, state: {}, env })).toBe("1");
+  expect(memoizedPrototypeDerive(spec.derive, data, {})).toBe(first);
 });

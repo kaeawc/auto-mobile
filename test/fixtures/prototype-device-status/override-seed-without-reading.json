@@ -1,0 +1,53 @@
+{
+  "description": "A fake module with no real reading starts from its first seed; a null seed value removes the key; returning to real with no reading leaves every key absent.",
+  "module": "battery",
+  "platform": "ios",
+  "inputs": [
+    {
+      "timestampMs": 0,
+      "mode": "fake"
+    },
+    {
+      "timestampMs": 10,
+      "seed": {
+        "level": 5,
+        "state": "unplugged"
+      }
+    },
+    {
+      "timestampMs": 20,
+      "seed": {
+        "level": null
+      }
+    },
+    {
+      "timestampMs": 30,
+      "mode": "real"
+    }
+  ],
+  "expectedUpdates": [
+    {
+      "timestampMs": 10,
+      "values": {
+        "level": 5,
+        "state": "unplugged"
+      }
+    },
+    {
+      "timestampMs": 20,
+      "values": {
+        "state": "unplugged"
+      }
+    },
+    {
+      "timestampMs": 30,
+      "values": {}
+    }
+  ],
+  "expectedEvents": [
+    {
+      "timestampMs": 530,
+      "values": {}
+    }
+  ]
+}

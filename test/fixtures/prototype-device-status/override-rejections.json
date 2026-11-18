@@ -1,0 +1,152 @@
+{
+  "description": "Seeds a runtime refuses, each with the input index and path of the refusal.",
+  "cases": [
+    {
+      "name": "seed in real mode",
+      "module": "battery",
+      "platform": "android",
+      "inputs": [
+        {
+          "timestampMs": 0,
+          "seed": {
+            "level": 10
+          }
+        }
+      ],
+      "expectedError": {
+        "index": 0,
+        "path": "inputs[0].seed"
+      }
+    },
+    {
+      "name": "unknown key",
+      "module": "battery",
+      "platform": "android",
+      "inputs": [
+        {
+          "timestampMs": 0,
+          "mode": "fake"
+        },
+        {
+          "timestampMs": 1,
+          "seed": {
+            "health": "good"
+          }
+        }
+      ],
+      "expectedError": {
+        "index": 1,
+        "path": "inputs[1].seed.health"
+      }
+    },
+    {
+      "name": "ringer on iOS",
+      "module": "audio",
+      "platform": "ios",
+      "inputs": [
+        {
+          "timestampMs": 0,
+          "mode": "fake"
+        },
+        {
+          "timestampMs": 1,
+          "seed": {
+            "ringer": "silent"
+          }
+        }
+      ],
+      "expectedError": {
+        "index": 1,
+        "path": "inputs[1].seed.ringer"
+      }
+    },
+    {
+      "name": "level past 100",
+      "module": "battery",
+      "platform": "android",
+      "inputs": [
+        {
+          "timestampMs": 0,
+          "mode": "fake"
+        },
+        {
+          "timestampMs": 1,
+          "seed": {
+            "level": 101
+          }
+        }
+      ],
+      "expectedError": {
+        "index": 1,
+        "path": "inputs[1].seed.level"
+      }
+    },
+    {
+      "name": "fractional volume",
+      "module": "audio",
+      "platform": "android",
+      "inputs": [
+        {
+          "timestampMs": 0,
+          "mode": "fake"
+        },
+        {
+          "timestampMs": 1,
+          "seed": {
+            "volume": 12.5
+          }
+        }
+      ],
+      "expectedError": {
+        "index": 1,
+        "path": "inputs[1].seed.volume"
+      }
+    },
+    {
+      "name": "unknown thermal state",
+      "module": "power",
+      "platform": "android",
+      "inputs": [
+        {
+          "timestampMs": 0,
+          "mode": "fake"
+        },
+        {
+          "timestampMs": 1,
+          "seed": {
+            "thermal": "hot"
+          }
+        }
+      ],
+      "expectedError": {
+        "index": 1,
+        "path": "inputs[1].seed.thermal"
+      }
+    },
+    {
+      "name": "seed after returning to real",
+      "module": "power",
+      "platform": "ios",
+      "inputs": [
+        {
+          "timestampMs": 0,
+          "mode": "fake"
+        },
+        {
+          "timestampMs": 1,
+          "mode": "real"
+        },
+        {
+          "timestampMs": 2,
+          "seed": {
+            "saver": true
+          }
+        }
+      ],
+      "expectedError": {
+        "index": 2,
+        "path": "inputs[2].seed"
+      }
+    }
+  ]
+}

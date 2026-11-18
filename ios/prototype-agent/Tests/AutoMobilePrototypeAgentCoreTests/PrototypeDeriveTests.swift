@@ -34,7 +34,7 @@ final class PrototypeDeriveTests: XCTestCase {
 
     func testAllSharedCollectionFixtures() throws {
         let cases = try fixtures()
-        XCTAssertEqual(cases.count, 35)
+        XCTAssertEqual(cases.count, 37)
         XCTAssertEqual(cases.filter { $0.error != nil }.count, 12)
         for fixture in cases where fixture.error == nil {
             let entries = try PrototypeDerivedCollections.entries(fixture.spec?.objectFields?["derive"])
@@ -142,6 +142,16 @@ final class PrototypeDeriveTests: XCTestCase {
 
     private func decode(_ text: String) throws -> [String: PrototypeDerivedEntry] {
         try JSONDecoder().decode([String: PrototypeDerivedEntry].self, from: Data(text.utf8))
+    }
+
+    func testDerivedInvalidationDistinguishesCanonicallyEquivalentStrings() {
+        let composed = JSONValue.string("\u{E9}")
+        let decomposed = JSONValue.string("e\u{301}")
+        XCTAssertEqual(composed, decomposed)
+        XCTAssertFalse(PrototypeSession.scalarIdentical(composed, decomposed))
+        XCTAssertFalse(PrototypeSession.scalarIdentical(.array([composed]), .array([decomposed])))
+        XCTAssertTrue(PrototypeSession.scalarIdentical(.object(["q": composed]), .object(["q": composed])))
+        XCTAssertTrue(PrototypeSession.scalarIdentical(nil, nil))
     }
 
     private final class Observer: PrototypeDeriveObserver {

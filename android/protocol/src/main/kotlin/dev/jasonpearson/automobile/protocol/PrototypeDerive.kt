@@ -34,12 +34,40 @@ object PrototypeDerive {
       }
     }
 
-  internal fun fromSpec(spec: JsonObject): Map<String, JsonElement?> {
+  private class Revision(val spec: JsonObject, val values: Map<String, JsonElement?>)
+
+  @Volatile private var lastRevision: Revision? = null
+
+  /**
+   * One evaluation per spec revision: validation reads derived values from many repeat nodes and
+   * caches, and parsed JSON is immutable, so the same spec instance reuses the last result.
+   */
+  internal fun fromSpec(
+    spec: JsonObject,
+    observer: PrototypeDeriveObserver? = null,
+  ): Map<String, JsonElement?> {
+    lastRevision
+      ?.takeIf { it.spec === spec }
+      ?.let {
+        return it.values
+      }
+    return evaluateSpec(spec, observer).also { lastRevision = Revision(spec, it) }
+  }
+
+  private fun evaluateSpec(
+    spec: JsonObject,
+    observer: PrototypeDeriveObserver?,
+  ): Map<String, JsonElement?> {
     val entries =
       (spec["derive"] as? JsonObject).orEmpty().mapValues { (_, value) ->
         PrototypeSpecValidator.json.decodeFromJsonElement<PrototypeDerivedEntry>(value)
       }
-    return evaluate(entries, spec["data"], (spec["state"] as? JsonObject).orEmpty())
+    return evaluate(
+      entries,
+      spec["data"],
+      (spec["state"] as? JsonObject).orEmpty(),
+      observer = observer,
+    )
   }
 
   private fun affected(entry: PrototypeDerivedEntry, changed: PrototypeDeriveChanges): Boolean {

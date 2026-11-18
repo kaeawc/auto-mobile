@@ -69,7 +69,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_settings_v1",
             // Contract only; the system picker runtimes are owed (#14318).
             "prototype_platform_contacts_v1", "prototype_platform_calendar_v1",
-            // Contract only; the motion and sensor runtimes are owed (#14327).
+            // Registered by the agent and Viewer registries, not the static list.
             "prototype_platform_sensors_v1",
             // Contract only; map backends are advertised once their renderers can serve them (#14302).
             "prototype_platform_map_google_v1",

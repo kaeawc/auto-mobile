@@ -377,6 +377,7 @@ class WebSocketServer(
     // change event. Older APKs reject the actions as unknown, so hosts refuse a spec using one
     // for a device lacking this flag. Advertised only together with prototype_data_model_v1.
     add("prototype_data_actions_v1")
+    add("prototype_data_actions_v2")
     // The request action (#12528): an HTTP call from a tap, run by the host (via "host") or by the
     // device itself (via "device"), that writes /data and moves a status key. Older APKs reject the
     // action as unknown. Advertised only together with prototype_data_model_v1, since the
@@ -438,15 +439,7 @@ class WebSocketServer(
     add("prototype_reduced_motion_v1")
     add("prototype_shared_element_v1")
     add("prototype_shared_element_v2")
-    // Line, area, bar and ring charts over /data arrays (#14209).
-    add("prototype_chart_v1")
-    add("prototype_lazy_list_v1")
-    // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).
-    add("prototype_linkify_v1")
-    add("prototype_format_v1")
-    add("prototype_derive_v1")
-    // Chat-list scrolls: reverse, stickToEnd, atEndKey, onStartReached and scrollTo (#14232).
-    add("prototype_chat_scroll_v1")
+    addPrototypeContentFlags()
   }
 
   /** Prototype runtime flags: checks, appearance, persistence, storage and timers. */
@@ -1460,4 +1453,17 @@ class WebSocketServer(
       )
     }
   }
+}
+
+/** Prototype charts, lists and text content flags, in their wire order. */
+private fun MutableList<String>.addPrototypeContentFlags() {
+  // Line, area, bar and ring charts over /data arrays (#14209).
+  add("prototype_chart_v1")
+  add("prototype_lazy_list_v1")
+  // Text nodes linkify mentions, hashtags and URLs into links running linkify.onTap (#14233).
+  add("prototype_linkify_v1")
+  add("prototype_format_v1")
+  add("prototype_derive_v1")
+  // Chat-list scrolls: reverse, stickToEnd, atEndKey, onStartReached and scrollTo (#14232).
+  add("prototype_chat_scroll_v1")
 }

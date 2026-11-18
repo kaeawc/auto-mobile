@@ -155,6 +155,7 @@ export type FieldKind =
   | "request"
   | "deviceRequest"
   | "uploadRequest"
+  | "keyedData"
   | "prependData"
   | "scrollTo"
   | "hideKeyboard"
@@ -269,6 +270,13 @@ function mapEmitAction(action: Raw, path: string, visit: FieldVisitor): void {
 function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
   if (action.type === "prependData") {
     visit(action, path, "prependData");
+  }
+  if (action.where !== undefined || action.member !== undefined) {
+    visit(action, path, "keyedData");
+  }
+  const where = record(action.where);
+  if (where) {
+    action.where = { ...where, equals: mapBinding(where.equals, `${path}.where.equals`, visit) };
   }
   mapField(action, "path", path, { kind: "dataPath", visit });
   if (action.type !== "removeData" && action.value !== undefined) {

@@ -18,6 +18,7 @@ import { DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS } from "./prototypeEventTimeout";
 
 export { DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS };
 export interface PrototypeEventSource {
+  readonly instanceId?: string;
   onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void;
 }
 export interface PrototypeEventTelemetry {
@@ -31,6 +32,8 @@ export interface PrototypeAwaitResult extends PrototypeEventCounts {
 interface Entry {
   scope: PrototypeScope;
   id: string;
+  source: PrototypeEventSource;
+  instanceId?: string;
   buffer: PrototypeEventBuffer;
   shown: boolean;
   terminal: boolean;
@@ -39,12 +42,12 @@ interface Entry {
 const scopeKey = (scope: PrototypeScope, id: string) =>
   JSON.stringify([scope.sessionUuid ?? null, scope.deviceId, id]);
 
-/** One subscription per device client; only the current device/id owner receives pushes. */
+/** One subscription per source; only its current device/id owner receives pushes. */
 export class PrototypeEventCoordinator {
   private readonly entries = new Map<string, Entry>();
   private readonly sources = new Map<
     string,
-    { client: PrototypeEventSource; unsubscribe: () => void }
+    Map<PrototypeEventSource, { unsubscribe: () => void }>
   >();
 
   private readonly telemetry?: PrototypeEventTelemetry;
@@ -83,7 +86,7 @@ export class PrototypeEventCoordinator {
         this.remove(entry);
       }
     }
-    const entry = this.watch(scope, id, client);
+    const entry = this.watch(scope, id, client, false);
     // A show starts a fresh sequence epoch: the device's sequence ledger is in memory and a
     // CtrlProxy restart restarts it at 1, so the previous showing's high-water mark must not
     // reject the new showing's events. Pushes carry only id/sequence/timestamp (no show
@@ -109,14 +112,13 @@ export class PrototypeEventCoordinator {
     { replayed, lastSequence }: { replayed: readonly PrototypeEvent[]; lastSequence: number },
   ): void {
     const known = this.entries.get(scopeKey(scope, id));
-    // A replayed terminal event may already have ended the entry (shown false, terminal true)
-    // before this runs; its unconsumed events are still this host's to deliver.
-    const holdsEvents = known?.terminal === true && known.buffer.status().pendingCount > 0;
-    if ((known?.shown && !known.terminal) || holdsEvents) {
-      // Re-inspecting a prototype this host already tracks must not start a new epoch: that would
-      // clear the unconsumed events, and advancing the ledger below would make them unrecoverable.
-      this.watch(scope, id, client);
+    if (known) {
+      // awaitEvent can track an entry before it is shown. Inspection must retain its pending
+      // events and cursor, including terminal replay that arrived before the inspect reply.
+      const entry = this.watch(scope, id, client);
+      entry.shown = !entry.terminal;
     } else {
+      // Initialise the epoch before subscribing: the source may synchronously release replay.
       this.show(scope, id, client);
     }
     for (const event of replayed) {
@@ -131,6 +133,13 @@ export class PrototypeEventCoordinator {
 
   counts(scope: PrototypeScope, id: string): PrototypeEventCounts | undefined {
     return this.entries.get(scopeKey(scope, id))?.buffer.status();
+  }
+
+  /** Device reports may reconcile only the prototypes belonging to their event source. */
+  sourceFor(deviceId: string, id: string): PrototypeEventSource | undefined {
+    return Array.from(this.entries.values()).find(
+      (entry) => entry.scope.deviceId === deviceId && entry.id === id,
+    )?.source;
   }
 
   async awaitEvent(
@@ -206,7 +215,12 @@ export class PrototypeEventCoordinator {
     this.pruneSources();
   }
 
-  private watch(scope: PrototypeScope, id: string, client: PrototypeEventSource): Entry {
+  private watch(
+    scope: PrototypeScope,
+    id: string,
+    client: PrototypeEventSource,
+    subscribe = true,
+  ): Entry {
     const key = scopeKey(scope, id);
     let entry = this.entries.get(key);
     if (!entry) {
@@ -221,6 +235,8 @@ export class PrototypeEventCoordinator {
       entry = {
         scope: { ...scope },
         id,
+        source: client,
+        instanceId: client.instanceId,
         buffer: new PrototypeEventBuffer(),
         shown: false,
         terminal: false,
@@ -228,27 +244,50 @@ export class PrototypeEventCoordinator {
       };
       this.entries.set(key, entry);
     }
-    if (!entry.terminal) {
+    if (
+      client.instanceId !== undefined &&
+      entry.instanceId !== undefined &&
+      client.instanceId !== entry.instanceId
+    ) {
+      entry.buffer.startEpoch();
+      entry.terminal = false;
+    }
+    entry.source = client;
+    entry.instanceId = client.instanceId;
+    if (subscribe && !entry.terminal) {
       this.subscribe(scope.deviceId, client);
     }
+    this.pruneSources();
     return entry;
   }
 
   private subscribe(deviceId: string, client: PrototypeEventSource): void {
-    const existing = this.sources.get(deviceId);
-    if (existing?.client === client) {
+    let sources = this.sources.get(deviceId);
+    if (sources?.has(client)) {
       return;
     }
-    existing?.unsubscribe();
-    this.sources.set(deviceId, {
-      client,
-      unsubscribe: client.onPrototypeEvent((event) => this.receive(deviceId, event)),
-    });
+    if (!sources) {
+      sources = new Map();
+      this.sources.set(deviceId, sources);
+    }
+    // Register before subscribing: a buffered source can synchronously deliver terminal replay.
+    const subscription = { unsubscribe: () => {} };
+    sources.set(client, subscription);
+    subscription.unsubscribe = client.onPrototypeEvent((event) =>
+      this.receive(deviceId, event, client),
+    );
+    if (sources.get(client) !== subscription) {
+      subscription.unsubscribe();
+    }
+    this.pruneSources();
   }
 
-  private receive(deviceId: string, event: PrototypeEvent): void {
+  private receive(deviceId: string, event: PrototypeEvent, source?: PrototypeEventSource): void {
     const entry = Array.from(this.entries.values()).find(
-      (known) => known.scope.deviceId === deviceId && known.id === event.id,
+      (known) =>
+        known.scope.deviceId === deviceId &&
+        known.id === event.id &&
+        (source === undefined || known.source === source),
     );
     // A duplicate is not buffered, and neither is a kind this host does not know: the buffer only
     // advances its sequence for that one, so it is not recorded, counted or handed to a waiter.
@@ -382,12 +421,18 @@ export class PrototypeEventCoordinator {
   }
 
   private pruneSources(): void {
-    for (const [deviceId, source] of this.sources) {
-      const listening = Array.from(this.entries.values()).some(
-        (entry) => entry.scope.deviceId === deviceId && !entry.terminal,
-      );
-      if (!listening) {
-        source.unsubscribe();
+    for (const [deviceId, sources] of this.sources) {
+      for (const [client, subscription] of sources) {
+        const listening = Array.from(this.entries.values()).some(
+          (entry) =>
+            entry.scope.deviceId === deviceId && entry.source === client && !entry.terminal,
+        );
+        if (!listening) {
+          subscription.unsubscribe();
+          sources.delete(client);
+        }
+      }
+      if (sources.size === 0) {
         this.sources.delete(deviceId);
       }
     }

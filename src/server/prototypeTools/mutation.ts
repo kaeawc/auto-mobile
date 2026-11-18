@@ -162,6 +162,7 @@ export async function performPrototypeAction(
       {
         store,
         transport: target.transport,
+        deviceOwnsSpec: target.disposableApp,
         supportsPatch: async () =>
           target.android
             ? target.android.supportsCommand(PROTOTYPE_PATCH_CAPABILITY)

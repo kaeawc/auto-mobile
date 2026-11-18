@@ -158,7 +158,7 @@ describe("prototype MCP tool", () => {
     [{ action: "show", spec, state: {} }, "Unrecognized key"],
     [{ action: "show", spec, reset: "yes" }, "boolean"],
     [{ action: "dismiss", id: "panel", reset: true }, "dismiss allows id, all"],
-    [{ action: "status", reset: false }, "status allows no mutation fields"],
+    [{ action: "status", reset: false }, "status allows id"],
     [
       { action: "awaitEvent", id: "panel", display: "inner" },
       "awaitEvent allows id, eventName, kind, afterSequence",
@@ -1260,7 +1260,6 @@ describe("prototype MCP tool", () => {
     { action: "show", spec, id: "panel" },
     { action: "dismiss", id: "panel", all: true },
     { action: "dismiss" },
-    { action: "status", id: "panel" },
   ])("action contract rejects ambiguous input %j", async (input) => {
     expect(prototypeSchema.safeParse(input).success).toBe(false);
     expect(toolIsError((await call(input)).response)).toBe(true);

@@ -28,6 +28,10 @@ export class HandshakeReplaySocket implements PrototypeAgentSocket {
         this.dataListener?.(`${line}\n`);
       } else {
         if (this.lines.length === REPLAY_LIMIT) {
+          if (this.retainReplay) {
+            this.failReplay();
+            return;
+          }
           this.lines.shift();
         }
         this.lines.push(line);
@@ -43,7 +47,18 @@ export class HandshakeReplaySocket implements PrototypeAgentSocket {
     },
   });
 
-  constructor(private readonly socket: PrototypeAgentSocket) {}
+  constructor(
+    private readonly socket: PrototypeAgentSocket,
+    private readonly retainReplay = false,
+  ) {}
+  private failReplay(): void {
+    this.failure = new ActionableError(
+      "Prototype app replay exceeded the client buffer; reconnect to the app.",
+    );
+    this.lines.length = 0;
+    this.socket.end();
+    this.closeListener?.(this.failure);
+  }
   write(data: string): void {
     this.socket.write(data);
   }

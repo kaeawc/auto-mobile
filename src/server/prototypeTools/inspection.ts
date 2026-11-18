@@ -99,18 +99,32 @@ function groupByPrototype(events: readonly PrototypeEvent[]): Map<string, Protot
 /**
  * The report is authoritative for what the device shows: a prototype this host still lists that the
  * device neither reports nor ended with a replayed terminal event is gone (for example CtrlProxy
- * restarted), including when the report is empty.
+ * restarted), including when the report is empty. CtrlProxy reconciles its own sources; a
+ * single-app report reconciles only its id.
  */
 function dropUnreportedPrototypes(
   store: PrototypeStatusStore,
   events: PrototypeEventCoordinator,
-  scope: PrototypeScope,
-  reportedIds: ReadonlySet<string>,
+  {
+    scope,
+    reportedIds,
+    reconciliationId,
+    reconciliationSource,
+  }: {
+    scope: PrototypeScope;
+    reportedIds: ReadonlySet<string>;
+    reconciliationId?: string;
+    reconciliationSource?: PrototypeEventSource;
+  },
 ): void {
   // Shown ids are device-wide, so stale ids are enumerated across every session: a
   // session that tracked the vanished prototype is not necessarily the one inspecting.
   for (const id of store.shownIds(scope.deviceId)) {
-    if (!reportedIds.has(id)) {
+    const owner = events.sourceFor(scope.deviceId, id);
+    if (reconciliationSource && owner && owner !== reconciliationSource) {
+      continue;
+    }
+    if ((reconciliationId === undefined || reconciliationId === id) && !reportedIds.has(id)) {
       events.dismiss(scope.deviceId, id);
       store.dismissed(scope, id);
     }
@@ -125,7 +139,11 @@ function adoptReportedPrototypes(
   {
     scope,
     report,
+    reconciliationId,
+    reconciliationSource,
   }: {
+    reconciliationId?: string;
+    reconciliationSource?: PrototypeEventSource;
     scope: PrototypeScope;
     report: {
       prototypes: readonly unknown[] | undefined;
@@ -149,7 +167,12 @@ function adoptReportedPrototypes(
       });
     }
   }
-  dropUnreportedPrototypes(store, events, scope, reportedIds);
+  dropUnreportedPrototypes(store, events, {
+    scope,
+    reportedIds,
+    reconciliationId,
+    reconciliationSource,
+  });
   for (const entry of reported) {
     if (!history.has(entry.id)) {
       events.adopt(scope, entry.id, source, { replayed: [], lastSequence: entry.lastSequence });
@@ -179,13 +202,17 @@ async function inspectDevice(
   dependencies: Pick<PrototypeHandlerDependencies, "store" | "events">,
   target: PrototypeTarget,
   scope: PrototypeScope,
-  { timeoutMs, signal }: { timeoutMs?: number; signal?: AbortSignal } = {},
+  {
+    timeoutMs,
+    signal,
+    reconciliationId,
+  }: { timeoutMs?: number; signal?: AbortSignal; reconciliationId?: string } = {},
 ): Promise<PrototypeOutput> {
   const { store, events } = dependencies;
   const client = target.android;
   if (!client) {
     if (target.ios) {
-      return inspectIosAgent({ store, events }, target, target.ios, scope);
+      return inspectIosAgent({ store, events }, target, target.ios, { scope, reconciliationId });
     }
     throw new ActionableError("inspect needs an Android device or an iOS simulator agent.");
   }
@@ -215,8 +242,10 @@ async function inspectDevice(
   if (!result.success) {
     return { success: false, error: result.error ?? "Prototype inspect failed" };
   }
-  adoptReportedPrototypes(store, events, prototypeEventSource(target.transport), {
+  const source = prototypeEventSource(target.transport);
+  adoptReportedPrototypes(store, events, source, {
     scope,
+    reconciliationSource: source,
     report: {
       prototypes: result.prototypes,
       replayed,
@@ -255,7 +284,11 @@ export async function deviceRequestAction(
   if (args.action === "clearStorage") {
     return performPrototypeClearStorage(target, args, host.store, device.deviceId);
   }
-  return inspectDevice(host, target, scope, { timeoutMs: args.timeoutMs, signal });
+  return inspectDevice(host, target, scope, {
+    timeoutMs: args.timeoutMs,
+    signal,
+    reconciliationId: target.disposableApp ? args.id : undefined,
+  });
 }
 
 const iosAgentStatusSchema = z.object({
@@ -286,7 +319,7 @@ async function inspectIosAgent(
   dependencies: Pick<PrototypeHandlerDependencies, "store" | "events">,
   target: PrototypeTarget,
   ios: NonNullable<PrototypeTarget["ios"]>,
-  scope: PrototypeScope,
+  { scope, reconciliationId }: { scope: PrototypeScope; reconciliationId?: string },
 ): Promise<PrototypeOutput> {
   const { store, events } = dependencies;
   if (!ios.supportsCapability(IOS_PROTOTYPE_INSPECT_CAPABILITY)) {
@@ -350,6 +383,7 @@ async function inspectIosAgent(
       : [];
   adoptReportedPrototypes(store, events, prototypeEventSource(target.transport), {
     scope,
+    reconciliationId,
     report: {
       prototypes: reported,
       replayed: [],

@@ -40,6 +40,11 @@ export type ModelSelection = Readonly<Record<string, ModelOptions>>;
  * preserve each native API. Type refs below bridge definitions that remain hand-written.
  */
 export const prototypeModelSelection = {
+  dataWhere: {
+    swiftName: "PrototypeDataWhere",
+    swiftConformances: ["Decodable", "Equatable", "Sendable"],
+    fieldTypes: { equals: { kotlin: "EmitContextBinding", swift: "JSONValue" } },
+  },
   requestUploadFile: {},
   requestUploadPart: {},
   channel: {

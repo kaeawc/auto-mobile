@@ -237,14 +237,15 @@ The same compare-and-set records a claim the files decided, and it never
 replaces a row a live foreign owner holds. Every local daemon creates and migrates the registry
 after its control socket binds. From then on the daemon refuses, retryably, a claim the table cannot decide instead of
 falling back to the files (#11811, owner decision E1). That covers no registry open yet, and a
-write still busy after four attempts 50, 100 and 200 ms apart. Before bind (startup recovery)
-the same refusal applies whenever a registry file exists and its open or claim failed for any
-reason but a schema that still needs this release's migrations: every current daemon migrates
-once bound, so an unmigrated registry holds no table-only claim yet. The daemon remembers the
-last failed open's error until an open succeeds, so a claim that finds no open to join is judged
-by it. Recovery treats the refusal as deferred: it gives the device back, keeps the session
-pending and retries. The claim files decide with no registry file before bind, for watch and
-TV, and in files-only mode.
+write still busy after four attempts 50, 100 and 200 ms apart.
+
+Before bind (startup recovery) the same refusal applies whenever a registry file exists and its
+open or claim failed. The one exception is a schema that still needs this release's migrations.
+Every current daemon migrates once bound, so an unmigrated registry holds no table-only claim
+yet. The daemon remembers the last failed open's error until an open succeeds. A claim that
+finds no open to join is judged by that error. Recovery treats the refusal as deferred: it gives
+the device back, keeps the session pending and retries. The claim files decide with no registry
+file before bind, for watch and TV, and in files-only mode.
 
 The device-claims mirror skips
 reads, writes, opens and retries until daemon restart. Writers and ownership readers

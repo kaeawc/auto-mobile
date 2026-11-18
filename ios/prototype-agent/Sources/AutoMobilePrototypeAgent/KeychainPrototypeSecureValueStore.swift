@@ -36,7 +36,11 @@
         let client: any KeychainClient
         init(client: any KeychainClient = SystemKeychainClient()) { self.client = client }
 
-        struct Failure: Error { let status: OSStatus }
+        struct Failure: Error, CustomNSError {
+            let status: OSStatus
+            static var errorDomain: String { NSOSStatusErrorDomain }
+            var errorCode: Int { Int(status) }
+        }
 
         private func query(id: String, key: String? = nil) -> [String: Any] {
             var query: [String: Any] = [

@@ -427,8 +427,8 @@ final class PrototypeStorageCoordinator {
             stored.invalidated = read.invalidated.sorted()
             return (stored, dropped, all)
         } catch {
-            // Temporary Keychain failures leave items intact. Never log an error carrying a value.
-            log("could not read secure storage")
+            // Temporary Keychain failures leave items intact. Log only the numeric code, never a value.
+            log("could not read secure storage (OSStatus: \((error as NSError).code))")
             return (plaintext, [], [])
         }
     }

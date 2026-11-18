@@ -154,4 +154,15 @@ final class KeychainPrototypeSecureValueStoreTests: XCTestCase {
         XCTAssertThrowsError(try store.readAll(id: "a"))
         XCTAssertEqual(client.queries.count, 1)
     }
+
+    func testMissingEntitlementPreservesNumericStatusForLogging() {
+        let client = FakeKeychainClient()
+        client.readStatus = errSecMissingEntitlement
+        XCTAssertThrowsError(try KeychainPrototypeSecureValueStore(client: client).readAll(id: "a")) { error in
+            let failure = error as NSError
+            XCTAssertEqual(failure.domain, NSOSStatusErrorDomain)
+            XCTAssertEqual(failure.code, -34018)
+            XCTAssertTrue(failure.userInfo.isEmpty)
+        }
+    }
 }

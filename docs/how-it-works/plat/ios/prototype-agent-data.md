@@ -92,6 +92,7 @@ storage.
 `clear_prototype_storage {id}` answers `cleared` (count of keys removed) and leaves the shown prototype.
 
 Viewer, ProtoViewer and the standalone agent persist `storage.secure` string keys in the Keychain.
+The simulator viewer template embeds a keychain entitlement because the Keychain needs one.
 Generic-password items use service `dev.automobile.prototype.<full prototype id>` and the storage key
 (`state:<name>`) as account, with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` and synchronization off.
 Secure values stay out of plaintext storage and its byte budget; each is limited to 4 KiB of UTF-8.

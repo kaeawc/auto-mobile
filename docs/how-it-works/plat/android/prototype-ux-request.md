@@ -40,6 +40,14 @@ without them. A device advertising `prototype_network_v1` also writes `/data` fo
 | `allowSecureInRequest` | Optional boolean. Lets this request send a `storage.secure` key; without it any reference to one is refused.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `onSuccess`, `onError` | Optional action lists (1 to 32). Recursive: a request may carry requests.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
+Android device uploads require `prototype_network_upload_v1`. A body can be `{multipart: parts}`,
+`{form: entries}` or `{file: {asset: id}, contentType}`. File assets stream from storage, limited
+to 10 MiB in total. Multipart files default to the asset id as filename and
+`application/octet-stream`; OkHttp supplies the boundary and overrides an authored Content-Type.
+Bound strings are literal; other values use JSON text. `progressKey` names a declared number key:
+byte updates run at most 10 Hz, with completion setting 100. Events include total file bytes as
+`uploadBytes` (zero for forms). Host uploads fail as `invalid_request`; use `via: "device"`.
+
 **Limits** live in the contract's `limits` and `src/features/prototype/prototypeRequestLimits.ts`
 reads them from there (the contract is the single source for the host executor, the validator and
 the native runtimes):

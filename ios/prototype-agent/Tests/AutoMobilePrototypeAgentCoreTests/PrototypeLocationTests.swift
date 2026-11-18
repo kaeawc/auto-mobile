@@ -51,6 +51,7 @@ final class LocationTestSource: PrototypeLocationSource {
     var failure: PrototypeLocationSourceError?
     var fix = PrototypeLocationFix(latitude: 1, longitude: 2, accuracyM: 3, timestampMs: 0, approximate: false)
     var handler: (@MainActor @Sendable (PrototypeLocationFix) -> Void)?
+    var authorizationChangeHandler: (@MainActor @Sendable () -> Void)?
     var servicesEnabled: Bool { touches += 1; return enabled }
     var authorization: PrototypeLocationAuthorization { touches += 1; return grant }
     func requestAuthorization() async { touches += 1; prompts += 1; grant = afterPrompt }
@@ -69,6 +70,16 @@ final class LocationTestSource: PrototypeLocationSource {
     }
 
     func setUpdateAccuracy(_ accuracy: String) { touches += 1; updateAccuracies.append(accuracy) }
+
+    // Registering a callback does not access the native location service.
+    func setAuthorizationChangeHandler(_ handler: (@MainActor @Sendable () -> Void)?) {
+        authorizationChangeHandler = handler
+    }
+
+    func changeAuthorization(to grant: PrototypeLocationAuthorization) {
+        self.grant = grant
+        authorizationChangeHandler?()
+    }
 
     func startUpdates(
         minDistanceM: Double,
@@ -115,12 +126,57 @@ final class PrototypeLocationTests: XCTestCase {
         let module = PrototypeLocationModule(source: source, bundle: LocationBundle(keys: []), clock: LocationClock())
         XCTAssertTrue(module.requiredInfoPlistKeys.isEmpty)
         XCTAssertEqual(module.availability(), .unavailable("missing_usage_description"))
+        XCTAssertEqual(source.touches, 0)
         let result = await module.call(call())
         XCTAssertEqual(result, .failure(.unavailable, "missing_usage_description"))
+        XCTAssertEqual(source.touches, 0)
         module.configure(root: .object([:]))
+        XCTAssertEqual(source.touches, 0)
         _ = module.events
         XCTAssertEqual(module.state["current"], .object([:]))
+        XCTAssertEqual(module.state["servicesEnabled"], .bool(false))
+        source.changeAuthorization(to: .authorizedPrecise)
         XCTAssertEqual(source.touches, 0)
+    }
+
+    func testConfiguredSubscriptionStartsAfterLaterAuthorizationGrant() {
+        for grant in [PrototypeLocationAuthorization.denied, .notDetermined] {
+            let source = LocationTestSource()
+            source.grant = grant
+            let module = module(source)
+            module.configure(root: .object([:]))
+            XCTAssertTrue(source.distances.isEmpty)
+            XCTAssertEqual(source.prompts, 0)
+
+            source.changeAuthorization(to: .authorizedPrecise)
+            XCTAssertEqual(source.distances, [0])
+            source.report(source.fix)
+            XCTAssertEqual(module.state["current"], source.fix.json)
+            source.changeAuthorization(to: .authorizedPrecise)
+            XCTAssertEqual(source.distances, [0], "Repeated grants do not start another stream")
+            module.configure(root: nil)
+        }
+    }
+
+    func testRevokedSubscriptionStopsAndRestartsAfterLaterGrant() {
+        let source = LocationTestSource()
+        let clock = LocationClock()
+        let module = module(source, clock: clock)
+        module.configure(root: .object([:]))
+        source.report(source.fix)
+        XCTAssertEqual(source.distances, [0])
+
+        source.changeAuthorization(to: .denied)
+        XCTAssertEqual(source.stops, 1)
+        XCTAssertNil(source.handler)
+        source.changeAuthorization(to: .authorizedApproximate)
+        XCTAssertEqual(source.distances, [0, 0])
+        clock.advance(1000)
+        var next = PrototypeLocationFix(latitude: 2, longitude: 2, accuracyM: 3, timestampMs: 1000, approximate: false)
+        source.report(next)
+        next.approximate = true
+        XCTAssertEqual(module.state["current"], next.json)
+        module.configure(root: nil)
     }
 
     func testDisabledServices() async {

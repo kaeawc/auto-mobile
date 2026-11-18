@@ -188,6 +188,35 @@ final class PrototypePlatformTests: XCTestCase {
     }
 
     @MainActor
+    func testLocationSuccessStoresAccuracyInSessionMetadata() async throws {
+        let url = PrototypeSpecFixtures.directory.appendingPathComponent("valid/platform-location.json")
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(contentsOf: url))
+        let action = try XCTUnwrap(spec.root.children?[1].onTap?.first)
+        for grant in [PrototypeLocationAuthorization.authorizedApproximate, .authorizedPrecise] {
+            let source = LocationTestSource()
+            source.grant = grant
+            let bundle = LocationBundle()
+            let clock = LocationClock()
+            let module = PrototypeLocationModule(source: source, bundle: bundle, clock: clock)
+            let registry = PrototypePlatformRegistry(modules: [module], bundle: bundle)
+            let driver = PrototypePlatformDriver(registry: registry, clock: clock)
+            var session = PrototypeSession()
+            session.show(spec)
+            _ = session.run([action])
+            driver.onComplete = { id, result, duration in
+                _ = session.completePlatformCall(id, result, durationMs: duration)
+            }
+            driver.perform(session.takePlatformCommands())
+            await driver.settled()
+            let approximate = JSONValue.bool(grant == .authorizedApproximate)
+            XCTAssertEqual(session.state["locStatus"], .string("success"))
+            XCTAssertEqual(session.data?["here"]?.objectFields?["approximate"], approximate)
+            XCTAssertEqual(session.data?["here__meta"]?.objectFields?["approximate"], approximate)
+            XCTAssertEqual(session.data?["here__meta"]?.objectFields?["durationMs"], .number(0))
+        }
+    }
+
+    @MainActor
     func testLocationUnavailableReasonsReachSessionMetadataWithoutTouchingMissingUsageSource() async throws {
         let url = PrototypeSpecFixtures.directory.appendingPathComponent("valid/platform-location.json")
         let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(contentsOf: url))

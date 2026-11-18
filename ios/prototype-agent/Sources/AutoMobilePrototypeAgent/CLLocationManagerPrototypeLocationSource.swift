@@ -8,18 +8,28 @@
     final class CLLocationManagerPrototypeLocationSource: NSObject, @preconcurrency CLLocationManagerDelegate,
         PrototypeLocationSource
     {
-        private let manager: CLLocationManager
+        private let suppliedManager: CLLocationManager?
+        // Construction and callback registration must not access the host's location manager.
+        private lazy var manager: CLLocationManager = {
+            let manager = suppliedManager ?? CLLocationManager()
+            manager.delegate = self
+            return manager
+        }()
         private var authorizationWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
         private var fixWaiters: [UUID: CheckedContinuation<PrototypeLocationFix, any Error>] = [:]
         private var accuracyWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
         private var accuracyRequest: UUID?
         private var updateAccuracy = kCLLocationAccuracyBest
         private var update: (@MainActor @Sendable (PrototypeLocationFix) -> Void)?
+        private var authorizationChangeHandler: (@MainActor @Sendable () -> Void)?
 
-        init(manager: CLLocationManager = CLLocationManager()) {
-            self.manager = manager
+        init(manager: CLLocationManager? = nil) {
+            suppliedManager = manager
             super.init()
-            manager.delegate = self
+        }
+
+        func setAuthorizationChangeHandler(_ handler: (@MainActor @Sendable () -> Void)?) {
+            authorizationChangeHandler = handler
         }
 
         var servicesEnabled: Bool { CLLocationManager.locationServicesEnabled() }
@@ -147,6 +157,7 @@
             if !authorization.authorized {
                 finishFixes(.failure(PrototypeLocationSourceError.permissionDenied))
             }
+            authorizationChangeHandler?()
         }
 
         func locationManager(_: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
@@ -185,7 +196,8 @@
             let waiters = fixWaiters
             fixWaiters.removeAll()
             waiters.values.forEach { $0.resume(with: result) }
-            if update != nil {
+            // Only one-shot requests pause the stream; ordinary stream fixes need no restart.
+            if !waiters.isEmpty, update != nil {
                 manager.desiredAccuracy = updateAccuracy
                 manager.startUpdatingLocation()
             }

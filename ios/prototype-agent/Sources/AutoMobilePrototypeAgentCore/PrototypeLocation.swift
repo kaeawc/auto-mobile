@@ -59,6 +59,7 @@ protocol PrototypeLocationSource: AnyObject {
     func requestAuthorization() async
     func requestFix(accuracy: String) async throws -> PrototypeLocationFix
     func requestTemporaryFullAccuracy() async -> Bool
+    func setAuthorizationChangeHandler(_ handler: (@MainActor @Sendable () -> Void)?)
     func setUpdateAccuracy(_ accuracy: String)
     func startUpdates(
         minDistanceM: Double,
@@ -68,6 +69,8 @@ protocol PrototypeLocationSource: AnyObject {
 }
 
 extension PrototypeLocationSource {
+    func setAuthorizationChangeHandler(_: (@MainActor @Sendable () -> Void)?) {}
+
     /// Sources without a configurable accuracy can keep their native best-available policy.
     func setUpdateAccuracy(_: String) {}
 }
@@ -99,6 +102,14 @@ final class PrototypeLocationModule: PrototypePlatformModule {
         self.source = source
         self.bundle = bundle
         self.clock = clock
+        source.setAuthorizationChangeHandler { [weak self] in
+            guard let self else { return }
+            if updating, !self.source.authorization.authorized {
+                self.source.stopUpdates()
+                updating = false
+            }
+            startIfAuthorized()
+        }
     }
 
     private var hasUsage: Bool { bundle.containsInfoPlistKey("NSLocationWhenInUseUsageDescription") }

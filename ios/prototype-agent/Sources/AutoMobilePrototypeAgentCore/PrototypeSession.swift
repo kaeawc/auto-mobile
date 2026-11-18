@@ -1632,6 +1632,9 @@ extension PrototypeSession {
 
     private func platformMeta(_ result: PlatformCallResult, durationMs: Int) -> JSONValue {
         var fields: [String: JSONValue] = ["durationMs": .number(Double(max(0, durationMs)))]
+        if case let .success(value) = result, case let .bool(approximate)? = value.objectFields?["approximate"] {
+            fields["approximate"] = .bool(approximate)
+        }
         if case let .failure(code, message) = result {
             var error: [String: JSONValue] = [
                 "code": .string(code.rawValue),

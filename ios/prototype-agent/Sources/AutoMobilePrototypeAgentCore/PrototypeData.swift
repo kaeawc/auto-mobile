@@ -173,11 +173,17 @@ struct PrototypeRepeatData {
 
 /// Scans authored UTF-16 once, just like Kotlin; replacement values are never scanned again.
 enum PrototypeDataText {
-    static func bind(_ text: String, data: [String: JSONValue]?, platform: [String: JSONValue]? = nil) -> String {
+    static func bind(
+        _ text: String, data: [String: JSONValue]?, platform: [String: JSONValue]? = nil,
+        deferData: Bool = false
+    )
+        -> String
+    {
         let units = Array(text.utf16)
         var result = ""
         var literalStart = 0
         scan(units, includePlatform: true) { open, close, pointer, isPlatform in
+            if deferData, !isPlatform { return true }
             result += String(decoding: units[literalStart ..< open], as: UTF16.self)
             result += rendered(pointer, data: isPlatform ? platform : data)
             literalStart = close + 1
@@ -260,8 +266,8 @@ enum PrototypeDataResolver {
         return resolveRoot(root, data: data, platform: nil, repeats: &repeats, pass: .repeatsOnly)
     }
 
-    /// `deferText` leaves text raw (conditions still resolve) for a lazy row template that binds per row.
-    private enum Pass { case all, repeatsOnly, deferText }
+    /// `deferDataText` binds platform text and conditions, leaving data text for per-row binding.
+    private enum Pass { case all, repeatsOnly, deferDataText }
 
     private static func resolveRoot(
         _ root: JSONValue, data: [String: JSONValue]?, platform: [String: JSONValue]?,
@@ -270,10 +276,10 @@ enum PrototypeDataResolver {
         -> JSONValue
     {
         guard case var .object(fields) = root else { return root }
-        if pass == .all { PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind(
+        if pass != .repeatsOnly { PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind(
             $0,
             data: data,
-            platform: platform
+            platform: platform, deferData: pass == .deferDataText
         ) } }
         let lazy = fields["type"] == .string("list")
         if !lazy, let value = fields["repeat"] { fields["repeat"] = resolveRepeat(
@@ -301,9 +307,9 @@ enum PrototypeDataResolver {
                 ) }
             }
         } else if case let .array(children)? = fields["children"] {
-            // A lazy list's row template keeps its text raw: each row binds `{index}` and
+            // Bind platform text now, but keep data pointers raw: each row binds `{index}` and
             // `{row.x}` first, then resolves, so a pointer such as `{data:/rows/{index}/name}` stays whole.
-            let rowPass: Pass = pass == .all && lazy ? .deferText : pass
+            let rowPass: Pass = pass == .all && lazy ? .deferDataText : pass
             fields["children"] = .array(children
                 .map { resolveRoot($0, data: data, platform: platform, repeats: &repeats, pass: rowPass) })
         }

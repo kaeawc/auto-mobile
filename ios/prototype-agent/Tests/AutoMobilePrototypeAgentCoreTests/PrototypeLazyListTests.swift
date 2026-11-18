@@ -330,6 +330,28 @@ final class PrototypeLazyListTests: XCTestCase {
             + text + #""}]}}"#
     }
 
+    func testLazyTextPreservesPlatformSnapshotWhileDeferringData() throws {
+        let json = lazySpec(
+            text: "{platform:/name}: {data:/rows/{index}/name}",
+            data: #"{"rows":[{"name":"Zero"},{"name":"One"}],"posts":[{"id":"a"},{"id":"b"}]}"#
+        )
+        let authored = try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
+        let root = try XCTUnwrap(authored.objectFields?["root"])
+        let resolved = PrototypeDataResolver.resolveRoot(root, data: nil, platform: ["name": .string("iOS")])
+        guard case let .array(children)? = resolved.objectFields?["children"] else {
+            return XCTFail("Expected a lazy row template")
+        }
+        XCTAssertEqual(
+            children.first?.objectFields?["text"],
+            .string("iOS: {data:/rows/{index}/name}")
+        )
+        let node = try JSONDecoder().decode(PrototypeNode.self, from: JSONEncoder().encode(resolved))
+        let row = try XCTUnwrap(PrototypeLazyList.resolvedRow(
+            node: node, data: authored.objectFields?["data"]?.objectFields, index: 1
+        ))
+        XCTAssertEqual(row.json.objectFields?["text"], .string("iOS: One"))
+    }
+
     func testRowIndexBindsInsideDataPointerBeforeResolving() throws {
         let json = lazySpec(
             text: "{data:/rows/{index}/name}",

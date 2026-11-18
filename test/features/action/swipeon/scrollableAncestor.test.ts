@@ -151,3 +151,117 @@ describe("resolveScrollableSwipeTarget", () => {
     expect(resolve("left").class).toBe("UICollectionView");
   });
 });
+
+/** Runner-shaped iOS nodes: `class`, `role`, `scrollable` and `bounds`, never an orientation. */
+function iosCell(text: string, left: number, top: number, right: number, bottom: number) {
+  return {
+    class: "UICollectionViewCell",
+    role: "listitem",
+    text,
+    scrollable: "false",
+    bounds: { left, top, right, bottom },
+  } satisfies ViewHierarchyNode;
+}
+
+function geometryFixture(list: ViewHierarchyNode, cells: ViewHierarchyNode[], swiped: number) {
+  const parser = new FakeElementParser();
+  const selector = new AutoTargetSelector();
+  const listNode = { ...list, node: cells } satisfies ViewHierarchyNode;
+  const hierarchy: ViewHierarchyResult = {
+    hierarchy: {
+      node: {
+        class: "UIWindow",
+        bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+        node: [listNode],
+      },
+    },
+  };
+  const element = parser.parseNodeBounds(cells[swiped]);
+  if (!element) {
+    throw new Error("Fixture cell must have valid bounds");
+  }
+  return {
+    element,
+    resolve(direction: SwipeDirection, platform: Platform) {
+      return resolveScrollableSwipeTarget({
+        hierarchy,
+        element,
+        direction,
+        platform,
+        parser,
+        scrollsInDirection: (candidate, dir) => selector.scrollsInDirection(candidate, dir),
+      });
+    },
+  };
+}
+
+describe("resolveScrollableSwipeTarget iOS geometry (no reported orientation)", () => {
+  const verticalList = {
+    class: "UICollectionView",
+    role: "list",
+    scrollable: "true",
+    bounds: { left: 0, top: 118, right: 402, bottom: 874 },
+  } satisfies ViewHierarchyNode;
+  const verticalRows = [
+    iosCell("Library row 1", 0, 152, 402, 221),
+    iosCell("Library row 2", 0, 221, 402, 290),
+    iosCell("Library row 3", 0, 290, 402, 359),
+  ];
+  const carousel = {
+    class: "UICollectionView",
+    scrollable: "true",
+    bounds: { left: 0, top: 200, right: 402, bottom: 420 },
+  } satisfies ViewHierarchyNode;
+  const carouselCards = [
+    iosCell("Card 1", 16, 210, 176, 410),
+    iosCell("Card 2", 186, 210, 346, 410),
+    iosCell("Card 3", 356, 210, 516, 410),
+  ];
+  const pager = {
+    class: "UICollectionView",
+    scrollable: "true",
+    bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+  } satisfies ViewHierarchyNode;
+  const pages = [iosCell("Page 1", 0, 0, 402, 874), iosCell("Page 2", 402, 0, 804, 874)];
+
+  for (const direction of horizontalDirections) {
+    test(`iOS ${direction} on a full-width row of a vertical list stays on the row (#18564)`, () => {
+      const { element, resolve } = geometryFixture(verticalList, verticalRows, 0);
+      expect(resolve(direction, "ios")).toBe(element);
+    });
+
+    test(`iOS ${direction} on a lone full-width row stays on the row`, () => {
+      const { element, resolve } = geometryFixture(verticalList, [verticalRows[0]], 0);
+      expect(resolve(direction, "ios")).toBe(element);
+    });
+
+    test(`iOS ${direction} on a narrow carousel card escalates to the carousel`, () => {
+      const { resolve } = geometryFixture(carousel, carouselCards, 1);
+      const target = resolve(direction, "ios");
+      expect(target.class).toBe("UICollectionView");
+      expect(target.bounds).toEqual(carousel.bounds);
+    });
+
+    test(`iOS ${direction} on a lone narrow card escalates to the collection`, () => {
+      const { resolve } = geometryFixture(carousel, [carouselCards[0]], 0);
+      expect(resolve(direction, "ios").bounds).toEqual(carousel.bounds);
+    });
+
+    test(`iOS ${direction} on a full-width page escalates to a paging collection`, () => {
+      const { resolve } = geometryFixture(pager, pages, 0);
+      const target = resolve(direction, "ios");
+      expect(target.class).toBe("UICollectionView");
+      expect(target.bounds).toEqual(pager.bounds);
+    });
+
+    test(`Android ${direction} on a full-width row still escalates to the list`, () => {
+      const { resolve } = geometryFixture(verticalList, verticalRows, 0);
+      expect(resolve(direction, "android").bounds).toEqual(verticalList.bounds);
+    });
+  }
+
+  test("iOS up on a vertical list row still escalates to the list", () => {
+    const { resolve } = geometryFixture(verticalList, verticalRows, 0);
+    expect(resolve("up", "ios").bounds).toEqual(verticalList.bounds);
+  });
+});

@@ -7,9 +7,12 @@ import {
 } from "../../../src/features/storekit/StoreKitTest";
 import type {
   CtrlProxyStoreKitResult,
+  StoreKitRequestOptions,
   StoreKitRunnerRequest,
   StoreKitTransaction,
 } from "../../../src/features/observe/ios/CtrlProxyStoreKit";
+import { InMemoryStoreKitClearedSessions } from "../../../src/features/storekit/StoreKitClearedSessions";
+import { runWithToolSelectionContext } from "../../../src/features/toolSelection/toolSelectionContext";
 import type { IosDeviceKind } from "../../../src/utils/ios-cmdline-tools/IosDeviceKind";
 import { createStoreKitTestTool } from "../../../src/server/storeKitTestTool";
 import type { ToolRegistrar } from "../../../src/server/defineTool";
@@ -34,12 +37,17 @@ const purchase: StoreKitTransaction = {
 /** Records every runner request and answers with a scripted result. */
 class FakeStoreKitSender implements StoreKitSender {
   readonly requests: StoreKitRunnerRequest[] = [];
+  readonly options: (StoreKitRequestOptions | undefined)[] = [];
   constructor(
     private readonly answer: (request: StoreKitRunnerRequest) => CtrlProxyStoreKitResult,
   ) {}
 
-  async requestStoreKit(request: StoreKitRunnerRequest): Promise<CtrlProxyStoreKitResult> {
+  async requestStoreKit(
+    request: StoreKitRunnerRequest,
+    options?: StoreKitRequestOptions,
+  ): Promise<CtrlProxyStoreKitResult> {
     this.requests.push(request);
+    this.options.push(options);
     return this.answer(request);
   }
 }
@@ -57,11 +65,13 @@ function harness(
   }),
 ) {
   const sender = new FakeStoreKitSender(answer);
+  const cleared = new InMemoryStoreKitClearedSessions();
   const storeKit = new StoreKitTest(
     () => sender,
     () => kind,
+    cleared,
   );
-  return { sender, storeKit };
+  return { sender, storeKit, cleared };
 }
 
 const appId = "com.example.app";
@@ -151,6 +161,71 @@ describe("StoreKitTest actions", () => {
       appId,
       error: "no storekit session for bundleId; call load first",
     });
+  });
+});
+
+describe("StoreKitTest dispatch state", () => {
+  test("a timed-out buy the runner received is reported as not retryable", async () => {
+    const error = "Timeout waiting for storekit_result; the buy was sent and may still apply";
+    const { storeKit } = harness("simulator", () => ({
+      success: false,
+      totalTimeMs: 0,
+      error,
+      dispatched: true,
+      retryable: false,
+    }));
+    expect(await storeKit.run(simulator, { action: "buy", appId, productId: "p" })).toEqual({
+      success: false,
+      action: "buy",
+      appId,
+      error,
+      retryable: false,
+    });
+  });
+
+  test("a connect-only call asks the runner seam for the open socket only", async () => {
+    const { sender, storeKit } = harness();
+    await storeKit.run(simulator, { action: "list", appId, connectOnly: true });
+    await storeKit.run(simulator, { action: "list", appId });
+    expect(sender.options).toEqual([{ requireExistingConnection: true }, {}]);
+  });
+});
+
+describe("StoreKitTest cleared-session ledger", () => {
+  const deviceId = simulator.deviceId;
+
+  test("a confirmed clear marks the bundle cleared; a later mutation unmarks it first", async () => {
+    const { storeKit, cleared } = harness();
+    await storeKit.run(simulator, { action: "clear", appId });
+    expect(cleared.isCleared(deviceId, appId)).toBe(true);
+    await storeKit.run(simulator, { action: "list", appId });
+    expect(cleared.isCleared(deviceId, appId)).toBe(true);
+    await storeKit.run(simulator, { action: "buy", appId, productId: "p" });
+    expect(cleared.isCleared(deviceId, appId)).toBe(false);
+  });
+
+  test("a failed clear marks nothing and does not unmark an earlier clear", async () => {
+    const { storeKit, cleared } = harness("simulator", () => ({
+      success: false,
+      totalTimeMs: 1,
+      error: "no storekit session for bundleId; call load first",
+    }));
+    await storeKit.run(simulator, { action: "clear", appId });
+    expect(cleared.isCleared(deviceId, appId)).toBe(false);
+    cleared.markCleared(deviceId, appId);
+    await storeKit.run(simulator, { action: "clear", appId });
+    expect(cleared.isCleared(deviceId, appId)).toBe(true);
+  });
+
+  test("a mutation the runner refuses still unmarks the bundle", async () => {
+    const { storeKit, cleared } = harness("simulator", () => ({
+      success: false,
+      totalTimeMs: 0,
+      error: "Timeout waiting for storekit_result",
+    }));
+    cleared.markCleared(deviceId, appId);
+    await storeKit.run(simulator, { action: "load", appId, configPath: "/tmp/P.storekit" });
+    expect(cleared.isCleared(deviceId, appId)).toBe(false);
   });
 });
 
@@ -269,5 +344,35 @@ describe("storeKitTest tool", () => {
     ).toBe(false);
     expect(schema.safeParse({ action: "refund", appId, transactionId: -1 }).success).toBe(false);
     expect(schema.safeParse({ action: "list", appId }).success).toBe(true);
+  });
+
+  test("the schema enforces the published appId contract", () => {
+    const { schema } = createStoreKitTestTool(harness().storeKit);
+    for (const bad of ["com.example app", "", "a".repeat(257), "com/example"]) {
+      expect(schema.safeParse({ action: "list", appId: bad }).success).toBe(false);
+    }
+  });
+
+  test("a sessionless read of a held device runs list connect-only", async () => {
+    let registered: DeviceAwareToolRegistration<unknown> | undefined;
+    const registrar = {
+      register: () => {},
+      registerDeviceAware: (_name, _description, _schema, registration) => {
+        if (typeof registration !== "function") {
+          registered = registration as DeviceAwareToolRegistration<unknown>;
+        }
+      },
+    } as ToolRegistrar;
+    const { sender, storeKit } = harness();
+    createStoreKitTestTool(storeKit).register(registrar);
+    const handler = deviceAwareHandler(registered!);
+    await runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
+      Reflect.apply(handler, undefined, [simulator, { action: "list", appId }]),
+    );
+    await Reflect.apply(handler, undefined, [simulator, { action: "list", appId }]);
+    expect(sender.options.map((options) => options?.requireExistingConnection)).toEqual([
+      true,
+      undefined,
+    ]);
   });
 });

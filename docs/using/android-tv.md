@@ -161,9 +161,18 @@ its own, `focusedElement.descendantLabel` is its child label: the `label` of its
   holding the target inside another focusable or clickable control. Navigation continues until the
   control owns focus.
 - With `until.label` or `until.elementId` alone, the target uses `tapOn` selection. If the label
-  selects a node that cannot take focus, the target is its nearest focusable parent. Without one,
-  it is the smallest focusable visible label match in the same window, exact labels first. Focus
-  must then reach that control; a focused row that only contains it does not count.
+  selects a node that is neither focusable nor clickable, the target is its nearest focusable
+  parent. The parent search stops at the first clickable or scrollable ancestor. A clickable label
+  that cannot take focus keeps its own bounds. Without an owner, the target is the smallest
+  focusable visible label match in the same window, exact labels first.
+- A scrollable ancestor suppresses duplicate matches outside the label's parent row. Within that
+  row, a matching focusable sibling can still own the label.
+- When no focusable label match applies, a single unlabelled focusable sibling in the row owns the
+  label; with two or more, none does. A sibling parked outside the row is ignored. A sibling with
+  its own label or a labelled child is excluded, except for a range control's value description
+  covering the control itself.
+  Otherwise the label keeps its bounds. Focus must reach the selected control; a focused row that
+  only contains it does not count.
 
 ### Tapping on a TV
 

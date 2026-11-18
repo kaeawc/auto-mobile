@@ -18,7 +18,7 @@ export function isStoreKitMutation(entry: Pick<DeviceMutationInput, "kind">): bo
   return entry.kind === STOREKIT_MUTATION_KIND;
 }
 
-/** The runner's refusal when no session exists for the bundle id: already clean. */
+/** The runner's refusal when it holds no session record for the bundle id (see `StoreKitClearedSessions`). */
 const NO_SESSION_ERROR = "no storekit session for bundleId";
 
 export function isStoreKitSessionAbsentError(error: string | undefined): boolean {

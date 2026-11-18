@@ -77,7 +77,7 @@ final class PrototypePlatformSimulationTests: XCTestCase {
         )}
         """.utf8))
         var session = PrototypeSession()
-        try session.show(spec)
+        session.show(spec)
         return session
     }
 

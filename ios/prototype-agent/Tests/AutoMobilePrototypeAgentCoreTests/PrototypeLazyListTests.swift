@@ -330,6 +330,30 @@ final class PrototypeLazyListTests: XCTestCase {
             + text + #""}]}}"#
     }
 
+    func testEmptyPlatformLeavesLazyListRepeatUnchanged() throws {
+        let json = lazySpec(
+            text: "{data:/rows/{index}/name}",
+            data: #"{"rows":[{"name":"Zero"},{"name":"One"}],"posts":[{"id":"a"},{"id":"b"}]}"#
+        )
+        let authored = try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
+        let root = try XCTUnwrap(authored.objectFields?["root"])
+        let platforms: [[String: JSONValue]?] = [nil, [:]]
+        for platform in platforms {
+            let resolved = PrototypeDataResolver.resolveRoot(root, data: nil, platform: platform)
+            XCTAssertEqual(resolved, root)
+            let repeated = try XCTUnwrap(resolved.objectFields?["repeat"]?.objectFields)
+            XCTAssertEqual(.object(repeated), root.objectFields?["repeat"])
+            XCTAssertNil(repeated["_platform"])
+            let node = try JSONDecoder().decode(PrototypeNode.self, from: JSONEncoder().encode(resolved))
+            let listRepeat = try XCTUnwrap(node.listRepeat)
+            XCTAssertNil(listRepeat.platformSnapshot)
+            let row = try XCTUnwrap(PrototypeLazyList.resolvedRow(
+                node: node, data: authored.objectFields?["data"]?.objectFields, index: 1
+            ))
+            XCTAssertEqual(row.json.objectFields?["text"], .string("One"))
+        }
+    }
+
     func testLazyTextPreservesPlatformSnapshotWhileDeferringData() throws {
         let json = lazySpec(
             text: "{platform:/name}: {data:/rows/{index}/name}",

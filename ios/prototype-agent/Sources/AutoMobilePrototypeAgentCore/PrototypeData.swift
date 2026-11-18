@@ -282,7 +282,7 @@ enum PrototypeDataResolver {
             platform: platform
         ) } }
         let lazy = fields["type"] == .string("list")
-        if lazy, pass == .all, let platform, var repeated = fields["repeat"]?.objectFields {
+        if lazy, pass == .all, let platform, !platform.isEmpty, var repeated = fields["repeat"]?.objectFields {
             repeated["_platform"] = .object(platform)
             fields["repeat"] = .object(repeated)
         }

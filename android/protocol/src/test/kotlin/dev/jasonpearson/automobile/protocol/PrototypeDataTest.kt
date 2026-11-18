@@ -259,6 +259,25 @@ class PrototypeDataTest : PrototypeDataTestSupport() {
   }
 
   @Test
+  fun `empty platform leaves lazy list repeat unchanged`() {
+    val root =
+      Json.parseToJsonElement(
+          """{"type":"list","repeat":{"items":{"path":"/rows"},"as":"row","key":"id"},"children":[{"type":"text","text":"{data:/rows/{index}/name}"}]}""",
+        )
+        .jsonObject
+    for (platform in listOf(null, JsonObject(emptyMap()))) {
+      val resolved = PrototypeDataResolver.resolveRoot(root, data = null, platform = platform)
+      assertEquals(root, resolved)
+      val repeat = resolved.getValue("repeat").jsonObject
+      assertEquals(root["repeat"], repeat)
+      assertFalse(repeat.containsKey("_platform"))
+      val decoded = json.decodeFromJsonElement<PrototypeNode>(resolved) as PrototypeListNode
+      assertNull(decoded.repeat.platformSnapshot)
+      assertEquals(repeat, json.encodeToJsonElement(decoded.repeat))
+    }
+  }
+
+  @Test
   fun `path repeat wire format never exposes itemsPath`() {
     val input = Json.parseToJsonElement("""{"items":{"path":"/orders"},"as":"order","key":"id"}""")
     val decoded = json.decodeFromJsonElement<PrototypeRepeat>(input)

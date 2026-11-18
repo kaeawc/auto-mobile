@@ -367,7 +367,7 @@ object PrototypeDataResolver {
             "repeat" ->
               if ((root["type"] as? JsonPrimitive)?.content == "list") {
                 val repeat = value as? JsonObject
-                if (repeat != null && platform != null)
+                if (repeat != null && platform != null && platform.isNotEmpty())
                   JsonObject(repeat + ("_platform" to platform))
                 else value
               } else resolveRepeat(value, repeats)

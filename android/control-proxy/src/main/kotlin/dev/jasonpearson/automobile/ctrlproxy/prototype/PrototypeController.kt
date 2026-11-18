@@ -513,6 +513,12 @@ class PrototypeController(
     }
 
   private fun validate(spec: PrototypeSpec): PrototypeSpec {
+    require(
+      "biometric" !in spec.requires?.platform.orEmpty() ||
+        PrototypeBiometricModule.CAPABILITY in platform.registry.capabilities,
+    ) {
+      "The biometric module requires a foreground Activity host"
+    }
     guardPrototypeTree(spec.root)
     requireResolvedPrototypeAnchors(spec.root)
     val validated =

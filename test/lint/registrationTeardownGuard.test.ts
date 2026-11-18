@@ -88,6 +88,11 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
       excludes: ["/test/", "/androidTest/"],
       pairs: [
         {
+          name: "Biometric prompt",
+          register: /\.authenticate\(\s*cancellation,/,
+          teardown: /cancellation\.cancel\s*\(/,
+        },
+        {
           name: "BroadcastReceiver",
           // `(?<!un)` so `unregisterReceiver(` does not count as a registration.
           register: /(?<!un)registerReceiver\s*\(/,
@@ -209,6 +214,25 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
       }
     }
     expect(offenders, offenders.join("\n")).toEqual([]);
+  });
+
+  test("biometric prompt registrations require cancellation even after formatting", () => {
+    const pair = SCOPES.find((scope) => scope.lang === "kotlin")!.pairs.find(
+      (candidate) => candidate.name === "Biometric prompt",
+    )!;
+    expect(pair.register.test("prompt.authenticate(\n  cancellation, executor, callback)")).toBe(
+      true,
+    );
+    expect(pair.teardown.test("return { cancellation.cancel() }")).toBe(true);
+    expect(pair.teardown.test("return {} ")).toBe(false);
+    const source = readGuardFile(
+      join(
+        ROOT,
+        "android/prototype-compose/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/AndroidBiometricSource.kt",
+      ),
+    );
+    expect(pair.register.test(source)).toBe(true);
+    expect(pair.teardown.test(source)).toBe(true);
   });
 
   test("every exception still matches its call (no stale exemption)", () => {

@@ -6,6 +6,7 @@ import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.net.toUri
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBiometricModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEgressPolicy
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
@@ -183,4 +184,7 @@ internal fun protoViewerMcpAbout(versionCode: Long, versionName: String?): McpAb
 
 /** Capabilities of the renderer and the app-owned modules registered by ViewerActivity. */
 internal val protoViewerCapabilities: Set<String>
-  get() = AutoMobilePrototype.capabilities + PrototypeLocationModule.CAPABILITY
+  get() =
+    AutoMobilePrototype.capabilities +
+      PrototypeLocationModule.CAPABILITY +
+      PrototypeBiometricModule.CAPABILITY

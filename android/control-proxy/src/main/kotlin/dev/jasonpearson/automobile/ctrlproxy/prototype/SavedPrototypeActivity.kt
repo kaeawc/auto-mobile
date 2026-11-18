@@ -58,6 +58,7 @@ class SavedPrototypeActivity : ComponentActivity() {
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private val interactions = Mutex()
   private var state by mutableStateOf<SavedPrototypeScreenState>(SavedPrototypeScreenState.Loading)
+  private val platform by lazy { prototypeRuntimePlatform(this) }
   private var runtime: PrototypeRuntime? = null
   private var content by mutableStateOf<SavedPrototypeContent?>(null)
 
@@ -91,6 +92,7 @@ class SavedPrototypeActivity : ComponentActivity() {
       key(current) {
         ProvideEmbeddedPrototypeHost(current.host) {
           AutoMobilePrototype(
+            platform = platform,
             spec = current.spec,
             assets = current.assets,
             storage = current.storage,
@@ -235,6 +237,7 @@ class SavedPrototypeActivity : ComponentActivity() {
   override fun onDestroy() {
     scope.cancel()
     runtime?.close()
+    closePrototypeModules(platform)
     super.onDestroy()
   }
 }

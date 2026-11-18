@@ -192,14 +192,23 @@ function siblingLabelQualifies(
   if (siblingMatchRank(node, target)) {
     return true;
   }
-  if (hasLabel(node.element)) {
-    return false;
-  }
-  return !nodes.some(
-    (child) =>
-      hasLabel(child.element) &&
-      isDescendant(nodes, child, node) &&
-      !isRangeValueDescription(node.element, child.element),
+  return !isIndependentlyLabelledSibling(nodes, node);
+}
+
+/** A focusable sibling owns descendant labels as well as its own text or description. */
+function isIndependentlyLabelledSibling(
+  nodes: readonly FocusSiblingNode[],
+  node: FocusSiblingNode,
+): boolean {
+  return (
+    hasLabel(node.element) ||
+    (isTruthyFlag(node.element?.focusable) &&
+      nodes.some(
+        (child) =>
+          hasLabel(child.element) &&
+          isDescendant(nodes, child, node) &&
+          !isRangeValueDescription(node.element, child.element),
+      ))
   );
 }
 
@@ -244,7 +253,7 @@ function followingLabelSibling(
     if (node.parentIndex !== label.parentIndex || node.index >= label.index) {
       continue;
     }
-    if (hasLabel(node.element)) {
+    if (isIndependentlyLabelledSibling(nodes, node)) {
       previousLabelCanOwn = labelMayOwnFollowing(node, precedingCount, previousLabelCanOwn);
       precedingCount = 0;
     } else if (candidateIndices.has(node.index)) {
@@ -256,7 +265,9 @@ function followingLabelSibling(
   }
   const nextLabel = nodes.find(
     (node) =>
-      node.parentIndex === label.parentIndex && node.index > label.index && hasLabel(node.element),
+      node.parentIndex === label.parentIndex &&
+      node.index > label.index &&
+      isIndependentlyLabelledSibling(nodes, node),
   );
   const following = candidates.filter(
     (node) => node.index > label.index && (!nextLabel || node.index < nextLabel.index),

@@ -30,8 +30,8 @@ Every result includes `virtualDevice`:
 
 ## What is refused
 
-- `save`, `listSaved`, `deleteSaved`, `open`, `clearStorage` and `simulate` fail with "needs a
-  real device".
+- `save`, `listSaved`, `deleteSaved`, `open`, `clearStorage`, `simulate`, `installApp`,
+  `listApps` and `uninstallApp` fail with "needs a real device".
 - `display` fails: there is one display.
 - A spec that needs a capability in `unsupportedCapabilities` fails with the same error an older
   device gives. Examples: `window.persistence: "device"` or `window.layer: "app"`

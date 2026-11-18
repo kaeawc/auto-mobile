@@ -171,6 +171,7 @@ describe("getStaticToolDefinitions", () => {
             "publish",
             "serve",
             "stop",
+            "listApps",
           ],
         },
       ],

@@ -23,7 +23,11 @@ import {
 } from "./daemonSpecRevisions";
 import { MAX_MOCK_DOCUMENT_BYTES } from "../../features/prototype/prototypeMockSchema";
 import { mockBackendOutput } from "./mockBackend";
-import { isPrototypeHostOnlyAction, isPrototypePreviewAction } from "./hostOnlyActions";
+import {
+  isPrototypeHostOnlyAction,
+  isPrototypePreviewAction,
+  type PrototypeHostOnlyAction,
+} from "./hostOnlyActions";
 import { PrototypeMockBackendRegistry } from "../../features/prototype/PrototypeMockBackendRegistry";
 import { PrototypeCommitGenerations } from "../../features/prototype/PrototypeCommitGenerations";
 import { PrototypeEventCoordinator } from "../../features/prototype/PrototypeEventCoordinator";
@@ -95,6 +99,13 @@ import {
 } from "../prototypeSavedActions";
 import type { ProgressCallback } from "../toolRegistry";
 import { stageAssets } from "./assets";
+import {
+  disposableAppOutput,
+  isDisposableAppAction,
+  lazyDisposableApps,
+  type PrototypeDisposableAppAction,
+  type PrototypeDisposableApps,
+} from "./disposableApps";
 import {
   daemonPrototypePreviewBinding,
   prototypePreviewOutput,
@@ -538,7 +549,7 @@ async function specFromPath(
 }
 
 const takesSpecPath = (action: string): boolean =>
-  action === "show" || action === "screenMap" || action === "share";
+  action === "show" || action === "screenMap" || action === "share" || action === "installApp";
 
 /** A show with `mockPath` becomes a show with the file's `{backendId: definition}` as `mock`. */
 async function mockFromPath(
@@ -630,6 +641,29 @@ async function hostOnlyOutput(
     : mockBackendOutput(host.mocks, args);
 }
 
+interface EarlyRoutes {
+  disposableApps: () => PrototypeDisposableApps;
+  hostOnly: { mocks: PrototypeMockBackendRegistry; preview: () => PrototypePreviewBinding };
+  assetReaders: AssetReaders;
+  shareFiles: ProtoViewerShareFiles | undefined;
+}
+
+const isEarlyAction = (
+  action: string,
+): action is PrototypeHostOnlyAction | PrototypeDisposableAppAction =>
+  isDisposableAppAction(action) || isPrototypeHostOnlyAction(action);
+
+/** Disposable-app and host-only actions, answered before any prototype scope or target. */
+function earlyOutput(
+  routes: EarlyRoutes,
+  device: BootedDevice,
+  args: z.infer<typeof prototypeSchema>,
+): Promise<PrototypeOutput> {
+  return isDisposableAppAction(args.action)
+    ? disposableAppOutput(routes.disposableApps(), device, args)
+    : hostOnlyOutput(routes.hostOnly, args, routes.assetReaders, routes.shareFiles);
+}
+
 /** share writes local files only: the spec was validated, and no device or scope is involved. */
 async function shareOutput(
   args: z.infer<typeof prototypeSchema>,
@@ -694,6 +728,12 @@ export function createPrototypeToolRuntime(
   });
   // Resolved on first use: building the daemon's (unbound) server is deferred until a call needs it.
   const preview = () => dependencies.preview ?? daemonPrototypePreviewBinding();
+  const earlyRoutes: EarlyRoutes = {
+    disposableApps: lazyDisposableApps(dependencies, clock),
+    hostOnly: { mocks: host.mocks, preview },
+    assetReaders,
+    shareFiles: dependencies.protoViewerShareFiles,
+  };
   const handler = async (
     device: BootedDevice,
     input: unknown,
@@ -731,10 +771,8 @@ export function createPrototypeToolRuntime(
         return respond(settled);
       }
     }
-    if (isPrototypeHostOnlyAction(args.action)) {
-      const shareFiles = dependencies.protoViewerShareFiles;
-      const hostOnly = { mocks: host.mocks, preview };
-      return respond(await hostOnlyOutput(hostOnly, args, assetReaders, shareFiles));
+    if (isEarlyAction(args.action)) {
+      return respond(await earlyOutput(earlyRoutes, device, args));
     }
     const scope = prototypeScope(device, args);
     if (isHostLocalPrototypeAction(args.action)) {

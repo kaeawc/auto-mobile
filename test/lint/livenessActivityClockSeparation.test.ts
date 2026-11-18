@@ -459,6 +459,11 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "MRTR device-choice requestState expiry, unrelated to device sessions.",
   },
+  "src/server/prototypeTools/outputSchemas.ts <module>": {
+    writes: 2,
+    reason:
+      "Output-schema keys for a disposable prototype app's TTL expiry, unrelated to device sessions.",
+  },
   "src/server/appResources.ts getAppMetadataResource": {
     writes: 1,
     reason: "App-metadata resource cache TTL, unrelated to device sessions.",

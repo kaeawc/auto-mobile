@@ -185,8 +185,10 @@ are available.
 
 A disposable app installs one spec as its own app, with its own package, label, icon, permissions
 and foreground-service types. The host core lives in `src/features/prototype/disposableApp/`.
-The Android stamper packages a spec into a signed APK; the `prototype installApp`, `listApps`
-and `uninstallApp` actions remain separate from this artifact pipeline.
+The Android stamper packages a spec into a signed APK. The `prototype` actions `installApp`,
+`listApps` and `uninstallApp` (`{appId}`, `{all: true}` or `{expired: true}`) run on the daemon's
+`DisposableAppManager`, built on the first such call. iOS refuses them until its stamper exists.
+The headless virtual device refuses them too.
 
 - **Identity.** The package is `dev.jasonpearson.automobile.app.<slug>_<sha256(slug) 8 hex>`.
   Hyphens in the slug become underscores because Android package segments allow only

@@ -1,9 +1,6 @@
 #if canImport(Security)
     import Foundation
     import Security
-    #if SWIFT_PACKAGE
-        @testable import AutoMobilePrototypeAgentCore
-    #endif
 
     /// The Security boundary is injectable: tests never access the host's Keychain.
     protocol KeychainClient {

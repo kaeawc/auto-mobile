@@ -13,7 +13,7 @@ import { z } from "zod/v4";
 import { deleteInternalToolParams } from "../../daemon/wire/constants";
 import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { SessionReleaseBroadcaster } from "../../daemon/sessionReleaseBroadcast";
-import { getDaemonStreamDeviceLifecycleEmitter } from "../../daemon/streamDeviceLifecycleEvents";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../../daemon/streams/streamDeviceLifecycleEvents";
 import {
   DefaultDeviceWindowCacheInvalidator,
   type DeviceWindowCacheInvalidator,

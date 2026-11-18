@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createDaemonPerformanceDemandProbe } from "../../../src/features/performance/PerformanceDemandProbe";
 import type { PerformanceDemandProbe } from "../../../src/features/performance/PerformanceMonitorTypes";
-import type { LivePerformanceData } from "../../../src/daemon/performancePushSocketServer";
+import type { LivePerformanceData } from "../../../src/daemon/streams/performancePushSocketServer";
 import { PerformanceMonitor } from "../../../src/features/performance/PerformanceMonitor";
 import {
   PerfWindowBuffer,
   type PerfSample,
 } from "../../../src/features/performance/PerfWindowBuffer";
 import { SdkFrameMetricsStore } from "../../../src/features/performance/SdkFrameMetricsStore";
-import { TelemetryPushSocketServer } from "../../../src/daemon/telemetryPushSocketServer";
+import { TelemetryPushSocketServer } from "../../../src/daemon/streams/telemetryPushSocketServer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSocket } from "../../fakes/FakeNetServer";
 import { FakeTimer } from "../../fakes/FakeTimer";

@@ -7,7 +7,7 @@ import { Timer } from "../../utils/SystemTimer";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { readFramePlatformHint } from "../daemonRequestEnvelope";
 import { DaemonStateAccess } from "../daemonRequestHandlers";
-import { getDeviceDataStreamServer } from "../deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "../streams/deviceDataStreamSocketServer";
 import {
   executionTracker,
   sessionExecutionMetadataOf,

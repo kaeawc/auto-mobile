@@ -2,7 +2,7 @@ import { mock, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:
 import {
   SessionScopedStreamAuthenticator,
   STREAM_SOCKET_AUTH_ENV,
-} from "../../src/daemon/streamSocketAuth";
+} from "../../src/daemon/streams/streamSocketAuth";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   MissingDeviceLiveness,

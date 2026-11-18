@@ -3,7 +3,7 @@ import {
   prepareCameraPosterLaunch,
 } from "../features/utility/ios/iosCameraPosterLaunch";
 import { SessionReleaseBroadcaster } from "../daemon/sessionReleaseBroadcast";
-import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streams/streamDeviceLifecycleEvents";
 import type { ActionCall } from "../features/action/ActionCall";
 import { AppLifecycle, type AppLifecycleExecutionOptions } from "../features/action/AppLifecycle";
 import { AppPermissions, type SetAppPermissionsResult } from "../features/action/AppPermissions";

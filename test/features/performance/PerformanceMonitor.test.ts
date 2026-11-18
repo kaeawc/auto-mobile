@@ -13,7 +13,7 @@ import {
   getLastStartupTimingMs,
 } from "../../../src/features/performance/PerformanceMonitor";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
-import { LivePerformanceData } from "../../../src/daemon/performancePushSocketServer";
+import { LivePerformanceData } from "../../../src/daemon/streams/performancePushSocketServer";
 import { PerfWindowBuffer } from "../../../src/features/performance/PerfWindowBuffer";
 import { SdkFrameMetricsStore } from "../../../src/features/performance/SdkFrameMetricsStore";
 import { FakeTimer } from "../../fakes/FakeTimer";

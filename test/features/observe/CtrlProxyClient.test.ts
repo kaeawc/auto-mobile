@@ -57,7 +57,7 @@ import {
   DeviceDataStreamSocketServer,
   installDeviceDataStreamSocketServerForTesting,
   stopDeviceDataStreamSocketServer,
-} from "../../../src/daemon/deviceDataStreamSocketServer";
+} from "../../../src/daemon/streams/deviceDataStreamSocketServer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
 import { FakeScreenshotBackoffScheduler } from "../../fakes/FakeScreenshotBackoffScheduler";
 import type {

@@ -223,12 +223,12 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "setActiveDevice path reads the same pooled device afterward, so it reconciles first.",
     },
 
-    "src/daemon/streamDeviceResolver.ts": {
+    "src/daemon/streams/streamDeviceResolver.ts": {
       calls: 2,
       reason:
         "Shared video/WebRTC discovery reconciles before selection, including bounded iOS retries.",
     },
-    "src/daemon/deviceGestureRecordingSocketServer.ts": {
+    "src/daemon/streams/deviceGestureRecordingSocketServer.ts": {
       calls: 1,
       reason:
         "Selects the recording target from the AVD-name-aware manager, reconciles before the " +
@@ -386,8 +386,8 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/server/deviceToolsListing.ts",
       "src/server/provisioning/provisioningBoot.ts",
       "src/server/utilityTools.ts",
-      "src/daemon/streamDeviceResolver.ts",
-      "src/daemon/deviceGestureRecordingSocketServer.ts",
+      "src/daemon/streams/streamDeviceResolver.ts",
+      "src/daemon/streams/deviceGestureRecordingSocketServer.ts",
       "src/server/resourceDeviceResolver.ts",
     ];
     routedSources = routed.map((file) => ({ file, source: sourceWithoutComments(file) }));

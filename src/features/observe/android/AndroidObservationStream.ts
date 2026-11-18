@@ -1,5 +1,5 @@
 import { COORDINATE_SPACE_PX } from "../../../daemon/canonicalPixels";
-import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "../../../daemon/streams/deviceDataStreamSocketServer";
 import type { BootedDevice, ScreenScaleMetadata, ViewHierarchyResult } from "../../../models";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { logger } from "../../../utils/logger";

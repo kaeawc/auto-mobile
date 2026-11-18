@@ -3,7 +3,7 @@ import { registerPrototypeDaemonPort } from "../features/prototype/prototypeDaem
 import { daemonToolRegistry } from "./toolRegistryPort";
 import {} from "./networkStateSessionCleanup";
 import {} from "./recordingSessionCleanup";
-import {} from "./observationRequestBatch";
+import {} from "./streams/observationRequestBatch";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
@@ -42,7 +42,7 @@ import {
   notifyBootedDeviceResourcesUpdated,
   resetBootedDevicesResourceCache,
 } from "./deviceResourceInvalidation";
-import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "./streams/deviceDataStreamSocketServer";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { NavigationGraphStreamBridge } from "./daemonStreamRouting";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
@@ -54,7 +54,7 @@ import { DeviceLossState } from "./deviceLossState";
 import { DaemonShutdownState } from "./daemonShutdownState";
 import { DaemonRuntimeState } from "./daemonRuntimeState";
 import { errorMessage } from "../utils/describeUnknownError";
-import { type ObservationStreamHealth } from "./ObservationStreamHealth";
+import { type ObservationStreamHealth } from "./streams/ObservationStreamHealth";
 import {
   resolveDaemonDependencies,
   type DaemonDependencies,

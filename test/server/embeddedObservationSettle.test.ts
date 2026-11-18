@@ -47,7 +47,7 @@ import { displayInventoryOutcome } from "../../src/models/DeviceInfo";
 import { createDeviceHierarchyCapture } from "../../src/features/observe/DeviceHierarchyCapture";
 import type { AccessibilityHierarchy } from "../../src/features/observe/android/types";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
-import { buildObservationScreenshotUri } from "../../src/daemon/observationResourceUris";
+import { buildObservationScreenshotUri } from "../../src/daemon/streams/observationResourceUris";
 import { FakeScreenshotStateStore } from "../fakes/FakeScreenshotStateStore";
 
 /**

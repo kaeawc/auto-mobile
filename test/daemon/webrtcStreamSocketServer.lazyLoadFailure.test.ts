@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import * as realManager from "../../src/daemon/webrtcStreamManager";
+import * as realManager from "../../src/daemon/streams/webrtcStreamManager";
 import {
   WebRtcStreamSocketServer,
   type WebRtcStreamManagerModule,
-} from "../../src/daemon/webrtcStreamSocketServer";
+} from "../../src/daemon/streams/webrtcStreamSocketServer";
 import type {
   WebRtcStreamSocketRequest,
   WebRtcStreamSocketResponse,
-} from "../../src/daemon/webrtcStreamSocketTypes";
-import type { StreamSocketAuthenticator } from "../../src/daemon/streamSocketAuth";
+} from "../../src/daemon/streams/webrtcStreamSocketTypes";
+import type { StreamSocketAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
 import { permissiveDeviceAdmissionGate } from "../../src/utils/deviceAdmissionGate";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";

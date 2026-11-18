@@ -1,13 +1,13 @@
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { VideoStreamSocketServer } from "../../src/daemon/videoStreamSocketServer";
+import { VideoStreamSocketServer } from "../../src/daemon/streams/videoStreamSocketServer";
 import { permissiveDeviceAdmissionGate } from "../../src/utils/deviceAdmissionGate";
 import {
   resetWebRtcStreamManager,
   setWebRtcStreamManagerDependencies,
   startWebRtcStream,
   stopWebRtcStream,
-} from "../../src/daemon/webrtcStreamManager";
+} from "../../src/daemon/streams/webrtcStreamManager";
 import type { BootedDevice } from "../../src/models";
 import type {
   H264CaptureSource,

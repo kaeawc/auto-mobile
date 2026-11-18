@@ -3,7 +3,7 @@ import {
   AppearanceSocketServer,
   type AppearanceDeviceSource,
   type AppearanceSocketServerDependencies,
-} from "../../src/daemon/appearanceSocketServer";
+} from "../../src/daemon/streams/appearanceSocketServer";
 import type { AppearanceSocketResponse } from "../../src/daemon/wire/appearanceSocketTypes";
 import {
   handleDaemonRequest,
@@ -12,7 +12,7 @@ import {
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { SessionScopedStreamAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import {
   DeviceSettingDefaults,

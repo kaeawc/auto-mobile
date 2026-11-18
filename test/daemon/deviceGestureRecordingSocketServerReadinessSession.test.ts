@@ -3,7 +3,7 @@ import {
   createDeviceGestureRecordingDeviceResolution,
   DeviceGestureRecordingSocketServer,
   type DeviceGestureRecordingDeviceResolution,
-} from "../../src/daemon/deviceGestureRecordingSocketServer";
+} from "../../src/daemon/streams/deviceGestureRecordingSocketServer";
 import type { DeviceGestureRecordingCommand } from "../../src/daemon/deviceGestureRecordingSocketTypes";
 import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import {

@@ -56,6 +56,24 @@ export const TIER_RULES: readonly TierRule[] = [
     forbiddenModules: DAEMON_RUNTIME_MODULES,
     allowedModules: DAEMON_RUNTIME_LEAVES,
   })),
+  // The stream servers never reach into the control-socket implementation or the daemon process
+  // (#15673). The socket-server base classes, the control-socket singleton and the path/context
+  // leaves stay importable until they move into their own sub-packages.
+  {
+    tier: "daemon/streams",
+    forbiddenModules: [
+      "src/daemon/socketServer",
+      "src/daemon/daemon",
+      "src/daemon/manager",
+      "src/daemon/cli/",
+    ],
+    allowedPrefixes: ["src/daemon/socketServer/"],
+    allowedModules: [
+      "src/daemon/socketServerSingleton",
+      "src/daemon/daemonContext",
+      "src/daemon/daemonFiles",
+    ],
+  },
 ];
 
 export function baselinePath(tier: string): string {

@@ -59,10 +59,11 @@ class HostPrototypeHttpClient(
     val started = clock()
     fun failed(code: PrototypeRequestErrorCode, message: String) =
       PrototypeRequestResponse.Failed(PrototypeRequestError(code, message), clock() - started)
-    if (request.uploadBody != null) return failed(
-      PrototypeRequestErrorCode.INVALID_REQUEST,
-      "Host uploads are not available yet; use via \"device\".",
-    )
+    if (request.uploadBody != null)
+      return failed(
+        PrototypeRequestErrorCode.INVALID_REQUEST,
+        "Host uploads are not available yet; use via \"device\".",
+      )
     val entry = Pending(CompletableDeferred())
     val answer = entry.answer
     pending[request.requestId] = entry

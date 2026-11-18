@@ -8,8 +8,9 @@ Part of [the agent-authored prototype specification](prototype-ux.md).
 values, delivered like `connectivity.changed`. The state updates at once, and the event fires once
 the state has been quiet for 500 ms. A flap that settles back on the last delivered values is not an
 event. Unknown keys and events fail validation with a
-path. Android provides these read-only modules with lazy system observers and debounced change events;
-thermal state is absent below API 29. The iOS readers are pending (#14323).
+path. Android and iOS provide these read-only modules with lazy system observers and debounced change
+events; Android thermal state is absent below API 29. The iOS agent and ProtoViewer register all three
+without permissions. Their shared registry stops observers after the final presentation releases it.
 
 The host mirrors each delivered `<module>.changed` as `platformStatus.<module>` in `prototype status`
 and `inspect`: `values`, the event's device `timestamp`, the host `receivedAt`, and `simulated` for an
@@ -72,7 +73,9 @@ runtimes copy, replayed from `test/fixtures/prototype-device-status/`:
   `NOT_CHARGING` are `unplugged`, anything else `unknown`; iOS `UIDevice.BatteryState` maps one to one.
 - Battery `level` and audio `volume` are whole percents (Android level over scale and stream index over
   its maximum; iOS `batteryLevel` and `outputVolume`). An unknown reading, such as the Simulator's
-  battery level of -1, leaves the key absent.
+  battery level of -1, leaves the key absent. iOS omits `muted`: an inactive host audio session can
+  report zero `outputVolume`, so volume alone does not establish mute status. Observing audio does
+  not activate or reconfigure the host session.
 - `ringer` is Android `AudioManager.RINGER_MODE_*`: silent, vibrate or normal.
 
 **Biometric prompt (#14328).** The `biometric` module (`prototype_platform_biometric_v1`) has one call,

@@ -49,7 +49,7 @@ class ManifestTest {
     val info =
       context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
     assertEquals(
-      setOf("android.permission.INTERNET", "android.permission.ACCESS_LOCAL_NETWORK"),
+      EXPECTED_PERMISSIONS,
       info.requestedPermissions.orEmpty().toSet(),
     )
     val viewer =
@@ -107,3 +107,11 @@ class ManifestTest {
     assertEquals(0, context.applicationInfo.flags and ApplicationInfo.FLAG_USES_CLEARTEXT_TRAFFIC)
   }
 }
+
+private val EXPECTED_PERMISSIONS =
+  setOf(
+    "android.permission.INTERNET",
+    "android.permission.ACCESS_LOCAL_NETWORK",
+    "android.permission.ACCESS_COARSE_LOCATION",
+    "android.permission.ACCESS_FINE_LOCATION",
+  )

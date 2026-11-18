@@ -1,6 +1,7 @@
 import { z } from "zod/v3";
 import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
 import { prototypeDataPathPointer } from "./prototypeData";
+import { dataMemberSchema } from "./prototypeActionValues";
 import { prototypeJsonSchema } from "./prototypeJson";
 
 /**
@@ -11,10 +12,13 @@ import { prototypeJsonSchema } from "./prototypeJson";
  * `pages` are the usual snapshot.
  */
 const revisionSchema = z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const whereSchema = z.object({ field: dataMemberSchema, equals: prototypeJsonSchema }).strict();
 const payloadSchema = z.union([
   z
     .object({
       op: z.literal("set"),
+      where: whereSchema.optional(),
+      member: dataMemberSchema.optional(),
       value: prototypeJsonSchema.optional(),
       revision: revisionSchema,
     })
@@ -55,7 +59,9 @@ const payloadSchema = z.union([
       revision: revisionSchema,
     })
     .strict(),
-  z.object({ op: z.literal("remove"), revision: revisionSchema }).strict(),
+  z
+    .object({ op: z.literal("remove"), where: whereSchema.optional(), revision: revisionSchema })
+    .strict(),
 ]);
 
 export type PrototypeDataWriteEventPayload = z.infer<typeof payloadSchema>;

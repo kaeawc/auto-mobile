@@ -67,6 +67,44 @@ class PrototypeDataActionsRuntimeTest {
     runtime.items()!!.map { it.jsonObject.getValue("name").jsonPrimitive.content }
 
   @Test
+  fun `duplicate keyed matches leave revisions and events unchanged`() = runTest {
+    val json =
+      File(fixtures(), "valid/keyed-data-writes.json").readText().replace("\"id\": 1", "\"id\": 2")
+    val spec = validated(json)
+    val runtime = runtime(spec)
+    val before = runtime.current.revision
+    runtime.handle(tap((spec.root as PrototypeButtonNode).onTap))
+    assertEquals(spec.data, runtime.current.spec.data)
+    assertEquals(before, runtime.current.revision)
+    assertTrue(events.isEmpty())
+    assertTrue(warnings.all { "More than one element matches where" in it })
+  }
+
+  @Test
+  fun `keyed writes resolve state and data and report selectors`() = runTest {
+    val spec = validated(File(fixtures(), "valid/keyed-data-writes.json").readText())
+    val runtime = runtime(spec)
+    val before = runtime.current.revision
+    runtime.handle(tap((spec.root as PrototypeButtonNode).onTap))
+    assertEquals(
+      Json.parseToJsonElement("""[{"id":2,"title":"new"}]"""),
+      runtime.current.spec.data?.get("items"),
+    )
+    assertEquals(2, events.size)
+    assertTrue(runtime.current.revision > before)
+    assertEquals(
+      JsonPrimitive(2),
+      events[0].payload?.jsonObject?.get("where")?.jsonObject?.get("equals"),
+    )
+    assertEquals(JsonPrimitive("title"), events[0].payload?.jsonObject?.get("member"))
+    assertEquals(
+      JsonPrimitive(1),
+      events[1].payload?.jsonObject?.get("where")?.jsonObject?.get("equals"),
+    )
+    assertEquals(2, spec.data?.get("items")?.jsonArray?.size)
+  }
+
+  @Test
   fun `the shared fixture decodes into the three data actions`() {
     val spec = list()
     val root = spec.root as PrototypeColumnNode

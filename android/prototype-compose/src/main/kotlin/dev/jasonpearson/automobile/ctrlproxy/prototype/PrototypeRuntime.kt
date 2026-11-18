@@ -1264,6 +1264,15 @@ class PrototypeRuntime(
    * Null once the write took effect (and reported itself), else why it was refused.
    */
   private suspend fun applyDataWrite(write: PrototypeDataWrite): PrototypeDataWriteError? {
+    if (
+      dataWritePayload(write, Long.MAX_VALUE).toString().toByteArray(Charsets.UTF_8).size >
+        PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES
+    ) {
+      return PrototypeDataWriteError(
+        PrototypeDataWriteErrorCode.LIMIT_EXCEEDED,
+        "Data write selector exceeds the change event payload limit",
+      )
+    }
     val before = current
     val spec =
       when (val staged = stageDataWrite(before, before.spec, write)) {
@@ -1349,9 +1358,25 @@ class PrototypeRuntime(
           null
         }
       }
+    val selector =
+      when (action) {
+        is PrototypeSetDataAction -> action.where
+        is PrototypeRemoveDataAction -> action.where
+        else -> null
+      }
+    val where = selector?.let {
+      val equals =
+        value(
+          it.equals,
+          (action as? PrototypeSetDataAction)?.path ?: (action as PrototypeRemoveDataAction).path,
+        ) ?: return null
+      PrototypeDataMatch(it.field, equals)
+    }
     return when (action) {
       is PrototypeSetDataAction ->
-        value(action.value, action.path)?.let { PrototypeDataWrite.Set(action.path, it) }
+        value(action.value, action.path)?.let {
+          PrototypeDataWrite.Set(action.path, it, where, action.member)
+        }
       is PrototypeAppendDataAction ->
         value(action.value, action.path)?.let {
           PrototypeDataWrite.Append(
@@ -1380,7 +1405,7 @@ class PrototypeRuntime(
               .minOrNull(),
           )
         }
-      is PrototypeRemoveDataAction -> PrototypeDataWrite.Remove(action.path)
+      is PrototypeRemoveDataAction -> PrototypeDataWrite.Remove(action.path, where)
       else -> null
     }
   }
@@ -1393,6 +1418,22 @@ class PrototypeRuntime(
     fun payload(value: JsonElement?) = buildJsonObject {
       put("op", write.op)
       if (write is PrototypeDataWrite.Upsert) put("key", write.key)
+      val where =
+        when (write) {
+          is PrototypeDataWrite.Set -> write.where
+          is PrototypeDataWrite.Remove -> write.where
+          else -> null
+        }
+      where?.let { match ->
+        put(
+          "where",
+          buildJsonObject {
+            put("field", match.field)
+            put("equals", match.equals)
+          },
+        )
+      }
+      if (write is PrototypeDataWrite.Set) write.member?.let { put("member", it) }
       if (value != null) put("value", value)
       val maximum =
         when (write) {

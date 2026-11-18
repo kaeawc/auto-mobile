@@ -128,9 +128,13 @@ internal class PrototypePlatformDispatcher(
   private suspend fun runCall(call: Pending, action: PrototypePlatformAction, args: JsonObject) {
     val result =
       try {
-        withTimeoutOrNull((action.timeoutMs ?: DEFAULT_TIMEOUT_MS).toLong()) {
-          invoke(call, action, args)
-        } ?: failure(PlatformErrorCode.TIMEOUT, "Platform call timed out")
+        // A permission dialog waits for the user. Teardown/caller cancellation still releases it;
+        // an elapsed wall-clock deadline must not report an error while the OS can still grant.
+        if (action.call == "permissions.request") invoke(call, action, args)
+        else
+          withTimeoutOrNull((action.timeoutMs ?: DEFAULT_TIMEOUT_MS).toLong()) {
+            invoke(call, action, args)
+          } ?: failure(PlatformErrorCode.TIMEOUT, "Platform call timed out")
       } catch (cancelled: CancellationException) {
         withContext(NonCancellable) {
           exclusively {

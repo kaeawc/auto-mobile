@@ -22,7 +22,7 @@ The hardening promises above are checked on the **built artifact**, not the sour
 
 - **Android** (`aapt2 dump xmltree` of the APK's merged manifest):
   - permissions equal the allowlist (`INTERNET`, `ACCESS_LOCAL_NETWORK`,
-    `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`, `USE_BIOMETRIC`) with no declared permissions;
+    `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`, `POST_NOTIFICATIONS`, `USE_BIOMETRIC`) with no declared permissions;
   - no `debuggable`;
   - `allowBackup=false` and `dataExtractionRules`;
   - no cleartext (`usesCleartextTraffic` or a network security config that permits it);

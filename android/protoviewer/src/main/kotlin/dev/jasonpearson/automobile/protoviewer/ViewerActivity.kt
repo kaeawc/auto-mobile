@@ -38,10 +38,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.lifecycleScope
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidBiometricSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidLocationSource
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPermissionsSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBiometricModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePermissionsModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeScheduledTask
 import dev.jasonpearson.automobile.protocol.PrototypeLibraryProvenance
@@ -332,13 +334,14 @@ private class ViewerContent(
     onError: (PrototypeLoadError) -> Unit,
   ) {
     val context = LocalContext.current
-    val activity = checkNotNull(LocalActivity.current)
+    val activity = checkNotNull(LocalActivity.current as? ComponentActivity)
     val platform =
       remember(context, activity) {
         PrototypePlatform(
           listOf(
             PrototypeLocationModule(AndroidLocationSource(context)),
             PrototypeBiometricModule(AndroidBiometricSource(activity)),
+            PrototypePermissionsModule(AndroidPermissionsSource(activity)),
           ),
         )
       }

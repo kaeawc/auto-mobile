@@ -63,15 +63,20 @@ iOS declares `NSLocalNetworkUsageDescription`; the first LAN connection prompts 
 
 A standalone app per platform reuses the existing renderer and saved-prototype code. Library
 prototypes never render inside CtrlProxy: it is an accessibility service, input method and overlay,
-and its renderer honours privileged window options. ProtoViewer declares `INTERNET` and the
-runtime-granted `ACCESS_LOCAL_NETWORK` permission that Android 17 (API 37) requires for private LAN
-connections, plus `ACCESS_COARSE_LOCATION` and `ACCESS_FINE_LOCATION` for the prototype location
-module (never requested by the app itself; grants come from the device or the host), and the normal
-`USE_BIOMETRIC` permission for framework biometric prompts. It declares no accessibility, input method,
-overlay, device-admin or camera permissions. The app requests `ACCESS_LOCAL_NETWORK` only when the user turns on "Allow network for
-imported prototypes" (section 6), never at install or first launch. If the user denies it, the
-switch turns off and the library explains that network access is disabled until permission is granted. The validator rejects `window.layer: "system"` and any other privileged window
-option for library prototypes.
+and its renderer honours privileged window options.
+
+ProtoViewer declares `INTERNET` and the runtime-granted `ACCESS_LOCAL_NETWORK` permission that
+Android 17 (API 37) requires for private LAN connections. The prototype location module uses
+`ACCESS_COARSE_LOCATION` and `ACCESS_FINE_LOCATION`; grants come from the device or host, and the app
+never requests them itself. The normal `USE_BIOMETRIC` permission supports framework biometric
+prompts. `POST_NOTIFICATIONS` supports explicit `permissions.request` calls for notification
+authorization on API 33+; see [Runtime permissions](plat/android/prototype-ux-platform-services.md).
+
+It declares no accessibility, input method, overlay, device-admin or camera permissions. The app
+requests `ACCESS_LOCAL_NETWORK` only when the user turns on "Allow network for imported prototypes"
+(section 6), never at install or first launch. If the user denies it, the switch turns off and the
+library explains that network access is disabled until permission is granted. The validator rejects
+`window.layer: "system"` and any other privileged window option for library prototypes.
 
 - **Android** renders with the renderer extracted from CtrlProxy into its own module (Compose plus
   `android/protocol`). CtrlProxy keeps `SavedPrototypeActivity` and shortcuts on top of that

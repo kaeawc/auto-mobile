@@ -14,8 +14,8 @@ import kotlinx.serialization.json.booleanOrNull
  * Secure storage rules (#14321) the contract cannot express, the twin of TypeScript's
  * `prototypeSecureStorage.ts`: `storage.secure` needs the `secureStorage` module, each key is a
  * declared string state key not also in `storage.keys`, a `secureAuth` entry names a secure key and
- * needs the `biometric` module, and no secure key may leave the device through an emit context or
- * through a `request` that does not opt in with `allowSecureInRequest: true`.
+ * needs the `biometric` module, and secure keys cannot bind into emit contexts, route params or
+ * platform args, or into a `request` that does not opt in with `allowSecureInRequest: true`.
  */
 internal object PrototypeSecureStorageRules {
   fun blockError(root: JsonObject): PrototypeSpecError? {
@@ -53,9 +53,54 @@ internal object PrototypeSecureStorageRules {
     return null
   }
 
-  /** The first way [action] sends a secure key off the device: an emit context, then a request. */
+  /** Refuses secure bindings before an action can expose them outside secure state. */
   fun actionError(action: JsonObject, path: String, root: JsonObject): PrototypeSpecError? =
-    emitError(action, path, root) ?: requestError(action, path, root)
+    when (action.text("type")) {
+      "emit" -> emitError(action, path, root)
+      "request" -> requestError(action, path, root)
+      "push",
+      "replace" -> bindingMapError(action.member("params"), "$path.params", root, "route params")
+      "setStack" -> stackParamsError(action, path, root)
+      "platform" -> bindingMapError(action.member("args"), "$path.args", root, "platform args")
+      else -> null
+    }
+
+  private fun stackParamsError(
+    action: JsonObject,
+    path: String,
+    root: JsonObject,
+  ): PrototypeSpecError? {
+    for ((index, entry) in (action["path"] as? JsonArray).orEmpty().withIndex()) {
+      bindingMapError(
+          (entry as? JsonObject)?.member("params"),
+          "$path.path[$index].params",
+          root,
+          "route params",
+        )
+        ?.let {
+          return it
+        }
+    }
+    return null
+  }
+
+  /**
+   * These value bindings read state directly; literal text does not expand `{key}` placeholders.
+   */
+  private fun bindingMapError(
+    bindings: JsonObject?,
+    path: String,
+    root: JsonObject,
+    destination: String,
+  ): PrototypeSpecError? {
+    val secure = root.member("storage")?.strings("secure").orEmpty()
+    for ((name, binding) in bindings.orEmpty().toSortedMap()) {
+      val key = (binding as? JsonObject)?.text("state") ?: continue
+      val leaked = secureKeyFor(key, secure) ?: continue
+      return fail(keyPath(path, name), "Secure storage key $leaked cannot be sent in $destination")
+    }
+    return null
+  }
 
   private fun emitError(action: JsonObject, path: String, root: JsonObject): PrototypeSpecError? {
     if (action.text("type") != "emit") return null

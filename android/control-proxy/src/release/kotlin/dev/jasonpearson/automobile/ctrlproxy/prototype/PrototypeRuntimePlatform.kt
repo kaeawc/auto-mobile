@@ -18,6 +18,7 @@ internal fun prototypeRuntimePlatform(
       listOfNotNull(clipboard?.let { PrototypeClipboardModule(it) }) +
       listOfNotNull(
         (context as? Activity)?.let { PrototypeBiometricModule(AndroidBiometricSource(it)) },
+        (context as? Activity)?.let { PrototypeSecureStorageModule.fileBacked(it) },
         (context as? ComponentActivity)?.let {
           PrototypePermissionsModule(AndroidPermissionsSource(it))
         },

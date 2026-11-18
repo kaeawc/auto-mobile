@@ -10,12 +10,18 @@ import { FakeDisposableAppStamper } from "../../../fakes/FakeDisposableAppStampe
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { InMemoryDisposableAppRegistryStore } from "../../../fakes/InMemoryDisposableAppRegistryStore";
 import fixture from "../../../fixtures/prototype-spec/valid/platform-requires.json";
+import { ActionableError } from "../../../../src/models/ActionableError";
+import type { PrototypeJson } from "../../../../src/features/prototype/prototypeJson";
 
 const HOUR = 60 * 60 * 1000;
 const DEVICE = "emulator-5554";
 const media = {
   name: "media",
-  capabilities: ["prototype_platform_v1", "prototype_platform_test_v1"],
+  capabilities: [
+    "prototype_platform_v1",
+    "prototype_platform_test_v1",
+    "prototype_platform_location_v1",
+  ],
   size: 2,
 };
 
@@ -73,6 +79,87 @@ describe("DisposableAppManager.install", () => {
     expect(result.template).toBe("base");
     expect(result.permissions.declared).toEqual(["notifications"]);
     expect(stamper.stamped).toHaveLength(1);
+  });
+
+  test("refuses an undeclared call permission before stamping or installing", async () => {
+    const requires = {
+      platform: fixture.requires.platform,
+      background: fixture.requires.background,
+    };
+    const spec = { ...fixture, requires };
+    const installation = manager.install({ ...input(), spec });
+    await expect(installation).rejects.toBeInstanceOf(ActionableError);
+    await expect(installation).rejects.toThrow(
+      /root\.onTap\[0\]\.call: .*camera.*declare it in requires.permissions/,
+    );
+    expect(stamper.stamped).toEqual([]);
+    expect(installer.installs).toEqual([]);
+  });
+
+  const cameraNodes: Record<string, PrototypeJson>[] = [
+    { root: { type: "cameraPreview", id: "preview" } },
+    {
+      components: { preview: { root: { type: "cameraPreview", id: "preview" } } },
+      root: { type: "use", component: "preview" },
+    },
+  ];
+  test.each(cameraNodes)(
+    "refuses undeclared camera permission in a node before installation: %j",
+    async (nodes) => {
+      const spec = { ...fixture, ...nodes, requires: { platform: ["camera"] } };
+      await expect(manager.install({ ...input(), spec })).rejects.toThrow(
+        /camera.*declare it in requires.permissions/,
+      );
+      expect(stamper.stamped).toEqual([]);
+      expect(installer.installs).toEqual([]);
+    },
+  );
+
+  test("stamps exactly the declared call permission's manifest entries plus INTERNET", async () => {
+    await manager.install({
+      ...input(),
+      spec: {
+        ...fixture,
+        requires: {
+          platform: ["location"],
+          permissions: [{ name: "location", purpose: "Show the current position" }],
+        },
+        root: {
+          type: "button",
+          label: "Locate",
+          onTap: [{ type: "platform", call: "location.request" }],
+        },
+      },
+    });
+    expect(stamper.stamped[0]?.declarations).toEqual({
+      permissions: ["location"],
+      background: [],
+      android: {
+        permissions: [
+          "android.permission.ACCESS_COARSE_LOCATION",
+          "android.permission.ACCESS_FINE_LOCATION",
+          "android.permission.INTERNET",
+        ],
+      },
+      ios: {
+        usageDescriptions: { NSLocationWhenInUseUsageDescription: "Show the current position" },
+        backgroundModes: [],
+      },
+    });
+    expect(installer.installs).toHaveLength(1);
+  });
+
+  test("a spec declaring nothing stamps only INTERNET and no iOS usage descriptions", async () => {
+    await manager.install({
+      ...input(),
+      spec: { id: "plain", window: fixture.window, root: { type: "column" } },
+    });
+    expect(stamper.stamped[0]?.declarations).toEqual({
+      permissions: [],
+      background: [],
+      android: { permissions: ["android.permission.INTERNET"] },
+      ios: { usageDescriptions: {}, backgroundModes: [] },
+    });
   });
 
   test("stamps the smallest covering template with the spec's declared permissions", async () => {

@@ -279,6 +279,49 @@ final class PrototypePermissionsTests: XCTestCase {
         XCTAssertEqual(source.stops, 2)
     }
 
+    func testStopDropsLateForegroundStatus() async throws {
+        let source = PermissionTestSource()
+        let module = PrototypePermissionsModule(source: source)
+        let stream = module.events
+        var events = stream.makeAsyncIterator()
+        let baseline = await events.next()
+        XCTAssertEqual(baseline, .stateRefresh("permissions"))
+        XCTAssertEqual(module.state["notifications"], .string("notDetermined"))
+        source.holdStatus = true
+        await withCheckedContinuation { (ready: CheckedContinuation<Void, Never>) in
+            source.read = { ready.resume() }
+            source.continuation?.yield(())
+        }
+        source.read = nil
+        let oldObservation = try XCTUnwrap(module.observation)
+        let oldRead = try XCTUnwrap(source.statusWaiter)
+        source.statusWaiter = nil
+        module.stop()
+        // Keep the new baseline pending so it cannot mask a stale foreground result.
+        let restarted: AsyncStream<PlatformEvent> = await withCheckedContinuation { ready in
+            let stream = module.events
+            source.read = { ready.resume(returning: stream) }
+        }
+        source.read = nil
+        let newObservation = try XCTUnwrap(module.observation)
+        let newRead = try XCTUnwrap(source.statusWaiter)
+        source.statusWaiter = nil
+        oldRead.resume(returning: .granted)
+        await oldObservation.value
+        XCTAssertNil(module.state["notifications"])
+        module.stop()
+        newRead.resume(returning: .denied)
+        await newObservation.value
+        var changes: [PlatformEvent] = []
+        while let event = await events.next() {
+            if event.event == "permissions.changed" { changes.append(event) }
+        }
+        for await event in restarted where event.event == "permissions.changed" {
+            changes.append(event)
+        }
+        XCTAssertEqual(changes, [])
+    }
+
     func testRequestResultSupersedesEarlierReadsButKeepsLaterSettingsChanges() async throws {
         let scenarios: [(initial: Bool, granted: Bool)] = [(true, true), (false, true), (true, false)]
         for (initial, granted) in scenarios {

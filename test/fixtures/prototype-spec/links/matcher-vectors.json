@@ -1,0 +1,878 @@
+{
+  "matchGroups": [
+    {
+      "name": "path and URL splitting",
+      "table": [
+        {
+          "path": "/post/{postId}",
+          "query": {
+            "ref": "string?"
+          }
+        }
+      ],
+      "cases": [
+        {
+          "url": "amp-feedly://post/41?ref=x",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {
+              "ref": "x"
+            }
+          }
+        },
+        {
+          "url": "https://example.test/post/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "http://another.test:8080/post/41/?ref=x#fragment",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {
+              "ref": "x"
+            }
+          }
+        },
+        {
+          "url": "HTTPS://EXAMPLE.test/post/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp-feedly://post/41/",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp-feedly://post/a%2Fb",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "a/b"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp-feedly://%70ost/41",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp-feedly://post/a+b?ref=a+b",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "a+b"
+            },
+            "query": {
+              "ref": "a b"
+            }
+          }
+        },
+        {
+          "url": "amp-feedly://post/%E2%82%AC",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "€"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp-feedly://post/日本",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "日本"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp-feedly://post/%EF%BB%BF",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "﻿"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp-feedly://post/%00",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "\u0000"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp-feedly://post/a#ignored?ref=x",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "a"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp-feedly://post/%23%3F",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "#?"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp-feedly://post/41?ref=first&ref=second",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {
+              "ref": "first"
+            }
+          }
+        },
+        {
+          "url": "amp-feedly://post/41?%72ef=a%3Db%26c&&unknown=z&",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {
+              "ref": "a=b&c"
+            }
+          }
+        },
+        {
+          "url": "amp-feedly://post/41?ref",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {
+              "ref": ""
+            }
+          }
+        },
+        {
+          "url": "amp-feedly://post/41?ref=%XX&ref=valid",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {
+              "ref": "valid"
+            }
+          }
+        },
+        {
+          "url": "amp-feedly://post/41?ref=%FF&bad%XX=x",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp-feedly://post/41?ref=&ref=second",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {
+              "ref": ""
+            }
+          }
+        },
+        {
+          "url": "amp-feedly://Post/41",
+          "expected": null
+        },
+        {
+          "url": "amp-feedly://post//41",
+          "expected": null
+        },
+        {
+          "url": "amp-feedly://post/41//",
+          "expected": null
+        },
+        {
+          "url": "https://host//post/41",
+          "expected": null
+        },
+        {
+          "url": "amp-feedly://post/%",
+          "expected": null
+        },
+        {
+          "url": "amp-feedly://post/%GG",
+          "expected": null
+        },
+        {
+          "url": "amp-feedly://post/%C0%AF",
+          "expected": null
+        },
+        {
+          "url": "amp-feedly://post/%ED%A0%80",
+          "expected": null
+        },
+        {
+          "url": "amp-feedly://post/%F4%90%80%80",
+          "expected": null
+        },
+        {
+          "url": "amp-feedly://post/%E2%82",
+          "expected": null
+        },
+        {
+          "url": "post/41",
+          "expected": null
+        },
+        {
+          "url": "://post/41",
+          "expected": null
+        },
+        {
+          "url": "amp-feedly://post/",
+          "expected": null
+        }
+      ]
+    },
+    {
+      "name": "root",
+      "table": [
+        {
+          "path": "/"
+        }
+      ],
+      "cases": [
+        {
+          "url": "https://host",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {},
+            "query": {}
+          }
+        },
+        {
+          "url": "https://host/",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {},
+            "query": {}
+          }
+        },
+        {
+          "url": "amp-feedly://",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {},
+            "query": {}
+          }
+        },
+        {
+          "url": "amp-feedly:///",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {},
+            "query": {}
+          }
+        },
+        {
+          "url": "https://host?extra=x#fragment",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {},
+            "query": {}
+          }
+        },
+        {
+          "url": "https://host//",
+          "expected": null
+        },
+        {
+          "url": "amp-feedly:////",
+          "expected": null
+        },
+        {
+          "url": "https://host/a",
+          "expected": null
+        }
+      ]
+    },
+    {
+      "name": "ordered query fallback",
+      "table": [
+        {
+          "path": "/post/{postId}",
+          "query": {
+            "ref": "int"
+          }
+        },
+        {
+          "path": "/post/{id}",
+          "query": {
+            "ref": "string?"
+          }
+        }
+      ],
+      "cases": [
+        {
+          "url": "amp-feedly://post/41?ref=3",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {
+              "postId": "41"
+            },
+            "query": {
+              "ref": 3
+            }
+          }
+        },
+        {
+          "url": "amp-feedly://post/41",
+          "expected": {
+            "entryIndex": 1,
+            "captures": {
+              "id": "41"
+            },
+            "query": {}
+          }
+        },
+        {
+          "url": "amp-feedly://post/41?ref=no",
+          "expected": {
+            "entryIndex": 1,
+            "captures": {
+              "id": "41"
+            },
+            "query": {
+              "ref": "no"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "typed query",
+      "table": [
+        {
+          "path": "/types",
+          "query": {
+            "s": "string",
+            "i": "int",
+            "n": "number",
+            "b": "boolean",
+            "optional": "int?"
+          }
+        }
+      ],
+      "cases": [
+        {
+          "url": "x://types?s=&i=41&n=41&b=true",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {},
+            "query": {
+              "s": "",
+              "i": 41,
+              "n": 41,
+              "b": true
+            }
+          }
+        },
+        {
+          "url": "x://types?s=hello+world&i=-9007199254740991&n=-1.25e2&b=false&optional=0",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {},
+            "query": {
+              "s": "hello world",
+              "i": -9007199254740991,
+              "n": -125,
+              "b": false,
+              "optional": 0
+            }
+          }
+        },
+        {
+          "url": "x://types?s=x&i=00041&n=%2B.5&b=true&unknown=x",
+          "expected": {
+            "entryIndex": 0,
+            "captures": {},
+            "query": {
+              "s": "x",
+              "i": 41,
+              "n": 0.5,
+              "b": true
+            }
+          }
+        },
+        {
+          "url": "x://types?s=x&i=1.5&n=1&b=true",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=%2B1&n=1&b=true",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=9007199254740992&n=1&b=true",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=-9007199254740992&n=1&b=true",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=&n=1&b=true",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=1&n=0x10&b=true",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=1&n=NaN&b=true",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=1&n=Infinity&b=true",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=1&n=&b=true",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=1&n=1e309&b=true",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=1&n=%201&b=true",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=1&n=1&b=TRUE",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=1&n=1&b=1",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=1&n=1&b=",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=1&n=1&b=true&optional=no",
+          "expected": null
+        },
+        {
+          "url": "x://types?i=1&n=1&b=true",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=%FF&i=1&n=1&b=true",
+          "expected": null
+        },
+        {
+          "url": "x://types?s=x&i=wrong&i=1&n=1&b=true",
+          "expected": null
+        }
+      ]
+    }
+  ],
+  "validationCases": [
+    {
+      "name": "valid names and optional query",
+      "table": [
+        {
+          "path": "/"
+        },
+        {
+          "path": "/a._~-/{Alpha_01}",
+          "query": {
+            "query_1": "boolean?"
+          },
+          "usedCaptures": ["Alpha_01"]
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "duplicate literal",
+      "table": [
+        {
+          "path": "/post"
+        },
+        {
+          "path": "/post"
+        }
+      ],
+      "expected": [
+        {
+          "index": 1,
+          "code": "duplicatePattern"
+        }
+      ]
+    },
+    {
+      "name": "duplicate capture shape",
+      "table": [
+        {
+          "path": "/post/{id}"
+        },
+        {
+          "path": "/post/{other}"
+        }
+      ],
+      "expected": [
+        {
+          "index": 1,
+          "code": "duplicatePattern"
+        }
+      ]
+    },
+    {
+      "name": "different positions are distinct",
+      "table": [
+        {
+          "path": "/post/{id}"
+        },
+        {
+          "path": "/{id}/post"
+        },
+        {
+          "path": "/post/literal"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "33 entries",
+      "table": [
+        {
+          "path": "/p0"
+        },
+        {
+          "path": "/p1"
+        },
+        {
+          "path": "/p2"
+        },
+        {
+          "path": "/p3"
+        },
+        {
+          "path": "/p4"
+        },
+        {
+          "path": "/p5"
+        },
+        {
+          "path": "/p6"
+        },
+        {
+          "path": "/p7"
+        },
+        {
+          "path": "/p8"
+        },
+        {
+          "path": "/p9"
+        },
+        {
+          "path": "/p10"
+        },
+        {
+          "path": "/p11"
+        },
+        {
+          "path": "/p12"
+        },
+        {
+          "path": "/p13"
+        },
+        {
+          "path": "/p14"
+        },
+        {
+          "path": "/p15"
+        },
+        {
+          "path": "/p16"
+        },
+        {
+          "path": "/p17"
+        },
+        {
+          "path": "/p18"
+        },
+        {
+          "path": "/p19"
+        },
+        {
+          "path": "/p20"
+        },
+        {
+          "path": "/p21"
+        },
+        {
+          "path": "/p22"
+        },
+        {
+          "path": "/p23"
+        },
+        {
+          "path": "/p24"
+        },
+        {
+          "path": "/p25"
+        },
+        {
+          "path": "/p26"
+        },
+        {
+          "path": "/p27"
+        },
+        {
+          "path": "/p28"
+        },
+        {
+          "path": "/p29"
+        },
+        {
+          "path": "/p30"
+        },
+        {
+          "path": "/p31"
+        },
+        {
+          "path": "/p32"
+        }
+      ],
+      "expected": [
+        {
+          "index": 32,
+          "code": "tooManyEntries"
+        }
+      ]
+    },
+    {
+      "name": "bad patterns",
+      "table": [
+        {
+          "path": ""
+        },
+        {
+          "path": "post"
+        },
+        {
+          "path": "/post/"
+        },
+        {
+          "path": "/a//b"
+        },
+        {
+          "path": "/a b"
+        },
+        {
+          "path": "/a%20b"
+        },
+        {
+          "path": "/{1id}"
+        },
+        {
+          "path": "/{a-b}"
+        },
+        {
+          "path": "/{xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}"
+        },
+        {
+          "path": "/{é}"
+        }
+      ],
+      "expected": [
+        {
+          "index": 0,
+          "code": "badPattern"
+        },
+        {
+          "index": 1,
+          "code": "badPattern"
+        },
+        {
+          "index": 2,
+          "code": "badPattern"
+        },
+        {
+          "index": 3,
+          "code": "badPattern"
+        },
+        {
+          "index": 4,
+          "code": "badPattern"
+        },
+        {
+          "index": 5,
+          "code": "badPattern"
+        },
+        {
+          "index": 6,
+          "code": "badPattern"
+        },
+        {
+          "index": 7,
+          "code": "badPattern"
+        },
+        {
+          "index": 8,
+          "code": "badPattern"
+        },
+        {
+          "index": 9,
+          "code": "badPattern"
+        }
+      ]
+    },
+    {
+      "name": "duplicate captures",
+      "table": [
+        {
+          "path": "/{id}/{id}"
+        }
+      ],
+      "expected": [
+        {
+          "index": 0,
+          "code": "duplicateCapture"
+        }
+      ]
+    },
+    {
+      "name": "bad query names types collisions",
+      "table": [
+        {
+          "path": "/{id}",
+          "query": {
+            "": "string",
+            "1bad": "int",
+            "a-b": "string",
+            "id": "string",
+            "ok": "integer",
+            "what": "number??"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "index": 0,
+          "code": "badQuery"
+        },
+        {
+          "index": 0,
+          "code": "badQuery"
+        },
+        {
+          "index": 0,
+          "code": "badQuery"
+        },
+        {
+          "index": 0,
+          "code": "badQuery"
+        },
+        {
+          "index": 0,
+          "code": "badQuery"
+        },
+        {
+          "index": 0,
+          "code": "badQuery"
+        }
+      ]
+    },
+    {
+      "name": "unused captures supplied",
+      "table": [
+        {
+          "path": "/{id}/{other}",
+          "usedCaptures": ["id"]
+        }
+      ],
+      "expected": [
+        {
+          "index": 0,
+          "code": "unusedCapture"
+        }
+      ]
+    },
+    {
+      "name": "unused empty set",
+      "table": [
+        {
+          "path": "/{id}",
+          "usedCaptures": []
+        }
+      ],
+      "expected": [
+        {
+          "index": 0,
+          "code": "unusedCapture"
+        }
+      ]
+    },
+    {
+      "name": "unsupplied used captures",
+      "table": [
+        {
+          "path": "/{id}"
+        }
+      ],
+      "expected": []
+    }
+  ]
+}

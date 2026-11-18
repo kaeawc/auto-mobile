@@ -1,8 +1,8 @@
 # Listing device images
 
-| Tool                             | What it does       | Requires                             |
-| -------------------------------- | ------------------ | ------------------------------------ |
-| 💿 <code>listDeviceImages</code> | List device images | <span class="tool-requires">—</span> |
+| Tool                             | What it does       | Platforms                             | Needs                             |
+| -------------------------------- | ------------------ | ------------------------------------- | --------------------------------- |
+| 💿 <code>listDeviceImages</code> | List device images | <span class="tool-platforms">—</span> | <span class="tool-needs">—</span> |
 
 `listDeviceImages` lists the configured emulators (Android) or simulators (iOS,
 tvOS, visionOS) on this host, booted or not.

@@ -202,6 +202,14 @@ final class PrototypeMapModelTests: XCTestCase {
             PrototypeMapStyle(streets: false, offlineChip: true)
         )
         XCTAssertEqual(
+            PrototypeMap.style("streets"),
+            PrototypeMapStyle(streets: false, offlineChip: true)
+        )
+        XCTAssertEqual(
+            PrototypeMap.style("streets", networkAllowed: nil),
+            PrototypeMapStyle(streets: false, offlineChip: true)
+        )
+        XCTAssertEqual(
             PrototypeMap.style("streets", networkAllowed: true),
             PrototypeMapStyle(streets: true, offlineChip: false)
         )
@@ -260,5 +268,69 @@ final class PrototypeMapModelTests: XCTestCase {
         XCTAssertEqual(action.value, .object(["value": camera.value]))
         let written = try PrototypeDataWrite.apply(data, op: .set, path: "/data/lastCamera", value: camera.value).get()
         XCTAssertEqual(written["lastCamera"], camera.value)
+    }
+
+    private func driftedCamera(_ camera: PrototypeMapCamera) -> PrototypeMapCamera {
+        PrototypeMapCamera(
+            center: PrototypeMapCoordinate(lat: camera.center.lat + 0.00000001, lng: camera.center.lng - 0.00000001),
+            zoom: camera.zoom + 0.0001, bearing: camera.bearing + 0.001, tilt: camera.tilt + 0.001
+        )
+    }
+
+    func testIdleCameraRoundsEveryField() throws {
+        let raw = PrototypeMapCamera(
+            center: PrototypeMapCoordinate(lat: 37.7749126, lng: -122.4194126),
+            zoom: 13.126, bearing: 90.16, tilt: 30.16
+        )
+        let rounded = try XCTUnwrap(PrototypeMap.idleCamera(raw, lastCamera: nil))
+        XCTAssertEqual(rounded, PrototypeMapCamera(
+            center: PrototypeMapCoordinate(lat: 37.774913, lng: -122.419413),
+            zoom: 13.13, bearing: 90.2, tilt: 30.2
+        ))
+        XCTAssertEqual(rounded.rounded, rounded)
+    }
+
+    func testIdleCameraDeduplicatesSubPrecisionDrift() {
+        let raw = PrototypeMapCamera(
+            center: PrototypeMapCoordinate(lat: 37.7749001, lng: -122.4194001),
+            zoom: 13.001, bearing: 90.01, tilt: 30.01
+        )
+        XCTAssertNil(PrototypeMap.idleCamera(driftedCamera(raw), lastCamera: raw))
+        XCTAssertNil(PrototypeMap.idleCamera(driftedCamera(raw.rounded), lastCamera: raw.rounded))
+    }
+
+    func testIdleCameraWritesChangesBeyondPrecision() throws {
+        let previous = PrototypeMapCamera(
+            center: PrototypeMapCoordinate(lat: 37.7749, lng: -122.4194), zoom: 13, bearing: 90, tilt: 30
+        )
+        for (field, value) in [
+            ("lat", 37.774901), ("lng", -122.419401), ("zoom", 13.01), ("bearing", 90.1), ("tilt", 30.1),
+        ] {
+            var fields = try XCTUnwrap(previous.value.objectFields)
+            fields[field] = .number(value)
+            let moved = try XCTUnwrap(PrototypeMap.camera(.object(fields), data: nil))
+            XCTAssertEqual(PrototypeMap.idleCamera(moved, lastCamera: previous)?.value, .object(fields), field)
+        }
+    }
+
+    func testBoundCameraDoesNotLoop() throws {
+        let initial = PrototypeMapCamera(
+            center: PrototypeMapCoordinate(lat: 37.7749, lng: -122.4194), zoom: 13, bearing: 90, tilt: 30
+        )
+        var data = ["camera": initial.value]
+        let binding: JSONValue = .object(["data": .string("/camera")])
+        var lastCamera = try XCTUnwrap(PrototypeMap.camera(binding, data: data)).rounded
+        XCTAssertNil(PrototypeMap.idleCamera(driftedCamera(initial), lastCamera: lastCamera))
+
+        let moved = PrototypeMapCamera(center: initial.center, zoom: 14, bearing: 90, tilt: 30)
+        let written = try XCTUnwrap(PrototypeMap.idleCamera(driftedCamera(moved), lastCamera: lastCamera))
+        XCTAssertEqual(written, moved)
+        lastCamera = written
+        XCTAssertNil(PrototypeMap.idleCamera(driftedCamera(moved), lastCamera: lastCamera))
+        data = try PrototypeDataWrite.apply(data, op: .set, path: "/data/camera", value: written.value).get()
+
+        let applied = try XCTUnwrap(PrototypeMap.camera(binding, data: data))
+        lastCamera = applied.rounded
+        XCTAssertNil(PrototypeMap.idleCamera(driftedCamera(applied), lastCamera: lastCamera))
     }
 }

@@ -4,11 +4,11 @@
     import UIKit
 
     private struct PrototypeMapNetworkKey: EnvironmentKey {
-        static let defaultValue = true
+        static let defaultValue: Bool? = nil
     }
 
     extension EnvironmentValues {
-        var prototypeMapNetworkAllowed: Bool {
+        var prototypeMapNetworkAllowed: Bool? {
             get { self[PrototypeMapNetworkKey.self] }
             set { self[PrototypeMapNetworkKey.self] = newValue }
         }
@@ -168,7 +168,7 @@
             var routePalette: PrototypePalette?
             var routes: [PrototypeMapRoute] = []
             var lines: [ObjectIdentifier: PrototypeMapRoute] = [:]
-            private var lastIdle: PrototypeMapCamera?
+            private var lastCamera: PrototypeMapCamera?
 
             init(_ parent: PrototypeNativeMap) { self.parent = parent }
 
@@ -177,6 +177,7 @@
                 if camera != parent.map.camera || force {
                     camera = parent.map.camera
                     if let camera = parent.map.camera {
+                        lastCamera = camera.rounded
                         let native = MKMapCamera(
                             lookingAtCenter: CLLocationCoordinate2D(
                                 latitude: camera.center.lat,
@@ -331,11 +332,11 @@
                     ),
                     bearing: mapView.camera.heading, tilt: Double(mapView.camera.pitch)
                 )
-                guard camera != lastIdle else { return }
-                lastIdle = camera
+                guard let camera = PrototypeMap.idleCamera(camera, lastCamera: lastCamera) else { return }
+                lastCamera = camera
                 // A programmatic camera change may report while SwiftUI is updating the view.
                 Task { @MainActor [weak self] in
-                    guard let self, active, lastIdle == camera,
+                    guard let self, active, lastCamera == camera,
                           parent.node.onCameraIdle?["into"]?.stringValue == into,
                           let action = try? PrototypeMap.cameraAction(into: into, camera: camera) else { return }
                     parent.model.run([action])

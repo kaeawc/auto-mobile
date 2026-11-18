@@ -11,6 +11,19 @@ struct PrototypeMapCamera: Equatable, Sendable {
     let bearing: Double
     let tilt: Double
 
+    /// Stable write-back precision: coordinates 6 decimals, zoom 2, bearing and tilt 1.
+    var rounded: PrototypeMapCamera {
+        PrototypeMapCamera(
+            center: PrototypeMapCoordinate(
+                lat: (center.lat * 1_000_000).rounded() / 1_000_000,
+                lng: (center.lng * 1_000_000).rounded() / 1_000_000
+            ),
+            zoom: (zoom * 100).rounded() / 100,
+            bearing: (bearing * 10).rounded() / 10,
+            tilt: (tilt * 10).rounded() / 10
+        )
+    }
+
     var value: JSONValue {
         .object([
             "lat": .number(center.lat), "lng": .number(center.lng), "zoom": .number(zoom),
@@ -68,10 +81,17 @@ extension PrototypeMap {
     static let maxMarkers = 500
     static let maxPoints = 2000
 
-    /// MapKit is the only iOS backend. Imported streets require the live library consent switch.
-    static func style(_ requested: String?, networkAllowed: Bool) -> PrototypeMapStyle {
+    /// MapKit is the only iOS backend. Streets require explicit host network consent.
+    static func style(_ requested: String?, networkAllowed: Bool? = nil) -> PrototypeMapStyle {
         let streets = requested == "streets"
-        return PrototypeMapStyle(streets: streets && networkAllowed, offlineChip: streets && !networkAllowed)
+        let allowed = networkAllowed == true
+        return PrototypeMapStyle(streets: streets && allowed, offlineChip: streets && !allowed)
+    }
+
+    /// Suppress MapKit drift against the latest camera applied from the spec or written at idle.
+    static func idleCamera(_ camera: PrototypeMapCamera, lastCamera: PrototypeMapCamera?) -> PrototypeMapCamera? {
+        let rounded = camera.rounded
+        return rounded == lastCamera?.rounded ? nil : rounded
     }
 
     static func camera(_ raw: JSONValue?, data: [String: JSONValue]?) -> PrototypeMapCamera? {

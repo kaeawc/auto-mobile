@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, existsSync } from "node:fs";
 import path from "node:path";
 import { toActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -15,6 +15,11 @@ export class NodeDisposableAppRegistryStore implements DisposableAppRegistryStor
     private readonly directory: () => string = resolveAutoMobileBaseDir,
     private readonly ids: IdGenerator = defaultIdGenerator,
   ) {}
+
+  /** Synchronous empty-registry fast path; never opens the file or constructs device clients. */
+  exists(): boolean {
+    return existsSync(path.join(this.directory(), DISPOSABLE_APP_REGISTRY_FILE));
+  }
 
   async read(): Promise<string | undefined> {
     try {

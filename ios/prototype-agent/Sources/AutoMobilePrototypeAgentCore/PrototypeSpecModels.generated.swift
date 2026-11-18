@@ -1,6 +1,11 @@
 // Generated from schemas/prototype-spec-contract.json; do not edit.
 // Regenerate: bun scripts/prototype/generate-prototype-spec-models.ts
 
+struct PrototypeDataWhere: Decodable, Equatable, Sendable {
+    let field: String
+    let equals: JSONValue
+}
+
 struct RequestUploadFile: Codable, Equatable, Sendable {
     let asset: String
 }

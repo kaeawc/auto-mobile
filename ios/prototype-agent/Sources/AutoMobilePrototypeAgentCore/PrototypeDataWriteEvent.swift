@@ -9,10 +9,14 @@ struct PrototypeDataWriteEvent: Equatable {
     let value: JSONValue?
     let maxItems: Int?
     let revision: Int
+    var `where`: PrototypeDataWrite.Match? = nil
+    var member: String? = nil
 
     var payload: JSONValue {
         var fields: [String: JSONValue] = ["op": .string(op.rawValue), "revision": .number(Double(revision))]
         if let key { fields["key"] = .string(key) }
+        if let match = self.where { fields["where"] = .object(["field": .string(match.field), "equals": match.equals]) }
+        if let member { fields["member"] = .string(member) }
         if let value { fields["value"] = value }
         if let maxItems { fields["maxItems"] = .number(Double(maxItems)) }
         return .object(fields)
@@ -27,6 +31,8 @@ struct PrototypeDataWriteEvent: Equatable {
         let windowed = op == .append || op == .extend || op == .prepend || op == .upsert
         let allowed: Set<String> = Set(["op", "revision"])
             .union(op == .upsert ? ["key"] : [])
+            .union(op == .set || op == .remove ? ["where"] : [])
+            .union(op == .set ? ["member"] : [])
             .union(op == .remove ? [] : ["value"])
             .union(windowed ? ["maxItems"] : [])
         guard Set(fields.keys).isSubset(of: allowed) else { return nil }
@@ -40,7 +46,33 @@ struct PrototypeDataWriteEvent: Equatable {
         if op == .extend || op == .prepend, let value = fields["value"] {
             guard case .array = value else { return nil }
         }
-        return Self(op: op, path: path, key: key, value: fields["value"], maxItems: maxItems, revision: revision)
+        var match: PrototypeDataWrite.Match?
+        if let raw = fields["where"] {
+            guard let selector = raw.objectFields, Set(selector.keys) == ["field", "equals"],
+                  let field = selector["field"]?.stringValue, validName(field),
+                  let equals = selector["equals"] else { return nil }
+            match = .init(field: field, equals: equals)
+        }
+        var member: String?
+        if let raw = fields["member"] {
+            guard match != nil, let name = raw.stringValue, validName(name) else { return nil }
+            member = name
+        }
+        return Self(
+            op: op,
+            path: path,
+            key: key,
+            value: fields["value"],
+            maxItems: maxItems,
+            revision: revision,
+            where: match,
+            member: member
+        )
+    }
+
+    private static func validName(_ name: String) -> Bool {
+        !name.isEmpty && name.utf16.count <= PrototypeLimits.maxDataPointerLength && !name.contains("/") && !name
+            .contains("~")
     }
 
     private static func safeInteger(_ value: JSONValue?, minimum: Int) -> Int? {

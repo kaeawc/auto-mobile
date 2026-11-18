@@ -200,15 +200,17 @@ export function findToolRequirementsDrift(
   return [...missing, ...featureFlagDrift(byTool, scan), ...platformTableDrift(byTool, gates)];
 }
 
-// --- docs/tools.md: one Requires cell per tool row --------------------------------------------
+// --- docs/tools.md: Platforms and Needs cells per tool row --------------------------------------
 
-const REQUIRES_HEADER = "Requires";
-const NO_REQUIREMENTS = "—";
-/** Class on every generated Requires cell; the docs stylesheet scopes the tool tables by it. */
-export const REQUIRES_CELL_CLASS = "tool-requires";
-
-/** Every device tool reaches these platforms unless its schema narrows them. */
-const DEFAULT_PLATFORMS = "android,ios";
+/** The two generated columns that end every tool table. */
+export const PLATFORMS_HEADER = "Platforms";
+export const NEEDS_HEADER = "Needs";
+/** The single column the two replaced; a table still carrying it is rewritten. */
+const LEGACY_REQUIRES_HEADER = "Requires";
+const NONE = "—";
+/** Classes on the generated cells; the docs stylesheet and script find the tool tables by them. */
+export const PLATFORMS_CELL_CLASS = "tool-platforms";
+export const NEEDS_CELL_CLASS = "tool-needs";
 
 interface KeyEntry {
   emoji: string;
@@ -281,36 +283,36 @@ function platformBadge(platform: string): string {
   return key === undefined ? platform : emojiSpan(key.emoji, key.label);
 }
 
-/**
- * The docs cell for a requirement list: an emoji per gate (a feature flag keeps its key), then
- * an emoji per platform the tool drives when they differ from the Android and iOS every device
- * tool reaches. Each emoji carries its meaning as hover text; the key table explains them.
- */
-export function renderRequiresCell(requires: readonly string[]): string {
-  const gates = requires.filter((entry) => !entry.startsWith("platform:")).map(gateBadge);
+/** The Platforms cell: an emoji per platform the tool drives, or `—` for a host-only tool. */
+export function renderPlatformsCell(requires: readonly string[]): string {
   const platforms = requires
     .filter((entry) => entry.startsWith("platform:"))
-    .map((entry) => entry.slice("platform:".length));
-  const listed = platforms.length > 0 && platforms.join(",") !== DEFAULT_PLATFORMS;
-  const parts = [...gates, ...(listed ? [platforms.map(platformBadge).join(" ")] : [])];
-  const body = parts.length > 0 ? parts.join(" · ") : NO_REQUIREMENTS;
-  return `<span class="${REQUIRES_CELL_CLASS}">${body}</span>`;
+    .map((entry) => platformBadge(entry.slice("platform:".length)));
+  return `<span class="${PLATFORMS_CELL_CLASS}">${platforms.length > 0 ? platforms.join(" ") : NONE}</span>`;
 }
 
-// --- docs/tools.md: the emoji key for the Requires column -------------------------------------
+/** The Needs cell: an emoji per gate (a feature flag keeps its key), or `—` when there is none. */
+export function renderNeedsCell(requires: readonly string[]): string {
+  const gates = requires.filter((entry) => !entry.startsWith("platform:")).map(gateBadge);
+  return `<span class="${NEEDS_CELL_CLASS}">${gates.length > 0 ? gates.join(" · ") : NONE}</span>`;
+}
+
+// --- docs/tools.md: the emoji key for the Platforms and Needs columns -------------------------------------
 
 export const REQUIRES_KEY_START = "<!-- requires-key:start -->";
 export const REQUIRES_KEY_END = "<!-- requires-key:end -->";
 
-/** The key table's rows: header first, then one row per gate and platform emoji. */
+/** The key table's rows: header first, then one row per platform emoji and per gate emoji. */
 function requiresKeyRows(): string[][] {
   return [
-    ["Emoji", "Requirement", "Meaning"],
-    ...[...GATE_KEY, ...Object.values(PLATFORM_KEY)].map((key) => [
+    ["Emoji", "Column", "Requirement", "Meaning"],
+    ...Object.values(PLATFORM_KEY).map((key) => [
       key.emoji,
+      PLATFORMS_HEADER,
       `\`${key.entry}\``,
       key.meaning,
     ]),
+    ...GATE_KEY.map((key) => [key.emoji, NEEDS_HEADER, `\`${key.entry}\``, key.meaning]),
   ];
 }
 
@@ -354,7 +356,7 @@ export function findRequiresKeyDrift(markdown: string): string[] {
   const lines = markdown.split("\n");
   const block = keyBlock(lines);
   if (block === undefined) {
-    return [`Requires key markers ${REQUIRES_KEY_START} / ${REQUIRES_KEY_END} are missing`];
+    return [`Key markers ${REQUIRES_KEY_START} / ${REQUIRES_KEY_END} are missing`];
   }
   const actual = lines
     .slice(block.start + 1, block.end)
@@ -364,7 +366,7 @@ export function findRequiresKeyDrift(markdown: string): string[] {
   const expected = requiresKeyRows().map((values) => values.join(" | "));
   return actual.join("\n") === expected.join("\n")
     ? []
-    : ["Requires key table differs from the generated key"];
+    : ["Platforms and Needs key table differs from the generated key"];
 }
 
 function cells(line: string): string[] {
@@ -412,50 +414,68 @@ function toolTables(lines: readonly string[]): ToolTable[] {
   return tables;
 }
 
-/** Rewrite every tool table so its last column is `Requires`, filled from `requires`. */
-export function applyRequiresColumn(
+/** How many trailing generated columns `header` carries: 2 (Platforms, Needs), 1 (Requires) or 0. */
+function generatedColumnCount(header: readonly string[]): number {
+  if (header.at(-2) === PLATFORMS_HEADER && header.at(-1) === NEEDS_HEADER) {
+    return 2;
+  }
+  return header.at(-1) === LEGACY_REQUIRES_HEADER ? 1 : 0;
+}
+
+/** Rewrite every tool table so it ends with `Platforms` and `Needs`, filled from `requires`. */
+export function applyRequirementColumns(
   markdown: string,
   requires: ReadonlyMap<string, readonly string[]>,
 ): string {
   const lines = markdown.split("\n");
   for (const table of toolTables(lines)) {
     const header = cells(lines[table.header]);
-    const hasColumn = header.at(-1) === REQUIRES_HEADER;
-    const width = hasColumn ? header.length : header.length + 1;
-    lines[table.header] = row(hasColumn ? header : [...header, REQUIRES_HEADER]);
-    lines[table.header + 1] = row(Array.from({ length: width }, () => "---"));
+    const generated = generatedColumnCount(header);
+    const kept = header.slice(0, header.length - generated);
+    lines[table.header] = row([...kept, PLATFORMS_HEADER, NEEDS_HEADER]);
+    lines[table.header + 1] = row(Array.from({ length: kept.length + 2 }, () => "---"));
     for (const index of table.body) {
       const values = cells(lines[index]);
-      const kept = hasColumn ? values.slice(0, -1) : values;
+      const keptValues = values.slice(0, values.length - generated);
+      const current = generated === 2 ? values.slice(-2) : [NONE, NONE];
       const tool = rowTool(lines[index]);
       const toolRequires = tool === undefined ? undefined : requires.get(tool);
-      const current = hasColumn ? (values.at(-1) ?? NO_REQUIREMENTS) : NO_REQUIREMENTS;
-      lines[index] = row([...kept, toolRequires ? renderRequiresCell(toolRequires) : current]);
+      const filled = toolRequires
+        ? [renderPlatformsCell(toolRequires), renderNeedsCell(toolRequires)]
+        : current;
+      lines[index] = row([...keptValues, ...filled]);
     }
   }
   return lines.join("\n");
 }
 
-/** Tool rows whose Requires cell disagrees with the definitions (formatting-insensitive). */
-export function findDocsRequiresDrift(
+/** Tool rows whose Platforms or Needs cell disagrees with the definitions (formatting-insensitive). */
+export function findDocsRequirementDrift(
   markdown: string,
   requires: ReadonlyMap<string, readonly string[]>,
 ): string[] {
   const lines = markdown.split("\n");
   const problems: string[] = [];
   for (const table of toolTables(lines)) {
-    if (cells(lines[table.header]).at(-1) !== REQUIRES_HEADER) {
-      problems.push(`line ${table.header + 1}: tool table has no ${REQUIRES_HEADER} column`);
+    if (generatedColumnCount(cells(lines[table.header])) !== 2) {
+      problems.push(
+        `line ${table.header + 1}: tool table does not end with ${PLATFORMS_HEADER} and ${NEEDS_HEADER} columns`,
+      );
       continue;
     }
     for (const index of table.body) {
       const tool = rowTool(lines[index]);
       const toolRequires = tool === undefined ? undefined : requires.get(tool);
-      const actual = cells(lines[index]).at(-1);
-      if (toolRequires !== undefined && actual !== renderRequiresCell(toolRequires)) {
-        problems.push(
-          `${tool}: docs say "${actual}", definitions say "${renderRequiresCell(toolRequires)}"`,
-        );
+      if (toolRequires === undefined) {
+        continue;
+      }
+      const [platforms, needs] = cells(lines[index]).slice(-2);
+      const expected = [renderPlatformsCell(toolRequires), renderNeedsCell(toolRequires)];
+      if (platforms !== expected[0]) {
+        problems.push(`${tool}: docs Platforms "${platforms}", definitions say "${expected[0]}"`);
+      }
+      if (needs !== expected[1]) {
+        problems.push(`${tool}: docs Needs "${needs}", definitions say "${expected[1]}"`);
       }
     }
   }
@@ -470,5 +490,7 @@ export function findMissingToolRows(markdown: string, tools: readonly string[]):
   );
   return tools
     .filter((tool) => !listed.has(tool))
-    .map((tool) => `${tool}: page has no \`| Tool | What it does | Requires |\` row for it`);
+    .map(
+      (tool) => `${tool}: page has no \`| Tool | What it does | Platforms | Needs |\` row for it`,
+    );
 }

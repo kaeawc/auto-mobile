@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { load } from "js-yaml";
+import { dropGitIgnored } from "./lib/gitIgnored";
 
 const COPIED_FILES = new Set(["changelog.md", "contributing.md"]);
 const EXCLUDED_FILES = new Set([
@@ -69,7 +70,15 @@ async function markdownFiles(docsDir: string): Promise<string[]> {
       files.push(file);
     }
   }
-  return files.sort();
+  // Ignored files (docs/changelog.md is generated locally) do not exist on a CI checkout.
+  const repoRoot = path.dirname(docsDir);
+  const tracked = new Set(
+    dropGitIgnored(
+      repoRoot,
+      files.map((file) => `docs/${file}`),
+    ),
+  );
+  return files.filter((file) => tracked.has(`docs/${file}`)).sort();
 }
 
 /** Parses mkdocs.yml into its top-level keys (empty when it is not a mapping). */

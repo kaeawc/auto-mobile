@@ -83,7 +83,7 @@ for package in "${TESTABLE_PACKAGES[@]}"; do
   fi
 
   # Extract line coverage using llvm-cov export (binaries must precede -instr-profile)
-  coverage_json=$(xcrun llvm-cov export "${binary_args[@]}" -instr-profile "$profile" -summary-only 2>/dev/null || true)
+  coverage_json=$(xcrun llvm-cov export ${binary_args[@]+"${binary_args[@]}"} -instr-profile "$profile" -summary-only 2>/dev/null || true)
   if [[ -z "$coverage_json" ]]; then
     echo "Warning: llvm-cov export failed for ${package}" >&2
     continue

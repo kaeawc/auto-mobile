@@ -501,6 +501,7 @@ nav:
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-19: Headless CarPlay on TVOut with a StarkConfig": devlog/2026-11-19-headless-carplay-tvout-stark.md
       - "2026-11-17: Docs navigation grouped by task and platform": devlog/2026-11-17-docs-navigation-by-task.md
       - "2026-11-17: Material 3 Expressive component availability at the pinned Compose BOM": devlog/2026-11-17-m3-expressive-component-availability.md
       - "2026-11-16: Android Auto provisioning accepts the welcome screen": devlog/2026-11-16-android-auto-terms-accepted-by-provisioning.md

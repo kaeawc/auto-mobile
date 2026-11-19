@@ -148,6 +148,19 @@ load yq-helpers
   [[ " $output " == *' :prototype-compose:createDebugUnitTestCoverageReport '* ]]
 }
 
+@test "PR and merge Kotlin coverage run prototype release-variant unit tests" {
+  require_mikefarah_yq
+  local workflow module
+  for workflow in "$WF" .github/workflows/merge.yml; do
+    run yq -r '.jobs."kotlin-code-coverage".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
+    [ "$status" -eq 0 ]
+    for module in prototype-compose prototype-saved; do
+      [[ " $output " == *" :${module}:testDebugUnitTest "* ]]
+      [[ " $output " == *" :${module}:testReleaseUnitTest "* ]]
+    done
+  done
+}
+
 @test "Kotlin badge includes the prototype-compose Android debug coverage report" {
   local root="$BATS_TEST_TMPDIR/repo"
   local report_dir="$root/android/prototype-compose/build/reports/coverage/test/debug"

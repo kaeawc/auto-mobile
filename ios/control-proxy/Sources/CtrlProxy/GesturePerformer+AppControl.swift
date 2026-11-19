@@ -84,21 +84,21 @@ import os
 
         public func launchApp(bundleId: String) throws {
             try catchingObjCException {
-                let app = XCUIApplication(bundleIdentifier: bundleId)
+                let app = XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId)
                 app.launch()
             }
         }
 
         public func terminateApp(bundleId: String) throws {
             try catchingObjCException {
-                let app = XCUIApplication(bundleIdentifier: bundleId)
+                let app = XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId)
                 app.terminate()
             }
         }
 
         public func activateApp(bundleId: String) throws {
             try catchingObjCException {
-                let app = XCUIApplication(bundleIdentifier: bundleId)
+                let app = XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId)
                 app.activate()
             }
         }
@@ -118,7 +118,7 @@ import os
             // permission per request, so each is isolated and accounted per-permission;
             // this only matters for a hypothetical multi-resource single request.
             try catchingObjCException {
-                let app = XCUIApplication(bundleIdentifier: bundleId)
+                let app = XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId)
                 var resetResourceNames = Set<String>()
                 for raw in resources {
                     guard let resettableResourceNames = Self.expandedPrivacyResourceNames(for: raw) else {

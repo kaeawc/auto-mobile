@@ -17,6 +17,8 @@
 #   AAOS_SMOKE_SKIP_IMAGE_INSTALL 1 skips sdkmanager (image already installed)
 #   AAOS_SMOKE_DIAGNOSTICS_SCRIPT diagnostics collector (default:
 #                              scripts/android/collect-emulator-diagnostics.sh; tests stub it)
+#   ANDROID_AVD_HOME           AVD directory shared by avdmanager and the emulator (default:
+#                              ${ANDROID_USER_HOME:-$HOME/.android}/avd); exported to the smoke
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,6 +27,8 @@ project_root="$(cd "${script_dir}/../../.." && pwd)"
 source "${project_root}/scripts/ios/run_with_timeout.sh"
 # shellcheck source=scripts/ci/emulator-smoke/install-system-image.sh
 source "${project_root}/scripts/ci/emulator-smoke/install-system-image.sh"
+# shellcheck source=scripts/ci/emulator-smoke/avd-home.sh
+source "${project_root}/scripts/ci/emulator-smoke/avd-home.sh"
 
 if [[ $# -ne 0 ]]; then
   echo "usage: run-aaos-smoke.sh (no arguments; configure with AAOS_SMOKE_* env)" >&2
@@ -39,6 +43,7 @@ diagnostics_collected=0
 
 collect_diagnostics() {
   diagnostics_collected=1
+  record_avd_homes "${out_dir}/avd-homes.txt"
   # Boot diagnostics (KVM, host memory/disk, emulator log tail, adb devices, logcat) the way
   # .github/actions/android-emulator records them; best-effort and never masks the status.
   bash "${diagnostics_script}" "${out_dir}/diagnostics" "$1" || true
@@ -110,6 +115,10 @@ if [[ "${image_api}" != "${expected_api}" ]]; then
 fi
 phase="creating ${out_dir}"
 mkdir -p "${out_dir}"
+# startDevice createIfMissing (avdmanager) and the emulator must share one AVD directory, or the
+# AVD just created is "not found".
+phase="creating the AVD directory"
+pin_avd_home
 
 if [[ "${AAOS_SMOKE_SKIP_IMAGE_INSTALL:-0}" != "1" ]]; then
   phase="locating sdkmanager"

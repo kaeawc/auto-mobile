@@ -259,6 +259,8 @@ const INSTALLER_ERROR_EXEMPTION =
   "Host installer library errors; no MCP/tool boundary until #12257 wires the installer.";
 
 const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
+  "utils/ios/AXBridgePreflightError":
+    "Session companion preflight rejects start with an ActionableError before launching; the lifecycle listener logs it. Its code is local diagnostic state, not a structured daemon/session-broker refusal field.",
   "features/portReverse/PortReverseError":
     "portReverse (#17099) catches PortReverseError in its own handler and returns errorCode and ports in its structured result (portReverseResultSchema); it is never thrown through the refusal paths.",
   "features/prototype/bundle/bundleContract":

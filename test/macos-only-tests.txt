@@ -126,3 +126,7 @@ macos test/utils/runtimeCompatibility.test.ts                            # impor
 macos test/devices/appleTvVisionRuntimeSupportedDeviceTypes.test.ts      # imports only the tvOS and visionOS provisioner checks
 
 portable test/features/observe/ios/CtrlProxyAccessibilityFocus.test.ts # delegate and decoder use the fake harness
+
+portable test/utils/ios/AXBridgeSessions.test.ts # injected preflight and launcher only
+portable test/utils/ios/AXBridgeProcessLauncher.test.ts # fake child streams and FakeTimer only
+portable test/utils/ios/AXBridgeClient.test.ts # fake transport and FakeTimer only

@@ -1,7 +1,11 @@
 import { parsePsSnapshot } from "../../devices/bootAdmission/psSnapshot";
 import type { HostProcessRow } from "../../models/HostProcessRow";
+import { findIosSimulatorAppProcessId } from "../../utils/ios-cmdline-tools/IosCrashBackend";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { logger } from "../../utils/logger";
-import type { MonitoredDevice } from "./PerformanceMonitorTypes";
+import type { MonitoredDevice, SimCtlClientFactory } from "./PerformanceMonitorTypes";
+
+const PID_LOOKUP_TIMEOUT_MS = 5_000;
 
 export type IOSPerformanceProcessResolver = (
   deviceId: string,
@@ -11,9 +15,30 @@ export type IOSPerformanceProcessResolver = (
 /** One lazy host snapshot per sampling tick, shared by every iOS device and metric. */
 export function createIOSPerformanceProcessResolver(
   readSnapshot: () => Promise<{ stdout: string }>,
+  simCtlClientFactory: SimCtlClientFactory,
 ): IOSPerformanceProcessResolver {
   let snapshot: Promise<HostProcessRow[]> | undefined;
   return async (deviceId, packageName) => {
+    if (resolveIosDeviceKind({ deviceId }) !== "simulator") {
+      return null;
+    }
+
+    // Resolve against this simulator's launchd on every due tick since apps can restart.
+    let pid: number | null;
+    try {
+      const { stdout } = await simCtlClientFactory
+        .create(deviceId)
+        .executeCommandArgs(["spawn", deviceId, "launchctl", "list"], PID_LOOKUP_TIMEOUT_MS);
+      pid = findIosSimulatorAppProcessId(stdout, packageName);
+    } catch (error) {
+      // The simulator can shut down between ticks. Publish unavailable host metrics this tick.
+      logger.warn(`[PerformanceMonitor] iOS process lookup failed for ${deviceId}`, error);
+      return null;
+    }
+    if (pid === null) {
+      return null;
+    }
+
     snapshot ??= readSnapshot()
       .then(({ stdout }) => parsePsSnapshot(stdout).rows)
       .catch((error) => {
@@ -22,11 +47,7 @@ export function createIOSPerformanceProcessResolver(
         return [];
       });
     const rows = await snapshot;
-    // Re-resolve from each fresh snapshot: an app can exit or restart with a new PID.
-    return (
-      rows.find((row) => row.command.includes(deviceId) && row.command.includes(packageName)) ??
-      null
-    );
+    return rows.find((row) => row.pid === pid) ?? null;
   };
 }
 

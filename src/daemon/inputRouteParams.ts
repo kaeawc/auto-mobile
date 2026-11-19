@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   SUPPORTED_INPUT_KEYS,
   isInputKeyName,

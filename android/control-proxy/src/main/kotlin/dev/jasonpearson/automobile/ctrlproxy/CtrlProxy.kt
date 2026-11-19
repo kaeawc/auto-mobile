@@ -2,34 +2,22 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
-import android.accessibilityservice.GestureDescription
-import android.annotation.SuppressLint
-import android.app.Activity
 import android.app.admin.DevicePolicyManager
-import android.content.BroadcastReceiver
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Build
-import android.os.Handler
 import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import android.view.Display
 import android.view.View
-import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
-import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
-import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitRequest
-import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
-import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
-import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
@@ -63,6 +51,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHostLink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureValueStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeController
@@ -75,8 +64,6 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.GlobalActionResult
-import dev.jasonpearson.automobile.protocol.SdkEventBatch
-import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import java.io.File
@@ -92,7 +79,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 
 // AccessibilityEvent constants are inlined on every API level; preserve the subscribed values.
 private const val SPEECH_STATE_CHANGE_EVENT = 0x02000000 // TYPE_SPEECH_STATE_CHANGE, API 33.
@@ -137,7 +123,7 @@ class CtrlProxy : AccessibilityService() {
 
   companion object {
     private const val TAG = "CtrlProxy"
-    private const val XR_SPATIAL_FEATURE = "android.software.xr.api.spatial"
+    internal const val XR_SPATIAL_FEATURE = "android.software.xr.api.spatial"
 
     // File name for app-scoped storage
 
@@ -349,7 +335,7 @@ class CtrlProxy : AccessibilityService() {
    * The one path every request result takes to the wire (#11877): running check, broadcast guard,
    * perf flush and routing. Declared ahead of the eagerly built [textInputController].
    */
-  private val hierarchyExtractFrames =
+  internal val hierarchyExtractFrames =
     HierarchyExtractFrameSender(
       transport = hierarchyExtractTransport(),
       resultBroadcaster = resultBroadcaster,
@@ -360,7 +346,6 @@ class CtrlProxy : AccessibilityService() {
       resultBroadcaster = resultBroadcaster,
     )
   private val recompositionStore = RecompositionStore()
-  private val frameMetricsStore = FrameMetricsStore()
   internal val workStats = CtrlProxyWorkStats()
   internal val viewHierarchyExtractor: ViewHierarchyExtractor by lazy {
     createViewHierarchyExtractor()
@@ -402,8 +387,6 @@ class CtrlProxy : AccessibilityService() {
     prettyPrint = false
     encodeDefaults = true
   }
-  private val jsonLenient = Json { ignoreUnknownKeys = true }
-
   internal val perfProvider = PerfProvider.instance
   private val timeProvider: TimeProvider = SystemTimeProvider()
   internal lateinit var webSocketServer: WebSocketServer
@@ -516,6 +499,14 @@ class CtrlProxy : AccessibilityService() {
       CoroutinePrototypeScheduler(serviceScope),
     )
   }
+
+  // Overlay shows only reconcile plain values. Secure storage belongs to Activity hosts and is
+  // touched here solely by explicit reset/removal.
+  internal suspend fun purgePrototypeSecureStorage(id: String): Int =
+    kotlinx.coroutines.withContext(Dispatchers.IO) {
+      PrototypeSecureValueStores.inDirectory(prototypeStorageRoot(filesDir)).delete(id)
+    }
+
   internal val savedPrototypeController by lazy {
     SavedPrototypeController(
       SavedPrototypeStores.inDirectory(File(filesDir, "saved-prototypes")),
@@ -525,8 +516,9 @@ class CtrlProxy : AccessibilityService() {
       pinner = PinnedPrototypeShortcuts(AndroidPinnedShortcutPlatform(this)),
       // Deleting a saved prototype also removes the values its storage block kept.
       clearStorage = { id ->
-        if (::prototypeController.isInitialized) prototypeController.clearStoredValues(id)
-        else prototypeStorage.clear(id)
+        if (::prototypeController.isInitialized)
+          prototypeController.clearStoredValues(id, keepSessionValues = true)
+        else purgePrototypeSecureStorage(id) + prototypeStorage.clear(id)
       },
     )
   }
@@ -756,28 +748,9 @@ class CtrlProxy : AccessibilityService() {
   }
   // Kept as a Lazy so teardown releases cached window contexts only if XR reads created any.
   private val logicalSizeReaderDelegate = lazy { createDisplayLogicalSizeReader(this) }
-  private val displayController by lazy {
+  internal val displayController by lazy {
     DisplayController(
-      host =
-        object : DisplayController.Host {
-          override fun displayManager() =
-            getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
-
-          override fun windowManager() = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-
-          private val insetsProvider by lazy { createDisplayInsetsProvider(this@CtrlProxy) }
-
-          override fun displayInsetsProvider() = insetsProvider
-
-          override fun frameworkDimenPx(name: String): Int {
-            val id = resources.getIdentifier(name, "dimen", "android")
-            return if (id > 0) resources.getDimensionPixelSize(id) else 0
-          }
-
-          override fun isXrSpatialDevice() = packageManager.hasSystemFeature(XR_SPATIAL_FEATURE)
-
-          override fun densityDpi() = resources.displayMetrics.densityDpi
-        },
+      host = CtrlProxyDisplayHost(this),
       logicalSizeReader = logicalSizeReaderDelegate.value,
     )
   }
@@ -792,66 +765,7 @@ class CtrlProxy : AccessibilityService() {
   }
   internal val hierarchyController by lazy {
     HierarchyController(
-      host =
-        object : HierarchyController.Host {
-          override fun currentFrameContext() = this@CtrlProxy.currentFrameContext()
-
-          override fun selectDisplayWindows(displayId: Int?) =
-            viewHierarchyExtractor.selectDisplayWindows(this@CtrlProxy, displayId)
-
-          override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
-
-          override fun lastWindowState() = this@CtrlProxy.lastWindowState
-
-          override fun rotationProvenance() = this@CtrlProxy.rotationProvenance
-
-          override fun occlusionEnabled() = accessibilityFlags.occlusionEnabled
-
-          override fun wakefulness() = deviceInfoController.getWakefulness()
-
-          override fun foregroundActivity(
-            rootPackage: String?,
-            windowClass: String?,
-            windowPackage: String?,
-          ) = deviceInfoController.getForegroundActivity(rootPackage, windowClass, windowPackage)
-
-          override fun isEmulator() = deviceInfoController.getIsEmulator()
-
-          override fun accessibilityTool() = deviceInfoController.getAccessibilityTool()
-
-          override fun isServerRunning() = isWebSocketRunning()
-
-          override fun connectionCount() = webSocketServer.getConnectionCount()
-
-          override fun releaseRequestOwner(requestId: String?) {
-            webSocketServerOrNull?.releaseRequestOwner(requestId)
-          }
-
-          override suspend fun broadcastHierarchyWithPerf(
-            routeByRequestId: Boolean,
-            messageBuilder: (perfTiming: JsonElement?) -> String,
-          ) = webSocketServer.broadcastWithPerf(routeByRequestId, messageBuilder)
-
-          override suspend fun broadcastHierarchyWithPerfSync(
-            routeByRequestId: Boolean,
-            messageBuilder: (perfTiming: JsonElement?) -> String,
-          ) = webSocketServer.broadcastWithPerfSync(routeByRequestId, messageBuilder)
-
-          override suspend fun broadcastHierarchyExtractFrame(
-            frame: ErrorResponse?,
-            externallyCorrelated: Boolean,
-          ) = hierarchyExtractFrames.send(frame, externallyCorrelated)
-
-          override fun launchRequestScope(
-            requestId: String?,
-            block: suspend CoroutineScope.() -> Unit,
-          ) = this@CtrlProxy.launchRequestScope(requestId, block)
-
-          override fun openFileOutput(filename: String, mode: Int) =
-            this@CtrlProxy.openFileOutput(filename, mode)
-
-          override fun filesDir() = this@CtrlProxy.filesDir
-        },
+      host = CtrlProxyHierarchyHost(this),
       serviceScope = serviceScope,
       viewHierarchyExtractor = viewHierarchyExtractor,
       displayController = displayController,
@@ -866,40 +780,14 @@ class CtrlProxy : AccessibilityService() {
   }
   private val screenshotController by lazy {
     ScreenshotController(
-      host =
-        object : ScreenshotController.Host {
-          override fun takeScreenshot(displayId: Int, callback: TakeScreenshotCallback) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-              this@CtrlProxy.takeScreenshot(displayId, mainExecutor, callback)
-            }
-          }
-
-          override fun rotationProvenance() = this@CtrlProxy.rotationProvenance
-        },
+      host = CtrlProxyScreenshotHost(this),
       displayController = displayController,
       timeProvider = timeProvider,
     )
   }
   private val interactionEventController by lazy {
     InteractionEventController(
-      host =
-        object : InteractionEventController.Host {
-          override fun connectionCount() = webSocketConnectionCount()
-
-          override fun observerSessionGeneration() = webSocketObserverGeneration()
-
-          override fun isServerRunning() = isWebSocketRunning()
-
-          override suspend fun broadcast(message: String) {
-            webSocketServer.broadcast(message)
-          }
-
-          override fun lastWindowClassName() = this@CtrlProxy.lastWindowClassName
-
-          override fun launchInServiceScope(block: suspend CoroutineScope.() -> Unit) {
-            serviceScope.launch(block = block)
-          }
-        },
+      host = CtrlProxyInteractionEventHost(this),
       timeProvider = timeProvider,
       jsonCompact = jsonCompact,
     )
@@ -993,34 +881,7 @@ class CtrlProxy : AccessibilityService() {
    */
   internal val textInputController =
     TextInputController(
-      host =
-        object : TextInputController.Host {
-          override fun launchRequestScope(
-            requestId: String?,
-            block: suspend CoroutineScope.() -> Unit,
-          ) {
-            this@CtrlProxy.launchRequestScope(requestId, block)
-          }
-
-          override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
-
-          override fun screenDimensions(displayId: Int) =
-            displayController.getScreenDimensions(displayId)
-
-          override fun hideSoftKeyboard() {
-            softKeyboardController.setShowMode(AccessibilityService.SHOW_MODE_HIDDEN)
-          }
-
-          override suspend fun performImeNavigationAction(actionId: Int) =
-            CtrlProxyIme.current()?.performNavigationAction(actionId)
-
-          override fun sendKeycodeEnter() =
-            Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0
-
-          override suspend fun publishSettledHierarchy() {
-            hierarchyController.publishSettledHierarchy()
-          }
-        },
+      host = CtrlProxyTextInputHost(this),
       serviceScope = serviceScope,
       perfProvider = perfProvider,
       timeProvider = timeProvider,
@@ -1033,33 +894,7 @@ class CtrlProxy : AccessibilityService() {
   /** CtrlProxyIme commitText, its cancellation tombstones, and the keyboard profile requests. */
   internal val imeController by lazy {
     ImeController(
-      host =
-        object : ImeController.Host {
-          override fun launchRequestScope(
-            requestId: String?,
-            block: suspend CoroutineScope.() -> Unit,
-          ) {
-            this@CtrlProxy.launchRequestScope(requestId, block)
-          }
-
-          override fun currentIme(): ImeController.ImeTarget? =
-            CtrlProxyIme.current()?.let { ime ->
-              object : ImeController.ImeTarget {
-                override fun commitText(
-                  request: ImeCommitRequest,
-                  onResult: (ImeCommitResult) -> Unit,
-                ) = ime.commitText(request, onResult)
-              }
-            }
-
-          override fun setActiveProfile(id: String, onComplete: (Boolean) -> Unit) =
-            CtrlProxyIme.setActiveProfile(id, onComplete)
-
-          override fun keyboardProfileStore(): KeyboardProfileStore =
-            SharedPreferencesKeyboardProfileStore(this@CtrlProxy)
-
-          override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
-        },
+      host = CtrlProxyImeHost(this),
       timeProvider = timeProvider,
       jsonCompact = jsonCompact,
       resultSender = resultSender,
@@ -1068,27 +903,7 @@ class CtrlProxy : AccessibilityService() {
   /** Recomposition tracking, network mock rules and error simulation broadcasts to the app. */
   internal val sdkControlController by lazy {
     SdkControlController(
-      host =
-        object : SdkControlController.Host {
-          override fun sendBroadcast(intent: Intent) = this@CtrlProxy.sendBroadcast(intent)
-
-          override fun sendOrderedBroadcast(intent: Intent, resultReceiver: BroadcastReceiver) =
-            this@CtrlProxy.sendOrderedBroadcast(
-              intent,
-              null,
-              resultReceiver,
-              null,
-              Activity.RESULT_OK,
-              null,
-              null,
-            )
-
-          override fun replyNetworkMockRules(result: SetNetworkMockRulesResult) {
-            if (isWebSocketRunning()) {
-              serviceScope.launch { webSocketServer.broadcast(result) }
-            }
-          }
-        },
+      host = CtrlProxySdkControlHost(this),
       recompositionStore = recompositionStore,
     )
   }
@@ -1098,31 +913,7 @@ class CtrlProxy : AccessibilityService() {
    */
   internal val gestureController =
     GestureController(
-      host =
-        object : GestureController.Host {
-          override fun dispatchGesture(
-            gesture: GestureDescription,
-            callback: GestureResultCallback,
-            handler: Handler,
-          ) = this@CtrlProxy.dispatchGesture(gesture, callback, handler)
-
-          override fun currentFrameContext() = this@CtrlProxy.currentFrameContext()
-
-          override fun launchRequestScope(
-            requestId: String?,
-            block: suspend CoroutineScope.() -> Unit,
-          ) {
-            this@CtrlProxy.launchRequestScope(requestId, block)
-          }
-
-          override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
-
-          override suspend fun settledHierarchy(displayId: Int?) =
-            hierarchyController.settledHierarchy(displayId)
-
-          override suspend fun publishHierarchy(hierarchy: ViewHierarchy) =
-            hierarchyController.broadcastHierarchyUpdate(hierarchy, sync = true)
-        },
+      host = CtrlProxyGestureHost(this),
       scope = { serviceScope },
       reporting =
         GestureReportingDependencies(
@@ -1132,8 +923,11 @@ class CtrlProxy : AccessibilityService() {
         ),
       gestureThreadFactory = { gestureThreadFactory() },
     )
-  @Volatile private var lastWindowState = AccessibilityEventDispatcher.WindowState(null, null)
-  private val lastWindowClassName: String?
+  @Volatile
+  internal var lastWindowState = AccessibilityEventDispatcher.WindowState(null, null)
+    private set
+
+  internal val lastWindowClassName: String?
     get() = lastWindowState.className
 
   internal val frameContextGate =
@@ -1236,7 +1030,7 @@ class CtrlProxy : AccessibilityService() {
 
   internal val ownWindowTypeMemo = OwnWindowTypeMemo(nowMs = SystemClock::elapsedRealtime)
 
-  private fun currentFrameContext(): String = frameContextGate.current()
+  internal fun currentFrameContext(): String = frameContextGate.current()
 
   internal val accessibilityFlags =
     AccessibilityFlagsController(
@@ -1264,109 +1058,44 @@ class CtrlProxy : AccessibilityService() {
   internal var logcatReader: LogcatReader? = null
   internal var logEventBuffer: BoundedLogBuffer? = null
 
-  private val commandReceiver =
-    CommandReceiver(
-      serviceScope,
-      object : CommandHost {
-        override suspend fun handleCommand(intent: Intent) = this@CtrlProxy.handleCommand(intent)
-
-        override fun sendFailure(error: String?) = sendResult(success = false, error = error)
-      },
-    )
-
-  private val navigationEventReceiver =
-    NavigationEventReceiver(
-      sdkEventBatchProcessor = { sdkEventBatchProcessor },
-      timeProvider = timeProvider,
-    )
-
-  private val recompositionReceiver =
-    RecompositionSnapshotReceiver(
-      jsonLenient = jsonLenient,
-      recompositionStore = recompositionStore,
-    )
-
-  private val frameMetricsReceiver =
-    FrameMetricsSnapshotReceiver(
-      jsonLenient = jsonLenient,
-      frameMetricsStore = frameMetricsStore,
+  internal val receivers =
+    CtrlProxyReceivers(
+      context = this,
       scope = serviceScope,
-      isRunning = { isWebSocketRunning() },
-      broadcast = { response -> webSocketServer.broadcast(response) },
-    )
+      timeProvider = timeProvider,
+      recompositionStore = recompositionStore,
+      host =
+        object : CtrlProxyReceivers.Host {
+          override suspend fun handleCommand(intent: Intent) = this@CtrlProxy.handleCommand(intent)
 
-  private val packageReceiver =
-    PackageEventReceiver(
-      serviceScope,
-      object : PackageEventHost {
-        override fun isSystemApp(packageName: String) =
-          packageManager.systemAppFlag(packageName) {
-            Log.w(TAG, "Failed to resolve system flag for $packageName", it)
-          }
+          override fun sendFailure(error: String?) = sendResult(success = false, error = error)
 
-        override suspend fun onPackageEvent(event: PackageBroadcastEvent) =
-          deviceEvents.packageEvent(event)
-      },
-    )
+          override fun isSystemApp(packageName: String) =
+            packageManager.systemAppFlag(packageName) {
+              Log.w(TAG, "Failed to resolve system flag for $packageName", it)
+            }
 
-  private val failureReportHost =
-    object : FailureReportHost {
-      override suspend fun onHandledException(report: HandledExceptionReport) =
-        deviceEvents.handledException(report)
+          override suspend fun onPackageEvent(event: PackageBroadcastEvent) =
+            deviceEvents.packageEvent(event)
 
-      override suspend fun onCrash(report: CrashReport) = deviceEvents.crash(report)
-    }
+          override suspend fun onHandledException(report: HandledExceptionReport) =
+            deviceEvents.handledException(report)
 
-  private val handledExceptionReceiver = HandledExceptionReceiver(serviceScope, failureReportHost)
+          override suspend fun onCrash(report: CrashReport) = deviceEvents.crash(report)
 
-  private val crashReceiver = CrashReceiver(serviceScope, failureReportHost)
+          override fun refreshPrototypeWindow() = this@CtrlProxy.refreshPrototypeWindow()
 
-  private val screenStateReceiver =
-    ScreenStateReceiver(
-      object : ScreenStateHost {
-        override fun refreshPrototypeWindow() = this@CtrlProxy.refreshPrototypeWindow()
+          override fun extractHierarchyNow() = hierarchyController.extractNow()
 
-        override fun extractHierarchyNow() = hierarchyController.extractNow()
-      },
-    )
+          override fun sdkEventBatchProcessor() = this@CtrlProxy.sdkEventBatchProcessor
 
-  private val anrBroadcastHandler =
-    SdkAnrBroadcastHandler(
-      enqueue = { event ->
-        sdkEventBatchProcessor.enqueue(
-          SdkEventBatch(timestamp = event.timestamp, events = listOf(event)),
-        )
-      },
-      log =
-        object : SdkEventBatchBroadcastHandler.LogSink {
-          override fun debug(message: String) {
-            Log.d(TAG, message)
-          }
+          override fun isServerRunning() = isWebSocketRunning()
 
-          override fun warn(message: String) {
-            Log.w(TAG, message)
+          override suspend fun broadcast(response: WebSocketResponse) {
+            webSocketServer.broadcast(response)
           }
         },
     )
-
-  private val anrReceiver = AnrReceiver(anrBroadcastHandler)
-
-  private val eventBatchBroadcastHandler =
-    SdkEventBatchBroadcastHandler(
-      enqueue = { batch -> sdkEventBatchProcessor.enqueue(batch) },
-      log =
-        object : SdkEventBatchBroadcastHandler.LogSink {
-          override fun debug(message: String) {
-            Log.d(TAG, message)
-          }
-
-          override fun warn(message: String) {
-            Log.w(TAG, message)
-          }
-        },
-    )
-
-  private val eventBatchReceiver = EventBatchReceiver(eventBatchBroadcastHandler)
 
   internal val displayTransitions =
     DisplayTransitionRelay(
@@ -1434,7 +1163,7 @@ class CtrlProxy : AccessibilityService() {
       }
       overlayManager.setPrototypeAttached(prototypeController.isShowing)
 
-      registerReceivers()
+      receivers.register()
 
       hierarchyController.start()
 
@@ -1453,66 +1182,6 @@ class CtrlProxy : AccessibilityService() {
     }
   }
 
-  /**
-   * The receivers for broadcasts from other processes, in registration order: commands first, then
-   * the SDK event receivers, before the slower service initialization. The SDK sender cannot detect
-   * an absent dynamic receiver, while SdkEventBatchProcessor retains accepted events until the
-   * WebSocket starts. Registration and teardown both read this list, so each one is released.
-   */
-  private fun exportedReceivers(): List<Triple<String, BroadcastReceiver, () -> IntentFilter>> =
-    listOf(
-      Triple("command", commandReceiver, ReceiverFilters::command),
-      Triple("navigation event", navigationEventReceiver, ReceiverFilters::navigation),
-      Triple("event batch", eventBatchReceiver, ReceiverFilters::eventBatch),
-      Triple("recomposition", recompositionReceiver, ReceiverFilters::recomposition),
-      Triple("frame metrics", frameMetricsReceiver, ReceiverFilters::frameMetrics),
-      Triple("package", packageReceiver, ReceiverFilters::packages),
-      Triple("handled exception", handledExceptionReceiver, ReceiverFilters::handledException),
-      Triple("crash", crashReceiver, ReceiverFilters::crash),
-      Triple("ANR", anrReceiver, ReceiverFilters::anr),
-    )
-
-  /** Registers every broadcast receiver; [unregisterReceivers] releases the same set. */
-  internal fun registerReceivers() {
-    for ((name, receiver, filter) in exportedReceivers()) {
-      registerExportedReceiver(receiver, filter())
-      Log.d(TAG, "${name.replaceFirstChar(Char::uppercaseChar)} receiver registered")
-    }
-
-    // Screen on/off and unlock are protected system broadcasts, so this one is not exported. The
-    // filter stays inline so lint can see that and accept the flagless registration.
-    val screenStateFilter =
-      IntentFilter().apply {
-        addAction(Intent.ACTION_SCREEN_ON)
-        addAction(Intent.ACTION_SCREEN_OFF)
-        addAction(Intent.ACTION_USER_PRESENT)
-      }
-    registerReceiver(screenStateReceiver, screenStateFilter)
-    Log.d(TAG, "Screen state receiver registered")
-  }
-
-  /** Releases every receiver [registerReceivers] registered, continuing past a failed one. */
-  internal fun unregisterReceivers() {
-    releaseEach(
-      exportedReceivers().map { (name, receiver) -> name to receiver } +
-        ("screen state" to screenStateReceiver),
-      release = { unregisterReceiver(it) },
-      onFailure = { name, e -> Log.e(TAG, "Error unregistering $name receiver", e) },
-    )
-  }
-
-  /**
-   * Registers a receiver for broadcasts sent from other processes (the SDK in an app under test,
-   * the daemon's ADB broadcasts, the package manager), exported as Android 13+ requires.
-   */
-  internal fun registerExportedReceiver(receiver: BroadcastReceiver, filter: IntentFilter) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-      registerReceiver(receiver, filter, RECEIVER_EXPORTED)
-    } else {
-      @SuppressLint("UnspecifiedRegisterReceiverFlag") registerReceiver(receiver, filter)
-    }
-  }
-
   override fun onUnbind(intent: Intent?): Boolean {
     // Android can reconnect this service in the same process before onDestroy runs.
     webSocketLifecycle.stop()
@@ -1527,7 +1196,7 @@ class CtrlProxy : AccessibilityService() {
   override fun onDestroy() {
     super.onDestroy()
 
-    unregisterReceivers()
+    receivers.unregister()
 
     stopDisplayTracking()
 
@@ -1585,6 +1254,15 @@ class CtrlProxy : AccessibilityService() {
     get() = if (::webSocketServer.isInitialized) webSocketServer else null
 
   /** Whether the WebSocket server exists and is accepting connections. */
+  /**
+   * A framework `dimen` by name, or 0 when the platform has none. Kept on the service so its
+   * baselined DiscouragedApi lookup stays where `lint-baseline.xml` records it.
+   */
+  internal fun frameworkDimenPx(name: String): Int {
+    val id = resources.getIdentifier(name, "dimen", "android")
+    return if (id > 0) resources.getDimensionPixelSize(id) else 0
+  }
+
   internal fun isWebSocketRunning(): Boolean = webSocketServerOrNull?.isRunning() == true
 
   /** Connected clients; zero before the WebSocket server exists. */

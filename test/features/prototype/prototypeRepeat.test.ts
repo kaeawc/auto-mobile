@@ -37,6 +37,21 @@ describe("repeatFieldReferences", () => {
 });
 
 describe("repeatErrors", () => {
+  test("listItem binds headline and supporting and checks their repeat fields (#18390)", () => {
+    const row = { type: "listItem", headline: "{item.x}", supporting: "Row {index}" };
+    expect(validatePrototypeSpec(spec(list([row], [{ x: "one" }]))).success).toBe(true);
+    const instance = { binding: { alias: "item", index: true }, values: { x: "one" }, index: 0 };
+    expect(bindNodeFields(row, "root.children[0]", instance)).toMatchObject({
+      headline: "one",
+      supporting: "Row 0",
+    });
+    expect(repeatErrors(spec(list([{ ...row, supporting: "{item.zz}" }], [{ x: "one" }])))).toEqual(
+      {
+        path: "root.children[0].supporting",
+        message: 'Unknown repeat field "zz"',
+      },
+    );
+  });
   test("searchBar binds placeholder, result child, trailing labels and actions", () => {
     const search = {
       type: "searchBar",

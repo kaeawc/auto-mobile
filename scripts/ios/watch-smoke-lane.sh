@@ -5,6 +5,8 @@
 # Seams: XCRUN_BIN, LSOF_BIN, AUTO_MOBILE_CMD (whitespace-separated argv), WATCH_SMOKE_LOG_DIR.
 # Exit: 0 pass, 1 setup/check failure, 2 usage/isolation refusal, 3 runtime unavailable.
 set -euo pipefail
+# One row tap plus one bounded fallback after any covering alert is dismissed.
+readonly ROW_TAP_MAX_ATTEMPTS=2
 
 if [[ $# -ne 1 || ! ${1:-} =~ ^(latest|[0-9]+(\.[0-9]+)*)$ ]]; then
   echo 'usage: watch-smoke-lane.sh <watchos-version|latest>' >&2
@@ -217,7 +219,10 @@ set -e
 # DaemonClient connects to AUTOMOBILE_DAEMON_SOCKET_PATH, not the HTTP port
 # (wire/constants.ts, client/clientSocketConnector.ts). AUX also isolates state;
 # ordinary CLI calls and cleanup share this socket env and need no --port.
-call_tool() {
+readonly ALERT_REFUSAL_STATUS=10
+# Runs one tool call into ${step}.json and ${step}.err. Returns 0 on success,
+# ALERT_REFUSAL_STATUS when tapOn refused a target covered by a system alert, 1 otherwise.
+run_tool() {
   local step="$1" command_status
   local -a session_args=() target_args=(--deviceId "${udid}")
   shift
@@ -228,15 +233,32 @@ call_tool() {
     session_args=(--session-uuid "${session_uuid}")
   fi
   set +e
-  run_with_timeout 300 ${cli_base[@]+"${cli_base[@]}"} ${session_args[@]+"${session_args[@]}"} "${step}" ${target_args[@]+"${target_args[@]}"} "$@" > "${log_dir}/${step}.json"
+  run_with_timeout 300 ${cli_base[@]+"${cli_base[@]}"} ${session_args[@]+"${session_args[@]}"} "${step}" ${target_args[@]+"${target_args[@]}"} "$@" > "${log_dir}/${step}.json" 2> "${log_dir}/${step}.err"
   command_status=$?
   set -e
-  [[ ${command_status} -eq 0 ]] || fail "${step} CLI failed"
   cat "${log_dir}/${step}.json"
-  jq -e --arg step "${step}" 'def ok: .success == true or ($step == "startDevice" and .success != false) or ($step == "observe" and (.screenshotPath | type == "string"));
+  cat "${log_dir}/${step}.err" >&2
+  if [[ ${step} == tapOn ]] && grep -Fq 'A system alert is covering the app' "${log_dir}/${step}.json" "${log_dir}/${step}.err"; then
+    return "${ALERT_REFUSAL_STATUS}"
+  fi
+  if [[ ${command_status} -ne 0 ]]; then
+    echo "watch-smoke-lane: ${step} CLI failed" >&2
+    return 1
+  fi
+  if ! jq -e --arg step "${step}" 'def ok: .success == true or ($step == "startDevice" and .success != false) or ($step == "observe" and (.screenshotPath | type == "string"));
     if .isError == true then false elif .content? then
     [.content[] | select(.type == "text") | .text | fromjson?] | any(ok)
-    else ok end'  "${log_dir}/${step}.json" >/dev/null || fail "${step} returned failure"
+    else ok end' "${log_dir}/${step}.json" >/dev/null; then
+    echo "watch-smoke-lane: ${step} returned failure" >&2
+    return 1
+  fi
+}
+call_tool() {
+  local step="$1" command_status=0
+  # Status is inspected explicitly so the failure message names the step.
+  # shellcheck disable=SC2310
+  run_tool "$@" || command_status=$?
+  [[ ${command_status} -eq 0 ]] || fail "${step} failed"
 }
 # Acquisition is the only sessionless tool call, always pinned to this lane's UDID.
 # A failed start can leave a daemon behind; arm cleanup before attempting it.
@@ -257,12 +279,19 @@ install_session_release_trap "${session_uuid}"
 # Compose release with owned-resource cleanup and preserve this lane's signal exit codes.
 trap cleanup EXIT
 trap terminate INT TERM
-check_identifier() {
+has_identifier() {
   # Observe can put label-only watch rows in context; full nodes use resource-id.
   jq -e --arg id "$1" 'any(.context[]?; .elementId == $id or .label == $id) or
     any(.skeleton[]?; .elementId == $id) or
     any(.viewHierarchy? | .. | objects; .["resource-id"]? == $id)' \
-    "${log_dir}/hierarchy.json" >/dev/null || fail "missing identifier $1"
+    "${log_dir}/hierarchy.json" >/dev/null
+}
+check_identifier() {
+  # Predicate failure is handled explicitly rather than by errexit.
+  # shellcheck disable=SC2310
+  if ! has_identifier "$1"; then
+    fail "missing identifier $1"
+  fi
 }
 observe() {
   call_tool observe --platform watchos
@@ -274,12 +303,75 @@ observe() {
     "${log_dir}/hierarchy.json" >/dev/null || \
     fail "watchOS observe returned no hierarchy for session ${session_uuid} on ${udid}; identifier checks require a connected watch runner (see ${log_dir}/observe.json)"
 }
+# Prints the covering alert's "Don't Allow" label (straight or curly apostrophe) from $1.
+alert_dismiss_label() {
+  # jq escapes keep both apostrophes (straight U+0027, curly U+2019) out of the shell source.
+  jq -Rrs '"Don[\u0027\u2019]t Allow" as $label
+    | (fromjson? // .) as $doc
+    | [if ($doc | type) == "string" then ($doc | scan($label))
+       else ($doc | .. | strings | select(test("^" + $label + "$"))) end][0] // empty' "$1" | grep .
+}
+log_tap_effect() {
+  local changed
+  changed="$(jq -r 'if .content? then [.content[] | select(.type == "text") | .text | fromjson?][0] else . end
+    | .effect.screenChanged | if . == null then "absent" else tostring end' "${log_dir}/tapOn.json" 2>/dev/null || echo unparsed)"
+  echo "watch-smoke-lane: $1 tap effect.screenChanged=${changed}"
+}
+dismiss_alert() {
+  local label="$1" still_covered
+  echo "watch-smoke-lane: notification permission alert covers the app; tapping \"${label}\""
+  call_tool tapOn --selector "$(jq -nc --arg text "${label}" '{text: $text}')"
+  log_tap_effect "alert \"${label}\""
+  observe
+  # An absent label is the expected outcome, not a shell error.
+  # shellcheck disable=SC2310
+  if still_covered="$(alert_dismiss_label "${log_dir}/hierarchy.json")"; then
+    fail "system alert still covers the app after tapping \"${label}\" (now showing \"${still_covered}\")"
+  fi
+  alert_dismissed=1
+}
+alert_dismissed=0
 observe
 cp "${log_dir}/observe.json" "${log_dir}/before.json"
-check_identifier watch-smoke-row
 run_with_timeout 30 "${xcrun_bin}" simctl io "${udid}" screenshot "${log_dir}/before.png"
-call_tool tapOn --selector '{"text":"watch-smoke-row"}'
-observe
+# A cold simulator shows the notification permission alert over the List (#18563).
+# shellcheck disable=SC2310
+if alert_label="$(alert_dismiss_label "${log_dir}/hierarchy.json")"; then
+  dismiss_alert "${alert_label}"
+fi
+check_identifier watch-smoke-row
+row_taps=0
+while ((row_taps < ROW_TAP_MAX_ATTEMPTS)); do
+  tap_status=0
+  # shellcheck disable=SC2310
+  run_tool tapOn --selector '{"text":"watch-smoke-row"}' || tap_status=$?
+  if ((tap_status == ALERT_REFUSAL_STATUS)); then
+    # tapOn refused without tapping, so this is not a row attempt.
+    ((alert_dismissed == 0)) || fail 'tapOn still reports a covering system alert after it was dismissed'
+    cat "${log_dir}/tapOn.json" "${log_dir}/tapOn.err" > "${log_dir}/tapOn-refusal.txt"
+    # shellcheck disable=SC2310
+    alert_label="$(alert_dismiss_label "${log_dir}/tapOn-refusal.txt")" ||
+      fail "tapOn reported a covering system alert without a Don't Allow button (see ${log_dir}/tapOn-refusal.txt)"
+    dismiss_alert "${alert_label}"
+    continue
+  fi
+  ((tap_status == 0)) || fail 'tapOn failed'
+  row_taps=$((row_taps + 1))
+  log_tap_effect "row attempt ${row_taps}"
+  observe
+  # Predicate status controls the fallback; an absent identifier is not a shell error.
+  # shellcheck disable=SC2310
+  if has_identifier watch-smoke-next; then
+    break
+  fi
+  # shellcheck disable=SC2310
+  if ! has_identifier watch-smoke-row; then
+    break
+  fi
+  if ((row_taps < ROW_TAP_MAX_ATTEMPTS)); then
+    echo "watch-smoke-lane: row tap attempt ${row_taps} did not navigate; retrying once"
+  fi
+done
 check_identifier watch-smoke-next
 run_with_timeout 30 "${xcrun_bin}" simctl io "${udid}" screenshot "${log_dir}/after.png"
 echo 'watch-smoke-lane: PASS'

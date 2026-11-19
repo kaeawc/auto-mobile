@@ -255,6 +255,24 @@ final class FailureResponseWireTests: XCTestCase {
         )
     }
 
+    func testStoreKitUnsupportedFailureWire() async throws {
+        let store = StoreKitSessionStore(supported: false)
+        let commandHandler = CommandHandler(
+            elementLocator: FakeElementLocator(), gesturePerformer: FakeGesturePerformer(),
+            perf: PerfProvider(), storeKitSessions: store
+        )
+        try await assertFailure(
+            "request_storekit",
+            fields: ["action": "list", "bundleId": app],
+            using: commandHandler,
+            expected: [
+                "type": "storekit_result", "requestId": requestId, "success": false,
+                "action": "list", "bundleId": app,
+                "error": "unsupported: StoreKitTest requires an iOS simulator runner",
+            ]
+        )
+    }
+
     func testAccessibilityFailureResponses() async throws {
         try await assertFailure(
             "set_voiceover_state",

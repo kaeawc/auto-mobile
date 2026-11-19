@@ -1,3 +1,4 @@
+import { IosSdkMultiSceneError } from "../observe/ios/sdkObservationBridge";
 import type { AndroidXrDisplaySize } from "../observe/android/AndroidXrDisplaySize";
 import { withoutHiddenXrChrome, selectWithoutHiddenXrChrome } from "./xrHiddenChrome";
 import type { TapOnCall } from "./ActionCall";
@@ -365,7 +366,7 @@ export class TapTargetResolver {
         })
       ).hierarchy;
     } catch (error) {
-      if (error instanceof StaleDisplayError) {
+      if (error instanceof IosSdkMultiSceneError || error instanceof StaleDisplayError) {
         throw error;
       }
       throwIfAborted(signal);

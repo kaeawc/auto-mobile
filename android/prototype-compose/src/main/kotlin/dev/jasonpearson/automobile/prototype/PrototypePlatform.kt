@@ -29,7 +29,11 @@ enum class PlatformErrorCode(val wireValue: String) {
   PLATFORM_ERROR("platform_error"),
 }
 
-data class PlatformError(val code: PlatformErrorCode, val message: String)
+data class PlatformError(
+  val code: PlatformErrorCode,
+  val message: String,
+  val reason: String? = null,
+)
 
 sealed interface PlatformCallResult {
   data class Success(val value: JsonElement) : PlatformCallResult
@@ -45,6 +49,12 @@ interface PrototypePlatformModule {
   fun availability(): PlatformAvailability
 
   suspend fun call(call: PlatformCall): PlatformCallResult
+
+  /**
+   * Apply simulated state without emitting: the runtime delivers once through its event path.
+   * Return false without mutations when this event is unsupported. Only a host may invoke this.
+   */
+  suspend fun simulate(event: PlatformEvent): Boolean = false
 
   val events: Flow<PlatformEvent>
   val state: StateFlow<JsonObject>

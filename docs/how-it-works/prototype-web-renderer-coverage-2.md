@@ -11,7 +11,10 @@ descriptions here are the Android skin's.
   sources.
 - **Video chrome.** Android draws a centred 56 px play button over a bottom bar. iOS draws play
   inside a rounded bottom bar. The bar has a CC button when the player has captions. When
-  `controls` is `none`, the still draws no chrome. The still lists a poster as `assetNotInlined`.
+  `controls` is `none`, the still draws no chrome.
+- **Poster.** The page treats a `poster` as it treats an `image` asset: it encodes the poster at
+  the player's size and fits it over black, above the first frame and under the chrome. Until the
+  page inlines it, the still lists the poster as `assetNotInlined` (no bytes) or `assetOverBudget`.
 - **Camera preview.** A camera preview is a portrait viewfinder at its `aspectRatio` (default 4:3)
   showing colour bars and a label naming its mode.
 - **Cast button.** A cast button is the skin's idle route icon (Cast on Android, AirPlay on iOS) in
@@ -66,7 +69,8 @@ descriptions here are the Android skin's.
 - **Bottom sheet surface.** The column paints `surface` unless an authored background resolves, with
   no corner radius or shadow. It holds a centred 32x4 px `onSurfaceVariant` drag handle with 8 px
   around it, unless `dragHandle` is false, then its child.
-- **Dialog and snackbar layering.** A `dialog` and a `snackbar` open and layer the same way.
+- **Dialog, snackbar and drawer layering.** A `dialog`, a `snackbar` and a `drawer` open and layer
+  the same way.
 - **Dialog.** A dialog is a scrim (the `scrim` role at 0.32) under a centred `surfaceContainerHigh`
   surface. The surface has 28 px corners, 24 px padding and 16 px gaps, and is 280 to 560 px wide
   with 24 px around it.
@@ -78,6 +82,12 @@ descriptions here are the Android skin's.
   window's bottom with 12 px around it, as wide as the window up to 600 px, at least 48 px tall. It
   uses `inverseSurface` with 4 px corners and `bodyMedium` `inverseOnSurface` text, then its
   optional `inversePrimary` action tagged `<testTag>.action`.
+- **Drawer.** A drawer fills the window inside its safe-area insets. Its scrim resolves like a
+  sheet's and is tagged `<testTag>.close`. The surface sits at its `edge` (`end` unless `start`,
+  mirrored in RTL), full height and `min(320px, 100% - 56px)` wide. It paints `surface` at tonal
+  elevation 3 with a 3 px shadow unless an authored background resolves, and holds its child.
+- **Fullscreen scrim.** A fullscreen placement's `scrim` paints behind the window's content,
+  resolved like a sheet's scrim. Without one the window is transparent.
 
 ## Choice controls
 

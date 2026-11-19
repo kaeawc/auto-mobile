@@ -66,9 +66,14 @@ describe("tvOS is advertised in tool schemas and refused by unsupported tools (#
     const plain = ToolRegistry.getEveryRegisteredTool().filter(
       (tool) =>
         tool.deviceAwareHandler === undefined &&
-        !["listDevices", "listDeviceImages", "provisionDevice", "deleteDevice"].includes(
-          tool.name,
-        ) &&
+        // buildApp builds for the tvOS simulator SDK on the host; it never refuses tvos.
+        ![
+          "listDevices",
+          "listDeviceImages",
+          "provisionDevice",
+          "deleteDevice",
+          "buildApp",
+        ].includes(tool.name) &&
         JSON.stringify(toAdvertisedJsonSchema(tool.schema, { constrainAppIds: false })).includes(
           '"tvos"',
         ),

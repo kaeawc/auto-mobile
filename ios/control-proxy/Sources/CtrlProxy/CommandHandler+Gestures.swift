@@ -118,17 +118,15 @@ extension CommandHandler {
             try checkDeadline()
             let diagnostics: TapDiagnostics?
             if request.doubleTap == true {
-                try self.gesturePerformer.doubleTap(x: request.x, y: request.y)
-                diagnostics = nil
+                diagnostics = try self.gesturePerformer.doubleTapReportingRoute(x: request.x, y: request.y)
             } else if request.diagnostics == true {
                 diagnostics = try self.gesturePerformer.tapWithDiagnostics(
                     x: request.x, y: request.y, durationMs: duration, strategy: request.tapStrategy
                 )
             } else {
-                try self.gesturePerformer.tap(
+                diagnostics = try self.gesturePerformer.tapReportingRoute(
                     x: request.x, y: request.y, duration: TimeInterval(duration) / 1000.0, strategy: request.tapStrategy
                 )
-                diagnostics = nil
             }
             if let deadlineMs, monotonicNowMs() >= deadlineMs || deliveryAbandoned() {
                 throw CommandError.deadlineExceeded(

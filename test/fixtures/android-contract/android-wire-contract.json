@@ -1875,6 +1875,35 @@
       ]
     },
     {
+      "serialName": "simulate_prototype_platform",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "event",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "data",
+          "type": "json",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
       "serialName": "start_recording",
       "fields": [
         {
@@ -3969,6 +3998,12 @@
         {
           "name": "degradedEffects",
           "type": "list",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "status",
+          "type": "json",
           "nullable": true,
           "hasDefault": true
         }
@@ -8837,6 +8872,20 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeDataWhere": [
+      {
+        "name": "field",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "equals",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect": [
       {
         "name": "path",
@@ -8862,13 +8911,13 @@
         "name": "of",
         "type": "json",
         "nullable": false,
-        "hasDefault": false
+        "hasDefault": true
       },
       {
         "name": "format",
         "type": "json",
         "nullable": false,
-        "hasDefault": false
+        "hasDefault": true
       },
       {
         "name": "locale",
@@ -8879,6 +8928,18 @@
       {
         "name": "timeZone",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "collection",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "reduce",
+        "type": "json",
         "nullable": true,
         "hasDefault": true
       }
@@ -10249,6 +10310,32 @@
         "type": "list",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "secure",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeStorageSecureMetadata": [
+      {
+        "name": "key",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "present",
+        "type": "boolean",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "bytes",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeStyle": [
@@ -14071,6 +14158,12 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "where",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeDataWhere",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "replace": [
@@ -15091,6 +15184,18 @@
         "type": "json",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "where",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeDataWhere",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "member",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "setPage": [

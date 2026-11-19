@@ -4,7 +4,18 @@ import os
 private let lazyListLog = Logger(subsystem: "dev.jasonpearson.automobile.prototype-agent", category: "prototype")
 
 struct PrototypeListRepeat: Decodable {
-    struct Items: Decodable { let path: String }
+    struct Items: Decodable {
+        let path: String?
+        let derived: String?
+        let rows: [JSONValue]?
+        enum CodingKeys: String, CodingKey { case path, derived; case rows = "_rows" }
+
+        func resolve(_ data: [String: JSONValue]?) -> JSONValue? {
+            if let rows { return .array(rows) }
+            return path.flatMap { PrototypeDataPointer.resolve(data, pointer: $0) }
+        }
+    }
+
     let items: Items
     let `as`: String
     let key: String
@@ -23,7 +34,7 @@ enum PrototypeLazyList {
     /// Identity only: no template binding, data resolution or JSON coding.
     static func keys(node: PrototypeNode, data: [String: JSONValue]?) -> [String] {
         guard let spec = node.listRepeat,
-              case let .array(items)? = PrototypeDataPointer.resolve(data, pointer: spec.items.path)
+              case let .array(items)? = spec.items.resolve(data)
         else { return [] }
         return items.map { value in
             guard PrototypeRepeat.isFieldName(spec.key), let key = value.objectFields?[spec.key],
@@ -39,7 +50,7 @@ enum PrototypeLazyList {
         -> (key: String, json: JSONValue)?
     {
         guard let spec = node.listRepeat, let raw = node.listRowTemplate,
-              case let .array(items)? = PrototypeDataPointer.resolve(data, pointer: spec.items.path),
+              case let .array(items)? = spec.items.resolve(data),
               items.indices.contains(index) else { return nil }
         let fields = PrototypeDataValues.project(items[index].objectFields ?? [:]).objectFields ?? [:]
         let bound = PrototypeRepeatInstance(alias: spec.as, item: fields, index: index).bind(raw)
@@ -159,6 +170,12 @@ enum PrototypeLazyList {
                     if PrototypeRoutes.fields(key).isEmpty, state[key]?.boolValue == nil {
                         try reject("Refresh requires a boolean state key", field: ".refresh.stateKey")
                     }
+                }
+                if let source = node["repeat"]?.objectFields?["items"]?.objectFields,
+                   source["derived"] != nil, case let .array(items)? = source["_rows"],
+                   let maxItems = node["maxItems"]?.intValue, items.count > maxItems
+                {
+                    try reject("List data has more items than maxItems", field: ".repeat.items.derived")
                 }
                 if let pointer = node["repeat"]?.objectFields?["items"]?.objectFields?["path"]?.stringValue {
                     guard case let .array(items)? = PrototypeDataPointer.resolve(data, pointer: pointer) else {

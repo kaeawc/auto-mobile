@@ -49,13 +49,16 @@ test("focused input types only and reports the input method and Unicode text len
 });
 
 test.each<SendKeysSelector>([{ elementId: "ctrlproxy-crown" }, { text: "CtrlProxy Watch" }])(
-  "selector focuses with a tap before typing: %j",
+  "selector focuses without extra effect reads or sleeps before typing: %j",
   async (selector) => {
+    const timer = new FakeTimer();
     const result = await watchSendKeys(
       device.deviceId,
       [{ action: "type", text: "hello" }],
       selector,
+      { timer },
     );
+    expect(timer.getSleepHistory()).toEqual([]);
     expect(result.success).toBe(true);
     expect(client.commands).toEqual([
       { type: "face", op: "dump" },

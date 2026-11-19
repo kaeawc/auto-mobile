@@ -64,7 +64,9 @@ struct SdkContractManifest: Encodable {
     var capabilities: CapabilityObservation?
     /// For the observation scenario, what the contract bridge's host captured and executed.
     var observation: ObservationHostLog?
+    var webView: WebViewHostLog?
     var navigation: NavigationHostLog?
+    var multiScene: MultiSceneHostLog?
     /// For the storage scenarios, the storage registration the host applied.
     var storage: StorageRegistration?
     /// This run's SDK envelopes exactly as the SDK encoded them (payload is base64 JSON).

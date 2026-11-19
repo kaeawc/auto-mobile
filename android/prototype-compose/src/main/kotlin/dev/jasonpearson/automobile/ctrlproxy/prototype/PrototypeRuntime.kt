@@ -158,7 +158,7 @@ class PrototypeRuntime(
   private val nextRevision: (() -> Long)? = null,
   previousStacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
   /** Where a refused data write is explained; a seam so JVM tests need no `android.util.Log`. */
-  private val warn: (String) -> Unit = { Log.w("PrototypeRuntime", it) },
+  warn: (String) -> Unit = { Log.w("PrototypeRuntime", it) },
   /**
    * Keeps the spec's `storage` keys across shows (#12522). The [spec] passed in already carries the
    * restored values, so restoring is neither a write nor an event.
@@ -187,7 +187,20 @@ class PrototypeRuntime(
     PrototypeRequestLimiter(PrototypePlatformCalls.maxInFlight),
   private val requestHideKeyboard: suspend () -> Unit = {},
   monotonicMs: () -> Long = { System.nanoTime() / 1_000_000L },
+  private val uploadAssets: PrototypeAssetSource? = null,
 ) {
+  private val reportWarning = warn
+
+  private fun publicDiagnostic(message: String, fallback: String): String =
+    if (current.spec.storage?.secure.orEmpty().isEmpty()) message else fallback
+
+  private fun warn(message: String) =
+    reportWarning(publicDiagnostic(message, "Prototype action could not be completed"))
+
+  /** State safe for status, inspect, conflicts and events; rendering keeps device-local state. */
+  val publicState: Map<String, PrototypeScalar>
+    get() = prototypePublicState(current.spec)
+
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
     PrototypeSpecValidator.prepareStateWrites(it, runtimeJson)
@@ -282,13 +295,45 @@ class PrototypeRuntime(
     warn("onAppear action nesting limit reached")
   }
 
-  fun pauseTimers() = timerEngine.pause()
+  fun pauseTimers() {
+    timerEngine.pause()
+    platformForeground = false
+    stopPlatformUpdates()
+  }
 
-  fun resumeTimers() = timerEngine.resume()
+  fun resumeTimers() {
+    timerEngine.resume()
+    platformForeground = true
+    startPlatformUpdates()
+  }
 
   fun timerReports(): List<PrototypeTimerReport> = timerEngine.reports()
 
   suspend fun advanceClock(ms: Int): Int = timerEngine.advance(ms)
+
+  /** Host-only injection, deliberately absent from the spec action vocabulary. */
+  suspend fun simulatePlatformEvent(name: String, data: JsonObject): Boolean {
+    check(current.active) { "Prototype is inactive" }
+    val owner = PrototypePlatformCalls.eventOwner(name)
+    require(owner != null) { "Unknown platform event: $name; use a known module event" }
+    require(owner in current.spec.requires?.platform.orEmpty()) {
+      "Declare $owner in requires.platform before simulation"
+    }
+    val payload = buildJsonObject {
+      put("event", name)
+      put("data", data)
+      put("simulated", true)
+    }
+    require(
+      payload.toString().toByteArray(Charsets.UTF_8).size <=
+        PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
+    ) {
+      "simulate event payload exceeds the 4096-byte emit budget; reduce data"
+    }
+    return platformDispatcher.simulate(
+      dev.jasonpearson.automobile.prototype.PlatformEvent(name, data),
+    )
+  }
 
   private val platformState =
     PrototypePlatformState(CoroutinePrototypeScheduler(requestScope), exclusively) { name, data ->
@@ -297,7 +342,11 @@ class PrototypeRuntime(
       .also { if (initialPlatformState.isNotEmpty()) it.update(initialPlatformState) }
   private var eventData: JsonObject? = null
 
-  private suspend fun deliverPlatformEvent(name: String, data: JsonObject) {
+  private suspend fun deliverPlatformEvent(
+    name: String,
+    data: JsonObject,
+    simulated: Boolean = false,
+  ) {
     if (!current.active || name.substringBefore('.') !in current.spec.requires?.platform.orEmpty())
       return
     val previousEvent = eventData
@@ -311,6 +360,7 @@ class PrototypeRuntime(
     var payload = buildJsonObject {
       put("event", name)
       put("data", data)
+      if (simulated) put("simulated", true)
     }
     if (
       payload.toString().toByteArray(Charsets.UTF_8).size >
@@ -320,6 +370,7 @@ class PrototypeRuntime(
         put("event", name)
         put("data", JsonObject(emptyMap()))
         put("truncated", true)
+        if (simulated) put("simulated", true)
       }
     }
     emit(PrototypeEventKind.EMIT, PrototypePlatform.DELIVERED_EVENT_NAME, payload)
@@ -366,10 +417,17 @@ class PrototypeRuntime(
   /** The last haptic and sound calls this prototype made, for `inspect` (#14329). */
   val feedbackLog = PrototypeFeedbackLog()
 
-  val platformRegistry =
-    PrototypePlatformRegistry(
-      listOf(deviceModule) + platform.registry.modules,
-    )
+  private val sessionModules =
+    platform.registry.modules.map {
+      when (it) {
+        is PrototypeBiometricModule -> it.session()
+        is PrototypePermissionsModule -> it.session(requestScope)
+        is PrototypeLocationModule -> it.session(requestScope)
+        is PrototypeSensorsModule -> it.session(requestScope)
+        else -> it
+      }
+    }
+  val platformRegistry = PrototypePlatformRegistry(listOf(deviceModule) + sessionModules)
   private val platformDispatcher =
     PrototypePlatformDispatcher(
       platformRegistry,
@@ -380,19 +438,56 @@ class PrototypeRuntime(
       ::finishPlatformCall,
       ::deliverPlatformEvent,
       ::publishModuleState,
-      warn,
+      ::warn,
       platformLimiter,
       monotonicMs,
     )
 
+  private var platformModulesStarted = false
+  private var platformForeground = true
+
+  private fun locationModules(): List<PrototypeLocationModule> {
+    return platformRegistry.modules.filterIsInstance<PrototypeLocationModule>()
+  }
+
+  private fun sensorsModules() = platformRegistry.modules.filterIsInstance<PrototypeSensorsModule>()
+
+  private fun stopPlatformUpdates() {
+    locationModules().forEach { it.stopUpdates() }
+    sensorsModules().forEach { it.stopSensors() }
+  }
+
+  private fun startPlatformUpdates() {
+    if (!platformModulesStarted || !platformForeground || !current.active) return
+    val block = current.spec.location
+    locationModules().forEach {
+      if (block == null) it.stopUpdates() else it.startUpdates(PrototypeLocationConfig.of(block))
+    }
+    val sensors = current.spec.sensors
+    sensorsModules().forEach {
+      if (sensors == null) it.stopSensors() else it.startSensors(sensors)
+    }
+  }
+
   /** Start streams only after the host has installed this runtime in its surface table. */
-  fun startPlatformModules() = platformDispatcher.subscribe()
+  fun startPlatformModules() {
+    platformDispatcher.subscribe()
+    platformModulesStarted = true
+    startPlatformUpdates()
+  }
 
   /** Hosts call this under their lock before replacement, reset or dismissal. */
-  suspend fun cancelPlatformCalls() = platformDispatcher.cancel()
+  suspend fun cancelPlatformCalls() {
+    platformModulesStarted = false
+    stopPlatformUpdates()
+    platformDispatcher.cancel()
+  }
+
+  private fun shouldPublishModuleState(name: String, state: JsonObject) =
+    name != "biometric" && (name != "device" || state.isNotEmpty())
 
   private fun publishModuleState(name: String, state: JsonObject) {
-    if (!current.active || (name == "device" && state.isEmpty())) return
+    if (!current.active || !shouldPublishModuleState(name, state)) return
     val next = JsonObject(current.platformState + (name to state))
     if (next.toString().toByteArray(Charsets.UTF_8).size > PrototypeDeviceContract.maxStateBytes) {
       warn("Refused oversized platform state from $name")
@@ -410,6 +505,7 @@ class PrototypeRuntime(
     if (!current.active) return
     stateWriteValidator = null
     mutableSnapshot.value = replacementSnapshot(spec)
+    startPlatformUpdates()
   }
 
   /** Authoritative text replacement shares its epoch handling with patch commits. */
@@ -471,7 +567,10 @@ class PrototypeRuntime(
           .distinct()
           .filter { key -> before.stateRevisions[key]?.let { it > baseRevision } == true }
       if (changed.isNotEmpty()) {
-        return PatchResult.Conflict(before.revision, before.state.filterKeys { it in changed })
+        return PatchResult.Conflict(
+          before.revision,
+          prototypePublicState(before.spec).filterKeys { it in changed },
+        )
       }
     }
     val patched =
@@ -527,6 +626,7 @@ class PrototypeRuntime(
         revision = revision,
         stateRevisions = before.stateRevisions + changed.associateWith { revision },
       )
+    startPlatformUpdates()
     // The commit is authoritative even if an ancillary event sink fails. Cancellation propagates.
     storage?.record(current.spec, current.stacks)
     try {
@@ -543,6 +643,9 @@ class PrototypeRuntime(
   private fun allocateRevision(): Long = nextRevision?.invoke() ?: (current.revision + 1L)
 
   fun close() {
+    platformRegistry.modules.filterIsInstance<PrototypePermissionsModule>().forEach { it.detach() }
+    locationModules().forEach { it.detach() }
+    sensorsModules().forEach { it.detach() }
     platformDispatcher.close()
     platformState.close()
     mutableSnapshot.value = current.copy(active = false)
@@ -823,16 +926,16 @@ class PrototypeRuntime(
         .flatMap { it.checkedKeys() }
         .filter { it in keys }
     mutableSnapshot.value = current.copy(shownErrors = current.shownErrors + changedChecks)
-    val state = current.state
+    val state = publicState
     fun json(key: String) =
       runtimeJson.encodeToJsonElement(PrototypeScalar.serializer(), state.getValue(key))
     val payload = buildJsonObject {
       if (keys.size == 1) {
         put("key", keys.single())
-        put("value", json(keys.single()))
+        if (keys.single() in state) put("value", json(keys.single()))
       } else {
         put("keys", buildJsonArray { keys.forEach { add(JsonPrimitive(it)) } })
-        put("values", buildJsonObject { keys.forEach { put(it, json(it)) } })
+        put("values", buildJsonObject { keys.filter { it in state }.forEach { put(it, json(it)) } })
       }
     }
     emit(kind = PrototypeEventKind.EMIT, name = "change", payload = payload)
@@ -1028,6 +1131,10 @@ class PrototypeRuntime(
     params: Map<String, JsonElement>?,
   ): Pair<String, JsonObject>? {
     if (!node.screens.containsKey(screen)) return null
+    if (params.orEmpty().values.any { isSecureStateBinding(it as? JsonObject) }) {
+      warn("Refused navigation: secure state cannot be copied to route params")
+      return null
+    }
     val resolved = PrototypeRouteRuntime.resolve(params, bindingInputs())
     if (resolved == null || !PrototypeRouteRuntime.fits(node, screen, resolved)) {
       warn("Refused navigation of ${node.id} to $screen: its route params do not fit")
@@ -1111,7 +1218,10 @@ class PrototypeRuntime(
             prepareStateWrites(bound).also { stateWriteValidator = it }
           }
       val error = validator.validate(checkNotNull(spec.state))
-      require(error == null) { error.toString() }
+      require(error == null) {
+        if (from.storage?.secure.orEmpty().isEmpty()) error.toString()
+        else "Prototype state write refused"
+      }
       spec
     }
 
@@ -1207,6 +1317,15 @@ class PrototypeRuntime(
    * Null once the write took effect (and reported itself), else why it was refused.
    */
   private suspend fun applyDataWrite(write: PrototypeDataWrite): PrototypeDataWriteError? {
+    if (
+      prototypeDataWritePayload(write, Long.MAX_VALUE).toString().toByteArray(Charsets.UTF_8).size >
+        PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES
+    ) {
+      return PrototypeDataWriteError(
+        PrototypeDataWriteErrorCode.LIMIT_EXCEEDED,
+        "Data write selector exceeds the change event payload limit",
+      )
+    }
     val before = current
     val spec =
       when (val staged = stageDataWrite(before, before.spec, write)) {
@@ -1221,7 +1340,7 @@ class PrototypeRuntime(
     emit(
       kind = PrototypeEventKind.CHANGE,
       name = write.path,
-      payload = dataWritePayload(write, revision),
+      payload = prototypeDataWritePayload(write, revision),
     )
     return null
   }
@@ -1283,115 +1402,87 @@ class PrototypeRuntime(
   }
 
   /** Binds the action's value; null when the value cannot be resolved (the write is refused). */
-  private fun dataWrite(action: PrototypeAction): PrototypeDataWrite? {
-    fun value(binding: EmitContextBinding, path: String): JsonElement? =
-      when (val resolved = PrototypeDataWriter.resolveValue(binding, bindingInputs())) {
-        is PrototypeDataValue.Resolved -> resolved.value
-        is PrototypeDataValue.Failure -> {
-          warn("Refused data write at $path: ${resolved.error.message}")
-          null
-        }
+  private fun dataWriteValue(binding: EmitContextBinding, path: String): JsonElement? {
+    if (isSecureStateBinding(binding)) {
+      warn("Refused data write: secure state cannot be copied to public data")
+      return null
+    }
+    return when (val resolved = PrototypeDataWriter.resolveValue(binding, bindingInputs())) {
+      is PrototypeDataValue.Resolved -> resolved.value
+      is PrototypeDataValue.Failure -> {
+        warn("Refused data write at $path: ${resolved.error.message}")
+        null
       }
-    return when (action) {
-      is PrototypeSetDataAction ->
-        value(action.value, action.path)?.let { PrototypeDataWrite.Set(action.path, it) }
-      is PrototypeAppendDataAction ->
-        value(action.value, action.path)?.let {
-          PrototypeDataWrite.Append(
-            action.path,
-            it,
-            prototypeListMaxItemsFor(current.spec, action.path),
-          )
-        }
-      // `prependData` inserts one row, so the resolved value is wrapped as the page `[row]`, as on
-      // iOS and in the `change` event (#16715).
-      is PrototypePrependDataAction ->
-        value(action.value, action.path)?.let {
-          PrototypeDataWrite.Prepend(
-            action.path,
-            JsonArray(listOf(it)),
-            prototypeListMaxItemsFor(current.spec, action.path),
-          )
-        }
-      is PrototypeUpsertDataAction ->
-        value(action.value, action.path)?.let {
-          PrototypeDataWrite.Upsert(
-            action.path,
-            action.key,
-            it,
-            listOfNotNull(action.maxItems, prototypeListMaxItemsFor(current.spec, action.path))
-              .minOrNull(),
-          )
-        }
-      is PrototypeRemoveDataAction -> PrototypeDataWrite.Remove(action.path)
-      else -> null
     }
   }
 
-  /**
-   * `{op, value?, revision}`. The value is left out when the payload would not fit an event, so the
-   * host, which cannot mirror a write it was not shown, stops tracking the spec.
-   */
-  private fun dataWritePayload(write: PrototypeDataWrite, revision: Long): JsonObject {
-    fun payload(value: JsonElement?) = buildJsonObject {
-      put("op", write.op)
-      if (write is PrototypeDataWrite.Upsert) put("key", write.key)
-      if (value != null) put("value", value)
-      val maximum =
-        when (write) {
-          is PrototypeDataWrite.Append -> write.maxItems
-          is PrototypeDataWrite.Prepend -> write.maxItems
-          is PrototypeDataWrite.Extend -> write.maxItems
-          is PrototypeDataWrite.Upsert -> write.maxItems
-          else -> null
-        }
-      maximum?.let { put("maxItems", it.toLong()) }
-      put("revision", revision)
-    }
-    val value = dataWriteValue(write)
-    val full = payload(value)
-    return if (
-      full.toString().toByteArray(Charsets.UTF_8).size <=
-        PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES
-    )
-      full
-    else payload(null)
+  private fun isSecureStateBinding(binding: JsonObject?): Boolean {
+    val key = (binding?.get("state") as? JsonPrimitive)?.content ?: return false
+    return "state:$key" in current.spec.storage?.secure.orEmpty()
   }
 
-  private fun dataWriteValue(write: PrototypeDataWrite): JsonElement? =
-    when (write) {
-      is PrototypeDataWrite.Upsert -> write.value
-      is PrototypeDataWrite.Set -> write.value
-      is PrototypeDataWrite.Append -> write.value
-      is PrototypeDataWrite.Prepend -> write.value
-      is PrototypeDataWrite.Extend -> write.value
-      is PrototypeDataWrite.Remove -> null
+  private fun dataWrite(action: PrototypeAction): PrototypeDataWrite? {
+    val selector =
+      when (action) {
+        is PrototypeSetDataAction -> action.where
+        is PrototypeRemoveDataAction -> action.where
+        else -> null
+      }
+    val where = selector?.let {
+      val equals =
+        dataWriteValue(
+          it.equals,
+          (action as? PrototypeSetDataAction)?.path ?: (action as PrototypeRemoveDataAction).path,
+        ) ?: return null
+      PrototypeDataMatch(it.field, equals)
     }
+    return prototypeDataWrite(action, where, ::dataWriteValue) { path ->
+      prototypeListMaxItemsFor(current.spec, path)
+    }
+  }
 
   private suspend fun startPlatformCall(
     action: PrototypePlatformAction,
     touched: MutableSet<String>,
   ) {
-    val args = linkedMapOf<String, JsonElement>()
-    var invalid: String? = null
-    for ((name, binding) in action.args.orEmpty()) {
-      when (val resolved = PrototypeDataWriter.resolveValue(binding.jsonObject, bindingInputs())) {
-        is PrototypeDataValue.Resolved -> args[name] = resolved.value
-        is PrototypeDataValue.Failure -> {
-          invalid = resolved.error.message
-          break
-        }
+    val resolved = resolvePlatformArgs(action)
+    val args = (resolved as? PrototypeDataValue.Resolved)?.value as? JsonObject
+    var invalid = (resolved as? PrototypeDataValue.Failure)?.error?.message
+    if (invalid == null && action.call == "permissions.request") {
+      val declared = current.spec.requires?.permissions.orEmpty().map { it.name }.toSet()
+      val names = args?.get("names") as? JsonArray
+      if (names.orEmpty().any { (it as? JsonPrimitive)?.content !in declared }) {
+        invalid = "Permission is not declared in requires.permissions"
       }
     }
     // Resolve against the state before loading, matching request actions (including self-bindings).
     action.statusKey?.let { if (writeStatus(it, "loading")) touched += it }
     platformDispatcher.start(
       action,
-      if (invalid == null) JsonObject(args) else null,
+      if (invalid == null) args else null,
       invalid,
       eventData,
       owningNodeId(current.spec, action),
     )
+  }
+
+  private fun resolvePlatformArgs(action: PrototypePlatformAction): PrototypeDataValue {
+    val args = linkedMapOf<String, JsonElement>()
+    for ((name, binding) in action.args.orEmpty()) {
+      if (isSecureStateBinding(binding as? JsonObject)) {
+        return PrototypeDataValue.Failure(
+          PrototypeDataWriteError(
+            PrototypeDataWriteErrorCode.INVALID_VALUE,
+            "Secure state cannot be copied to platform args",
+          ),
+        )
+      }
+      when (val resolved = PrototypeDataWriter.resolveValue(binding.jsonObject, bindingInputs())) {
+        is PrototypeDataValue.Resolved -> args[name] = resolved.value
+        is PrototypeDataValue.Failure -> return resolved
+      }
+    }
+    return PrototypeDataValue.Resolved(JsonObject(args))
   }
 
   private fun platformCallPayload(
@@ -1412,9 +1503,42 @@ class PrototypeRuntime(
         "error",
         buildJsonObject {
           put("code", failure.code.wireValue)
-          put("message", failure.message.take(512))
+          put("message", publicDiagnostic(failure.message, "Platform call failed").take(512))
+          val allowedReason =
+            failure.reason == "disabled" ||
+              (call.action.call == "biometric.authenticate" &&
+                failure.reason in setOf("lockout", "not_enrolled", "no_hardware"))
+          if (failure.code == PlatformErrorCode.UNAVAILABLE && allowedReason)
+            put("reason", failure.reason)
         },
       )
+    }
+  }
+
+  private fun platformResultMeta(
+    call: PrototypePlatformDispatcher.Pending,
+    result: PlatformCallResult,
+    error: PlatformError?,
+    duration: Long,
+  ): JsonObject {
+    val payload = platformCallPayload(call, error, duration)
+    if (call.action.call != "location.request") return JsonObject(payload - "callId" - "call")
+    return buildJsonObject {
+      put("durationMs", duration)
+      if (error != null) {
+        val reported = payload.getValue("error").jsonObject
+        val code =
+          when (error.code) {
+            PlatformErrorCode.PERMISSION_DENIED,
+            PlatformErrorCode.UNAVAILABLE,
+            PlatformErrorCode.TIMEOUT,
+            PlatformErrorCode.PLATFORM_ERROR -> error.code
+            else -> PlatformErrorCode.PLATFORM_ERROR
+          }
+        put("error", JsonObject(reported + ("code" to JsonPrimitive(code.wireValue))))
+      } else if (result is PlatformCallResult.Success) {
+        (result.value as? JsonObject)?.get("approximate")?.let { put("approximate", it) }
+      }
     }
   }
 
@@ -1431,7 +1555,7 @@ class PrototypeRuntime(
     writes +=
       PrototypeDataWrite.Set(
         PrototypeRequests.metaPath(into),
-        platformCallPayload(call, error, duration).let { JsonObject(it - "callId" - "call") },
+        platformResultMeta(call, result, error, duration),
       )
     val refused = trialDataWrites(writes)
     if (refused == null) {
@@ -1443,7 +1567,7 @@ class PrototypeRuntime(
     applyDataWrite(
       PrototypeDataWrite.Set(
         PrototypeRequests.metaPath(into),
-        JsonObject(platformCallPayload(call, reported, duration) - "callId" - "call"),
+        platformResultMeta(call, result, reported, duration),
       ),
     )
     return reported
@@ -1521,7 +1645,11 @@ class PrototypeRuntime(
     val onError: List<PrototypeAction>?,
     val eventContext: JsonObject?,
     val append: PrototypeRequestAppend?,
+    val sensitive: Boolean,
+    val progressKey: String?,
   ) {
+    var uploadBytes: Long? = null
+
     lateinit var job: Job
 
     /** The runtime that applies the response; a same-id replacement hands it to the new one. */
@@ -1529,6 +1657,13 @@ class PrototypeRuntime(
   }
 
   private val inFlight = LinkedHashMap<String, RequestInFlight>()
+
+  /**
+   * The request id that last reset each `progressKey` to 0. Only that upload writes the key, so a
+   * concurrent upload sharing the key (non-overlapping `into`, so not superseded) cannot raise it
+   * again after the newer one reset it.
+   */
+  private val progressOwners = HashMap<String, String>()
 
   /** Dismissal ends every request without a trace: the runtime is closed, so nothing is sent. */
   private fun cancelRequests() {
@@ -1547,6 +1682,8 @@ class PrototypeRuntime(
   @InternalAutoMobilePrototypeApi
   fun handOverRequests(replacement: PrototypeRuntime) {
     val moved = synchronized(inFlight) { inFlight.values.toList().also { inFlight.clear() } }
+    val owners = synchronized(progressOwners) { progressOwners.toMap() }
+    synchronized(replacement.progressOwners) { replacement.progressOwners.putAll(owners) }
     moved.forEach { request ->
       requestLimiter.release()
       replacement.adoptRequest(request)
@@ -1572,6 +1709,12 @@ class PrototypeRuntime(
     }
 
   /**
+   * Whether a response may echo a secure value, so its headers are dropped. Only a spec with secure
+   * keys holds any; `allowSecureInRequest` on a spec without them sends nothing secure.
+   */
+  private fun canCarrySecure(): Boolean = current.spec.storage?.secure.orEmpty().isNotEmpty()
+
+  /**
    * A `request` action: resolves its bindings against the committed state and data, moves
    * `statusKey` to `loading`, then waits for the response off the interaction. The latest request
    * with overlapping `into` or `append.to` targets wins (the older one reports `cancelled`), at
@@ -1589,7 +1732,8 @@ class PrototypeRuntime(
       RequestInFlight(
         newRequestId(),
         action.method ?: PrototypeRequests.DEFAULT_METHOD,
-        url,
+        // This URL is diagnostic metadata only; the transport keeps the resolved URL below.
+        publicDiagnostic(url, "[redacted]"),
         action.via ?: PrototypeHttpClients.VIA_HOST,
         action.into,
         action.statusKey,
@@ -1598,12 +1742,35 @@ class PrototypeRuntime(
         action.onError,
         eventData,
         action.append,
+        canCarrySecure(),
+        action.progressKey,
       )
     }
     // The newest request wins even when it fails to resolve: the older one must not land later.
     supersedeRequests(action.into, action.append?.to)
+    val upload =
+      try {
+        resolveUpload(action)
+      } catch (error: IllegalArgumentException) {
+        return finishRequest(
+          info(bound.url),
+          PrototypeRequestResponse.Failed(
+            PrototypeRequestError(
+              PrototypeRequestErrorCode.INVALID_REQUEST,
+              error.message ?: "Invalid upload",
+            ),
+          ),
+        )
+      }
     val resolved =
-      when (val result = PrototypeRequestResolver.resolve(bound, bound.url, bindingInputs())) {
+      when (
+        val result =
+          PrototypeRequestResolver.resolve(
+            if (upload == null) bound else bound.copy(body = null),
+            bound.url,
+            bindingInputs(),
+          )
+      ) {
         is PrototypeResolvedRequestResult.Failure ->
           return finishRequest(
             info(bound.url),
@@ -1613,6 +1780,7 @@ class PrototypeRuntime(
       }
     val started = info(resolved.url)
     started.owner = this
+    started.uploadBytes = upload?.fileBytes
     if (!requestLimiter.tryAcquire()) {
       val error =
         PrototypeRequestError(
@@ -1621,9 +1789,7 @@ class PrototypeRuntime(
         )
       return finishRequest(started, PrototypeRequestResponse.Failed(error))
     }
-    action.statusKey?.let { key ->
-      if (writeStatus(key, PrototypeRequests.STATUS_LOADING)) touched += key
-    }
+    writeRequestLoading(action, upload, started.requestId, touched)
     val request =
       PrototypeHttpRequest(
         requestId = started.requestId,
@@ -1633,7 +1799,59 @@ class PrototypeRuntime(
         headers = resolved.headers,
         body = resolved.body,
         timeoutMs = action.timeoutMs ?: PrototypeSpecValidator.DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS,
+        uploadBody = upload,
+        onUploadProgress = uploadProgressCallback(action.progressKey, started),
       )
+    launchRequest(started, request)
+  }
+
+  private fun resolveUpload(action: PrototypeRequestAction): PrototypeUploadBody? {
+    if (!PrototypeUploadResolver.isUpload(action.body)) return null
+    require((action.via ?: PrototypeHttpClients.VIA_HOST) == PrototypeHttpClients.VIA_DEVICE) {
+      "Host uploads are not available yet; use via \"device\"."
+    }
+    return PrototypeUploadResolver.resolve(checkNotNull(action.body), bindingInputs(), uploadAssets)
+  }
+
+  private suspend fun writeRequestLoading(
+    action: PrototypeRequestAction,
+    upload: PrototypeUploadBody?,
+    requestId: String,
+    touched: MutableSet<String>,
+  ) {
+    action.statusKey?.let { key ->
+      if (writeStatus(key, PrototypeRequests.STATUS_LOADING)) touched += key
+    }
+    if (upload != null)
+      action.progressKey?.let { writeUploadProgress(it, 0, requestId, reset = true) }
+  }
+
+  private fun uploadProgressCallback(key: String?, started: RequestInFlight): ((Int) -> Unit)? =
+    key?.let { key ->
+      { percent: Int ->
+        requestScope.launch {
+          do {
+            val owner = started.owner
+            owner.exclusively {
+              if (
+                started.owner === owner &&
+                  owner.current.active &&
+                  synchronized(owner.inFlight) { owner.inFlight[started.requestId] === started }
+              ) {
+                try {
+                  owner.writeUploadProgress(key, percent, started.requestId)
+                } finally {
+                  owner.interactionRevision = null
+                }
+              }
+            }
+          } while (started.owner !== owner)
+        }
+        Unit
+      }
+    }
+
+  private fun launchRequest(started: RequestInFlight, request: PrototypeHttpRequest) {
     val client = httpClients.forVia(started.via)
     // Lazy, so the job is registered before it can settle even on an eager dispatcher.
     started.job =
@@ -1648,7 +1866,10 @@ class PrototypeRuntime(
             PrototypeRequestResponse.Failed(
               PrototypeRequestError(
                 PrototypeRequestErrorCode.NETWORK,
-                error.message ?: error.javaClass.simpleName,
+                publicDiagnostic(
+                  error.message ?: error.javaClass.simpleName,
+                  "Prototype request failed",
+                ),
               ),
             )
           }
@@ -1709,6 +1930,23 @@ class PrototypeRuntime(
     }
   }
 
+  private fun publicResponse(
+    response: PrototypeRequestResponse,
+    sensitive: Boolean,
+  ): PrototypeRequestResponse =
+    if (response is PrototypeRequestResponse.Failed)
+      response.copy(
+        error =
+          response.error.copy(
+            message =
+              if (sensitive) "Prototype request failed"
+              else publicDiagnostic(response.error.message, "Prototype request failed"),
+          ),
+      )
+    else if (response is PrototypeRequestResponse.Received && sensitive)
+      response.copy(headers = emptyMap())
+    else response
+
   /**
    * The completion order of the contract: `into`, then `<into>__meta`, then `statusKey`, then the
    * `prototype_request` event, then `onSuccess` or `onError`.
@@ -1718,7 +1956,7 @@ class PrototypeRuntime(
     val result =
       PrototypeRequestOutcome.complete(
         request.into,
-        response,
+        publicResponse(response, request.sensitive),
         request.append?.let {
           it.copy(maxItems = prototypeListMaxItemsFor(current.spec, it.to)?.toLong())
         },
@@ -1733,6 +1971,7 @@ class PrototypeRuntime(
       check(applyDataWrite(write) == null) { "A staged request write was refused at ${write.path}" }
     }
     if (!current.active) return
+    finishUploadProgress(request, response)
     request.statusKey?.let { key ->
       val status =
         if (result.succeeded) PrototypeRequests.STATUS_SUCCESS else PrototypeRequests.STATUS_ERROR
@@ -1762,6 +2001,15 @@ class PrototypeRuntime(
     }
   }
 
+  private suspend fun finishUploadProgress(
+    request: RequestInFlight,
+    response: PrototypeRequestResponse,
+  ) {
+    if (request.uploadBytes != null && response is PrototypeRequestResponse.Received) {
+      request.progressKey?.let { writeUploadProgress(it, 100, request.requestId) }
+    }
+  }
+
   private suspend fun sendRequestEvent(
     request: RequestInFlight,
     status: Int?,
@@ -1772,17 +2020,47 @@ class PrototypeRuntime(
       kind = PrototypeEventKind.EMIT,
       name = PrototypeRequests.EVENT_NAME,
       payload =
-        PrototypeRequestEvent.payload(
-          request.requestId,
-          request.method,
-          request.url,
-          request.via,
-          request.into,
-          status,
-          durationMs,
-          error,
+        JsonObject(
+          PrototypeRequestEvent.payload(
+            request.requestId,
+            request.method,
+            request.url,
+            request.via,
+            request.into,
+            status,
+            durationMs,
+            error,
+          ) + request.uploadBytes?.let { mapOf("uploadBytes" to JsonPrimitive(it)) }.orEmpty(),
         ),
     )
+  }
+
+  /**
+   * Only writes a numeric percent to an existing numeric state key, never request values. A [reset]
+   * makes [requestId] the key's owner; any other write from a request that does not own the key, or
+   * that would not raise it, is dropped.
+   */
+  private suspend fun writeUploadProgress(
+    key: String,
+    percent: Int,
+    requestId: String,
+    reset: Boolean = false,
+  ) {
+    val owned =
+      synchronized(progressOwners) {
+        if (reset) progressOwners[key] = requestId
+        progressOwners[key] == requestId
+      }
+    if (!owned) return
+    val value = PrototypeScalar.Numeric(percent.coerceIn(0, 100).toDouble())
+    val previous = current.state[key] as? PrototypeScalar.Numeric ?: return
+    if (previous.value == value.value || (!reset && previous.value >= value.value)) return
+    try {
+      writeInteractionSpec(validated(current.spec, mapOf(key to value)))
+      emitStateChange(listOf(key))
+    } catch (error: IllegalArgumentException) {
+      warn("Refused upload progress $key: ${error.message}")
+    }
   }
 
   /** True when the state key changed; a rejected write leaves state alone and says why. */
@@ -1824,7 +2102,7 @@ class PrototypeRuntime(
         kind = kind,
         name = name,
         payload = payload,
-        state = current.state.toMap(),
+        state = publicState,
         pages = current.pages.toMap(),
         stacks = current.stacks.toMap(),
         context = resolved?.context,
@@ -1907,7 +2185,9 @@ class PrototypeRuntime(
   }
 
   init {
-    platform.registry.modules.forEach { publishModuleState(it.name, it.state.value) }
+    for (module in platformRegistry.modules) {
+      if (module !== deviceModule) publishModuleState(module.name, module.state.value)
+    }
   }
 }
 

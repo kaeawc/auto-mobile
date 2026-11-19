@@ -21,6 +21,7 @@ final class CrayonGrainTests: XCTestCase {
         )
     }
 
+    @MainActor
     func testModifierIsConstructibleWithoutRendering() {
         let modifier = CrayonGrainModifier(cornerRadius: 8)
         XCTAssertEqual(modifier.cornerRadius, 8)

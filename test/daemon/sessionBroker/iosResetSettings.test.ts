@@ -39,6 +39,8 @@ function harness(
       },
       privacyGrants: { readServiceRows: async () => [] },
       residue: new FakeIosResidueInspector(),
+
+      storeKit: { clear: async () => {} },
       trustStore: { readUserTrustedCertificates: async () => [] },
       files: { realpath: async (path) => path, remove: async () => {} },
       pasteboard: { assertSettled: () => {}, write: async () => {} },
@@ -154,6 +156,8 @@ describe("iOS baseline setting contracts", () => {
         },
         privacyGrants: { readServiceRows: async () => [] },
         residue: new FakeIosResidueInspector(),
+
+        storeKit: { clear: async () => {} },
         trustStore: { readUserTrustedCertificates: async () => [] },
         files: { realpath: async (path) => path, remove: async () => {} },
         pasteboard: { assertSettled: () => {}, write: async () => {} },

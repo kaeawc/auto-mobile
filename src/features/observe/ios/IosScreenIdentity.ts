@@ -48,6 +48,7 @@ interface CandidateSignals {
   selectedTab?: string;
   modalClass?: string;
   modalTitle?: string;
+  presentation?: string;
   focusedElementId?: string;
   keyboardVisible?: boolean;
 }
@@ -200,7 +201,7 @@ function findSelectedTab(root: HierarchyNodeLike | undefined): string | undefine
 
 function findModal(
   root: HierarchyNodeLike | undefined,
-): Pick<CandidateSignals, "modalClass" | "modalTitle"> {
+): Pick<CandidateSignals, "modalClass" | "modalTitle" | "presentation"> {
   let modalNode: HierarchyNodeLike | undefined;
   walk(root, (node) => {
     if (modalNode) {
@@ -212,13 +213,45 @@ function findModal(
     }
   });
   if (!modalNode) {
-    return {};
+    return findPopover(root);
   }
   const attrs = attrsOf(modalNode);
   return {
     modalClass: className(attrs),
     modalTitle: collectText(modalNode)[0],
   };
+}
+
+function findPopover(
+  root: HierarchyNodeLike | undefined,
+): Pick<CandidateSignals, "modalTitle" | "presentation"> {
+  let siblings: HierarchyNodeLike[] | undefined;
+  walk(root, (node) => {
+    if (siblings) {
+      return;
+    }
+    const children = nodeChildren(node);
+    const dismissRegion = children.find(
+      (child) => attrsOf(child)["resource-id"] === "PopoverDismissRegion",
+    );
+    if (dismissRegion) {
+      siblings = children.filter((child) => child !== dismissRegion);
+    }
+  });
+  if (!siblings) {
+    return {};
+  }
+  let modalTitle: string | undefined;
+  for (const sibling of siblings) {
+    walk(sibling, (node) => {
+      const attrs = attrsOf(node);
+      const cls = className(attrs);
+      if (!modalTitle && (cls === "UILabel" || cls === "XCUIElementTypeStaticText")) {
+        modalTitle = textOf(attrs);
+      }
+    });
+  }
+  return { presentation: "popover", modalTitle };
 }
 
 function findFocusedElementId(root: HierarchyNodeLike | undefined): string | undefined {
@@ -329,6 +362,7 @@ function makeKey(signals: CandidateSignals): string {
     ["nav", signals.navigationTitle],
     ["modalClass", signals.modalClass],
     ["modalTitle", signals.modalTitle],
+    ["presentation", signals.presentation],
     ["tab", signals.selectedTab],
     ["focus", signals.focusedElementId],
     ["keyboard", signals.keyboardVisible ? "true" : undefined],
@@ -337,7 +371,7 @@ function makeKey(signals: CandidateSignals): string {
 }
 
 function confidence(signals: CandidateSignals): ScreenIdentity["confidence"] {
-  if (signals.modalClass || signals.navigationTitle) {
+  if (signals.modalClass || signals.navigationTitle || signals.presentation) {
     return "high";
   }
   if (signals.selectedTab || signals.focusedElementId || signals.keyboardVisible) {
@@ -375,6 +409,7 @@ export function deriveIosScreenIdentity(
     signals.selectedTab ||
     signals.modalClass ||
     signals.modalTitle ||
+    signals.presentation ||
     signals.focusedElementId ||
     signals.keyboardVisible,
   );

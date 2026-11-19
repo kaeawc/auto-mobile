@@ -14,10 +14,15 @@ const HEAVY_ROUTED = "needs.mac-pool-routing.outputs.heavy != 'hosted'";
 const SMALL_LABEL = 'fromJSON(\'["self-hosted","automobile-mac"]\')';
 const HEAVY_LABEL = 'fromJSON(\'["self-hosted","automobile-mac-heavy"]\')';
 const ORIGINAL_SELF_HOSTED_JOBS = ["build-desktop-app", "installer-minimal", "swift-code-coverage"];
-const SMALL_POOL_JOBS = ["ios-swift-packages", "ios-spm-root-package-build"];
+const SMALL_POOL_JOBS = [
+  "ios-swift-packages",
+  "ios-swift-prototype-apps",
+  "ios-spm-root-package-build",
+];
 const HEAVY_LANE_JOBS = ["ios-xcode-build", "ios-playground-tests", "prototype-simulator"];
 const FALLBACK: Record<string, string> = {
   "ios-swift-packages": "matrix.config.runner",
+  "ios-swift-prototype-apps": "matrix.config.runner",
   "ios-spm-root-package-build": "'macos-26'",
   "ios-xcode-build": "matrix.config.runner",
   "ios-playground-tests": "matrix.config.runner",

@@ -1,5 +1,5 @@
 import type { Kysely } from "kysely";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { ensureMigrations, getDatabase } from "./database";
 import { nowIso } from "./nowIso";
 import type { Database } from "./types";

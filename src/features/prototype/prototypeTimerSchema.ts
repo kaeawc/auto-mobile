@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import contract from "../../../schemas/prototype-spec-contract.json";
 const limits = contract.limits;
 const id = z.string().min(1).max(limits.MAX_PROTOTYPE_TIMER_ID_LENGTH);

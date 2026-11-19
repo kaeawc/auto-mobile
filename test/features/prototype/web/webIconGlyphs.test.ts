@@ -203,15 +203,32 @@ describe("web still icons (#16532)", () => {
     expect(html).not.toContain("M0 0h8");
   });
 
-  test("an iOS frame keeps the placeholder until its glyph set is decided (#16526)", () => {
+  test("an iOS frame draws the same Material glyphs (#16526)", () => {
     const glyphs = new FakeGlyphSource(new Set(["home"]));
-    const still = renderPrototypeStill(iconSpec([{ type: "icon", testTag: "i", name: "home" }]), {
-      platform: "ios",
-      glyphs,
+    const still = renderPrototypeStill(
+      iconSpec([
+        { type: "icon", testTag: "i", name: "home" },
+        { type: "icon", id: "gone", testTag: "j", name: "eco" },
+      ]),
+      { platform: "ios", glyphs },
+    );
+    expect(glyphs.asked).toEqual(["filled/home", "filled/eco"]);
+    expect(toHtml(still.element)).toContain("M0 0h4");
+    expect(still.unsupportedNodes).toEqual([
+      { type: "icon", id: "gone", path: "root.children[1]", reason: "iconMissing" },
+    ]);
+  });
+
+  test("the page builder draws Material glyphs in an iOS frame (#16532)", () => {
+    const spec = iconSpec([{ type: "icon", testTag: "i", name: "home" }]);
+    const page = buildPrototypeWebPage({
+      title: "icons",
+      frame: "iphone-16",
+      variants: [{ id: "v", label: "v", revisions: [{ revision: 1, operation: "show", spec }] }],
     });
-    expect(glyphs.asked).toEqual([]);
-    expect(toHtml(still.element)).not.toContain("<svg");
-    expect(still.unsupportedNodes).toEqual([]);
+    const home = materialIconGlyphs().glyph("home", "filled")!;
+    expect(page.html).toContain(toHtml(home[0]!));
+    expect(page.unsupportedNodes).toEqual([]);
   });
 
   test("the page builder draws Material glyphs in an Android frame (#16532)", () => {

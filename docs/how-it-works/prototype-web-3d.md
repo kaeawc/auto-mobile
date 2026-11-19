@@ -65,8 +65,18 @@ the starting posture's view; when the angle crosses a posture threshold it switc
 posture's view, as a device reflows only when its device state changes. The thresholds are per
 device and come from the frame's `postures` data, not the script. The layout shown is the frame's
 posture whose `hingeDegrees` is nearest the hinge angle, so each threshold lies halfway between two
-of the frame's postures. The status line names that posture. `closed` on a book
-foldable draws the cover panel's view on the outside face of the moving leaf.
+of the frame's postures. The status line names that posture.
+
+- The 3D runtime switches views through the 2D runtime's posture select, so the 2D runtime shows
+  the view and the 3D runtime wraps it like any newly shown view. The select carries
+  `data-keep-framing` during that change, so the user's zoom and pan stay.
+- Entering 3D starts from flat. A hinge already moved off flat (a posture chosen before entering)
+  reflows on the first pose.
+- `closed` is never reflowed to: its view is the cover panel, not the folding inner panel, so
+  shutting keeps the last open layout. Drawing the cover view on the moving leaf's outside face is
+  not built.
+- Leaving 3D shows the posture and screen the 2D page showed before entering, so the shown view's
+  DOM is unchanged. A posture whose stack lacked that screen had moved it to the stack's start.
 
 ## Device fidelity
 

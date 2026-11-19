@@ -9,6 +9,7 @@ import {
   type ObserveDiffSelector,
   type ObserveDiffNode,
   type ObserveDiffNodeChange,
+  type ObserveDiffRelayout,
   type ObserveDiff,
   type DiffObserveConfig,
   type FlatObserveNode,
@@ -459,11 +460,15 @@ export function diffObserveResult(
     removed: finalRemoved
       .map((node) => toObserveDiffNode(node, cfg?.projectAddedRemoved === true))
       .filter((node): node is ObserveDiffNode => node !== undefined),
-    changed:
-      cfg?.projectAddedRemoved === true
-        ? changed.filter((c) => !isNonActionableRelayout(c))
-        : changed,
+    changed,
   };
+  if (cfg?.projectAddedRemoved === true) {
+    const projected = summarizeRelayout(changed);
+    diff.changed = projected.changed;
+    if (projected.relayout) {
+      diff.relayout = projected.relayout;
+    }
+  }
   appendDisplayChange(diff, baseline, next);
 
   appendFieldChanges(diff, baseline, next, cfg);
@@ -501,22 +506,70 @@ function recordChange(
   changed.push(entry);
 }
 
+function isBoundsOnlyChange(entry: ObserveDiffNodeChange): boolean {
+  const changedKeys = Object.keys(entry.changes);
+  return changedKeys.length === 1 && changedKeys[0] === "bounds";
+}
+
 /**
- * Whether a skeleton-projected diff should omit this change: a bounds-only move
- * of a node with no affordance is a relayout the client cannot act on (#11637),
- * the same node class `toObserveDiffNode` already drops from added/removed.
+ * Whether a bounds-only move is of a node with no affordance: a relayout the
+ * client cannot act on (#11637), the same node class `toObserveDiffNode`
+ * already drops from added/removed.
  */
-function isNonActionableRelayout(entry: ObserveDiffNodeChange): boolean {
+function isNonActionableNode(entry: ObserveDiffNodeChange): boolean {
   const attributes = changeTargets.get(entry);
   if (!attributes) {
     return false;
   }
-  const changedKeys = Object.keys(entry.changes);
-  if (changedKeys.length !== 1 || changedKeys[0] !== "bounds") {
-    return false;
-  }
   const skeleton = projectSkeletonElement(attributes as Element);
   return !skeleton || skeleton.affordances.length === 0;
+}
+
+/** Left and top edge of a bounds value in either array or object form. */
+function boundsOrigin(bounds: unknown): { left: number; top: number } | undefined {
+  const [left, top] = boundsKey(bounds).split(",").map(Number);
+  return Number.isFinite(left) && Number.isFinite(top) ? { left, top } : undefined;
+}
+
+/** The single offset every move shares, or `undefined` when they differ or any is unknown. */
+function sharedOffset(moves: ObserveDiffNodeChange[], axis: "left" | "top"): number | undefined {
+  const offsets = new Set(
+    moves.map((entry) => {
+      const from = boundsOrigin(entry.changes.bounds?.from);
+      const to = boundsOrigin(entry.changes.bounds?.to);
+      return from && to ? to[axis] - from[axis] : Number.NaN;
+    }),
+  );
+  const [offset] = offsets;
+  return offsets.size === 1 && Number.isFinite(offset) && offset !== 0 ? offset : undefined;
+}
+
+/**
+ * The skeleton-projected `changed` list. A bounds-only change (a move, a resize
+ * or both) is a relayout, not a change the client acts on: the skeleton shipped
+ * beside the diff already carries the new bounds. Moves of non-actionable nodes are dropped (#11637);
+ * moves of actionable ones are counted in one `relayout` line, with the shared
+ * offset when every move has the same one (#18348).
+ */
+function summarizeRelayout(changed: ObserveDiffNodeChange[]): {
+  changed: ObserveDiffNodeChange[];
+  relayout?: ObserveDiffRelayout;
+} {
+  const kept = changed.filter((entry) => !isBoundsOnlyChange(entry));
+  const moves = changed.filter((entry) => isBoundsOnlyChange(entry) && !isNonActionableNode(entry));
+  if (moves.length === 0) {
+    return { changed: kept };
+  }
+  const dx = sharedOffset(moves, "left");
+  const dy = sharedOffset(moves, "top");
+  return {
+    changed: kept,
+    relayout: {
+      count: moves.length,
+      ...(dx === undefined ? {} : { dx }),
+      ...(dy === undefined ? {} : { dy }),
+    },
+  };
 }
 
 function collectPositionalNodeDiffs({

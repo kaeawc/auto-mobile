@@ -33,7 +33,13 @@ enum PrototypeStrictCapabilities {
         }
         if spec["data"] != nil { need("data_model") }
         if PrototypeMediaQueue.queued(spec) { need("platform_media_queue") }
-        if spec["derive"] != nil { need("format") }
+        let derived = spec["derive"]?.objectFields ?? [:]
+        if derived.values.contains(where: { $0.objectFields?["collection"] != nil }) { need("derive") }
+        if derived.values
+            .contains(where: { $0.objectFields?["collection"] == nil || $0.objectFields?["format"] != nil })
+        {
+            need("format")
+        }
         if spec["storage"] != nil { need("storage") }
         if PrototypeContractValidator.strings(spec["storage"]?.objectFields?["keys"])
             .contains(where: { $0.hasPrefix("stack:") }) { need("routes") }
@@ -153,6 +159,8 @@ enum PrototypeStrictCapabilities {
             }
             if ["setData", "appendData", "prependData", "upsertData", "removeData"]
                 .contains(type) { need("data_actions") }
+            if ["setData", "removeData"].contains(type),
+               fields["where"] != nil || fields["member"] != nil { result.insert("prototype_data_actions_v2") }
             if type == "upsertData" || (type == "appendData" && fields["maxItems"] != nil) || PrototypeChannels
                 .needsValueCapability(fields) { need("platform_realtime") }
             if type == "prependData" { need("lazy_list") }
@@ -185,6 +193,7 @@ enum PrototypeStrictCapabilities {
                     continue
                 }
                 if key == "repeat" {
+                    if child.objectFields?["items"]?.objectFields?["derived"] != nil { need("derive") }
                     if child.objectFields?["derive"] != nil { need("format") }
                     if child.objectFields?["stagger"] != nil { need("window_motion") }
                     if let repeatSpec = child.objectFields,
@@ -223,8 +232,16 @@ enum PrototypeStrictCapabilities {
                 if key == "linkify" {
                     if let actions = child
                         .objectFields?["onTap"] { scan(actions, field: "onTap", routeAlias: routeAlias) }
-                } else if !["series", "effects", "keyframes", "attentionLoop", "scrollLinked", "scrollTransition", "press"]
-                    .contains(key) { scan(child, field: key, routeAlias: routeAlias) }
+                } else if ![
+                    "series",
+                    "effects",
+                    "keyframes",
+                    "attentionLoop",
+                    "scrollLinked",
+                    "scrollTransition",
+                    "press"
+                ]
+                .contains(key) { scan(child, field: key, routeAlias: routeAlias) }
             }
         }
         if let root = spec["root"] { scan(root) }

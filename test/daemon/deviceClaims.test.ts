@@ -11,6 +11,7 @@ import {
 } from "bun:test";
 import type { Kysely } from "kysely";
 import {
+  DEVICE_CLAIM_ACQUIRE_BUSY_ATTEMPTS,
   DEVICE_CLAIM_MIRROR_RETRY_DELAYS_MS,
   DEVICE_CLAIM_READ_OPEN_TIMEOUT_MS,
   lazyDeviceClaims,
@@ -292,12 +293,76 @@ describe("the claims mirror", () => {
       expect(await skipped.acquire("emulator-5554", ME, live)).toEqual({ outcome: "unavailable" });
     });
 
-    test("a table that cannot be written leaves the claim to the files", async () => {
+    test("a table still busy after the bounded retries leaves the claim to the files", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const store = new FakeDeviceClaims();
+        store.failWrites = DEVICE_CLAIM_ACQUIRE_BUSY_ATTEMPTS;
+        const timer = new FakeTimer();
+        const mirror = new StoreDeviceClaimMirror({
+          platform: "android",
+          store: () => store,
+          timer,
+        });
+        expect(await timer.resolvePromise(mirror.acquire("emulator-5554", ME, live))).toEqual({
+          outcome: "unavailable",
+        });
+        // Every attempt ran, after waits of 50, 100 and 200 ms in all, and then it gave up.
+        expect(store.failWrites).toBe(0);
+        expect(timer.now()).toBeGreaterThanOrEqual(350);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("a briefly busy table still decides the claim", async () => {
       const store = new FakeDeviceClaims();
-      store.failWrites = 1;
-      expect(await mirrorOver(() => store).acquire("emulator-5554", ME, live)).toEqual({
-        outcome: "unavailable",
+      store.failWrites = DEVICE_CLAIM_ACQUIRE_BUSY_ATTEMPTS - 1;
+      const timer = new FakeTimer();
+      const mirror = new StoreDeviceClaimMirror({ platform: "android", store: () => store, timer });
+      expect(await timer.resolvePromise(mirror.acquire("emulator-5554", ME, live))).toEqual({
+        outcome: "claimed",
       });
+      expect((await store.get("android", "emulator-5554"))?.pid).toBe(100);
+    });
+
+    test("once a registry must decide, a missing or unusable table refuses the claim (#11811, E1)", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const timer = new FakeTimer();
+        const expected = (store: () => DeviceClaims | undefined) =>
+          new StoreDeviceClaimMirror({
+            platform: "android",
+            store,
+            timer,
+            registryExpected: () => true,
+          });
+        expect(await expected(() => undefined).acquire("emulator-5554", ME, live)).toEqual({
+          outcome: "unusable",
+        });
+        const busy = new FakeDeviceClaims();
+        busy.failWrites = DEVICE_CLAIM_ACQUIRE_BUSY_ATTEMPTS;
+        expect(
+          await timer.resolvePromise(expected(() => busy).acquire("emulator-5554", ME, live)),
+        ).toEqual({ outcome: "unusable" });
+        // A non-busy failure is not retried.
+        const broken = new FakeDeviceClaims();
+        broken.replaceIf = async () => {
+          throw new Error("disk I/O error");
+        };
+        expect(await expected(() => broken).acquire("emulator-5554", ME, live)).toEqual({
+          outcome: "unusable",
+        });
+        // A skipped registry (unknown migrations) still leaves the claim to the files.
+        const skipped = expected(() => new FakeDeviceClaims());
+        skipped.skip();
+        expect(await skipped.acquire("emulator-5554", ME, live)).toEqual({
+          outcome: "unavailable",
+        });
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     test("a re-opened registry writes an acquired claim back only while no other owner took it", async () => {

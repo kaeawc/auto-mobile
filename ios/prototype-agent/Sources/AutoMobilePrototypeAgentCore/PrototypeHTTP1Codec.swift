@@ -44,7 +44,7 @@ struct PrototypeHTTP1Codec {
         lines += request.headers.filter { $0.key.lowercased() != "accept-encoding" }
             .sorted { $0.key < $1.key }.map { "\($0.key): \($0.value)" }
         lines += ["Connection: close", "Accept-Encoding: identity"]
-        let body = request.method.allowsBody ? request.body : nil
+        let body = request.method.allowsBody ? (request.uploadBody?.data ?? request.body) : nil
         if let body { lines.append("Content-Length: \(body.count)") }
         var bytes = Data((lines.joined(separator: "\r\n") + "\r\n\r\n").utf8)
         if let body { bytes.append(body) }

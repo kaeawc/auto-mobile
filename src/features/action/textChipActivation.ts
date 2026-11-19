@@ -1,6 +1,7 @@
 import type { Element } from "../../models";
 import { logger } from "../../utils/logger";
 import { isFocusEditableElement } from "../utility/ElementResolver";
+import { tapFocusFailure, type TapFocusFailure } from "./tapFocusResult";
 
 /** What chip activation needs from setUIState: a tap on the chip and a fresh copy of it. */
 export interface TextChipActivationDeps {
@@ -12,15 +13,20 @@ export interface TextChipActivationDeps {
 
 /** Focusing additionally needs the verified focus action. */
 export interface TextFieldFocusDeps extends TextChipActivationDeps {
-  focus: (
-    target: Element,
-  ) => Promise<{ success: boolean; focusVerified?: boolean; error?: string }>;
+  focus: (target: Element) => Promise<{
+    success: boolean;
+    focusVerified?: boolean;
+    error?: string;
+    [tapFocusFailure]?: TapFocusFailure;
+  }>;
 }
 
 /** A failed text-field step, in setUIState's field-application shape. */
 export interface TextFieldFocusFailure {
   success: false;
   error: string;
+  /** The same attempt would fail the same way, so retrying only wastes time (#18538). */
+  stopRetrying?: boolean;
 }
 
 export type TextChipActivation = { element: Element } | { error: string };
@@ -83,6 +89,9 @@ export async function focusForInput(
     return {
       success: false,
       error: `Failed to tap/focus on field: ${tapResult.error ?? "focus was not verified"}`,
+      // A selector that matched a visible non-input keeps matching it until the caller taps it
+      // first, so a retry repeats the same refusal (#18538).
+      ...(tapResult[tapFocusFailure] === "matched-non-input" ? { stopRetrying: true } : {}),
     };
   }
   return null;

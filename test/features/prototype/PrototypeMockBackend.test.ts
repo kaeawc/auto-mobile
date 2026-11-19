@@ -246,6 +246,21 @@ describe("PrototypeMockBackend rooms and broadcasts", () => {
     return frames;
   }
 
+  test("backendLog shows a connection joining and leaving its room (#18380)", () => {
+    const { engine } = backend(chat);
+    const joined = engine.join("/rooms/lobby", {}, { deliver: () => {}, close: () => {} });
+    if (!joined.ok) {
+      throw new Error(joined.message);
+    }
+    joined.connection.send("hi");
+    joined.connection.leave();
+    expect(engine.requestLog()).toEqual([
+      { seq: 1, room: "/rooms/lobby", event: "join" },
+      { seq: 2, room: "/rooms/lobby", from: "client", data: "hi" },
+      { seq: 3, room: "/rooms/lobby", event: "leave" },
+    ]);
+  });
+
   test("a POST to a broadcasting collection reaches the room the stored item names", async () => {
     const { engine } = backend(chat);
     const general = member(engine, "/rooms/general");
@@ -262,8 +277,12 @@ describe("PrototypeMockBackend rooms and broadcasts", () => {
     ]);
     expect(other).toEqual([]);
     expect(
-      engine.requestLog().map((entry) => ("room" in entry ? entry.from : entry.method)),
-    ).toEqual(["POST", "broadcast"]);
+      engine
+        .requestLog()
+        .map((entry) =>
+          "method" in entry ? entry.method : "from" in entry ? entry.from : entry.event,
+        ),
+    ).toEqual(["join", "join", "POST", "broadcast"]);
   });
 
   test("only the configured write methods with a 2xx answer broadcast", async () => {

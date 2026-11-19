@@ -8,6 +8,7 @@ import {
 } from "../../features/prototype/prototypeDegradedEffects";
 import { prototypeTimerWarnings } from "../../features/prototype/prototypeTimers";
 import { prototypeSensitiveWarnings } from "../../features/prototype/prototypeStrictPolicy";
+import { prototypeTopAppBarInsetWarnings } from "../../features/prototype/prototypeTopAppBarInsetLint";
 import { prototypeAccessibilityOutput } from "../../features/prototype/prototypeAccessibilityLint";
 import { prototypePlaceholderOutput } from "../../features/prototype/prototypePlaceholderLint";
 import { pseudoLocalizeSpec } from "../../features/prototype/prototypePseudoLocale";
@@ -161,6 +162,7 @@ export async function performPrototypeAction(
       {
         store,
         transport: target.transport,
+        deviceOwnsSpec: target.disposableApp,
         supportsPatch: async () =>
           target.android
             ? target.android.supportsCommand(PROTOTYPE_PATCH_CAPABILITY)
@@ -798,6 +800,7 @@ function missingAssetsOutput(
     result.success ? landedWarning : undefined,
     ...(result.success ? prototypeTimerWarnings(spec) : []),
     ...(result.success ? prototypeSensitiveWarnings(spec) : []),
+    ...(result.success ? prototypeTopAppBarInsetWarnings(spec) : []),
   ]
     .filter((entry) => entry !== undefined)
     .join(" ");

@@ -1165,7 +1165,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     ].join("\n");
   const groupedRows = (notifications: readonly (readonly [string, string])[]) =>
     node("com.android.systemui:id/expandableNotificationRow", "", [
-      node("android:id/app_name_text", shellLabel),
+      node("android:id/notification_header", "", [node("android:id/app_name_text", shellLabel)]),
       node(
         "com.android.systemui:id/notification_children_container",
         "",
@@ -1293,6 +1293,14 @@ describe("systemTray clearAll dumpsys ownership", () => {
       initialDump,
       initialDump,
       initialDump,
+      // Matching re-reads ownership for the initial shade and each post-swipe observation.
+      initialDump,
+      execResult(
+        dumpsys(...notifications.slice(1).map(([title, body], id) => record(id + 2, title, body))),
+      ),
+      execResult(
+        dumpsys(...notifications.slice(2).map(([title, body], id) => record(id + 3, title, body))),
+      ),
       execResult(dumpsys()),
     ]);
     const installedAppsSpy = mockInstalledApps([SHELL]);

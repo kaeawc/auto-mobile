@@ -48,6 +48,7 @@ class CommandAdvertisementTest {
       "prototype_dead_tap_v1",
       "prototype_theme_modes_v1",
       "prototype_timers_v1",
+      "prototype_platform_simulation_v1",
       "prototype_tooltip_v1",
       "prototype_pager_state_key_v1",
       "prototype_flow_grid_v1",
@@ -56,8 +57,10 @@ class CommandAdvertisementTest {
       "prototype_data_model_v1",
       "prototype_design_platform_v1",
       "prototype_data_actions_v1",
+      "prototype_data_actions_v2",
       "prototype_network_v1",
       "prototype_network_device_v1",
+      "prototype_network_upload_v1",
       "prototype_platform_clipboard_v1",
       "prototype_platform_device_v1",
       "prototype_platform_test_v1",
@@ -98,6 +101,7 @@ class CommandAdvertisementTest {
       "prototype_lazy_list_v1",
       "prototype_linkify_v1",
       "prototype_format_v1",
+      "prototype_derive_v1",
       "prototype_chat_scroll_v1",
       "prototype_adaptive_v1",
       "prototype_drawer_v1",
@@ -199,8 +203,10 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_bar_scroll_v1"))
     assertTrue(commands.contains("prototype_data_model_v1"))
     assertTrue(commands.contains("prototype_data_actions_v1"))
+    assertTrue(commands.contains("prototype_data_actions_v2"))
     assertTrue(commands.contains("prototype_network_v1"))
     assertTrue(commands.contains("prototype_network_device_v1"))
+    assertTrue(commands.contains("prototype_network_upload_v1"))
     assertTrue(commands.contains("prototype_platform_v1"))
     assertTrue(commands.contains("prototype_platform_device_v1"))
     assertFalse(commands.contains("prototype_platform_test_v1"))
@@ -215,6 +221,7 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_rich_text_v1"))
     assertTrue(commands.contains("prototype_linkify_v1"))
     assertTrue(commands.contains("prototype_format_v1"))
+    assertTrue(commands.contains("prototype_derive_v1"))
     assertTrue(commands.contains("prototype_chat_scroll_v1"))
     assertTrue(commands.contains("prototype_emit_context_v1"))
     assertTrue(commands.contains("prototype_checks_v1"))

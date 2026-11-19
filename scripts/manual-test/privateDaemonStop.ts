@@ -1,6 +1,6 @@
 // Harness modules never import the product logger; returned identity reasons are the trace.
 import { join } from "node:path";
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { PrivateDaemonCliDeps } from "./private-daemon";
 import type { PrivateDaemonBatchOptions, PrivateDaemonSpec } from "./privateDaemonEnv";
 import {

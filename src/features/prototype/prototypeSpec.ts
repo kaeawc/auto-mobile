@@ -9,7 +9,11 @@ export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { buildRouteSchema, setStackActionSchema } from "./prototypeRouteSchema";
 import { themeSchema } from "./prototypeThemeSchema";
 import { buildTooltipDrawerSchemas, tooltipAnchorIssue } from "./prototypeTooltipDrawerSchema";
-import { prototypeDeriveSchema, prototypeRepeatDeriveSchema } from "./prototypeFormatSchema";
+import {
+  prototypeDeriveSchema,
+  prototypeRepeatDeriveSchema,
+  prototypeRepeatItemsSchema,
+} from "./prototypeFormatSchema";
 import { prototypeScrollMotionShape } from "./prototypeScrollMotionSchema";
 import {
   prototypePlatformNamespaceShape,
@@ -20,16 +24,18 @@ import { prototypeStringsSchema } from "./prototypeStringsSchema";
 import { prototypeSemanticsSchema } from "./prototypeSemanticsSchema";
 import { stackScreenActionSchema, stackTransitionSchema } from "./prototypeStackTransitions";
 import { createSwipeActionsShape } from "./prototypeSwipeActionsSchema";
-import { z } from "zod";
+import { z } from "zod/v3";
+import { prototypeOwnKeyRecordV3 } from "./prototypeOwnKeyRecord";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
   buildPrototypeActionListSchema,
+  setDataActionSchema,
+  removeDataActionSchema,
   appendDataActionSchema,
   upsertDataActionSchema,
   keySchema,
   prototypeEmitContextSchema,
-  dataActionPathSchema,
   dataActionFields,
   pointerSchema,
   setStateValueSchema,
@@ -140,11 +146,11 @@ export const actionSchema = z.discriminatedUnion("type", [
     .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
   z.object({ type: z.enum(["hideKeyboard"]) }).strict(),
-  z.object({ type: z.enum(["setData"]), ...dataActionFields }).strict(),
+  setDataActionSchema,
   appendDataActionSchema,
   upsertDataActionSchema,
   z.object({ type: z.enum(["prependData"]), ...dataActionFields }).strict(),
-  z.object({ type: z.enum(["removeData"]), path: dataActionPathSchema }).strict(),
+  removeDataActionSchema,
   timers.startTimerActionSchema,
   timers.cancelTimerActionSchema,
   requestActionSchema,
@@ -209,16 +215,9 @@ export const commonNodeShape = {
   safeAreaPadding: safeAreaPaddingSchema.optional(),
 };
 // A literal list template: the container's children are instantiated once per item.
-const repeatItemSchema = z.record(
-  keySchema,
-  z.union([z.string(), z.number().finite(), z.boolean()]),
-);
 const repeatSchema = z
   .object({
-    items: z.union([
-      z.array(repeatItemSchema).min(1).max(128),
-      z.object({ path: pointerSchema }).strict(),
-    ]),
+    items: prototypeRepeatItemsSchema,
     as: keySchema,
     derive: prototypeRepeatDeriveSchema.optional(),
     key: keySchema.optional(),
@@ -697,7 +696,7 @@ const stackBaseSchema = z
     type: z.enum(["stack"]),
     id: z.string().min(1),
     start: z.string().min(1),
-    routes: z.record(routeSchema).and(z.unknown()).optional(),
+    routes: prototypeOwnKeyRecordV3(z.string(), routeSchema).optional(),
   })
   .strict();
 const adaptiveBaseSchema = buildAdaptiveSchema(commonNodeShape);

@@ -1,4 +1,7 @@
-import type { AdvancePrototypeClockMessage } from "./prototypeMessages";
+import type {
+  AdvancePrototypeClockMessage,
+  SimulatePrototypePlatformMessage,
+} from "./prototypeMessages";
 /** Android control-proxy request shapes and discriminated request union. */
 import { type ClearPrototypeStorageMessage } from "../../../prototype/prototypeStorageWire";
 import type { HighlightShape } from "../../../../models/VisualHighlight";
@@ -764,6 +767,7 @@ export type CtrlProxyRequest =
   | ListSavedPrototypesMessage
   | DeleteSavedPrototypeMessage
   | AdvancePrototypeClockMessage
+  | SimulatePrototypePlatformMessage
   | ClearPrototypeStorageMessage
   | PutPrototypeAssetMessage
   | RemovePrototypeAssetMessage

@@ -89,6 +89,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   identifyInteractions: READ_ONLY,
   snapshotOf: READ_ONLY,
   listApps: READ_ONLY,
+  buildApp: HOST_LOCAL,
   getAppPermissions: READ_ONLY,
   inspectPackageSigning: READ_ONLY,
   getDeepLinks: READ_ONLY,
@@ -175,6 +176,8 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "shake",
   "siri",
   "statusBar",
+  // Added after the list was frozen: a StoreKit purchase, refund or expiry replays as a plan step (#18399).
+  "storeKitTest",
   "swipeAt",
   "swipeOn",
   "systemAlerts",

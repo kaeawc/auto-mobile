@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /**
  * Root `location` subscription block (#14324): keeps `/platform/location/current` up to date while

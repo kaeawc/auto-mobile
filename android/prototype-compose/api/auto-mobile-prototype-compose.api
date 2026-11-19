@@ -178,13 +178,16 @@ public interface dev.jasonpearson.automobile.prototype.PlatformCallResult {
 Compiled from "PrototypePlatform.kt"
 public final class dev.jasonpearson.automobile.prototype.PlatformError {
   public static final int $stable;
-  public dev.jasonpearson.automobile.prototype.PlatformError(dev.jasonpearson.automobile.prototype.PlatformErrorCode, java.lang.String);
+  public dev.jasonpearson.automobile.prototype.PlatformError(dev.jasonpearson.automobile.prototype.PlatformErrorCode, java.lang.String, java.lang.String);
+  public dev.jasonpearson.automobile.prototype.PlatformError(dev.jasonpearson.automobile.prototype.PlatformErrorCode, java.lang.String, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final dev.jasonpearson.automobile.prototype.PlatformErrorCode getCode();
   public final java.lang.String getMessage();
+  public final java.lang.String getReason();
   public final dev.jasonpearson.automobile.prototype.PlatformErrorCode component1();
   public final java.lang.String component2();
-  public final dev.jasonpearson.automobile.prototype.PlatformError copy(dev.jasonpearson.automobile.prototype.PlatformErrorCode, java.lang.String);
-  public static dev.jasonpearson.automobile.prototype.PlatformError copy$default(dev.jasonpearson.automobile.prototype.PlatformError, dev.jasonpearson.automobile.prototype.PlatformErrorCode, java.lang.String, int, java.lang.Object);
+  public final java.lang.String component3();
+  public final dev.jasonpearson.automobile.prototype.PlatformError copy(dev.jasonpearson.automobile.prototype.PlatformErrorCode, java.lang.String, java.lang.String);
+  public static dev.jasonpearson.automobile.prototype.PlatformError copy$default(dev.jasonpearson.automobile.prototype.PlatformError, dev.jasonpearson.automobile.prototype.PlatformErrorCode, java.lang.String, java.lang.String, int, java.lang.Object);
   public java.lang.String toString();
   public int hashCode();
   public boolean equals(java.lang.Object);
@@ -227,10 +230,12 @@ Compiled from "PrototypeAssets.kt"
 public final class dev.jasonpearson.automobile.prototype.PrototypeAssets {
   public static final dev.jasonpearson.automobile.prototype.PrototypeAssets$Companion Companion;
   public static final int $stable;
+  public final kotlin.jvm.functions.Function1<java.lang.String, java.io.File> getUploadFile$prototype_compose();
   public dev.jasonpearson.automobile.prototype.PrototypeAssets(java.util.Map<java.lang.String, byte[]>, java.util.Map<java.lang.String, byte[]>, kotlin.jvm.functions.Function1<? super java.lang.String, byte[]>, kotlin.jvm.functions.Function1<? super java.lang.String, byte[]>);
   public dev.jasonpearson.automobile.prototype.PrototypeAssets(java.util.Map, java.util.Map, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final dev.jasonpearson.automobile.prototype.PrototypeAssets withShaders(java.util.Map<java.lang.String, byte[]>, kotlin.jvm.functions.Function1<? super java.lang.String, byte[]>);
   public static dev.jasonpearson.automobile.prototype.PrototypeAssets withShaders$default(dev.jasonpearson.automobile.prototype.PrototypeAssets, java.util.Map, kotlin.jvm.functions.Function1, int, java.lang.Object);
+  public final dev.jasonpearson.automobile.prototype.PrototypeAssets withUploadFiles(kotlin.jvm.functions.Function1<? super java.lang.String, ? extends java.io.File>);
   public final byte[] imageBytes$prototype_compose(java.lang.String);
   public final byte[] fontBytes$prototype_compose(java.lang.String);
   public final byte[] shaderBytes$prototype_compose(java.lang.String);
@@ -269,6 +274,7 @@ public final class dev.jasonpearson.automobile.prototype.PrototypeClipboardModul
   public dev.jasonpearson.automobile.prototype.PlatformAvailability$Ready availability();
   public void close();
   public java.lang.Object call(dev.jasonpearson.automobile.prototype.PlatformCall, kotlin.coroutines.Continuation<? super dev.jasonpearson.automobile.prototype.PlatformCallResult>);
+  public java.lang.Object simulate(dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation<? super java.lang.Boolean>);
   public dev.jasonpearson.automobile.prototype.PlatformAvailability availability();
 }
 Compiled from "PrototypeLoadError.kt"
@@ -293,6 +299,9 @@ public final class dev.jasonpearson.automobile.prototype.PrototypeHttpRequest {
   public final java.util.Map<java.lang.String, java.lang.String> getHeaders();
   public final kotlinx.serialization.json.JsonElement getBody();
   public final int getTimeoutMs();
+  public final dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeUploadBody getUploadBody();
+  public static void getUploadBody$annotations();
+  public final kotlin.jvm.functions.Function1<java.lang.Integer, kotlin.Unit> getOnUploadProgress();
 }
 Compiled from "PrototypeLoadError.kt"
 public final class dev.jasonpearson.automobile.prototype.PrototypeLoadError$Invalid implements dev.jasonpearson.automobile.prototype.PrototypeLoadError {
@@ -357,14 +366,21 @@ public final class dev.jasonpearson.automobile.prototype.PrototypePlatform {
   public static final dev.jasonpearson.automobile.prototype.PrototypePlatform access$getNone$cp();
 }
 Compiled from "PrototypePlatform.kt"
+public final class dev.jasonpearson.automobile.prototype.PrototypePlatformModule$DefaultImpls {
+  public static java.lang.Object simulate(dev.jasonpearson.automobile.prototype.PrototypePlatformModule, dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation<? super java.lang.Boolean>);
+}
+Compiled from "PrototypePlatform.kt"
 public interface dev.jasonpearson.automobile.prototype.PrototypePlatformModule {
   public abstract java.lang.String getName();
   public abstract java.lang.String getCapability();
   public abstract dev.jasonpearson.automobile.prototype.PlatformAvailability availability();
   public abstract java.lang.Object call(dev.jasonpearson.automobile.prototype.PlatformCall, kotlin.coroutines.Continuation<? super dev.jasonpearson.automobile.prototype.PlatformCallResult>);
+  public default java.lang.Object simulate(dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation<? super java.lang.Boolean>);
+  public static java.lang.Object simulate$suspendImpl(dev.jasonpearson.automobile.prototype.PrototypePlatformModule, dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation<? super java.lang.Boolean>);
   public abstract kotlinx.coroutines.flow.Flow<dev.jasonpearson.automobile.prototype.PlatformEvent> getEvents();
   public abstract kotlinx.coroutines.flow.StateFlow<kotlinx.serialization.json.JsonObject> getState();
   public abstract void close();
+  public static java.lang.Object access$simulate$jd(dev.jasonpearson.automobile.prototype.PrototypePlatformModule, dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation);
 }
 Compiled from "PrototypePlatform.kt"
 public final class dev.jasonpearson.automobile.prototype.PrototypePlatformRegistry {

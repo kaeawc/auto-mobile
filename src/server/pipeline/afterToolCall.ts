@@ -67,6 +67,8 @@ export interface PlainToolFinalizeInput {
   args: unknown;
   response: unknown;
   timer: Timer;
+  /** The tool's `omitsAcquisitionTiming` trait (#18348). */
+  omitsAcquisitionTiming?: boolean;
 }
 
 export interface AfterToolCallHandler {
@@ -196,7 +198,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler, PlainT
   }
 
   finalizePlain(input: PlainToolFinalizeInput): unknown {
-    const { name, outputSchema, args, response, timer } = input;
+    const { name, outputSchema, args, response, timer, omitsAcquisitionTiming } = input;
     const internal = isRecord(args) && args[INTERNAL_NO_DIFF_PARAM] === true;
     // `plainTool` never reads the artifact mode: a configured output directory only
     // chooses where a spill lands, and only device tools artifact every response.
@@ -206,6 +208,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler, PlainT
       args: isRecord(args) ? args : undefined,
       internal,
       plainTool: true,
+      omitsAcquisitionTiming,
       artifactWriter: this.agentFacingArtifactWriter(internal, timer),
     });
   }
@@ -278,6 +281,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler, PlainT
       name,
       loudArtifactWrites: traits?.loudArtifactWrites,
       defaultsToSkeletonObservation: traits?.defaultsToSkeletonObservation,
+      omitsAcquisitionTiming: traits?.omitsAcquisitionTiming,
       outputSchema,
       args,
       sessionUuid,

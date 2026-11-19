@@ -5,6 +5,7 @@ import type {
 import { runDetachedFromPerf, trackAmbient } from "../PerfContext";
 import { ActionableError, ExecResult } from "../../models";
 import { logger } from "../logger";
+import { errorMessage } from "../describeUnknownError";
 import { runExecSeam } from "../ExecSeam";
 import {
   DefaultHostCommandExecutor,
@@ -63,6 +64,9 @@ export interface Xcodebuild {
 // issue #6585): a stalled `xcodebuild -version` must never hang a caller
 // indefinitely, so every availability check is timer/abort-bounded.
 const DEFAULT_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
+
+/** How long a timed-out command's killed child may take to hand back the output it printed. */
+const TIMEOUT_OUTPUT_GRACE_MS = 2_000;
 
 // Route the default long-lived spawn through the shared host-process seam so the
 // client no longer reaches for `child_process.spawn` directly (issue #5459). The
@@ -197,7 +201,9 @@ export class XcodebuildClient implements Xcodebuild {
         logger.warn(
           `[iOS] Command failed after ${duration}ms: ${fullCommand} - ${(error as Error).message}`,
         );
-        throw controller.signal.aborted ? timeoutError : error;
+        throw controller.signal.aborted
+          ? await this.timeoutErrorWithOutput(timeoutError, runPromise)
+          : error;
       }
     }
 
@@ -213,6 +219,33 @@ export class XcodebuildClient implements Xcodebuild {
       );
       throw error;
     }
+  }
+
+  /**
+   * The timeout error, carrying the aborted run's rejection as its `cause`: execFile attaches
+   * the stdout and stderr the command printed before it stalled, which callers excerpt.
+   * Waits at most {@link TIMEOUT_OUTPUT_GRACE_MS} for the killed child to settle.
+   */
+  private async timeoutErrorWithOutput(
+    timeoutError: Error,
+    runPromise: Promise<ExecResult>,
+  ): Promise<Error> {
+    const cause = await raceWithDeadline(
+      runPromise.then(
+        () => undefined,
+        (error: unknown) => error,
+      ),
+      {
+        timer: this.timer,
+        timeoutMs: TIMEOUT_OUTPUT_GRACE_MS,
+        label: "xcodebuild output after timeout",
+      },
+    ).catch((error: unknown) => {
+      // The timeout error is still accurate without the partial output; report it bare.
+      logger.debug(`[iOS] xcodebuild did not settle after its timeout: ${errorMessage(error)}`);
+      return undefined;
+    });
+    return cause === undefined ? timeoutError : new Error(timeoutError.message, { cause });
   }
 
   /**

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { ENV, readEnvRaw } from "../../config/env";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { execFileAsync, type ExecFileAsync } from "../HostCommandExecutor";

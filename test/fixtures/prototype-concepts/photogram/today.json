@@ -190,6 +190,10 @@
     "screens": {
       "home": {
         "type": "column",
+        "safeAreaPadding": {
+          "edges": ["top"],
+          "types": ["systemBars"]
+        },
         "children": [
           {
             "type": "pager",
@@ -1764,6 +1768,10 @@
       },
       "viewer": {
         "type": "column",
+        "safeAreaPadding": {
+          "edges": ["top"],
+          "types": ["systemBars"]
+        },
         "children": [
           {
             "type": "topAppBar",
@@ -1804,6 +1812,10 @@
       },
       "inbox": {
         "type": "column",
+        "safeAreaPadding": {
+          "edges": ["top"],
+          "types": ["systemBars"]
+        },
         "children": [
           {
             "type": "topAppBar",
@@ -1855,6 +1867,10 @@
       },
       "dm": {
         "type": "column",
+        "safeAreaPadding": {
+          "edges": ["top"],
+          "types": ["systemBars"]
+        },
         "children": [
           {
             "type": "topAppBar",
@@ -2010,6 +2026,10 @@
       },
       "upload": {
         "type": "column",
+        "safeAreaPadding": {
+          "edges": ["top"],
+          "types": ["systemBars"]
+        },
         "children": [
           {
             "type": "topAppBar",
@@ -2096,6 +2116,10 @@
       },
       "link": {
         "type": "column",
+        "safeAreaPadding": {
+          "edges": ["top"],
+          "types": ["systemBars"]
+        },
         "children": [
           {
             "type": "topAppBar",

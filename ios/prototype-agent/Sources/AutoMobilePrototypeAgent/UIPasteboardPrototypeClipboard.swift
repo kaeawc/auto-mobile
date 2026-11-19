@@ -33,7 +33,16 @@
                 clipboard: UIPasteboardPrototypeClipboard(),
                 connectivity: NWPathConnectivitySource(),
                 links: UIKitLinkOpener(),
-                settings: UIKitSettingsURLOpener()
+                settings: UIKitSettingsURLOpener(),
+                deviceStatus: [
+                    PrototypeDeviceStatusModule.battery(source: UIDeviceBatterySource()),
+                    PrototypeDeviceStatusModule.power(source: ProcessInfoPowerSource()),
+                    PrototypeDeviceStatusModule.audio(source: AVAudioSessionAudioSource()),
+                ],
+                location: CLLocationManagerPrototypeLocationSource(),
+                sensors: CoreMotionPrototypeSensorSource(),
+                permissions: UNUserNotificationCenterPrototypePermissionsSource(),
+                biometric: LAContextPrototypeBiometricSource()
             )
     }
 #endif

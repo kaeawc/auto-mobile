@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
 import { decodePrototypeCastEvent, type PrototypeCastEvent } from "./prototypeCastEvents";
 import { prototypeJsonSchema, type PrototypeJson } from "./prototypeJson";

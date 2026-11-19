@@ -1,5 +1,7 @@
 import { ActionableError } from "../../../models/ActionableError";
 import type { PrototypeJson } from "../prototypeJson";
+import { expandPrototypeComponents } from "../prototypeComponents";
+import { prototypePlatformError } from "../prototypePlatform";
 import { prototypeRequiresSchema } from "../prototypePlatformSchema";
 
 /**
@@ -27,6 +29,17 @@ export const DISPOSABLE_APP_ANDROID_PERMISSIONS: Readonly<Record<string, readonl
   nearbyWifi: [`${ANDROID}NEARBY_WIFI_DEVICES`],
   motion: [`${ANDROID}ACTIVITY_RECOGNITION`],
   speech: [`${ANDROID}RECORD_AUDIO`],
+};
+
+/**
+ * `requires.platform` module → Android install-time permissions its runtime uses. These have no
+ * contract permission name because nothing is granted at runtime, so they come from the module
+ * list; the template's merged manifest declares them, but stamping rebuilds the permission list.
+ */
+export const DISPOSABLE_APP_ANDROID_MODULE_PERMISSIONS: Readonly<
+  Record<string, readonly string[]>
+> = {
+  biometric: [`${ANDROID}USE_BIOMETRIC`],
 };
 
 /** Contract background kind → Android foreground-service type permissions. */
@@ -87,6 +100,21 @@ function sortedUnique(values: Iterable<string>): string[] {
   return [...new Set(values)].sort();
 }
 
+function assertSpecPermissionsDeclared(spec: PrototypeJson): void {
+  // Tool callers already validate the schema. Reuse the platform semantic rules here so direct
+  // manager callers cannot bypass call/node permission checks, including inside components.
+  const expansion = expandPrototypeComponents(spec);
+  const problem = expansion.success
+    ? prototypePlatformError(expansion.spec, [], () => undefined)
+    : expansion.error;
+  if (problem) {
+    const path = expansion.success ? expansion.locate(problem.path) : problem.path;
+    throw new ActionableError(
+      `Cannot derive disposable app permissions at ${path}: ${problem.message}. If a permission is required, declare it in requires.permissions and retry.`,
+    );
+  }
+}
+
 export function disposableAppDeclarations(spec: PrototypeJson): DisposableAppDeclarations {
   const raw = spec && typeof spec === "object" && !Array.isArray(spec) ? (spec.requires ?? {}) : {};
   const parsed = prototypeRequiresSchema.safeParse(raw);
@@ -95,9 +123,11 @@ export function disposableAppDeclarations(spec: PrototypeJson): DisposableAppDec
       `The spec's requires block is invalid, so the disposable app's permissions cannot be derived: ${parsed.error.issues[0]?.message ?? "unknown error"}. Validate the spec and retry.`,
     );
   }
+  assertSpecPermissionsDeclared(spec);
   const permissionEntries = parsed.data.permissions ?? [];
   const permissions = sortedUnique(permissionEntries.map((entry) => entry.name));
   const background = sortedUnique(parsed.data.background ?? []);
+  const modules = parsed.data.platform ?? [];
   const services = background.flatMap((kind) => DISPOSABLE_APP_ANDROID_BACKGROUND[kind] ?? []);
   return {
     permissions,
@@ -106,6 +136,7 @@ export function disposableAppDeclarations(spec: PrototypeJson): DisposableAppDec
       permissions: sortedUnique([
         ...ANDROID_ALWAYS,
         ...permissions.flatMap((name) => DISPOSABLE_APP_ANDROID_PERMISSIONS[name] ?? []),
+        ...modules.flatMap((name) => DISPOSABLE_APP_ANDROID_MODULE_PERMISSIONS[name] ?? []),
         ...(services.length > 0 ? [ANDROID_FOREGROUND_SERVICE, ...services] : []),
       ]),
     },

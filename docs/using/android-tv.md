@@ -160,17 +160,28 @@ its own, `focusedElement.descendantLabel` is its child label: the `label` of its
 - A focused scrollable container does not count for a child target. Neither does a container
   holding the target inside another focusable or clickable control. Navigation continues until the
   control owns focus.
-- To land on the exact control `tapOn` would tap, name the target with `until.label` or
-  `until.elementId` alone. Focus must then reach that control; a focused row that only contains it
-  does not count.
+- With `until.label` or `until.elementId` alone, the target uses `tapOn` selection. If the label
+  selects a node that is neither focusable nor clickable, the target is its nearest focusable
+  parent. The parent search stops at the first clickable or scrollable ancestor. A clickable label
+  that cannot take focus keeps its own bounds. Without an owner, the target is the smallest
+  focusable visible label match in the same window, exact labels first.
+- A scrollable ancestor suppresses duplicate matches outside the label's parent row. Within that
+  row, a matching focusable sibling can still own the label.
+- When no focusable label match applies, a single unlabelled focusable sibling in the row owns the
+  label; with two or more, none does. A sibling parked outside the row is ignored. A sibling with
+  its own label or a labelled child is excluded, except for a range control's value description
+  covering the control itself.
+  Otherwise the label keeps its bounds. Focus must reach the selected control; a focused row that
+  only contains it does not count.
 
 ### Tapping on a TV
 
 On a TV, `tapOn` with a `text` or `elementId` selector moves D-pad focus to the match and presses
 `enter`. One flow can then tap on both Android TV and tvOS.
 
-The selector picks the same element a touch tap would. That includes a text field found by its
-placeholder, and the first of several matches even when focus is on another one. The result has
+The selector picks the same element a touch tap would, or the control that takes focus for it
+when that element cannot focus. That includes a text field found by its placeholder, and the first of
+several matches even when focus is on another one. The result has
 `inputMethod: "dpad"` and a `focusNavigation` object with the focus `status`, `steps` and `path`.
 
 Focus takes the shortest route: it reaches a match on another row by changing rows first. With

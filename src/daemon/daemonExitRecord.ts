@@ -1,5 +1,5 @@
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { daemonOptionsSchema } from "./client/client";
 import type { DaemonOptions } from "./types";
 import { logger } from "../utils/logger";

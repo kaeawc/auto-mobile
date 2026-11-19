@@ -81,7 +81,10 @@ It resolves the prototype like the native resource, expands `components`, and wr
 - The samples are pinned to LF in `.gitattributes` and excluded from oxfmt, so neither a Windows
   checkout nor the formatter can make them differ from the resource output.
 - `scripts/android/validate-prototype-compose-consumer.sh` compiles the Android sample against the
-  locally published renderer in a minified consumer app; the iOS library build compiles
+  locally published renderer in a minified consumer app, in the PR workflow's JVM Consumer Checks
+  job. Its android path filter includes the Android samples, the fixture specs, the generator and
+  the `nativePrototype*` and `prototypeEject*` emitter sources, so an emitter-only change runs it.
+  The iOS library build compiles
   `EmbedConsumer` in Swift 6 language mode. The ejected SwiftUI state class is `@MainActor` for
   that mode.
 

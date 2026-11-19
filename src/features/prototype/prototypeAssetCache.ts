@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
 import { getTempDir } from "../../utils/tempDir";

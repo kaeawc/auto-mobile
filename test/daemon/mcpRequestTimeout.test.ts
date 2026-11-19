@@ -23,11 +23,20 @@ import {
 } from "../../src/features/prototype/prototypeEventTimeout";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../src/features/prototype/protoViewer/protoViewerDevice";
 import {
+  DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS,
+  DISPOSABLE_APP_UNINSTALL_STEP_MS,
+} from "../../src/features/prototype/disposableApp/disposableAppUninstallBudget";
+import {
   DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS,
   MAX_PROTOTYPE_ASSET_COUNT,
 } from "../../src/features/prototype/prototypeAssets";
 import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "../../src/daemon/observationResourceUris";
 import { describe, expect, test } from "bun:test";
+import {
+  BUILD_APP_MCP_TIMEOUT_HEADROOM_MS,
+  DEFAULT_BUILD_TIMEOUT_MS,
+  MAX_BUILD_TIMEOUT_MS,
+} from "../../src/features/build/buildAppTimeout";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
   DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
@@ -43,6 +52,9 @@ import {
   MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS,
   MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
   MIN_INSTALL_APP_MCP_TIMEOUT_MS,
+  MIN_PROTOTYPE_INSTALL_APP_MCP_TIMEOUT_MS,
+  MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS,
+  MIN_PROTOTYPE_BULK_UNINSTALL_APP_MCP_TIMEOUT_MS,
   INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS,
   MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS,
   OBSERVE_MCP_TIMEOUT_ENV_VAR,
@@ -149,6 +161,23 @@ describe("resolveExplicitToolTimeoutOverrideMs", () => {
 });
 
 describe("resolveMcpRequestTimeoutMs", () => {
+  test("buildApp waits for the default or requested build plus headroom, under the caller cap", () => {
+    const build = (args: Record<string, unknown>): DaemonRequest => ({
+      id: "b",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "buildApp", arguments: { platform: "android", projectPath: "/p", ...args } },
+    });
+    expect(resolveMcpRequestTimeoutMs(build({}))).toBe(
+      DEFAULT_BUILD_TIMEOUT_MS + BUILD_APP_MCP_TIMEOUT_HEADROOM_MS,
+    );
+    expect(resolveMcpRequestTimeoutMs(build({ timeoutMs: 600_000 }))).toBe(
+      600_000 + BUILD_APP_MCP_TIMEOUT_HEADROOM_MS,
+    );
+    expect(MAX_BUILD_TIMEOUT_MS + BUILD_APP_MCP_TIMEOUT_HEADROOM_MS).toBeLessThanOrEqual(
+      MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+    );
+  });
   test("installApp floor covers the downgrade transfer chain plus headroom", () => {
     expect(MIN_INSTALL_APP_MCP_TIMEOUT_MS).toBeGreaterThanOrEqual(
       ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
@@ -1651,6 +1680,34 @@ describe("argument budget deadline gaps", () => {
           Math.max(PROTOVIEWER_DEFAULT_TIMEOUT_MS + headroom, DEFAULT_MCP_REQUEST_TIMEOUT_MS),
         );
       }
+    });
+    test("installApp budgets stamping and one transfer; uninstallApp budgets one uninstall command", () => {
+      expect(resolve({ action: "installApp" })).toBe(MIN_PROTOTYPE_INSTALL_APP_MCP_TIMEOUT_MS);
+      expect(MIN_PROTOTYPE_INSTALL_APP_MCP_TIMEOUT_MS).toBeGreaterThan(
+        ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
+      );
+      expect(resolve({ action: "uninstallApp", appId: "dev.jasonpearson.automobile.app.a" })).toBe(
+        MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS,
+      );
+      expect(MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS).toBeGreaterThan(
+        ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
+      );
+      expect(resolve({ action: "listApps" })).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+    });
+    test("bulk uninstallApp budgets the manager's bulk deadline plus headroom", () => {
+      for (const target of [{ all: true }, { expired: true }, {}]) {
+        expect(resolve({ action: "uninstallApp", ...target })).toBe(
+          MIN_PROTOTYPE_BULK_UNINSTALL_APP_MCP_TIMEOUT_MS,
+        );
+      }
+      expect(MIN_PROTOTYPE_BULK_UNINSTALL_APP_MCP_TIMEOUT_MS).toBe(
+        DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS + INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS,
+      );
+      // The deadline fits several worst-case removals, so the bulk path is not one-app-only.
+      expect(DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS).toBeGreaterThanOrEqual(
+        2 * DISPOSABLE_APP_UNINSTALL_STEP_MS,
+      );
+      expect(DISPOSABLE_APP_UNINSTALL_STEP_MS).toBeGreaterThan(ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS);
     });
     test("other prototype actions and a larger request timeout are unchanged", () => {
       for (const action of [

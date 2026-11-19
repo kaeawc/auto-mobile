@@ -171,12 +171,17 @@
                 return
             }
             if controlledWindow !== prototypeWindow {
+                let chrome = UIKitPrototypeWindowChrome(window: prototypeWindow)
+                // Transfer only orientation before restoring the old runtime's other controls.
+                if let orientation = session.spec?.window.controls.orientation {
+                    _ = chrome.requestOrientation(orientation)
+                }
                 logWindowControls(windowControls?.apply(nil))
                 controlledWindow = prototypeWindow
                 windowControls = PrototypeWindowControlsRuntime(
                     idleTimer: UIKitPrototypeIdleTimer(),
                     screen: UIKitPrototypeScreen(screen: prototypeWindow.screen),
-                    chrome: UIKitPrototypeWindowChrome(window: prototypeWindow)
+                    chrome: chrome
                 )
             }
             logWindowControls(windowControls?.apply(session.spec?.window.controls))
@@ -374,7 +379,7 @@
             storage: PrototypeStorageCoordinator? = nil,
             registry: PrototypePlatformRegistry = .system
         ) {
-            platformRegistry = registry
+            platformRegistry = registry.forPresentation()
             self.clock = clock
             self.mode = mode
             self.storage = storage
@@ -446,6 +451,11 @@
             // Stored values replace the spec's for the keys it lists before the first draw, and emit
             // nothing (#12526); the session only receives the result.
             let prepared = storage?.prepare(spec)
+            // Drop buffered location/sensor events from the old session while keeping global and
+            // host-supplied streams alive. New state must be seeded before the first draw.
+            platformDriver.resetSessionEvents()
+            platformRegistry.configure(locationBlock: (prepared?.spec ?? spec).locationBlock)
+            platformRegistry.configure(sensorsBlock: (prepared?.spec ?? spec).sensorsBlock, sessionID: showRevision + 1)
             let seeded: PrototypeSpec
             do { seeded = try (prepared?.spec ?? spec).replacingPlatform(
                 platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }
@@ -469,8 +479,7 @@
                 onEvent?(event.wireObject(timestamp: timestamp))
             }
             platformDriver.perform(platformCommands)
-            // Keep consuming the module stream for the model lifetime: cancelling an AsyncStream
-            // iterator terminates it. Hidden sessions drop events; the next show seeds fresh state.
+            // A fresh stream cannot deliver the previous session's buffered shake/location events.
             platformDriver.subscribe()
             deviceState.reset()
             if let lastDeviceState { updateDeviceState(lastDeviceState) }
@@ -500,13 +509,19 @@
         }
 
         /// Uploaded assets are tracked independently of session transitions.
-        func putAsset(_ id: String, _ image: UIImage) {
+        func putAsset(_ id: String, _ image: UIImage, data: Data) {
             assets[id] = image
+            var upload = session.uploadAssets as? PrototypeUploadAssets ?? PrototypeUploadAssets()
+            upload.bytes[id] = data
+            session.uploadAssets = upload
         }
 
         func removeAsset(_ id: String) {
             guard assets[id] != nil else { return }
             assets[id] = nil
+            var upload = session.uploadAssets as? PrototypeUploadAssets ?? PrototypeUploadAssets()
+            upload.bytes[id] = nil
+            session.uploadAssets = upload
         }
 
         func holds(_ condition: Condition) -> Bool {
@@ -712,6 +727,10 @@
             apply(activity: false) { $0.dismiss(reason: reason) }
         }
 
+        func stopPlatformEvents() {
+            platformDriver.stopEvents()
+        }
+
         /// The last host connection is gone: the prototype ends with `reason: disconnect` and its
         /// uploaded assets are dropped, shown or not (Android's `onClientCountChanged(0)`).
         func hostDisconnected() {
@@ -719,6 +738,7 @@
             dismiss(reason: .disconnect)
             if !assets.isEmpty {
                 assets = [:]
+                session.uploadAssets = nil
             }
         }
 
@@ -752,6 +772,8 @@
                 onEvent?(event.wireObject(timestamp: timestamp))
             }
             if wasShown, !session.isShown {
+                platformRegistry.configure(locationBlock: nil)
+                platformRegistry.configure(sensorsBlock: nil)
                 hitRects.removeAll()
                 onVisibilityChange?(false)
             }
@@ -759,6 +781,11 @@
             timers.perform(timerCommands)
             platformDriver.perform(platformCommands)
             requestDriver?.perform(requestCommands)
+        }
+
+        /// Upload progress follows ordinary state transitions without counting as user activity.
+        func writeUploadProgress(_ requestId: String, key: String, value: Int) {
+            apply(activity: false) { $0.writeUploadProgress(requestId, key: key, value: value) }
         }
 
         /// A request's answer. Not user activity: it neither restarts the idle TTL nor needs the

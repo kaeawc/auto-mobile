@@ -1,6 +1,6 @@
 import Foundation
 
-/// Opt-in coordinate resolution and display routing, NOT measured touch delivery. Codable
+/// Dispatch routing with opt-in coordinate resolution, NOT measured touch delivery. Codable
 /// omits nil fields and supports the response encoder's sorted keys. No candidateElement
 /// or window enumeration: tap has no cached snapshot, and diagnostic tree queries are not free.
 public struct TapDiagnostics: Codable, Sendable, Equatable {
@@ -108,6 +108,11 @@ public struct TapDiagnostics: Codable, Sendable, Equatable {
     public var synthesizedInterfaceOrientation: Int?
     public var fallbackFrom: String?
     public var deliveryWarning: DeliveryWarning?
+
+    /// Reports delivery without sampling coordinates, screens, or orientation.
+    public static func routeOnly(x: Double, y: Double, durationMs: Int, route: Route) -> Self {
+        Self(requested: .init(x: x, y: y, durationMs: durationMs), route: route)
+    }
 
     /// Pure, stable formatter, emitted once even for a fast diagnostic tap.
     public func logLine(gesture: String? = nil) -> String {

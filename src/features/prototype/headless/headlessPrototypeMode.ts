@@ -52,6 +52,8 @@ export const VIRTUAL_PROTOTYPE_CAPABILITIES: readonly string[] = [
   "prototype_emit_context_v1",
   "prototype_flow_grid_v1",
   "prototype_format_v1",
+  "prototype_derive_v1",
+  "prototype_hide_keyboard_v1",
   "prototype_icon_effects_v1",
   "prototype_keyframes_v1",
   "prototype_lazy_list_v1",
@@ -96,7 +98,6 @@ export const VIRTUAL_PROTOTYPE_UNSUPPORTED_CAPABILITIES: readonly string[] = [
   "prototype_dead_tap_v1",
   "prototype_display_id_v1",
   "prototype_display_id_v2",
-  "prototype_hide_keyboard_v1",
   "prototype_multi_surface_v1",
   "prototype_network_device_v1",
   "prototype_platform_v1",
@@ -116,6 +117,9 @@ const DEVICE_ONLY_ACTIONS = new Set([
   "open",
   "clearStorage",
   "simulate",
+  "installApp",
+  "listApps",
+  "uninstallApp",
 ]);
 
 /** Why the virtual device refuses a call before anything runs, or undefined when it can run it. */
@@ -124,7 +128,7 @@ export function headlessPrototypeRefusal(args: {
   display?: unknown;
 }): string | undefined {
   if (DEVICE_ONLY_ACTIONS.has(args.action)) {
-    return `${args.action} needs a real device: the headless virtual device has no saved prototypes, storage or prototype clock. Run without AUTOMOBILE_HEADLESS/--headless on an Android device or iOS simulator.`;
+    return `${args.action} needs a real device: the headless virtual device has no saved prototypes, installed apps, storage or prototype clock. Run without AUTOMOBILE_HEADLESS/--headless on an Android device or iOS simulator.`;
   }
   if (args.display !== undefined) {
     return "display needs a real Android device: the headless virtual device has one display. Omit display.";

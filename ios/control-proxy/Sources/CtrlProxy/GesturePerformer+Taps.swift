@@ -27,11 +27,23 @@ extension GesturePerformer {
         }
 
         public func tap(x: Double, y: Double, duration: TimeInterval, strategy: String?) throws {
-            _ = try performTap(x: x, y: y, duration: duration, requested: nil, forced: forcedTapStrategy(strategy))
+            _ = try tapReportingRoute(x: x, y: y, duration: duration, strategy: strategy)
         }
 
         public func doubleTap(x: Double, y: Double) throws {
-            _ = try performTap(x: x, y: y, duration: 0, requested: nil, forced: nil, doubleTap: true)
+            _ = try doubleTapReportingRoute(x: x, y: y)
+        }
+
+        public func tapReportingRoute(
+            x: Double, y: Double, duration: TimeInterval, strategy: String?
+        )
+            throws -> TapDiagnostics?
+        {
+            try performTap(x: x, y: y, duration: duration, requested: nil, forced: forcedTapStrategy(strategy))
+        }
+
+        public func doubleTapReportingRoute(x: Double, y: Double) throws -> TapDiagnostics? {
+            try performTap(x: x, y: y, duration: 0, requested: nil, forced: nil, doubleTap: true)
         }
 
         private func forcedTapStrategy(_ value: String?) -> TapCoordinateStrategy? {
@@ -155,7 +167,9 @@ extension GesturePerformer {
                     factory.annotate(&sample, delivery: delivery)
                     logger.warning("\(sample.logLine(), privacy: .public)")
                 }
-                return diagnostics
+                return diagnostics ?? TapDiagnostics.routeOnly(
+                    x: x, y: y, durationMs: Self.diagnosticDurationMs(duration), route: delivery.route
+                )
             }
         }
 

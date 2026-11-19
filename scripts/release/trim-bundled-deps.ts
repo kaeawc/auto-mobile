@@ -126,28 +126,74 @@ function files(directory: string): string[] {
   });
 }
 
-function exportTargets(value: unknown): string[] {
+/** Entry points of one bundled package that no bundled consumer loads (audited by hand). */
+export interface UnloadedEntrypoints {
+  /** Export subpaths nothing in the bundled closure imports. */
+  subpaths: readonly string[];
+  /** Export conditions nothing in the bundled closure resolves. */
+  conditions: readonly string[];
+  /** The legacy `main` field is a CJS entry nothing in the bundled closure requires. */
+  main: boolean;
+  /** Files reachable only through the unloaded entry points above. */
+  files: (relative: string) => boolean;
+}
+
+export const PACKAGE_UNLOADED_ENTRYPOINTS: Record<string, UnloadedEntrypoints> = {
+  // Bundled only as the validator of the @jimp/* closure, which loads it solely through
+  // ESM `import { z } from "zod"` ("." import condition). AutoMobile's own zod/v3 and
+  // zod/v4 imports are inlined into dist/, so the CJS twin and the v3/mini builds are dead.
+  zod: {
+    subpaths: ["./v3", "./mini", "./v4/mini", "./v4-mini"],
+    conditions: ["require"],
+    main: true,
+    files: (relative) =>
+      relative.endsWith(".cjs") || /^(v3|mini|v4-mini|v4\/mini)\//.test(relative),
+  },
+};
+
+function exportTargets(value: unknown, skippedConditions: readonly string[] = []): string[] {
   if (typeof value === "string") {
     return [value];
   }
   if (Array.isArray(value)) {
-    return value.flatMap(exportTargets);
+    return value.flatMap((item) => exportTargets(item, skippedConditions));
   }
   if (value && typeof value === "object") {
     return Object.entries(value)
       .filter(
         ([key]) =>
           // Bun and Node never resolve the browser condition; browser-builds owns those targets.
-          key !== "types" && key !== "typings" && key !== "browser" && !key.startsWith("@"),
+          key !== "types" &&
+          key !== "typings" &&
+          key !== "browser" &&
+          !key.startsWith("@") &&
+          !skippedConditions.includes(key),
       )
-      .flatMap(([, target]) => exportTargets(target));
+      .flatMap(([, target]) => exportTargets(target, skippedConditions));
   }
   return [];
 }
 
+function loadedExports(exports: unknown, unloaded: UnloadedEntrypoints | undefined): unknown {
+  if (!unloaded || !exports || typeof exports !== "object" || Array.isArray(exports)) {
+    return exports;
+  }
+  return Object.fromEntries(
+    Object.entries(exports).filter(([key]) => !unloaded.subpaths.includes(key)),
+  );
+}
+
 function runtimeTargets(metadata: PackageJson): string[] {
+  const unloaded = Object.hasOwn(PACKAGE_UNLOADED_ENTRYPOINTS, metadata.name)
+    ? PACKAGE_UNLOADED_ENTRYPOINTS[metadata.name]
+    : undefined;
   const bin = typeof metadata.bin === "string" ? [metadata.bin] : Object.values(metadata.bin ?? {});
-  return [metadata.main, metadata.module, ...bin, ...exportTargets(metadata.exports)].filter(
+  const exports = exportTargets(
+    loadedExports(metadata.exports, unloaded),
+    unloaded?.conditions ?? [],
+  );
+  const main = unloaded?.main ? undefined : metadata.main;
+  return [main, metadata.module, ...bin, ...exports].filter(
     (target): target is string => typeof target === "string" && target.length > 0,
   );
 }
@@ -245,6 +291,8 @@ export interface PruneClass {
   description: string;
   /** Never loaded at runtime, so removable even inside a protected wildcard export prefix. */
   runtimeInert: boolean;
+  /** Only an exact entry target protects it; wildcard prefixes and whole-package keeps do not. */
+  exactEntriesOnly?: boolean;
   matches: (file: PruneFile) => boolean;
 }
 
@@ -321,6 +369,16 @@ export const PRUNE_CLASSES: readonly PruneClass[] = [
       (PACKAGE_BROWSER_BUILDS[file.packageName]?.(file.relative) ?? false),
   },
   {
+    id: "unloaded-entrypoints",
+    description:
+      "files reachable only through a bundled package's unloaded entry points (PACKAGE_UNLOADED_ENTRYPOINTS)",
+    runtimeInert: false,
+    exactEntriesOnly: true,
+    matches: (file) =>
+      Object.hasOwn(PACKAGE_UNLOADED_ENTRYPOINTS, file.packageName) &&
+      PACKAGE_UNLOADED_ENTRYPOINTS[file.packageName]!.files(file.relative),
+  },
+  {
     id: "tooling-config",
     description: "CI and build tooling config (.github/, YAML, Makefile)",
     runtimeInert: false,
@@ -393,12 +451,21 @@ function isProtected(
   filename: string,
   pruneClass: PruneClass,
   protectedEntries: readonly string[],
+  packageDirectory: string,
 ): boolean {
-  return protectedEntries.some((entry) =>
+  return protectedEntries.some((entry) => {
     // An inert file (types, maps) is never an exact entry target, so only an exact
     // match protects it; wildcard prefixes and ambiguous whole-package keeps do not.
-    pruneClass.runtimeInert ? entry === filename : inside(entry, filename),
-  );
+    if (pruneClass.runtimeInert) {
+      return entry === filename;
+    }
+    // An unloaded entry point's files sit under loaded wildcard prefixes (zod's
+    // ./v4/locales/* serves both conditions), but an ambiguous whole-package keep still wins.
+    if (pruneClass.exactEntriesOnly) {
+      return entry === filename || entry === packageDirectory;
+    }
+    return inside(entry, filename);
+  });
 }
 
 export function listCandidates(root: string, packages = collectBundledPackages(root)): Candidate[] {
@@ -422,7 +489,7 @@ export function listCandidates(root: string, packages = collectBundledPackages(r
         hasDist,
         browserTargets: browser,
       });
-      if (pruneClass && !isProtected(filename, pruneClass, protectedEntries)) {
+      if (pruneClass && !isProtected(filename, pruneClass, protectedEntries, pkg.directory)) {
         classes.set(filename, pruneClass);
       }
     }

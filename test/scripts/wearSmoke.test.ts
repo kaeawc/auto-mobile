@@ -6,6 +6,7 @@ import {
   expectNoText,
   expectText,
   WEAR_FIXTURE,
+  WEAR_SETUP_RETRY,
   WEAR_SMOKE_TITLE,
   wearSmokeNotes,
   wearSmokeOptionsFromEnv,
@@ -290,6 +291,35 @@ describe("runSmoke with the Wear plan", () => {
     );
     expect(result.steps.find((step) => step.status === "failed")?.id).toBe("find-notification");
     expect(result.steps.at(-1)).toMatchObject({ id: "ambient-exit", status: "passed" });
+  });
+
+  test("the first observe waits out the setup screen's empty skeleton (#16829)", async () => {
+    const setup = { ...screen("com.android.systemui"), skeleton: [] };
+    const client = new FakeClient({ startDevice: START }, [setup, setup, ...fixtureObserves()]);
+    const sleeps: number[] = [];
+    const result = await runSmoke(buildWearSmokePlan({ fixtureApkPath: "/f.apk", avdName: "w" }), {
+      ...deps(client),
+      sleep: (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.steps.find((step) => step.id === "observe-initial")?.status).toBe("passed");
+    expect(sleeps).toEqual([WEAR_SETUP_RETRY.delayMs, WEAR_SETUP_RETRY.delayMs]);
+  });
+
+  test("a setup screen that never clears fails observe-initial after every attempt (#16829)", async () => {
+    const setup = { ...screen("com.android.systemui"), skeleton: [] };
+    const observes = Array.from({ length: WEAR_SETUP_RETRY.attempts }, () => setup);
+    const client = new FakeClient({ startDevice: START }, [...observes, ...fixtureObserves()]);
+    const result = await runSmoke(buildWearSmokePlan({ avdName: "w" }), deps(client));
+    const failed = result.steps.find((step) => step.status === "failed");
+    expect(failed).toMatchObject({ id: "observe-initial" });
+    expect(failed?.detail).toContain("observe returned an empty skeleton");
+    expect(client.calls.filter((call) => call.tool === "observe")).toHaveLength(
+      WEAR_SETUP_RETRY.attempts,
+    );
   });
 
   test("the device-only plan passes on a round watch and notes the missing fixture", async () => {

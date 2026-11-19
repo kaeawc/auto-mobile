@@ -442,8 +442,8 @@ export interface RepartitionResult {
  * current direct dependency (prod or dev) that is not a runtime root stays a
  * `devDependency` at our own version — it is inlined into `dist/` at build time
  * and only needed to build/test the repo. Crucially, a closure node whose name
- * we already use directly is NOT flattened into `dependencies`: that would pin
- * jimp's transitive `zod@3` over the `zod@4` our build inlines. The release
+ * we already use directly is NOT flattened into `dependencies`: that would pin a
+ * transitive version over the one our build inlines. The release
  * generator records those names so selected parent packages can bundle their
  * exact nested closure into the published artifact.
  */

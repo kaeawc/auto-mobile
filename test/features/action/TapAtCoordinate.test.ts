@@ -93,6 +93,36 @@ function createAndroidTapAtWithClient(
 }
 
 describe("TapAtCoordinate", () => {
+  test.each(["xcuiCoordinate", "displayTargetedRecord"] as const)(
+    "reports iOS dispatchRoute %s from a route-only reply without requesting diagnostics",
+    async (route) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const observeScreen = new FakeObserveScreen();
+      observeScreen.setObserveResult(observation(100, 200));
+      const requests: TapCoordinatesRequest[] = [];
+      const tapAt = new TapAtCoordinate(iosDevice, new FakeAdbExecutor(), {
+        timer,
+        iosClient: {
+          requestTapCoordinates: async (request) => {
+            requests.push(request);
+            return { success: true, tapDiagnostics: { route } };
+          },
+          requestDoubleTapCoordinates: async () => ({ success: true }),
+        },
+        invalidateIosCache: () => {},
+      });
+      setFakeTapAtWindow(tapAt);
+      tapAt.observeScreen = observeScreen;
+
+      const result = await tapAt.execute({ x: 10, y: 20 });
+
+      expect(result).toMatchObject({ success: true, dispatchRoute: route });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).not.toHaveProperty("diagnostics");
+    },
+  );
+
   test("coordinate resolver uses the supplied tool name and defaults to tapAt", () => {
     const observed = observation(10, 10);
     expect(resolveTapAtCoordinates({ x: 10, y: 0 }, observed, "android")).toMatchObject({

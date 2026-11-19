@@ -46,6 +46,8 @@ import {
 } from "./prototypeSharedElement";
 import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
 import {
+  prototypeDeriveFields,
+  prototypeDeriveUnsupportedMessage,
   prototypeFormatFields,
   prototypeFormatUnsupportedMessage,
 } from "./prototypeFormatCapability";
@@ -64,6 +66,7 @@ import {
   PROTOTYPE_SHARED_ELEMENT_V2_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_FORMAT_CAPABILITY,
+  PROTOTYPE_DERIVE_CAPABILITY,
   PROTOTYPE_STACK_PATTERNS_CAPABILITY,
   PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
@@ -96,6 +99,7 @@ import {
   PROTOTYPE_MENUS_CAPABILITY,
   PROTOTYPE_EMIT_CONTEXT_CAPABILITY,
   PROTOTYPE_CHECKS_CAPABILITY,
+  PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY,
   PROTOTYPE_DATA_ACTIONS_CAPABILITY,
   PROTOTYPE_STORAGE_CAPABILITY,
   PROTOTYPE_NETWORK_CAPABILITY,
@@ -112,6 +116,8 @@ import {
   prototypePlatformUnsupportedMessage,
 } from "./prototypePlatformGates";
 import {
+  prototypeKeyedDataActionFields,
+  prototypeKeyedDataActionsUnsupportedMessage,
   prototypeDataActionFields,
   prototypeDataActionsUnsupportedMessage,
 } from "./prototypeDataActions";
@@ -334,6 +340,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_SEMANTICS_CAPABILITY,
     fields: prototypeSemanticsFields,
     unsupportedMessage: prototypeSemanticsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_DERIVE_CAPABILITY,
+    fields: prototypeDeriveFields,
+    unsupportedMessage: prototypeDeriveUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_FORMAT_CAPABILITY,
@@ -560,6 +571,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypeChecksUnsupportedMessage,
   },
   {
+    capability: PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY,
+    fields: prototypeKeyedDataActionFields,
+    unsupportedMessage: prototypeKeyedDataActionsUnsupportedMessage,
+  },
+  {
     capability: PROTOTYPE_DATA_ACTIONS_CAPABILITY,
     fields: prototypeDataActionFields,
     unsupportedMessage: prototypeDataActionsUnsupportedMessage,
@@ -648,4 +664,20 @@ export function prototypeGateCapabilities(spec: unknown): string[] {
 /** Capability names required by a spec, for the native-code resource's renderer contract. */
 export function requiredPrototypeCapabilities(spec: unknown): string[] {
   return [...new Set([...prototypeGateCapabilities(spec), ...preflightCapabilities(spec)])].sort();
+}
+
+/**
+ * Every capability `requiredPrototypeCapabilities` can name: the gate table's and the preflight's.
+ * The web library advertises this set as of its release (#16453), so it refuses only a spec that
+ * needs a capability added after it.
+ */
+export function knownPrototypeCapabilities(): string[] {
+  return [
+    ...new Set([
+      ...PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.capability),
+      PROTOTYPE_ANCHOR_CAPABILITY,
+      PROTOTYPE_WINDOW_CHROME_CAPABILITY,
+      PROTOTYPE_DEAD_TAP_CAPABILITY,
+    ]),
+  ].sort();
 }

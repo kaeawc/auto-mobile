@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /**
  * Root `sensors` subscription block (#14327): the device listens only to the sensors listed here.

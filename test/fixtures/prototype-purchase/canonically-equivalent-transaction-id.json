@@ -1,0 +1,78 @@
+{
+  "name": "A resolution id that is only canonically equivalent does not match the open transaction",
+  "products": [
+    {
+      "id": "no_ads",
+      "kind": "nonConsumable"
+    }
+  ],
+  "state": {
+    "entitlements": {},
+    "lastTransaction": null
+  },
+  "steps": [
+    {
+      "op": "purchase",
+      "productId": "no_ads",
+      "outcome": {
+        "result": {
+          "status": "pending",
+          "transactionId": "é"
+        }
+      },
+      "expect": {
+        "state": {
+          "entitlements": {},
+          "lastTransaction": {
+            "transactionId": "é",
+            "productId": "no_ads",
+            "status": "pending"
+          }
+        },
+        "into": {
+          "status": "pending",
+          "transactionId": "é"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "resolve",
+      "transactionId": "é",
+      "resolution": "approved",
+      "expect": {
+        "state": {
+          "entitlements": {},
+          "lastTransaction": {
+            "transactionId": "é",
+            "productId": "no_ads",
+            "status": "pending"
+          }
+        },
+        "error": {
+          "code": "platform_error",
+          "message": "No open transaction é"
+        },
+        "entitlementsChanged": false
+      }
+    },
+    {
+      "op": "resolve",
+      "transactionId": "é",
+      "resolution": "approved",
+      "expect": {
+        "state": {
+          "entitlements": {
+            "no_ads": "active"
+          },
+          "lastTransaction": {
+            "transactionId": "é",
+            "productId": "no_ads",
+            "status": "purchased"
+          }
+        },
+        "entitlementsChanged": true
+      }
+    }
+  ]
+}

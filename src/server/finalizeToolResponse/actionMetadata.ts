@@ -3,8 +3,6 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { observationOfPayload, stringifyToolResponse } from "../../utils/toolUtils";
 import type { readToolEnvelopePayload } from "../../daemon/toolEnvelopePayload";
 import { isRecord } from "../pipeline/isRecord";
-import { boundsKey } from "../../features/observe/output/resultOutput/hierarchy";
-import { requiredOutputSchemaKeys } from "./responseArtifacts";
 import type { FinalizeToolResponseContext } from "./contracts";
 
 /** Skipped for a response the client will never receive (#10081). */
@@ -94,49 +92,6 @@ function actionMetadataDeviceId(
 }
 
 /**
- * Attributes that name a node. Everything else on a raw element (its `node`
- * subtree, `actions`, `hierarchyDepth`, focus/selection state, a regenerated
- * synthetic `view-id`) can differ between two reads of the same node.
- */
-const ACTION_ELEMENT_IDENTITY_KEYS = [
-  "class",
-  "package",
-  "resource-id",
-  "test-tag",
-  "text",
-  "content-desc",
-  "ios-accessibility-identifier",
-  "ios-accessibility-label",
-] as const;
-
-/**
- * `element` and `selectedElement.matchedElement` are often the same node read
- * from captures moments apart, so a deep-equality test let both through
- * (#11637, #17464). Compare what names the node and where it is instead.
- */
-function isSameActionElement(element: unknown, matched: unknown): boolean {
-  if (!isRecord(element) || !isRecord(matched)) {
-    return false;
-  }
-  return (
-    boundsKey(element.bounds) === boundsKey(matched.bounds) &&
-    ACTION_ELEMENT_IDENTITY_KEYS.every((key) => element[key] === matched[key])
-  );
-}
-
-function hasDuplicateActionElement(
-  payload: Record<string, unknown>,
-  outputSchema: unknown,
-): boolean {
-  return (
-    payload.element !== undefined &&
-    isRecord(payload.selectedElement) &&
-    isSameActionElement(payload.element, payload.selectedElement.matchedElement) &&
-    !requiredOutputSchemaKeys(outputSchema).includes("element")
-  );
-}
-
-/**
  * Per-capture stamps inside an otherwise static block. They change on every call
  * and nothing reads them, so they must not keep an unchanged block inline.
  * `freshness` is deliberately absent: its `ageMs` is documented for a consumer
@@ -183,18 +138,13 @@ function compactActionMetadata(
   payload: Record<string, unknown>,
   ctx: FinalizeToolResponseContext,
 ): Record<string, unknown> {
-  let next = payload;
-  if (hasDuplicateActionElement(payload, ctx.outputSchema)) {
-    next = { ...payload };
-    delete next.element;
-  }
   const deviceId = actionMetadataDeviceId(payload, ctx.name);
   if (!deviceId || !isRecord(payload.observation)) {
-    return next;
+    return payload;
   }
   const previous = ctx.baselineStore!.getActionMetadata!(ctx.sessionUuid!, deviceId);
   if (!previous) {
-    return next;
+    return payload;
   }
   const observation = payload.observation;
   const omittedFields = ACTION_METADATA_FIELDS.filter((field) => {
@@ -219,7 +169,7 @@ function compactActionMetadata(
       isDeepStrictEqual(sourceHierarchy[field], previous[`viewHierarchy.${field}`]),
   );
   if (omittedFields.length === 0 && omittedHierarchyFields.length === 0) {
-    return next;
+    return payload;
   }
 
   const compactedObservation = { ...observation };
@@ -233,7 +183,7 @@ function compactActionMetadata(
     }
     compactedObservation.viewHierarchy = hierarchy;
   }
-  return { ...next, observation: compactedObservation };
+  return { ...payload, observation: compactedObservation };
 }
 
 /** Record only final inline blocks, including observe and errors; artifacts do not count. */

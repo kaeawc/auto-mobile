@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /** The `divider` node's own fields; prototypeSpec.ts adds the common node shape. */
 export const prototypeDividerShape = {

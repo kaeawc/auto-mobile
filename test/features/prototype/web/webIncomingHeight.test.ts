@@ -8,13 +8,16 @@ import {
 } from "../../../../src/features/prototype/web/webIncomingHeight";
 import {
   CAPPED_SHRINK,
+  LATER_SHRINK,
   rowContentHeight,
   rowMeasured,
+  rowMeasureHeight,
   type PrepareChild,
 } from "../../../../src/features/prototype/web/webRowAspect";
 import {
   INCOMING_ALLOCATED_KEY,
   INCOMING_HEIGHT_KEY,
+  INCOMING_SHARE_BOUND_KEY,
   nodeCss,
   ROW_BOUND_KEY,
   ROW_MEASURE_KEY,
@@ -295,8 +298,8 @@ test("a weight share is exact only when every unweighted sibling's height is kno
   expect(exactWeightShares([{ type: "box", style: { height: "fill" } }, weighted])).toBe(true);
   expect(exactWeightShares([{ type: "column" }, weighted])).toBe(false);
   expect(exactWeightShares([{ type: "text", style: { minHeight: 30 } }, weighted])).toBe(false);
-  // A wrap sibling of unknown height leaves the share an upper bound: the row keeps its dp height,
-  // so its aspect ratio errs small rather than overflowing a share it may not get.
+  // A wrap sibling of unknown height leaves the share an upper bound: the row is marked as a
+  // share bound, not an allocation (#16716).
   const children = [
     { type: "column", children: [{ type: "box", style: { height: { dp: 80 } } }] },
     { ...weighted, children: [{ type: "box", style: { aspectRatio: 2 } }, { type: "text" }] },
@@ -304,12 +307,79 @@ test("a weight share is exact only when every unweighted sibling's height is kno
   const column = withColumnHeights({ type: "column", children }, "root", prepare, 100);
   const row = record(record(childrenOf(column)[1])?.style);
   expect(row?.[INCOMING_ALLOCATED_KEY]).toBeUndefined();
+  expect(row?.[INCOMING_SHARE_BOUND_KEY]).toBe(true);
+  // Other consumers keep the tighter ceiling; only the row measure lets the share replace it.
   expect(rowContentHeight(row)).toBe(10);
+  expect(rowMeasureHeight(row)).toEqual({ height: 100, boundOnly: true });
   const repeat = { type: "column", repeat: { items: [{}, {}] }, children };
   const instances = repeatInstanceChildren(repeat, "root", [prepare, prepare], 100);
-  expect(
-    instances.map((entries) => record(record(entries[1])?.style)?.[INCOMING_ALLOCATED_KEY]),
-  ).toEqual([undefined, undefined]);
+  const marks = (key: string) =>
+    instances.map((entries) => record(record(entries[1])?.style)?.[key]);
+  expect(marks(INCOMING_ALLOCATED_KEY)).toEqual([undefined, undefined]);
+  expect(marks(INCOMING_SHARE_BOUND_KEY)).toEqual([true, true]);
+});
+
+test("a weighted row beside a wrap sibling sizes its capped aspect ratio from its laid-out height (#16716)", () => {
+  // The issue's example: native gives the row 20 dp, so the box is 40×20, not capped at 20×10.
+  const column = withColumnHeights(
+    {
+      type: "column",
+      children: [
+        { type: "column", children: [{ type: "box", style: { height: { dp: 80 } } }] },
+        {
+          type: "row",
+          style: { weight: 1, height: { dp: 10 } },
+          children: [
+            { type: "box", style: { aspectRatio: 2 } },
+            { type: "box", style: { aspectRatio: 2, maxWidth: 30, maxHeight: 20 } },
+          ],
+        },
+      ],
+    },
+    "root",
+    prepare,
+    100,
+  );
+  const ratios = childrenOf(
+    rowMeasured(record(childrenOf(column)[1])!, "root.children[1]", prepare, 100),
+  ).map((entry) => record(record(entry)?.style));
+  expect(ratios[0]?.[ROW_MEASURE_KEY]).toEqual({ shrink: CAPPED_SHRINK, fillHeight: true });
+  const css = nodeCss(ratios[0], { ...light, parentAxis: "row" });
+  expect(css).toMatchObject({ height: "100%", "flex-basis": "auto", "flex-grow": "0" });
+  expect(css.width).toBeUndefined();
+  // A later capped ratio sizes from the row's height too, keeping the later siblings' tier, so it
+  // never takes the share's upper bound as a basis.
+  expect(ratios[1]?.[ROW_MEASURE_KEY]).toEqual({
+    shrink: LATER_SHRINK,
+    later: true,
+    fillHeight: true,
+    capHeight: 15,
+  });
+  expect(nodeCss(ratios[1], { ...light, parentAxis: "row" })).not.toHaveProperty(
+    "flex-basis",
+    "200px",
+  );
+  // Its own caps hold the height, maxWidth through the ratio.
+  const capped = rowMeasured(
+    {
+      type: "row",
+      style: { weight: 1, [INCOMING_HEIGHT_KEY]: 100, [INCOMING_SHARE_BOUND_KEY]: true },
+      children: [{ type: "box", style: { aspectRatio: 2, maxWidth: 30, maxHeight: 20 } }],
+    },
+    "root",
+    prepare,
+  );
+  const style = record(record(childrenOf(capped)[0])?.style);
+  expect(style?.[ROW_MEASURE_KEY]).toEqual({
+    shrink: CAPPED_SHRINK,
+    fillHeight: true,
+    capHeight: 15,
+  });
+  expect(nodeCss(style, { ...light, parentAxis: "row" })["max-height"]).toBe("15px");
+  // The share-bound key never reaches the CSS.
+  expect(nodeCss({ [INCOMING_SHARE_BOUND_KEY]: true }, light)).toEqual({
+    "box-sizing": "border-box",
+  });
 });
 
 test("a weighted row bounded around a capped aspect ratio keeps its share over its maxWidth (#16698)", () => {

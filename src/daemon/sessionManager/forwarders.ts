@@ -404,6 +404,11 @@ export abstract class SessionManagerForwarders {
       options,
     );
   }
+  /** See {@link SessionCreationGuard.restoreDeferredRecoveryClaim}. */
+  restoreDeferredRecoveryClaim(session: Session): Promise<boolean> {
+    return this.forwardersHost.creationGuard.restoreDeferredRecoveryClaim(session);
+  }
+
   /**
    * Fence new session publication before daemon shutdown snapshots active work.
    *

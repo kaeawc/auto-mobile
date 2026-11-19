@@ -110,7 +110,6 @@ export class DefaultAndroidAutoProjectionApplier implements AndroidAutoProjectio
       deviceId: device.deviceId,
       androidAutoApks: inputs.androidAutoApks,
       dhu: inputs.dhu,
-      acceptAndroidAutoTerms: inputs.acceptAndroidAutoTerms,
       signal,
       deadlineMs,
     });
@@ -132,7 +131,6 @@ export class DefaultAndroidAutoProjectionApplier implements AndroidAutoProjectio
       deviceId: device.deviceId,
       androidAutoApks: [],
       dhu: inputs.dhu,
-      acceptAndroidAutoTerms: inputs.acceptAndroidAutoTerms,
       signal,
       deadlineMs,
     });

@@ -28,6 +28,7 @@ test.skipIf(!configured || !tools || !keytool)(
         template,
         appId: "dev.jasonpearson.automobile.app.integration",
         label: "Feedly",
+        icon: { backgroundColor: "#FFC62828" },
         permissions: [],
         enabledComponents: [],
         spec: '{"root":{"type":"column"}}',
@@ -49,6 +50,12 @@ test.skipIf(!configured || !tools || !keytool)(
       ]);
       expect(manifest.stdout).toContain("Feedly");
       expect(manifest.stdout).toContain("dev.jasonpearson.automobile.app.integration");
+      const resources = await executor.executeCommand(tools.aapt2, [
+        "dump",
+        "resources",
+        result.apkPath,
+      ]);
+      expect(resources.stdout.toLowerCase()).toContain("#ffc62828");
 
       const zip = new AdmZip(result.apkPath);
       expect(zip.readAsText("assets/prototype/spec.json")).toContain("column");

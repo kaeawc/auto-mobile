@@ -571,3 +571,21 @@ test("only a horizontal scroll hands its child its content height (#16718)", () 
   const unsized = scrollChildPatch({ style: scope.style }, { type: "scroll", axis: "horizontal" });
   expect(unsized.heightBound).toBeUndefined();
 });
+
+test("a layer child in a row neither takes the width nor zeroes its siblings (#16711)", () => {
+  const prepare = (entry: unknown) => record(entry);
+  // A bottom sheet draws in the window's layer, open or closed, so it is no row child.
+  const sheet = { type: "bottomSheet", style: { aspectRatio: 1 }, child: { type: "text" } };
+  const text = { type: "text", text: "after" };
+  const row = { type: "row", children: [sheet, text] };
+  expect(rowMeasured(row, "root", prepare)).toBe(row);
+  expect(rowFillAxes(row, "root", prepare)).toEqual([]);
+  // A real aspect ratio after the layer still takes the width and zeroes what follows it.
+  const square = { type: "box", style: { aspectRatio: 1 } };
+  const mixed = { type: "row", children: [sheet, square, text] };
+  const children = rowMeasured(mixed, "root", prepare).children as unknown[];
+  expect(children[0]).toBe(sheet);
+  expect(styleOf(children[1])?.[ROW_MEASURE_KEY]).toEqual({ take: true });
+  expect(styleOf(children[2])?.[ROW_MEASURE_KEY]).toEqual({ zero: true });
+  expect(rowFillAxes(mixed, "root", prepare)).toEqual(["width"]);
+});

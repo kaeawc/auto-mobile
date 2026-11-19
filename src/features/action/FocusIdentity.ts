@@ -4,7 +4,7 @@
 
 import type { Element } from "../../models/Element";
 import type { ElementBounds } from "../../models/ElementBounds";
-import { boundsEqual, intersectBounds } from "../../utils/bounds";
+import { boundsEqual, boundsNearlyEqual, intersectBounds } from "../../utils/bounds";
 import type { FocusPathEntry, FocusScreen } from "./FocusNavigate";
 import type { FocusNavigateDirection } from "./FocusNavigateDirections";
 import { stringProp } from "./FocusNavigateMatching";
@@ -240,14 +240,25 @@ function rangeOf(screen: Pick<FocusScreen, "focused" | "elements">): string {
 }
 
 /**
+ * The control's label without its signed digits: a slider announcing its value (`Volume 49%`,
+ * `Balance -1`) keeps its stem across a step, zero crossings included, while a recycled focus slot that now shows another control (`Brightness`) does not (#18393).
+ * Digits are any Unicode decimal digits, so localized readouts (`Volume ٥٠`, Arabic-Indic, with
+ * its own decimal and thousands separators) keep their stem too (#18438).
+ */
+function labelStem(element: Element): string {
+  return labelOf(element).replace(/[-+\u2212]?\p{Nd}+([.,\u066B\u066C]\p{Nd}+)?/gu, "#");
+}
+
+/**
  * The focused control's own value before an arrow press (#17209): its `range-info`, or that of a
  * node inside it with the same bounds (a Compose slider's merged semantics). A container (a
  * settings row, a card, a pager page) whose smaller child reports a range has none of its own.
  * Undefined without a focused control or a value.
  */
 export interface FocusRangeRead {
-  /** The focused node's resource id, class and bounds. */
+  /** The focused node's resource id, class and {@link labelStem}. */
   readonly node: string;
+  readonly bounds: ElementBounds;
   readonly range: string;
 }
 
@@ -263,24 +274,29 @@ export function ownRangeOf(
   if (!ranged) {
     return undefined;
   }
-  const node = [
-    stringProp(focused, "resource-id"),
-    focused.class ?? "",
-    boundsText(focused.bounds),
-  ];
-  return { node: node.join("|"), range: stringProp(ranged, "range-info") };
+  const node = [stringProp(focused, "resource-id"), focused.class ?? "", labelStem(focused)];
+  return { node: node.join("|"), bounds: focused.bounds, range: stringProp(ranged, "range-info") };
 }
 
 /**
  * Whether the press between two reads changed the focused control's own value instead of moving
- * focus: the same node holds focus and its `range-info` differs.
+ * focus: the same node holds focus and its `range-info` differs. A recycled focus slot showing
+ * another control keeps id, class and bounds but changes its label stem, so it reads as a move.
+ * A scroll-into-view settle may shift the same-sized control by up to two pixels (#17209).
  */
 export function changedOwnRange(
   before: FocusRangeRead,
   screen: Pick<FocusScreen, "focused" | "elements">,
 ): boolean {
   const after = ownRangeOf(screen);
-  return after !== undefined && after.node === before.node && after.range !== before.range;
+  return (
+    after !== undefined &&
+    after.node === before.node &&
+    after.range !== before.range &&
+    after.bounds.right - after.bounds.left === before.bounds.right - before.bounds.left &&
+    after.bounds.bottom - after.bounds.top === before.bounds.bottom - before.bounds.top &&
+    boundsNearlyEqual(before.bounds, after.bounds, 2)
+  );
 }
 
 /** Whether the control's `range-info` changed on the first press and came back on the second. */

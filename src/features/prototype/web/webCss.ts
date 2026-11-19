@@ -49,6 +49,8 @@ export const WHITE_SPACE = "white-space";
 export const Z_INDEX = "z-index";
 
 // Values.
+/** The frame's system font stack: what a `default` family draws with. */
+export const SYSTEM_FONT_STACK = "system-ui, -apple-system, Roboto, sans-serif";
 export const ABSOLUTE = "absolute";
 export const BORDER_BOX = "border-box";
 export const CENTER = "center";

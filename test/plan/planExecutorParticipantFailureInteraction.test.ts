@@ -74,7 +74,11 @@ describe("mixed-platform waitFor-timeout failure with a survivor parked at a bar
     ToolRegistry.register(
       "observe",
       "observe that times out after the survivor parks",
-      z.object({ device: z.string(), platform: z.string().optional(), waitFor: z.any() }),
+      z.object({
+        device: z.string(),
+        platform: z.string().optional(),
+        waitFor: z.any().optional(),
+      }),
       async (params) => {
         record(params);
         await gate.promise;

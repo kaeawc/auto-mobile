@@ -12,7 +12,7 @@ class RobolectricAndroidAllTest {
   @Test
   fun coordinateMatchesRobolectricPreinstrumentedJarNames() {
     assertEquals(
-      "org.robolectric:android-all-instrumented:15-robolectric-13954326-i7",
+      "org.robolectric:android-all-instrumented:15-robolectric-14663667-2-i7",
       RobolectricAndroidAll.coordinate(35),
     )
     assertEquals(
@@ -23,13 +23,13 @@ class RobolectricAndroidAllTest {
 
   @Test
   fun coordinateIsNullForAnSdkRobolectricDoesNotShip() {
-    assertNull(RobolectricAndroidAll.coordinate(22))
+    assertNull(RobolectricAndroidAll.coordinate(23))
     assertNull(RobolectricAndroidAll.coordinate(38))
   }
 
   @Test
   fun oldestSdkIsRobolectricsOldest() {
-    assertEquals(23, RobolectricAndroidAll.OLDEST_SDK)
+    assertEquals(24, RobolectricAndroidAll.OLDEST_SDK)
   }
 
   @Test
@@ -37,7 +37,7 @@ class RobolectricAndroidAllTest {
     RobolectricAndroidAll.requireCatalogVersion(RobolectricAndroidAll.ROBOLECTRIC_VERSION)
     val error =
       assertThrows(IllegalStateException::class.java) {
-        RobolectricAndroidAll.requireCatalogVersion("4.18")
+        RobolectricAndroidAll.requireCatalogVersion("4.17")
       }
     assertEquals(true, error.message!!.contains("DefaultSdkProvider"))
   }
@@ -54,13 +54,13 @@ class RobolectricAndroidAllTest {
         propertiesFiles = listOf("# default\nsdk=24\n"),
         hasPrimaryPin = true,
       )
-    assertEquals(setOf(23, 24, 30, 34), sdks)
+    assertEquals(setOf(24, 30, 34), sdks)
   }
 
   @Test
   fun moduleWithoutPrimaryPinAlsoNeedsTheOldestSdk() {
     assertEquals(
-      setOf(23, 29),
+      setOf(24, 29),
       RobolectricAndroidAll.moduleSdks(listOf("@Config(sdk = [29])"), emptyList(), false),
     )
   }

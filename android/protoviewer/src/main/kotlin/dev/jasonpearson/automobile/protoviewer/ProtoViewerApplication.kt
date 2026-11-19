@@ -6,10 +6,16 @@ import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.net.toUri
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBiometricModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEgressPolicy
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePermissionsModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureValueStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeDirectoryStore
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.protocol.PrototypeBundleDirectoryFileSystem
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.PrototypeStorage
@@ -27,7 +33,11 @@ import okhttp3.OkHttpClient
 /** Per-process shared ownership: all document tasks use the same repository/storage locks. */
 class ProtoViewerApplication : Application() {
   var servicesFactory: (ProtoViewerApplication) -> ProtoViewerServices = { app ->
-    val storage = LibraryStorage(PrototypeStorage.fileBacked(app))
+    val storage =
+      LibraryStorage(
+        PrototypeStorage.fileBacked(app),
+        PrototypeSecureValueStores.inDirectory(prototypeStorageRoot(app.filesDir)),
+      )
     val root = File(app.filesDir, "library")
     val ids = IdGenerator { UUID.randomUUID().toString() }
     val blocklist =
@@ -55,7 +65,7 @@ class ProtoViewerApplication : Application() {
           app.contentResolver.openInputStream(uri.toUri())
             ?: throw IOException("Content unavailable")
         },
-        AutoMobilePrototype.capabilities,
+        protoViewerCapabilities,
         AndroidImportAssetCheck(),
         staging.canonicalFile.toPath().let { stagingRoot ->
           DirectoryLibraryImport(
@@ -119,11 +129,7 @@ private fun Application.mcpAbout(): McpAbout {
     } else {
       @Suppress("DEPRECATION") packageManager.getPackageInfo(packageName, 0)
     }
-  return McpAbout(
-    PackageInfoCompat.getLongVersionCode(info),
-    info.versionName,
-    AutoMobilePrototype.capabilities,
-  )
+  return protoViewerMcpAbout(PackageInfoCompat.getLongVersionCode(info), info.versionName)
 }
 
 // Application composition root: keep independent dependencies explicit for constructor injection.
@@ -180,3 +186,15 @@ class ProtoViewerServices(
     return true
   }
 }
+
+internal fun protoViewerMcpAbout(versionCode: Long, versionName: String?): McpAbout =
+  McpAbout(versionCode, versionName, protoViewerCapabilities)
+
+/** Capabilities of the renderer and the app-owned modules registered by ViewerActivity. */
+internal val protoViewerCapabilities: Set<String>
+  get() =
+    AutoMobilePrototype.capabilities +
+      PrototypeLocationModule.CAPABILITY +
+      PrototypeBiometricModule.CAPABILITY +
+      PrototypePermissionsModule.CAPABILITY +
+      PrototypeSecureStorageModule.CAPABILITY

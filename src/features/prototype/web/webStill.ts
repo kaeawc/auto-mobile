@@ -2,10 +2,12 @@ import {
   ABSOLUTE,
   ALIGN_ITEMS,
   ALIGN_SELF,
+  BACKGROUND_COLOR,
   COLUMN,
   DATA_WINDOW,
   FLEX,
   FLEX_DIRECTION,
+  FONT_FAMILY,
   JUSTIFY_CONTENT,
   RELATIVE,
   STRETCH,
@@ -39,6 +41,7 @@ import {
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
+import { scrimCss } from "./webSheet";
 import type { WebSkinId } from "./webSkin";
 import { resolveWebStillAppearance, webAuthoredBackground } from "./webStillAppearance";
 import type { WebStackScreens } from "./webStack";
@@ -60,8 +63,8 @@ import {
 import { stillTextScale, type StillTextSize } from "./webTextScale";
 
 export interface PrototypeStillOptions {
-  /** A device frame id; defaults to the platform's default frame. */
-  readonly frame?: string;
+  /** A device frame id, or a frame already checked; defaults to the platform's default frame. */
+  readonly frame?: string | DeviceFrame;
   readonly platform?: "android" | "ios";
   /** The platform skin components draw in; defaults to the frame's platform. */
   readonly skin?: WebSkinId;
@@ -86,9 +89,8 @@ export interface PrototypeStillOptions {
   /** Asset ids the page can inline, to their CSS slots; any other asset draws a placeholder. */
   readonly imageSlots?: ReadonlyMap<string, number>;
   /**
-   * Where icons find their glyphs (the server passes the Material Icons Android draws). Used only
-   * for an Android frame: an iOS frame keeps the placeholder until its glyph set is decided
-   * (#16526). Without one every icon draws the placeholder.
+   * Where icons find their glyphs (the server passes the Material Icons Android draws). Both
+   * skins draw them (#16526). Without one every icon draws the placeholder.
    */
   readonly glyphs?: PrototypeIconGlyphSource;
   /**
@@ -225,10 +227,10 @@ function windowDirection(spec: unknown, locale: string): "ltr" | "rtl" | undefin
 function placed(
   spec: unknown,
   content: WebElement | undefined,
-  layers: readonly WebElement[],
+  { layers, style }: Pick<WebRenderScope, "layers" | "style">,
   locale: string,
 ): WebElement {
-  const window = placedWindow(spec, content, layers);
+  const window = placedWindow(spec, content, layers, style);
   const direction = windowDirection(spec, locale);
   if (direction === undefined) {
     return window;
@@ -246,14 +248,28 @@ function placed(
 }
 
 /**
- * Window placement inside the screen: fullscreen fills it; a sheet is `height` dp at its `edge`;
- * a floating window sits at its `gravity`, moved by its `offset`. The window region holds the
- * content, then its layers; a floating window's transform anchors them.
+ * The theme's `typography.fontFamily` on the app window, so every label inherits it, not only nodes
+ * with a `textStyle` role: Android replaces the family in every Material type role, which control
+ * labels (buttons, checkboxes, switches) draw with, and iOS applies the theme design wherever a
+ * node names no family. A node's own `fontFamily` still overrides it; the status bar, outside the
+ * window, keeps the system font.
+ */
+function themedFamily(window: WebElement, style: WebStyleContext): WebElement {
+  const family = style.typography?.fontFamily;
+  return family ? { ...window, style: { ...window.style, [FONT_FAMILY]: family } } : window;
+}
+
+/**
+ * Window placement inside the screen: fullscreen fills it, over its `scrim` when one is set; a
+ * sheet is `height` dp at its `edge`; a floating window sits at its `gravity`, moved by its
+ * `offset`. The window region holds the content, then its layers; a floating window's transform
+ * anchors them.
  */
 function placedWindow(
   spec: unknown,
   content: WebElement | undefined,
   layers: readonly WebElement[],
+  style: WebStyleContext,
 ): WebElement {
   const placement = record(record(record(spec)?.window)?.placement) ?? {};
   const children = [...(content ? [content] : []), ...layers];
@@ -263,14 +279,14 @@ function placedWindow(
   if (placement.type === "floating") {
     return floatingWindow(placement, children);
   }
-  return el("div", { attrs: { [DATA_WINDOW]: "fullscreen" }, style: LAYER }, children);
-}
-
-function glyphScope(
-  options: PrototypeStillOptions,
-  frame: DeviceFrame,
-): { glyphs?: PrototypeIconGlyphSource } {
-  return options.glyphs && frame.platform === "android" ? { glyphs: options.glyphs } : {};
+  // Android paints a set scrim behind the fullscreen content, resolved like a sheet's scrim slot.
+  const scrim: Record<string, string> =
+    placement.scrim === undefined ? {} : { [BACKGROUND_COLOR]: scrimCss(placement.scrim, style) };
+  return el(
+    "div",
+    { attrs: { [DATA_WINDOW]: "fullscreen" }, style: { ...LAYER, ...scrim } },
+    children,
+  );
 }
 
 /** The host locale and fixed zone keep a still's bytes stable; the logger is optional for a browser embed. */
@@ -337,7 +353,7 @@ function stillScope(
     inBox: false,
     unsupported: [],
     skin,
-    ...glyphScope(options, frame),
+    ...(options.glyphs ? { glyphs: options.glyphs } : {}),
     screenWidth: size.width,
     screenHeight: size.height,
     // A chromeless screen sets every --safe-* variable to 0px, so its height pass takes none.
@@ -437,14 +453,19 @@ function postureFrameOptions(
   return { ...postureOf(view), ...(fold ? { fold } : {}) };
 }
 
+/** The frame drawn: one already checked, the one an id names, or the platform's default. */
+function stillFrame(options: PrototypeStillOptions): DeviceFrame {
+  if (typeof options.frame === "object") {
+    return options.frame;
+  }
+  return deviceFrameOrThrow(options.frame ?? defaultDeviceFrameId(options.platform ?? "android"));
+}
+
 export function renderPrototypeStill(
   spec: unknown,
   options: PrototypeStillOptions = {},
 ): PrototypeStill {
-  const view = frameInPosture(
-    deviceFrameOrThrow(options.frame ?? defaultDeviceFrameId(options.platform ?? "android")),
-    options.posture,
-  );
+  const view = frameInPosture(stillFrame(options), options.posture);
   const { frame } = view;
   const locale = stillLocale(options.locale);
   // Components expand, then string tables resolve for the host locale, as on devices.
@@ -456,7 +477,7 @@ export function renderPrototypeStill(
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
   const background = screenBackground(scope.style);
-  const placedContent = placed(expanded, root, scope.layers, locale);
+  const placedContent = themedFamily(placed(expanded, root, scope, locale), scope.style);
   // A d-pad device always has a focused item, so a TV still shows where focus starts.
   const content = frame.input === "dpad" ? markInitialFocus(placedContent) : placedContent;
   const paint = {

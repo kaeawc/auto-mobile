@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { PrivateDaemonCliDeps } from "./private-daemon";
 import type { PrivateDaemonSpec } from "./privateDaemonEnv";
 import { errorMessage } from "../../src/utils/describeUnknownError";

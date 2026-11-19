@@ -77,8 +77,9 @@ export function findPackedAssetViolations(
 
 /**
  * Byte budget for the bundled node_modules after the prepack prune (#17686). The pruned
- * closure is ~2.28 MB; an unpruned one (~8.2 MB) or a regression that stops pruning
- * docs/tests/browser builds (~2.7 MB) fails it. Raise it only for new runtime code.
+ * closure is ~1.82 MB (zod 4.6.7 ESM-only, #16102); an unpruned one (~10 MB) or a
+ * regression that stops pruning zod's unloaded CJS/v3/mini entry points (~3.27 MB) fails
+ * it. Raise it only for new runtime code.
  */
 export const BUNDLED_NODE_MODULES_MAX_BYTES = 2_500_000;
 

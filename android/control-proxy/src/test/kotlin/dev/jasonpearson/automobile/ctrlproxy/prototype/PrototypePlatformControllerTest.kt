@@ -19,6 +19,81 @@ import org.robolectric.annotation.Config
 @Config(sdk = [30])
 class PrototypePlatformControllerTest {
   @Test
+  fun `overlay refuses a permissions spec before opening its window`() = runTest {
+    var result: Boolean? = null
+    val host = FakePrototypeHost()
+    val controller =
+      PrototypeController(
+        host,
+        PrototypeResultSink { _, success, _ -> result = success },
+        clock = { testScheduler.currentTime },
+        lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+        requestScope = backgroundScope,
+        render = { mapPrototypeSpec(it).request() },
+      )
+    controller.show(
+      "show",
+      PrototypeSpec(
+        "permissions",
+        PrototypeWindow(PrototypeFullscreenPlacement()),
+        requires = PrototypeRequires(platform = listOf("permissions")),
+        root = PrototypeButtonNode(label = "Allow"),
+      ),
+    )
+    assertEquals(false, result)
+    assertNull(controller.activeRuntime)
+    assertTrue(host.calls.isEmpty())
+  }
+
+  @Test
+  fun `ComponentActivity registry includes Activity modules while overlay omits them`() {
+    val controller =
+      org.robolectric.Robolectric.buildActivity(androidx.activity.ComponentActivity::class.java)
+        .setup()
+    val platform = prototypeRuntimePlatform(controller.get())
+    assertTrue(PrototypeBiometricModule.CAPABILITY in platform.registry.capabilities)
+    assertTrue(PrototypePermissionsModule.CAPABILITY in platform.registry.capabilities)
+    assertTrue(PrototypeSecureStorageModule.CAPABILITY in platform.registry.capabilities)
+    assertFalse("prototype_platform_notifications_v1" in platform.registry.capabilities)
+    assertFalse(
+      PrototypeBiometricModule.CAPABILITY in
+        prototypeRuntimePlatform(android.content.ContextWrapper(null)).registry.capabilities,
+    )
+    assertFalse(
+      PrototypePermissionsModule.CAPABILITY in
+        prototypeRuntimePlatform(android.content.ContextWrapper(null)).registry.capabilities,
+    )
+    closePrototypeModules(platform)
+    controller.pause().stop().destroy()
+  }
+
+  @Test
+  fun `overlay refuses a biometric spec before opening its window`() = runTest {
+    var result: Boolean? = null
+    val host = FakePrototypeHost()
+    val controller =
+      PrototypeController(
+        host,
+        PrototypeResultSink { _, success, _ -> result = success },
+        clock = { testScheduler.currentTime },
+        lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+        requestScope = backgroundScope,
+        render = { mapPrototypeSpec(it).request() },
+      )
+    val spec =
+      PrototypeSpec(
+        "biometric",
+        PrototypeWindow(PrototypeFullscreenPlacement()),
+        requires = PrototypeRequires(platform = listOf("biometric")),
+        root = PrototypeButtonNode(label = "Unlock"),
+      )
+    controller.show("show", spec)
+    assertEquals(false, result)
+    assertNull(controller.activeRuntime)
+    assertTrue(host.calls.isEmpty())
+  }
+
+  @Test
   fun `dismiss replacement and reset cancel calls before the old surface closes`() = runTest {
     for (mode in listOf("dismiss", "replace", "reset")) {
       val events = mutableListOf<PrototypeEvent>()

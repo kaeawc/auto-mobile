@@ -47,11 +47,14 @@ sent, replacing backends of the same id, and a saved prototype does not carry th
 - **Actors** play the other side (at most 16, each up to 64 steps). An actor fires on a matching
   successful request (\`on: {route: "POST /messages/:id"}\`) or every N ms (\`every\` with \`maxRuns\`),
   after an optional \`afterMs\` lead, and runs \`do\` in order: \`{append: collection, value}\`,
-  \`{update: collection, id, value}\` (merge), \`{remove: collection, id}\`, each with an optional
-  \`afterMs\` after the previous step. \`value\` and \`id\` bind \`{params.x}\`, \`{query.x}\` and
-  \`{body:/pointer}\` from the triggering request. A failed step is skipped and the run goes on;
+  \`{update: collection, id, value}\` (merge), \`{remove: collection, id}\`, \`{publish: {room, frame}}\`
+  (a frame to a room path, e.g. "typing"), each with an optional \`afterMs\` after the previous step.
+  An actor write broadcasts like a request's. \`value\`, \`id\`, \`room\` and \`frame\` bind
+  \`{params.x}\`, \`{query.x}\` and \`{body:/pointer}\` from the triggering request. A failed step is skipped and the run goes on;
   redefining or clearing the backend cancels pending steps. Poll the collection to see the result.
-  \`publish\`, \`advance\` and \`notify\` steps are not supported yet.
+  Actor delays follow wall time; \`simulate advanceTimeMs\` also moves every backend's actors ahead,
+  applying due steps in order, and returns \`actorSteps\`.
+  \`advance\` and \`notify\` steps are not supported yet.
 - A request's \`timeoutMs\` applies to the mock too, and a response over the 262144-byte cap fails
   with \`too_large\`.
 - **Rooms** serve realtime channels with \`via: "host"\`: a WebSocket to
@@ -104,7 +107,19 @@ elapsed unit: seconds, minutes (60 s), hours (60 min), days (24 h), months (30 d
 Under one second uses localized now. Exact English fixtures normalize U+202F/U+00A0 to spaces;
 foreign currency symbols, narrow relative text, now wording and non-English CLDR data can vary
 by engine and use structural comparisons. Set locale, zone and clock for deterministic previews.
-Both derive maps require \`prototype_format_v1\`; use literal strings with older renderers.
+Collection entries use \`{collection:{of:{data:"/rows"},where:[{field:"name",op:"contains",value:{state:"query"}}],sort:{field:"name",order:"asc"},limit:50}}\`.
+The top-level derive map still allows 32 entries. Collections scan at most 500 source items,
+keep objects matching all clauses (at most four), stably sort, then limit (1..500).
+Operators are contains (case-insensitive string substring), eq, neq, gt, gte, lt and lte;
+clause values are \`{state:"key"}\` or \`{value:string|number}\`.
+Missing fields and mismatched types never match. Empty substring matches every string.
+Sort compares numbers numerically and strings by Unicode code point; missing fields sort last.
+Bind original rows with \`repeat.items:{derived:"results"}\`.
+Optional \`reduce:{op:"count"}\` or \`reduce:{op:"sum"|"min"|"max",field:"amount"}\`
+runs after limit; numeric reductions ignore non-numbers and empty reductions yield zero.
+Reduced scalars support the existing format, locale and timeZone options.
+Collections and derived repeat items require \`prototype_derive_v1\`.
+Scalar and formatted collection entries and repeat derive maps require \`prototype_format_v1\`; use literal strings with older renderers.
 \`dateTime\`, \`duration\`, \`plural\`, and \`fileSize\` are unsupported follow-ups.
 `;
 
@@ -138,6 +153,8 @@ Patch preserves them. Fires never restart idle TTL.
 
 \`prototype {action:"simulate",id,advanceTimeMs:1000}\` advances without waiting (integer
 1..3600000), requiring the same capability. It returns \`fired\`; paused timers fire zero times.
+While a mock backend is defined it also advances the backends' actors, even on a device without
+the capability, and returns \`actorSteps\` (the actor steps applied).
 Due timers run chronologically, ties by start order, including timers started during advancement.
 Exactly 10000 due fires succeed. If another fire is still due, advance stops at the last fire with
 an error and fired=10000, keeping pending timers for the next call. Real scheduling continues from the shifted clock.
@@ -308,8 +325,9 @@ export const GUIDE_PLATFORM = `## Platform features
 A spec reaches a platform feature through a module. Declare every module it uses in a root \`requires: {platform: [<module>], permissions?: [{name, purpose}], background?: [...]}\`; a call, handler or read of an undeclared module fails validation with a path, and a call's permissions must appear in \`requires.permissions\`. The host reads \`requires\` before show and refuses a device that lacks a module's capability, before anything is drawn.
 
 - **Call.** \`{type:"platform", call:"<module>.<op>", args, into?, statusKey?, timeoutMs?, onSuccess?, onError?}\` in any action list. \`args\` are strict per call; values are \`{value}\`, \`{state}\`, \`{data}\`, \`{platform}\`, \`{item}\`/\`{index}\` in a repeat, or \`{event}\` in a handler. \`into\` (a \`/data\` path) and \`statusKey\` (a declared string state key that moves loading, then success or error) behave as for \`request\`. A failure writes one of unsupported, unavailable, permission_denied, invalid_args, cancelled, timeout, too_many_in_flight or platform_error to \`<into>__meta.error\`. Each finished call is an emit event \`prototype_platform\` (\`{callId, call, outcome, error?, durationMs}\`).
-- **Handler.** A root \`platform: {on: {"<module>.<event>": [actions]}}\`. Inside a handler only, \`{event: "/pointer"}\` reads the event's data. Handlers run atomically like a tap and may use \`push\`, \`pop\`, data actions and further calls. A delivered event is an emit event \`prototype_platform_event\` (\`{event, data, truncated?}\`).
+- **Handler.** A root \`platform: {on: {"<module>.<event>": [actions]}}\`. Inside a handler only, \`{event: "/pointer"}\` reads the event's data. Handlers run atomically like a tap and may use \`push\`, \`pop\`, data actions and further calls. A delivered event is an emit event \`prototype_platform_event\` (\`{event, data, truncated?, simulated?}\`).
 - **Read.** \`/platform/<module>/<key>\` is device-owned, read-only JSON: \`{platform:/device/os}\` in text, \`{platform: "/device/widthClass", equals: "expanded"}\` as a condition, \`{platform: pointer}\` as a value. It is not patchable or stored and is not part of the \`/data\` revision log.
+- **Simulate.** \`prototype {action:"simulate",id,event:"test.tick",data:{count:7}}\` injects a known module event on Android with \`prototype_platform_simulation_v1\`. The module must opt in (debug \`test.tick\` does), and be declared in \`requires.platform\`. Data follows its event schema where defined, otherwise accepts any JSON object; the delivered payload including \`simulated:true\` must fit 4096 UTF-8 bytes. Injection updates module state, runs the ordinary handler and reports \`prototype_platform_event\`. Unsupported modules fail without delivery. Push and media events keep their dedicated routes. Call outcomes and \`platformMode\` remain unavailable.
 - **Names.** Authored emit names cannot start with \`prototype_\`.
 
 Each module needs \`prototype_platform_v1\` plus its own capability; a device without either refuses show, patch and \`replaceNode\` and names the capability. The table below is generated from the contract, so it lists every module, call, event and key a spec may name; a device can run only the modules whose capabilities it advertises:
@@ -414,3 +432,22 @@ it advertises \`mediaLibrary\` without the capture capability.
   }
 }
 \`\`\``;
+
+/** Disposable prototype apps (#14184), appended to the saved prototypes section. */
+export const GUIDE_DISPOSABLE_APPS = `
+
+## Disposable apps
+
+\`installApp\` (Android) installs \`spec\` or \`specPath\` as its own app:
+\`app: {slug, label, icon?: {backgroundColor}, ttlHours?, permissions?, reset?}\`. The id is
+always \`dev.jasonpearson.automobile.app.<slug>_<8 hex>\`; you choose only the slug. Declared
+permissions come only from the spec's \`requires.permissions\`. \`permissions\` is \`prompt\` (the
+default), \`grantDeclared\` or \`{grant, deny}\` naming declared permissions. \`ttlHours\` defaults to
+72; 0 keeps the app. Re-installing a slug updates it in place and keeps its storage unless
+\`reset: true\`. The result \`disposableApp\` has \`appId\`, \`template\`, \`expiresAt\` and
+\`permissions\`; then use \`launchApp\`, \`observe\`, \`tapOn\` and \`terminateApp\` with that \`appId\`.
+\`listApps\` returns \`disposableApps\`, this host's records joined with the device's packages
+under the prefix. \`uninstallApp\` takes exactly one of \`appId\`, \`all: true\` or \`expired: true\`
+and returns \`uninstalled: {removed, skipped, pending?}\`; it refuses ids outside the prefix and apps
+signed by another key. A bulk call that runs out of time lists the apps it did not start in
+\`pending\`; call it again with the same target to continue. \`deleteSaved\` never removes a disposable app.`;

@@ -16,6 +16,7 @@ import { bindMockValue, decodeURIComponentSafe, matchMockPath } from "./prototyp
 import {
   MockRooms,
   type MockFrameSource,
+  type MockRoomEvent,
   type MockRoomJoin,
   type MockRoomMember,
 } from "./prototypeMockRooms";
@@ -56,12 +57,19 @@ export interface MockFrameLogEntry {
   data: string;
 }
 
-export type MockLogEntry = MockRequestLogEntry | MockFrameLogEntry;
+/** A connection joining or leaving a room (a leave covers a client close and a backend close). */
+export interface MockRoomEventLogEntry {
+  seq: number;
+  room: string;
+  event: MockRoomEvent;
+}
+
+export type MockLogEntry = MockRequestLogEntry | MockFrameLogEntry | MockRoomEventLogEntry;
 
 export interface MockBackendDeps {
   random: Random;
   ids: IdGenerator;
-  timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout">;
+  timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout" | "now" | "monotonicNow">;
 }
 
 const MAX_LOG_ENTRIES = 200;
@@ -85,10 +93,12 @@ export class PrototypeMockBackend {
     this.rooms = new MockRooms(definition.rooms ?? [], {
       timer: deps.timer,
       record: (room, from, data) => this.append({ seq: 0, room, from, data }),
+      recordConnection: (room, event) => this.append({ seq: 0, room, event }),
     });
-    this.actors = new PrototypeMockActors(definition.actors ?? [], deps.timer, (write) =>
-      this.applyActorWrite(write),
-    );
+    this.actors = new PrototypeMockActors(definition.actors ?? [], deps.timer, {
+      write: (write) => this.applyActorWrite(write),
+      publish: (room, frame) => this.rooms.publish(room, frame, "publish"),
+    });
     this.actors.start();
   }
 
@@ -110,6 +120,11 @@ export class PrototypeMockBackend {
     return this.rooms.publish(room, frame, "publish");
   }
 
+  /** Moves the actors' virtual clock ahead by `ms`; how many actor steps that applied. */
+  advanceClock(ms: number): number {
+    return this.actors.advance(ms);
+  }
+
   /**
    * Cancels every scheduled actor step and ends every open connection; the backend still answers
    * requests. `reason` is the close reason its channels see.
@@ -128,7 +143,7 @@ export class PrototypeMockBackend {
   }
 
   /**
-   * Requests answered and room frames seen with `seq` above `since`, oldest first; bounded to the
+   * Requests answered, room frames and room joins and leaves with `seq` above `since`, oldest first; bounded to the
    * latest 200.
    */
   requestLog(since = 0): MockLogEntry[] {
@@ -158,7 +173,8 @@ export class PrototypeMockBackend {
     this.record(method, request, response);
     // Only a collection's own answer is a stored write; a fault or canned route stored nothing.
     if (written !== undefined) {
-      this.broadcastWrite(method, request, written);
+      const name = decodeURIComponentSafe(request.path.split("/")[1] ?? "");
+      this.broadcastWrite(name, method, request, written);
     }
     this.actors.onRequest(method, request.path, response.status, {
       query: request.query,
@@ -167,12 +183,13 @@ export class PrototypeMockBackend {
     return response;
   }
 
+  /** An actor's write answers and broadcasts like the equivalent HTTP request. */
   private applyActorWrite(write: MockActorWrite): number {
     const items = this.collections.get(write.collection);
     if (items === undefined) {
       return 404;
     }
-    return answerCollection(
+    const response = answerCollection(
       items,
       {
         method: write.method,
@@ -181,12 +198,18 @@ export class PrototypeMockBackend {
         body: write.body,
       },
       { ids: this.deps.ids, fits: (next) => this.fitsWith(items, next) },
-    ).status;
+    );
+    this.broadcastWrite(write.collection, write.method, { query: {}, body: write.body }, response);
+    return response.status;
   }
 
   /** A successful write to a collection with a broadcast sends its frame to the bound room. */
-  private broadcastWrite(method: string, request: MockRequest, response: MockResponse): void {
-    const name = decodeURIComponentSafe(request.path.split("/")[1] ?? "");
+  private broadcastWrite(
+    name: string,
+    method: string,
+    request: Pick<MockRequest, "query" | "body">,
+    response: MockResponse,
+  ): void {
     const broadcast = this.broadcastFor(name, method, response.status);
     if (broadcast === undefined) {
       return;

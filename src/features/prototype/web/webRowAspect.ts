@@ -1,8 +1,10 @@
 import { record, type Raw } from "../prototypeTemplate";
+import { isWebLayerType } from "./webLayerTypes";
 import {
   boundsOwnWidth,
   INCOMING_ALLOCATED_KEY,
   INCOMING_HEIGHT_KEY,
+  INCOMING_SHARE_BOUND_KEY,
   ROW_BOUND_KEY,
   SAFE_INSET_KEY,
   ROW_MEASURE_KEY,
@@ -55,6 +57,18 @@ export function aspectRatioCap(node: Raw | undefined, rowHeight = Infinity): num
 /** A child as rendering will see it (bound, `styleWhen` merged), or undefined when it is hidden. */
 export type PrepareChild = (entry: unknown, path: string) => Raw | undefined;
 
+/**
+ * A child as it takes part in a row's or column's flow: as `prepare` resolves it, but undefined
+ * when it is hoisted into a window layer (see isWebLayerType), open or closed, which leaves nothing
+ * in its parent: it takes no width or height and no spacing gap, and is handed none.
+ */
+export const inFlow =
+  (prepare: PrepareChild): PrepareChild =>
+  (entry, path) => {
+    const node = prepare(entry, path);
+    return node && isWebLayerType(node.type) ? undefined : node;
+  };
+
 const childPath = (path: string, index: number) => `${path}.children[${index}]`;
 
 const side = (padding: Raw | undefined, name: string) =>
@@ -100,6 +114,28 @@ export function rowContentHeight(style: Raw | undefined, inherited = Infinity): 
   const allocated = style?.[INCOMING_ALLOCATED_KEY] === true && handed !== Infinity;
   const height = allocated ? handed : Math.min(own, inherited, handed);
   return Math.max(0, height - verticalPadding(style));
+}
+
+/** A row's content height for measuring its children, and whether it is only an upper bound. */
+export interface RowMeasureHeight {
+  readonly height: number;
+  readonly boundOnly: boolean;
+}
+
+/**
+ * The content height a row measures its children against (see rowContentHeight), and whether it
+ * is only an upper bound. A weighted share next to a wrap-height sibling
+ * (INCOMING_SHARE_BOUND_KEY) pins the row's height on both devices, so its own dp height and
+ * bounds do not cap it, but the share is known only at layout time: the static number is the
+ * share's upper bound, and CSS flex sizes the row.
+ */
+export function rowMeasureHeight(style: Raw | undefined, inherited = Infinity): RowMeasureHeight {
+  const incoming = style?.[INCOMING_HEIGHT_KEY];
+  if (style?.[INCOMING_SHARE_BOUND_KEY] !== true || typeof incoming !== "number") {
+    return { height: rowContentHeight(style, inherited), boundOnly: false };
+  }
+  const height = Math.max(0, Math.min(incoming, inherited) - verticalPadding(style));
+  return { height, boundOnly: height !== Infinity };
 }
 
 /** A node's top and bottom padding in dp: its authored padding and its safe-area inset. */
@@ -167,7 +203,7 @@ export function rowFillAxes(
     Array.isArray(node.children) &&
     node.children.some((entry, index) =>
       isUnsizedAspectRatio(
-        prepare(entry, childPath(path, index)),
+        inFlow(prepare)(entry, childPath(path, index)),
         rowContentHeight(record(node.style), inherited),
       ),
     );
@@ -190,12 +226,16 @@ export function rowMeasured(
     return node;
   }
   const { height: inherited = Infinity, unboundedWidth } = rowBounds(bounds);
-  const styled = node.children.map((entry, index) => prepare(entry, childPath(path, index)));
-  const height = rowContentHeight(record(node.style), inherited);
+  // A layer child (a sheet, dialog or snackbar) draws in the window, so the row measures without it.
+  const styled = node.children.map((entry, index) =>
+    inFlow(prepare)(entry, childPath(path, index)),
+  );
+  const measureHeight = rowMeasureHeight(record(node.style), inherited);
+  const { height } = measureHeight;
   const children = rowSequentialChildren(
     node.children,
     (_entry, index) => styled[index],
-    height,
+    measureHeight,
     unboundedWidth,
   );
   if (children === node.children) {
@@ -252,15 +292,23 @@ const measured = (entry: unknown, measure: RowMeasure) =>
  * already caps, and with no definite height an unsized ratio stays as authored, so nothing is
  * zeroed.
  *
+ * `measureHeight` may instead carry whether that height is only an upper bound (see
+ * rowMeasureHeight). When it is, a cap from it
+ * would overshoot the row's real height, so the capped aspect ratio sizes from the row's laid-out
+ * height in CSS instead of a static basis (RowMeasure's `fillHeight`).
+ *
  * `prepared` resolves an entry as rendering will (bound, visible, `styleWhen` merged), or
- * undefined when it is hidden. A repeat's children are one template, so they are left as authored.
+ * undefined when it is hidden or draws in a window layer (see inFlow). A repeat's children are one
+ * template, so they are left as authored.
  */
 export function rowSequentialChildren(
   entries: readonly unknown[],
   prepared: (entry: unknown, index: number) => Raw | undefined,
-  rowHeight = Infinity,
+  measureHeight: number | RowMeasureHeight = Infinity,
   unboundedWidth = false,
 ): readonly unknown[] {
+  const { height: rowHeight, boundOnly: heightBoundOnly } =
+    typeof measureHeight === "number" ? { height: measureHeight, boundOnly: false } : measureHeight;
   const styled = entries.map(prepared);
   const taker = unboundedWidth
     ? -1
@@ -281,10 +329,33 @@ export function rowSequentialChildren(
     if (taker >= 0 && (index > taker || weighted)) {
       return measured(entry, { zero: true });
     }
-    return capped < 0 || index < capped || weighted
-      ? entry
-      : cappedSibling(entry, aspectRatioCap(node, rowHeight), index === capped);
+    if (capped < 0 || index < capped || weighted) {
+      return entry;
+    }
+    const cap = aspectRatioCap(node, rowHeight);
+    return heightBoundOnly && cap !== undefined
+      ? measured(entry, filledCap(node, index === capped))
+      : cappedSibling(entry, cap, index === capped);
   });
+}
+
+/**
+ * The measure for a capped aspect ratio in a row whose height is only an upper bound: it takes
+ * the row's laid-out height, held under its own `maxHeight` and `maxWidth / ratio`, and its width
+ * from the ratio. The first capped ratio keeps the capped shrink tier, and a later one keeps the
+ * later siblings' tier, as cappedSibling gives them.
+ */
+function filledCap(node: Raw, first: boolean): RowMeasure {
+  const style = record(node.style);
+  const ratio = freeAspectRatio(node) ?? 1;
+  const capHeight = Math.min(
+    typeof style?.maxHeight === "number" ? style.maxHeight : Infinity,
+    typeof style?.maxWidth === "number" ? style.maxWidth / ratio : Infinity,
+  );
+  const tier: RowMeasure = first
+    ? { shrink: CAPPED_SHRINK, fillHeight: true }
+    : { shrink: LATER_SHRINK, later: true, fillHeight: true };
+  return capHeight === Infinity ? tier : { ...tier, capHeight };
 }
 
 /**

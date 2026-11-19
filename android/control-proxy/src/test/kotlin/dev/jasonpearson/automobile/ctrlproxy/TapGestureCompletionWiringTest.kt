@@ -26,10 +26,10 @@ class TapGestureCompletionWiringTest {
         Regex(",\\s*gestureHandler\\s*,?\\s*$").containsMatchIn(args),
       )
     }
-    // The service's Host forwards the controller's handler to the framework unchanged.
+    // CtrlProxyGestureHost forwards the controller's handler to the framework unchanged.
     assertTrue(
-      "CtrlProxy's GestureController.Host must pass the handler through to dispatchGesture",
-      "this@CtrlProxy.dispatchGesture(gesture, callback, handler)" in maskedServiceSource,
+      "CtrlProxyGestureHost must pass the handler through to dispatchGesture",
+      "service.dispatchGesture(gesture, callback, handler)" in maskedGestureHostSource,
     )
   }
 
@@ -80,12 +80,15 @@ class TapGestureCompletionWiringTest {
       "tap must extract after quiescence",
       "host.settledHierarchy(displayId)" in beforeBody,
     )
-    val settled = maskedServiceSource.indexOf("override suspend fun settledHierarchy(")
+    val settled = maskedGestureHostSource.indexOf("override suspend fun settledHierarchy(")
     assertTrue(
       "the service's settled hierarchy must wait for quiescence on the requested display",
       settled >= 0 &&
-        maskedServiceSource
-          .substring(settled, maskedServiceSource.indexOf("override suspend fun publishHierarchy("))
+        maskedGestureHostSource
+          .substring(
+            settled,
+            maskedGestureHostSource.indexOf("override suspend fun publishHierarchy("),
+          )
           .let { "hierarchyController.settledHierarchy(displayId)" in it },
     )
     assertTrue(
@@ -102,9 +105,9 @@ class TapGestureCompletionWiringTest {
       "the service must publish the settled hierarchy synchronously",
       Regex(
           "override suspend fun publishHierarchy\\(hierarchy: ViewHierarchy\\)\\s*=\\s*" +
-            "hierarchyController\\.broadcastHierarchyUpdate\\(hierarchy, sync = true\\)",
+            "service\\.hierarchyController\\.broadcastHierarchyUpdate\\(hierarchy, sync = true\\)",
         )
-        .containsMatchIn(maskedServiceSource),
+        .containsMatchIn(maskedGestureHostSource),
     )
     assertFalse("tap completion must not runBlocking", "runBlocking" in beforeBody)
 
@@ -132,7 +135,7 @@ class TapGestureCompletionWiringTest {
 
   companion object {
     private lateinit var maskedGestureSource: String
-    private lateinit var maskedServiceSource: String
+    private lateinit var maskedGestureHostSource: String
     private lateinit var maskedHierarchySource: String
 
     @BeforeClass
@@ -140,8 +143,10 @@ class TapGestureCompletionWiringTest {
     fun loadSource() {
       maskedGestureSource =
         KotlinSourceScan.maskLiteralsAndComments(locateSource("GestureController.kt").readText())
-      maskedServiceSource =
-        KotlinSourceScan.maskLiteralsAndComments(locateSource("CtrlProxy.kt").readText())
+      maskedGestureHostSource =
+        KotlinSourceScan.maskLiteralsAndComments(
+          locateSource("CtrlProxyControllerHosts.kt").readText(),
+        )
       maskedHierarchySource =
         KotlinSourceScan.maskLiteralsAndComments(locateSource("HierarchyController.kt").readText())
     }

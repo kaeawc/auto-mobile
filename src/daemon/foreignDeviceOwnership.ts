@@ -73,9 +73,16 @@ export interface ForeignDeviceOwnership {
   /**
    * Publish this daemon's allocation claim on a device it just assigned, so other daemons see it
    * before any CtrlProxy forward exists. False when another live daemon's claim on the device is
-   * still in use: the caller must give the device back.
+   * still in use, or when the host-wide table must decide but cannot be used right now (#11811):
+   * the caller must give the device back and may retry.
    */
   claim(deviceId: string): Promise<boolean>;
+  /**
+   * Whether the latest {@link claim} of `deviceId` was refused only because the host-wide table
+   * must decide but could not be used (#11811): no other daemon was seen holding the device, so
+   * the caller should wait and retry rather than treat the refusal as ownership loss.
+   */
+  claimDeferred?(deviceId: string): boolean;
   /**
    * Withdraw this daemon's allocation claim on a device it no longer assigns to a session. A
    * claim another daemon took over is left alone.
@@ -400,6 +407,8 @@ export interface ForeignOwnershipOptions {
  */
 export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnership {
   private readonly owners = new Map<string, number>();
+  /** Devices whose latest claim the table refused only because it could not decide (#11811). */
+  private readonly deferredClaims = new Set<string>();
   private readonly unreadable = new Set<string>();
   /** Device -> control socket of an idle holder whose lease was its only foreign ownership. */
   private readonly idleLeaseHolders = new Map<string, string>();
@@ -539,7 +548,12 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     return this.owners.get(deviceId);
   }
 
+  claimDeferred(deviceId: string): boolean {
+    return this.deferredClaims.has(deviceId);
+  }
+
   async claim(deviceId: string): Promise<boolean> {
+    this.deferredClaims.delete(deviceId);
     const owner = this.claimOwner();
     const decided = await this.claimInTable(deviceId, owner);
     if (decided !== undefined) {
@@ -561,8 +575,10 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
    * The host-wide table decides the claim (#11811 step d), and for one more release the winner also
    * writes its claim file, so a daemon that cannot use the table and falls back to the files still
    * sees it (owner decision 2026-11-02, option A2). A claim file a live foreign daemon holds
-   * refuses the claim. Undefined when no table can decide (watch and TV have none; no
-   * registry; a failed write): the claim files decide, as before.
+   * refuses the claim. Once a registry must decide (after socket bind), a table that cannot be used
+   * refuses the claim retryably rather than falling back to the files (owner decision 2026-11-07,
+   * E1). Undefined when no table can decide yet (watch and TV have none; no registry before
+   * bind; a skipped one): the claim files decide, as before.
    */
   private async claimInTable(
     deviceId: string,
@@ -578,6 +594,11 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     const decision = await acquire(deviceId, owner, (row) => this.isLiveTableOwner(deviceId, row));
     if (decision.outcome === "unavailable") {
       return undefined;
+    }
+    if (decision.outcome === "unusable") {
+      // Fail closed: a file fallback could not see a peer that claimed in the table alone.
+      this.deferredClaims.add(deviceId);
+      return false;
     }
     if (decision.outcome === "refused") {
       // Recovery's rollback must name the live owner the table holds.

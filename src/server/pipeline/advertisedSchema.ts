@@ -1,5 +1,6 @@
 import { toJSONSchema } from "zod/v4";
 import { flattenTopLevelUnion } from "../TopLevelUnionFlattener";
+import { normalizeZod4JsonSchema } from "./normalizeZod4JsonSchema";
 import { visitJsonSchemaAlternatives } from "../jsonSchemaReferences";
 import {
   dropDefaultedKeysFromRequired,
@@ -94,6 +95,7 @@ export function toAdvertisedJsonSchema(
       }
     },
   });
+  normalizeZod4JsonSchema(jsonSchema);
   if (options.reused === "ref") {
     dropReferencedDefaultsFromRequired(jsonSchema);
   }

@@ -1530,13 +1530,14 @@ describe("finalizeToolResponse", () => {
       // ...AND it still carries a full, usable actionable-only skeleton — never
       // absent just because a diff was emitted.
       expect(Array.isArray(obsSc.skeleton)).toBe(true);
-      expect(obsSc.skeleton.length).toBeGreaterThan(0);
-      expect(obsSc.skeleton[0].elementId).toBe("com.example:id/btn");
-      expect(obsSc.skeleton[0].affordances).toContain("tap");
+      const skeleton = requireValue(obsSc.skeleton);
+      expect(skeleton.length).toBeGreaterThan(0);
+      expect(skeleton[0].elementId).toBe("com.example:id/btn");
+      expect(skeleton[0].affordances).toContain("tap");
 
       // Text mirror agrees.
       const parsed = JSON.parse(finalized.content[0].text);
-      expect(parsed.observation.skeleton.length).toBe(obsSc.skeleton.length);
+      expect(parsed.observation.skeleton.length).toBe(skeleton.length);
     });
 
     test("a diffed observation carries `activeWindow` and `freshness` with the same shape as full mode (issue #6258)", () => {
@@ -2312,8 +2313,9 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.isDiff).toBe(true);
       expect(obsSc.viewHierarchy).toBeUndefined();
       expect(Array.isArray(obsSc.skeleton)).toBe(true);
-      expect(obsSc.skeleton.length).toBeGreaterThan(0);
-      expect(obsSc.skeleton[0].elementId).toBe("com.example:id/btn");
+      const skeleton = requireValue(obsSc.skeleton);
+      expect(skeleton.length).toBeGreaterThan(0);
+      expect(skeleton[0].elementId).toBe("com.example:id/btn");
     });
 
     test("a diffed observation ALSO carries the state-readout `context` alongside `skeleton` (issue #6256)", () => {
@@ -2438,6 +2440,91 @@ describe("finalizeToolResponse", () => {
         );
       },
     );
+
+    /** A tapOn over `next` after an observe of `baseline`, as delivered (#18348). */
+    function tapAfterObserve(baseline: ObserveResult, next: ObserveResult) {
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(baseline), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+      const result = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
+      );
+      return observeDiffSchema.parse(structuredPayload(result).observation);
+    }
+
+    test("a keyboard shown over an unchanged app is not reported as unchanged (#18348)", () => {
+      const next = sameScreenObserve();
+      const key = {
+        text: "Q",
+        clickable: true,
+        bounds: { left: 0, top: 100, right: 50, bottom: 150 },
+      };
+      setElementProvenance(key, {
+        group: 1,
+        enter: 1,
+        exit: 1,
+        keyboardPackage: "example.keyboard",
+      });
+      next.elements = { clickable: [key], text: [key], scrollable: [], media: [] };
+      flatChildren(next.viewHierarchy!.hierarchy.node).push({
+        extras: { "automobile:imePackage": "example.keyboard" },
+        node: [key],
+      });
+
+      const observation = tapAfterObserve(sameScreenObserve(), next);
+
+      expect(observation.isDiff).toBe(true);
+      expect("unchanged" in observation ? observation.unchanged : undefined).toBeUndefined();
+      expect(observation.keyboard).toEqual({ visible: true, package: "example.keyboard" });
+      expect(observation.skeleton?.map((row) => row.elementId)).toEqual(["<ime>"]);
+    });
+
+    test("a regenerated synthetic selector id is not reported as unchanged (#18348)", () => {
+      const withSyntheticId = (viewId: string): ObserveResult => {
+        const observation = sameScreenObserve();
+        const row = flatChild(observation.viewHierarchy!.hierarchy.node, 0);
+        // An id-less clickable row: its selector is the synthetic `view-id`.
+        delete row["resource-id"];
+        row["view-id"] = viewId;
+        row.clickable = "true";
+        observation.elements = {
+          clickable: [{ ...row, bounds: { left: 0, top: 0, right: 100, bottom: 50 } }],
+          scrollable: [],
+          text: [],
+          media: [],
+        };
+        return observation;
+      };
+
+      const observation = tapAfterObserve(
+        withSyntheticId("s2-0000000000000001"),
+        withSyntheticId("s2-0000000000000002"),
+      );
+
+      expect(observation.isDiff).toBe(true);
+      expect("unchanged" in observation ? observation.unchanged : undefined).toBeUndefined();
+      expect(observation.skeleton?.map((row) => row.elementId)).toEqual(["s2-0000000000000002"]);
+
+      expect(observation.isDiff).toBe(true);
+      expect("unchanged" in observation ? observation.unchanged : undefined).toBeUndefined();
+      expect(observation.skeleton?.map((row) => row.elementId)).toEqual(["s2-0000000000000002"]);
+    });
+
+    test("an unchanged selector surface still answers unchanged (#18348)", () => {
+      const observation = tapAfterObserve(sameScreenObserve(), sameScreenObserve());
+
+      expect("unchanged" in observation ? observation.unchanged : undefined).toBe(true);
+      expect(observation.skeleton).toBeUndefined();
+    });
 
     test("a diff with no surviving readout row omits `context` entirely rather than emitting `[]`", () => {
       const { store } = makeStore();
@@ -5424,7 +5511,8 @@ describe("actions-compact-metadata", () => {
     serverConfig.setActionsCompactMetadataEnabled(false);
     const full = emit();
     expectFull(full);
-    expect(structuredPayload(full).element).toEqual(element);
+    // The duplicate element is dropped whatever the metadata setting (#18348).
+    expect(structuredPayload(full)).not.toHaveProperty("element");
     const expected = JSON.stringify(full);
     expect(JSON.stringify(emit())).toBe(expected);
     emit(action().observation as Record<string, unknown>, { name: "observe" });
@@ -5454,7 +5542,7 @@ describe("actions-compact-metadata", () => {
     expectFull(emit());
   });
   test.each(["environment", "feature-flag"])(
-    "%s opt-out restores every block and duplicate element",
+    "%s opt-out restores every block but not the duplicate element (#18348)",
     (source) => {
       if (source === "environment") {
         serverConfig.setActionsCompactMetadataEnabled(
@@ -5470,7 +5558,7 @@ describe("actions-compact-metadata", () => {
       for (let i = 0; i < 2; i++) {
         const response = emit();
         expectFull(response);
-        expect(structuredPayload(response).element).toEqual(element);
+        expect(structuredPayload(response)).not.toHaveProperty("element");
       }
       expect(records.size).toBe(0);
     },

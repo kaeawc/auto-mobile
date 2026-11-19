@@ -1584,6 +1584,28 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.timer.getSleepCallCount()).toBe(0);
   });
 
+  // #14116: missing on-disk data is classified by text and names the erase recovery; boot never
+  // erases on its own, and does not shut down and retry a device that cannot boot at all.
+  test("reports missing on-disk data with the erase recovery instead of retrying", async () => {
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
+    harness.setStates(["Shutdown"]);
+    harness.failBootStatusWith(
+      coreSimulator405Error(
+        "An error was encountered processing the command (domain=NSPOSIXErrorDomain, code=2):\n" +
+          "Unable to boot device because it cannot be located on disk.\n",
+      ),
+    );
+
+    const result = await harness.timer
+      .resolvePromise(harness.simctl.startSimulator(UDID, 5000))
+      .catch((error: unknown) => error);
+
+    expect(result).toBeInstanceOf(ActionableError);
+    expect(String(result)).toContain(`xcrun simctl erase ${UDID}`);
+    expect(harness.calls.some((call) => call.includes(" erase "))).toBe(false);
+    expect(bootstatusCalls(harness.calls).length).toBe(1);
+  });
+
   // Issue #6411: CoreSimulator also emits the 405 with the domain/code appended
   // *inline after* the reported state ("...current state: Booted (domain=...,
   // code=405)"). A greedy state capture folded that trailing clause into the

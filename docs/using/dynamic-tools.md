@@ -119,7 +119,7 @@ A `recordToolCalls` recording retains successful explicit verification calls:
 `systemTray` `list`/`find`, `getLogs`, and `observe`, in their original order.
 Incidental probes such as keyboard detection and clipboard reads are omitted.
 Recording does not infer assertions from the result; add step `expect` checks
-to the exported plan as described in [UI tests](ui-tests.md#step-expectations).
+to the exported plan yourself.
 
 Debug-only tools (`debug`), `recordToolCalls` `begin`/`end`
 (`tool-call-recording`) and `setDeviceState` `deviceCondition`

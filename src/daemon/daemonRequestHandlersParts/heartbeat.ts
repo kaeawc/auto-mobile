@@ -1,5 +1,5 @@
 import { isSessionReleasing } from "../sessionReleaseState";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { type ObserverSessionStore } from "../observerSessionRegistry";
 import {
   DAEMON_INSTANCE_CHANGED_CODE,

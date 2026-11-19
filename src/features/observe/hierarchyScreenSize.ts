@@ -1,6 +1,6 @@
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
-import { nodeBounds } from "../../models/ViewHierarchyResult";
-import { parseBounds } from "../../utils/bounds";
+import { childrenOf, nodeAttributes, nodeBounds } from "../../models/ViewHierarchyResult";
+import { intersectBounds, parseBounds } from "../../utils/bounds";
 
 const PIXEL_ORIENTATION_TOLERANCE_POINTS = 1;
 
@@ -79,6 +79,19 @@ function isExactSwappedFrame(
   );
 }
 
+/** Oversized dismiss/transition backdrops are not screen geometry (#18560). */
+function isSwappedFrameBackdrop(
+  child: NonNullable<ReturnType<typeof parseBounds>>,
+  bounds: NonNullable<ReturnType<typeof parseBounds>>,
+): boolean {
+  return (
+    child.left < bounds.left &&
+    child.top < bounds.top &&
+    child.right >= bounds.left + (bounds.bottom - bounds.top) &&
+    child.bottom >= bounds.top + (bounds.right - bounds.left)
+  );
+}
+
 interface SwappedRootEvidence {
   maxRight: number;
   maxBottom: number;
@@ -114,7 +127,7 @@ function landscapeExtentFitsSwappedRoot(
   }
   const root = rootNode ? parseBounds(nodeBounds(rootNode)) : null;
   const rootIsApplicationFrame = sameBounds(root, bounds);
-  const rootChildren = Array.isArray(rootNode?.node) ? rootNode.node : [];
+  const rootChildren = rootNode ? childrenOf(rootNode) : [];
   return swappedExtentFits(
     rootIsApplicationFrame ? rootChildren : rootNode ? [rootNode] : [],
     bounds,
@@ -122,34 +135,61 @@ function landscapeExtentFitsSwappedRoot(
   );
 }
 
+function countsAsScreenExtent(
+  child: NonNullable<ReturnType<typeof parseBounds>>,
+  bounds: NonNullable<ReturnType<typeof parseBounds>>,
+): boolean {
+  return child.top < bounds.bottom && !isSwappedFrameBackdrop(child, bounds);
+}
+
+function isScrollable(node: ViewHierarchyNode): boolean {
+  const scrollable = nodeAttributes(node).scrollable;
+  return scrollable === true || scrollable === "true";
+}
+
+/**
+ * Extent maxima and landscape proof flags both read the viewport-clipped frame,
+ * so content hidden by a scroll viewport cannot prove landscape either.
+ */
+function recordScreenExtent(
+  evidence: SwappedRootEvidence,
+  visible: NonNullable<ReturnType<typeof parseBounds>>,
+  bounds: NonNullable<ReturnType<typeof parseBounds>>,
+): void {
+  evidence.maxRight = Math.max(evidence.maxRight, visible.right);
+  evidence.maxBottom = Math.max(evidence.maxBottom, visible.bottom);
+  evidence.fullLandscapeFrame ||= isFullLandscapeFrame(visible, bounds);
+  evidence.exactSwappedFrame ||= isExactSwappedFrame(visible, bounds);
+}
+
 function swappedExtentFits(
   nodes: ViewHierarchyNode[],
   bounds: NonNullable<ReturnType<typeof parseBounds>>,
   iosMultiPanel: boolean,
 ): boolean {
-  const stack = [...nodes];
-  let maxRight = bounds.left;
-  let maxBottom = bounds.top;
-  let fullLandscapeFrame = false;
-  let exactSwappedFrame = false;
+  type Bounds = NonNullable<ReturnType<typeof parseBounds>>;
+  const stack: { node: ViewHierarchyNode; clip?: Bounds | null }[] = nodes.map((node) => ({
+    node,
+  }));
+  const evidence: SwappedRootEvidence = {
+    maxRight: bounds.left,
+    maxBottom: bounds.top,
+    fullLandscapeFrame: false,
+    exactSwappedFrame: false,
+  };
   while (stack.length > 0) {
-    const node = stack.pop()!;
+    const { node, clip } = stack.pop()!;
     const child = parseBounds(nodeBounds(node));
-    if (child) {
-      maxRight = Math.max(maxRight, child.right);
-      maxBottom = Math.max(maxBottom, child.bottom);
-      fullLandscapeFrame ||= isFullLandscapeFrame(child, bounds);
-      exactSwappedFrame ||= isExactSwappedFrame(child, bounds);
+    const clipped = child && (clip === undefined ? child : clip && intersectBounds(child, clip));
+    // Flattened scroll rows below the root are outside either orientation (#18560).
+    if (child && clipped && countsAsScreenExtent(child, bounds)) {
+      recordScreenExtent(evidence, clipped, bounds);
     }
-    if (Array.isArray(node.node)) {
-      stack.push(...node.node);
-    }
+    // A scroll view contributes its own frame, but only its visible descendants.
+    const descendantClip = child && isScrollable(node) ? clipped : clip;
+    stack.push(...childrenOf(node).map((node) => ({ node, clip: descendantClip })));
   }
-  return fitsSwappedBounds(
-    bounds,
-    { maxRight, maxBottom, fullLandscapeFrame, exactSwappedFrame },
-    iosMultiPanel,
-  );
+  return fitsSwappedBounds(bounds, evidence, iosMultiPanel);
 }
 
 /** Runner pixels determine orientation; root bounds take precedence over legacy point metadata. */

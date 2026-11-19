@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import dev.jasonpearson.automobile.protocol.*
 import dev.jasonpearson.automobile.prototype.PlatformAvailability
 import dev.jasonpearson.automobile.prototype.PlatformCallResult
+import dev.jasonpearson.automobile.prototype.PlatformError
+import dev.jasonpearson.automobile.prototype.PlatformErrorCode
 import dev.jasonpearson.automobile.prototype.PlatformEvent
 import dev.jasonpearson.automobile.prototype.PrototypePlatform as Platform
 import kotlinx.coroutines.*
@@ -136,6 +138,53 @@ class PrototypePlatformRuntimeTest {
 
   private fun outcomes(events: List<PrototypeEvent>) = events.filter {
     it.name == PrototypePlatform.CALL_EVENT_NAME
+  }
+
+  @Test
+  fun `location failures preserve into and normalize metadata codes and reasons`() = runTest {
+    val module = FakePlatformModule("location")
+    val subject =
+      runtime(
+        module,
+        mutableListOf(),
+        spec().copy(requires = PrototypeRequires(platform = listOf("test", "location"))),
+      )
+    val allowed =
+      setOf(
+        PlatformErrorCode.PERMISSION_DENIED,
+        PlatformErrorCode.UNAVAILABLE,
+        PlatformErrorCode.TIMEOUT,
+        PlatformErrorCode.PLATFORM_ERROR,
+      )
+    for (code in PlatformErrorCode.entries) {
+      module.execute = { PlatformCallResult.Failure(PlatformError(code, "failed", "disabled")) }
+      subject.tap(
+        PrototypePlatformAction(
+          "location.request",
+          emptyMap(),
+          into = "/data/result",
+          statusKey = "status",
+        ),
+      )
+      runCurrent()
+      val meta = subject.current.spec.data!!.getValue("result__meta").jsonObject
+      val expectedCode = if (code in allowed) code else PlatformErrorCode.PLATFORM_ERROR
+      assertEquals(
+        obj(
+          "durationMs" to JsonPrimitive(0),
+          "error" to
+            buildJsonObject {
+              put("code", expectedCode.wireValue)
+              put("message", "failed")
+              if (code == PlatformErrorCode.UNAVAILABLE) put("reason", "disabled")
+            },
+        ),
+        meta,
+      )
+      assertEquals(JsonPrimitive("old"), subject.current.spec.data?.get("result"))
+      assertEquals(PrototypeScalar.Text("error"), subject.current.state["status"])
+    }
+    subject.close()
   }
 
   @Test

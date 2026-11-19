@@ -12,7 +12,8 @@ import type { PrototypeData } from "./prototypeSpec";
  * - A failure, or a fix outside the coordinate ranges, leaves `into` untouched, writes
  *   `{durationMs, error}` to `<into>__meta` and the status is `error`. Codes outside
  *   `PROTOTYPE_LOCATION_ERROR_CODES` are reported as `platform_error`; only `unavailable` keeps a
- *   `reason` (`disabled` when location services are off).
+ *   `reason` (`disabled` when location services are off, or `missing_usage_description` when the
+ *   host has no location usage description).
  * - The writes are atomic: if `<into>__meta` cannot be written beside the fix, the fix is rolled
  *   back and the call is a `platform_error`.
  */
@@ -39,7 +40,7 @@ export interface PrototypeLocationFix {
 export interface PrototypeLocationError {
   code: PrototypeLocationErrorCode;
   message: string;
-  reason?: "disabled";
+  reason?: "disabled" | "missing_usage_description";
 }
 
 export type PrototypeLocationOutcome =
@@ -113,8 +114,9 @@ function typedError(error: {
   const code = (PROTOTYPE_LOCATION_ERROR_CODES as readonly string[]).includes(error.code)
     ? (error.code as PrototypeLocationErrorCode)
     : "platform_error";
-  return code === "unavailable" && error.reason === "disabled"
-    ? { code, message: error.message, reason: "disabled" }
+  return code === "unavailable" &&
+    (error.reason === "disabled" || error.reason === "missing_usage_description")
+    ? { code, message: error.message, reason: error.reason }
     : { code, message: error.message };
 }
 

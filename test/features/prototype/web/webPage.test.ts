@@ -13,6 +13,8 @@ import {
   prototypeWebClockDelay,
   prototypeWebClockText,
   prototypeWebFitScale,
+  prototypeWebHeldView,
+  prototypeWebRelayout,
   prototypeWebRotation,
   prototypeWebScreenView,
   prototypeWebStartClock,
@@ -601,6 +603,58 @@ describe("prototype web page rotation (#16545)", () => {
     expect(buildPrototypeWebPage(input).html).toContain('data-platform="android"');
     expect(PROTOTYPE_WEB_RUNTIME).toContain("rotation: ");
     expect(PROTOTYPE_WEB_RUNTIME).toContain("prefers-reduced-motion: reduce");
+  });
+});
+
+describe("prototype web page rotation lock (#16587)", () => {
+  test("unlocked, the layout follows the frame upright", () => {
+    expect(prototypeWebHeldView("portrait", "portrait", false)).toEqual({
+      orientation: "portrait",
+      degrees: 0,
+    });
+    expect(prototypeWebHeldView("landscape", "portrait", false)).toEqual({
+      orientation: "landscape",
+      degrees: 0,
+    });
+  });
+
+  test("locked, a landscape frame keeps the portrait layout turned a quarter counterclockwise", () => {
+    expect(prototypeWebHeldView("landscape", "portrait", true)).toEqual({
+      orientation: "portrait",
+      degrees: -90,
+    });
+    expect(prototypeWebHeldView("portrait", "portrait", true)).toEqual({
+      orientation: "portrait",
+      degrees: 0,
+    });
+  });
+
+  test("locked, a frame whose natural orientation is landscape keeps it, turned clockwise", () => {
+    expect(prototypeWebHeldView("portrait", "landscape", true)).toEqual({
+      orientation: "landscape",
+      degrees: 90,
+    });
+  });
+
+  test("a lock change cross-fades the layouts in place with the platform turn's timing", () => {
+    const turn = prototypeWebRotation("ios", "landscape");
+    const step = prototypeWebRelayout(turn, -90, 0);
+    expect([step.durationMs, step.easing]).toEqual([turn.durationMs, turn.easing]);
+    expect(step.outgoing).toEqual([
+      { transform: "translate(-50%, -50%) rotate(-90deg)", opacity: 1 },
+      { transform: "translate(-50%, -50%) rotate(-90deg)", opacity: 0 },
+    ]);
+    expect(step.incoming).toEqual([
+      { transform: "translate(-50%, -50%) rotate(0deg)", opacity: 0 },
+      { transform: "translate(-50%, -50%) rotate(0deg)", opacity: 1 },
+    ]);
+  });
+
+  test("the inlined runtime carries the lock rules and watches the body's lock attribute", () => {
+    expect(PROTOTYPE_WEB_RUNTIME).toContain("heldView: ");
+    expect(PROTOTYPE_WEB_RUNTIME).toContain("relayout: ");
+    expect(PROTOTYPE_WEB_RUNTIME).toContain("viewportGestures: ");
+    expect(PROTOTYPE_WEB_RUNTIME).toContain("data-rotation-lock");
   });
 });
 

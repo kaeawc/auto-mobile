@@ -1,4 +1,5 @@
-import { z } from "zod";
+import { z } from "zod/v3";
+import { prototypeOwnKeyRecordV3 } from "./prototypeOwnKeyRecord";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { keySchema, pointerSchema } from "./prototypeActionValues";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
@@ -20,23 +21,19 @@ export const prototypeMediaSourceSchema = z.union([
 
 export const prototypeMediaSchema = z
   .object({
-    players: z
-      .record(
-        keySchema,
-        z
-          .object({
-            kind: z.enum(["video", "audio"]),
-            source: prototypeMediaSourceSchema.optional(),
-            queue: pointerSchema.optional(),
-            loop: z.boolean().optional(),
-          })
-          .strict(),
-      )
-      // Keep every authored id: Zod 3 record output alone drops an own __proto__ key.
-      .and(z.unknown())
-      .refine(
-        (players) => Object.keys(players).length <= contract.limits.MAX_PROTOTYPE_MEDIA_PLAYERS,
-      ),
+    players: prototypeOwnKeyRecordV3(
+      keySchema,
+      z
+        .object({
+          kind: z.enum(["video", "audio"]),
+          source: prototypeMediaSourceSchema.optional(),
+          queue: pointerSchema.optional(),
+          loop: z.boolean().optional(),
+        })
+        .strict(),
+    ).refine(
+      (players) => Object.keys(players).length <= contract.limits.MAX_PROTOTYPE_MEDIA_PLAYERS,
+    ),
   })
   .strict();
 

@@ -5,12 +5,17 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -56,6 +61,23 @@ class PrototypeSwipeSemanticsTest {
     return (view as RootForTest).semanticsOwner.unmergedRootSemanticsNode
   }
 
+  private fun renderColumn(
+    column: PrototypeRenderNode,
+    coordinator: SwipeCoordinator? = null,
+  ): SemanticsNode {
+    val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
+    activity.setContent {
+      CompositionLocalProvider(LocalPrototypeSwipeCoordinator provides coordinator) {
+        Box(Modifier.width(300.dp).height(400.dp)) {
+          PrototypeSpecContent(column)
+        }
+      }
+    }
+    shadowOf(Looper.getMainLooper()).idle()
+    val view = checkNotNull(composeView(activity.window.decorView))
+    return (view as RootForTest).semanticsOwner.unmergedRootSemanticsNode
+  }
+
   private fun composeView(view: View): View? =
     if (view is RootForTest) view
     else if (view is ViewGroup)
@@ -67,6 +89,50 @@ class PrototypeSwipeSemanticsTest {
 
   private fun SemanticsNode.tags() =
     all().mapNotNull { it.config.getOrNull(SemanticsProperties.TestTag) }
+
+  @Test
+  fun `an open delete action stays at the content row height inside a tall column`() {
+    val row = row.copy(swipeActions = PrototypeSwipeActions(end = swipe.end?.take(1)))
+    val column =
+      mapPrototypeSpec(
+          PrototypeSpec(
+            "panel",
+            PrototypeWindow(PrototypeFullscreenPlacement()),
+            root =
+              PrototypeColumnNode(
+                testTag = "column",
+                children =
+                  listOf(
+                    row,
+                    PrototypeTextNode(text = "Other orders"),
+                    PrototypeTextNode(text = "More content below the swipe row"),
+                  ),
+              ),
+          ),
+        )
+        .root
+    val closed = renderColumn(column)
+    val closedRowHeight =
+      closed
+        .all()
+        .first { it.config.getOrNull(SemanticsProperties.TestTag) == "order" }
+        .boundsInRoot
+        .height
+    val identity = column.children.single { it.testTag == "order" }.identity
+    val coordinator = SwipeCoordinator()
+    coordinator.opened(identity, SwipeSide.END)
+    val open = renderColumn(column, coordinator)
+    val heights =
+      open
+        .all()
+        .mapNotNull { node ->
+          node.config.getOrNull(SemanticsProperties.TestTag)?.let { it to node.boundsInRoot.height }
+        }
+        .toMap()
+    assertTrue(closedRowHeight > 0f)
+    assertEquals(closedRowHeight, heights.getValue("order.swipe.0"), 0f)
+    assertTrue(heights.getValue("order.swipe.0") < heights.getValue("column"))
+  }
 
   @Test
   fun `a closed row exposes every entry as an accessibility action and composes no button`() {

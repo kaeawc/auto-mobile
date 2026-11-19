@@ -2,6 +2,7 @@
 // Regenerate: bun scripts/prototype/generate-prototype-render-contract.ts
 
 export const prototypeRenderLimits = {
+  MAX_PROTOTYPE_DATA_ARRAY_ITEMS: 2000,
   MAX_PROTOTYPE_DATA_POINTER_LENGTH: 256,
   MAX_PROTOTYPE_LIST_ITEMS: 2000,
   MAX_PROTOTYPE_NODES: 2000,
@@ -40,6 +41,7 @@ export const prototypeContractPatternSources = {
   isoPeriod: "^P[1-9][0-9]{0,2}[DWMY]$(?![\\s\\S])",
   webViewUrl: "^https://[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])",
   webOrigin: "^https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::(?!443(?![\\s\\S]))(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$(?![\\s\\S])",
+  dataMember: "^[^~/]+$(?![\\s\\S])",
 } as const;
 
 export const prototypeStringFields = [

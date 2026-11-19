@@ -1,5 +1,5 @@
 import { prototypeLoopSchema } from "./prototypeLoops";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { prototypeAnimateError } from "./prototypeMotionTokens";
 import { prototypeKeyframesSchema } from "./prototypeKeyframes";
 import { prototypeTransitionSchema } from "./prototypeChoreographySchema";

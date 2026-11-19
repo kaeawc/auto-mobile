@@ -1,7 +1,7 @@
 # Apple Watch tool behavior
 
-This page describes how each tool that accepts an [Apple Watch simulator](apple-watch.md) behaves
-on a watch. Every call names the watch with `platform: "watchos"`.
+How each tool behaves on an [Apple Watch simulator](apple-watch.md). Every call names the watch
+with `platform: "watchos"`.
 
 ## `observe`
 
@@ -12,8 +12,7 @@ with action buttons.
 
 - If AutoMobile cannot read the hierarchy, the result carries `hierarchyUnavailable` and no
   hierarchy fields.
-- When the target app is not in the foreground, the message says to call `launchApp` to bring it
-  back, or to post a notification and retry `observe`. Read the screenshot meanwhile.
+- When the target app is not in the foreground, the message says to call `launchApp`, or to post a notification and retry `observe`. Read the screenshot meanwhile.
 - When the app `launchApp` started has exited or crashed, `hierarchyUnavailable` carries
   `appNotRunning: { bundleId }`. Read `getLogs` for the crash and call `launchApp` to start it again.
 - With a hierarchy, bounds and `screenSize` are in points and `screenshotImageSize` is in pixels. A
@@ -33,12 +32,21 @@ only `action: "tap"`. Only elements wholly on screen match, including notificati
 The notification permission prompt scrolls: use `rotateCrown` to bring `Allow` wholly into view
 before you select it.
 
-`tapAt` takes absolute coordinates in points. A point outside the watch screen fails with
-`tap is outside the watch screen`. Take the coordinates from `observe`, within `screenSize`.
+`tapAt` takes absolute coordinates in points from `observe`, within `screenSize`. A point outside
+the watch screen fails with `tap is outside the watch screen`.
+
+Outside the Smart Stack, both results include `effect: {screenChanged, basis}`. AutoMobile checks
+the screen for about 1 second after the tap. `basis` is `viewHierarchy changed`,
+`viewHierarchy unchanged` or `insufficient observation data`. The tap is never retried for you. A
+changed screen does not prove the intended control responded, so `observe` when it matters.
+
+When a system or app alert, such as the notification permission prompt, covers the app, `tapOn`
+refuses a target outside the alert. The error names the alert title and its buttons. Tap one of
+those buttons first, for example `tapOn` with `text: "Allow"`, then retry the original tap.
+`tapAt` has no such guard: a point under an alert taps the alert.
 
 With the host app not in the foreground and no Smart Stack open, `tapAt` taps the watch face at the
-given point. A device has not confirmed whether such a tap opens a complication, so `observe`
-afterwards. In that state `tapOn` still needs the host app in the foreground.
+given point. Whether such a tap opens a complication is unverified, so `observe` afterwards. In that state `tapOn` still needs the host app in the foreground.
 
 ### Smart Stack widgets
 
@@ -50,16 +58,15 @@ When the Smart Stack is open and the host app is not in the foreground:
 - `tapAt` taps widgets by point coordinates too.
 - `observe` returns `hierarchyUnavailable` and no hierarchy fields.
 
-Tapping a widget opens its host app, so the normal tools work afterwards. A widget you just added
-shows its text about 2 seconds after the final Done tap. Wait about 2 seconds once before you match
-it. See [Smart Stack](../how-it-works/plat/watchos/smart-stack.md) for how this works.
+Tapping a widget opens its host app, where the normal tools work. A widget you just added
+shows its text about 2 seconds after the final Done tap; wait that long before you match it. See [Smart Stack](../how-it-works/plat/watchos/smart-stack.md) for how this works.
 
 ## `swipeOn` and `pressButton`
 
 `swipeOn` swipes in a direction, including on the watch face after `pressButton` with `home`. With
 `lookFor`, it swipes until an exact `text` or `elementId` is on screen, up to `maxSwipes` (default
-10, maximum 100). Each `lookFor` step is a short, slow drag of about one row, so consecutive reads
-overlap and do not skip nearby targets. You cannot set coordinates or duration.
+10, maximum 100). Each `lookFor` step drags slowly by about one row, so reads overlap and
+skip no nearby targets. You cannot set coordinates or duration.
 
 `pressButton` supports `home` only.
 
@@ -111,24 +118,23 @@ When a rotation changes nothing, the error says which case applies:
   content is at its limit. Tap the control first. For a `delta` between -1 and 1, the error also
   says the turn may be too small.
 
-Use `observe` after rotating to confirm the app responded. Retry only if `observe` confirms the
-turn had no effect, because a retry after a working turn can overshoot. Tap the control that should
-respond before retrying.
+Call `observe` after rotating. Retry only if it shows the turn had no effect, since a retry after a
+working turn can overshoot, and tap the control first.
 
 ## `sendKeys`
 
 `sendKeys` accepts non-empty text only and appends to the focused field. Focus a field with `tapOn`
 first, or pass a selector with an exact `elementId` or `text`. Selector `text` matches a field's
-label, value or placeholder, and prefers text fields over static text. A focused field opens the
+label, value or placeholder, and prefers text fields over static text. Like `tapOn`, a selector
+refuses a field covered by an alert and names its buttons; tap one, then retry. A focused field opens the
 watch keyboard, and AutoMobile types through it. Input fails when no text field or keyboard is up.
 The watch refuses commands that clear, replace or press keys.
 
 ## `postNotification`
 
 `postNotification` sends a simulated push to the watch app named by `appId`. The simulator cannot
-pre-grant notification authorization, so the app must request permission. Answer Allow with
-`tapOn`, scrolling with `rotateCrown` or `swipeOn` first if needed. Use `observe` to find Allow /
-Don't Allow. A "CtrlProxyWatch" permission prompt may appear first.
+pre-grant notification authorization, so the app must request permission. Find Allow with
+`observe` and tap it with `tapOn`, scrolling with `rotateCrown` or `swipeOn` first if needed. A "CtrlProxyWatch" permission prompt may appear first.
 
 - If the watch dropped the push because the app's notifications are denied, `postNotification`
   returns `success: false`. That happens after Don't Allow, or when Allow was never reached.

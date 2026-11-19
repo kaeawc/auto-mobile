@@ -29,6 +29,8 @@ class PrototypeCapabilityAdvertisementTest {
         .supportedCommands()
     assertTrue("prototype_platform_window_controls_v1" in commands)
     assertTrue("prototype_hide_keyboard_v1" in commands)
+    assertTrue("simulate_prototype_platform" in commands)
+    assertTrue("prototype_platform_simulation_v1" in commands)
   }
 
   @Test
@@ -41,7 +43,7 @@ class PrototypeCapabilityAdvertisementTest {
   }
 
   @Test
-  fun `advertisement adds exactly the registered capabilities and overlay needs no permission`() {
+  fun `advertisement adds exactly the registered capabilities`() {
     fun commands(platform: PrototypePlatform) =
       WebSocketServer(
           port = 0,
@@ -65,15 +67,28 @@ class PrototypeCapabilityAdvertisementTest {
     val overlay = prototypeRuntimePlatform(android.content.ContextWrapper(null))
     assertEquals(
       setOf(
+        "prototype_platform_audio_v1",
+        "prototype_platform_battery_v1",
         "prototype_platform_connectivity_v1",
         "prototype_platform_haptics_v1",
         "prototype_platform_links_v1",
+        "prototype_platform_location_v1",
+        "prototype_platform_power_v1",
+        "prototype_platform_sensors_v1",
         "prototype_platform_settings_v1",
         "prototype_platform_sound_v1",
         "prototype_platform_test_v1",
       ),
       overlay.registry.capabilities,
     )
+    assertFalse("prototype_platform_permissions_v1" in commands(overlay))
+    assertFalse("prototype_platform_notifications_v1" in commands(overlay))
+    assertFalse("prototype_platform_biometric_v1" in commands(overlay))
+    assertFalse("prototype_platform_secureStorage_v1" in commands(overlay))
+    assertTrue("prototype_platform_sensors_v1" in commands(overlay))
+    assertFalse("prototype_platform_sensors_v1" in commands(PrototypePlatform.None))
+    assertTrue("prototype_platform_location_v1" in commands(overlay))
+    assertFalse("prototype_platform_location_v1" in commands(PrototypePlatform.None))
     assertTrue(
       overlay.registry.modules.all {
         it.availability() == PlatformAvailability.Ready

@@ -1,0 +1,59 @@
+{
+  "description": "A seed equal to the shown values is not an update, and a repeated mode switch is a no-op.",
+  "module": "power",
+  "platform": "ios",
+  "inputs": [
+    {
+      "timestampMs": 0,
+      "reading": {
+        "saver": false,
+        "thermal": "nominal"
+      }
+    },
+    {
+      "timestampMs": 50,
+      "mode": "fake"
+    },
+    {
+      "timestampMs": 60,
+      "mode": "fake"
+    },
+    {
+      "timestampMs": 100,
+      "seed": {
+        "thermal": "nominal"
+      }
+    },
+    {
+      "timestampMs": 200,
+      "seed": {
+        "thermal": "critical"
+      }
+    }
+  ],
+  "expectedUpdates": [
+    {
+      "timestampMs": 0,
+      "values": {
+        "saver": false,
+        "thermal": "nominal"
+      }
+    },
+    {
+      "timestampMs": 200,
+      "values": {
+        "saver": false,
+        "thermal": "critical"
+      }
+    }
+  ],
+  "expectedEvents": [
+    {
+      "timestampMs": 700,
+      "values": {
+        "saver": false,
+        "thermal": "critical"
+      }
+    }
+  ]
+}

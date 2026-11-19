@@ -22,6 +22,8 @@ final class ManualRequestClock: PrototypeClock {
         }
     }
 
+    var nowMilliseconds = 0
+    var monotonicMilliseconds: Int { nowMilliseconds }
     private(set) var handles: [Handle] = []
 
     func schedule(afterMilliseconds: Int, _ fire: @escaping () -> Void) -> PrototypeTimerHandle {
@@ -39,24 +41,79 @@ final class FakeHttpClient: PrototypeHttpClient, @unchecked Sendable {
     private let lock = NSLock()
     private var continuations: [Int: CheckedContinuation<PrototypeHttpResponse, Error>] = [:]
     private var calls: [PrototypeHttpRequest] = []
+    private var progress: [Int: PrototypeUploadProgressCallback] = [:]
     private var cancelledCalls: Set<Int> = []
+    private var readyCalls: Set<Int> = []
+    private struct Waiter {
+        let id: UUID
+        let count: Int
+        let continuation: CheckedContinuation<Int, Never>
+        let deadline: DispatchWorkItem
+    }
+
+    private var requestWaiters: [Waiter] = []
 
     var requests: [PrototypeHttpRequest] { lock.withLock { calls } }
     var cancelled: Set<Int> { lock.withLock { cancelledCalls } }
 
     func perform(_ request: PrototypeHttpRequest) async throws -> PrototypeHttpResponse {
+        try await perform(request, delivery: PrototypeDeliveryCheck(), uploadProgress: nil)
+    }
+
+    func perform(
+        _ request: PrototypeHttpRequest, delivery _: PrototypeDeliveryCheck,
+        uploadProgress: PrototypeUploadProgressCallback?
+    )
+        async throws -> PrototypeHttpResponse
+    {
         let index = lock.withLock { () -> Int in
+            let index = calls.count
             calls.append(request)
-            return calls.count - 1
+            progress[index] = uploadProgress
+            return index
         }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                lock.withLock { continuations[index] = continuation }
+                let waiting = lock.withLock { () -> [Waiter] in
+                    continuations[index] = continuation
+                    readyCalls.insert(index)
+                    let waiting = requestWaiters.filter { $0.count <= readyCalls.count }
+                    requestWaiters.removeAll { $0.count <= readyCalls.count }
+                    return waiting
+                }
+                for waiter in waiting {
+                    waiter.deadline.cancel()
+                    waiter.continuation.resume(returning: lock.withLock { readyCalls.count })
+                }
                 if Task.isCancelled { cancel(index) }
             }
         } onCancel: {
             cancel(index)
         }
+    }
+
+    func waitForRequests(_ count: Int) async -> Int {
+        await withCheckedContinuation { continuation in
+            let id = UUID()
+            let deadline = DispatchWorkItem { [self] in
+                let expired = lock.withLock { () -> (Waiter, Int)? in
+                    guard let index = requestWaiters.firstIndex(where: { $0.id == id }) else { return nil }
+                    return (requestWaiters.remove(at: index), readyCalls.count)
+                }
+                if let (waiter, observed) = expired { waiter.continuation.resume(returning: observed) }
+            }
+            let observed = lock.withLock { () -> Int? in
+                if readyCalls.count >= count { return readyCalls.count }
+                requestWaiters.append(Waiter(id: id, count: count, continuation: continuation, deadline: deadline))
+                return nil
+            }
+            if let observed { continuation.resume(returning: observed) }
+            else { DispatchQueue.global().asyncAfter(deadline: .now() + 1, execute: deadline) }
+        }
+    }
+
+    func sendProgress(_ index: Int, sent: Int64, expected: Int64 = 100) {
+        lock.withLock { progress[index] }?(sent, expected)
     }
 
     private func cancel(_ index: Int) {
@@ -106,6 +163,9 @@ final class RequestHarness {
             guard hostConnected else { return false }
             hostFrames.append(frame)
             return true
+        }
+        driver.onUploadProgress = { [unowned self] id, key, value in
+            apply { $0.writeUploadProgress(id, key: key, value: value) }
         }
         driver.onComplete = { [unowned self] requestId, response in
             apply { $0.completeRequest(requestId, response) }
@@ -164,14 +224,26 @@ final class RequestHarness {
 
     /// Lets the tasks the driver started reach their first suspension.
     func waitForDeviceCalls(_ count: Int) async {
-        for _ in 0 ..< 200 where client.requests.count < count {
-            await Task.yield()
-        }
+        let observed = await client.waitForRequests(count)
+        XCTAssertGreaterThanOrEqual(observed, count, "Expected \(count) ready client calls; observed \(observed)")
     }
 }
 
 @MainActor
 final class PrototypeRequestDriverTests: XCTestCase {
+    override class func setUp() {
+        super.setUp()
+        // Compile shared contract patterns outside individual test timing, including isolated runs.
+        let data = Data(
+            #"{"id":"warm","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"warm"}}"#
+                .utf8
+        )
+        do {
+            try PrototypeSpecStrictValidator.validate(data: data)
+            _ = try JSONDecoder().decode(PrototypeSpec.self, from: data)
+        } catch { XCTFail("Fixture warmup failed: \(error)") }
+    }
+
     func testDeliveryBoundaryChecksSuccessAndFailureAndKeepsCurrentResponse() async throws {
         for revoked in [false, true] {
             for fails in [false, true] {

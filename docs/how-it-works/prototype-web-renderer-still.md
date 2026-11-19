@@ -41,9 +41,10 @@ the host, so the page's script only switches between views it was given and neve
   through `all`, `any` and `not`. Only an undecided whole condition counts as true, so the still
   never hides a node on a guess.
 - **Window.** An explicit `window.layoutDirection` sets the content's `dir` (the frame is never
-  mirrored). Without one, a locale whose language or script is written right to left (Arabic,
-  including `ar-XB`, Hebrew, Persian, Urdu and the like) sets `rtl`, as a device in that locale
-  does. Any other locale leaves the page's direction. In either case `start`/`end` safe-area edges
+  mirrored). Without one, a locale whose script is written right to left sets `rtl`, as a device
+  in that locale does. An explicit script subtag decides; otherwise CLDR's likely subtags give the
+  script the tag implies. Arabic (including `ar-XB` and `pa-PK`), Hebrew, Persian, Urdu, Syriac
+  and N'Ko are written right to left. Any other locale leaves the page's direction. In either case `start`/`end` safe-area edges
   read the inset on the matching physical side. Fullscreen fills the screen, and a fullscreen or
   sheet root fills its window on each axis it leaves unsized, as on devices. A sheet spans the
   screen width, `height` dp tall at its `edge`. A floating window sits at its `gravity`, moved by

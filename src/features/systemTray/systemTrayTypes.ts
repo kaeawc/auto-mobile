@@ -1,3 +1,4 @@
+import type { DumpsysNotificationRecord } from "./notificationDumpsys";
 import type { Platform } from "../../models";
 import type { ActionCall } from "../action/ActionCall";
 import type { PostedNotificationContent } from "../utility/postedNotificationLedger";
@@ -8,6 +9,8 @@ export interface SystemTrayNotificationArgs {
   appId?: string;
   tapActionLabel?: string;
   replyText?: string;
+  /** Current Android observation's notification-manager evidence; never tool input. */
+  dumpsysRecords?: () => readonly DumpsysNotificationRecord[] | undefined;
   /**
    * Reads the content `appId` posted through `postNotification`, filled in by
    * systemTray on iOS and never taken from tool input: the only evidence that

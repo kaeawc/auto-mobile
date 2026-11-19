@@ -99,6 +99,10 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
   },
   prototype_semantics_v1: fixture({ ...label, semantics: { heading: true } }),
+  prototype_derive_v1: {
+    minimalSpec: { ...base, derive: { results: { collection: { of: { data: "/rows" } } } } },
+    ops: [],
+  },
   prototype_format_v1: fixture({
     type: "column",
     id: "label",
@@ -352,6 +356,21 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     label: "Save",
     enabledWhen: { key: "liked", equals: true },
   }),
+  prototype_data_actions_v2: {
+    ...fixture({
+      ...label,
+      onTap: [
+        {
+          type: "setData",
+          path: "/data/rows",
+          where: { field: "id", equals: { value: 1 } },
+          member: "title",
+          value: { value: "new" },
+        },
+      ],
+    }),
+    with: ["prototype_data_actions_v1"],
+  },
   prototype_data_actions_v1: fixture({
     ...label,
     onTap: [{ type: "setData", path: "/data/count", value: { value: 1 } }],

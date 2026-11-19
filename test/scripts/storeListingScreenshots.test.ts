@@ -68,12 +68,13 @@ describe("screenshot plan", () => {
       const tools = shot.steps.flatMap((step) => (step.kind === "mcp" ? [step.tool] : []));
       expect(tools[0]).toBe(shot.profile.platform === "android" ? "getAndroid" : "getApple");
       expect(tools).toContain("statusBar");
-      expect(tools.indexOf("putAppFile")).toBeGreaterThan(tools.indexOf("terminateApp"));
+      expect(tools).not.toContain("putAppFile");
+      expect(tools.indexOf("prototype")).toBeGreaterThan(tools.indexOf("terminateApp"));
       const last = shot.steps[shot.steps.length - 1];
       expect(last).toEqual({
         kind: "mcp",
         tool: "observe",
-        args: { screenshot: "settled", settled: true },
+        args: { screenshot: "settled" },
       });
     });
   });
@@ -103,14 +104,84 @@ describe("screenshot plan", () => {
   test("the plan is deterministic", () => {
     expect(buildScreenshotPlan(pins)).toEqual(plan);
   });
+
+  test("seeds the library through ProtoViewer's import path, one save per sample (#18397)", () => {
+    const loaded: string[] = [];
+    const seeded = buildScreenshotPlan(pins, (file) => {
+      loaded.push(file);
+      return { id: `spec:${file}` };
+    });
+    expect(loaded).toEqual(SAMPLE_LIBRARY.map((entry) => entry.file));
+    seeded.forEach((shot) => {
+      const saves = shot.steps.flatMap((step) =>
+        step.kind === "mcp" && step.tool === "prototype" ? [step.args] : [],
+      );
+      expect(saves).toEqual(
+        SAMPLE_LIBRARY.map((entry) => ({
+          action: "save",
+          platform: shot.profile.platform,
+          label: entry.label,
+          spec: { id: `spec:${entry.file}` },
+        })),
+      );
+      const tools = shot.steps.flatMap((step) => (step.kind === "mcp" ? [step.tool] : []));
+      expect(tools.lastIndexOf("prototype")).toBeLessThan(tools.lastIndexOf("launchApp"));
+    });
+  });
+
+  test("the default loader inlines each corpus spec", () => {
+    const save = plan[0]!.steps.find((step) => step.kind === "mcp" && step.tool === "prototype");
+    expect(save?.kind === "mcp" ? save.args.spec : undefined).toMatchObject({
+      id: expect.any(String),
+    });
+  });
+
+  test("app ID pins reach Android launch and iOS launch and termination", () => {
+    const pinnedPlan = buildScreenshotPlan({
+      ...pins,
+      androidAppId: "dev.example.debug",
+      iosAppId: "dev.example.iosdebug",
+    });
+    const android = pinnedPlan.find((shot) => shot.id === "android-phone-light-library")!;
+    const ios = pinnedPlan.find((shot) => shot.id === "ios-iphone-69-light-library")!;
+    const appStepIds = (steps: typeof android.steps) =>
+      steps.flatMap((step) =>
+        step.kind === "mcp" && (step.tool === "launchApp" || step.tool === "terminateApp")
+          ? [step.args.appId]
+          : [],
+      );
+    expect(appStepIds(android.steps)).toEqual([
+      "dev.example.debug",
+      "dev.example.debug",
+      "dev.example.debug",
+    ]);
+    expect(appStepIds(ios.steps)).toEqual([
+      "dev.example.iosdebug",
+      "dev.example.iosdebug",
+      "dev.example.iosdebug",
+    ]);
+  });
 });
 
 describe("capture-screenshots", () => {
   test("parses flags", () => {
-    expect(parseArgs(["--emit", "out", "--android-serial", "a", "--ios-udid", "u"])).toEqual({
+    expect(
+      parseArgs([
+        "--emit",
+        "out",
+        "--android-serial",
+        "a",
+        "--ios-udid",
+        "u",
+        "--android-app-id",
+        "a.debug",
+        "--ios-app-id",
+        "i.debug",
+      ]),
+    ).toEqual({
       list: false,
       emit: "out",
-      pins: { androidSerial: "a", iosUdid: "u" },
+      pins: { androidSerial: "a", iosUdid: "u", androidAppId: "a.debug", iosAppId: "i.debug" },
     });
     expect(parseArgs(["--list"]).list).toBe(true);
   });
@@ -125,4 +196,30 @@ describe("capture-screenshots", () => {
     });
     expect(manifest[0]?.hostSteps).toHaveLength(1);
   });
+});
+
+test("capture flags select a shot and reject incomplete values", () => {
+  expect(
+    parseArgs([
+      "--run",
+      "--out",
+      "out",
+      "--android-serial",
+      "serial",
+      "--profile",
+      "android-phone",
+      "--shot",
+      "android-phone-light-library",
+    ]),
+  ).toMatchObject({
+    run: true,
+    out: "out",
+    profile: "android-phone",
+    shot: "android-phone-light-library",
+    pins: { androidSerial: "serial" },
+  });
+  expect(parseArgs(["--verify-identical", "a", "b"]).verifyIdentical).toEqual(["a", "b"]);
+  expect(() => parseArgs(["--out", "--run"])).toThrow("Missing value");
+  expect(() => parseArgs(["--verify-identical", "a"])).toThrow("two directories");
+  expect(() => parseArgs(["--typo", "a"])).toThrow("Unknown flag");
 });

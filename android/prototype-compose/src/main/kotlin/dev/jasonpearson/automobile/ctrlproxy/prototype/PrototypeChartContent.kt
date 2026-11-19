@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -42,7 +43,11 @@ private fun seriesColor(scheme: ColorScheme, index: Int): Color =
  * summary (see [PrototypeChart.summary]); the x labels below it are visual only.
  */
 @Composable
-internal fun RenderPrototypeChart(node: PrototypeRenderNode, modifier: Modifier) {
+internal fun RenderPrototypeChart(
+  node: PrototypeRenderNode,
+  modifier: Modifier,
+  labelModifier: Modifier = Modifier,
+) {
   val chart = node.chart ?: return
   val scheme = MaterialTheme.colorScheme
   val colors =
@@ -55,17 +60,23 @@ internal fun RenderPrototypeChart(node: PrototypeRenderNode, modifier: Modifier)
     Canvas(modifier.size(RING_SIZE)) { drawRing(fraction, colors.first(), scheme.surfaceVariant) }
     return
   }
-  Column(modifier.fillMaxWidth()) {
-    Canvas(Modifier.fillMaxWidth().height(CHART_HEIGHT)) {
-      val scale = ChartScale(size, chart.yMin, chart.yMax)
-      chart.goal?.let { drawGoal(scale.y(it), scheme.outline) }
-      if (chart.variant == "bar") drawBars(chart, colors, scale)
-      else
-        chart.series.forEachIndexed { index, series ->
-          drawLine(series.points.map { it.y }, colors[index], scale, chart.variant == "area")
-        }
+  BoxWithConstraints(modifier.fillMaxWidth()) {
+    val fixedHeight = constraints.hasFixedHeight
+    Column(Modifier.fillMaxWidth()) {
+      Canvas(
+        Modifier.fillMaxWidth()
+          .then(if (fixedHeight) Modifier.weight(1f) else Modifier.height(CHART_HEIGHT)),
+      ) {
+        val scale = ChartScale(size, chart.yMin, chart.yMax)
+        chart.goal?.let { drawGoal(scale.y(it), scheme.outline) }
+        if (chart.variant == "bar") drawBars(chart, colors, scale)
+        else
+          chart.series.forEachIndexed { index, series ->
+            drawLine(series.points.map { it.y }, colors[index], scale, chart.variant == "area")
+          }
+      }
+      ChartXLabels(chart, labelModifier)
     }
-    ChartXLabels(chart)
   }
 }
 
@@ -143,7 +154,7 @@ private fun DrawScope.drawRing(fraction: Float, color: Color, track: Color) {
 
 /** The first series' x labels: none, the two ends, or all of them evenly spaced. */
 @Composable
-private fun ChartXLabels(chart: PrototypeChartModel) {
+private fun ChartXLabels(chart: PrototypeChartModel, modifier: Modifier) {
   val labels = chart.series.firstOrNull()?.points?.mapNotNull { it.x }.orEmpty()
   val shown =
     when (chart.xLabels) {
@@ -156,7 +167,7 @@ private fun ChartXLabels(chart: PrototypeChartModel) {
     shown.forEach {
       Text(
         it,
-        Modifier.clearAndSetSemantics {},
+        modifier.clearAndSetSemantics {},
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,

@@ -19,7 +19,11 @@ describe("iOS runner feature commands", () => {
       Object.fromEntries(
         Object.entries(IOS_RUNNER_COMMAND_APPLICABILITY).filter(([, value]) => value !== "both"),
       ),
-    ).toEqual({ set_hinge_angle: "simulator", set_voiceover_state: "physical" });
+    ).toEqual({
+      set_hinge_angle: "simulator",
+      set_voiceover_state: "physical",
+      request_storekit: "simulator",
+    });
   });
 
   const sharedCommands = IOS_RUNNER_FEATURE_COMMANDS.filter(

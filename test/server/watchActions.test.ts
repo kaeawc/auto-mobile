@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { watchRunners } from "../../src/features/watch/WatchRunnerRegistry";
-import { FakeWatchRunnerClient } from "../fakes/FakeWatchRunnerClient";
+import {
+  FakeScreenChangingAfterTapWatchRunner,
+  FakeWatchRunnerClient,
+} from "../fakes/FakeWatchRunnerClient";
 import { tapOnHandler, tapAtHandler } from "../../src/server/interactionTools/tapHandlers";
 import { swipeOnHandler } from "../../src/server/interactionTools/gestureHandlers";
 import { pressButtonHandler } from "../../src/server/interactionTools/deviceHandlers";
@@ -25,7 +28,7 @@ const device: BootedDevice = { deviceId: "watch-handlers", platform: "watchos", 
 let client: FakeWatchRunnerClient;
 let unregister: () => void;
 beforeEach(() => {
-  client = new FakeWatchRunnerClient();
+  client = new FakeScreenChangingAfterTapWatchRunner();
   unregister = watchRunners.register(device.deviceId, client);
 });
 afterEach(() => unregister());
@@ -107,8 +110,11 @@ test("existing tool schemas and registry admit watch tapOn, tapAt, swipeOn and h
     { type: "face", op: "dump" },
     { type: "hierarchy" },
     { type: "tap", identifier: "ctrlproxy-crown" },
+    { type: "hierarchy" },
     { type: "face", op: "dump" },
+    { type: "hierarchy" },
     { type: "tap", x: 10, y: 20 },
+    { type: "hierarchy" },
     { type: "swipe", direction: "up" },
     { type: "home" },
   ]);

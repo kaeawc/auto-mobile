@@ -144,4 +144,6 @@ tasks.withType<Test>().configureEach {
   inputs.dir(layout.projectDirectory.dir("../../test/fixtures/prototype-spec"))
   inputs.dir(layout.projectDirectory.dir("../../test/fixtures/prototype-embedded-routing"))
   inputs.dir(layout.projectDirectory.dir("../../test/fixtures/prototype-capabilities"))
+  inputs.dir(layout.projectDirectory.dir("../../test/fixtures/prototype-device-status"))
+  inputs.dir(layout.projectDirectory.dir("../../test/fixtures/prototype-sensors"))
 }

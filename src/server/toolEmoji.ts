@@ -54,6 +54,7 @@ export const TOOL_EMOJI: Readonly<Record<string, ToolEmojiEntry>> = Object.freez
   siri: tool("🗣️"),
   // Apps, files & data
   listApps: tool("🗂️"),
+  buildApp: tool("🔨"),
   launchApp: tool("🚀"),
   terminateApp: tool("🛑"),
   crashApp: tool("💥"),
@@ -63,6 +64,7 @@ export const TOOL_EMOJI: Readonly<Record<string, ToolEmojiEntry>> = Object.freez
   inspectPackageSigning: tool("🔏"),
   getDeepLinks: tool("🔗"),
   putAppFile: tool("📥"),
+  storeKitTest: tool("🛒", "docs/using/storekit-test.md"),
   resetAppLogs: tool("🧹"),
   getPreference: tool("⚙️"),
   setPreference: tool("🔧"),

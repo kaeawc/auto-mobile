@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import AdmZip from "adm-zip";
-import { AndroidDisposableAppStamper } from "../../../../../src/features/prototype/disposableApp/android/AndroidDisposableAppStamper";
+import {
+  ANDROID_ICON_BACKGROUND_COLOR,
+  AndroidDisposableAppStamper,
+} from "../../../../../src/features/prototype/disposableApp/android/AndroidDisposableAppStamper";
 import { DefaultAndroidStampZip } from "../../../../../src/features/prototype/disposableApp/android/AndroidStampZip";
 import { CountingIdGenerator } from "../../../../../src/utils/IdGenerator";
 import { FakeFileSystem } from "../../../../fakes/FakeFileSystem";
@@ -34,15 +37,30 @@ test("cache miss follows link, zip, align, sign, verify; cache hit skips tools",
   expect(calls.length).toBe(5);
   expect((await stamper.stamp({ ...input, label: "Other" })).apkPath).not.toBe(first.apkPath);
 });
-test("rejects icons and ids outside the disposable prefix before tools", async () => {
+test("rejects asset icons, bad colours and ids outside the disposable prefix before tools", async () => {
   const { calls, stamper } = setup();
+  await expect(stamper.stamp({ ...stampInput(), icon: { asset: "logo" } })).rejects.toThrow(
+    "icon asset",
+  );
   await expect(
-    stamper.stamp({ ...stampInput(), icon: { backgroundColor: "#ffffff" } }),
-  ).rejects.toThrow("Omit icon");
+    stamper.stamp({ ...stampInput(), icon: { backgroundColor: "red" } }),
+  ).rejects.toThrow("#AARRGGBB");
   await expect(stamper.stamp({ ...stampInput(), appId: "com.real.app" })).rejects.toThrow(
     "not a disposable",
   );
   expect(calls).toEqual([]);
+});
+test("icon backgroundColor recolours the icon and splash background and keys the cache", async () => {
+  const { fs, zip, stamper } = setup();
+  const input = stampInput();
+  await fs.writeFileBuffer(input.template.apkPath, Buffer.from("template"));
+  const plain = await stamper.stamp(input);
+  expect(zip.colors.size).toBe(0);
+  const red = await stamper.stamp({ ...input, icon: { backgroundColor: "#C62828" } });
+  expect(zip.colors).toEqual(new Map([[ANDROID_ICON_BACKGROUND_COLOR, 0xffc62828]]));
+  const translucent = await stamper.stamp({ ...input, icon: { backgroundColor: "#80C62828" } });
+  expect(zip.colors.get(ANDROID_ICON_BACKGROUND_COLOR)).toBe(0x80c62828);
+  expect(new Set([plain.apkPath, red.apkPath, translucent.apkPath]).size).toBe(3);
 });
 test("failed verification never creates a cache receipt", async () => {
   const { fs, tools, stamper } = setup();
@@ -72,7 +90,10 @@ test("ZIP replaces manifest and spec, drops signatures, stores resources, and co
   linked.addFile("AndroidManifest.xml", Buffer.from("binary manifest"));
   const assembly = new DefaultAndroidStampZip();
   const result = new AdmZip(
-    assembly.assemble(template.toBuffer(), linked.toBuffer(), "{}", stampInput().assets),
+    assembly.assemble(template.toBuffer(), linked.toBuffer(), {
+      spec: "{}",
+      assets: stampInput().assets,
+    }),
   );
   expect(result.readAsText("AndroidManifest.xml")).toBe("binary manifest");
   expect(result.readAsText("assets/prototype/spec.json")).toBe("{}");
@@ -84,9 +105,10 @@ test("ZIP replaces manifest and spec, drops signatures, stores resources, and co
   expect(result.getEntry("META-INF/OLD.SF")).toBeNull();
   expect(result.getEntry("assets/prototype/old.json")).toBeNull();
   expect(() =>
-    assembly.assemble(template.toBuffer(), linked.toBuffer(), "{}", [
-      { id: "../escape", bytes: Buffer.from("") },
-    ]),
+    assembly.assemble(template.toBuffer(), linked.toBuffer(), {
+      spec: "{}",
+      assets: [{ id: "../escape", bytes: Buffer.from("") }],
+    }),
   ).toThrow("Invalid");
 });
 
@@ -116,4 +138,75 @@ test("canonical spec keys and permission order share a cache entry", async () =>
   });
   expect(second.apkPath).toBe(first.apkPath);
   expect(second.cacheHit).toBe(true);
+});
+
+test("ZIP assembly patches stamped colours into resources.arsc", () => {
+  const template = new AdmZip();
+  template.addFile("resources.arsc", Buffer.from("not a table"));
+  const linked = new AdmZip();
+  linked.addFile("AndroidManifest.xml", Buffer.from("binary manifest"));
+  const colors = new Map([[ANDROID_ICON_BACKGROUND_COLOR, 0xffc62828]]);
+  expect(() =>
+    new DefaultAndroidStampZip().assemble(template.toBuffer(), linked.toBuffer(), {
+      spec: "{}",
+      assets: [],
+      colors,
+    }),
+  ).toThrow("resources.arsc");
+});
+
+test("attach tokens key the cache and replace the template secret", async () => {
+  const { fs, stamper } = setup();
+  const input = stampInput();
+  await fs.writeFileBuffer(input.template.apkPath, Buffer.from("template"));
+  const first = await stamper.stamp({ ...input, attachToken: "a".repeat(64) });
+  const second = await stamper.stamp({ ...input, attachToken: "b".repeat(64) });
+  expect(first.version).not.toBe(second.version);
+  const template = new AdmZip();
+  template.addFile("resources.arsc", Buffer.from("old"));
+  template.addFile("assets/prototype/attach-token", Buffer.from("old-secret"));
+  const linked = new AdmZip();
+  linked.addFile("AndroidManifest.xml", Buffer.from("manifest"));
+  const result = new AdmZip(
+    new DefaultAndroidStampZip().assemble(template.toBuffer(), linked.toBuffer(), {
+      spec: "{}",
+      assets: [],
+      attachToken: "a".repeat(64),
+    }),
+  );
+  expect(result.readAsText("assets/prototype/attach-token")).toBe("a".repeat(64));
+});
+
+test("physical-device listener opt-in changes cache and is stamped only with a token", async () => {
+  const { fs, stamper } = setup();
+  const input = stampInput();
+  await fs.writeFileBuffer(input.template.apkPath, Buffer.from("template"));
+  const first = await stamper.stamp({ ...input, attachToken: "a".repeat(64) });
+  const optedIn = await stamper.stamp({
+    ...input,
+    attachToken: "a".repeat(64),
+    allowPhysicalDeviceAttach: true,
+  });
+  expect(first.version).not.toBe(optedIn.version);
+  const template = new AdmZip();
+  template.addFile("resources.arsc", Buffer.from("old"));
+  template.addFile("assets/prototype/attach-allow-physical-device", Buffer.from("true"));
+  const linked = new AdmZip();
+  linked.addFile("AndroidManifest.xml", Buffer.from("manifest"));
+  const stamp = (allowPhysicalDeviceAttach: boolean, attachToken?: string) =>
+    new AdmZip(
+      new DefaultAndroidStampZip().assemble(template.toBuffer(), linked.toBuffer(), {
+        spec: "{}",
+        assets: [],
+        allowPhysicalDeviceAttach,
+        attachToken,
+      }),
+    );
+  expect(
+    stamp(false, "token").getEntry("assets/prototype/attach-allow-physical-device"),
+  ).toBeNull();
+  expect(stamp(true).getEntry("assets/prototype/attach-allow-physical-device")).toBeNull();
+  expect(stamp(true, "token").readAsText("assets/prototype/attach-allow-physical-device")).toBe(
+    "true",
+  );
 });

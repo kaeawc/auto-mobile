@@ -4,6 +4,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,15 +30,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.lifecycleScope
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidBiometricSource
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidLocationSource
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPermissionsSource
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBiometricModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePermissionsModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeScheduledTask
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureValueStore
 import dev.jasonpearson.automobile.protocol.PrototypeLibraryProvenance
 import dev.jasonpearson.automobile.protocol.PrototypeWebView
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
@@ -46,6 +56,7 @@ import dev.jasonpearson.automobile.prototype.PrototypeAssets
 import dev.jasonpearson.automobile.prototype.PrototypeHttpClient as EmbeddedHttpClient
 import dev.jasonpearson.automobile.prototype.PrototypeLoadError
 import dev.jasonpearson.automobile.prototype.PrototypeNetwork
+import dev.jasonpearson.automobile.prototype.PrototypePlatform
 import dev.jasonpearson.automobile.prototype.PrototypeStorage
 import dev.jasonpearson.automobile.prototype.ProvideEmbeddedPrototypeHost
 import java.io.IOException
@@ -103,6 +114,7 @@ class ViewerActivity : ComponentActivity() {
   }
 
   private fun prepare(prototype: LibraryPrototype) {
+    val stores = services.storage.namespaces(prototype.entry.libraryId)
     val host =
       EmbeddedPrototypeHost(lifecycleScope, interactions, services.io).apply {
         clock = services.clock::nowMillis
@@ -120,7 +132,8 @@ class ViewerActivity : ComponentActivity() {
     content =
       ViewerContent(
         prototype,
-        services.storage.namespace(prototype.entry.libraryId),
+        stores.plain,
+        stores.secure,
         host,
         services.networkClient,
       )
@@ -236,7 +249,7 @@ class ViewerActivity : ComponentActivity() {
       ViewerDiagnostics(
         appVersion = appVersionName(),
         androidSdk = Build.VERSION.SDK_INT,
-        capabilities = AutoMobilePrototype.capabilities,
+        capabilities = protoViewerCapabilities,
         lastFailure = lastFailure,
         watchdogTripped = watchdogTripped,
       )
@@ -290,6 +303,7 @@ class ViewerActivity : ComponentActivity() {
 private class ViewerContent(
   val prototype: LibraryPrototype,
   val storage: PrototypeStorage,
+  val secure: PrototypeSecureValueStore?,
   val host: EmbeddedPrototypeHost,
   client: PrototypeHttpClient,
 ) {
@@ -297,6 +311,7 @@ private class ViewerContent(
   val sensitiveModules = PrototypeLibraryProvenance.sensitiveModules(prototype.saved.specJson)
   val assets =
     PrototypeAssets(image = prototype.saved::assetBytes, font = prototype.saved::assetBytes)
+      .withUploadFiles { id -> prototype.saved.fontFile(id) ?: prototype.saved.assetFile(id) }
   // The embedded renderer exposes a read-only request facade; the saved transport consumes
   // the shared runtime contract. Preserve every resolved field at this app boundary.
   val network =
@@ -312,6 +327,8 @@ private class ViewerContent(
               request.headers,
               request.body,
               request.timeoutMs,
+              request.uploadBody,
+              request.onUploadProgress,
             ),
           )
         },
@@ -324,11 +341,28 @@ private class ViewerContent(
     onDismiss: () -> Unit,
     onError: (PrototypeLoadError) -> Unit,
   ) {
+    val context = LocalContext.current
+    val activity = checkNotNull(LocalActivity.current as? ComponentActivity)
+    val platform =
+      remember(context, activity) {
+        PrototypePlatform(
+          listOfNotNull(
+            PrototypeLocationModule(AndroidLocationSource(context)),
+            PrototypeBiometricModule(AndroidBiometricSource(activity)),
+            PrototypePermissionsModule(AndroidPermissionsSource(activity)),
+            secure?.let(::PrototypeSecureStorageModule),
+          ),
+        )
+      }
+    DisposableEffect(platform) {
+      onDispose { platform.registry.modules.forEach { it.close() } }
+    }
     renderer.Render(
       onFailure = onFailure,
       content = {
         ProvideEmbeddedPrototypeHost(host) {
           AutoMobilePrototype(
+            platform = platform,
             spec = prototype.saved.specJson,
             modifier = Modifier.fillMaxSize().testTag("viewer-ready"),
             assets = assets,

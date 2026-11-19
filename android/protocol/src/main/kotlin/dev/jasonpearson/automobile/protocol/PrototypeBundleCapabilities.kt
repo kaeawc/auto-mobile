@@ -41,7 +41,9 @@ internal object PrototypeBundleCapabilities {
     if ("data" in spec) caps.add("prototype_data_model_v1")
     if (PrototypeMediaQueue.queued(spec)) caps.add("prototype_platform_media_queue_v1")
     if ("storage" in spec) caps.add("prototype_storage_v1")
-    if ("derive" in spec) caps.add("prototype_format_v1")
+    val entries = (spec["derive"] as? JsonObject).orEmpty().values.mapNotNull { it as? JsonObject }
+    if (entries.any { "collection" !in it || "format" in it }) caps.add("prototype_format_v1")
+    if (entries.any { "collection" in it }) caps.add("prototype_derive_v1")
   }
 
   /** Window and theme level presentation: namespaces, motion, backdrop, design and mode colours. */
@@ -90,18 +92,11 @@ internal object PrototypeBundleCapabilities {
 
   private fun actions(action: JsonObject, caps: MutableSet<String>) {
     val type = text(action["type"])
+    dataActions(action, caps)
     if (PrototypeChannels.needsRealtimeCapability(action))
       caps.add("prototype_platform_realtime_v1")
     when (type) {
       "request" -> request(action, caps)
-      "prependData" -> {
-        caps.add("prototype_data_actions_v1")
-        caps.add("prototype_lazy_list_v1")
-      }
-      "setData",
-      "appendData",
-      "upsertData",
-      "removeData" -> caps.add("prototype_data_actions_v1")
       "startTimer",
       "cancelTimer" -> caps.add("prototype_timers_v1")
       "push",
@@ -113,6 +108,13 @@ internal object PrototypeBundleCapabilities {
       "hideKeyboard" -> caps.add("prototype_hide_keyboard_v1")
       "emit" -> if ("context" in action) caps.add("prototype_emit_context_v1")
     }
+  }
+
+  private fun dataActions(action: JsonObject, caps: MutableSet<String>) {
+    val type = text(action["type"])
+    if (type in PrototypeDataRules.dataActionTypes) caps.add("prototype_data_actions_v1")
+    if (type == "prependData") caps.add("prototype_lazy_list_v1")
+    if (PrototypeDataRules.isKeyedAction(action)) caps.add("prototype_data_actions_v2")
   }
 
   private fun fields(node: JsonObject, caps: MutableSet<String>) {
@@ -130,6 +132,8 @@ internal object PrototypeBundleCapabilities {
       caps.add("prototype_loading_states_v1")
     val repeat = node["repeat"] as? JsonObject
     if (repeat?.containsKey("derive") == true) caps.add("prototype_format_v1")
+    if ((repeat?.get("items") as? JsonObject)?.containsKey("derived") == true)
+      caps.add("prototype_derive_v1")
     if (repeat?.let { "key" in it || it["items"] is JsonObject } == true)
       caps.add("prototype_data_model_v1")
     PrototypeBindableFields.first<Unit>(node, "") { value, _, kind ->

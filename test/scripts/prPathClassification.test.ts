@@ -23,6 +23,18 @@ describe("parseWorkflowPathFilters", () => {
     expect(filters.ts).toContain("src/**");
   });
 
+  test("an emitter change with regenerated samples selects the android lane (#18381)", () => {
+    expect(
+      classify([
+        "src/features/prototype/prototypeEjectCompose.ts",
+        "samples/prototype-embedding/android/app/src/main/java/prototypes/eject/EjectSamplePrototype.kt",
+      ]),
+    ).toBe("android");
+    expect(classify(["src/features/prototype/nativePrototypeTemplates.ts"])).toBe("android");
+    expect(classify(["test/fixtures/prototype-embedding/eject-sample.json"])).toBe("android");
+    expect(classify(["src/features/prototype/prototypeSpec.ts"])).toBe("ts-only");
+  });
+
   test("throws when a filter step is missing", () => {
     expect(() => parseWorkflowPathFilters("jobs:\n  a:\n    steps: []\n")).toThrow(
       "filter-android",

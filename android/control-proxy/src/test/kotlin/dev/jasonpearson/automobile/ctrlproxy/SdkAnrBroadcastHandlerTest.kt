@@ -284,7 +284,7 @@ class SdkAnrRetainedDeliveryTest {
             "sdkEventBatchProcessor\$delegate",
           )
           .value
-      handler = ReflectionHelpers.getField(proxy, "anrBroadcastHandler")
+      handler = ReflectionHelpers.getField(proxy.receivers, "anrBroadcastHandler")
     }
 
     fun cancelService() {

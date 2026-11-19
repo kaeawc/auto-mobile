@@ -283,6 +283,21 @@ internal object PrototypeBindableFields {
     return null
   }
 
+  private fun <T : Any> Visitor<T>.dataAction(
+    action: JsonObject,
+    path: String,
+    hasValue: Boolean,
+  ): T? {
+    field(action, "path", path, PrototypeBindableKind.DATA_PATH)?.let {
+      return it
+    }
+    if (hasValue)
+      binding(action["value"], "$path.value")?.let {
+        return it
+      }
+    return binding((action["where"] as? JsonObject)?.get("equals"), "$path.where.equals")
+  }
+
   private fun <T : Any> Visitor<T>.requestBody(value: JsonElement?, path: String): T? {
     val body = value as? JsonObject ?: return null
     val parts = body["multipart"] as? JsonArray
@@ -375,10 +390,8 @@ internal object PrototypeBindableFields {
         "setData",
         "appendData",
         "upsertData",
-        "prependData" ->
-          field(action, "path", path, PrototypeBindableKind.DATA_PATH)
-            ?: binding(action["value"], "$path.value")
-        "removeData" -> field(action, "path", path, PrototypeBindableKind.DATA_PATH)
+        "prependData",
+        "removeData" -> dataAction(action, path, type != "removeData")
         "startTimer" -> actionLists(action, listOf("actions"), path)
         "request" -> request(action, path)
         "platform" -> platform(action, path)
@@ -707,12 +720,12 @@ internal object PrototypeRepeatValidator {
     val items: List<JsonObject>,
     val pathBound: Boolean = false,
     val derivedNames: Set<String> = emptySet(),
+    val sourceKind: String = "path",
   )
 
   fun validate(
     spec: JsonElement,
-    data: PrototypeRepeatData =
-      PrototypeRepeatData((spec as? JsonObject)?.get("data") as? JsonObject),
+    data: PrototypeRepeatData = PrototypeRepeatData.fromSpec(spec),
   ): PrototypeSpecError? {
     val root = (spec as? JsonObject)?.get("root") as? JsonObject ?: return null
     return templateErrors(root, "root", null, RepeatState(data))
@@ -722,8 +735,7 @@ internal object PrototypeRepeatValidator {
   /** Every repeat container in the spec, outermost first. */
   fun scopes(
     spec: JsonElement,
-    data: PrototypeRepeatData =
-      PrototypeRepeatData((spec as? JsonObject)?.get("data") as? JsonObject),
+    data: PrototypeRepeatData = PrototypeRepeatData.fromSpec(spec),
   ): List<Scope> {
     val root = (spec as? JsonObject)?.get("root") as? JsonObject ?: return emptyList()
     val scopes = mutableListOf<Scope>()

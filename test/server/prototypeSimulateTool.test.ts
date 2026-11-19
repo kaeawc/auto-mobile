@@ -155,6 +155,25 @@ describe("prototype simulate and timer reports", () => {
     expect(agent.requests).toEqual([]);
   });
 
+  test("Android generic event simulation is routed to the capable CtrlProxy", async () => {
+    proxy.setSupportedCommands(["prototype_platform_simulation_v1"]);
+    expect(
+      await call(android, {
+        action: "simulate",
+        id: "panel",
+        event: "test.tick",
+        data: { count: 7 },
+      }),
+    ).toMatchObject({ success: true });
+    expect(proxy.simulatePlatformRequests).toEqual([
+      { id: "panel", event: "test.tick", data: { count: 7 } },
+    ]);
+    expect(
+      await call(ios, { action: "simulate", id: "panel", event: "test.tick", data: {} }),
+    ).toMatchObject({ success: false, error: expect.stringContaining("Android") });
+    expect(agent.requests).toEqual([]);
+  });
+
   test("simulate needs id and bounded integer advanceTimeMs", () => {
     for (const input of [
       { action: "simulate", id: "proto" },
@@ -224,6 +243,28 @@ describe("prototype simulate and timer reports", () => {
     expect(agent.requests).toEqual([
       { type: "advance_prototype_clock", body: { id: "proto", advanceTimeMs: 100 } },
     ]);
+  });
+
+  test("simulate advances mock backend actors and reports actorSteps (#14211)", async () => {
+    const backend = {
+      collections: { ticks: [] },
+      actors: [{ every: 1000, maxRuns: 5, do: [{ append: "ticks", value: { n: 1 } }] }],
+    };
+    const define = await call(android, { action: "defineBackend", backendId: "demo", backend });
+    expect(define.success).toBe(true);
+    const unsupported = await call(android, { action: "simulate", id: "p", advanceTimeMs: 2500 });
+    expect(unsupported).toMatchObject({ success: false, actorSteps: 2 });
+    proxy.setSupportedCommands(["prototype_timers_v1"]);
+    proxy.setAdvanceClockResult({ success: true, fired: 0 });
+    const capable = await call(android, { action: "simulate", id: "p", advanceTimeMs: 500 });
+    expect(capable).toMatchObject({ success: true, fired: 0, actorSteps: 1 });
+  });
+
+  test("simulate omits actorSteps when no mock backend is defined", async () => {
+    proxy.setSupportedCommands(["prototype_timers_v1"]);
+    proxy.setAdvanceClockResult({ success: true, fired: 1 });
+    const result = await call(android, { action: "simulate", id: "proto", advanceTimeMs: 100 });
+    expect(result.actorSteps).toBeUndefined();
   });
 
   test("advance cap failures retain the number of completed fires", async () => {
@@ -370,7 +411,6 @@ describe("prototype simulate and timer reports", () => {
       { action: "simulate", id: "np", event: "notifications.push", data: push, advanceTimeMs: 1 },
       { action: "simulate", id: "np", advanceTimeMs: 1, data: push },
       { action: "simulate", id: "np", advanceTimeMs: 1, transport: "auto" },
-      { action: "simulate", id: "np", event: "notifications.opened", data: push },
       { action: "simulate", id: "np", event: "notifications.push", data: push, transport: "fcm" },
       { action: "show", id: "np", event: "notifications.push", data: push },
     ];
@@ -401,5 +441,47 @@ describe("prototype simulate and timer reports", () => {
     });
     expect(result).toMatchObject({ success: false, code: "invalid_args" });
     expect(result.error).toContain("4096 bytes");
+  });
+
+  test("simulate accepts media events and keeps transport for notifications.push", () => {
+    const error = { player: "main", status: "error", code: "network", advanceMs: 5000 };
+    expect(
+      prototypeSchema.safeParse({
+        action: "simulate",
+        id: "feed",
+        event: "media.statusChanged",
+        data: error,
+      }).success,
+    ).toBe(true);
+    for (const input of [
+      { action: "simulate", id: "feed", event: "media.ended" },
+      { action: "simulate", id: "feed", event: "media.ended", data: error, transport: "auto" },
+    ]) {
+      expect({ input, ok: prototypeSchema.safeParse(input).success }).toEqual({ input, ok: false });
+    }
+  });
+
+  test("other known notification and media events use the generic schema", () => {
+    for (const event of ["notifications.opened", "media.itemChanged"]) {
+      expect(
+        prototypeSchema.safeParse({ action: "simulate", id: "panel", event, data: {} }).success,
+      ).toBe(true);
+    }
+  });
+
+  test("simulate media is unavailable on a device with no media engine route", async () => {
+    const input = {
+      action: "simulate",
+      id: "feed",
+      event: "media.statusChanged",
+      data: { player: "main", status: "ready" },
+    };
+    for (const device of [android, ios]) {
+      expect(await call(device, input)).toMatchObject({ success: false, code: "unavailable" });
+    }
+    expect(
+      await call(android, { ...input, data: { player: "main", status: "paused" } }),
+    ).toMatchObject({ success: false, code: "invalid_args" });
+    expect(proxy.advanceClockRequests).toEqual([]);
   });
 });

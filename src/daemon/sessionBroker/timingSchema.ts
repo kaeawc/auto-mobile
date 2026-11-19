@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { SessionBrokerTiming } from "../../devices/sessionBrokerResult";
 import { logger } from "../../utils/logger";
 import { exactProfile } from "./profile";

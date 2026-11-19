@@ -1,9 +1,10 @@
 import { prototypeDegradedEffectSchema } from "../../features/prototype/prototypeDegradedEffects";
 import { z } from "zod/v4";
+import { PROTOTYPE_PUSH_DELIVERIES } from "../../features/prototype/prototypePushSimulate";
 import {
-  PROTOTYPE_PUSH_DELIVERIES,
-  PROTOTYPE_PUSH_ERROR_CODES,
-} from "../../features/prototype/prototypePushSimulate";
+  PROTOTYPE_MEDIA_ENGINES,
+  PROTOTYPE_MEDIA_SIMULATE_ERROR_CODES,
+} from "../../features/prototype/prototypeMediaSimulate";
 import { MAX_PROTOTYPE_FEEDBACK_LOG_ENTRIES } from "../../features/prototype/prototypeFeedbackLog";
 import {
   PROTOTYPE_EVENT_KINDS,
@@ -22,6 +23,7 @@ import {
   prototypeClearedOutputField,
   prototypeStorageOutputField,
 } from "../prototypeStorageOutput";
+import { prototypeOwnKeyRecord } from "../../features/prototype/prototypeOwnKeyRecord";
 
 export const dataOutput = z.record(z.string(), z.json()).optional();
 
@@ -175,7 +177,7 @@ const prototypeEventOutputSchema = z.object({
   kind: z.enum(PROTOTYPE_EVENT_KINDS),
   name: z.string().nullable(),
   payload: z.json(),
-  context: z.record(z.string(), z.json()).and(z.unknown()).optional(),
+  context: prototypeOwnKeyRecord(z.string(), z.json()).optional(),
   contextTruncated: z.literal(true).optional(),
   state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
   pages: z.record(z.string(), z.number().int().nonnegative()),
@@ -186,9 +188,7 @@ const prototypeEventOutputSchema = z.object({
         path: z.array(z.string().min(1)).min(1).max(32),
         depth: z.number().int().min(1).max(32),
         params: z
-          .array(
-            z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).and(z.unknown()),
-          )
+          .array(prototypeOwnKeyRecord(z.string(), z.union([z.string(), z.number(), z.boolean()])))
           .min(1)
           .max(32)
           .optional(),
@@ -299,11 +299,16 @@ export const prototypeOutputSchema = z.object({
           from: z.enum(["client", "publish", "broadcast"]),
           data: z.string(),
         }),
+        z.object({
+          seq: z.number().int().positive(),
+          room: z.string(),
+          event: z.enum(["join", "leave"]),
+        }),
       ]),
     )
     .optional()
     .describe(
-      "backendLog: requests answered and room frames seen ({room, from, data}), oldest first (latest 200 kept)",
+      "backendLog: requests answered, room frames seen ({room, from, data}) and connections joining or leaving a room ({room, event: join|leave}), oldest first (latest 200 kept)",
     ),
   report: z.json().optional(),
   markdown: z.string().optional(),
@@ -437,6 +442,12 @@ export const prototypeOutputSchema = z.object({
     ),
   cleared: prototypeClearedOutputField,
   fired: z.number().int().min(0).max(10000).optional(),
+  actorSteps: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("simulate advanceTimeMs only: mock backend actor steps applied"),
   transport: z
     .enum(["connection", "system"])
     .optional()
@@ -450,11 +461,15 @@ export const prototypeOutputSchema = z.object({
     .optional()
     .describe("simulate event only: foreground, background or notification"),
   code: z
-    .enum(PROTOTYPE_PUSH_ERROR_CODES)
+    .enum(PROTOTYPE_MEDIA_SIMULATE_ERROR_CODES)
     .optional()
     .describe(
-      "simulate event only: invalid_args (payload refused), unavailable (no route) or platform_error",
+      "simulate event only: invalid_args (payload refused), unavailable (no route), unsupported (media advanceMs on a native engine) or platform_error",
     ),
+  mediaEngine: z
+    .enum(PROTOTYPE_MEDIA_ENGINES)
+    .optional()
+    .describe("simulate media event only: the engine the player runs on, fake or native"),
   success: z.boolean(),
   error: z.string().optional(),
   prototypes: z
@@ -469,9 +484,7 @@ export const prototypeOutputSchema = z.object({
               depth: z.number().int().min(1).max(32),
               params: z
                 .array(
-                  z
-                    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
-                    .and(z.unknown()),
+                  prototypeOwnKeyRecord(z.string(), z.union([z.string(), z.number(), z.boolean()])),
                 )
                 .min(1)
                 .max(32)
@@ -694,6 +707,57 @@ export const prototypeOutputSchema = z.object({
     .describe(
       "serve, stop and status: the live preview server. status omits it until the first serve of this daemon",
     ),
+  disposableApp: z
+    .object({
+      appId: z.string().describe("Pass to launchApp, terminateApp, observe and uninstallApp"),
+      platform: z.enum(["android", "ios"]),
+      label: z.string(),
+      version: z.string(),
+      expiresAt: z.string().nullable().describe("ISO time it expires; null keeps it"),
+      template: z.string().describe("The smallest template flavor covering the spec's requires"),
+      permissions: z.object({
+        declared: z.array(z.string()),
+        granted: z.array(z.string()),
+        denied: z.array(z.string()),
+      }),
+      updated: z.boolean().describe("true when the slug was already installed and was updated"),
+      launched: z.literal(false),
+    })
+    .optional()
+    .describe("installApp only: the installed disposable app; launch it with launchApp"),
+  disposableApps: z
+    .array(
+      z.object({
+        appId: z.string(),
+        registered: z.boolean().describe("Recorded in this host's disposable app registry"),
+        installed: z.boolean().describe("Present on the device"),
+        expired: z.boolean(),
+        slug: z.string().optional(),
+        label: z.string().optional(),
+        template: z.string().optional(),
+        installedAt: z.string().optional(),
+        expiresAt: z.string().nullable().optional(),
+      }),
+    )
+    .optional()
+    .describe(
+      "listApps only: this host's registry joined with the device's packages under the reserved prefix",
+    ),
+  uninstalled: z
+    .object({
+      removed: z.array(z.object({ appId: z.string(), reason: z.string() })),
+      skipped: z
+        .array(z.object({ appId: z.string(), reason: z.string() }))
+        .describe("Apps left installed, with why (outside the prefix or another signer)"),
+      pending: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "all/expired only: apps not started before the call's deadline; call again with the same target",
+        ),
+    })
+    .optional()
+    .describe("uninstallApp only: each disposable app removed or left in place"),
   deviceDroppedEvents: z
     .number()
     .int()

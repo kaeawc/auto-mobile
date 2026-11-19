@@ -8,7 +8,9 @@ Part of [the agent-authored prototype specification](prototype-ux.md).
 values, delivered like `connectivity.changed`. The state updates at once, and the event fires once
 the state has been quiet for 500 ms. A flap that settles back on the last delivered values is not an
 event. Unknown keys and events fail validation with a
-path. No production runtime advertises them yet: the Android and iOS readers are #14322 and #14323.
+path. Android and iOS provide these read-only modules with lazy system observers and debounced change
+events; Android thermal state is absent below API 29. The iOS agent and ProtoViewer register all three
+without permissions. Their shared registry stops observers after the final presentation releases it.
 
 The host mirrors each delivered `<module>.changed` as `platformStatus.<module>` in `prototype status`
 and `inspect`: `values`, the event's device `timestamp`, the host `receivedAt`, and `simulated` for an
@@ -71,16 +73,37 @@ runtimes copy, replayed from `test/fixtures/prototype-device-status/`:
   `NOT_CHARGING` are `unplugged`, anything else `unknown`; iOS `UIDevice.BatteryState` maps one to one.
 - Battery `level` and audio `volume` are whole percents (Android level over scale and stream index over
   its maximum; iOS `batteryLevel` and `outputVolume`). An unknown reading, such as the Simulator's
-  battery level of -1, leaves the key absent.
+  battery level of -1, leaves the key absent. iOS omits `muted`: an inactive host audio session can
+  report zero `outputVolume`, so volume alone does not establish mute status. Observing audio does
+  not activate or reconfigure the host session.
 - `ringer` is Android `AudioManager.RINGER_MODE_*`: silent, vibrate or normal.
+
+The simulate override is normative too. `prototypeDeviceStatusOverride.ts` is the reference for
+`simulate` state seeding (#14300) on these modules, replayed from the same directory's `override-*`
+fixtures:
+
+- In `fake` platform mode, the shown values freeze at the last reading. Later real readings are held
+  back, and a seed merges into the shown values; a `null` seed value removes the key.
+- Switching back to `real` drops the override and shows the latest reading at once. Each change of
+  the shown values is debounced into `<module>.changed` like a real reading.
+- A seed is refused with its input path in `real` mode. It is also refused for a key outside the
+  state table, a key the platform does not report (`ringer` on iOS) or a value its rule refuses.
+
+The `simulate` state action that drives this on a device is not built.
 
 **Biometric prompt (#14328).** The `biometric` module (`prototype_platform_biometric_v1`) has one call,
 `biometric.authenticate` with `title` (required, 1-64 characters), `subtitle` (optional, 1-128) and
 `allowDeviceCredential` (optional boolean), and one event, `biometric.attemptFailed`, for a rejected
-attempt while the prompt stays up. It has no `/platform` state and needs no declared permission. The
+attempt while the prompt stays up. It has no `/platform` state and needs no `requires.permissions`
+entry. Android hosts declare the normal `USE_BIOMETRIC` manifest permission for framework prompts. The
 call proves presence only and returns no biometric data. Failures use the typed codes: `cancelled`, and
-`unavailable` for a locked-out, unenrolled or hardware-less device. No production runtime advertises the
-module yet.
+`unavailable` for a locked-out, unenrolled or hardware-less device. See
+[Android biometric runtime support](prototype-ux-platform-services.md)
+for host availability and error reasons. The iOS agent and ProtoViewer also register the module. Face ID
+requires the host's `NSFaceIDUsageDescription`; a missing key returns `unavailable` with reason
+`missing_usage_description`. A saved iOS app keeps that key only when its spec lists `biometric` in
+`requires.platform`. Allowing device credentials selects the system passcode fallback, including
+on a device without enrolled biometrics.
 
 **Window controls (#14320).** Four optional root `window` fields need
 `prototype_platform_window_controls_v1`. They are not a platform module, so they need no

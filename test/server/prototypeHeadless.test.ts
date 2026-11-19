@@ -4,6 +4,7 @@ import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { VirtualPrototypeDevice } from "../../src/features/prototype/headless/VirtualPrototypeDevice";
 import {
+  VIRTUAL_PROTOTYPE_CAPABILITIES,
   VIRTUAL_PROTOTYPE_DEVICE,
   VIRTUAL_PROTOTYPE_UNSUPPORTED_CAPABILITIES,
 } from "../../src/features/prototype/headless/headlessPrototypeMode";
@@ -94,6 +95,26 @@ describe("prototype tool on the headless virtual device (#17974)", () => {
     expect(saved.success).toBe(false);
     expect(saved.error).toContain("needs a real device");
     expect(saved.virtualDevice?.renderer).toBe("web");
+  });
+
+  test("show advertises prototype_hide_keyboard_v1, so a hideKeyboard action is accepted (#18442)", async () => {
+    const shown = await call({
+      action: "show",
+      spec: spec({
+        root: {
+          type: "button",
+          label: "Done",
+          testTag: "done",
+          onTap: [{ type: "hideKeyboard" }],
+        },
+      }),
+    });
+    expect(shown.success).toBe(true);
+    expect(VIRTUAL_PROTOTYPE_CAPABILITIES).toContain("prototype_hide_keyboard_v1");
+    expect(shown.virtualDevice?.unsupportedCapabilities).not.toContain(
+      "prototype_hide_keyboard_v1",
+    );
+    expect(virtual.shownIds()).toEqual(["demo"]);
   });
 
   test("a spec needing a capability the virtual device lacks is refused", async () => {

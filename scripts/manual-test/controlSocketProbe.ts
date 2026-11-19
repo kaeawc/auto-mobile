@@ -3,7 +3,7 @@ import {
   DAEMON_CLIENT_MAX_FRAME_BYTES,
   DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES,
 } from "../../src/daemon/wire/LineFramer";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { debuglog } from "node:util";
 import type { Timer } from "../../src/utils/SystemTimer";
 import type { IdGenerator } from "../../src/utils/IdGenerator";

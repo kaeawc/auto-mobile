@@ -53,6 +53,9 @@
             guard let loaded else { return }
             let driver = network.driver()
             driver.onComplete = { [weak model] id, response in model?.completeRequest(id, response) }
+            driver.onUploadProgress = { [weak model] id, key, value in
+                model?.writeUploadProgress(id, key: key, value: value)
+            }
             model.requestDriver = driver
             model.onEmbeddedEvent = { [weak self] event in
                 self?.onEvent(event)
@@ -97,6 +100,7 @@
             model.onEmbeddedEvent = nil
             model.dismiss(reason: .user) // Cancels in-flight requests without a synthetic host dismissal callback.
             model.flushStorage()
+            model.stopPlatformEvents()
             stopObserving()
         }
 

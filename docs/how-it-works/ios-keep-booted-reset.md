@@ -74,7 +74,10 @@ Each release that is not due for maxUses erase runs:
 2. Journal reverts in reverse sequence order for entries with a supported revert.
    Unplannable entries are skipped and logged, not treated as a blocker. App and
    app-group journal entries defer to the baseline-aware app cleanup below to
-   avoid duplicate uninstalls or removal of baseline apps.
+   avoid duplicate uninstalls or removal of baseline apps. A `storekit` entry
+   (`storeKitTest`, one per `appId`) reverts with the runner's StoreKit `clear`
+   for that bundle id; a runner that reports no session is already clean, and any
+   other failure falls back to erase.
 3. A fresh app inventory, then terminate and uninstall only `ApplicationType: User`
    apps outside the installed-app baseline. Removal and baseline app-group
    lookups never target System, Hidden and untyped apps. Remove user app-group

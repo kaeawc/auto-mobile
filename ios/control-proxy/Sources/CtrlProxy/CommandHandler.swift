@@ -44,8 +44,8 @@ final class CommandHandler: CommandHandling {
             case .setVoiceOverState:
                 // DefaultVoiceOverToggle drives Settings on a physical device.
                 return environment == .device
-            case .setHingeAngle:
-                // DefaultHingeAngleSetter has a simulator-only implementation.
+            case .requestStoreKit, .setHingeAngle:
+                // StoreKitTest and the hinge-angle setter require a simulator.
                 return environment == .simulator
             default:
                 // The exhaustive WebSocketRequest decoder and dispatch switch
@@ -65,6 +65,7 @@ final class CommandHandler: CommandHandling {
     let sdkPreferenceClient: (any SdkPreferenceFetching)?
     let hierarchyDebouncer: (any HierarchyDebouncing)?
     let voiceOverStateProvider: any VoiceOverStateProviding
+    let storeKitSessions: any StoreKitSessionProviding
     let voiceOverToggle: any VoiceOverToggling
     let locationSimulator: any LocationSimulating
     let hingeAngleSetter: any HingeAngleSetting
@@ -86,6 +87,7 @@ final class CommandHandler: CommandHandling {
         sdkPreferenceClient: (any SdkPreferenceFetching)? = nil,
         hierarchyDebouncer: (any HierarchyDebouncing)? = nil,
         voiceOverStateProvider: any VoiceOverStateProviding = DefaultVoiceOverStateProvider(),
+        storeKitSessions: any StoreKitSessionProviding = StoreKitSessionStore.shared,
         voiceOverToggle: any VoiceOverToggling = DefaultVoiceOverToggle(),
         locationSimulator: any LocationSimulating = DefaultLocationSimulator(),
         hingeAngleSetter: any HingeAngleSetting = DefaultHingeAngleSetter(),
@@ -106,6 +108,7 @@ final class CommandHandler: CommandHandling {
         self.sdkPreferenceClient = sdkPreferenceClient
         self.hierarchyDebouncer = hierarchyDebouncer
         self.voiceOverStateProvider = voiceOverStateProvider
+        self.storeKitSessions = storeKitSessions
         self.voiceOverToggle = voiceOverToggle
         self.locationSimulator = locationSimulator
         self.hingeAngleSetter = hingeAngleSetter
@@ -177,6 +180,8 @@ final class CommandHandler: CommandHandling {
         async throws -> any WebSocketResponsePayload
     {
         switch request {
+        case let .storeKit(payload):
+            return await handleStoreKit(payload, startTime: startTime)
         case .requestHierarchy, .requestHierarchyIfStale, .setHierarchyPollInterval, .requestScreenshot,
              .refreshGeometry:
             return try await dispatchHierarchy(request, startTime: startTime)

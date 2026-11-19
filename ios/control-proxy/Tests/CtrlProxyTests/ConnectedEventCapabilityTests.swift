@@ -31,6 +31,8 @@ final class ConnectedEventCapabilityTests: XCTestCase {
         let simulator = Set(ConnectedEvent(id: 1, environment: .simulator).supportedCommands)
         let device = Set(ConnectedEvent(id: 1, environment: .device).supportedCommands)
 
+        XCTAssertTrue(simulator.contains("request_storekit"))
+        XCTAssertFalse(device.contains("request_storekit"))
         XCTAssertFalse(simulator.contains(RequestType.setVoiceOverState.rawValue))
         XCTAssertTrue(device.contains(RequestType.setVoiceOverState.rawValue))
         XCTAssertTrue(simulator.contains(RequestType.setHingeAngle.rawValue))

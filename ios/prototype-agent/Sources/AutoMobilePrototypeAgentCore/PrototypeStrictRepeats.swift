@@ -8,10 +8,12 @@ struct PrototypeStrictRepeats {
         let items: [[String: JSONValue]]
         let pathBound: Bool
         var derived: Set<String> = []
+        var sourceField = "path"
     }
 
     var scopes: [Scope] = []
     let data: [String: JSONValue]?
+    var derivedValues: [String: JSONValue] = [:]
     /// Expanded nodes and images, per stack screen and for the whole spec (#14213).
     var budget = PrototypeScreenBudget()
     var effects = PrototypeEffectUses()
@@ -69,7 +71,17 @@ struct PrototypeStrictRepeats {
             let source = spec["items"]
             let pathBound = source?.objectFields != nil
             let items: [JSONValue]
-            if let pointer = source?.objectFields?["path"]?.stringValue {
+            if let name = source?.objectFields?["derived"]?.stringValue {
+                let raw = source?.objectFields?["_rows"] ?? derivedValues[name]
+                let resolved = PrototypeStrictBindings.array(raw)
+                guard resolved
+                    .count <=
+                    (node["type"] == .string("list") ? PrototypeLimits.maxListItems : PrototypeLimits.maxRepeatItems)
+                else {
+                    throw PrototypeContractValidator.invalid("\(path).repeat.items.derived", "Invalid repeat source")
+                }
+                items = resolved.map { PrototypeDataValues.project($0.objectFields ?? [:]) }
+            } else if let pointer = source?.objectFields?["path"]?.stringValue {
                 let at = "\(path).repeat.items.path"
                 guard case let .array(resolved)? = PrototypeDataPointer.resolve(data, pointer: pointer),
                       resolved
@@ -89,7 +101,14 @@ struct PrototypeStrictRepeats {
                         old
                     }
             }
-            let created = Scope(path: path, alias: alias, items: projected, pathBound: pathBound, derived: derived)
+            let created = Scope(
+                path: path,
+                alias: alias,
+                items: projected,
+                pathBound: pathBound,
+                derived: derived,
+                sourceField: source?.objectFields?["derived"] == nil ? "path" : "derived"
+            )
             own = created
             scopes.append(created)
         }
@@ -203,7 +222,7 @@ struct PrototypeStrictRepeats {
                                         .isEmpty ? "key" : "boundKey")]
                             ) {
                                 let at = scope
-                                    .pathBound ? "\(scope.path).repeat.items.path" :
+                                    .pathBound ? "\(scope.path).repeat.items.\(scope.sourceField)" :
                                     "\(scope.path).repeat.items[\(index)]"
                                 throw PrototypeContractValidator.invalid(
                                     at,

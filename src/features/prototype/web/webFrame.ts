@@ -11,6 +11,7 @@ import {
   FLEX,
   FLEX_DIRECTION,
   FONT_FAMILY,
+  SYSTEM_FONT_STACK,
   FONT_SIZE,
   JUSTIFY_CONTENT,
   POINTER_EVENTS,
@@ -367,7 +368,7 @@ function screenStyle(
     // app below, so the theme's background stands in for it.
     [BACKGROUND_COLOR]: options.background,
     color: options.textColor,
-    [FONT_FAMILY]: "system-ui, -apple-system, Roboto, sans-serif",
+    [FONT_FAMILY]: SYSTEM_FONT_STACK,
     [FONT_SIZE]: options.fontSize ?? "14px",
     ...insetVars(insets),
   };

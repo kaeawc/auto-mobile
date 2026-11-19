@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /** A node's accessibility semantics (#14210); at least one field. Gated by `prototype_semantics_v1`. */
 export const prototypeSemanticsSchema = z

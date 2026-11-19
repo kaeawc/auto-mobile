@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 
 /** One fake account (#14303): an id, a display name and a reserved-domain email; no secrets. */

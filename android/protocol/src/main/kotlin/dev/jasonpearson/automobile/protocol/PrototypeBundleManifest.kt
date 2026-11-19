@@ -27,7 +27,7 @@ internal data class PrototypeBundleManifest(
 
 internal object PrototypeBundleManifestCodec {
   private val shaPattern = Regex("[0-9a-f]{64}")
-  private val capabilityPattern = Regex("[a-z][a-z0-9_]*")
+  private val capabilityPattern = Regex("[a-z][A-Za-z0-9_]*")
   // AGSL is deliberately excluded; records rejects it explicitly before this allowlist.
   private val extensions =
     mapOf(

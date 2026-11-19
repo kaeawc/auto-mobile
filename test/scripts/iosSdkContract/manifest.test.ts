@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { parseSdkContractManifest } from "../../../scripts/ios/sdk-contract/manifest";
+import {
+  parseSdkContractManifest,
+  type SdkContractManifest,
+} from "../../../scripts/ios/sdk-contract/manifest";
 
 // Shape written by SdkContractManifestWriter (sorted keys, nil optionals omitted).
 const swiftManifest = {
@@ -131,5 +134,26 @@ test("Core Data registrations require an explicit queryable flag", () => {
         }),
       ).success,
     ).toBe(true);
+  }
+});
+
+test("reads the optional multi-scene log without changing schema version 4", () => {
+  for (const deviceClass of ["ipad", "iphone"] as const) {
+    const multiScene: NonNullable<SdkContractManifest["multiScene"]> = {
+      deviceClass,
+      status: deviceClass === "ipad" ? "complete" : "not-applicable",
+      sceneIdentifiers: deviceClass === "ipad" ? ["a", "b"] : ["a"],
+      observation: { captures: 0, actions: [] },
+    };
+    const parsed = parseSdkContractManifest(JSON.stringify({ ...swiftManifest, multiScene }));
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.manifest.multiScene).toEqual(multiScene);
+    }
+    expect(
+      parseSdkContractManifest(
+        JSON.stringify({ ...swiftManifest, multiScene: { ...multiScene, observation: {} } }),
+      ).success,
+    ).toBe(false);
   }
 });

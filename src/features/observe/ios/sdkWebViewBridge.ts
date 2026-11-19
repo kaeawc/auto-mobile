@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /**
  * Host-side model of the iOS SDK WKWebView bridge's values (#5162). The Swift source of truth is
@@ -43,6 +43,10 @@ export const iosSdkWebSnapshotSchema = z.object({
   elements: z.array(iosSdkWebElementSchema),
   /** Absent from an SDK that predates it; bounds are then taken as web-view points. */
   viewport: iosSdkWebViewportSchema.optional(),
+  /** Points between the web view's frame and where the page's layout viewport begins. */
+  contentInset: z
+    .object({ top: z.number(), left: z.number(), bottom: z.number(), right: z.number() })
+    .optional(),
   /**
    * The page document that posted the snapshot; a navigation starts a new one. Element ids restart
    * for each document, so the same id in another document names an unrelated element.

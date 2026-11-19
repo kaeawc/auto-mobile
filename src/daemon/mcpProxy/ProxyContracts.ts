@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import type { ToolAnnotations } from "@modelcontextprotocol/server";
 import type { BackoffInput } from "../../utils/Backoff";
 import { type IdGenerator } from "../../utils/IdGenerator";

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { prototypePresentationNamespaceShape } from "./prototypePlatformNamespaceSchema";
 import { hexColorSchema, PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 

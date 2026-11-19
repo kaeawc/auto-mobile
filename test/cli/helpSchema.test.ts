@@ -8,7 +8,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 
 import { z } from "zod/v4";
 
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { getCliHelpParameterInfo, getCliHelpSchemaShape } from "../../src/cli";
 import { launchAppSchema } from "../../src/server/appTools";
 import { observeSchema, waitForSchema } from "../../src/server/observeTools";
@@ -87,22 +87,35 @@ class FakeCliOutput implements CliOutput {
   }
 }
 
-test("tool help exposes real selector keys and a schema-valid example", async () => {
+let generalHelp: string;
+let tapOnHelp: string;
+let helpErrors: readonly string[];
+let tapOnTool: ReturnType<typeof ToolRegistry.getTool>;
+
+beforeAll(async () => {
+  // Build the full CLI registry and help once, outside CI's per-test timing budget.
   const fakeOutput = new FakeCliOutput();
   await runCliCommand(["help"], undefined, fakeOutput);
-  expect(fakeOutput.lines.join("\n")).toContain(`tapOn --selector '{"text":"Submit"}'`);
-  const parsed = parseCliArgs(["tapOn", "--selector", '{"text":"Submit"}']);
-  expect(ToolRegistry.getTool("tapOn")?.schema.safeParse(parsed.params).success).toBe(true);
+  generalHelp = fakeOutput.lines.join("\n");
   fakeOutput.lines.length = 0;
   await runCliCommand(["help", "tapOn"], undefined, fakeOutput);
-  const output = fakeOutput.lines.join("\n");
+  tapOnHelp = fakeOutput.lines.join("\n");
+  helpErrors = Object.freeze([...fakeOutput.errors]);
+  tapOnTool = ToolRegistry.getTool("tapOn");
+});
+
+test("tool help exposes real selector keys and a schema-valid example", () => {
+  expect(generalHelp).toContain(`tapOn --selector '{"text":"Submit"}'`);
+  const parsed = parseCliArgs(["tapOn", "--selector", '{"text":"Submit"}']);
+  expect(tapOnTool?.schema.safeParse(parsed.params).success).toBe(true);
+  const output = tapOnHelp;
   for (const key of ["elementId", "testTag", "text", "accessibilityLink", "textAny"]) {
     expect(output).toContain(`"${key}"`);
   }
   expect(output).toContain('"tap" | "doubleTap" | "longPress" | "focus"');
   expect(output).not.toContain("Type: union");
   expect(output).not.toContain("Could not parse");
-  expect(fakeOutput.errors).toEqual([]);
+  expect(helpErrors).toEqual([]);
 });
 
 test("nested criticalSection schema renders the required per-step parameter map", () => {

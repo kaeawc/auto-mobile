@@ -117,9 +117,9 @@ reports.
   run in progress. The provisioner refuses another device while a run is in progress or another
   device's DHU has not exited. An unhealthy but live DHU still holds the port, so the provisioner refuses that too
   (naming the device) and does not stop it: provisioning never tears down another device's projection.
-- **Welcome screen.** **Continue** accepts Android Auto's terms on the user's behalf, so it is tapped
-  only when the request sets `acceptAndroidAutoTerms`; otherwise a pending screen is reported as
-  `skipped`.
+- **Welcome screen.** A pending **Welcome to Android Auto** screen is accepted with **Continue** as
+  part of provisioning, with no request flag, and logged at info. An accepted screen is not shown
+  again, so the step reports `already-done`. The provisioner never signs in to Google.
 
 ## DHU recovery
 
@@ -186,3 +186,4 @@ this path never enters `BaseVisualChange` or `AwaitIdle`:
 ## Background
 
 - [Android Auto projection: no Google account](../../../devlog/2026-11-10-android-auto-projection-provisioning-no-account.md)
+- [Android Auto provisioning accepts the welcome screen](../../../devlog/2026-11-16-android-auto-terms-accepted-by-provisioning.md)

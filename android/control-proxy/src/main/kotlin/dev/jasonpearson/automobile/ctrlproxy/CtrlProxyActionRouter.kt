@@ -22,6 +22,7 @@ import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
 import dev.jasonpearson.automobile.protocol.SetPreference
 import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.put
 
 /**
@@ -407,6 +408,17 @@ internal class CtrlProxyActionRouter(private val service: CtrlProxy) : CtrlProxy
 
   override suspend fun deleteSavedPrototype(requestId: String?, id: String) {
     service.launchRequestScope(requestId) { service.savedPrototypeController.delete(requestId, id) }
+  }
+
+  override suspend fun simulatePrototypePlatform(
+    requestId: String?,
+    id: String,
+    event: String,
+    data: JsonObject,
+  ) {
+    service.launchRequestScope(requestId) {
+      service.prototypeController.simulatePlatformEvent(requestId, id, event, data)
+    }
   }
 
   override suspend fun advancePrototypeClock(requestId: String?, id: String, advanceTimeMs: Int) {

@@ -1,5 +1,5 @@
 import { sessionDeviceInfo } from "../sessionDeviceBinding";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,

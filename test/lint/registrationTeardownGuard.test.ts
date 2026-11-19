@@ -88,6 +88,16 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
       excludes: ["/test/", "/androidTest/"],
       pairs: [
         {
+          name: "Permission result",
+          register: /activityResultRegistry\.register\s*\(/,
+          teardown: /launcher\.unregister\s*\(/,
+        },
+        {
+          name: "Biometric prompt",
+          register: /\.authenticate\(\s*cancellation,/,
+          teardown: /cancellation\.cancel\s*\(/,
+        },
+        {
           name: "BroadcastReceiver",
           // `(?<!un)` so `unregisterReceiver(` does not count as a registration.
           register: /(?<!un)registerReceiver\s*\(/,
@@ -101,6 +111,42 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
       ],
     },
   ];
+
+  interface GuardException {
+    /** Repo-relative file the exception applies to (forward slashes). */
+    readonly file: string;
+    /** The exact call text removed from the scan before the pair is checked. */
+    readonly call: RegExp;
+    readonly reason: string;
+  }
+
+  /**
+   * Calls that lexically match a registration but register nothing. Each entry names
+   * exactly one file and one call shape; every other registration in that file is
+   * still checked.
+   */
+  const EXCEPTIONS: readonly GuardException[] = [
+    {
+      file: "android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/AndroidBatteryStatusSource.kt",
+      call: /registerReceiver\(null, IntentFilter\(Intent\.ACTION_BATTERY_CHANGED\)\)/g,
+      reason:
+        "registerReceiver(null, filter) only returns the current sticky ACTION_BATTERY_CHANGED " +
+        "intent; with a null receiver nothing is registered, so there is nothing to tear down. " +
+        "The live battery receiver is registered and unregistered in AndroidDeviceStatusSource.kt.",
+    },
+  ];
+
+  function toRepoPath(abs: string): string {
+    return relative(ROOT, abs).split("\\").join("/");
+  }
+
+  function scannedSource(abs: string): string {
+    const rel = toRepoPath(abs);
+    return EXCEPTIONS.filter((e) => e.file === rel).reduce(
+      (source, e) => source.replace(e.call, ""),
+      readGuardFile(abs),
+    );
+  }
 
   function walk(absDir: string, ext: string, excludes: readonly string[]): string[] {
     if (!existsSync(absDir)) {
@@ -124,8 +170,8 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
     for (const scope of SCOPES) {
       const files = scope.dirs.flatMap((d) => walk(join(ROOT, d), scope.ext, scope.excludes));
       for (const abs of files) {
-        const source = readGuardFile(abs);
-        const rel = relative(ROOT, abs);
+        const source = scannedSource(abs);
+        const rel = toRepoPath(abs);
         for (const pair of scope.pairs) {
           if (pair.register.test(source) && !pair.teardown.test(source)) {
             if (!result.has(rel)) {
@@ -143,8 +189,13 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
   // loaded runner's disk latency is not charged to the tests.
   let unbalancedPairs = new Map<string, Set<string>>();
   const filesPerDir = new Map<string, number>();
+  let stale: string[] = [];
   beforeAll(() => {
     unbalancedPairs = unbalanced();
+    stale = EXCEPTIONS.filter((e) => {
+      const abs = join(ROOT, e.file);
+      return !existsSync(abs) || !new RegExp(e.call.source).test(readGuardFile(abs));
+    }).map((e) => `${e.file}: ${e.call.source} no longer matches; remove the exception`);
     for (const scope of SCOPES) {
       for (const dir of scope.dirs) {
         filesPerDir.set(
@@ -168,6 +219,48 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
       }
     }
     expect(offenders, offenders.join("\n")).toEqual([]);
+  });
+
+  test("permission-result registrations require launcher teardown", () => {
+    const pair = SCOPES.find((scope) => scope.lang === "kotlin")!.pairs.find(
+      (candidate) => candidate.name === "Permission result",
+    )!;
+    expect(
+      pair.register.test("activity.activityResultRegistry.register(\n key, contract) {}"),
+    ).toBe(true);
+    expect(pair.teardown.test("return { launcher.unregister() }")).toBe(true);
+    expect(pair.teardown.test("return {} ")).toBe(false);
+    const source = readGuardFile(
+      join(
+        ROOT,
+        "android/prototype-compose/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/AndroidPermissionsSource.kt",
+      ),
+    );
+    expect(pair.register.test(source)).toBe(true);
+    expect(pair.teardown.test(source)).toBe(true);
+  });
+
+  test("biometric prompt registrations require cancellation even after formatting", () => {
+    const pair = SCOPES.find((scope) => scope.lang === "kotlin")!.pairs.find(
+      (candidate) => candidate.name === "Biometric prompt",
+    )!;
+    expect(pair.register.test("prompt.authenticate(\n  cancellation, executor, callback)")).toBe(
+      true,
+    );
+    expect(pair.teardown.test("return { cancellation.cancel() }")).toBe(true);
+    expect(pair.teardown.test("return {} ")).toBe(false);
+    const source = readGuardFile(
+      join(
+        ROOT,
+        "android/prototype-compose/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/AndroidBiometricSource.kt",
+      ),
+    );
+    expect(pair.register.test(source)).toBe(true);
+    expect(pair.teardown.test(source)).toBe(true);
+  });
+
+  test("every exception still matches its call (no stale exemption)", () => {
+    expect(stale, stale.join("\n")).toEqual([]);
   });
 
   test("the scan reaches every source root (no vacuous pass from a broken path)", () => {

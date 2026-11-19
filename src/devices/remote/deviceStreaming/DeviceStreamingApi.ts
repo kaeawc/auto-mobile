@@ -4,7 +4,7 @@
  * The adb connection itself is a gRPC stream (`DirectAccessService.AdbConnect`) with no REST
  * transport, so it is not part of this client.
  */
-import { z } from "zod";
+import { z } from "zod/v3";
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../models/describeUnknownError";
 import { logger } from "../../../utils/logger";

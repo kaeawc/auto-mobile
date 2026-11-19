@@ -13,7 +13,7 @@ automatically.
 ## What works
 
 - `show`, `patch`, `dismiss`, `status`, `inspect` and `awaitEvent` take the same arguments as on a
-  device.
+  device. `tapOn` and `sendKeys` act on the shown prototype (see [Events](#events)).
 - Mock backends (`defineBackend`, `mock`, `mockPath`), `screenMap`, `share` and test sessions.
 - The accessibility findings a successful `show` or `patch` returns.
 - `automobile:prototype/<id>/web` returns the prototype as one HTML page in a device frame (see
@@ -30,8 +30,8 @@ Every result includes `virtualDevice`:
 
 ## What is refused
 
-- `save`, `listSaved`, `deleteSaved`, `open`, `clearStorage` and `simulate` fail with "needs a
-  real device".
+- `save`, `listSaved`, `deleteSaved`, `open`, `clearStorage`, `simulate`, `installApp`,
+  `listApps` and `uninstallApp` fail with "needs a real device".
 - `display` fails: there is one display.
 - A spec that needs a capability in `unsupportedCapabilities` fails with the same error an older
   device gives. Examples: `window.persistence: "device"` or `window.layer: "app"`
@@ -44,5 +44,49 @@ Without `window.chrome`, a show reports `chrome: "bar"`, as on a device without
 
 ## Events
 
-Nothing taps the virtual device yet: `awaitEvent` returns `timedOut: true` after `timeoutMs`
-unless an event arrives. Taps in the web page run in the browser only.
+`tapOn` and `sendKeys` act on the shown prototype, so `awaitEvent` returns their events as it does
+on a device.
+
+- `tapOn` takes a `text`, `textAny`, `elementId` or `testTag` selector (`elementId` and `testTag`
+  match a node's `id` or `testTag`). It taps the first visible node that matches. Hidden nodes,
+  closed dialogs and sheets, other pager pages and stack screens below the top cannot be tapped.
+  While a dialog, bottom sheet, drawer or menu is open, only its own nodes can be tapped.
+- A tap on a node goes to the nearest enclosing node that handles taps. Switches, checkboxes and
+  chips toggle their state key. So does a list item with a trailing switch or checkbox.
+  A dialog's confirm and dismiss buttons and a snackbar's action close it.
+  Tab bar and bottom nav items select their tab.
+- Text selectors match what the device shows: `{key}` placeholders filled from state, and a text
+  field's current value. A search bar's results can be tapped only while it is expanded.
+- `sendKeys` with `type` and `clear` commands writes to the `textField` or `searchBar` that a
+  `tapOn` focused, or that its `selector` names. The field's current `maxLength` is applied, as
+  on a device. A `selector` that names
+  anything other than a text field fails without tapping it. Typing fails once the focused field
+  is hidden or disabled; focus it again.
+- A tap whose state write the prototype would reject, such as a number into a text field's key,
+  fails and nothing changes.
+- The result lists `events` (`sequence`, `kind`, `name`) and `virtualDevice`. `handled: false`
+  means the tap reached nothing that handles it, or the control is disabled.
+
+These actions run on a tap: `emit` (context from `state`, `page`, `data` or `value`),
+`setState`, `toggle`, `increment`, `decrement`, `setPage`, `push`, `pop`, `popToRoot`, `replace`,
+`dismiss` and `hideKeyboard`. An emit context over 4096 bytes is cut and flagged
+`contextTruncated`, as on a device. A tap whose actions include anything else fails with "cannot run",
+and nothing changes. That includes `request`, data actions, `platform`, timers, `emit` with
+`requireValid`, and stacks with `routes` or route params. Run those on a device.
+
+Not supported in headless mode:
+
+- `tapOn` with `sibling`, `container`, `index`, `subtext`, `ensureChecked`, `display`, a
+  non-default `selectionStrategy`, an `accessibilityLink` selector, or an `action` other than tap
+  (a positive `duration` means `longPress`).
+- `sendKeys` with a non-default `selectionStrategy`.
+- `layer: "app"` on `tapOn` or a `sendKeys` selector: there is no app below the prototype. Omit
+  `layer` or pass `layer: "prototype"`.
+- `visibleWhen` or `enabledWhen` conditions on `data`, `platform` or `valid` around the target:
+  the input fails with "cannot decide". Run it on a device.
+- `sendKeys` `key` commands.
+- Nodes inside `repeat` templates.
+- `tapAt` and screenshots: there is no rendered layout to tap or capture. Read
+  `automobile:prototype/<id>/web` to see the page.
+
+Taps in the web page itself change only the page.

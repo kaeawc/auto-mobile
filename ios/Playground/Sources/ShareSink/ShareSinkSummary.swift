@@ -1,7 +1,7 @@
 import Foundation
 
-struct ShareSinkAttachment: Equatable {
-    enum Kind: String {
+struct ShareSinkAttachment: Equatable, Sendable {
+    enum Kind: String, Sendable {
         case text
         case url
         case image

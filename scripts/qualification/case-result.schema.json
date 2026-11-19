@@ -36,18 +36,10 @@
       "enum": ["source-tests", "local-build", "published-package"]
     },
     "artifact": {
-      "description": "local-build and published-package require non-null packageVersion and sourceSha; published-package also requires non-null integrity.",
       "type": "object",
       "properties": {
         "packageVersion": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": ["string", "null"]
         },
         "sourceSha": {
           "anyOf": [
@@ -73,7 +65,8 @@
         }
       },
       "required": ["packageVersion", "sourceSha", "integrity"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "local-build and published-package require non-null packageVersion and sourceSha; published-package also requires non-null integrity."
     },
     "command": {
       "type": "object",
@@ -100,8 +93,7 @@
       "enum": ["pass", "fail", "blocked", "not-exercised"]
     },
     "observation": {
-      "description": "Native observation is invalid at the source-tests proof level.",
-      "anyOf": [
+      "oneOf": [
         {
           "type": "object",
           "properties": {
@@ -143,7 +135,8 @@
           "required": ["kind"],
           "additionalProperties": false
         }
-      ]
+      ],
+      "description": "Native observation is invalid at the source-tests proof level."
     },
     "timings": {
       "type": "object",
@@ -151,13 +144,13 @@
         "startedAt": {
           "type": "string",
           "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$"
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
         },
         "finishedAt": {
-          "description": "finishedAt must be at or after startedAt.",
           "type": "string",
           "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$"
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "finishedAt must be at or after startedAt."
         },
         "durationMs": {
           "type": "integer",
@@ -165,7 +158,6 @@
           "maximum": 9007199254740991
         },
         "operations": {
-          "description": "Operation durationMs may exceed budgetMs; the aggregator flags this evidence.",
           "type": "array",
           "items": {
             "type": "object",
@@ -194,7 +186,8 @@
             },
             "required": ["name", "durationMs", "budgetMs"],
             "additionalProperties": false
-          }
+          },
+          "description": "Operation durationMs may exceed budgetMs; the aggregator flags this evidence."
         }
       },
       "required": ["startedAt", "finishedAt", "durationMs", "operations"],
@@ -261,24 +254,10 @@
     },
     "boundary": {
       "description": "boundary must be non-empty for blocked or not-exercised outcomes.",
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ]
+      "type": ["string", "null"]
     },
     "notes": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ]
+      "type": ["string", "null"]
     }
   },
   "required": [

@@ -4,6 +4,9 @@ import { fileURLToPath } from "node:url";
 // The peer holds its write lock for at most half the app connection's retry
 // budget, leaving Windows scheduling slack before app writes give up (#17902).
 const HOLD_MS = 1500;
+// An app write must succeed when the peer's COMMIT lands this long before the
+// retry budget ends: one more paced attempt plus slow-runner scheduling (#17902).
+const RETRY_SLACK_MS = 1000;
 
 test("real peer write locks leave the event loop responsive", async () => {
   const child = Bun.spawn(
@@ -47,8 +50,16 @@ test("real peer write locks leave the event loop responsive", async () => {
   for (const row of cases) {
     expect(row.maxLoopStallMs).toBeLessThan(1000);
     if (row.path.startsWith("app-db-")) {
-      // The whole row names the path and its elapsed time when an app write gives up.
-      expect(row).toMatchObject({ path: row.path, outcome: "ok" });
+      // The hold is measured on the peer's clock (LOCKED to RELEASED): the parent may
+      // start its operation late, so peerReleasedMs alone has no lower bound.
+      expect(row.peerHeldMs).toBeGreaterThanOrEqual(HOLD_MS);
+      expect(row.peerReleasedMs).toEqual(expect.any(Number));
+      // A peer whose COMMIT itself lands after the budget (a stalled Windows
+      // runner) makes BUSY the correct outcome; only an in-budget release must
+      // succeed. The whole row names the path and timings when it does not.
+      if (row.peerReleasedMs <= header.budgets.appRetryTotalWaitMs - RETRY_SLACK_MS) {
+        expect(row).toMatchObject({ path: row.path, outcome: "ok" });
+      }
     }
   }
 }, 60_000);

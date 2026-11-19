@@ -28,6 +28,21 @@ final class TapDiagnosticsTests: XCTestCase {
         return try XCTUnwrap(String(data: encoder.encode(value), encoding: .utf8))
     }
 
+    func testRouteOnlyPreservesRequestAndOmitsSampledFields() throws {
+        for route in [TapDiagnostics.Route.xcuiCoordinate, .displayTargetedRecord] {
+            for durationMs in [0, 800] {
+                let diagnostics = TapDiagnostics.routeOnly(x: 443, y: 202, durationMs: durationMs, route: route)
+                XCTAssertEqual(diagnostics.requested, .init(x: 443, y: 202, durationMs: durationMs))
+                XCTAssertEqual(diagnostics.route, route)
+                let data = try JSONEncoder().encode(diagnostics)
+                let wire = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                XCTAssertEqual(Set(wire.keys), ["requested", "route", "sampleErrors"])
+                XCTAssertEqual(diagnostics.sampleErrors, [])
+                XCTAssertEqual(try JSONDecoder().decode(TapDiagnostics.self, from: data), diagnostics)
+            }
+        }
+    }
+
     func testFullPayloadSortedEncodingAndResponseCopy() throws {
         let expected =
             #"{"application":{"frame":{"height":951,"width":669,"x":0,"y":0}},"baseScreenPoint":{"x":0,"y":0},"orientation":{"device":{"rawValue":3,"source":"XCUIDevice.shared.orientation","value":"landscapeLeft"},"interface":{"rawValue":4,"source":"runnerProcessScenes","value":"landscapeLeft"}},"requested":{"coordinateConstruction":"appFrameOriginPlusPointOffset","durationMs":50,"mode":"press","units":"points","x":443,"y":202},"resolvedScreenPoint":{"x":443,"y":202},"sampleErrors":[],"screen":{"bounds":{"height":669,"width":951,"x":0,"y":0},"nativeBounds":{"height":2007,"width":2853,"x":0,"y":0},"nativeScale":3,"scale":3,"source":"runnerProcessUIScreenMain"}}"#
@@ -244,6 +259,41 @@ final class TapDiagnosticsTests: XCTestCase {
         XCTAssertEqual(gestures.diagnosticTapCalls, 0)
     }
 
+    func testHandlerOffReportsRouteWithoutDiagnosticSampling() async throws {
+        for route in [TapDiagnostics.Route.xcuiCoordinate, .displayTargetedRecord] {
+            for flag in ["", ",\"diagnostics\":false"] {
+                for doubleTap in [false, true] {
+                    let gestures = FakeGesturePerformer()
+                    gestures.tapRoute = route
+                    let handler = CommandHandler(
+                        elementLocator: FakeElementLocator(), gesturePerformer: gestures,
+                        perf: FakePerfTracking(flushResult: nil)
+                    )
+                    let request = try JSONDecoder().decode(
+                        WebSocketRequest.self,
+                        from: Data(
+                            "{\"type\":\"request_tap_coordinates\",\"x\":443,\"y\":202,\"duration\":800,\"doubleTap\":\(doubleTap)\(flag)}"
+                                .utf8
+                        )
+                    )
+                    let result = await handler.handle(request)
+                    let response = try XCTUnwrap(result as? WebSocketResponse)
+                    XCTAssertEqual(response.success, true)
+                    XCTAssertEqual(response.tapDiagnostics, .routeOnly(
+                        x: 443, y: 202, durationMs: doubleTap ? 0 : 800, route: route
+                    ))
+                    let wire = try XCTUnwrap(
+                        JSONSerialization.jsonObject(with: JSONEncoder().encode(response)) as? [String: Any]
+                    )
+                    XCTAssertEqual((wire["tapDiagnostics"] as? [String: Any])?["route"] as? String, route.rawValue)
+                    XCTAssertEqual(gestures.diagnosticTapCalls, 0)
+                    XCTAssertEqual(gestures.tapCalls, doubleTap ? 0 : 1)
+                    XCTAssertEqual(gestures.doubleTapPoints.count, doubleTap ? 1 : 0)
+                }
+            }
+        }
+    }
+
     func testHandlerLongPressTapRequestConvertsMillisecondsToSeconds() async throws {
         let gestures = FakeGesturePerformer()
         let handler = CommandHandler(
@@ -285,6 +335,7 @@ final class TapDiagnosticsTests: XCTestCase {
 
     func testHandlerOnAttachesDiagnostics() async throws {
         let gestures = FakeGesturePerformer()
+        gestures.tapRoute = .xcuiCoordinate
         gestures.tapDiagnosticsResult = fixture
         let handler = CommandHandler(
             elementLocator: FakeElementLocator(), gesturePerformer: gestures,

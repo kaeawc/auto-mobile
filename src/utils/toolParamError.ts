@@ -463,14 +463,17 @@ function formatIssue(issue: ZodIssue, toolName: string, rawInput: unknown): stri
     // zod v4 rejects non-finite numbers (Infinity/-Infinity/NaN) at the base
     // `z.number()` check, so no `.finite()` refinement can carry a custom
     // message. Those surface as an invalid_type whose value is still a number
-    // (`received` is "Infinity"/"NaN", or "number" from a typeof-based error
+    // (`received` is "Infinity"/"-Infinity"/"NaN", or "number" from a typeof-based error
     // map), collapsing the default text to the self-contradictory "expected
     // number, received number". A finite number never trips invalid_type, so
     // any of these markers means non-finite — name the real constraint (#5769).
     const received = (issue as { received?: unknown }).received;
     if (
       issue.expected === "number" &&
-      (received === "Infinity" || received === "NaN" || received === "number")
+      (received === "Infinity" ||
+        received === "-Infinity" ||
+        received === "NaN" ||
+        received === "number")
     ) {
       return `${path} must be a finite number`;
     }

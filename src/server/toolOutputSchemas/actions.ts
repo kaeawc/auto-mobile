@@ -255,6 +255,7 @@ export const tapOnResultSchema = z
     observation: observationOutputSchema.optional(),
     observationDiff: observationDiffMetadataSchema.optional(),
     effect: tapEffectSchema.optional(),
+    dispatchRoute: z.string().optional(),
     selectedElement: selectedElementSchema.optional(),
     ...observationBackendFields,
     activatedSubtext: z

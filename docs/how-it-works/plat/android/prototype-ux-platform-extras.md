@@ -4,26 +4,23 @@ Part of [the agent-authored prototype specification](prototype-ux.md).
 
 ## Dead taps (`window.deadTaps`, `prototype_dead_tap_v1`)
 
-`window.deadTaps: true` enables `emit` events named `prototype_dead_tap`. The
-Android device advertises `prototype_dead_tap_v1`; this window option is a host
-preflight capability, not a strict-spec gate.
+`window.deadTaps: true` enables `emit` events named `prototype_dead_tap`. Android
+advertises `prototype_dead_tap_v1`, a host preflight capability, not a
+strict-spec gate.
 
 A root Final-pass observer reports single-pointer down/up gestures left
 unconsumed by descendants, with movement below touch slop. Scrolling, pager
-drags, multitouch and taps outside the content window do not report. Interactive
+drags, multitouch and taps outside the content window never report. Interactive
 controls and dismissing scrims consume their gestures. Gesture-only nodes with
-nonempty long-press or double-tap actions explicitly mark their down as handled
-without consuming it, preserving ancestor clicks. Passive text, boxes, images
-and spacers remain dead areas. A single tap on a gesture-only node counts as
-handled, even if its hold or double tap action does not fire.
+nonempty long-press or double-tap actions mark their down handled without consuming it,
+preserving ancestor clicks. A single tap on one counts as handled even if its
+hold or double-tap action does not fire. Passive text, boxes, images and spacers stay dead.
 
 Payloads contain only `stack`, `screen`, `x` and `y`; coordinates are window-local
-dp rounded to one decimal. The deepest stack path supplies its id and top screen;
-equal depths choose the lowest stack id lexicographically. Both ids are null
+dp rounded to one decimal. The deepest stack supplies its id and top screen; ties pick the lexicographically lowest stack id. Both are null
 without stacks. The event uses normal sequence allocation, state, pages and
-stacks. The payload never includes typed text. Authored emits cannot use the
-reserved `prototype_` prefix. Disabling the option or closing the runtime stops
-reporting.
+stacks, never typed text. Authored emits cannot use the
+reserved `prototype_` prefix. Disabling it or closing the runtime stops reports.
 
 ## Value formatters (#14227)
 
@@ -32,20 +29,19 @@ Optional `derive` maps up to 32 STATE_KEY names to strict
 `{data: "/pointer"}` (relative to data), `{state: "key"}`, or
 `{value: number|string}`. Every text field supporting `{data:/pointer}` also
 accepts `{derived:name}`; undeclared names are validation errors, unused entries
-are allowed, and malformed braces remain literal. Devices render these tokens in
+are allowed, and malformed braces remain literal. Devices render them in
 text node text, contentDescription, rich-text spans, button/FAB labels, topAppBar
-title, badge text, dialog title/text, and snackbar text. Other text-kind fields
+title, badge text, dialog title/text and snackbar text. Other text-kind fields
 (request url/headers/body, check messages, select/segmented/menu/searchBar labels)
 validate unknown names but display the token literally on devices.
 
 `repeat.derive` maps at most 8 names to the same entry shape with `of` restricted
 to `{item: "field"}` or `{value: number|string}`. It projects strings onto each
-original row for `{item.createdAtText}` (using the repeat's actual alias).
+original row for `{item.createdAtText}` (with the repeat's actual alias).
 Names cannot collide with any original item field, including non-scalar data
 fields. Derived entries do not read other derived entries. Host validation checks projected
-field references without evaluating device-local strings; value-dependent checks
-on derived repeat keys and emit names are deferred to the renderer. Missing source fields
-are allowed and format as empty strings.
+field references without evaluating device-local strings; the renderer defers value-dependent checks
+on derived repeat keys and emit names. Missing source fields are allowed and format as empty strings.
 
 `format` contains exactly one of these keys, each containing a strict object:
 
@@ -62,8 +58,7 @@ are allowed and format as empty strings.
 minFraction must not exceed maxFraction when both are supplied. Omitted numeric
 fraction options use Intl/CLDR defaults (currency respects minor units, including
 zero for JPY). Number grouping true/default respects the locale's minimum grouping
-digits; false disables grouping entirely. Compact, currency, and percent also
-respect locale minimum grouping digits. Locale defaults to the device locale; timeZone defaults to the
+digits; false disables grouping. Compact, currency, and percent do too. Locale defaults to the device locale; timeZone defaults to the
 device zone. Overrides accept a simple BCP 47 tag of at most 35 characters and an
 IANA zone identifier of at most 128 characters. Shape validation does not prove
 that the current engine supports a locale or zone.
@@ -84,12 +79,11 @@ and zone overrides before formatting, and keep the clock snapshot fixed when
 reproducible output is required.
 
 `prototype_format_v1` gates either derive map, including empty maps, before show
-or the complete patch result. Renderers must implement this capability before
-advertising it. Shared `derive/formatters.json` cases define parity: normalize
+or the complete patch result. Renderers advertise it only once implemented. Shared `derive/formatters.json` cases define parity: normalize
 U+202F and U+00A0 to plain space before comparisons. Exact cases pin supported
 English output; structural cases allow documented CLDR differences in foreign
 currency symbols, narrow relative abbreviations, zero-relative wording and
-non-English data. Add engine overrides only after measuring an actual platform
+non-English data. Add engine overrides only for a measured platform
 difference; the fixture note records the divergence policy and unit thresholds.
 
 `dateTime`, `duration`, `plural` and `fileSize` are not format kinds (invalid). No dependencies are needed: the host uses Intl.NumberFormat,
@@ -185,18 +179,52 @@ are available.
 
 A disposable app installs one spec as its own app, with its own package, label, icon, permissions
 and foreground-service types. The host core lives in `src/features/prototype/disposableApp/`.
-The Android stamper packages a spec into a signed APK; the `prototype installApp`, `listApps`
-and `uninstallApp` actions remain separate from this artifact pipeline.
+The Android stamper packages a spec into a signed APK. The `prototype` actions `installApp`,
+`listApps` and `uninstallApp` (`{appId}`, `{all: true}` or `{expired: true}`) run on the daemon's
+`DisposableAppManager`, built on the first such call. iOS refuses them until its stamper exists.
+The headless virtual device refuses them too.
+
+On Android, `patch`, `status`, `inspect` and `awaitEvent` with an installed spec id attach over
+`automobile-app-<appId>`. Conflicting installed spec ids return their slugs. Call `launchApp` first.
+Failed attachment uses CtrlProxy only when live inspection confirms that id; otherwise it
+returns attach guidance. Inspection reconciles CtrlProxy sources, preserving disposable-app
+entries and waits. Other actions use CtrlProxy.
+
+The listener requires a nonblank `assets/prototype/attach-token` and an emulator identity
+(kernel qemu flag or emulator build fingerprint/hardware). The stamper's explicit
+`allowPhysicalDeviceAttach: true` option writes `assets/prototype/attach-allow-physical-device`
+to permit physical devices. This applies to debug and release templates alike, independently of APK debuggability. The token-in-APK model is development-only: anyone who can read the APK can recover the token. Reinstalling a slug in place reuses the token. A second connection cannot
+replace an authenticated live peer. Status and patch conflicts redact `storage.secure` state keys.
+
+Events replay at least once. A process-scoped agent keeps its listener, buffer, sequence ledger
+and `appInstanceId` across reconnects and Activity recreation. Activities rebind targets. A
+new process resets identity and epoch. `hello_result` reports identity and an optional
+`showingId`, which changes when the Activity mounts a new runtime. A same-process remount clears
+the dismissal and keeps pending events. Older apps without `showingId` keep process-only identity.
+One daemon-host attacher serves every MCP registration and keeps app/device cursors. `hello` sends
+`appInstanceId` and `lastAcknowledgedSequence` (initially zero), and `{type: "ack", sequence,
+appInstanceId}` acknowledges matching instances after subscriber delivery. Epochs initialize before
+replay. Status reconciles only its app. The 256-event buffer closes on overflow for replay. Device
+cleanup and host disposal close sockets, remove adb forwards and forget device cursors. Uninstall
+and reinstall each forget only that app's cursors.
+
+Events stay buffered until acknowledged and replay on the next hello; the host de-duplicates
+replays by sequence, within the connection and coordinator. The app retains 200 events, drops the
+oldest on overflow, and reports cumulative `droppedEvents` in hello and status; sequence gaps expose
+missing events. A separate writer uses a 256-frame queue and five-second write deadline. Queue
+overflow or blocked writes close the peer, and events and requests continue with replay retained.
 
 - **Identity.** The package is `dev.jasonpearson.automobile.app.<slug>_<sha256(slug) 8 hex>`.
   Hyphens in the slug become underscores because Android package segments allow only
   `[A-Za-z0-9_]`. A slug is lowercase hyphen-separated words of at most 48 characters that start
-  with a letter. The prefix is never agent-chosen, so a disposable app cannot replace a real app.
+  with a letter. The prefix is never agent-chosen, so a disposable app cannot replace a real one.
 - **Permissions** come only from the spec's root `requires`. `INTERNET` is always declared.
   Each canonical permission maps to its manifest permissions (`location` maps to fine and coarse;
   `photosAdd` maps to none). Each `requires.background` kind adds `FOREGROUND_SERVICE` and its
-  `FOREGROUND_SERVICE_<TYPE>` permission; `remoteNotification` adds none. The permission mode is
-  `prompt` (the default), `grantDeclared`, or `{grant, deny}`, which may name only declared
+  `FOREGROUND_SERVICE_<TYPE>` permission; `remoteNotification` adds none. A `requires.platform`
+  module whose runtime needs an install-time permission adds it (`biometric` adds `USE_BIOMETRIC`);
+  it is never granted or denied, so it is not part of the permission mode. The permission mode is
+  `prompt` (default), `grantDeclared`, or `{grant, deny}`, which may name only declared
   permissions and must not name one in both lists.
 - **Template.** The host picks the smallest flavor whose capabilities cover
   `requiredPrototypeCapabilities(spec)`. If none does, it refuses and names the missing capabilities
@@ -213,6 +241,13 @@ and `uninstallApp` actions remain separate from this artifact pipeline.
   from the host's disposable-app key: one requested id is refused with an error, and in a bulk
   removal the package is reported under `skipped`. Each removal is logged at `warn`. An app that
   is already gone from the device still has its registry record cleared.
+- **Device commands.** The Android installer runs `adb install -r` (then `pm clear` for `reset`),
+  `pm grant` per granted manifest permission, and `pm revoke` plus the `user-set user-fixed` flags
+  per denied one, so a denial reads as blocked with no dialog. It refuses a grant and a deny that
+  share a manifest permission (`microphone` and `speech`) before any write. `adb install` and
+  `adb uninstall` must print `Success`. The installed signer comes from the package signing
+  inspection; a signer set that cannot be read never matches the host key, and an unknown
+  presence fails the removal instead of guessing.
 
 ### Template packaging and stamping
 
@@ -227,8 +262,12 @@ INTERNET), and explicitly enabled components in structured XML. App-owned resour
 references retain the template resource namespace with private-resource access.
 `aapt2 link` resolves those names back to binary resource ids, avoiding unsafe
 binary-manifest string replacement. The spec and assets are baked under
-`assets/prototype/` at stamp time. Icon customization is refused until adaptive
-icon replacement is implemented.
+`assets/prototype/` at stamp time. An `icon.backgroundColor` (`#RRGGBB` or
+`#AARRGGBB`) rewrites the `prototype_icon_background` colour value in the stored
+resource table, in every configuration. That colour backs the adaptive icon and the
+Android 12+ splash screen, so both follow it. The stamp fails if the template has no
+literal colour by that name. An `icon.asset` is refused: the raster foreground
+layer is not stamped yet.
 
 Template signatures are removed before assembly. The resource table stays stored;
 zipalign aligns it before apksigner signs with v2/v3 using a persistent host-owned

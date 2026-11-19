@@ -82,6 +82,10 @@ enum PrototypePurchaseOutcome {
         return Step(state: next, entitlementsChanged: changed)
     }
 
+    private static func sameUtf16(_ lhs: String, _ rhs: String) -> Bool {
+        lhs.utf16.elementsEqual(rhs.utf16)
+    }
+
     /// Applies one queued or tapped `commerce.purchase` outcome.
     static func purchase(_ products: [Product], _ state: State, _ productId: String, _ outcome: Outcome) -> Step {
         guard let product = products.first(where: { $0.id == productId }) else {
@@ -118,7 +122,8 @@ enum PrototypePurchaseOutcome {
     )
         -> Step
     {
-        guard let open = state.lastTransaction, open.transactionId == transactionId,
+        // Swift `==` uses canonical equivalence; TypeScript and Kotlin compare UTF-16 code units.
+        guard let open = state.lastTransaction, sameUtf16(open.transactionId, transactionId),
               open.status == "deferred" || open.status == "pending"
         else {
             return failed(state, Error(code: "platform_error", message: "No open transaction \(transactionId)"))

@@ -21,6 +21,18 @@ models, with the runtimes each model supports. It also lists the configured Appl
 `provisionDevice` request that names a missing or unavailable runtime fails. The error lists the
 available runtimes and repeats the install command.
 
+## Build an app
+
+`buildApp` builds an Xcode scheme for the tvOS simulator on macOS. It returns the `.app` path to
+pass to `installApp` as `artifactPath`:
+
+```json
+{ "platform": "tvos", "projectPath": "TvApp.xcodeproj", "scheme": "TvApp" }
+```
+
+Pass `simulatorUdid` to build for one simulator. A failed build returns `errorCode: "build_failed"`
+with the compiler errors in `logExcerpt`.
+
 ## Supported tools
 
 <!-- apple-tv-supported-tools:start -->

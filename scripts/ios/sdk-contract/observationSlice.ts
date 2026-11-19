@@ -1,3 +1,4 @@
+import type { Timer } from "../../../src/utils/SystemTimer";
 import type { ContractFinding } from "./boundaries";
 import type { ObservationHostLog, SdkContractManifest } from "./manifest";
 
@@ -25,7 +26,46 @@ type JsonRecord = Record<string, unknown>;
 /** A tool call's structured result, or the error it failed with. */
 export interface ToolOutcome {
   result?: JsonRecord;
+  /** Diagnostic text, bounded for logs and findings. */
   error?: string;
+  /** The untruncated failure text, present only when `error` was cut; judge against this. */
+  fullError?: string;
+}
+
+/**
+ * Must exceed the runner's 30 s negativeTTL (SdkEndpointResolver.swift) plus the daemon's
+ * 5 s SDK_CAPABILITY_NEGATIVE_CACHE_TTL_MS (CtrlProxySdkCapabilities.ts) plus probe time.
+ */
+export const SDK_BRIDGE_READY_WAIT_MS = 60_000;
+
+interface BridgeReadyOptions {
+  invoke: () => Promise<ToolOutcome>;
+  timer: Timer;
+  pollMs: number;
+  waitMs: number;
+  /** Multi-scene judges a rejection immediately; observation keeps retrying errors. */
+  stopOnError: boolean;
+}
+
+/** Retry observe through cached discovery misses, returning the last outcome at the deadline. */
+export async function waitForSdkBridge({
+  invoke,
+  timer,
+  pollMs,
+  waitMs,
+  stopOnError,
+}: BridgeReadyOptions): Promise<ToolOutcome> {
+  const deadline = timer.now() + waitMs;
+  let outcome = await invoke();
+  while (
+    (!stopOnError || outcome.error === undefined) &&
+    outcome.result?.backend !== "sdk" &&
+    timer.now() < deadline
+  ) {
+    await timer.sleep(pollMs);
+    outcome = await invoke();
+  }
+  return outcome;
 }
 
 /** One harness step: the tool, its arguments, and the case it is judged as. */

@@ -20,7 +20,7 @@ import { resolveAndroidDatabasePath } from "../features/database/androidDatabase
 import { isReadOnlySqlQuery } from "../features/database/sqlQueryClassification";
 
 // Schema for sqlQuery tool
-export const sqlQuerySchema = withAppIdAliases(
+const sqlQueryBaseSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
     z
       .object({
@@ -55,13 +55,16 @@ export const sqlQuerySchema = withAppIdAliases(
       })
       .strict(),
   ),
-).refine(
+);
+
+// Type interface for tool arguments. Derived from the unrefined schema: refine() infers from
+// its predicate, so typing the predicate by the refined schema would be circular.
+type SqlQueryArgs = z.output<typeof sqlQueryBaseSchema>;
+
+export const sqlQuerySchema = sqlQueryBaseSchema.refine(
   isValidSqlQueryMode,
   "Supply exactly databasePath and query, or store and entity (with optional limit)",
 );
-
-// Type interface for tool arguments
-type SqlQueryArgs = z.output<typeof sqlQuerySchema>;
 
 function isValidSqlQueryMode(args: SqlQueryArgs): boolean {
   return (

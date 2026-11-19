@@ -1538,6 +1538,7 @@
     "shake_result",
     "siri_result",
     "storage_capabilities_result",
+    "storekit_result",
     "swipe_result",
     "table_data_result",
     "table_structure_result",

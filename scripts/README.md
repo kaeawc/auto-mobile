@@ -693,8 +693,10 @@ labelled `run-aaos`; it is not a required check. `scripts/ci/aaos-smoke/run-aaos
 installs the non-Play `android-automotive` API 34 ext9 image, enables the `device-condition`
 flag in a run-private database (`scripts/ci/aaos-smoke/enableFeatureFlags.ts`), and runs
 `scripts/ci/aaos-smoke/aaosSmoke.ts`, which creates the AVD with `startDevice` `createIfMissing`
-and drives observe, launch, tap, scroll, back, home, driving and parked. Each step asserts on its
-payload; step JSON, screenshots, `summary.md` and emulator diagnostics land in
+and drives observe, launch, tap, scroll, back, home, an `observe` of the `cluster` display, driving
+and parked. After each vehicle state an `observe` asserts `automotive.drivingState` (`moving`, or
+`parked`/`idling`) and whether `automotive.uxRestrictions.requiresDistractionOptimization` is set
+(only while moving). Each step asserts on its payload; step JSON, screenshots, `summary.md` and emulator diagnostics land in
 `AAOS_SMOKE_OUT_DIR` (default `scratch/aaos-smoke`). `AAOS_SMOKE_BREAK_ASSERTION=1` (the
 `break-assertion` dispatch input) swaps in an impossible assertion to check the failure summary.
 `AAOS_SMOKE_OS_VERSION` (default `14`) pins `startDevice`; an `AAOS_SMOKE_SYSTEM_IMAGE` override

@@ -1,3 +1,8 @@
+import type { PrototypePlatformSimulationRequest } from "./ctrlProxyProtocol";
+import {
+  requirePrototypePlatformSimulationSupport,
+  simulatePrototypePlatformMessage,
+} from "../../prototype/prototypePlatformSimulation";
 import {
   withHostOnlySavedPrototypes,
   removeDeletedSavedPrototypeMirror,
@@ -12,7 +17,7 @@ import {
   type PrototypePatchReply,
 } from "../../prototype/prototypePatchWire";
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { parsePrototypeStacks, prototypeStacksSchema } from "./prototypeStacksWire";
 import { ActionableError } from "../../../models/ActionableError";
 import { logger } from "../../../utils/logger";
@@ -77,6 +82,7 @@ import {
   type ListSavedPrototypesMessage,
   type ClearPrototypeStorageMessage,
   type AdvancePrototypeClockMessage,
+  type SimulatePrototypePlatformMessage,
   type DeleteSavedPrototypeMessage,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
@@ -428,6 +434,13 @@ export class CtrlProxyPrototypes {
       perf,
     );
     return withHostOnlySavedPrototypes(reply, this.context.savedPrototypeMirror);
+  }
+  async requestSimulatePrototypePlatform(
+    simulation: PrototypePlatformSimulationRequest,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    return this.request(simulatePrototypePlatformMessage(simulation), timeoutMs, perf);
   }
   async requestAdvancePrototypeClock(
     id: string,
@@ -843,7 +856,8 @@ export class CtrlProxyPrototypes {
       | ListSavedPrototypesMessage
       | DeleteSavedPrototypeMessage
       | ClearPrototypeStorageMessage
-      | AdvancePrototypeClockMessage,
+      | AdvancePrototypeClockMessage
+      | SimulatePrototypePlatformMessage,
     timeoutMs: number,
     perf?: PerformanceTracker,
     deliveryOptions: Pick<SendCommandOptions<PrototypeResult>, "onDispatch" | "timeoutError"> = {},
@@ -882,7 +896,8 @@ export class CtrlProxyPrototypes {
       | ListSavedPrototypesMessage
       | DeleteSavedPrototypeMessage
       | ClearPrototypeStorageMessage
-      | AdvancePrototypeClockMessage,
+      | AdvancePrototypeClockMessage
+      | SimulatePrototypePlatformMessage,
   ): void {
     const supports = (command: string) => this.context.isCommandSupported?.(command);
     this.requireShaderSpecSupport(message, supports);
@@ -899,6 +914,7 @@ export class CtrlProxyPrototypes {
     this.requireMultiSurfaceSupport(message, supports);
     requirePrototypeStorageSupport(message.type, supports);
     requirePrototypeTimersSupport(message.type, supports);
+    requirePrototypePlatformSimulationSupport(message.type, supports);
     const type = message.type;
     if (
       [

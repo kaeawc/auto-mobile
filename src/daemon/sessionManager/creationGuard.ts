@@ -245,6 +245,42 @@ export class SessionCreationGuard {
     }
   }
 
+  /**
+   * Put a deferred recovery's claimed row back before the recovery retries (#11811). The pool
+   * rolled the published session back as `allocation-rollback`, which is not re-issuable, over the
+   * generation this creation's upsert wrote. Rewrite that generation's release with the claim's own
+   * re-issuable reason and stamp, and advance the recovery's claimed incarnation to it, so the
+   * retry's conditioned upsert finds the row it expects. Resolves false when there is nothing to
+   * restore or the write failed; a retry over a row that changed meanwhile fails as any changed row does.
+   */
+  async restoreDeferredRecoveryClaim(session: Session): Promise<boolean> {
+    const recovery = this.host.sessionSlots.getRecovery(session.sessionId);
+    const claimed = this.host.claimedIncarnation(recovery);
+    const generation = this.host.persistedRowGenerations.get(session);
+    if (!recovery || claimed?.releaseReason === undefined || generation === undefined) {
+      return false;
+    }
+    const restore = this.host.creationRowRollbackSnapshot(
+      session,
+      claimed.releaseReason,
+      claimed.releasedAtMs,
+    );
+    this.host.captureReleaseRowGeneration(restore, generation);
+    try {
+      if (!(await this.host.persistSessionRelease(restore))) {
+        return false;
+      }
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Could not restore the claimed row of deferred recovery ${session.sessionId}: ${errorMessage(error)}`,
+      );
+      return false;
+    }
+    // The recovery holds its claimed row by identity; only the generation moved.
+    recovery.stable_identity_generation = generation;
+    return true;
+  }
+
   /** The claimed incarnation a recovery's upsert is conditioned on, when `row` is a claim. */
 
   claimedIncarnation(row: DeviceSession | undefined): ClaimedCreationRow | undefined {

@@ -531,6 +531,9 @@ extension PrototypeRepeat {
                     }
                 }
             }
+            if let selector = action["where"]?.objectFields, let binding = selector["equals"]?.objectFields {
+                try validateEmitBinding(binding, path: "\(path)[\(index)].where.equals", scope: scope)
+            }
             guard action["type"] == .string("emit"), let context = action["context"] else { continue }
             let contextPath = "\(path)[\(index)].context"
             // Match values are strings supplied at tap time, after the row is bound.
@@ -640,6 +643,16 @@ struct PrototypeRepeatInstance {
             if case let .array(actions)? = fields["onSubmit"] {
                 fields["onSubmit"] = .array(actions.map(bindAction))
             }
+        case "map":
+            bindList("polylines", in: &fields) { bindString("path", in: &$0) }
+            if var camera = fields["camera"]?.objectFields {
+                bindString("data", in: &camera)
+                fields["camera"] = .object(camera)
+            }
+            if var markers = fields["markers"]?.objectFields {
+                bindString("path", in: &markers)
+                fields["markers"] = .object(markers)
+            }
         case "chart":
             // A repeat-bound series path takes the row's placeholders, as Android's repeat does.
             bindList("series", in: &fields) { bindString("path", in: &$0) }
@@ -716,6 +729,10 @@ struct PrototypeRepeatInstance {
     private func bindDataAction(_ fields: inout [String: JSONValue]) {
         if case let .string(path)? = fields["path"] { fields["path"] = .string(bindDataPath(path)) }
         if case let .object(binding)? = fields["value"] { fields["value"] = bindDataValue(binding) }
+        if var selector = fields["where"]?.objectFields, let binding = selector["equals"]?.objectFields {
+            selector["equals"] = bindDataValue(binding)
+            fields["where"] = .object(selector)
+        }
     }
 
     func bindAction(_ action: JSONValue) -> JSONValue {
@@ -778,7 +795,23 @@ struct PrototypeRepeatInstance {
                 }
             })
         }
-        if case let .object(binding)? = fields["body"] { fields["body"] = bindDataValue(binding) }
+        if case var .object(binding)? = fields["body"] {
+            if let entries = binding["form"]?.objectFields {
+                binding["form"] = .object(entries.mapValues { value in
+                    value.objectFields.map(bindDataValue) ?? value
+                })
+                fields["body"] = .object(binding)
+            } else if case let .array(parts)? = binding["multipart"] {
+                binding["multipart"] = .array(parts.map { raw in
+                    guard var part = raw.objectFields else { return raw }
+                    if let value = part["value"]?.objectFields { part["value"] = bindDataValue(value) }
+                    return .object(part)
+                })
+                fields["body"] = .object(binding)
+            } else {
+                fields["body"] = bindDataValue(binding)
+            }
+        }
         for list in ["onSuccess", "onError"] {
             if case let .array(actions)? = fields[list] { fields[list] = .array(actions.map(bindAction)) }
         }
@@ -836,7 +869,7 @@ struct PrototypeRepeatInstance {
 
     /// A string operand: text is interpolated, numbers and booleans pass through. A string that is
     /// exactly one placeholder keeps the item's own type.
-    private func interpolateScalar(_ value: JSONValue) -> JSONValue {
+    func interpolateScalar(_ value: JSONValue) -> JSONValue {
         guard case let .string(text) = value else { return value }
         let segments = PrototypeRepeat.segments(text, alias: alias)
         if segments.count == 1 {

@@ -8,6 +8,7 @@ import {
   createDefaultBindingExclusion,
   RegistryBindingExclusion,
 } from "../../../../src/daemon/sessionBroker/provisioning/exclusion";
+import { SharedHostRegistry } from "../../../../src/daemon/sessionBroker/provisioning/sharedHostRegistry";
 import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
 import type { BindingRegistry } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { defaultBindingRegistryPath } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
@@ -137,7 +138,9 @@ describe("binding registry absence", () => {
     });
 
     test("reads an absent host registry as empty without creating it", async () => {
-      const exclusion = createDefaultBindingExclusion(timer);
+      const exclusion = createDefaultBindingExclusion(timer, {
+        hostRegistry: new SharedHostRegistry(),
+      });
       await exclusion.refresh();
       expect(exclusion.holderOf({ platform: "ios", stableIds: [DEVICE.deviceId] })).toBeUndefined();
       expect(existsSync(defaultBindingRegistryPath())).toBe(false);

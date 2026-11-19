@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { MAX_PROTOTYPE_BACKDROP_BLUR_DP, PROTOTYPE_BACKDROP_MATERIALS } from "./prototypeBackdrop";
 import { colorTokenSchema } from "./prototypePresentationSchemas";
 

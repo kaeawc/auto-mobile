@@ -17,6 +17,9 @@ import {
   prototypeWebOrbitKey,
   prototypeWebPose,
   prototypeWebPostureAt,
+  prototypeWebReflowPosture,
+  prototypeWeb3dLayoutReflow,
+  type PrototypeWebReflowSelect,
 } from "../../../../src/features/prototype/web/webDevice3d";
 import { toHtml } from "../../../../src/features/prototype/web/webNodes";
 import {
@@ -103,6 +106,92 @@ describe("prototype web 3D pose rules (#16458)", () => {
     expect(prototypeWebPostureAt(90, [])).toBeUndefined();
   });
 
+  test("a fold reflows to a posture view the page has and does not show (#16458)", () => {
+    const views = ["opened", "half_opened", "closed"];
+    expect(prototypeWebReflowPosture("half_opened", "opened", views)).toBe("half_opened");
+    expect(prototypeWebReflowPosture("opened", "half_opened", views)).toBe("opened");
+    expect(prototypeWebReflowPosture("opened", "opened", views)).toBeUndefined();
+    expect(prototypeWebReflowPosture("tent", "opened", views)).toBeUndefined();
+    expect(prototypeWebReflowPosture(undefined, "opened", views)).toBeUndefined();
+  });
+
+  test("shutting never reflows to the cover panel's closed view", () => {
+    expect(prototypeWebReflowPosture("closed", "half_opened", ["half_opened", "closed"])).toBe(
+      undefined,
+    );
+  });
+
+  test("the reflow rule is self-contained, as the inlined runtime needs", () => {
+    const inlined = new Function(`return (${prototypeWebReflowPosture.toString()})`)() as (
+      ...args: Parameters<typeof prototypeWebReflowPosture>
+    ) => string | undefined;
+    expect(inlined("half_opened", "opened", ["half_opened"])).toBe("half_opened");
+  });
+
+  test("a reflow chooses the posture with the framing kept, and leaving restores posture and screen", () => {
+    const changes: string[] = [];
+    /** A fake 2D select that records each change and whether framing was kept. */
+    const select = (name: string, value: string, values: string[]): PrototypeWebReflowSelect => {
+      const fake: PrototypeWebReflowSelect = {
+        value,
+        options: values.map((option) => ({ value: option })),
+        dataset: {},
+        dispatchEvent: () => {
+          const kept = fake.dataset.keepFraming === undefined ? "" : " (kept)";
+          changes.push(`${name}=${fake.value}${kept}`);
+          return true;
+        },
+      };
+      return fake;
+    };
+    const postures = select("posture", "opened", ["opened", "half_opened", "closed"]);
+    const screens = select("screen", "detail", ["home", "detail"]);
+    const reflow = prototypeWeb3dLayoutReflow(
+      {
+        querySelector: (selector) =>
+          selector.includes("layout-posture")
+            ? postures
+            : selector.includes("screen")
+              ? screens
+              : null,
+      },
+      prototypeWebReflowPosture,
+    );
+    reflow.enter("opened");
+    reflow.reflow("opened");
+    reflow.reflow("half_opened");
+    // The half_opened stack has no detail screen, so the 2D runtime moved it to the start.
+    screens.value = "home";
+    reflow.reflow("closed");
+    reflow.leave();
+    expect(changes).toEqual([
+      "posture=half_opened (kept)",
+      "posture=opened (kept)",
+      "screen=detail (kept)",
+    ]);
+    expect(postures.dataset.keepFraming).toBeUndefined();
+  });
+
+  test("leaving does not choose a screen the restored posture no longer offers", () => {
+    const changes: string[] = [];
+    const fake = (value: string, values: string[]): PrototypeWebReflowSelect => ({
+      value,
+      options: values.map((option) => ({ value: option })),
+      dataset: {},
+      dispatchEvent: () => changes.push(value) > 0,
+    });
+    // Entered on detail; the restored posture's stack offers only home now.
+    const screens = fake("detail", ["home"]);
+    const reflow = prototypeWeb3dLayoutReflow(
+      { querySelector: (selector) => (selector.includes("screen") ? screens : null) },
+      prototypeWebReflowPosture,
+    );
+    reflow.enter(undefined);
+    screens.value = "home";
+    reflow.leave();
+    expect(changes).toEqual([]);
+  });
+
   test("arrow keys orbit by 5°, 15° with Shift; other keys do nothing", () => {
     expect(prototypeWebOrbitKey("ArrowLeft", false)).toEqual({ yaw: -5, pitch: 0 });
     expect(prototypeWebOrbitKey("ArrowUp", true)).toEqual({ yaw: 0, pitch: 15 });
@@ -110,7 +199,14 @@ describe("prototype web 3D pose rules (#16458)", () => {
   });
 
   test("a book splits at the hinge into a left fixed leaf and a right moving leaf", () => {
-    expect(prototypeWebLeaves(400, 300, { axis: "vertical", at: 0.25 })).toEqual({
+    expect(
+      prototypeWebLeaves(
+        400,
+        300,
+        { axis: "vertical", at: 0.25 },
+        { left: 0, top: 0, width: 400, height: 300 },
+      ),
+    ).toEqual({
       flip: "rotateY(180deg)",
       clip: "inset(0 300px 0 0)",
       fixed: { width: "100px", height: "300px" },
@@ -123,11 +219,40 @@ describe("prototype web 3D pose rules (#16458)", () => {
   });
 
   test("a flip splits into a top fixed leaf and a bottom moving leaf", () => {
-    const leaves = prototypeWebLeaves(200, 400, { axis: "horizontal", at: 0.5 });
+    const leaves = prototypeWebLeaves(
+      200,
+      400,
+      { axis: "horizontal", at: 0.5 },
+      { left: 0, top: 0, width: 200, height: 400 },
+    );
     expect(leaves.clip).toBe("inset(0 0 200px 0)");
     expect(leaves.moving).toEqual({ top: "200px", width: "200px", height: "200px" });
     expect(leaves.origin).toBe("50% 0");
     expect(leaves.clone).toEqual({ top: "-200px" });
+  });
+
+  test("an off-centre hinge behind a bezel splits on the screen's hinge, not the frame's share (#16768)", () => {
+    // A 12 px bezel around a 400 × 300 screen: the hinge a quarter across the screen is 112 px
+    // into the 424 px frame, where a share of the frame box would put it 106 px in.
+    const book = prototypeWebLeaves(
+      424,
+      324,
+      { axis: "vertical", at: 0.25 },
+      { left: 12, top: 12, width: 400, height: 300 },
+    );
+    expect(book.clip).toBe("inset(0 312px 0 0)");
+    expect(book.fixed).toEqual({ width: "112px", height: "324px" });
+    expect(book.moving).toEqual({ left: "112px", width: "312px", height: "324px" });
+    expect(book.clone).toEqual({ left: "-112px" });
+    const flip = prototypeWebLeaves(
+      324,
+      424,
+      { axis: "horizontal", at: 0.75 },
+      { left: 12, top: 12, width: 300, height: 400 },
+    );
+    expect(flip.clip).toBe("inset(0 0 112px 0)");
+    expect(flip.moving).toEqual({ top: "312px", width: "324px", height: "112px" });
+    expect(flip.clone).toEqual({ top: "-312px" });
   });
 });
 

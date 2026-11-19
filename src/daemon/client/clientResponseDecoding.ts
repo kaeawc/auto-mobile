@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { ActionableError } from "../../models";
 import { type BuildIdentity } from "../wire/buildIdentity";
 import { type DaemonMethodCallOptions } from "./client";

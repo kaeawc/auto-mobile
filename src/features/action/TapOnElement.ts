@@ -854,7 +854,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * @returns Result of the command
    */
   async execute(options: TapOnElementOptions, call: TapOnCall = {}): Promise<TapOnFocusResult> {
-    const runnerResult = tapOnAppleRunner(this.device, options, call.signal);
+    const runnerResult = tapOnAppleRunner(this.device, options, call.signal, this.timer);
     if (runnerResult) {
       return runnerResult;
     }

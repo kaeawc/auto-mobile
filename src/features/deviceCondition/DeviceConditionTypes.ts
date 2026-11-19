@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { INTEGRITY_SIGNALS } from "./integritySignals";
 import { DEVICE_CLOCK_TOLERANCE_MS, MAX_DEVICE_CLOCK_ADVANCE_MS } from "../utility/DeviceClock";
 import { STATUS_BAR_BATTERY_STATES, STATUS_BAR_DATA_NETWORKS } from "../utility/StatusBarOverride";

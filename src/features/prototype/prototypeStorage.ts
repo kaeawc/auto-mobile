@@ -1,7 +1,7 @@
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { ActionableError } from "../../models/ActionableError";
-import { z } from "zod";
+import { z } from "zod/v3";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_STORAGE_CAPABILITY, type PrototypeStorageReport } from "./prototypeStorageWire";
 import { prototypeDataPathPointer, resolvePrototypeDataPointer } from "./prototypeData";
@@ -194,6 +194,9 @@ const storageReportSchema = z.object({
   keys: z.array(z.object({ key: storageKeySchema, bytes: byteCountSchema })),
   totalBytes: byteCountSchema,
   skippedKeys: z.array(storageKeySchema).optional(),
+  secure: z
+    .array(z.object({ key: storageKeySchema, present: z.boolean(), bytes: byteCountSchema }))
+    .optional(),
 });
 
 /**

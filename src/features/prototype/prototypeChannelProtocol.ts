@@ -4,7 +4,7 @@
  * These are transport relay messages, not prototype events: what a spec or `awaitEvent` sees
  * stays on `prototype_platform_event`. Not in the Kotlin-mirrored wire manifest.
  */
-import { z } from "zod";
+import { z } from "zod/v3";
 import { PROTOTYPE_REQUEST_ERROR_CODES } from "./prototypeRequestProtocol";
 
 export const PROTOTYPE_CHANNEL_OPEN_MESSAGE_TYPE = "prototype_channel_open";

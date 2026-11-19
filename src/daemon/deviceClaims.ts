@@ -1,3 +1,5 @@
+import { classifySqliteError } from "../db/databaseFailureClassification";
+import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { LockOwnerGenerationVerdict } from "../utils/fileLock";
 import { defaultLockOwnerGenerationProbe } from "../utils/lockOwnerGeneration";
@@ -88,8 +90,10 @@ export interface DeviceClaimMirror {
   released(deviceId: string, owner: { pid: number; ownerToken: string }): void;
   /**
    * The claim itself, decided by the table (#11811 step d): `claimed` once the row names this
-   * owner, `refused` while a live foreign owner holds it, `unavailable` when no table can decide
-   * (no registry, a skipped one, a failed write), and the claim files decide instead.
+   * owner, `refused` while a live foreign owner holds it. When the table cannot decide (no
+   * registry open, a failed write after bounded busy retries) it is `unusable` once a registry
+   * must decide claims, and the claim is refused retryably (owner decision 2026-11-07, E1);
+   * before that, and for a skipped registry, it is `unavailable` and the claim files decide.
    */
   acquire?(
     deviceId: string,
@@ -101,10 +105,20 @@ export interface DeviceClaimMirror {
 export type DeviceClaimAcquisition =
   | { outcome: "claimed" }
   | { outcome: "refused"; ownerPid: number }
+  | { outcome: "unusable" }
   | { outcome: "unavailable" };
 
 /** Racing takers retry the judge-then-write this many times before refusing. */
 const ACQUIRE_ATTEMPTS = 3;
+
+/** A busy or locked registry is tried this many times in all before the claim gives up. */
+export const DEVICE_CLAIM_ACQUIRE_BUSY_ATTEMPTS = 4;
+
+/** Waits between busy attempts: 50, 100 and 200 ms, so a claim gives up within about 1.1 s. */
+export const DEVICE_CLAIM_ACQUIRE_BUSY_BACKOFF: BackoffPolicy = exponentialBackoff({
+  initialDelayMs: 50,
+  maxDelayMs: 200,
+});
 
 export interface StoreDeviceClaimMirrorOptions {
   platform: Platform;
@@ -123,6 +137,13 @@ export interface StoreDeviceClaimMirrorOptions {
   generationVerdict?: (pid: number, recorded: string) => LockOwnerGenerationVerdict;
   /** Delay before the nth retry of a device's write; its length bounds the retries. */
   retryDelaysMs?: readonly number[];
+  /**
+   * True once a registry must decide this daemon's claims (after socket bind, when startup creates
+   * it). Then a claim the table cannot decide is `unusable`, not left to the files (#11811, E1).
+   */
+  registryExpected?: () => boolean;
+  /** Waits between busy acquire attempts; defaults to {@link DEVICE_CLAIM_ACQUIRE_BUSY_BACKOFF}. */
+  busyBackoff?: BackoffPolicy;
 }
 
 /** Delays before a failed or deferred write is retried: about eight minutes in all. */
@@ -215,26 +236,93 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     owner: MirrorOwner,
     isLiveForeignOwner: (row: DeviceClaim) => Promise<boolean>,
   ): Promise<DeviceClaimAcquisition> {
-    const store = this.skipped ? undefined : await this.readStore();
-    if (!store || this.skipped || this.disposed) {
+    if (this.skipped || this.disposed) {
       return { outcome: "unavailable" };
     }
+    let store: DeviceClaims | undefined;
     try {
-      for (let attempt = 0; attempt < ACQUIRE_ATTEMPTS; attempt++) {
-        const decided = await this.acquireOnce(store, deviceId, owner, isLiveForeignOwner);
-        if (decided) {
-          return decided;
-        }
-      }
-      const winner = await store.get(this.options.platform, deviceId);
-      return winner ? { outcome: "refused", ownerPid: winner.pid } : { outcome: "unavailable" };
+      store = await this.readStore();
     } catch (error) {
-      logger.warn(
-        `[DeviceClaims] Cannot claim ${deviceId} in the host-wide table; the claim files decide: ${errorMessage(error)}`,
-        error,
-      );
+      return this.undecided(deviceId, error);
+    }
+    if (this.skipped || this.disposed) {
       return { outcome: "unavailable" };
     }
+    if (!store) {
+      return this.undecided(deviceId);
+    }
+    return this.acquireRetryingBusy(store, deviceId, owner, isLiveForeignOwner);
+  }
+
+  /** Judge-then-write, retried on a busy or locked registry a bounded number of times. */
+  private async acquireRetryingBusy(
+    store: DeviceClaims,
+    deviceId: string,
+    owner: MirrorOwner,
+    isLiveForeignOwner: (row: DeviceClaim) => Promise<boolean>,
+  ): Promise<DeviceClaimAcquisition> {
+    for (let busyAttempt = 1; ; busyAttempt++) {
+      try {
+        return await this.acquireRacing(store, deviceId, owner, isLiveForeignOwner);
+      } catch (error) {
+        if (
+          classifySqliteError(error) !== "retryable" ||
+          busyAttempt >= DEVICE_CLAIM_ACQUIRE_BUSY_ATTEMPTS ||
+          this.disposed ||
+          this.skipped
+        ) {
+          return this.undecided(deviceId, error);
+        }
+        // A peer's short write holds the lock: yield and try again, a bounded number of times.
+        await this.wait(
+          (this.options.busyBackoff ?? DEVICE_CLAIM_ACQUIRE_BUSY_BACKOFF).delayForAttempt(
+            busyAttempt,
+          ),
+        );
+      }
+    }
+  }
+
+  /** Judge-then-write, retried while racing takers change the row. */
+  private async acquireRacing(
+    store: DeviceClaims,
+    deviceId: string,
+    owner: MirrorOwner,
+    isLiveForeignOwner: (row: DeviceClaim) => Promise<boolean>,
+  ): Promise<DeviceClaimAcquisition> {
+    for (let attempt = 0; attempt < ACQUIRE_ATTEMPTS; attempt++) {
+      const decided = await this.acquireOnce(store, deviceId, owner, isLiveForeignOwner);
+      if (decided) {
+        return decided;
+      }
+    }
+    const winner = await store.get(this.options.platform, deviceId);
+    return winner ? { outcome: "refused", ownerPid: winner.pid } : this.undecided(deviceId);
+  }
+
+  /**
+   * The table could not decide: refuse retryably once a registry must decide claims (#11811, E1),
+   * else leave the claim to the files.
+   */
+  private undecided(deviceId: string, error?: unknown): DeviceClaimAcquisition {
+    const expected = this.options.registryExpected?.() === true;
+    if (!expected && error === undefined) {
+      // No registry yet and none required: the files decide, as on a host before claims tables.
+      return { outcome: "unavailable" };
+    }
+    const detail = error === undefined ? "no registry is open" : errorMessage(error);
+    logger.warn(
+      `[DeviceClaims] Cannot claim ${deviceId} in the host-wide table; ` +
+        `${expected ? "refusing it for now" : "the claim files decide"}: ${detail}`,
+      ...(error === undefined ? [] : [error]),
+    );
+    return expected ? { outcome: "unusable" } : { outcome: "unavailable" };
+  }
+
+  private wait(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      this.options.timer.setTimeout(resolve, ms);
+    });
   }
 
   /** One judge-then-write; undefined when the row changed meanwhile and the caller should retry. */

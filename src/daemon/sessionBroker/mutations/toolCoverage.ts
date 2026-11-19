@@ -53,6 +53,11 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "notJournaled",
   ),
   ...tools(
+    ["storeKitTest"],
+    "StoreKit Testing state lives in the iOS simulator runner's in-memory SKTestSession, keyed by bundle id for the runner's lifetime, and keep-booted reuse keeps the runner: every iOS call but list and clear records a storekit row for its appId, which keep-booted reset reverts with the runner's clear (a clear the runner cannot confirm erases); other platforms change nothing.",
+    "journaled",
+  ),
+  ...tools(
     [
       "accessibility",
       "accessibilityAction",
@@ -230,6 +235,11 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
   ...tools(
     ["exportPlan", "recordToolCalls", "setActiveDevice", "setToolEnabled", "systemAlerts"],
     "Host routing/recording configuration has no direct persistent device setting; device-side child operations are journaled by their own tools (#14359).",
+    "notJournaled",
+  ),
+  ...tools(
+    ["buildApp"],
+    "Runs xcodebuild or Gradle on the host and writes only host build outputs; it has no device handler and touches no device (#18021).",
     "notJournaled",
   ),
   ...tools(

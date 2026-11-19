@@ -575,6 +575,13 @@ function visitChoice(
   { context, depth }: { context: Context; depth: number },
 ): PrototypeValidationError | undefined {
   const options = rule.options ?? [];
+  if (
+    object(value) === undefined &&
+    options.length > 0 &&
+    options.every((option) => option.kind === "object")
+  ) {
+    return fail(path, "Expected object");
+  }
   const candidates = options.filter((option) => {
     if (option.kind === "array") {
       return Array.isArray(value);

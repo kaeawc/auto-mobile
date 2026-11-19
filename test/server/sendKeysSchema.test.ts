@@ -1,5 +1,5 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import type { output } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -17,6 +17,13 @@ const interactionDeps: InteractionToolDependencies = {};
 isolateToolRegistry();
 
 describe("sendKeysSchema", () => {
+  let sendKeysTool: ReturnType<typeof ToolRegistry.getToolDefinitions>[number] | undefined;
+  beforeAll(() => {
+    // Build advertised schemas once, outside the per-test timing budget.
+    registerInteractionTools(interactionDeps);
+    sendKeysTool = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "sendKeys");
+  });
+
   const scoped = {
     selector: { elementId: "quantity" },
     container: { elementId: "item_42", container: { elementId: "cart_A", index: 0 } },
@@ -32,10 +39,7 @@ describe("sendKeysSchema", () => {
     }
   });
   test("advertises nested scope, strategies, and selector dependencies", () => {
-    registerInteractionTools(interactionDeps);
-    const schema = ToolRegistry.getToolDefinitions().find(
-      (tool) => tool.name === "sendKeys",
-    )?.inputSchema;
+    const schema = sendKeysTool?.inputSchema;
     expect(schema).toMatchObject({
       properties: {
         container: { description: expect.stringContaining("Nested container scope") },
@@ -165,7 +169,6 @@ describe("sendKeysSchema", () => {
   });
 
   test("accepts keyboard profiles only with automatic or IME delivery", () => {
-    registerInteractionTools(interactionDeps);
     for (const mode of [undefined, "auto", "ime"]) {
       expect(
         sendKeysSchema.safeParse({
@@ -189,7 +192,6 @@ describe("sendKeysSchema", () => {
       }).success,
     ).toBe(false);
 
-    const sendKeysTool = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "sendKeys");
     expect(sendKeysTool).toBeDefined();
     const inputSchema = sendKeysTool!.inputSchema as {
       properties: {

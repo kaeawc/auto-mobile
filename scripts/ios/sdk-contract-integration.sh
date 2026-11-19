@@ -2,7 +2,8 @@
 # iOS SDK contract suite (#5164): builds Playground (Debug) for a booted simulator, then
 # runs scripts/ios/sdk-contract/run.ts, which drives the SDK network adapters in Playground
 # and follows each event through CtrlProxy, the daemon's iOS client and the MCP network
-# resources. A failure names the boundary that disagreed. First build the runner with
+# resources. Phase E drives a visible loopback WKWebView: DOM observe, click, replace and stale selectors.
+# A failure names the boundary that disagreed. First build the runner with
 # bash scripts/ios/ctrl-proxy-build-for-testing.sh using AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA.
 # Start the private daemon with that same path and either AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true
 # or AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true plus AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256

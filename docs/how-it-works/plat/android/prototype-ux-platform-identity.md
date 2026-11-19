@@ -112,25 +112,44 @@ TTL counts as expired, so the runtime raises `auth.sessionExpired`. The token ap
 milliseconds, 0 to one day). The call needs `location` in `requires.permissions`. The `precise` value maps to
 `ACCESS_FINE_LOCATION` on Android and full accuracy on iOS, and `approximate` maps to `ACCESS_COARSE_LOCATION` and
 reduced accuracy. Its `into` receives `{latitude, longitude, accuracyM, altitudeM?, speedMps?, bearingDeg?,
-timestampMs, approximate}`. A grant of approximate only sets `approximate: true` rather than failing. Failures
-use the typed codes `permission_denied`, `unavailable` (location services off), `timeout` and `platform_error`.
+timestampMs, approximate}`. A grant of approximate only sets `approximate: true` rather than failing.
+
+On Android an `approximate` request or a coarse-only grant yields a coarse fix, so a fine grant never leaks a
+precise reading. Its coordinates are rounded to two decimal places, its `accuracyM` is at least 1500, and it drops
+`altitudeM`, `speedMps` and `bearingDeg`. On iOS the system reduces the fix itself; a precise request under reduced accuracy asks for
+temporary full accuracy only when the host declares `NSLocationTemporaryUsageDescriptionDictionary`. Failures
+use the typed codes `permission_denied`, `unavailable`, `timeout` and `platform_error`. The `unavailable` code
+carries a `reason`. On both platforms it can be `disabled`: location services are off, or, on Android below API 31, a
+coarse-only grant has no network provider. On iOS it can also be
+`missing_usage_description` (the host has no `NSLocationWhenInUseUsageDescription`; the runtime then never touches
+Core Location and reports `servicesEnabled: false`).
 
 The `location.updated` event and the state keys `/platform/location/current` (the last fix, a flat object) and
-`/platform/location/servicesEnabled` (the system location toggle) complete the module. The call and the event
+`/platform/location/servicesEnabled` (location services and a usable provider) complete the module. The call and the event
 are `sensitive`. Real-device verification sets the fix with `setDeviceState.location`; the Android emulator keeps
 that fix after the session ends.
 
 The reference both runtimes copy is `applyPrototypeLocationOutcome` (`prototypeLocationOutcome.ts`). The runtime writes a fix only when its coordinates are in range, and the fix carries only the
 optional fields the platform reported. The `<into>__meta` key then gets `{durationMs, approximate}`. A failure leaves
 `into` untouched and records `{durationMs, error}`. A code outside the four above becomes `platform_error`, and
-only `unavailable` keeps the `disabled` reason. If the metadata cannot fit beside the fix, the runtime rolls the fix
+only `unavailable` keeps a `reason`, limited to `disabled` and `missing_usage_description`. If the metadata cannot fit beside the fix, the runtime rolls the fix
 back.
 
 The root `location` block `{accuracy?, minIntervalMs?, minDistanceM?}` subscribes to foreground updates.
 It keeps `/platform/location/current` current while the prototype is shown and raises `location.updated` for each
 write. It writes at most once per `minIntervalMs` (whole milliseconds, 1000 to one hour) and only after moving
 `minDistanceM` (0 to 100 km). Like the call, the block needs `location` in both `requires.platform` and
-`requires.permissions`. The runtime delivers no updates in the background. No production runtime advertises the module.
+`requires.permissions`. The runtime delivers no updates in the background. On Android, CtrlProxy, ProtoViewer and the app shell
+register and advertise `prototype_platform_location_v1` using platform `LocationManager`, without Play services.
+Below API 31 GPS needs fine permission, so a coarse-only grant uses only the network provider and reports
+`unavailable` with reason `disabled` when none exists. Disposable apps do not advertise location.
+
+On iOS, the injected
+prototype agent, ProtoViewer and the Viewer app advertise it using `CLLocationManager`, and the runtime asks for
+authorization only on an explicit `location.request`. The iOS runtime checks the host's usage description before
+accessing location. Each iOS presentation owns its location manager, configuration, cached fix and pending requests.
+Replacing or re-showing it clears its cached fix and invalidates earlier callbacks; dismissing or stopping it
+ends its subscriptions without stopping another presentation's updates. A later presentation can restart updates.
 
 The delivered `location.updated` event carries only `{accuracyM, approximate}`, so coordinates reach the host
 only when the spec emits them or writes them into `/data`. The reference the runtimes copy is `prototypeLocationEventSummary`

@@ -87,6 +87,7 @@ const SWIFT_REQUEST_TYPES = [
   "request_sdk_web_action",
   "get_voiceover_state",
   "set_voiceover_state",
+  "request_storekit",
   "request_accessibility_audit",
   "list_preference_files",
   "get_preferences",

@@ -128,7 +128,7 @@ internal object PrototypeSpecInput {
 
   fun validateElement(value: JsonElement, context: Context): PrototypeSpecValidation {
     context.root = value
-    val repeats = PrototypeRepeatData((value as? JsonObject)?.get("data") as? JsonObject)
+    val repeats = PrototypeRepeatData.fromSpec(value)
     val error =
       structuralError(value, context)
         ?: PrototypeKeyframesRules.validate(context)

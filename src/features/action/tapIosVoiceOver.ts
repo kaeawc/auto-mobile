@@ -36,11 +36,9 @@ function voiceOverTapTimeoutError(error: IndeterminateTapError): VoiceOverTapTim
 }
 
 /** Add VoiceOver recovery guidance without losing the no-retry indeterminate contract. */
-export async function withVoiceOverTimeoutContext(
-  coordinateTap: () => Promise<void>,
-): Promise<void> {
+export async function withVoiceOverTimeoutContext<T>(coordinateTap: () => Promise<T>): Promise<T> {
   try {
-    await coordinateTap();
+    return await coordinateTap();
   } catch (error) {
     if (isIndeterminateTapTimeout(error)) {
       throw voiceOverTapTimeoutError(error);
@@ -106,8 +104,8 @@ export async function tapViaVoiceOver({
   point: { x: number; y: number };
   durationMs: number;
   fenceOptions: IosTapOptions;
-  coordinateTap: (options: IosTapOptions) => Promise<void>;
-}): Promise<void> {
+  coordinateTap: (options: IosTapOptions) => Promise<{ route?: string } | void>;
+}): Promise<{ route?: string } | void> {
   const { displayFence: fence, signal } = fenceOptions;
   // Resolve accessibility label: ios-accessibility-label > content-desc > text > fallback
   const label =
@@ -119,8 +117,7 @@ export async function tapViaVoiceOver({
 
   if (!label) {
     logger.info("[TapOnElement] VoiceOver: no label available, falling back to coordinate tap");
-    await withVoiceOverTimeoutContext(() => coordinateTap({ displayFence: fence, signal }));
-    return;
+    return withVoiceOverTimeoutContext(() => coordinateTap({ displayFence: fence, signal }));
   }
 
   const voiceOverAction: "activate" | "long_press" =
@@ -144,7 +141,7 @@ export async function tapViaVoiceOver({
       `[TapOnElement] VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}, ` +
         `falling back to coordinate tap at (${point.x}, ${point.y})`,
     );
-    await withVoiceOverTimeoutContext(() => coordinateTap({ displayFence: fence, signal }));
+    return withVoiceOverTimeoutContext(() => coordinateTap({ displayFence: fence, signal }));
   }
 }
 

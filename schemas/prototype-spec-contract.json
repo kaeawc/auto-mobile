@@ -20,7 +20,8 @@
     "decimalAmount": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,2})?$(?![\\s\\S])",
     "isoPeriod": "^P[1-9][0-9]{0,2}[DWMY]$(?![\\s\\S])",
     "webViewUrl": "^https://[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])",
-    "webOrigin": "^https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::(?!443(?![\\s\\S]))(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$(?![\\s\\S])"
+    "webOrigin": "^https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*(?::(?!443(?![\\s\\S]))(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$(?![\\s\\S])",
+    "dataMember": "^[^~/]+$(?![\\s\\S])"
   },
   "limits": {
     "MIN_PROTOTYPE_TIMER_MS": 100,
@@ -613,7 +614,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0.000001,
+                "min": 1e-6,
                 "max": 10000
               },
               "optional": false
@@ -967,7 +968,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001,
+            "min": 1e-6,
             "max": 10000
           },
           "optional": true
@@ -1063,7 +1064,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001,
+            "min": 1e-6,
             "max": 10000
           },
           "optional": true
@@ -1145,7 +1146,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001,
+            "min": 1e-6,
             "max": 1000
           },
           "optional": true
@@ -1186,7 +1187,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001,
+            "min": 1e-6,
             "max": 1000
           },
           "optional": true
@@ -1497,7 +1498,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0.000001,
+                "min": 1e-6,
                 "max": 10000
               },
               "optional": false
@@ -2130,7 +2131,25 @@
                 ]
               },
               "optional": false
+            },
+            "where": {
+              "rule": {
+                "kind": "ref",
+                "name": "dataWhere"
+              },
+              "optional": true
+            },
+            "member": {
+              "rule": {
+                "kind": "string",
+                "pattern": "dataMember",
+                "max": 256
+              },
+              "optional": true
             }
+          },
+          "dependents": {
+            "where": ["member"]
           }
         },
         "appendData": {
@@ -2285,6 +2304,13 @@
                 "max": 261
               },
               "optional": false
+            },
+            "where": {
+              "rule": {
+                "kind": "ref",
+                "name": "dataWhere"
+              },
+              "optional": true
             }
           }
         },
@@ -4938,7 +4964,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0.000001,
+                "min": 1e-6,
                 "max": 10000
               },
               "optional": false
@@ -18388,6 +18414,17 @@
                     "optional": false
                   }
                 }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "derived": {
+                    "rule": {
+                      "kind": "key"
+                    },
+                    "optional": false
+                  }
+                }
               }
             ]
           },
@@ -18668,7 +18705,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0.000001,
+                "min": 1e-6,
                 "max": 10000
               },
               "optional": false
@@ -18714,7 +18751,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001,
+            "min": 1e-6,
             "max": 1000
           },
           "optional": true
@@ -19358,68 +19395,247 @@
       "exactlyOne": ["number", "compact", "currency", "percent", "date", "time", "relative"]
     },
     "derivedEntry": {
-      "kind": "object",
-      "fields": {
-        "of": {
-          "rule": {
-            "kind": "object",
-            "fields": {
-              "data": {
-                "rule": {
-                  "kind": "pointer"
-                },
-                "optional": true
-              },
-              "state": {
-                "rule": {
-                  "kind": "key"
-                },
-                "optional": true
-              },
-              "value": {
-                "rule": {
-                  "kind": "choice",
-                  "options": [
-                    {
-                      "kind": "number"
+      "kind": "choice",
+      "preferMatchingFields": true,
+      "options": [
+        {
+          "kind": "object",
+          "fields": {
+            "of": {
+              "rule": {
+                "kind": "object",
+                "fields": {
+                  "data": {
+                    "rule": {
+                      "kind": "pointer"
                     },
-                    {
-                      "kind": "string",
-                      "empty": true
-                    }
-                  ]
+                    "optional": true
+                  },
+                  "state": {
+                    "rule": {
+                      "kind": "key"
+                    },
+                    "optional": true
+                  },
+                  "value": {
+                    "rule": {
+                      "kind": "choice",
+                      "options": [
+                        {
+                          "kind": "number"
+                        },
+                        {
+                          "kind": "string",
+                          "empty": true
+                        }
+                      ]
+                    },
+                    "optional": true
+                  }
                 },
-                "optional": true
-              }
+                "exactlyOne": ["data", "state", "value"]
+              },
+              "optional": false
             },
-            "exactlyOne": ["data", "state", "value"]
-          },
-          "optional": false
+            "format": {
+              "rule": {
+                "kind": "ref",
+                "name": "valueFormat"
+              },
+              "optional": false
+            },
+            "locale": {
+              "rule": {
+                "kind": "string",
+                "max": 35,
+                "pattern": "formatLocale"
+              },
+              "optional": true
+            },
+            "timeZone": {
+              "rule": {
+                "kind": "string",
+                "max": 128,
+                "pattern": "formatTimeZone"
+              },
+              "optional": true
+            }
+          }
         },
-        "format": {
-          "rule": {
-            "kind": "ref",
-            "name": "valueFormat"
-          },
-          "optional": false
-        },
-        "locale": {
-          "rule": {
-            "kind": "string",
-            "max": 35,
-            "pattern": "formatLocale"
-          },
-          "optional": true
-        },
-        "timeZone": {
-          "rule": {
-            "kind": "string",
-            "max": 128,
-            "pattern": "formatTimeZone"
-          },
-          "optional": true
+        {
+          "kind": "object",
+          "fields": {
+            "collection": {
+              "rule": {
+                "kind": "object",
+                "fields": {
+                  "of": {
+                    "rule": {
+                      "kind": "object",
+                      "fields": {
+                        "data": {
+                          "rule": {
+                            "kind": "pointer"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    "optional": false
+                  },
+                  "where": {
+                    "rule": {
+                      "kind": "array",
+                      "max": 4,
+                      "item": {
+                        "kind": "object",
+                        "fields": {
+                          "field": {
+                            "rule": {
+                              "kind": "key"
+                            },
+                            "optional": false
+                          },
+                          "op": {
+                            "rule": {
+                              "kind": "enum",
+                              "values": ["contains", "eq", "neq", "gt", "gte", "lt", "lte"]
+                            },
+                            "optional": false
+                          },
+                          "value": {
+                            "rule": {
+                              "kind": "object",
+                              "fields": {
+                                "state": {
+                                  "rule": {
+                                    "kind": "key"
+                                  },
+                                  "optional": true
+                                },
+                                "value": {
+                                  "rule": {
+                                    "kind": "choice",
+                                    "options": [
+                                      {
+                                        "kind": "number"
+                                      },
+                                      {
+                                        "kind": "string",
+                                        "empty": true
+                                      }
+                                    ]
+                                  },
+                                  "optional": true
+                                }
+                              },
+                              "exactlyOne": ["state", "value"]
+                            },
+                            "optional": false
+                          }
+                        }
+                      }
+                    },
+                    "optional": true
+                  },
+                  "sort": {
+                    "rule": {
+                      "kind": "object",
+                      "fields": {
+                        "field": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        },
+                        "order": {
+                          "rule": {
+                            "kind": "enum",
+                            "values": ["asc", "desc"]
+                          },
+                          "optional": true
+                        }
+                      }
+                    },
+                    "optional": true
+                  },
+                  "limit": {
+                    "rule": {
+                      "kind": "number",
+                      "integer": true,
+                      "min": 1,
+                      "max": 500
+                    },
+                    "optional": true
+                  }
+                }
+              },
+              "optional": false
+            },
+            "reduce": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "op": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["count"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "op": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["sum", "min", "max"]
+                        },
+                        "optional": false
+                      },
+                      "field": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "format": {
+              "rule": {
+                "kind": "ref",
+                "name": "valueFormat"
+              },
+              "optional": true
+            },
+            "locale": {
+              "rule": {
+                "kind": "string",
+                "max": 35,
+                "pattern": "formatLocale"
+              },
+              "optional": true
+            },
+            "timeZone": {
+              "rule": {
+                "kind": "string",
+                "max": 128,
+                "pattern": "formatTimeZone"
+              },
+              "optional": true
+            }
+          }
         }
-      }
+      ]
     },
     "repeatDerivedEntry": {
       "kind": "object",
@@ -19534,15 +19750,31 @@
       "fields": {
         "items": {
           "rule": {
-            "kind": "object",
-            "fields": {
-              "path": {
-                "rule": {
-                  "kind": "pointer"
-                },
-                "optional": false
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "object",
+                "fields": {
+                  "path": {
+                    "rule": {
+                      "kind": "pointer"
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "derived": {
+                    "rule": {
+                      "kind": "key"
+                    },
+                    "optional": false
+                  }
+                }
               }
-            }
+            ]
           },
           "optional": false
         },
@@ -22104,6 +22336,84 @@
             "name": "iconEffectRepeat"
           },
           "optional": true
+        }
+      }
+    },
+    "dataWhere": {
+      "kind": "object",
+      "fields": {
+        "field": {
+          "rule": {
+            "kind": "string",
+            "pattern": "dataMember",
+            "max": 256
+          },
+          "optional": false
+        },
+        "equals": {
+          "rule": {
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "object",
+                "fields": {
+                  "state": {
+                    "rule": {
+                      "kind": "boundKey"
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "item": {
+                    "rule": {
+                      "kind": "key"
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "index": {
+                    "rule": {
+                      "kind": "enum",
+                      "values": [true]
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "data": {
+                    "rule": {
+                      "kind": "pointer"
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "value": {
+                    "rule": {
+                      "kind": "json",
+                      "maxDepth": 24
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            ]
+          },
+          "optional": false
         }
       }
     }

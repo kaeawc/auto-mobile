@@ -15,7 +15,11 @@ interface TimelineStep {
   request?: { method: string; path: string; body?: PrototypeRequestJson };
   status?: number;
   advanceMs?: number;
+  simulateMs?: number;
+  applied?: number;
   expect?: Record<string, unknown>;
+  join?: string;
+  frames?: Record<string, unknown[]>;
 }
 
 function engine(definition: unknown) {
@@ -34,7 +38,18 @@ describe("PrototypeMockActors fixtures", () => {
     "%s",
     async (_name, entry) => {
       const { timer, backend } = engine(entry.definition);
+      const received = new Map<string, unknown[]>();
       for (const [at, step] of (entry.steps as TimelineStep[]).entries()) {
+        if (step.join !== undefined) {
+          const frames: unknown[] = [];
+          received.set(step.join, frames);
+          const joined = backend.join(
+            step.join,
+            {},
+            { deliver: (data) => frames.push(JSON.parse(data)), close: () => {} },
+          );
+          expect({ at, ok: joined.ok }).toEqual({ at, ok: true });
+        }
         if (step.request !== undefined) {
           const response = await backend.answer({
             ...step.request,
@@ -46,11 +61,18 @@ describe("PrototypeMockActors fixtures", () => {
         if (step.advanceMs !== undefined) {
           timer.advanceTime(step.advanceMs);
         }
+        if (step.simulateMs !== undefined) {
+          const applied = backend.advanceClock(step.simulateMs);
+          expect({ at, applied }).toEqual({ at, applied: step.applied! });
+        }
         if (step.expect !== undefined) {
           const snapshot: Record<string, unknown> = backend.snapshot();
           for (const [name, items] of Object.entries(step.expect)) {
             expect({ at, name, items: snapshot[name] }).toEqual({ at, name, items });
           }
+        }
+        for (const [room, frames] of Object.entries(step.frames ?? {})) {
+          expect({ at, room, frames: received.get(room) }).toEqual({ at, room, frames });
         }
       }
       backend.dispose();
@@ -118,6 +140,30 @@ test("a full step queue drops runs but keeps an every actor's cadence", async ()
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
+test("a wall-clock step back does not stall scheduled actor steps", () => {
+  const { timer, backend } = engine({
+    collections: { ticks: [] },
+    actors: [
+      {
+        every: 1000,
+        maxRuns: 1,
+        do: [
+          { afterMs: 100, append: "ticks", value: { n: 1 } },
+          { afterMs: 100, append: "ticks", value: { n: 2 } },
+        ],
+      },
+    ],
+  });
+  timer.advanceTime(1000);
+  timer.stepWallClock(-3_600_000);
+  timer.advanceTime(200);
+  expect(backend.snapshot().ticks).toEqual([
+    { n: 1, id: "fake-1" },
+    { n: 2, id: "fake-2" },
+  ]);
+  backend.dispose();
+});
+
 describe("mock actor definitions", () => {
   const issueOf = (definition: unknown): string | undefined => {
     const result = mockBackendDefinitionSchema.safeParse(definition);
@@ -126,9 +172,28 @@ describe("mock actor definitions", () => {
 
   test.each([
     [
-      "publish is refused until mock channels exist",
-      { actors: [{ every: 100, maxRuns: 1, do: [{ publish: { channel: "room:1" } }] }] },
-      "publish is not supported",
+      "advance is refused until mock polylines exist",
+      { actors: [{ every: 100, maxRuns: 1, do: [{ advance: { route: "driverPath" } }] }] },
+      "advance is not supported",
+    ],
+    [
+      "publish to a room that is not a path",
+      { actors: [{ every: 100, maxRuns: 1, do: [{ publish: { room: "room:1", frame: {} } }] }] },
+      "Invalid input",
+    ],
+    [
+      "publish with a write in one step",
+      {
+        collections: { a: [] },
+        actors: [
+          {
+            every: 100,
+            maxRuns: 1,
+            do: [{ append: "a", value: {}, publish: { room: "/r", frame: {} } }],
+          },
+        ],
+      },
+      "at most one of append, update, remove or publish",
     ],
     [
       "an unknown collection",
@@ -166,7 +231,7 @@ describe("mock actor definitions", () => {
         collections: { a: [] },
         actors: [{ every: 100, maxRuns: 1, do: [{ append: "a", remove: "a", id: 1, value: {} }] }],
       },
-      "at most one of append, update or remove",
+      "at most one of append, update, remove or publish",
     ],
   ])("%s", (_name, definition, message) => {
     expect(issueOf(definition)).toContain(message);
@@ -179,5 +244,33 @@ describe("mock actor definitions", () => {
     expect(
       issueOf({ actors: [{ ...actor, do: Array.from({ length: 65 }, () => ({ afterMs: 1 })) }] }),
     ).toBeDefined();
+  });
+});
+
+describe("mock actor publish", () => {
+  test("a publish step frames the bound room, is logged as publish, and the run goes on", async () => {
+    const { timer, backend } = engine({
+      collections: { log: [] },
+      rooms: [{ path: "/rooms/:id" }],
+      actors: [
+        {
+          on: { route: "POST /log" },
+          do: [
+            { publish: { room: "/rooms/{body:/room}", frame: "hi" } },
+            { afterMs: 10, append: "log", value: { done: true } },
+          ],
+        },
+      ],
+    });
+    const frames: string[] = [];
+    backend.join("/rooms/a", {}, { deliver: (data) => frames.push(data), close: () => {} });
+    await backend.answer({ method: "POST", path: "/log", query: {}, body: { room: "a" } });
+    timer.advanceTime(10);
+    expect(frames).toEqual(["hi"]);
+    expect(backend.requestLog().filter((entry) => "from" in entry)).toMatchObject([
+      { room: "/rooms/a", from: "publish", data: "hi" },
+    ]);
+    expect(backend.snapshot().log).toHaveLength(2);
+    backend.dispose();
   });
 });

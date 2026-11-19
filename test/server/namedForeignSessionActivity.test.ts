@@ -66,6 +66,7 @@ const PLAIN_TOOL_CALLS: Record<string, Args[]> = {
       verifyAbsence: true,
     },
   ],
+  buildApp: [{ platform: "android", projectPath: "/work/app" }],
   exportPlan: [{}],
   exportPrototypeWeb: [{ id: "checkout" }],
   recordToolCalls: [{ action: "status" }, { action: "begin" }, { action: "end" }],

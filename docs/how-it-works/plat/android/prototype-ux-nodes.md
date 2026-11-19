@@ -229,7 +229,9 @@ label.
   FAB's `label`, else the icon name.
 - `topAppBar`: title text resolves state placeholders; navigation icon and actions are icon `Button`s
   labelled by `label`, tagged `<testTag>.navigation` and `<testTag>.actions.<index>`, each running its own
-  `onTap`. It draws no system-bar inset; add `safeAreaPadding`.
+  `onTap`. Neither renderer draws a system-bar inset; add top `safeAreaPadding` to the bar or an ancestor.
+  In a fullscreen window without the host dismiss bar, `show` and `patch` warn with the path of a bar that has
+  neither.
 - `divider` has no node unless tagged. `badge` reads as its `text`. `progress`: bound is determinate
   (`value / max` as a range over 0..1), unbound is indeterminate.
 - `dialog` and `snackbar` open while `openWhen` holds (an existing key must be boolean) and draw above the
@@ -307,4 +309,5 @@ and `onSubmit`, and draws the trailing icon as an SF Symbol button inside the fi
 `leadingIcon` is a built-in icon name drawn in the field's leading slot (decoration, no actions; an
 SF Symbol on iOS), gated by `prototype_text_field_leading_icon_v1`.
 
-A `secure` field's value is not redacted: it lives in state, `change` events and `inspect`.
+A `secure` field masks its text. Values listed in `storage.secure` are also omitted from public
+state, `change` payloads and `inspect`; see [secure storage](prototype-ux-platform-services.md).

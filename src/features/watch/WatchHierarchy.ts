@@ -1,7 +1,61 @@
 import { ActionableError } from "../../models/ActionableError";
-import type { ViewHierarchyResult } from "../../models";
+import type { Element, ViewHierarchyResult } from "../../models";
+import {
+  childrenOf,
+  nodeAttributes,
+  type ViewHierarchyNode,
+} from "../../models/ViewHierarchyResult";
+import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { convertToViewHierarchyResult } from "../observe/ios/IosHierarchyConverter";
 import type { CtrlProxyNode } from "../observe/ios/types";
+
+/** Refuse app targets covered by an alert; ancestry comes only from the captured tree. */
+export function rejectWatchAlertCoveredTap(hierarchy: ViewHierarchyResult, element: Element): void {
+  const source = getHierarchyNodeSource(element);
+  const root = hierarchy.hierarchy.node;
+  if (!source || !root) {
+    return;
+  }
+  const alerts: ViewHierarchyNode[] = [];
+  let located = false;
+  let insideAlert = false;
+  const visit = (node: ViewHierarchyNode, inAlert: boolean): void => {
+    const isAlert = nodeAttributes(node).class === "XCUIElementType(7)";
+    if (isAlert) {
+      alerts.push(node);
+    }
+    if (node === source) {
+      located = true;
+      insideAlert = inAlert || isAlert;
+    }
+    for (const child of childrenOf(node)) {
+      visit(child, inAlert || isAlert);
+    }
+  };
+  visit(root, false);
+  if (!located || insideAlert || !alerts.length) {
+    return;
+  }
+  const alert = alerts[0];
+  const texts: string[] = [];
+  const buttons: string[] = [];
+  const describe = (node: ViewHierarchyNode): void => {
+    const attributes = nodeAttributes(node);
+    if (typeof attributes.text === "string" && attributes.text) {
+      texts.push(attributes.text);
+      if (attributes.class === "XCUIElementType(9)") {
+        buttons.push(attributes.text);
+      }
+    }
+    for (const child of childrenOf(node)) {
+      describe(child);
+    }
+  };
+  describe(alert);
+  throw new ActionableError(
+    `A system alert is covering the app ("${texts[0] ?? "System alert"}"); a tap on "${element.text || element["resource-id"] || element.class || "element"}" would land on the alert instead. Tap one of its buttons (${buttons.join(", ")}) first, then retry.`,
+  );
+}
 
 /** Fields consumed from AutoMobileSdkWire's SdkViewNode, including its decoding defaults. */
 export interface WatchHierarchyNode {

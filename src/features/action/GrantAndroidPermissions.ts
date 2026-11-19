@@ -25,6 +25,7 @@ import {
 } from "../../utils/PerformanceTracker";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { shellQuote } from "../../utils/shellQuote";
+import { truncateBodyText } from "../../utils/truncateBodyText";
 
 export type AndroidPermissionChangeAction = "grant" | "revoke" | "reset";
 
@@ -41,6 +42,48 @@ export interface GrantAndroidPermissionsInput {
 export function normalizeAndroidPermissionName(permission: string): string {
   const trimmed = permission.trim();
   return /^[A-Z][A-Z0-9_]*$/.test(trimmed) ? `android.permission.${trimmed}` : trimmed;
+}
+
+/** Longest per-step reason embedded in the top-level error; full text stays in `results[].error`. */
+export const MAX_STEP_REASON_LENGTH = 200;
+/** Most failed steps named in the top-level error before summarizing the rest as `+N more`. */
+export const MAX_LISTED_FAILED_STEPS = 5;
+
+/** Collapses whitespace and caps a step reason for the one-line top-level error. */
+function boundStepReason(reason: string): string {
+  const collapsed = reason.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= MAX_STEP_REASON_LENGTH) {
+    return collapsed;
+  }
+  return `${truncateBodyText(collapsed, MAX_STEP_REASON_LENGTH)}…`;
+}
+
+/** Builds the bounded `Failed step(s): ...` summary from failed step results. */
+function formatFailedSteps(
+  failed: Array<Pick<GrantAndroidPermissionItemResult, "stepId" | "error">>,
+): string {
+  const listed = failed
+    .slice(0, MAX_LISTED_FAILED_STEPS)
+    .map((f) => (f.error ? `${f.stepId} (${boundStepReason(f.error)})` : f.stepId));
+  const remaining = failed.length - listed.length;
+  return `Failed step(s): ${listed.join("; ")}${remaining > 0 ? `; +${remaining} more` : ""}`;
+}
+
+/** Builds a failed `pm_reset_permissions` result whose top-level error carries the bounded reason. */
+function resetFailure(packageName: string, reason: string): GrantAndroidPermissionsResult {
+  const step: GrantAndroidPermissionItemResult = {
+    stepId: "pm_reset_permissions",
+    success: false,
+    countsTowardSuccess: true,
+    error: reason,
+  };
+  return {
+    success: false,
+    appId: packageName,
+    userId: 0,
+    results: [step],
+    error: formatFailedSteps([step]),
+  };
 }
 
 export class GrantAndroidPermissions {
@@ -176,7 +219,7 @@ export class GrantAndroidPermissions {
         : {
             error:
               failedRequired.length > 0
-                ? `Failed step(s): ${failedRequired.map((f) => f.stepId).join(", ")}`
+                ? formatFailedSteps(failedRequired)
                 : "One or more required Android permission changes failed",
           }),
     };
@@ -330,39 +373,15 @@ export class GrantAndroidPermissions {
     const resetPermissions = permissions;
     if (userId !== undefined) {
       perf.end();
-      return {
-        success: false,
-        appId: packageName,
-        userId: 0,
-        results: [
-          {
-            stepId: "pm_reset_permissions",
-            success: false,
-            countsTowardSuccess: true,
-            error: "Android reset is device-wide and does not support userId",
-          },
-        ],
-        error: "Failed step(s): pm_reset_permissions",
-      };
+      return resetFailure(packageName, "Android reset is device-wide and does not support userId");
     }
 
     if (resetPermissions.length !== 1 || resetPermissions[0] !== "all") {
       perf.end();
-      return {
-        success: false,
-        appId: packageName,
-        userId: 0,
-        results: [
-          {
-            stepId: "pm_reset_permissions",
-            success: false,
-            countsTowardSuccess: true,
-            error:
-              "Android reset requires permissions=['all'] because pm reset-permissions is device-wide",
-          },
-        ],
-        error: "Failed step(s): pm_reset_permissions",
-      };
+      return resetFailure(
+        packageName,
+        "Android reset requires permissions=['all'] because pm reset-permissions is device-wide",
+      );
     }
 
     try {
@@ -394,20 +413,7 @@ export class GrantAndroidPermissions {
     } catch (cause) {
       const message = errorMessage(cause);
       logger.warn(`[GrantAndroidPermissions] reset threw: ${message}`);
-      return {
-        success: false,
-        appId: packageName,
-        userId: 0,
-        results: [
-          {
-            stepId: "pm_reset_permissions",
-            success: false,
-            countsTowardSuccess: true,
-            error: message,
-          },
-        ],
-        error: "Failed step(s): pm_reset_permissions",
-      };
+      return resetFailure(packageName, message);
     } finally {
       perf.end();
     }

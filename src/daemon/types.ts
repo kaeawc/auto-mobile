@@ -1,5 +1,5 @@
 import type { AuxiliarySocketWarning } from "./auxiliarySocketAvailability";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   cliIdleTimeoutField,
   idleReleaseField,

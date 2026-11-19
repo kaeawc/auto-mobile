@@ -11,6 +11,8 @@ import {
   getNodeProperties,
   matchesNotificationResourceId,
 } from "../notificationHints";
+import { attributeRowByDumpsys } from "../notificationDumpsys";
+import { readTrayNotificationFields } from "../systemTrayNotificationList";
 import type { SystemTrayNotificationArgs } from "../systemTrayTypes";
 import { notificationSearchable } from "./dependencies";
 import {
@@ -183,13 +185,28 @@ const resolvePostedRowMatch = (
     ? postedAppMatch(appMatchTexts, criteria.appId)
     : null;
 
-// An iOS short-look row is attributed by its label alone, even when that label
-// (a lone banner's) names no app.
-const rowAttributesByLabelOnly = (node: ViewHierarchyNode): boolean =>
-  collectNotificationAttributions(node).length > 0 || nodeHasIosShortLook(node);
+/** Header-less Android rows require posting-package evidence, never app-name text. */
+const resolveDumpsysRowMatch = (
+  row: ViewHierarchyNode,
+  criteria: SystemTrayNotificationArgs,
+  appMatchTexts: string[],
+): SystemTrayTextMatch | null => {
+  if (!criteria.appId || !nodeIsNotificationRowRoot(row) || nodeHasIosShortLook(row)) {
+    return null;
+  }
+  const fields = readTrayNotificationFields(row, {
+    collectNotificationCandidates,
+    createSubHierarchy,
+    extractNodeTextCandidates,
+  });
+  const owner = attributeRowByDumpsys(
+    criteria.dumpsysRecords?.() ?? [],
+    new Set(fields.contentTexts),
+  );
+  return owner === criteria.appId ? postedAppMatch(appMatchTexts, criteria.appId) : null;
+};
 
 interface RowScope {
-  inAttributedRow: boolean;
   inRow: boolean;
 }
 
@@ -200,7 +217,6 @@ const enterRowScope = (
   const isRowRoot = nodeIsNotificationRowRoot(node);
   return {
     isOutermostRow: isRowRoot && !scope.inRow,
-    inAttributedRow: scope.inAttributedRow || (isRowRoot && rowAttributesByLabelOnly(node)),
     inRow: scope.inRow || isRowRoot,
   };
 };
@@ -211,7 +227,12 @@ const addPostedRowMatch = (
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
 ): void => {
-  const posted = matches.app ? null : resolvePostedRowMatch(row, criteria, appMatchTexts);
+  const posted = matches.app
+    ? null
+    : (resolvePostedRowMatch(row, criteria, appMatchTexts) ??
+      (collectNotificationAttributions(row).length === 0
+        ? resolveDumpsysRowMatch(row, criteria, appMatchTexts)
+        : null));
   if (posted) {
     matches.app = posted;
   }
@@ -302,25 +323,22 @@ const collectCompositeNotificationCandidates = (
     return matches(titleText) && matches(bodyText) && matches(actionText);
   };
 
-  // Inside a row that renders an app-name element, only that element can
-  // satisfy the app filter; a row without one falls back to all its text.
+  // Inside a row only attribution elements or row-level posting evidence satisfy appId.
   const resolveAppMatch = (
     node: ViewHierarchyNode,
     nodeTextCandidatesLower: string[],
-    inAttributedRow: boolean,
+    inRow: boolean,
   ): SystemTrayTextMatch | null => {
     const attribution = getNodeAttribution(node);
     if (attribution) {
       return resolveAttributionMatch([attribution], appSearchTexts);
     }
-    return inAttributedRow
-      ? null
-      : resolveMatchForSearchTexts(nodeTextCandidatesLower, appSearchTexts);
+    return inRow ? null : resolveMatchForSearchTexts(nodeTextCandidatesLower, appSearchTexts);
   };
 
   const resolveNodeMatches = (
     node: ViewHierarchyNode,
-    inAttributedRow: boolean,
+    inRow: boolean,
   ): SystemTrayMatchResult["matches"] => {
     const nodeTextCandidates = extractNodeTextCandidates(node);
     if (nodeTextCandidates.length === 0) {
@@ -352,7 +370,7 @@ const collectCompositeNotificationCandidates = (
     }
 
     if (appSearchTexts.length > 0) {
-      const match = resolveAppMatch(node, nodeTextCandidatesLower, inAttributedRow);
+      const match = resolveAppMatch(node, nodeTextCandidatesLower, inRow);
       if (match) {
         matches.app = match;
       }
@@ -364,7 +382,6 @@ const collectCompositeNotificationCandidates = (
   interface VisitScope {
     depth: number;
     groupNode?: ViewHierarchyNode;
-    inAttributedRow: boolean;
     inRow: boolean;
   }
 
@@ -394,15 +411,15 @@ const collectCompositeNotificationCandidates = (
     visited.add(node);
 
     const { depth } = scope;
-    const { isOutermostRow, inAttributedRow, inRow } = enterRowScope(node, scope);
-    const nodeMatches = resolveNodeMatches(node, inAttributedRow);
+    const { isOutermostRow, inRow } = enterRowScope(node, scope);
+    const nodeMatches = resolveNodeMatches(node, inRow);
     if (isOutermostRow) {
       addPostedRowMatch(node, nodeMatches, criteria, appMatchTexts);
     }
     const currentGroupNode = nodeIsNotificationGroup(node) ? node : scope.groupNode;
     const { combinedMatches, childHasAll } = visitChildren(
       node,
-      { depth, groupNode: currentGroupNode, inAttributedRow, inRow },
+      { depth, groupNode: currentGroupNode, inRow },
       nodeMatches,
     );
 
@@ -419,7 +436,7 @@ const collectCompositeNotificationCandidates = (
   };
 
   for (const rootNode of rootNodes) {
-    visit(rootNode, { depth: 0, inAttributedRow: false, inRow: false });
+    visit(rootNode, { depth: 0, inRow: false });
   }
 
   return candidates;
@@ -514,10 +531,8 @@ const findElementMatch = (
   text: string,
 ): SystemTrayElementMatch | null => findFirstElementMatch(selector, viewHierarchy, [text]);
 
-// A subtree carrying app-name elements is attributed by them alone; otherwise
-// the app filter may match any of its text unless the caller knows the row is
-// attributed elsewhere (a group child under an app-name header). An iOS lone
-// banner names no app and is attributed only by content the app posted (#17445).
+// Headers attribute their rows; Android header-less rows need notification-manager
+// evidence, and iOS lone banners need content the app posted (#17445).
 interface AppFilter {
   criteria: SystemTrayNotificationArgs;
   appMatchTexts: string[];
@@ -537,6 +552,12 @@ const findSubtreeAppMatch = (
   if (roots.some(nodeHasIosShortLook)) {
     const owned = roots.some((root) => rowShowsPostedContent(root, criteria.postedContents));
     return owned && criteria.appId ? postedAppMatch(appMatchTexts, criteria.appId) : null;
+  }
+  if (roots.some(nodeIsNotificationRowRoot)) {
+    return wholeRowFallback
+      ? (roots.map((row) => resolveDumpsysRowMatch(row, criteria, appMatchTexts)).find(Boolean) ??
+          null)
+      : null;
   }
   return wholeRowFallback ? findFirstTextMatch(selector, subtree, appMatchTexts) : null;
 };

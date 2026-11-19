@@ -188,38 +188,48 @@ const OBSERVATION_WIRE_REQUIRED_KEYS = ["observationId", "deviceId", "display"] 
  * captures that omit them. Registers by schema identity, so call it on the
  * final exported schema object. It detects every declared screenshot-resource
  * property, but promotes only the identity keys; the URI remains optional.
+ * `then` runs after it, for a schema with a further wire constraint of its own
+ * (one override is registered per schema).
  */
-export function requireObservationJoinKeysOnTheWire(schema: z.ZodTypeAny): void {
+export function requireObservationJoinKeysOnTheWire(
+  schema: z.ZodTypeAny,
+  then?: (jsonSchema: Record<string, unknown>) => void,
+): void {
   withJsonSchemaOverride(schema, (jsonSchema) => {
-    const properties = jsonSchema.properties as Record<string, unknown> | undefined;
-    if (!properties) {
-      return;
-    }
-    const required = new Set(Array.isArray(jsonSchema.required) ? jsonSchema.required : []);
-    const joinKeyProperties = OBSERVATION_JOIN_KEY_PROPERTIES.filter((key) =>
-      Object.hasOwn(properties, key),
-    );
-    if (joinKeyProperties.length === 0) {
-      return;
-    }
-    for (const key of OBSERVATION_WIRE_REQUIRED_KEYS) {
-      if (Object.hasOwn(properties, key)) {
-        required.add(key);
-      }
-    }
-    // Keep `additionalProperties` as the trailing key so the generated
-    // `schemas/tool-definitions.json` stays byte-stable.
-    const { additionalProperties, ...rest } = jsonSchema;
-    for (const key of Object.keys(jsonSchema)) {
-      delete jsonSchema[key];
-    }
-    Object.assign(jsonSchema, rest, {
-      required: Object.keys(properties).filter((key) => required.has(key)),
-    });
-    if (additionalProperties !== undefined) {
-      jsonSchema.additionalProperties = additionalProperties;
-    }
+    promoteObservationJoinKeys(jsonSchema);
+    then?.(jsonSchema);
   });
+}
+
+function promoteObservationJoinKeys(jsonSchema: Record<string, unknown>): void {
+  const properties = jsonSchema.properties as Record<string, unknown> | undefined;
+  if (!properties) {
+    return;
+  }
+  const required = new Set(Array.isArray(jsonSchema.required) ? jsonSchema.required : []);
+  const joinKeyProperties = OBSERVATION_JOIN_KEY_PROPERTIES.filter((key) =>
+    Object.hasOwn(properties, key),
+  );
+  if (joinKeyProperties.length === 0) {
+    return;
+  }
+  for (const key of OBSERVATION_WIRE_REQUIRED_KEYS) {
+    if (Object.hasOwn(properties, key)) {
+      required.add(key);
+    }
+  }
+  // Keep `additionalProperties` as the trailing key so the generated
+  // `schemas/tool-definitions.json` stays byte-stable.
+  const { additionalProperties, ...rest } = jsonSchema;
+  for (const key of Object.keys(jsonSchema)) {
+    delete jsonSchema[key];
+  }
+  Object.assign(jsonSchema, rest, {
+    required: Object.keys(properties).filter((key) => required.has(key)),
+  });
+  if (additionalProperties !== undefined) {
+    jsonSchema.additionalProperties = additionalProperties;
+  }
 }
 
 /**

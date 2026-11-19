@@ -1373,6 +1373,12 @@ public struct AutoMobileWebViewport: Codable, Sendable, Equatable
   public let height: Double
   public let scale: Double
   public init(offsetLeft: Double = 0, offsetTop: Double = 0, width: Double, height: Double, scale: Double = 1)
+public struct AutoMobileWebContentInset: Codable, Sendable, Equatable
+  public let top: Double
+  public let left: Double
+  public let bottom: Double
+  public let right: Double
+  public init(top: Double = 0, left: Double = 0, bottom: Double = 0, right: Double = 0)
 public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable
   public let snapshotId: String
   public let url: String?
@@ -1380,7 +1386,8 @@ public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable
   public let elements: [AutoMobileWebElement]
   public let viewport: AutoMobileWebViewport?
   public let documentId: String?
-  public init( snapshotId: String = UUID().uuidString, url: String? = nil, title: String? = nil, elements: [AutoMobileWebElement] = [], viewport: AutoMobileWebViewport? = nil, documentId: String? = nil )
+  public let contentInset: AutoMobileWebContentInset?
+  public init( snapshotId: String = UUID().uuidString, url: String? = nil, title: String? = nil, elements: [AutoMobileWebElement] = [], viewport: AutoMobileWebViewport? = nil, documentId: String? = nil, contentInset: AutoMobileWebContentInset? = nil )
 public struct AutoMobileWebSnapshotRequest: Codable, Equatable, Sendable
   public let webViewId: String?
   public init(webViewId: String? = nil)

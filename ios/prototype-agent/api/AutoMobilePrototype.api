@@ -129,6 +129,22 @@ AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public protoco
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public static let key = "allowImportedPrototypeNetwork"
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public struct PrototypeLibraryUserDefaultsSettingStore: PrototypeLibraryNetworkSettingStore
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public var enabled: Bool
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public enum PrototypeLinkMatcher
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public init(path: String, query: [String: String] = [:], usedCaptures: Set<String>? = nil)
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let captures: [String: String]
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let code: String
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let entryIndex: Int
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let index: Int
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let message: String
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let path: String
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let query: [String: JSONValue]
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let query: [String: String]
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let usedCaptures: Set<String>?
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public static func match(_ url: String, entries: [Entry]) -> Match?
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public static func validateLinkTable(_ entries: [Entry]) -> [TableError]
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public struct Entry: Sendable
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public struct Match: Codable, Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public struct TableError: Equatable, Sendable
 AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public enum PrototypePlatformPermissions
 AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public let android: PrototypeAndroidPermissionMapping
 AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public let grant: String
@@ -154,6 +170,8 @@ AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformErrorCode
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypeBundleReader] func containsInfoPlistKey(_ key: String) -> Bool
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func availability() -> PlatformAvailability
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func call(_ call: PlatformCall) async -> PlatformCallResult
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func configure(root: JSONValue?)
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func stop()
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var capability: String
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var events: AsyncStream<PlatformEvent>
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var name: String
@@ -163,7 +181,11 @@ AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public enum Platfo
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public enum PlatformCallResult: Equatable, Sendable
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public enum PlatformErrorCode: String, Sendable
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public final class PrototypePlatformRegistry
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func configure(locationBlock: JSONValue?)
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func configure(root _: JSONValue?)
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func configure(sensorsBlock: JSONValue?)
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func containsInfoPlistKey(_ key: String) -> Bool
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func stop()
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public init()
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public init(event: String, data: JSONValue)
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public init(modules: [any PrototypePlatformModule] = [], bundle: any PrototypeBundleReader = PrototypeMainBundleReader())

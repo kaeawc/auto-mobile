@@ -385,10 +385,10 @@ class CtrlProxyEventBatchReceiverTest {
       }
     }
     controller.create()
-    receiver = ReflectionHelpers.getField(service, "eventBatchReceiver")
+    receiver = ReflectionHelpers.getField(service.receivers, "eventBatchReceiver")
     val handler =
       ReflectionHelpers.getField<SdkEventBatchBroadcastHandler>(
-        service,
+        service.receivers,
         "eventBatchBroadcastHandler",
       )
     // Keep the production handler (including its dedup window); replace only its queue handoff.

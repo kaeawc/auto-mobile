@@ -8,6 +8,7 @@ import { declaresFormElicitation } from "../ambiguousDeviceElicitation";
 import { executeWithDeviceChoice } from "../ambiguousDeviceChoice";
 import { elicitationEnabled } from "../elicitationPolicy";
 import { classifyElicitationDeclaration, defaultElicitationRecorder } from "../elicitationOutcome";
+import { withoutPlanSuppliedDeadlineParams } from "../pipeline/advertisedSchema";
 
 /**
  * Eligibility and cancellation policy for THIS call, including its arguments (#13090).
@@ -24,11 +25,21 @@ export function taskEligibleByName(names: ReadonlySet<string>): TaskEligibility 
 
 const abortEligible = taskEligibleByName(new Set(["startDevice", "executePlan", "installApp"]));
 
+/**
+ * setUIState stops between fields on cancel, and as a task it runs under its own whole-call
+ * budget rather than stopping field admission ahead of the request's expired deadline (#18531).
+ */
+const SET_UI_STATE_POLICY: TaskPolicy = { onCancel: "abort", outlivesRequestDeadline: true };
+
 /** Recording stop must finish finalization even after the client stops polling (#13090). */
-export const TASK_ELIGIBILITY: TaskEligibility = (call) =>
-  call.name === "videoRecording" && call.args.action === "stop"
+export const TASK_ELIGIBILITY: TaskEligibility = (call) => {
+  if (call.name === "setUIState") {
+    return SET_UI_STATE_POLICY;
+  }
+  return call.name === "videoRecording" && call.args.action === "stop"
     ? { onCancel: "detach" }
     : abortEligible(call);
+};
 
 /** The execution scope a task's call registers under instead of its request's scope. */
 export const TASK_EXECUTION_SCOPE_PREFIX = "mcp-task:";
@@ -47,17 +58,20 @@ export interface TaskAwareToolCallDeps {
  * The call as the task runs it: the work's signal replaces the request's (which ends once the
  * `CreateTaskResult` is sent), its execution registers under the task's own scope (the
  * endpoint cancels the request scope's executions on close), progress goes to the task's
- * status message, and nothing is sent on the closed request's notification channel.
+ * status message, and nothing is sent on the closed request's notification channel. A policy
+ * that outlives the request also drops the request's forwarded transport-deadline args.
  */
 function asTaskCall(
   call: ToolCall<McpToolCallExtra>,
   run: TaskWorkRun,
+  policy: TaskPolicy,
 ): ToolCall<McpToolCallExtra> {
   if (!run.signal || !run.task) {
     return call;
   }
   return {
     ...call,
+    args: policy.outlivesRequestDeadline ? withoutPlanSuppliedDeadlineParams(call.args) : call.args,
     progressToken: undefined,
     progress: run.progress,
     extra: {
@@ -95,7 +109,7 @@ export function createTaskAwareToolCallExecutor(
         ...(deps.keepalive && { keepalive: deps.keepalive }),
       },
       async (run) => {
-        const taskCall = asTaskCall(call, run);
+        const taskCall = asTaskCall(call, run, policy);
         const task = run.task;
         if (!task || !canAsk) {
           return deps.execute(taskCall);

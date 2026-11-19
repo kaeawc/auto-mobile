@@ -16,6 +16,8 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { resolveTransportDeadlineMs } from "./transportDeadline";
 import { getLiveDeadlineMs, subscribeLiveDeadline } from "../daemon/liveDeadlineRegistry";
+import { observationOutputSchema } from "./toolOutputSchemas/observation";
+import { observationDiffMetadataSchema } from "./toolOutputSchemas/observationMetadata";
 
 /**
  * Schema for a single field specification
@@ -81,6 +83,8 @@ const setUIStateResultSchema = z.object({
   totalAttempts: z.number().describe("Total attempts"),
   warnings: z.array(z.string()).optional().describe("Field operation warnings"),
   error: z.string().optional().describe("Error message"),
+  observation: observationOutputSchema.optional(),
+  observationDiff: observationDiffMetadataSchema.optional(),
 });
 
 export type SetUIStateArgs = z.infer<typeof setUIStateSchema>;
@@ -182,6 +186,8 @@ export function createSetUIStateHandler({
       totalAttempts: result.totalAttempts,
       error: result.error,
       ...(result.warnings?.length ? { warnings: result.warnings } : {}),
+      // The form as it stands after the last field, like tapOn/sendKeys return (#18350).
+      ...(result.observation ? { observation: result.observation } : {}),
     });
     // Genuine partial success (some fields set, others failed) keeps
     // isError:false — the per-field `fields` array is the actionable status

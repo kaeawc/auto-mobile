@@ -85,6 +85,8 @@ export interface FinalizeToolResponseContext {
    * `observe` does not declare it: it owns the projection at the payload top level.
    */
   defaultsToSkeletonObservation?: boolean;
+  /** The tool returns the booted-device description (`omitsAcquisitionTiming` trait, #18348). */
+  omitsAcquisitionTiming?: boolean;
   /** Injectable JSON clone boundary for deterministic clone-count tests. */
   cloneObservation?: ObserveResultCloner;
   /**

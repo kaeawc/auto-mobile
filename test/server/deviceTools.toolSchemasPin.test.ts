@@ -16,7 +16,8 @@ import {
 // roles gained "cluster" (#16741), when form factors gained "xr-headset"/"xr-glasses" (#16838), and
 // when listDevices and device descriptions gained the watchOS/tvOS/visionOS platforms (#17320),
 // when the listDevices output gained watch–iPhone `simulatorPairs` (#17418), and when its
-// Android entries gained the Android Auto `headUnit` (#17840).
+// Android entries gained the Android Auto `headUnit` (#17840), and when Zod 4.6 began spelling
+// nullable fields as `type` arrays and ordering `default` differently (#16102).
 function fingerprint(schema: z.ZodType): string {
   const json = JSON.stringify(z.toJSONSchema(schema, { io: "input", unrepresentable: "any" }));
   return createHash("sha256").update(json).digest("hex").slice(0, 16);
@@ -26,9 +27,9 @@ describe("device tool schemas", () => {
   test.each([
     ["listDeviceImagesSchema", listDeviceImagesSchema, "6e36e4f0ac8620b8"],
     ["listDevicesSchema", listDevicesSchema, "5d79d40ab5756996"],
-    ["listDevicesOutputSchema", listDevicesOutputSchema, "01a84cb11eeee9f1"],
-    ["killDeviceSchema", killDeviceSchema, "38ea51a687408052"],
-    ["teardownDeviceSchema", teardownDeviceSchema, "66eef42ef74e612b"],
+    ["listDevicesOutputSchema", listDevicesOutputSchema, "fc397473d939bc02"],
+    ["killDeviceSchema", killDeviceSchema, "b35d2ec6d2e0bf85"],
+    ["teardownDeviceSchema", teardownDeviceSchema, "a3c6be5fa0b44b4e"],
   ])("%s keeps its JSON schema", (_name, schema, expected) => {
     expect(fingerprint(schema)).toBe(expected);
   });

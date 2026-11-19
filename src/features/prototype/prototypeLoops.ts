@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { record, type Raw } from "./prototypeTemplate";

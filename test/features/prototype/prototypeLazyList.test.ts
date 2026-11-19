@@ -23,6 +23,14 @@ const spec = (root: unknown = list(), count = 2) => ({
   data: { rows: Array.from({ length: count }, (_, id) => ({ id })) },
   root,
 });
+test("object-only list item unions reject every non-object with the object diagnostic", () => {
+  for (const items of [null, undefined, [], "rows", 1, true]) {
+    expect(validatePrototypeSpec(spec(list({ repeat: { items, as: "row", key: "id" } })))).toEqual({
+      success: false,
+      error: { path: "root.repeat.items", message: "Expected object" },
+    });
+  }
+});
 for (const kind of ["valid", "invalid"]) {
   for (const name of readdirSync(join(directory, kind)).filter(
     (name) => name.startsWith("list-") && !name.startsWith("list-item-"),

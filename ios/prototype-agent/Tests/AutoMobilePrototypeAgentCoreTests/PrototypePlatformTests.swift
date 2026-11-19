@@ -4,6 +4,55 @@ import XCTest
 /// The platform vocabulary backstop (#14294) rejects the shared fixtures at the host's paths, and
 /// its module table, permission and background names match the shared contract.
 final class PrototypePlatformTests: XCTestCase {
+    @MainActor
+    func testPresentationRegistriesShareDeviceStatusUntilFinalOwnerStops() {
+        for name in ["battery", "power", "audio"] {
+            let source = FakeDeviceStatusSource(["value": .number(0)])
+            let clock = LocationClock()
+            let status = PrototypeDeviceStatusModule(name: name, capability: name, source: source, clock: clock)
+            let shared = PrototypePlatformRegistry(modules: [status])
+            let first = shared.forPresentation()
+            let second = shared.forPresentation()
+            let firstDriver = PrototypePlatformDriver(registry: first, clock: clock)
+            let secondDriver = PrototypePlatformDriver(registry: second, clock: clock)
+            firstDriver.subscribe()
+            secondDriver.subscribe()
+            XCTAssertEqual(source.starts, 1)
+            first.configure(locationBlock: nil)
+            first.configure(sensorsBlock: nil)
+            firstDriver.stopEvents()
+            XCTAssertEqual(source.stops, 0)
+            source.report(["value": .number(1)])
+            XCTAssertEqual(second.snapshot[name]?.objectFields?["value"], .number(1))
+            secondDriver.stopEvents()
+            XCTAssertEqual(source.stops, 1)
+            XCTAssertEqual(clock.live, 0)
+        }
+    }
+
+    @MainActor
+    func testDeviceStatusRejectsCapturedCallbacksAfterStopAndRestart() throws {
+        for name in ["battery", "power", "audio"] {
+            let source = FakeDeviceStatusSource(["value": .number(0)])
+            let clock = LocationClock()
+            let status = PrototypeDeviceStatusModule(name: name, capability: name, source: source, clock: clock)
+            XCTAssertEqual(status.state, source.initial)
+            let old = try XCTUnwrap(source.update)
+            source.report(["value": .number(1)])
+            XCTAssertEqual(clock.live, 1)
+            status.stop()
+            XCTAssertEqual(status.state, source.initial)
+            old(["value": .number(99)])
+            XCTAssertEqual(status.state, source.initial)
+            XCTAssertEqual(clock.live, 0)
+            source.report(["value": .number(2)])
+            XCTAssertEqual(status.state["value"], .number(2))
+            clock.advance(status.debounceMs)
+            XCTAssertEqual(status.state["value"], .number(2))
+            status.stop()
+        }
+    }
+
     private var contract: [String: Any] {
         get throws {
             let url = PrototypeSpecFixtures.directory
@@ -185,5 +234,65 @@ final class PrototypePlatformTests: XCTestCase {
         let children = try XCTUnwrap(spec.root.children)
         XCTAssertEqual(children[0].visibleWhen?.holds([:]), false)
         XCTAssertEqual(children[1].visibleWhen?.holds([:]), true)
+    }
+
+    @MainActor
+    func testLocationSuccessStoresAccuracyInSessionMetadata() async throws {
+        let url = PrototypeSpecFixtures.directory.appendingPathComponent("valid/platform-location.json")
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(contentsOf: url))
+        let action = try XCTUnwrap(spec.root.children?[1].onTap?.first)
+        for grant in [PrototypeLocationAuthorization.authorizedApproximate, .authorizedPrecise] {
+            let source = LocationTestSource()
+            source.grant = grant
+            let bundle = LocationBundle()
+            let clock = LocationClock()
+            let module = PrototypeLocationModule(source: source, bundle: bundle, clock: clock)
+            let registry = PrototypePlatformRegistry(modules: [module], bundle: bundle)
+            let driver = PrototypePlatformDriver(registry: registry, clock: clock)
+            var session = PrototypeSession()
+            session.show(spec)
+            _ = session.run([action])
+            driver.onComplete = { id, result, duration in
+                _ = session.completePlatformCall(id, result, durationMs: duration)
+            }
+            driver.perform(session.takePlatformCommands())
+            await driver.settled()
+            let approximate = JSONValue.bool(grant == .authorizedApproximate)
+            XCTAssertEqual(session.state["locStatus"], .string("success"))
+            XCTAssertEqual(session.data?["here"]?.objectFields?["approximate"], approximate)
+            XCTAssertEqual(session.data?["here__meta"]?.objectFields?["approximate"], approximate)
+            XCTAssertEqual(session.data?["here__meta"]?.objectFields?["durationMs"], .number(0))
+        }
+    }
+
+    @MainActor
+    func testLocationUnavailableReasonsReachSessionMetadataWithoutTouchingMissingUsageSource() async throws {
+        let url = PrototypeSpecFixtures.directory.appendingPathComponent("valid/platform-location.json")
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(contentsOf: url))
+        let action = try XCTUnwrap(spec.root.children?[1].onTap?.first)
+        for reason in ["missing_usage_description", "disabled"] {
+            let source = LocationTestSource()
+            source.enabled = false
+            let bundle = reason == "disabled" ? LocationBundle() : LocationBundle(keys: [])
+            let clock = LocationClock()
+            let module = PrototypeLocationModule(source: source, bundle: bundle, clock: clock)
+            let registry = PrototypePlatformRegistry(modules: [module], bundle: bundle)
+            let driver = PrototypePlatformDriver(registry: registry, clock: clock)
+            var session = PrototypeSession()
+            session.show(spec)
+            _ = session.run([action])
+            driver.onComplete = { id, result, duration in
+                _ = session.completePlatformCall(id, result, durationMs: duration)
+            }
+            driver.perform(session.takePlatformCommands())
+            await driver.settled()
+            let error = session.data?["here__meta"]?.objectFields?["error"]?.objectFields
+            XCTAssertEqual(error?["code"], .string("unavailable"))
+            XCTAssertEqual(error?["reason"], .string(reason))
+            XCTAssertEqual(error?["message"], .string(reason))
+            XCTAssertEqual(session.state["locStatus"], .string("error"))
+            XCTAssertEqual(session.data?["here"], .object([:]))
+            if reason == "missing_usage_description" { XCTAssertEqual(source.touches, 0) }
+        }
     }
 }

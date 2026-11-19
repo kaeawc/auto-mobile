@@ -1,5 +1,5 @@
 import { prototypeAdaptiveError } from "./prototypeAdaptive";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { type KeyInstance } from "./prototypeRepeat";
 import { prototypeRequestStatusKeyError } from "./prototypeRequest";
 

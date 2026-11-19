@@ -51,14 +51,19 @@ public protocol PrototypePlatformModule: Sendable {
     var name: String { get }
     var capability: String { get }
     var requiredInfoPlistKeys: [String] { get }
+    func configure(root: JSONValue?)
     func availability() -> PlatformAvailability
     func call(_ call: PlatformCall) async -> PlatformCallResult
     var events: AsyncStream<PlatformEvent> { get }
     var state: [String: JSONValue] { get }
+    /// Releases observations after the final driver stops; later reads may start them again.
+    func stop()
 }
 
 extension PrototypePlatformModule {
     public var requiredInfoPlistKeys: [String] { [] }
+    public func stop() {}
+    public func configure(root _: JSONValue?) {}
 }
 
 @MainActor
@@ -80,6 +85,25 @@ public final class PrototypePlatformRegistry {
     public static let empty = PrototypePlatformRegistry()
 
     let modules: [String: any PrototypePlatformModule]
+    private var observers = 0
+    private let parent: PrototypePlatformRegistry?
+    private let presentationModules: [any PrototypePlatformModule]
+
+    func retainSources() {
+        observers += 1
+        parent?.retainSources()
+    }
+
+    func releaseSources() {
+        guard observers > 0 else { return }
+        observers -= 1
+        if observers == 0 {
+            if parent == nil { modules.values.forEach { $0.stop() } }
+            else { presentationModules.forEach { $0.stop() } }
+        }
+        // Global status streams outlive any one presentation; scoped streams stop independently.
+        parent?.releaseSources()
+    }
 
     public init(
         modules: [any PrototypePlatformModule] = [],
@@ -91,6 +115,51 @@ public final class PrototypePlatformRegistry {
             accepted[module.name] = module
         }
         self.modules = accepted
+        parent = nil
+        presentationModules = []
+    }
+
+    private init(
+        modules: [String: any PrototypePlatformModule],
+        parent: PrototypePlatformRegistry,
+        presentationModules: [any PrototypePlatformModule]
+    ) {
+        self.modules = modules
+        self.parent = parent
+        self.presentationModules = presentationModules
+    }
+
+    /// A model owns this registry's snapshots and streams for its lifetime. Read-only device status
+    /// remains global; authored sensor/location configuration and pending calls are presentation-local.
+    func forPresentation() -> PrototypePlatformRegistry {
+        if let parent { return parent.forPresentation() }
+        var scoped = modules
+        var owned: [any PrototypePlatformModule] = []
+        if let sensors = modules["sensors"] as? PrototypeSensorsModule {
+            let module = sensors.forPresentation()
+            scoped[module.name] = module
+            owned.append(module)
+        }
+        if let location = modules["location"] as? PrototypeLocationModule {
+            let module = location.forPresentation()
+            scoped[module.name] = module
+            owned.append(module)
+        }
+        return PrototypePlatformRegistry(modules: scoped, parent: self, presentationModules: owned)
+    }
+
+    public func configure(locationBlock: JSONValue?) {
+        modules["location"]?.configure(root: locationBlock)
+    }
+
+    public func configure(sensorsBlock: JSONValue?) {
+        configure(sensorsBlock: sensorsBlock, sessionID: 0)
+    }
+
+    func configure(sensorsBlock: JSONValue?, sessionID: Int = 0) {
+        if let sensors = modules["sensors"] as? PrototypeSensorsModule {
+            sensors.configure(root: sensorsBlock, sessionID: sessionID)
+        } else { modules["sensors"]?.configure(root: sensorsBlock) }
     }
 
     public var capabilities: [String] { Set(modules.values.map(\.capability)).sorted() }
@@ -102,17 +171,27 @@ public final class PrototypePlatformRegistry {
         connectivity: any PrototypeConnectivitySource,
         links: any PrototypeLinkOpener,
         settings: any PrototypeSettingsURLOpener,
-        bundle: any PrototypeBundleReader = PrototypeMainBundleReader()
+        bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
+        deviceStatus: [any PrototypePlatformModule] = [],
+        location: (any PrototypeLocationSource)? = nil,
+        sensors: (any PrototypeSensorSource)? = nil,
+        permissions: (any PrototypeNotificationAuthorizationSource)? = nil,
+        biometric: (any PrototypeBiometricSource)? = nil
     )
         -> PrototypePlatformRegistry
     {
-        PrototypePlatformRegistry(modules: [
+        var modules: [any PrototypePlatformModule] = [
             PrototypeHapticsModule(player: haptics),
             PrototypeSoundModule(player: sound),
             PrototypeConnectivityModule(source: connectivity),
             PrototypeLinksModule(opener: links),
             PrototypeSettingsModule(opener: settings),
-        ], bundle: bundle)
+        ] + deviceStatus
+        if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
+        if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
+        if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
+        if let permissions { modules.append(PrototypePermissionsModule(source: permissions)) }
+        return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 
     static func systemModules(
@@ -120,16 +199,26 @@ public final class PrototypePlatformRegistry {
         connectivity: any PrototypeConnectivitySource,
         links: any PrototypeLinkOpener,
         settings: any PrototypeSettingsURLOpener,
-        bundle: any PrototypeBundleReader = PrototypeMainBundleReader()
+        bundle: any PrototypeBundleReader = PrototypeMainBundleReader(),
+        deviceStatus: [any PrototypePlatformModule] = [],
+        location: (any PrototypeLocationSource)? = nil,
+        sensors: (any PrototypeSensorSource)? = nil,
+        permissions: (any PrototypeNotificationAuthorizationSource)? = nil,
+        biometric: (any PrototypeBiometricSource)? = nil
     )
         -> PrototypePlatformRegistry
     {
-        PrototypePlatformRegistry(modules: [
+        var modules: [any PrototypePlatformModule] = [
             PrototypeClipboardModule(clipboard: clipboard),
             PrototypeConnectivityModule(source: connectivity),
             PrototypeLinksModule(opener: links),
             PrototypeSettingsModule(opener: settings),
-        ], bundle: bundle)
+        ] + deviceStatus
+        if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
+        if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
+        if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
+        if let permissions { modules.append(PrototypePermissionsModule(source: permissions)) }
+        return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 
     var snapshot: [String: JSONValue] {

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /** Narrow wire schema; parsing strips any unexpected payload fields. */
 export const keystoreDiscoverySchema = z.object({

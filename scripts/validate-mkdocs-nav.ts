@@ -35,6 +35,13 @@ const EXCLUDED_FILES = new Set([
   "release/ios-simulator-continuity.md",
   "release/device-claims-registry-migration.md",
   "how-it-works/plat/ios/xctestrunner/ci-integration.md",
+  // Test authoring stays off the nav until recording and authoring tests is easy.
+  "using/ui-tests.md",
+  "using/ui-tests-accessibility.md",
+  "how-it-works/plat/android/junit-runner/index.md",
+  // Store-required ProtoViewer URLs, linked from the store listing.
+  "protoviewer/privacy.md",
+  "protoviewer/support.md",
 ]);
 // Copied files mirror root documents (lychee/deploy copy CHANGELOG.md into
 // docs/), so their release-note text, which can legitimately mention "TODOs",

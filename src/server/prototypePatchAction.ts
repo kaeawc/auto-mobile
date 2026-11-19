@@ -1,5 +1,6 @@
 import { prototypeDegradedEffectsOutput } from "../features/prototype/prototypeDegradedEffects";
 import { prototypeTimerWarnings } from "../features/prototype/prototypeTimers";
+import { prototypeTopAppBarInsetWarnings } from "../features/prototype/prototypeTopAppBarInsetLint";
 import { prototypeSettingsPagePlatformError } from "../features/prototype/prototypeSettings";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
@@ -54,6 +55,8 @@ export function createPrototypePatchQueue(): PrototypePatchQueue {
   };
 }
 export interface PrototypePatchDependencies {
+  /** A disposable app owns its installed spec and validates patches itself. */
+  deviceOwnsSpec?: boolean;
   store: Pick<PrototypeStatusStore, "shownSpecs" | "recordPatch">;
   transport: Pick<PrototypeTransport, "patch">;
   supportsPatch: () => Promise<boolean>;
@@ -133,6 +136,16 @@ async function queuedPatch(
   args: PrototypePatchInput,
   signal?: AbortSignal,
 ): Promise<PrototypePatchOutput> {
+  if (deps.deviceOwnsSpec) {
+    signal?.throwIfAborted();
+    const result = await sendPatch(deps, args);
+    deps.retire(result);
+    return {
+      success: result.success,
+      ...prototypePatchReplyFields(result),
+      ...(result.error ? { error: result.error } : {}),
+    };
+  }
   const read = deps.store.shownSpecs.read(deviceId, args.id);
   if (read.kind === "busy") {
     return failure(
@@ -199,7 +212,12 @@ async function finishPatch(
   deps.retire(result);
   const output = successfulPatchOutput(fields.revision, committed, args.id);
   const degraded = prototypeDegradedEffectsOutput(result.degradedEffects);
-  const warning = [output.warning, degraded.warning, ...prototypeTimerWarnings(applied.spec)]
+  const warning = [
+    output.warning,
+    degraded.warning,
+    ...prototypeTimerWarnings(applied.spec),
+    ...prototypeTopAppBarInsetWarnings(applied.spec),
+  ]
     .filter(Boolean)
     .join(" ");
   return {

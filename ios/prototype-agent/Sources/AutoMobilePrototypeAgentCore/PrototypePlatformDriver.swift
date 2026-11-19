@@ -9,7 +9,8 @@ final class PrototypePlatformDriver {
     private var calls: [String: Task<Void, Never>] = [:]
     private var deadlines: [String: any PrototypeTimerHandle] = [:]
     private var started: [String: Int] = [:]
-    private var subscriptions: [Task<Void, Never>] = []
+    private var subscriptions: [String: Task<Void, Never>] = [:]
+    private var observing = false
     var onComplete: ((String, PlatformCallResult, Int) -> Void)?
     var onEvent: ((PlatformEvent) -> Void)?
     var onState: (([String: JSONValue]) -> Void)?
@@ -20,11 +21,14 @@ final class PrototypePlatformDriver {
     }
 
     func subscribe() {
-        guard subscriptions.isEmpty else { return }
-        for name in registry.modules.keys.sorted() {
+        if !observing {
+            observing = true
+            registry.retainSources()
+        }
+        for name in registry.modules.keys.sorted() where subscriptions[name] == nil {
             guard let module = registry.modules[name] else { continue }
             let stream = module.events
-            subscriptions.append(Task { [weak self] in
+            subscriptions[name] = Task { [weak self] in
                 for await event in stream {
                     guard !Task.isCancelled, let self else { break }
                     if event.event == PlatformEvent.stateRefresh(name).event {
@@ -38,13 +42,26 @@ final class PrototypePlatformDriver {
                     onState?(registry.snapshot)
                     onEvent?(event)
                 }
-            })
+            }
+        }
+    }
+
+    /// Only the session-configured built-ins need fresh streams. Preserve global and host-supplied
+    /// streams across shows: cancelling an iterator permanently terminates that AsyncStream.
+    func resetSessionEvents() {
+        for (name, module) in registry.modules
+            where module is PrototypeSensorsModule || module is PrototypeLocationModule
+        {
+            subscriptions.removeValue(forKey: name)?.cancel()
         }
     }
 
     func stopEvents() {
-        subscriptions.forEach { $0.cancel() }
-        subscriptions = []
+        guard observing else { return }
+        observing = false
+        subscriptions.values.forEach { $0.cancel() }
+        subscriptions = [:]
+        registry.releaseSources()
     }
 
     func perform(_ commands: [PrototypePlatformCommand]) {
@@ -125,7 +142,7 @@ final class PrototypePlatformDriver {
     }
 
     deinit {
-        for task in subscriptions {
+        for task in subscriptions.values {
             task.cancel()
         }
         for task in calls.values {

@@ -1,5 +1,5 @@
 import { ENV as ENV_SPECS } from "../config/env";
-import { z } from "zod";
+import { z } from "zod/v3";
 import {
   parseSessionDeviceRequirement,
   type SessionDeviceRequirement,

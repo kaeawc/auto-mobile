@@ -1,26 +1,28 @@
 import AdmZip from "adm-zip";
 import { ActionableError } from "../../../../models/ActionableError";
 import { assertZipEntriesContained } from "../../../../utils/workers/assertZipEntriesContained";
+import { patchArscColors } from "./androidArscColors";
 
 export interface AndroidStampAsset {
   id: string;
   bytes: Uint8Array;
 }
+/** What a stamp bakes into the template beside the relinked manifest. */
+export interface AndroidStampContent {
+  spec: string;
+  attachToken?: string;
+  /** Development-only opt-in to expose attach on physical Android devices. */
+  allowPhysicalDeviceAttach?: boolean;
+  assets: readonly AndroidStampAsset[];
+  /** ARGB values for named template `color` resources, e.g. the icon and splash background. */
+  colors?: ReadonlyMap<string, number>;
+}
 export interface AndroidStampZip {
-  assemble(
-    template: Buffer,
-    linked: Buffer,
-    spec: string,
-    assets: readonly AndroidStampAsset[],
-  ): Buffer;
+  assemble(template: Buffer, linked: Buffer, content: AndroidStampContent): Buffer;
 }
 export class DefaultAndroidStampZip implements AndroidStampZip {
-  assemble(
-    template: Buffer,
-    linked: Buffer,
-    spec: string,
-    assets: readonly AndroidStampAsset[],
-  ): Buffer {
+  assemble(template: Buffer, linked: Buffer, content: AndroidStampContent): Buffer {
+    const { spec, assets, colors = new Map<string, number>() } = content;
     const zip = new AdmZip(template);
     const manifestZip = new AdmZip(linked);
     assertZipEntriesContained(zip, "/stamp", "Android template");
@@ -39,6 +41,7 @@ export class DefaultAndroidStampZip implements AndroidStampZip {
     }
     zip.addFile("AndroidManifest.xml", manifest.getData());
     zip.addFile("assets/prototype/spec.json", Buffer.from(spec));
+    this.addAttachAssets(zip, content);
     const seen = new Set<string>();
     for (const asset of assets) {
       if (!/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/.test(asset.id) || seen.has(asset.id)) {
@@ -51,9 +54,17 @@ export class DefaultAndroidStampZip implements AndroidStampZip {
     if (!resources) {
       throw new ActionableError("Template APK has no resources.arsc.");
     }
-    resources.setData(resources.getData());
+    resources.setData(patchArscColors(resources.getData(), colors));
     resources.header.method = 0;
     return zip.toBuffer();
+  }
+  private addAttachAssets(zip: AdmZip, content: AndroidStampContent): void {
+    if (content.attachToken !== undefined) {
+      zip.addFile("assets/prototype/attach-token", Buffer.from(content.attachToken));
+      if (content.allowPhysicalDeviceAttach === true) {
+        zip.addFile("assets/prototype/attach-allow-physical-device", Buffer.from("true"));
+      }
+    }
   }
 }
 function isSignature(name: string): boolean {

@@ -37,6 +37,7 @@ import {
   extractNodeTextCandidates,
   type SystemTrayNotificationMatch,
 } from "./hierarchy";
+import { refreshNotificationDumpsys } from "./notificationAttribution";
 import { findBestNotificationMatch, findsContentOnUnattributedIosRow } from "./matching";
 
 const DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS = 5000;
@@ -582,6 +583,7 @@ export const waitForNotificationMatch = async (
     throwIfAborted(signal);
     const viewHierarchy = observation.viewHierarchy;
     if (viewHierarchy && hasMatchableNotificationContent(detector, observation)) {
+      await refreshNotificationDumpsys(device, viewHierarchy, criteria, signal);
       const match = findBestNotificationMatch(viewHierarchy, criteria, appMatchTexts);
       if (match) {
         return { observation, match };

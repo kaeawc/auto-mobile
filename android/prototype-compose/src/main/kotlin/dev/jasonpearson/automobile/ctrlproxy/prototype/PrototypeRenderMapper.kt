@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStrings
 import java.util.IdentityHashMap
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 /** Static validation and repeat binding belong to one resolved root, with identity-based keys. */
@@ -23,10 +24,32 @@ internal class PrototypeRenderCache(
     guardPrototypeTree(root)
   }
 
-  fun children(node: PrototypeNode, path: String): List<PrototypeChildEntry> =
-    entries
+  private data class DerivedChildren(
+    val values: Map<String, JsonElement?>,
+    val entries: List<PrototypeChildEntry>,
+  )
+
+  private val derivedEntries = IdentityHashMap<PrototypeNode, MutableMap<String, DerivedChildren>>()
+
+  fun children(
+    node: PrototypeNode,
+    path: String,
+    derived: Map<String, JsonElement?>,
+  ): List<PrototypeChildEntry> {
+    val name = prototypeRepeatDerivedName(node)
+    if (name != null) {
+      val byPath = derivedEntries.getOrPut(node) { mutableMapOf() }
+      val old = byPath[path]
+      if (old != null && old.values[name] === derived[name]) return old.entries
+      val resolved = prototypeDerivedRepeatNode(node, derived)
+      return validatedPrototypeChildren(resolved, path, formatter).also {
+        byPath[path] = DerivedChildren(derived, it)
+      }
+    }
+    return entries
       .getOrPut(node) { mutableMapOf() }
       .getOrPut(path) { validatedPrototypeChildren(node, path, formatter) }
+  }
 }
 
 /**
@@ -38,6 +61,8 @@ internal class PrototypeRenderMapper(
 ) {
   private val lock = Any()
   private val checked = PrototypeCheckedNodeCache(formatter)
+  private val derived = PrototypeDerivedValuesCache()
+  private val derivedFormatter = PrototypeDerivedFormatterCache(formatter)
   private var locale: java.util.Locale? = null
   private var zone: String? = null
   private var authoredSpec: PrototypeSpec? = null
@@ -116,7 +141,8 @@ internal class PrototypeRenderMapper(
             shownErrors = shownErrors,
             data = resolved.data,
             derive = resolved.derive.orEmpty(),
-            formatter = formatter,
+            derivedValues = derived.evaluate(resolved),
+            formatter = derivedFormatter,
             fillWindowRoot =
               resolved.window.placement is PrototypeFullscreenPlacement ||
                 resolved.window.placement is PrototypeSheetPlacement,

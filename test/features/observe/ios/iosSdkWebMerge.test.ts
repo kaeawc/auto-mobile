@@ -4,7 +4,10 @@ import {
   iosSdkWebTarget,
   mergeIosSdkWebSnapshots,
 } from "../../../../src/features/observe/ios/iosSdkWebMerge";
-import type { IosSdkWebSnapshot } from "../../../../src/features/observe/ios/sdkWebViewBridge";
+import {
+  iosSdkWebSnapshotSchema,
+  type IosSdkWebSnapshot,
+} from "../../../../src/features/observe/ios/sdkWebViewBridge";
 import { hashHierarchyForSettle } from "../../../../src/features/observe/wait/WaitSettle";
 import type { Element, ViewHierarchyNode, ViewHierarchyResult } from "../../../../src/models";
 import { isFocusEditableElement } from "../../../../src/features/utility/ElementResolverNodes";
@@ -583,5 +586,91 @@ describe("page identity (#5162)", () => {
       elementId: "e0",
       documentId: "d1",
     });
+  });
+});
+
+describe("adjusted web content insets (#18475)", () => {
+  test("the wire schema preserves content insets and accepts older snapshots", () => {
+    const contentInset = { top: 62, left: 3, bottom: 34, right: 5 };
+    expect(
+      iosSdkWebSnapshotSchema.parse({ ...snapshot([submit]), contentInset }).contentInset,
+    ).toEqual(contentInset);
+    expect(iosSdkWebSnapshotSchema.parse(snapshot([submit])).contentInset).toBeUndefined();
+  });
+
+  test("offsets the page by its safe-area inset and removes the XCTest duplicate", () => {
+    const bounds = { left: 24, top: 286, right: 304, bottom: 330 };
+    const native: ViewHierarchyNode = {
+      $: { class: "UIButton", "content-desc": "Submit", bounds },
+    };
+    const hierarchy = screen(webView([native], { left: 0, top: 0, right: 402, bottom: 874 }));
+    const summary = mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: {
+          ...snapshot([{ ...submit, bounds: [24, 224, 280, 44] }]),
+          viewport: { offsetLeft: 0, offsetTop: 0, width: 402, height: 812, scale: 1 },
+          contentInset: { top: 62, left: 0, bottom: 0, right: 0 },
+        },
+      },
+    ]);
+    expect(webElements(findWebViewNodes(hierarchy)[0])[0].bounds).toEqual(bounds);
+    expect(summary?.deduplicated).toBe(1);
+    expect(webElements(findWebViewNodes(hierarchy)[0])).toHaveLength(1);
+  });
+
+  test("horizontal insets set both the origin and the points-per-pixel width basis", () => {
+    const hierarchy = screen(webView());
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: {
+          ...snapshot([{ ...submit, bounds: [100, 40, 100, 40] }]),
+          viewport: { offsetLeft: 0, offsetTop: 0, width: 600, height: 1400, scale: 1 },
+          contentInset: { top: 10, left: 30, bottom: 20, right: 70 },
+        },
+      },
+    ]);
+    expect(attached(findWebViewNodes(hierarchy)[0])[0].bounds).toEqual({
+      left: 80,
+      top: 130,
+      right: 130,
+      bottom: 150,
+    });
+  });
+
+  test("absent, zero, negative and non-finite insets preserve the entire zero-inset hierarchy", () => {
+    const render = (contentInset: IosSdkWebSnapshot["contentInset"]) => {
+      const hierarchy = screen(webView());
+      mergeIosSdkWebSnapshots(hierarchy, [
+        {
+          webViewId: "checkout",
+          snapshot: {
+            ...snapshot([{ ...submit, bounds: [150, 70, 20, 10] }]),
+            viewport: { offsetLeft: 100, offsetTop: 50, width: 200, height: 350, scale: 2 },
+            contentInset,
+          },
+        },
+      ]);
+      return JSON.stringify(hierarchy);
+    };
+    const legacy = render(undefined);
+    expect(render({ top: 0, left: 0, bottom: 0, right: 0 })).toBe(legacy);
+    expect(render({ top: -62, left: -30, bottom: -20, right: -70 })).toBe(legacy);
+    expect(render({ top: NaN, left: Infinity, bottom: -Infinity, right: NaN })).toBe(legacy);
+  });
+
+  test("clips to the full frame rather than the inset-reduced page box", () => {
+    const hierarchy = screen(webView());
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: {
+          ...snapshot([{ ...submit, bounds: [-40, -30, 500, 800] }]),
+          contentInset: { top: 20, left: 30, bottom: 40, right: 50 },
+        },
+      },
+    ]);
+    expect(attached(findWebViewNodes(hierarchy)[0])[0].bounds).toEqual(webViewBounds);
   });
 });

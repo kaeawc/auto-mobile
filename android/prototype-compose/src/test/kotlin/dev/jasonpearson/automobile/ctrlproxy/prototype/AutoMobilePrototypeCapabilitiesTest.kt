@@ -40,7 +40,6 @@ class AutoMobilePrototypeCapabilitiesTest {
     setOf(
       "prototype_glass_v1", // Real backdrop blur is deferred to PR 2; never simulate glass.
       "prototype_scroll_edge_effect_v1", // Contract only until Android edge rendering in PR 2.
-      "prototype_network_upload_v1", // Contract only until upload execution ships.
       // Realtime transport, routing and lifecycle remain owed by the runtime slices.
       "prototype_platform_realtime_v1",
       "prototype_platform_realtime_device_v1",
@@ -56,7 +55,7 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_audio_v1",
       // CtrlProxy registers connectivity (#14273); the embedded renderer leaves it to the app.
       "prototype_platform_connectivity_v1",
-      // Contract only; the biometric prompt runtime is owed (#14328).
+      // Activity hosts register biometric; the embedded renderer leaves it to its host.
       "prototype_platform_biometric_v1",
       // CtrlProxy registers the settings launcher (#14320); the embedded renderer does not.
       "prototype_platform_settings_v1",
@@ -74,8 +73,8 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_platform_map_maplibre_v1",
       // Contract only; the web view runtimes and the ProtoViewer import rule are owed (#14312).
       "prototype_platform_webview_v1",
-      // Contract only; the location runtimes are owed (#14325, #14326).
-      "prototype_platform_location_v1",
+      // CtrlProxy, ProtoViewer and the app shell register location; embedding remains opt-in.
+      PrototypeLocationModule.CAPABILITY,
       // Contract only; the system media picker and camera runtimes are owed (#14197).
       "prototype_platform_mediaLibrary_v1",
       "prototype_platform_camera_v1",
@@ -85,13 +84,13 @@ class AutoMobilePrototypeCapabilitiesTest {
       "prototype_layout_direction_v1",
       // Contract only; the fake identity provider runtime is owed (#14303).
       "prototype_platform_auth_v1",
-      // Contract only; the Keystore-backed secure storage runtime is owed (#14321).
+      // Activity hosts register secure storage; embedding remains opt-in.
       "prototype_platform_secureStorage_v1",
       // Contract only; the voice-note recorder runtimes are owed (#14194).
       "prototype_platform_audioRecorder_v1",
       // Contract only; the local notification runtime is owed (#14281).
       "prototype_platform_notifications_v1",
-      // Contract only; the disposable-app permission runtime is owed (#14298).
+      // ComponentActivity hosts register permissions; embedding remains opt-in.
       "prototype_platform_permissions_v1",
       // Contract only; the scheduled notification runtimes are owed (#14283).
       "prototype_platform_notifications_scheduled_v1",
@@ -148,6 +147,17 @@ class AutoMobilePrototypeCapabilitiesTest {
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilitiesForSdk(32))
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilitiesForSdk(33))
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilities)
+  }
+
+  @Test
+  fun `secure storage is advertised only by a registered host module`() {
+    val module = PrototypeSecureStorageModule(MemorySecureStore())
+    val platform = dev.jasonpearson.automobile.prototype.PrototypePlatform(listOf(module))
+    assertTrue(
+      PrototypeSecureStorageModule.CAPABILITY in AutoMobilePrototype.capabilities(platform),
+    )
+    assertTrue(PrototypeSecureStorageModule.CAPABILITY !in AutoMobilePrototype.capabilities)
+    module.close()
   }
 
   @Test

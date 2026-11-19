@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { load } from "js-yaml";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { ANDROID_PACKAGE_NAME_PATTERN } from "../../src/utils/androidPackageName";
 
 /** MCP server name the harness registers; tool names arrive as `mcp__auto-mobile__<tool>`. */

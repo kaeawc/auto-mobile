@@ -40,7 +40,7 @@ const payloadOf = (result: unknown) =>
       observation: z
         .looseObject({
           isDiff: z.boolean().optional(),
-          skeleton: z.unknown(),
+          skeleton: z.unknown().optional(),
           viewHierarchy: z
             .looseObject({
               hierarchy: z.looseObject({

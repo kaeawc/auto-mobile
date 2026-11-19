@@ -130,9 +130,30 @@ describe("Android artifact policy", () => {
     expect(failures[0].message).toContain("android.permission.READ_CONTACTS");
   });
 
+  test("notification permission is present and required by the release policy", async () => {
+    const manifest = parseAaptXmlTree(fixture("android/protoviewer-release/manifest.xmltree.txt"));
+    expect(
+      manifest.children
+        .filter((node) => node.name === "uses-permission")
+        .map((node) => node.attributes.name),
+    ).toContain("android.permission.POST_NOTIFICATIONS");
+    const runner = androidRunner("protoviewer-release", (text) =>
+      text.replace(
+        / *E: uses-permission \(line=\d+\)\n.*"android.permission.POST_NOTIFICATIONS".*\n/,
+        "",
+      ),
+    );
+    const failures = await androidFailures(runner);
+    expect(rules(failures)).toEqual(["android.permissions"]);
+    expect(failures[0].message).toContain("missing: android.permission.POST_NOTIFICATIONS");
+  });
+
   test("a missing allowlisted permission also fails (equality, not subset)", async () => {
     const runner = androidRunner("protoviewer-release", (manifest) =>
-      manifest.replace(/ *E: uses-permission \(line=13\)\n.*\n/, ""),
+      manifest.replace(
+        / *E: uses-permission \(line=\d+\)\n.*"android.permission.ACCESS_LOCAL_NETWORK".*\n/,
+        "",
+      ),
     );
     const failures = await androidFailures(runner);
     expect(failures[0].message).toContain("missing: android.permission.ACCESS_LOCAL_NETWORK");

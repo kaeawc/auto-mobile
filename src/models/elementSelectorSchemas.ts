@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import { ELEMENT_SELECTION_STRATEGIES } from "./ElementSelectionStrategy";
 import type { ElementContainerSelector } from "./PinchOnOptions";
 import { HIERARCHY_LAYERS } from "./HierarchyLayer";
+import { strictObjectUnion } from "./strictUnion";
 
 type ElementIdTextDescriptions = {
   elementId: string;
@@ -10,7 +11,7 @@ type ElementIdTextDescriptions = {
 };
 
 export const createElementIdTextSelectorSchema = (descriptions: ElementIdTextDescriptions) =>
-  z.union([
+  strictObjectUnion([
     z
       .object({
         elementId: z.string().describe(descriptions.elementId),
@@ -41,7 +42,7 @@ export const hierarchyLayerSchema = z
   );
 
 export const nestedElementContainerSchema: z.ZodType<ElementContainerSelector> = z.lazy(() =>
-  z.union([
+  strictObjectUnion([
     z
       .object({
         elementId: z.string().min(1).describe("Container resource ID"),
@@ -131,31 +132,29 @@ export const resolverSelectorSchema: z.ZodType<ResolverSelector> = z.lazy(() =>
     ),
 );
 
-export const tapOnSelectorSchema = z
-  .union([
-    z
-      .object({ elementId: z.string().min(1).describe("Resource ID, e.g. com.app:id/btn_login") })
-      .strict(),
-    z.object({ testTag: z.string().min(1).describe("Android accessibility test tag") }).strict(),
-    z.object({ text: z.string().min(1).describe("Text, content-desc, or placeholder") }).strict(),
-    z
-      .object({
-        accessibilityLink: z
-          .string()
-          .trim()
-          .min(1)
-          .describe("Exact visible text of a semantic accessibility link"),
-      })
-      .strict(),
-    z
-      .object({
-        textAny: z
-          .array(z.string().min(1))
-          .min(1)
-          .describe("Ordered text variants; first visible match wins"),
-      })
-      .strict(),
-  ])
-  .describe(
-    "Element to tap: elementId, Android testTag, text, semantic accessibility link, or ordered text variants",
-  );
+export const tapOnSelectorSchema = strictObjectUnion([
+  z
+    .object({ elementId: z.string().min(1).describe("Resource ID, e.g. com.app:id/btn_login") })
+    .strict(),
+  z.object({ testTag: z.string().min(1).describe("Android accessibility test tag") }).strict(),
+  z.object({ text: z.string().min(1).describe("Text, content-desc, or placeholder") }).strict(),
+  z
+    .object({
+      accessibilityLink: z
+        .string()
+        .trim()
+        .min(1)
+        .describe("Exact visible text of a semantic accessibility link"),
+    })
+    .strict(),
+  z
+    .object({
+      textAny: z
+        .array(z.string().min(1))
+        .min(1)
+        .describe("Ordered text variants; first visible match wins"),
+    })
+    .strict(),
+]).describe(
+  "Element to tap: elementId, Android testTag, text, semantic accessibility link, or ordered text variants",
+);

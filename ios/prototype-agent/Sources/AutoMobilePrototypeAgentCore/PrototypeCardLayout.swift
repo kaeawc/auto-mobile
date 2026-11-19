@@ -8,4 +8,13 @@ enum PrototypeCardLayout {
         if case .fill = width { return true }
         return false
     }
+
+    /// A card with an authored `style.height` (`fill` or fixed points) draws its outline, fill and
+    /// shadow across the whole frame, as Compose's `Card` does; `wrap` or no height hugs the content.
+    static func outlineSpansHeight(_ height: Dimension?) -> Bool {
+        switch height {
+        case .fill, .points: return true
+        default: return false
+        }
+    }
 }

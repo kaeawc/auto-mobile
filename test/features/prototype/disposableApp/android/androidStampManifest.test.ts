@@ -1,7 +1,14 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { disposableAppDeclarations } from "../../../../../src/features/prototype/disposableApp/disposableAppPermissions";
+import biometricSpecJson from "../../../../fixtures/prototype-spec/valid/platform-biometric.json";
+import { prototypeJsonSchema } from "../../../../../src/features/prototype/prototypeJson";
 import { stampAndroidManifest } from "../../../../../src/features/prototype/disposableApp/android/androidStampManifest";
 import { ActionableError } from "../../../../../src/models/ActionableError";
 import { parseStringPromise } from "xml2js";
+
+const biometricSpec = prototypeJsonSchema.parse(biometricSpecJson);
 
 // Captured-shaped inline copy; the verbatim AGP output lives in test/fixtures/android-stamp.
 export const templatePackage = "dev.jasonpearson.automobile.app.template";
@@ -69,3 +76,44 @@ test("keeps the special @null and @empty values unqualified", async () => {
     app["meta-data"].map((node: { $: Record<string, string> }) => node.$["android:resource"]),
   ).toContain("@empty");
 });
+
+describe("module permissions over the captured template manifest", () => {
+  // The merged template after the biometric runtime: prototype-compose's library manifest adds
+  // USE_BIOMETRIC beside INTERNET. The captured fixture predates it, so the line is added here.
+  const captured = readFileSync(
+    join(import.meta.dir, "../../../../fixtures/android-stamp/AndroidManifest.xml"),
+    "utf8",
+  ).replace(
+    '<uses-permission android:name="android.permission.INTERNET" />',
+    '<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.USE_BIOMETRIC" />',
+  );
+  const stamp = async (spec: Parameters<typeof disposableAppDeclarations>[0]) =>
+    permissionNames(
+      await stampAndroidManifest(captured, {
+        ...input,
+        permissions: disposableAppDeclarations(spec).android.permissions,
+        enabledComponents: [],
+      }),
+    );
+
+  test("a spec requiring biometric keeps USE_BIOMETRIC", async () => {
+    expect(captured).toContain("android.permission.USE_BIOMETRIC");
+    expect(await stamp(biometricSpec)).toEqual([
+      "android.permission.INTERNET",
+      "android.permission.USE_BIOMETRIC",
+    ]);
+  });
+
+  test("a spec without biometric does not inherit the template's USE_BIOMETRIC", async () => {
+    expect(await stamp({ id: "x", root: { type: "column" } })).toEqual([
+      "android.permission.INTERNET",
+    ]);
+  });
+});
+
+async function permissionNames(xml: string): Promise<string[]> {
+  const parsed = await parseStringPromise(xml);
+  return parsed.manifest["uses-permission"].map(
+    (node: { $: Record<string, string> }) => node.$["android:name"],
+  );
+}

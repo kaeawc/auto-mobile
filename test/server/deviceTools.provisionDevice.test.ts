@@ -694,7 +694,6 @@ describe("provisionDevice handler", () => {
         return {
           androidAutoApks: ["/apks/base.apk"],
           dhu: { binaryPath: "/dhu", configPath: "/dhu.ini" },
-          acceptAndroidAutoTerms: false,
         };
       }
       async apply(

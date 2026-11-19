@@ -1,4 +1,5 @@
-import { z } from "zod";
+import { z } from "zod/v3";
+import { prototypeOwnKeyRecordV3 } from "./prototypeOwnKeyRecord";
 
 export type PrototypeJson =
   | null
@@ -25,4 +26,4 @@ const jsonValueSchema: z.ZodType<PrototypeJson> = z.lazy(
 export const prototypeJsonSchema = z.custom<PrototypeJson>(
   (value) => jsonValueSchema.safeParse(value).success,
 );
-export const prototypeJsonObjectSchema = z.record(prototypeJsonSchema).and(z.unknown());
+export const prototypeJsonObjectSchema = prototypeOwnKeyRecordV3(z.string(), prototypeJsonSchema);

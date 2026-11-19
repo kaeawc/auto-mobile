@@ -59,6 +59,12 @@ final class SdkContractLoopbackServer: @unchecked Sendable {
     private var connections: [ObjectIdentifier: NWConnection] = [:]
     /// What the server saw, so a failed run says where an exchange stopped.
     private var events: [String] = []
+    private var htmlPages: [String: String] = [:]
+
+    /// Fixed fixture responses only; no request can execute code in the host.
+    func serveHTML(_ pages: [String: String]) {
+        queue.sync { htmlPages = pages }
+    }
 
     func start() async throws -> Ports {
         let http = try await ready(makeListener(webSocket: false))
@@ -181,11 +187,13 @@ final class SdkContractLoopbackServer: @unchecked Sendable {
         let parts = requestLine.split(separator: " ")
         let path = parts.count >= 2 ? String(parts[1]) : "/"
         let caseName = path.split(separator: "/").last.map(String.init) ?? ""
+        let html = parts.first == "GET" ? htmlPages[path] : nil
         let isContractPath = parts.first == "GET" && path.hasPrefix("/contract/")
         let status = isContractPath ? "200 OK" : "404 Not Found"
         record("http request \(parts.first ?? "?") \(path) -> \(status)")
-        let body = Data((isContractPath ? "ok:\(caseName)" : "not found").utf8)
-        let head = "HTTP/1.1 \(status)\r\nContent-Type: text/plain\r\nContent-Length: \(body.count)\r\n"
+        let body = Data((html ?? (isContractPath ? "ok:\(caseName)" : "not found")).utf8)
+        let contentType = html == nil ? "text/plain" : "text/html; charset=utf-8"
+        let head = "HTTP/1.1 \(status)\r\nContent-Type: \(contentType)\r\nContent-Length: \(body.count)\r\n"
             + "Connection: close\r\n\r\n"
         var response = Data(head.utf8)
         response.append(body)

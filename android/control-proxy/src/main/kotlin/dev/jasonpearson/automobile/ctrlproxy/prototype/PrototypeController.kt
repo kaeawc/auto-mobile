@@ -218,8 +218,13 @@ class PrototypeController(
   private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
   /** Device-compiled uniform declarations, checked even for hidden/styleWhen nodes. */
   private val validateShaders: (PrototypeNode) -> Unit = {},
+  private val uploadAssets: PrototypeAssetSource? = null,
   private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
     dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
+  /** Explicit reset/removal may purge Activity storage without exposing it to overlay shows. */
+  private val purgeSecureStorage: suspend (String) -> Int = { 0 },
+  private val storageSessions: PrototypeStorageSessionRegistry =
+    PrototypeStorageSessionRegistry.Shared,
 ) {
   // Asset cleanup must outlive service cancellation while retaining the injected worker dispatcher.
   private val assetCleanupScope = CoroutineScope(requestScope.coroutineContext + SupervisorJob())
@@ -513,6 +518,24 @@ class PrototypeController(
     }
 
   private fun validate(spec: PrototypeSpec): PrototypeSpec {
+    require(
+      "secureStorage" !in spec.requires?.platform.orEmpty() ||
+        PrototypeSecureStorageModule.CAPABILITY in platform.registry.capabilities,
+    ) {
+      "The secureStorage module requires an app-owned Activity host"
+    }
+    require(
+      "permissions" !in spec.requires?.platform.orEmpty() ||
+        PrototypePermissionsModule.CAPABILITY in platform.registry.capabilities,
+    ) {
+      "The permissions module requires a foreground ComponentActivity host"
+    }
+    require(
+      "biometric" !in spec.requires?.platform.orEmpty() ||
+        PrototypeBiometricModule.CAPABILITY in platform.registry.capabilities,
+    ) {
+      "The biometric module requires a foreground Activity host"
+    }
     guardPrototypeTree(spec.root)
     requireResolvedPrototypeAnchors(spec.root)
     val validated =
@@ -667,6 +690,7 @@ class PrototypeController(
           if (preservePages) previous?.runtime?.current?.stacks.orEmpty() else emptyMap(),
         storage = opened.session,
         httpClients = httpClients,
+        uploadAssets = uploadAssets,
         platform = platform,
         platformLimiter = platformLimiter,
         requestScope = requestScope,
@@ -759,8 +783,8 @@ class PrototypeController(
         remove(validated.id)
         put(validated.id, surface)
       }
-    runtime.startPlatformModules()
     if (blocked) runtime.pauseTimers()
+    runtime.startPlatformModules()
     armIdle(runtime)
     runtime.shown(preservingState = preservePages)
     syncAfterChange(runtime)
@@ -1120,6 +1144,30 @@ class PrototypeController(
     }
   }
 
+  suspend fun simulatePlatformEvent(
+    requestId: String?,
+    id: String,
+    event: String,
+    data: JsonObject,
+  ) = mutex.withLock {
+    try {
+      check(!destroyed) { "Prototype host destroyed" }
+      val runtime = surfaces[id]?.runtime ?: error("Unknown prototype: $id")
+      val supported = runtime.simulatePlatformEvent(event, data)
+      if (supported) syncAfterChange(runtime)
+      sink.send(
+        requestId,
+        supported,
+        if (supported) null else "unsupported: module does not support simulation of $event",
+      )
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("PrototypeController", "Prototype platform simulation failed", error)
+      sink.send(requestId, false, error.message ?: "Prototype platform simulation failed")
+    }
+  }
+
   suspend fun advanceClock(requestId: String?, id: String, advanceTimeMs: Int) = mutex.withLock {
     try {
       check(!destroyed) { "Prototype host destroyed" }
@@ -1139,11 +1187,25 @@ class PrototypeController(
     }
   }
 
-  /** The stored keys removed for [id]; callers hold no controller state of their own. */
-  suspend fun clearStoredValues(id: String): Int {
-    val persistence = storage ?: return 0
-    val live = surfaces[id]?.runtime?.storage
-    return live?.clear() ?: persistence.clear(id)
+  /**
+   * The stored keys removed for [id]; callers hold no controller state of their own. With
+   * [keepSessionValues] (a saved-prototype delete that has yet to remove its entry) open sessions
+   * keep what they hold, so the caller's resume can write it back if the entry delete fails.
+   */
+  suspend fun clearStoredValues(id: String, keepSessionValues: Boolean = false): Int {
+    val held = storageSessions.quiesce(id)
+    val removed =
+      try {
+        held.awaitWrites()
+        val secureRemoved = purgeSecureStorage(id)
+        val live = surfaces[id]?.runtime?.storage
+        secureRemoved + (live?.clear() ?: storage?.clear(id) ?: 0)
+      } catch (error: Throwable) {
+        held.resume()
+        throw error
+      }
+    if (keepSessionValues) held.releaseKeepingValues() else held.reset()
+    return removed
   }
 
   private suspend fun statusOf(surface: Surface): PrototypeStatusEntry {
@@ -1152,7 +1214,7 @@ class PrototypeController(
     return PrototypeStatusEntry(
       id = id,
       persistent = runtime.persistent,
-      state = runtime.current.state.toMap(),
+      state = runtime.publicState,
       data = runtime.current.spec.data,
       pages = runtime.current.pages.toMap(),
       stacks = runtime.current.stacks.toMap(),

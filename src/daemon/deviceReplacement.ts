@@ -4,7 +4,7 @@ import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } fr
 import { logger } from "../utils/logger";
 import type { DeviceCriteriaMatcher } from "./DeviceCriteriaMatcher";
 import type { ConnectionOwnership } from "./connectionOwnership";
-import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
+import { claimRefusalError } from "./claimRefusalError";
 import type {
   DevicePool,
   DeviceAutolockChildProcess as ChildProcess,
@@ -351,10 +351,7 @@ export class DeviceReplacement {
       return;
     }
     await ownership.refresh([replacementDevice.id]);
-    throw new DeviceOwnedByOtherDaemonError(
-      replacementDevice.id,
-      ownership.foreignOwnerPid(replacementDevice.id),
-    );
+    throw claimRefusalError(ownership, replacementDevice.id);
   }
 
   sourceImageForSameAndroidReplacement(

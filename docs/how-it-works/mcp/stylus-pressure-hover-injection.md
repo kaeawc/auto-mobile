@@ -15,7 +15,9 @@ buttons, hover, eraser) and how it records it. Platform evidence for each input 
 - A request a device or route cannot honour is refused before dispatch with the missing
   capability named. It never degrades to a finger touch.
 - iOS has no stylus or hover route: the runner advertises neither `stylus_input_v1` nor
-  `hover_input_v1`, and such requests are refused before dispatch.
+  `hover_input_v1`, and such requests are refused before dispatch. The simulator input paths
+  measured for a runner route are in
+  [Pressure, hover and stylus input](../plat/pressure-hover-stylus-input.md#ios).
 - `src/utils/disableStylusHandwriting.ts` runs `settings put secure stylus_handwriting_enabled 0`
   so injected touches are not treated as handwriting.
 
@@ -198,3 +200,4 @@ or `adb shell am start -a android.intent.action.VIEW -d automobile://playground/
 ## Background
 
 - [Stylus, pressure and hover injection spike](../../devlog/2026-10-19-stylus-pressure-hover-injection-spike.md)
+- [iOS simulator Pencil input through a virtual HID digitizer](../../devlog/2026-11-03-ios-simulator-pencil-virtual-digitizer.md)

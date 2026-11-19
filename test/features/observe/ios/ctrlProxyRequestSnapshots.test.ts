@@ -52,6 +52,7 @@ import {
   requestSdkWebSnapshot,
 } from "../../../../src/features/observe/ios/CtrlProxySdkWebView";
 import { requestAccessibilityAudit } from "../../../../src/features/observe/ios/CtrlProxyAccessibilityAudit";
+import { requestStoreKit } from "../../../../src/features/observe/ios/CtrlProxyStoreKit";
 import { CtrlProxyClipboard } from "../../../../src/features/observe/ios/CtrlProxyClipboard";
 import { CtrlProxyDatabase } from "../../../../src/features/observe/ios/CtrlProxyDatabase";
 import { CtrlProxyGestures } from "../../../../src/features/observe/ios/CtrlProxyGestures";
@@ -204,6 +205,22 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
       requestAccessibilityAudit(h.context, {
         appId: "com.example.audited",
         checks: ["contrast", "hitRegion"],
+      }),
+  },
+  {
+    name: "request_storekit",
+    builder: "requestStoreKit",
+    invoke: (h) =>
+      requestStoreKit(h.context, {
+        action: "load",
+        bundleId: "com.example.purchases",
+        configPath: "/tmp/Products.storekit",
+        productId: "com.example.pro",
+        transactionId: 7,
+        subscriptionId: "com.example.monthly",
+        timeRate: "oneRenewalEveryTenSeconds",
+        simulatedError: 2,
+        enabled: false,
       }),
   },
   {

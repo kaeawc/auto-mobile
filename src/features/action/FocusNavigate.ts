@@ -17,7 +17,12 @@ import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
 import { compareSelectionRank } from "../utility/selectionRank";
 import type { Timer } from "../../utils/SystemTimer";
 import type { InputKeyName } from "./InputKey";
-import { describeFocus, elementMatchesTarget, stringProp } from "./FocusNavigateMatching";
+import {
+  describeFocus,
+  elementMatchesTarget,
+  flatFocusLabelSibling,
+  stringProp,
+} from "./FocusNavigateMatching";
 import { changedOwnRange, createFocusIdentity, focusKey } from "./FocusIdentity";
 import {
   createFocusProgress,
@@ -133,7 +138,7 @@ export interface FocusNavigateOptions {
   /**
    * Resolve the target on each read: its bounds, null when nothing on the screen is the target,
    * or undefined to fall back to matching `until` here. tapOn's D-pad path resolves with the
-   * touch selector so both inputs pick the same element.
+   * touch selector, preferring a focusable label match when the touch target cannot focus.
    */
   pinTarget?: (screen: FocusScreen) => ElementBounds | null | undefined;
 }
@@ -239,20 +244,14 @@ function resolveTarget(screen: FocusScreen, options: FocusNavigateOptions): Focu
   if (pinned !== undefined) {
     return { atBounds: pinned };
   }
-  const exact = exactFirstTarget(screen, options.until);
-  return options.firstMatch ? firstMatchTarget(screen, exact) : exact;
+  return options.firstMatch
+    ? firstMatchTarget(screen, options.until)
+    : exactFirstTarget(screen, options.until);
 }
 
-/**
- * Pin `target` to the first match on this screen as tapOn's `first` selection ranks it: smallest
- * area, then hierarchy order (the same {@link compareSelectionRank} ordering tvOS tapOn uses).
- */
-export function firstMatchTarget(
-  screen: FocusScreen,
-  target: FocusNavigateTarget,
-): FocusNavigateTarget {
-  const [first] = screen.elements
-    .filter((element) => elementMatchesTarget(element, target))
+/** tapOn's `first` ranking for flat elements: smallest area, then hierarchy order. */
+function rankFirst(elements: readonly Element[]): Element[] {
+  return elements
     .map((element, order) => ({
       element,
       windowRank: 0,
@@ -260,8 +259,81 @@ export function firstMatchTarget(
       order,
       interactive: false,
     }))
-    .sort((a, b) => compareSelectionRank(a, b));
-  return first ? { ...target, atBounds: first.element.bounds } : target;
+    .sort((a, b) => compareSelectionRank(a, b))
+    .map(({ element }) => element);
+}
+
+function isActionableElement(element: Element): boolean {
+  return isTruthyFlag(element.focusable) || isTruthyFlag(element.clickable);
+}
+
+/**
+ * The nearest element enclosing `element` that is clickable, focusable or scrollable (the flat
+ * read's stand-in for its nearest actionable ancestor): the smallest such enclosure, the first one
+ * a walk up from `element` would reach.
+ */
+function nearestActionableOwner(
+  elements: readonly Element[],
+  element: Element,
+): Element | undefined {
+  const [nearest] = elements
+    .filter((owner) => {
+      if (owner === element || !(isActionableElement(owner) || isTruthyFlag(owner.scrollable))) {
+        return false;
+      }
+      const overlap = intersectBounds(owner.bounds, element.bounds);
+      return overlap !== null && boundsEqual(overlap, element.bounds);
+    })
+    .sort((a, b) => boundsArea(a.bounds) - boundsArea(b.bounds));
+  return nearest;
+}
+
+/**
+ * Pin `target` to the first match as tapOn's `first` selection ranks it: exact labels first
+ * ({@link exactFirstTarget}), then smallest area, then hierarchy order (the same
+ * {@link compareSelectionRank} ordering tvOS tapOn uses). A focusable or clickable first match is
+ * its own control and keeps the pin, so a focused row never stands in for a clickable child. A
+ * pure label keeps the pin when its nearest actionable owner is focusable (focus on that owner
+ * matches the label) or only clickable (that control owns it); a label with no actionable owner
+ * moves the pin to the best focusable match, exact before contains. A scrollable owner blocks
+ * that fallback. An unlabelled focusable sibling can own a pure label within its same parent row.
+ */
+export function firstMatchTarget(
+  screen: FocusScreen,
+  target: FocusNavigateTarget,
+): FocusNavigateTarget {
+  const ranked = exactFirstTarget(screen, target);
+  const matches = rankFirst(
+    screen.elements.filter((element) => elementMatchesTarget(element, ranked)),
+  );
+  const [first] = matches;
+  if (!first) {
+    return target;
+  }
+  const owner = nearestActionableOwner(screen.elements, first);
+  if (isActionableElement(first) || (owner && !isTruthyFlag(owner.scrollable))) {
+    return { ...target, atBounds: first.bounds };
+  }
+  const exact = target.label ? { ...target, labelExact: true } : target;
+  const focusable = owner
+    ? []
+    : rankFirst(
+        screen.elements.filter(
+          (element) => isTruthyFlag(element.focusable) && elementMatchesTarget(element, target),
+        ),
+      );
+  const [fallback] = [
+    ...focusable.filter((element) => elementMatchesTarget(element, exact)),
+    ...focusable,
+  ];
+  const sibling =
+    !fallback && target.label
+      ? flatFocusLabelSibling(screen, first, owner ? target : undefined)
+      : undefined;
+  // The sibling is identified by its bounds: it does not carry the requested label itself.
+  return sibling
+    ? { ...target, label: undefined, atBounds: sibling.bounds }
+    : { ...target, atBounds: (fallback ?? first).bounds };
 }
 
 /** Whether the closed intervals [aStart, aEnd] and [bStart, bEnd] share any length. */
@@ -475,8 +547,12 @@ interface ExitContext {
   focusedElement: FocusPathEntry | undefined;
   /** Whether the focused control consumed a direction by changing its own value (#17739). */
   adjusted: boolean;
-  /** Escapes already pressed, in order; each key is pressed at most once per call. */
-  trap: { escapes?: FocusTrapEscape[] };
+  /**
+   * Escapes already pressed, in order; each keyboard-trap key is pressed at most once per call.
+   * `tabbedFrom` keys each range control tab already left (#18393), so a walk through two sliders
+   * gets one tab per slider rather than one per call.
+   */
+  trap: { escapes?: FocusTrapEscape[]; tabbedFrom?: Set<string> };
   /** Arrows refused from the focused element since the walk last escaped a trap. */
   refused: ReadonlySet<FocusNavigateDirection>;
   select: boolean;
@@ -531,7 +607,7 @@ export class FocusNavigate {
         path,
         maxSteps > 0,
       );
-      const undone = await this.undoAdjustment(probe, screen, signal);
+      const undone = await this.undoAdjustment(probe, { screen, matches }, signal);
       probe = undefined;
       if (undone) {
         // The press changed the control's value: the read of the changed value is not a place
@@ -738,10 +814,11 @@ export class FocusNavigate {
    */
   private async undoAdjustment(
     probe: RangeProbe | undefined,
-    screen: FocusScreen,
+    { screen, matches }: { screen: FocusScreen; matches: boolean },
     signal: AbortSignal | undefined,
   ): Promise<RangeProbe | undefined> {
-    if (!probe || !changedOwnRange(probe.before, screen)) {
+    // A read that reached the target is never undone, whatever its range reads (#18393).
+    if (!probe || matches || !changedOwnRange(probe.before, screen)) {
       return undefined;
     }
     await this.press(OPPOSITE[probe.direction], signal);
@@ -787,8 +864,9 @@ export class FocusNavigate {
 
   /**
    * For a stuck exit on a control that took every arrow it did not refuse as a value change (a
-   * slider, #17739): press tab once, which moves focus out of it, and retry from there. After that
-   * tab, the stuck result says it was tried. Undefined when nothing applies.
+   * slider, #17739): press tab once per control, which moves focus out of it, and retry from there.
+   * When the same control is stuck again after its tab, the stuck result says it was tried.
+   * Undefined when nothing applies.
    */
   private async adjustableOutcome(
     done: FocusNavigateResult,
@@ -798,7 +876,9 @@ export class FocusNavigate {
       return undefined;
     }
     const escapes = trap.escapes ?? [];
-    if (escapes.includes("tab")) {
+    const control = focusKey(focusedElement);
+    const tabbedFrom = trap.tabbedFrom ?? new Set<string>();
+    if (tabbedFrom.has(control)) {
       return this.stopped("stuck", done.steps, done.path, {
         focusedElement,
         message: `${stripRetryAdvice(done.message)}; pressing tab did not move focus out of it either`,
@@ -810,6 +890,7 @@ export class FocusNavigate {
       throw new ActionableError(pressed.error ?? "Failed to press tab");
     }
     trap.escapes = [...escapes, "tab"];
+    trap.tabbedFrom = tabbedFrom.add(control);
     return "escaped";
   }
 

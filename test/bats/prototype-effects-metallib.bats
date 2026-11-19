@@ -51,6 +51,13 @@ MOCK
   ! grep -q "downloadComponent" "$XCRUN_LOG"
 }
 
+@test "quotes a developer directory with spaces in the printed install command" {
+  MOCK_NO_METAL=1 RUNNER_ENVIRONMENT=self-hosted DEVELOPER_DIR="/Applications/Xcode 27.2.app/Contents/Developer" \
+    run bash "$SCRIPT" "$OUT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'DEVELOPER_DIR=/Applications/Xcode\ 27.2.app/Contents/Developer xcodebuild'* ]]
+}
+
 @test "the shader source declares every function the renderer calls" {
   for name in pixelate chromaticAberration wave ripple noise gradientMesh; do
     grep -q "$name(" "${REPO_ROOT}/ios/prototype-agent/Shaders/PrototypeEffects.metal"

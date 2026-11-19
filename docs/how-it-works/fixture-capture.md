@@ -4,7 +4,7 @@ Parser and contract fixtures under `test/fixtures/` must come from running AutoM
 
 ## Switch
 
-Capture is off unless `AUTOMOBILE_CAPTURE_FIXTURES_DIR` names a directory in the daemon's environment. With it unset, the tool registry runs each handler unwrapped and the exec seam finds no capture scope, so normal runs record nothing and write nothing. Use a private daemon for capture runs: the variable applies to every tool call the daemon serves.
+Capture is off unless `AUTOMOBILE_CAPTURE_FIXTURES_DIR` names a directory in the daemon's environment (a relative path resolves against the daemon's working directory). With it unset, the tool registry runs each handler unwrapped and the exec seam finds no capture scope, so normal runs record nothing and write nothing. Use a private daemon for capture runs: the variable applies to every tool call the daemon serves.
 
 ## What is recorded
 
@@ -45,6 +45,7 @@ bun scripts/fixtures/promote-capture.ts --capture "$DIR/measureStartup_<ms>_<id>
 ```
 
 - The destination must be `test/fixtures/<area>/<form-factor>/<name>.txt`. The form-factor directory is one of the device model's form factors (`phone`, `tablet`, `foldable`, `tv`, `watch`, `automotive`, `xr-headset`, `xr-glasses`). Only `.txt` is accepted, because oxfmt would rewrite a JSON or Markdown capture.
+- `sourceTreeState` is `dirty` for modified tracked files only: the probe ignores untracked files, so a new untracked file under `src/` or `scripts/` still reads `clean`. Commit or stash new files before a capture run.
 - The step refuses a capture without a device, without an OS version or API level, whose device reports a different form factor, whose `automobileVersion` names no commit or a dirty checkout, or whose `sourceTreeState` is not `clean`. It also refuses a redacted or truncated command. A device that reports no form factor takes the directory's form factor, and the sidecar marks it `formFactorDeclared`.
 - The device id becomes `<serial>` (Android) or `<udid>` (Apple platforms), the home directory becomes `~`, and the executable in argv becomes its basename.
 - Next to the fixture it writes `<name>.provenance.json`: `provenance: "captured"`, tool, redacted argv, exit code, stream, capture date, source commit, AutoMobile version and the device's platform, form factor, model, device type, OS version, API level and runtime id. The sidecar is formatted with oxfmt.

@@ -10,6 +10,7 @@ import {
 import { logger } from "../../../src/utils/logger";
 import {
   fixtureCaptureFromEnv,
+  resolveCaptureDirectory,
   withToolCallCapture,
 } from "../../../src/utils/fixtureCapture/fixtureCaptureFromEnv";
 import { DirectoryFixtureCaptureWriter } from "../../../src/utils/fixtureCapture/FixtureCaptureWriter";
@@ -313,5 +314,12 @@ describe("fixtureCaptureFromEnv", () => {
   test("writes to the named directory when set", () => {
     const deps = fixtureCaptureFromEnv({ AUTOMOBILE_CAPTURE_FIXTURES_DIR: "/tmp/capture" });
     expect(deps?.writer).toBeInstanceOf(DirectoryFixtureCaptureWriter);
+  });
+});
+
+describe("resolveCaptureDirectory", () => {
+  test("resolves a relative directory against the working directory and keeps an absolute one", () => {
+    expect(resolveCaptureDirectory("captures", "/daemon/cwd")).toBe("/daemon/cwd/captures");
+    expect(resolveCaptureDirectory("/abs/captures", "/daemon/cwd")).toBe("/abs/captures");
   });
 });

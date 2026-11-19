@@ -1,3 +1,4 @@
+import path from "node:path";
 import { ENV, readEnvTrimmed } from "../../config/env";
 import { getSettledMcpServerVersion, getSettledSourceTreeState } from "../mcpVersion";
 import { defaultTimer, type Timer } from "../SystemTimer";
@@ -17,7 +18,14 @@ async function settledSourceIdentity(): Promise<CaptureSourceIdentity> {
   return { automobileVersion, sourceTreeState };
 }
 
-/** Capture deps when `AUTOMOBILE_CAPTURE_FIXTURES_DIR` is set; undefined (capture off) otherwise. */
+/** An absolute capture directory: a relative one resolves against the daemon's working directory. */
+export function resolveCaptureDirectory(dir: string, cwd: string = process.cwd()): string {
+  return path.resolve(cwd, dir);
+}
+
+/**
+ * Capture deps when `AUTOMOBILE_CAPTURE_FIXTURES_DIR` is set; undefined (capture off) otherwise.
+ */
 export function fixtureCaptureFromEnv(
   env: NodeJS.ProcessEnv = process.env,
   timer: Pick<Timer, "now"> = defaultTimer,
@@ -27,7 +35,7 @@ export function fixtureCaptureFromEnv(
     return undefined;
   }
   return {
-    writer: new DirectoryFixtureCaptureWriter(dir, timer),
+    writer: new DirectoryFixtureCaptureWriter(resolveCaptureDirectory(dir), timer),
     timer,
     sourceIdentity: settledSourceIdentity,
   };

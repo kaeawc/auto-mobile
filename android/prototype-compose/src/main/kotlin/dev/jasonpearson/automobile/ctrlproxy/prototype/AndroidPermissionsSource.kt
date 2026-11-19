@@ -9,6 +9,7 @@ import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -17,6 +18,28 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.*
 
 internal interface AndroidPermissionsGateway {
+  val permission: PrototypeRuntimePermission
+    get() = PrototypeRuntimePermission.NOTIFICATIONS
+
+  /** Whether the host manifest requests [permission]; an undeclared one can never be granted. */
+  val declared: Boolean
+    get() = true
+
+  /** A camera id or an audio input exists; notifications have no hardware. */
+  val hardware: Boolean
+    get() = true
+
+  /**
+   * A permission dialog of this Activity delivered its result and the Activity has not resumed
+   * since. A follow-up request waits for that resume instead of reading `unavailable`.
+   */
+  val settling: Boolean
+    get() = false
+
+  /** Another source or session of this Activity has its permission dialog open. */
+  val prompting: Boolean
+    get() = false
+
   val sdk: Int
   val foreground: Boolean
   val granted: Boolean
@@ -41,13 +64,21 @@ internal constructor(
 ) : PrototypePermissionsSource {
   constructor(
     activity: ComponentActivity,
+    permission: PrototypeRuntimePermission = PrototypeRuntimePermission.NOTIFICATIONS,
+  ) : this(activity, permission, PrototypePromptSlot())
+
+  internal constructor(
+    activity: ComponentActivity,
+    permission: PrototypeRuntimePermission,
+    slot: PrototypePromptSlot,
   ) : this(
-    FrameworkPermissionsGateway(activity),
+    FrameworkPermissionsGateway(activity, permission = permission, slot = slot),
     SessionPermissionRequestStore(),
     Dispatchers.Main.immediate,
   )
 
   private var closed = false
+  private val closing = MutableStateFlow(false)
   private var finish: (() -> Unit)? = null
   override val changes: Flow<PrototypePermissionState> =
     gateway.resumes.filter { !closed && finish == null }.map { status() }.flowOn(dispatcher)
@@ -56,32 +87,39 @@ internal constructor(
     if (closed || !gateway.foreground) PrototypePermissionState.UNAVAILABLE else authorization()
 
   private fun authorization(): PrototypePermissionState {
-    if (gateway.sdk >= 33) {
-      if (gateway.granted) store.rationaleSeen = false
-      else if (gateway.rationale) store.rationaleSeen = true
-    }
+    if (!gateway.declared || !gateway.hardware) return PrototypePermissionState.UNAVAILABLE
+    val notifications = gateway.permission == PrototypeRuntimePermission.NOTIFICATIONS
+    // Notifications became a runtime permission in API 33; camera and microphone always are.
+    if (notifications && gateway.sdk < 33) return notificationSetting()
+    if (gateway.granted) store.rationaleSeen = false
+    else if (gateway.rationale) store.rationaleSeen = true
     return when {
-      gateway.sdk < 33 ->
-        if (gateway.notificationsEnabled) PrototypePermissionState.GRANTED
-        else PrototypePermissionState.BLOCKED
       gateway.granted ->
-        if (gateway.notificationsEnabled) PrototypePermissionState.GRANTED
-        else PrototypePermissionState.BLOCKED
+        if (notifications) notificationSetting() else PrototypePermissionState.GRANTED
       !store.rationaleSeen -> PrototypePermissionState.NOT_DETERMINED
       gateway.rationale -> PrototypePermissionState.DENIED
       else -> PrototypePermissionState.BLOCKED
     }
   }
 
+  private fun notificationSetting() =
+    if (gateway.notificationsEnabled) PrototypePermissionState.GRANTED
+    else PrototypePermissionState.BLOCKED
+
   override fun session(): PrototypePermissionsSource =
     AndroidPermissionsSource(gateway, SessionPermissionRequestStore(), dispatcher)
 
   override fun request(): Flow<PrototypePermissionOutcome> = flow {
-    val current = status()
-    if (finish != null) {
+    if (!awaitSettled()) {
+      emit(PrototypePermissionOutcome.Cancelled)
+      return@flow
+    }
+    // While any dialog is open the Activity is paused, so check ownership before status.
+    if (finish != null || gateway.prompting) {
       emit(PrototypePermissionOutcome.Busy)
       return@flow
     }
+    val current = status()
     if (
       current !in setOf(PrototypePermissionState.NOT_DETERMINED, PrototypePermissionState.DENIED)
     ) {
@@ -125,8 +163,20 @@ internal constructor(
   }
     .flowOn(dispatcher)
 
+  /**
+   * A previous prompt's result can precede ON_RESUME; wait for the Activity to come back before
+   * prompting again. False when the source closed while waiting.
+   */
+  private suspend fun awaitSettled(): Boolean {
+    val idle = !closed && finish == null
+    if (!idle || gateway.foreground || !gateway.settling) return true
+    merge(gateway.resumes, closing.filter { it }.map {}).first()
+    return !closed
+  }
+
   override fun close() {
     closed = true
+    closing.value = true
     store.rationaleSeen = false
     finish?.invoke()
   }
@@ -139,8 +189,22 @@ private class SessionPermissionRequestStore : PrototypePermissionRequestStore {
 internal class FrameworkPermissionsGateway(
   private val activity: ComponentActivity,
   private val activityResultRegistry: ActivityResultRegistry = activity.activityResultRegistry,
+  override val permission: PrototypeRuntimePermission = PrototypeRuntimePermission.NOTIFICATIONS,
+  private val slot: PrototypePromptSlot = PrototypePromptSlot(),
 ) : AndroidPermissionsGateway {
-  private var requesting = false
+  private val manifestName = permission.manifest
+
+  override val declared by lazy { declaresPermission(activity, manifestName) }
+
+  override val hardware
+    get() = captureHardwarePresent(activity, permission)
+
+  override val settling
+    get() = slot.settling
+
+  override val prompting
+    get() = slot.requesting
+
   override val sdk
     get() = Build.VERSION.SDK_INT
 
@@ -151,13 +215,13 @@ internal class FrameworkPermissionsGateway(
         activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
 
   override val granted
-    get() = activity.checkSelfPermission(POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    get() = activity.checkSelfPermission(manifestName) == PackageManager.PERMISSION_GRANTED
 
   override val notificationsEnabled
     get() = activity.getSystemService(NotificationManager::class.java).areNotificationsEnabled()
 
   override val rationale
-    get() = activity.shouldShowRequestPermissionRationale(POST_NOTIFICATIONS)
+    get() = activity.shouldShowRequestPermissionRationale(manifestName)
 
   override val resumes: Flow<Unit> = callbackFlow {
     val observer = LifecycleEventObserver { _, event ->
@@ -168,14 +232,14 @@ internal class FrameworkPermissionsGateway(
   }
 
   override fun request(deliver: (Boolean) -> Unit, cancel: () -> Unit): (() -> Unit)? {
-    if (requesting) return null
+    if (slot.requesting) return null
     var active = true
     lateinit var launcher: ActivityResultLauncher<String>
     lateinit var observer: LifecycleEventObserver
     val unregister = {
       if (active) {
         active = false
-        requesting = false
+        slot.requesting = false
         launcher.unregister()
         activity.lifecycle.removeObserver(observer)
       }
@@ -188,15 +252,18 @@ internal class FrameworkPermissionsGateway(
     }
     launcher =
       activityResultRegistry.register(
-        "prototype.notifications.${nextRequest.incrementAndGet()}",
+        "prototype.${permission.wire}.${nextRequest.incrementAndGet()}",
         ActivityResultContracts.RequestPermission(),
       ) { granted ->
-        if (active && !activity.isDestroyed) deliver(granted)
+        if (active && !activity.isDestroyed) {
+          settleUntilResume()
+          deliver(granted)
+        }
       }
-    requesting = true
+    slot.requesting = true
     activity.lifecycle.addObserver(observer)
     try {
-      launcher.launch(POST_NOTIFICATIONS)
+      launcher.launch(manifestName)
     } catch (@Suppress("TooGenericExceptionCaught") error: RuntimeException) {
       unregister()
       throw error
@@ -204,10 +271,21 @@ internal class FrameworkPermissionsGateway(
     return unregister
   }
 
+  /** Marks the slot settling until the Activity's next resume (or destruction) clears it. */
+  private fun settleUntilResume() {
+    slot.settling = true
+    activity.lifecycle.addObserver(
+      object : LifecycleEventObserver {
+        override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
+          if (event != Lifecycle.Event.ON_RESUME && event != Lifecycle.Event.ON_DESTROY) return
+          slot.settling = false
+          source.lifecycle.removeObserver(this)
+        }
+      },
+    )
+  }
+
   companion object {
     private val nextRequest = AtomicLong()
   }
 }
-
-// Manifest.permission.POST_NOTIFICATIONS, which only API 33 declares; used only on API 33+.
-private const val POST_NOTIFICATIONS = "android.permission.POST_NOTIFICATIONS"

@@ -59,6 +59,35 @@ object FixtureCatalog {
       FixtureRow("template_restrictions", "Restrictions", "Shows the host content limits"),
     )
 
+  /** Smallest list-template row limit any host applies; every menu page stays within it. */
+  const val HOST_LIST_ROW_LIMIT = 6
+
+  /** Entries per menu page; the remaining slot on a non-final page holds [menuMoreRow]. */
+  const val MENU_PAGE_ENTRIES = HOST_LIST_ROW_LIMIT - 1
+
+  const val MENU_MORE_ROW_ID = "template_menu_more"
+  val menuMoreRow = FixtureRow(MENU_MORE_ROW_ID, "More templates", "Next page of templates")
+
+  /** TabTemplate needs Car App API level 6; the manifest minimum is 1. */
+  const val TAB_TEMPLATE_ID = "template_tabs"
+  const val TAB_TEMPLATE_MIN_CAR_API = 6
+
+  /** The menu entries a host at [carApiLevel] can open; the tab template is hidden below API 6. */
+  fun menuEntries(carApiLevel: Int): List<FixtureRow> = templateMenu.filter {
+    it.id != TAB_TEMPLATE_ID || carApiLevel >= TAB_TEMPLATE_MIN_CAR_API
+  }
+
+  fun menuPageCount(carApiLevel: Int): Int =
+    (menuEntries(carApiLevel).size + MENU_PAGE_ENTRIES - 1) / MENU_PAGE_ENTRIES
+
+  /** One menu page: up to [MENU_PAGE_ENTRIES] entries plus [menuMoreRow] when more pages follow. */
+  fun menuPage(carApiLevel: Int, page: Int): List<FixtureRow> {
+    val entries = menuEntries(carApiLevel)
+    val start = page * MENU_PAGE_ENTRIES
+    val rows = entries.drop(start).take(MENU_PAGE_ENTRIES)
+    return if (start + MENU_PAGE_ENTRIES < entries.size) rows + menuMoreRow else rows
+  }
+
   /** Tab titles, in order. Each tab's list has a different set of rows. */
   val tabTitles: List<String> = listOf("Tab One", "Tab Two")
 
@@ -89,10 +118,9 @@ object FixtureCatalog {
    * One line per host content limit, so the head unit shows what the host currently allows. A
    * driving restriction lowers these limits, which makes `restrict all` visible on screen.
    */
-  fun restrictionRows(limits: Map<String, Int>): List<FixtureRow> =
-    limits.map { (name, limit) ->
-      FixtureRow("limit_${name.lowercase()}", "$name limit", limit.toString())
-    }
+  fun restrictionRows(limits: Map<String, Int>): List<FixtureRow> = limits.map { (name, limit) ->
+    FixtureRow("limit_${name.lowercase()}", "$name limit", limit.toString())
+  }
 
   /** Six rows: within the list-template row limit on every host. */
   val listTemplateRows: List<FixtureRow> =

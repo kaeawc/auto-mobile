@@ -113,6 +113,8 @@ describe("prototype runtime budgets (#18804)", () => {
     expect(validatePrototypeSpec(appendFeed(5000)).success).toBe(false);
     expect(validatePrototypeSpec(appendFeed(5000), large).success).toBe(true);
     expect(validatePrototypeSpec(appendFeed(10001), large).success).toBe(false);
+    expect(prototypeLargeBudgetFields(appendFeed(5000))).toEqual(["root.onEndReached[0].maxItems"]);
+    expect(prototypeLargeBudgetFields(appendFeed(2000))).toEqual([]);
   });
 
   test("spec and data bytes over the base budget validate only against the large budget", () => {

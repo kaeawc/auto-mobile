@@ -30,7 +30,9 @@ internal object PrototypeBundleSpec {
         bundleRequire(styles.none { "shader" in it }, custom_shaders_unsupported, "spec.json")
       }
     }
-    val context = PrototypeStateChecks.Context()
+    // The bundle format admits the largest runtime budget, as the host's bundle check does; the
+    // importing runtime then validates against its own budget and the bundle's requires (#18804).
+    val context = PrototypeStateChecks.Context(PrototypeRuntimeBudget.LARGE)
     bundleRequire(
       PrototypeSpecInput.validateInput(value.toString(), context)
         is PrototypeSpecValidation.Success,

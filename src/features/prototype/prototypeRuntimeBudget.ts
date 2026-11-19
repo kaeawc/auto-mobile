@@ -1,5 +1,6 @@
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_LARGE_BUDGET_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { expandPrototypeComponents } from "./prototypeComponents";
 import { resolvePrototypeDataPointer } from "./prototypeData";
 import { jsonCost } from "./prototypeJsonCost";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
@@ -86,24 +87,65 @@ function oversizedLists(spec: unknown, fields: string[]): void {
   });
 }
 
+const WINDOWED_DATA_ACTIONS = new Set(["appendData", "upsertData"]);
+/** Opaque JSON a data action never sits in: the data model, state and emit payloads. */
+const OPAQUE_FIELDS = new Set(["data", "state", "payload"]);
+
+function oversizedActionWindows(value: unknown, path: string, fields: string[]): void {
+  if (Array.isArray(value)) {
+    for (const [index, child] of value.entries()) {
+      oversizedActionWindows(child, `${path}[${index}]`, fields);
+    }
+    return;
+  }
+  const object = record(value);
+  if (!object) {
+    return;
+  }
+  if (
+    typeof object.type === "string" &&
+    WINDOWED_DATA_ACTIONS.has(object.type) &&
+    typeof object.maxItems === "number" &&
+    object.maxItems > PROTOTYPE_BASE_BUDGET.MAX_PROTOTYPE_DATA_ARRAY_ITEMS
+  ) {
+    fields.push(`${path}.maxItems`);
+  }
+  for (const key of Object.keys(object).sort()) {
+    if (!OPAQUE_FIELDS.has(key)) {
+      oversizedActionWindows(object[key], path ? `${path}.${key}` : key, fields);
+    }
+  }
+}
+
+function specBytes(spec: unknown): number {
+  return Buffer.byteLength(JSON.stringify(spec) ?? "", "utf8");
+}
+
 /**
  * Where a spec is over the base budget, so only a runtime advertising
- * `prototype_large_budget_v1` can show it: `$` for spec bytes, `data` for data bytes, each
- * oversized `/data` array and each list whose items or `maxItems` exceed the base list limit.
- * A data action's own `maxItems` is not listed; the base-budget validator on the overlay refuses it.
+ * `prototype_large_budget_v1` can show it: `$` for spec bytes (authored or expanded), `data` for
+ * data bytes, each oversized `/data` array, each list whose items or `maxItems` exceed the base
+ * list limit and each `appendData`/`upsertData` whose `maxItems` exceeds the base array limit.
+ * Paths are those of the component-expanded spec the validator checks.
  */
 export function prototypeLargeBudgetFields(spec: unknown): string[] {
   const fields: string[] = [];
-  const bytes = Buffer.byteLength(JSON.stringify(spec) ?? "", "utf8");
+  const expansion = expandPrototypeComponents(spec);
+  const expanded = expansion.success ? expansion.spec : spec;
+  const bytes = Math.max(
+    specBytes(spec),
+    expansion.success && expansion.expanded ? specBytes(expanded) : 0,
+  );
   if (bytes > PROTOTYPE_BASE_BUDGET.MAX_PROTOTYPE_SPEC_BYTES) {
     fields.push("$");
   }
-  const data = record(spec)?.data;
+  const data = record(expanded)?.data;
   if (data !== undefined && jsonCost(data) > PROTOTYPE_BASE_BUDGET.MAX_PROTOTYPE_DATA_BYTES) {
     fields.push("data");
   }
   oversizedArrays(data, "data", fields);
-  oversizedLists(spec, fields);
+  oversizedLists(expanded, fields);
+  oversizedActionWindows(expanded, "", fields);
   return [...new Set(fields)];
 }
 

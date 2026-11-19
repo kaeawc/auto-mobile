@@ -470,7 +470,7 @@ function repeatSourceErrors(node: Raw, path: string, state: RepeatState): Repeat
     return error;
   }
   state.cells += derived
-    ? new PrototypeRepeatData({ rows: items }).cells("/rows")
+    ? new PrototypeRepeatData({ rows: items }, state.data.listItems).cells("/rows")
     : state.data.cells(String(source.path));
   return state.cells > contract.limits.MAX_PROTOTYPE_REPEAT_PATH_CELLS
     ? fail(at, "Repeat path cell limit exceeded")

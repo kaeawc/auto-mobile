@@ -89,7 +89,7 @@ device() {
       \"com.apple.CoreSimulator.SimRuntime.iOS-26-5\": [$(device BROKEN-265 'iPhone 17 Pro' iPhone-17-Pro Shutdown)],
       \"com.apple.CoreSimulator.SimRuntime.iOS-26-6\": [$(device GOOD-266 'iPhone 16' iPhone-16 Shutdown)]}}"
 
-  run_xcode_test CI=true
+  run_xcode_test -u CI
 
   [ "$status" -eq 0 ]
   [ "$(cat "${work}/destination")" = "platform=iOS Simulator,id=GOOD-266" ]
@@ -102,7 +102,7 @@ device() {
       \"com.apple.CoreSimulator.SimRuntime.iOS-18-6\": [$(device OLD-186 'iPhone 16' iPhone-16 Shutdown)],
       \"com.apple.CoreSimulator.SimRuntime.iOS-26-6\": [$(device NEW-266 'iPhone 17 Pro' iPhone-17-Pro Shutdown)]}}"
 
-  run_xcode_test CI=true
+  run_xcode_test -u CI
 
   [ "$status" -eq 0 ]
   [ "$(cat "${work}/destination")" = "platform=iOS Simulator,id=NEW-266" ]
@@ -115,7 +115,7 @@ device() {
       \"com.apple.CoreSimulator.SimRuntime.iOS-26-5\": [$(device OLD-265 'iPhone 16' iPhone-16 Shutdown)],
       \"com.apple.CoreSimulator.SimRuntime.iOS-26-6\": [$(device NEW-266 'iPhone 16' iPhone-16 Shutdown)]}}"
 
-  run_xcode_test CI=true
+  run_xcode_test -u CI
 
   [ "$status" -eq 0 ]
   [ "$(cat "${work}/destination")" = "platform=iOS Simulator,id=NEW-266" ]
@@ -128,20 +128,20 @@ device() {
       \"com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4\": [$(device DUO 'iPhone Duo' iPhone-Duo Booted)],
       \"com.apple.CoreSimulator.SimRuntime.iOS-27-2\": [$(device PHONE-272 'iPhone 17 Pro' iPhone-17-Pro Shutdown)]}}"
 
-  run_xcode_test CI=true
+  run_xcode_test -u CI
 
   [ "$status" -eq 0 ]
   [ "$(cat "${work}/destination")" = "platform=iOS Simulator,id=PHONE-272" ]
 }
 
-@test "under CI, creates an iPhone on the SDK's runtime when it has none" {
+@test "under CI, creates the dedicated simulator on the SDK's runtime when it has none" {
   write_json "{\"runtimes\": [$(runtime 26.6 26-6 '["arm64"]')]}" \
     "{\"devices\": {\"com.apple.CoreSimulator.SimRuntime.iOS-26-6\": []}}"
 
   run_xcode_test CI=true
 
   [ "$status" -eq 0 ]
-  grep -qx 'simctl create AutoMobile Playground Tests com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro com.apple.CoreSimulator.SimRuntime.iOS-26-6' "${work}/create.log"
+  grep -qx 'simctl create AutoMobile Playground CI com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro com.apple.CoreSimulator.SimRuntime.iOS-26-6' "${work}/create.log"
   [ "$(cat "${work}/destination")" = "platform=iOS Simulator,id=CREATED-0000-0000-0000-000000000001" ]
 }
 
@@ -179,4 +179,38 @@ device() {
   [[ "$output" == *"will be skipped"* ]]
   [ ! -e "${work}/create.log" ]
   [ ! -e "${work}/destination" ]
+}
+
+@test "under CI, a booted foreign simulator is ignored and the dedicated one is created" {
+  write_json "{\"runtimes\": [$(runtime 26.6 26-6 '["arm64"]')]}" \
+    "{\"devices\": {\"com.apple.CoreSimulator.SimRuntime.iOS-26-6\": [$(device FOREIGN 'AutoMobile CI iPhone' iPhone-17-Pro Booted), $(device IDLE 'iPhone 16' iPhone-16 Shutdown)]}}"
+
+  run_xcode_test CI=true
+
+  [ "$status" -eq 0 ]
+  grep -qx 'simctl create AutoMobile Playground CI com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro com.apple.CoreSimulator.SimRuntime.iOS-26-6' "${work}/create.log"
+  [ "$(cat "${work}/destination")" = "platform=iOS Simulator,id=CREATED-0000-0000-0000-000000000001" ]
+}
+
+@test "under CI, an existing dedicated simulator is reused without creating" {
+  write_json "{\"runtimes\": [$(runtime 26.6 26-6 '["arm64"]')]}" \
+    "{\"devices\": {\"com.apple.CoreSimulator.SimRuntime.iOS-26-6\": [$(device FOREIGN 'AutoMobile CI iPhone' iPhone-17-Pro Booted), $(device DEDICATED 'AutoMobile Playground CI' iPhone-17-Pro Shutdown)]}}"
+
+  run_xcode_test CI=true
+
+  [ "$status" -eq 0 ]
+  [ "$(cat "${work}/destination")" = "platform=iOS Simulator,id=DEDICATED" ]
+  [ ! -e "${work}/create.log" ]
+}
+
+@test "a runtime that supports only iPhone Duo is not usable" {
+  duo='[{"name": "iPhone Duo", "productFamily": "iPhone", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo"}]'
+  duo_runtime='{"isAvailable": true, "version": "26.6", "identifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-6", "platform": "iOS", "supportedArchitectures": ["arm64"], "supportedDeviceTypes": '"${duo}"'}'
+  write_json "{\"runtimes\": [$(runtime 26.5 26-5 '["arm64"]'), ${duo_runtime}]}" \
+    "{\"devices\": {\"com.apple.CoreSimulator.SimRuntime.iOS-26-5\": [$(device OK-265 'iPhone 16' iPhone-16 Shutdown)]}}"
+
+  run_xcode_test -u CI
+
+  [ "$status" -eq 0 ]
+  [ "$(cat "${work}/destination")" = "platform=iOS Simulator,id=OK-265" ]
 }

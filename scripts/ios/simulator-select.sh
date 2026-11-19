@@ -8,7 +8,8 @@
 #
 # A runtime is usable when it is an iOS runtime, `isAvailable` is not false, it
 # lists at least one supported architecture (an empty list is the "SimDevice
-# native architecture is nil" failure), and it is not a device-specific runtime
+# native architecture is nil" failure), it supports at least one non-Duo iPhone
+# device type (iOS-27-1 supports only iPhone Duo), and it is not a device-specific runtime
 # such as iOS-27-2-iPhone19-4 (iPhone Duo only). That last rule and the newest-
 # version tie-break match scripts/ios/prototype-agent-smoke.sh and
 # scripts/ios/prototype-mcp-smoke-lane.sh.
@@ -27,7 +28,9 @@ def usable_ios_runtime:
   select(.identifier | test("\\.SimRuntime\\.iOS-"))
   | select(.isAvailable != false)
   | select(.supportedArchitectures == null or (.supportedArchitectures | length) > 0)
-  | select(.identifier | test("\\.iOS-[0-9-]+-[A-Za-z]") | not);
+  | select(.identifier | test("\\.iOS-[0-9-]+-[A-Za-z]") | not)
+  | select(.supportedDeviceTypes == null
+      or any(.supportedDeviceTypes[]; .productFamily == "iPhone" and ((.name // "") | test("Duo") | not)));
 def matches_major_minor($v): .version == $v or (.version | startswith($v + "."));
 '
 
@@ -79,4 +82,16 @@ IOS_SIM_PICK_IPHONE_DEVICE_TYPE_JQ='
   | select(.productFamily == "iPhone")
   | . + {gen: ([(.name // "") | match("iPhone ([0-9]+)") | .captures[0].string | tonumber][0] // 0)}]
 | sort_by(.gen) | last // empty | .identifier
+'
+
+# Under CI the shared host runs other jobs' simulators, so a job never adopts an
+# arbitrary booted or existing one. It uses one dedicated simulator, found by
+# exact name on RUNTIME_ID (else created by the caller).
+IOS_SIM_CI_NAME="AutoMobile Playground CI"
+
+# --arg runtime RUNTIME_ID --arg name NAME, input DEVICES_JSON -> "udid<TAB>name"
+# of the available simulator with exactly that name on that runtime.
+IOS_SIM_PICK_NAMED_JQ='
+[.devices[$runtime] // [] | .[] | select(.isAvailable != false and .name == $name)]
+| first // empty | [.udid, .name] | @tsv
 '

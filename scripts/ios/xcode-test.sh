@@ -147,8 +147,10 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
-# Pick the simulator from simctl's JSON (scripts/ios/simulator-select.sh): a
-# booted iPhone on a usable runtime first (local runs), else an iPhone on the
+# Pick the simulator from simctl's JSON (scripts/ios/simulator-select.sh). Under
+# CI: the dedicated "AutoMobile Playground CI" simulator on the chosen runtime
+# (reused by name, else created). Locally: a
+# booted iPhone on a usable runtime first, else an iPhone on the
 # runtime matching this Xcode's SDK major.minor, else on the newest usable
 # runtime between the deployment target and the SDK. Text greps of
 # `simctl list` used to pick a device whose runtime this Xcode cannot run.
@@ -169,20 +171,24 @@ RUNTIME_VERSION="${RUNTIME_LINE%%$'\t'*}"
 RUNTIME_ID="${RUNTIME_LINE#*$'\t'}"
 print_info "Simulator runtime: iOS ${RUNTIME_VERSION} (${RUNTIME_ID})"
 
-SIMULATOR_LINE=$(jq -r --argjson runtimes "${RUNTIMES_JSON}" --arg v "${SDK_MAJOR_MINOR}" --arg min "${MIN_IOS}" --arg runtime "${RUNTIME_ID}" "${IOS_SIM_PICK_SIMULATOR_JQ}" <<< "${DEVICES_JSON}")
-if [ -z "${SIMULATOR_LINE}" ] && [ -n "${CI:-}" ]; then
-    # CI images may ship a runtime with no simulator for it; create one.
-    DEVICE_TYPE=$(jq -r --arg runtime "${RUNTIME_ID}" "${IOS_SIM_PICK_IPHONE_DEVICE_TYPE_JQ}" <<< "${RUNTIMES_JSON}")
-    if [ -z "${DEVICE_TYPE}" ]; then
-        no_simulator "iOS ${RUNTIME_VERSION} (${RUNTIME_ID}) lists no iPhone device type to create a simulator from."
+if [ -n "${CI:-}" ]; then
+    # Shared CI host: never adopt a booted or pre-existing simulator (it may
+    # belong to another job). Use one dedicated simulator on the chosen runtime.
+    SIMULATOR_LINE=$(jq -r --arg runtime "${RUNTIME_ID}" --arg name "${IOS_SIM_CI_NAME}" "${IOS_SIM_PICK_NAMED_JQ}" <<< "${DEVICES_JSON}")
+    if [ -z "${SIMULATOR_LINE}" ]; then
+        DEVICE_TYPE=$(jq -r --arg runtime "${RUNTIME_ID}" "${IOS_SIM_PICK_IPHONE_DEVICE_TYPE_JQ}" <<< "${RUNTIMES_JSON}")
+        if [ -z "${DEVICE_TYPE}" ]; then
+            no_simulator "iOS ${RUNTIME_VERSION} (${RUNTIME_ID}) lists no iPhone device type to create a simulator from."
+        fi
+        print_info "Creating \"${IOS_SIM_CI_NAME}\" (${DEVICE_TYPE}) on iOS ${RUNTIME_VERSION}"
+        CREATED_UDID=$(xcrun simctl create "${IOS_SIM_CI_NAME}" "${DEVICE_TYPE}" "${RUNTIME_ID}")
+        if [ -z "${CREATED_UDID}" ]; then
+            no_simulator "simctl create returned no UDID for ${DEVICE_TYPE} on ${RUNTIME_ID}."
+        fi
+        SIMULATOR_LINE="${CREATED_UDID}"$'\t'"${IOS_SIM_CI_NAME}"
     fi
-    CREATED_NAME="AutoMobile Playground Tests"
-    print_info "No iPhone simulator on iOS ${RUNTIME_VERSION}; creating \"${CREATED_NAME}\" (${DEVICE_TYPE})"
-    CREATED_UDID=$(xcrun simctl create "${CREATED_NAME}" "${DEVICE_TYPE}" "${RUNTIME_ID}")
-    if [ -z "${CREATED_UDID}" ]; then
-        no_simulator "simctl create returned no UDID for ${DEVICE_TYPE} on ${RUNTIME_ID}."
-    fi
-    SIMULATOR_LINE="${CREATED_UDID}"$'\t'"${CREATED_NAME}"
+else
+    SIMULATOR_LINE=$(jq -r --argjson runtimes "${RUNTIMES_JSON}" --arg v "${SDK_MAJOR_MINOR}" --arg min "${MIN_IOS}" --arg runtime "${RUNTIME_ID}" "${IOS_SIM_PICK_SIMULATOR_JQ}" <<< "${DEVICES_JSON}")
 fi
 if [ -z "${SIMULATOR_LINE}" ]; then
     no_simulator "No iPhone simulator on iOS ${RUNTIME_VERSION}. Create one: xcrun simctl create 'iPhone' <iPhone device type> ${RUNTIME_ID}"

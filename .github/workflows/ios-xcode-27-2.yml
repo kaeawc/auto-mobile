@@ -1,7 +1,8 @@
 name: "Xcode 27.2 (Advisory)"
 
 # Advisory Xcode 27.2 lane on the hosted `xcode-27` preview image (#18363). The required
-# iOS jobs in pull_request.yml stay on Xcode 26.6 and are untouched. This workflow is a
+# iOS jobs in pull_request.yml use the same pin but run on the self-hosted Macs for owner
+# PRs, so this lane keeps hosted-image coverage of every package. This workflow is a
 # separate run, so its jobs are not in the green-main ruleset, are not needs of the
 # required "iOS Build" roll-up, and cannot delay or fail it. Xcode 27.1 is the image
 # default, so every job selects 27.2 explicitly and fails if another version is active.

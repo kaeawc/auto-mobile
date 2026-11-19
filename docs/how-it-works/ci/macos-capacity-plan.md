@@ -4,8 +4,8 @@ Owner steps below are still open. The sourced CircleCI plan numbers are in the e
 [CircleCI migration plan](circleci-macos-migration.md) (#10887).
 
 Rule: every pull-request macOS job runs in exactly one place. Hosted
-GitHub `macos-26` is the fallback for fork PRs and, per run, for a self-hosted
-pool with no online runner.
+GitHub `xcode-27` (`macos-26` for jobs not on the Xcode pin) is the fallback for
+fork PRs and, per run, for a self-hosted pool with no online runner.
 
 ## Pools
 
@@ -181,11 +181,19 @@ job does not skip it.
 - Every moved job isolates `HOME`, `TMPDIR`, the XDG dirs and
   `CFFIXED_USER_HOME` under `$RUNNER_TEMP`, checks out with `clean: true`, and
   removes the isolated home.
-- Xcode: hosted runners use `maxim-lobanov/setup-xcode`. Self-hosted runners use
-  `scripts/ci/select-self-hosted-xcode.sh <version>`, which exports
-  `DEVELOPER_DIR` for that job only, so concurrent jobs do not fight over
-  `xcode-select`. A missing requested Xcode fails the job rather than building
-  on another toolchain.
+- Xcode: one pin, `AUTOMOBILE_XCODE_VERSION` in `scripts/ios/xcode_version.sh`
+  (27.2). Hosted runners select it with `maxim-lobanov/setup-xcode` on the
+  `xcode-27` image. Self-hosted runners use
+  `scripts/ci/select-self-hosted-xcode.sh <version>` (no argument means the pin),
+  which exports `DEVELOPER_DIR` for that job only, so concurrent jobs do not fight
+  over `xcode-select` and the Mac's default Xcode is never changed. A missing
+  requested Xcode fails the job rather than building on another toolchain.
+  Local build scripts call `select_pinned_xcode` from the same file, which exports
+  `DEVELOPER_DIR` for the pinned Xcode when it is installed and `DEVELOPER_DIR` is
+  unset. `test/bats/xcode-version-pin.bats` fails when a workflow job selects
+  another version; its exempt list names the tvOS and watchOS smokes, which stay on
+  Xcode 26.6 until the Mac has tvOS/watchOS 27.2 runtimes. The CircleCI nightly
+  sweeps stay on Xcode 26.6, the published Swift 6.3 toolchain floor.
 - Swift Packages builds unsigned on the Mac: its signing flags are false
   whenever the job is routed there, so no certificate is imported into the
   owner's keychains.
@@ -237,7 +245,7 @@ Routing, in order:
 2. Same-repo PR otherwise, with `AUTOMOBILE_MAC_POOLS_ENABLED=true`: the heavy
    self-hosted lane (the documented fallback, for example if ScreenCaptureKit
    cannot capture on the Namespace VM).
-3. Everything else, including forks: hosted `macos-26`.
+3. Everything else, including forks: hosted `macos-26` (this job selects no Xcode).
 
 The job keeps one capture retry for the known ScreenCaptureKit flake and a
 30-minute timeout. On the heavy lane it isolates `HOME` like the other
@@ -249,22 +257,22 @@ ports. Use that fallback only with the heavy runner under a dedicated user.
 | Job                                                                            | Same-repo PR                               | Fork PR        |
 | ------------------------------------------------------------------------------ | ------------------------------------------ | -------------- |
 | SwiftLint                                                                      | `ubuntu-24.04`                             | `ubuntu-24.04` |
-| Swift Code Coverage                                                            | self-hosted `automobile-mac`               | `macos-26`     |
+| Swift Code Coverage                                                            | self-hosted `automobile-mac`               | `xcode-27`     |
 | Build Desktop App / Installer Minimal (macOS)                                  | self-hosted `automobile-mac`               | `macos-latest` |
-| Swift Packages (Xcode 26.6)                                                    | self-hosted `automobile-mac`               | `macos-26`     |
-| Swift Prototype Apps (one leg per simulator app, Xcode 26.6)                   | self-hosted `automobile-mac`               | `macos-26`     |
-| Build Root SPM Package                                                         | self-hosted `automobile-mac`               | `macos-26`     |
-| Build Xcode Projects (Playground, CtrlProxy)                                   | self-hosted `automobile-mac-heavy`         | `macos-26`     |
-| Prototype Simulator iOS 26                                                     | self-hosted `automobile-mac-heavy`         | `macos-26`     |
+| Swift Packages (Xcode 27.2)                                                    | self-hosted `automobile-mac`               | `xcode-27`     |
+| Swift Prototype Apps (one leg per simulator app, Xcode 27.2)                   | self-hosted `automobile-mac`               | `xcode-27`     |
+| Build Root SPM Package                                                         | self-hosted `automobile-mac`               | `xcode-27`     |
+| Build Xcode Projects (Playground, CtrlProxy)                                   | self-hosted `automobile-mac-heavy`         | `xcode-27`     |
+| Prototype Simulator iOS 27.2                                                   | self-hosted `automobile-mac-heavy`         | `xcode-27`     |
 | iOS Playground Tests                                                           | CircleCI (heavy lane if label-forced)      | CircleCI       |
 | iOS Device Capture to WHEP                                                     | Namespace `auto-mobile-macos`              | `macos-26`     |
-| XCTestRunner Simulator Tests (`run-ios-sim`, contract inputs)                  | hosted `macos-26` (exception, see above)   | `macos-26`     |
+| XCTestRunner Simulator Tests (`run-ios-sim`, contract inputs)                  | hosted `xcode-27` (exception, see above)   | `xcode-27`     |
 | merge.yml: Build Desktop App (macOS), Generate/Build Xcode Projects            | CircleCI post-merge, path-gated, coalesced | n/a            |
 | nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | CircleCI `nightly-macos`                   | n/a            |
 | Xcode 27.2 (Advisory): packages, projects, tvOS/watchOS/visionOS runners       | hosted `xcode-27`                          | `xcode-27`     |
 
 Until the owner steps below are done, the self-hosted and Namespace jobs run on
-hosted `macos-26`. A self-hosted placement falls back to
+their hosted fallback. A self-hosted placement falls back to
 hosted for any run where Mac Pool Routing finds that pool offline.
 
 The Xcode 27.2 row is `ios-xcode-27-2.yml`, a separate advisory workflow outside the
@@ -294,13 +302,14 @@ These need a login or a credential.
 
 Run on the Mac as the user that owns `~/actions-runner`:
 
-1. Keep an Xcode 26.x installed (currently 26.6 at `/Applications/Xcode.app`,
-   next to Xcode 27.1 beta) with its iOS platform
-   (`xcodebuild -downloadPlatform iOS`). Swift Packages, Build Root SPM Package,
-   Build Xcode Projects, the Playground fallback and Prototype Simulator request
-   26.6. Then `bash scripts/ci/select-self-hosted-xcode.sh 26.6` uses 26.6 when
-   installed and otherwise the newest installed 26.x at or above it,
-   printing which it chose (#11422). It never selects Xcode 27.
+1. Keep the pinned Xcode installed (currently 27.2 at
+   `/Applications/Xcode-27.2.0.app`, next to 26.6 at `/Applications/Xcode.app`, the
+   `xcode-select` default) with its iOS platform
+   (`xcodebuild -downloadPlatform iOS`). Swift Code Coverage, Swift Packages, Build
+   Root SPM Package, Build Xcode Projects, the Playground fallback and Prototype
+   Simulator request 27.2. `bash scripts/ci/select-self-hosted-xcode.sh 27.2` uses
+   27.2 when installed and otherwise the newest installed 27.x at or above it,
+   printing which it chose (#11422). It never crosses majors.
 2. Get a registration token (valid for one hour):
 
    ```bash

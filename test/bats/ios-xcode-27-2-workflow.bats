@@ -57,11 +57,12 @@ wf_query() {
   [ "${output}" = "0" ]
 }
 
-@test "the required iOS jobs stay on Xcode 26.6 and do not reference this workflow" {
+@test "the required iOS jobs use the same pinned Xcode and do not reference this workflow" {
+  source scripts/ios/xcode_version.sh
   for job in ios-swift-packages ios-xcode-build; do
     run wf_query "${PR_WORKFLOW}" "wf.jobs[\"${job}\"].strategy.matrix.config.map((c) => c.xcode).join(\",\")"
-    [ "${output}" = "26.6" ]
+    [ "${output}" = "${AUTOMOBILE_XCODE_VERSION}" ]
   done
-  run grep -nE 'ios-xcode-27-2|Xcode 27\.2|xcode-27' "${PR_WORKFLOW}"
+  run grep -nE 'ios-xcode-27-2' "${PR_WORKFLOW}"
   [ "${status}" -eq 1 ]
 }

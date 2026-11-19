@@ -23,10 +23,10 @@ const HEAVY_LANE_JOBS = ["ios-xcode-build", "ios-playground-tests", "prototype-s
 const FALLBACK: Record<string, string> = {
   "ios-swift-packages": "matrix.config.runner",
   "ios-swift-prototype-apps": "matrix.config.runner",
-  "ios-spm-root-package-build": "'macos-26'",
+  "ios-spm-root-package-build": "'xcode-27'",
   "ios-xcode-build": "matrix.config.runner",
   "ios-playground-tests": "matrix.config.runner",
-  "prototype-simulator": "'macos-26'",
+  "prototype-simulator": "'xcode-27'",
 };
 
 describe("root SPM toolchain floor workflow", () => {
@@ -69,7 +69,7 @@ describe("root SPM toolchain floor workflow", () => {
     expect(jobs["build-desktop-app"]?.["runs-on"]).toContain("|| matrix.os");
     expect(jobs["installer-minimal"]?.["runs-on"]).toContain("matrix.os == 'macos-latest'");
     expect(jobs["installer-minimal"]?.["runs-on"]).toContain("|| matrix.os");
-    expect(jobs["swift-code-coverage"]?.["runs-on"]).toContain("|| 'macos-26'");
+    expect(jobs["swift-code-coverage"]?.["runs-on"]).toContain("|| 'xcode-27'");
   });
 
   test("runs SwiftLint on Linux with the SHA-256 verified pinned binary (#17581)", () => {
@@ -243,7 +243,7 @@ describe("root SPM toolchain floor workflow", () => {
       expect(cleanup?.run).toContain("rm -rf --");
     }
     const coverage = loadJobSteps(".github/workflows/pull_request.yml", "swift-code-coverage");
-    expect(stepNamed(coverage, "Select Xcode 26.6")?.if).toBe(
+    expect(stepNamed(coverage, "Select Xcode 27.2")?.if).toBe(
       "runner.environment == 'github-hosted'",
     );
     const desktop = loadJobSteps(".github/workflows/pull_request.yml", "build-desktop-app");
@@ -412,17 +412,17 @@ describe("root SPM toolchain floor workflow", () => {
     );
   });
 
-  test("selects Xcode 26.6 on every runner before building the root package", () => {
+  test("selects Xcode 27.2 on every runner before building the root package", () => {
     const steps = loadJobSteps(".github/workflows/pull_request.yml", "ios-spm-root-package-build");
-    const selectXcode = stepNamed(steps, "Select Xcode 26.6");
-    const selfHosted = stepNamed(steps, "Select self-hosted Xcode 26.6");
+    const selectXcode = stepNamed(steps, "Select Xcode 27.2");
+    const selfHosted = stepNamed(steps, "Select self-hosted Xcode 27.2");
     const build = steps.findIndex((step) => step.name === "Build root Package.swift");
 
     expect(steps.length).toBeGreaterThan(0);
     expect(selectXcode?.if).toBe("runner.environment == 'github-hosted'");
     expect(selectXcode?.uses).toBe("maxim-lobanov/setup-xcode@v1");
-    expect(selectXcode?.with?.["xcode-version"]).toBe("26.6");
-    expect(selfHosted?.run).toBe('bash scripts/ci/select-self-hosted-xcode.sh "26.6"');
+    expect(selectXcode?.with?.["xcode-version"]).toBe("27.2");
+    expect(selfHosted?.run).toBe('bash scripts/ci/select-self-hosted-xcode.sh "27.2"');
     expect(steps.indexOf(selectXcode!)).toBeLessThan(build);
     expect(steps.indexOf(selfHosted!)).toBeLessThan(build);
     const prototypeBuild = stepNamed(steps, "Build AutoMobilePrototype library and embed consumer");

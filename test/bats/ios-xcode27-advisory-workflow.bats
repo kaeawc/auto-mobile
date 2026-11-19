@@ -35,7 +35,7 @@ WORKFLOW=".github/workflows/ios-xcode27-advisory.yml"
 }
 
 @test "Xcode 27 is selected without touching the machine-wide default" {
-  grep -qF 'bash scripts/ci/select-self-hosted-xcode.sh "27.0"' "${WORKFLOW}"
+  grep -qF 'bash scripts/ci/select-self-hosted-xcode.sh "27.2"' "${WORKFLOW}"
   run grep -nE 'sudo|xcode-select|maxim-lobanov/setup-xcode' "${WORKFLOW}"
   [ "${status}" -eq 1 ]
 }
@@ -56,6 +56,6 @@ WORKFLOW=".github/workflows/ios-xcode27-advisory.yml"
 }
 
 @test "the required iOS gate does not depend on the Xcode 27 job" {
-  run grep -n "xcode27\|Xcode 27" .github/workflows/pull_request.yml
+  run grep -n "xcode27" .github/workflows/pull_request.yml
   [ "${status}" -eq 1 ]
 }

@@ -918,6 +918,8 @@ data class PrototypeResult(
   val degradedEffects: List<PrototypeDegradedEffect>? = null,
   /** Single-runtime status returned by a disposable app's attach agent. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val status: JsonObject? = null,
+  /** The successful show's runtime and module availability. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val platformRuntime: PrototypePlatformReport? = null,
 ) : WebSocketResponse(), CorrelatedResponse
 
 /**
@@ -1112,6 +1114,8 @@ data class PrototypeStatusEntry(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val orientation: String? = null,
   /** `unsupported` when a style was requested: overlays do not own the status bar. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val statusBar: String? = null,
+  /** The module runtime snapshot for this presentation, when the runtime reports it. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val platformRuntime: PrototypePlatformReport? = null,
 )
 
 /**

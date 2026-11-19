@@ -4006,6 +4006,12 @@
           "type": "json",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "platformRuntime",
+          "type": "object:dev.jasonpearson.automobile.protocol.PrototypePlatformReport",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -9342,6 +9348,58 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypePlatformReport": [
+      {
+        "name": "runtime",
+        "type": "enum",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "modules",
+        "type": "map",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "appState",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "permissions",
+        "type": "map",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypePlatformReport.Module": [
+      {
+        "name": "availability",
+        "type": "enum",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "mode",
+        "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "reason",
+        "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "inFlight",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypePress": [
       {
         "name": "scale",
@@ -10242,6 +10300,12 @@
       {
         "name": "statusBar",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "platformRuntime",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypePlatformReport",
         "nullable": true,
         "hasDefault": true
       }

@@ -12,6 +12,7 @@ import {
   PROTOTYPE_APPEARANCE_CAPABILITY,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_MULTI_SURFACE_CAPABILITY,
+  PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
   PROTOTYPE_WINDOW_CHROME_CAPABILITY,
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
@@ -38,6 +39,7 @@ import {
   prototypeIosMinimumOsNote,
 } from "../../features/prototype/prototypeIosMinimumOs";
 import { resolvePrototypeDisplayId } from "../../features/prototype/prototypeDisplay";
+import type { PrototypeRuntimeKind } from "../../features/prototype/prototypePlatformReport";
 import { type PrototypeSpec } from "../../features/prototype/prototypeSpec";
 import {
   resolvePrototypeWindowChrome,
@@ -212,6 +214,7 @@ function shaderRefusalFor(
 /** Refuses spec-introduced features before a show or patch reaches the device. */
 export async function specCapabilityRefusal(
   target: {
+    disposableApp?: true;
     android?: Pick<NonNullable<PrototypeTarget["android"]>, "supportsCommand">;
     ios?: Pick<NonNullable<PrototypeTarget["ios"]>, "supportsCapability">;
   },
@@ -220,23 +223,37 @@ export async function specCapabilityRefusal(
   {
     iosMinimumOs = PROTOTYPE_IOS_MINIMUM_OS,
     env,
-  }: { iosMinimumOs?: Readonly<Record<string, number>>; env?: NodeJS.ProcessEnv } = {},
+    platform = target.android || target.disposableApp ? "android" : "ios",
+  }: {
+    iosMinimumOs?: Readonly<Record<string, number>>;
+    env?: NodeJS.ProcessEnv;
+    platform?: "android" | "ios";
+  } = {},
 ): Promise<PrototypeResult | undefined> {
   const shaderRefusal = shaderRefusalFor(target, spec, env);
   if (shaderRefusal) {
     return shaderRefusal;
   }
-  for (const gate of prototypeRequiredCapabilities(spec, target.android ? "android" : "ios")) {
+  for (const gate of prototypeRequiredCapabilities(spec, platform)) {
     const supported = target.android
       ? await target.android.supportsCommand(gate.capability)
       : target.ios?.supportsCapability(gate.capability) === true;
     // A capability lookup may wait for the connection and handshake.
     signal?.throwIfAborted();
     if (!supported) {
-      const platform = target.android ? "android" : "ios";
       const note =
         platform === "ios" ? prototypeIosMinimumOsNote(gate.capability, iosMinimumOs) : "";
-      const message = gate.unsupportedMessage(gate.fields, platform) + note;
+      let runtime: PrototypeRuntimeKind | undefined;
+      if (target.disposableApp) {
+        runtime = "disposableApp";
+      } else if (target.android) {
+        runtime = "ctrlproxy";
+      } else if (target.ios) {
+        runtime = target.ios.supportsCapability(PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY)
+          ? "iosViewer"
+          : "iosAgent";
+      }
+      const message = gate.unsupportedMessage(gate.fields, platform, runtime) + note;
       return { success: false, error: new ActionableError(message).message };
     }
   }
@@ -526,7 +543,10 @@ export async function preflightMutation(
   const failure =
     iosResetRefusal(target, args) ??
     (args.action === "show" && args.spec !== undefined
-      ? await specCapabilityRefusal(target, args.spec, signal, { env: dependencies.env })
+      ? await specCapabilityRefusal(target, args.spec, signal, {
+          env: dependencies.env,
+          platform: device.platform === "android" ? "android" : "ios",
+        })
       : undefined) ??
     (await appearanceRefusal(target, args, signal)) ??
     (await windowOptionsRefusal(target, args, signal));

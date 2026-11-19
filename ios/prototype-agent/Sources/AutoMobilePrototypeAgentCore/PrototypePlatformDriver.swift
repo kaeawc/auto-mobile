@@ -85,8 +85,7 @@ final class PrototypePlatformDriver {
         calls[id] = Task { [weak self] in
             guard !Task.isCancelled else { return }
             let result: PlatformCallResult
-            let name = String(job.call.call.split(separator: ".").first ?? "")
-            if let module = registry.modules[name] {
+            if let module = registry.modules[job.call.moduleName] {
                 switch module.availability() {
                 case .ready:
                     if let invalid = Self.invalidArguments(job.call) { result = invalid }

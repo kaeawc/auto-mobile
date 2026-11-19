@@ -108,6 +108,9 @@ class PrototypePermissionsModule(
 
   override fun availability() = PlatformAvailability.Ready
 
+  internal val permissionReport: Map<String, String>
+    get() = mutableState.value.mapValues { (_, value) -> value.jsonPrimitive.content }
+
   override suspend fun call(call: PlatformCall): PlatformCallResult {
     if (call.call != "permissions.request") return failure(PlatformErrorCode.UNSUPPORTED)
     if (PrototypePlatformCalls.argumentsError(call.call, call.args) != null)

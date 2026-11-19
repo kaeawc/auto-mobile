@@ -159,6 +159,7 @@ function toPrototypeResult(result: PrototypeAgentResult): PrototypeResult {
       : {}),
     ...prototypeDegradedEffectsField(result.degradedEffects),
     success: result.success,
+    platformRuntime: result.platformRuntime,
     requestId: result.requestId,
     ...resultCount("fired", result.fired),
     ...resultCount("cleared", result.cleared),

@@ -222,6 +222,7 @@ test/fixtures/android-display/fold-pixel10pf-api36/fold-*-hinge-angle0.txt -text
 
 # Shared prototype specs: preserve byte limits and path parity on Windows.
 test/fixtures/prototype-spec/**/*.json text eol=lf
+test/fixtures/prototype-platform-report/*.json text eol=lf
 test/fixtures/prototype-saved-layout/**/*.json text eol=lf
 test/fixtures/prototype-embedded-routing/*.json text eol=lf
 test/fixtures/prototype-egress-policy/*.json text eol=lf

@@ -19,6 +19,8 @@ public struct PlatformCall: Equatable, Sendable {
     public let callId: String
     public let call: String
     public let args: [String: JSONValue]
+
+    var moduleName: String { String(call.prefix(while: { $0 != "." })) }
 }
 
 public enum PlatformCallResult: Equatable, Sendable {

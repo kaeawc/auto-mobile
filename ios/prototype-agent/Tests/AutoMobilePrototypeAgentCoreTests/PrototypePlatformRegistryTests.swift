@@ -33,6 +33,10 @@ private final class FakePlatformModule: PrototypePlatformModule {
     }
 }
 
+extension FakePlatformModule: PrototypePlatformReportModeSource {
+    var platformReportMode: PrototypePlatformReport.Mode? { .fake }
+}
+
 /// Reference test vocabulary only; production targets never register this module.
 @MainActor
 private final class TestPlatformModule: PrototypePlatformModule {
@@ -126,6 +130,7 @@ final class PrototypePlatformRegistryTests: XCTestCase {
         XCTAssertEqual(events[2].state["status"], .string("success"))
         XCTAssertEqual(events[3].payload.objectFields?["callId"], .string(call.callId))
         XCTAssertEqual(events[3].payload.objectFields?["outcome"], .string("success"))
+        XCTAssertEqual(events[3].payload.objectFields?["inFlight"], .number(0))
         XCTAssertEqual(session.data?["result__meta"]?.objectFields?["durationMs"], .number(7))
     }
 
@@ -322,6 +327,34 @@ final class PrototypePlatformRegistryTests: XCTestCase {
         XCTAssertEqual(snapshots.count, 2, "one refresh for the signal and one for the event")
         XCTAssertEqual(snapshots.first?["test"], .object(["n": .number(7)]))
         driver.stopEvents()
+    }
+
+    @MainActor
+    func testReportReadsAvailabilityModeAndPendingCallsFromTheSession() throws {
+        let module = FakePlatformModule()
+        let registry = PrototypePlatformRegistry(modules: [module])
+        var session = PrototypeSession(clock: PlatformClock())
+        try session.show(spec())
+        _ = try session.run([action()])
+
+        let ready = registry.report(runtime: .iosAgent, inFlight: session.platformInFlight, appState: "active")
+        XCTAssertEqual(ready.runtime, .iosAgent)
+        XCTAssertEqual(ready.appState, "active")
+        XCTAssertEqual(ready.modules["test"], .init(
+            availability: .ready, mode: .fake, reason: .fakeMode, inFlight: 1
+        ))
+        XCTAssertNil(ready.permissions)
+
+        module.available = .needsPermission(["camera"])
+        let denied = registry.report(runtime: .iosAgent, inFlight: session.platformInFlight)
+        XCTAssertEqual(denied.modules["test"], .init(
+            availability: .unavailable, mode: .fake, reason: .permissionDenied, inFlight: 1
+        ))
+        module.available = .unavailable("unrecognized diagnostic")
+        let other = registry.report(runtime: .iosAgent, inFlight: [:])
+        XCTAssertEqual(other.modules["test"], .init(
+            availability: .unavailable, mode: .fake, reason: nil, inFlight: 0
+        ))
     }
 
     @MainActor

@@ -87,6 +87,8 @@ internal class RuntimeAttachTarget(
             storage = current.storage?.report(),
             timers = current.timerReports(),
             feedbackLog = current.feedbackLog.snapshot(),
+            platformRuntime =
+              current.platformRuntimeReport(PrototypePlatformReport.Runtime.DISPOSABLE_APP),
             degradedEffects = prototypeEffectReport(model.root, current.effectHealth),
           )
         JsonObject(

@@ -598,9 +598,11 @@ function isSkippedPrRun(run: RawRun): boolean {
 
 /**
  * Jobs of every run, one listing call per run. A skipped pull_request run lists only skipped
- * jobs, which matter solely as skipped required checks, and one workflow lists the same jobs on
- * every run. So the first skipped run of each workflow is fetched as a sample, and the other skipped
- * runs of a workflow whose sample has no required check keep no jobs, without an API call.
+ * jobs, which matter solely as skipped required checks. So the first skipped run of each workflow
+ * is fetched as a sample, and the other skipped runs of a workflow whose sample has no required
+ * check keep no jobs, without an API call. This assumes a workflow's job names do not change within
+ * the window; a head whose edit of that workflow adds a required job that is then skipped reads as
+ * missing that check (not-green) instead of green.
  */
 async function fetchRunJobs(
   api: GhApi,
@@ -659,6 +661,32 @@ async function fetchRunJobs(
   };
 }
 
+/**
+ * Supersession and per-PR figures compare a PR's heads, so one incomplete head drops every head it
+ * may share a PR with: heads linked by a PR number, and heads on the same branch (an unresolved
+ * head has no PR number, so its branch stands in). Repeats until no head is added, since a head
+ * can link several PRs.
+ */
+export function omitRelatedHeads(
+  runs: readonly RunFact[],
+  rawRuns: readonly RawRun[],
+  omitted: Set<string>,
+): void {
+  const branchById = new Map(rawRuns.map((run) => [run.id, run.head_branch]));
+  const links = (run: RunFact) => [
+    ...run.prNumbers.map((number) => `pr:${number}`),
+    ...(branchById.get(run.id) ? [`branch:${branchById.get(run.id)}`] : []),
+  ];
+  for (let grew = omitted.size > 0; grew;) {
+    const dropped = new Set(runs.filter((run) => omitted.has(run.headSha)).flatMap(links));
+    const added = runs.filter(
+      (run) => !omitted.has(run.headSha) && links(run).some((link) => dropped.has(link)),
+    );
+    added.forEach((run) => omitted.add(run.headSha));
+    grew = added.length > 0;
+  }
+}
+
 export async function fetchBundle(
   api: GhApi,
   cache: CacheStore,
@@ -695,13 +723,7 @@ export async function fetchBundle(
   const prs = fetchedPrs.filter((pr): pr is PrFact => pr !== null);
   const external = await fetchExternalJobs(api, cache, options, rawRuns, prs, runs, stops);
   external.unfetchedShas.forEach((sha) => omitted.add(sha));
-  // Supersession and per-PR figures compare a PR's heads, so one incomplete head drops them all.
-  const omittedPrs = new Set(
-    runs.filter((run) => omitted.has(run.headSha)).flatMap((run) => run.prNumbers),
-  );
-  runs
-    .filter((run) => run.prNumbers.some((number) => omittedPrs.has(number)))
-    .forEach((run) => omitted.add(run.headSha));
+  omitRelatedHeads(runs, rawRuns, omitted);
 
   const keptRuns = runs.filter((run) => !omitted.has(run.headSha));
   const keptPrNumbers = new Set(keptRuns.flatMap((run) => run.prNumbers));

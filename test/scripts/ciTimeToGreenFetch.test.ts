@@ -22,6 +22,7 @@ import {
   type CommitStatus,
   type FetchOptions,
   normalizeRun,
+  omitRelatedHeads,
   requiredChecksOfRuleset,
   type CacheStore,
   type GhApi,
@@ -369,6 +370,29 @@ describe("skipped runs and partial bundles (#18691)", () => {
     expect(bundle.runs.map((item) => item.headSha)).toEqual(["other"]);
     expect(bundle.meta.partial).toMatchObject({ omittedHeadShas: 2, omittedRuns: 2 });
     expect(bundle.prs.map((pr) => pr.number)).toEqual([8]);
+  });
+
+  test("omitted heads close over shared PRs and over the branch of an unresolved head", () => {
+    const fact = (id: number, sha: string, prs: number[], branch?: string) => ({
+      raw: { ...run(id, "pr.yml", "success", sha), head_branch: branch, pull_requests: [] },
+      prs,
+    });
+    const items = [
+      fact(1, "x", [1]),
+      fact(2, "y", [2, 1]),
+      fact(3, "z", [2]),
+      fact(4, "orphan", [], "feature"),
+      fact(5, "sibling", [5], "feature"),
+      fact(6, "kept", [6], "other"),
+    ];
+    const facts = items.map((item) => ({ ...normalizeRun(item.raw, []), prNumbers: item.prs }));
+    const omitted = new Set(["x", "orphan"]);
+    omitRelatedHeads(
+      facts,
+      items.map((item) => item.raw),
+      omitted,
+    );
+    expect([...omitted].sort()).toEqual(["orphan", "sibling", "x", "y", "z"]);
   });
 
   test("without partialOnStop a stop still throws, and the budget refuses every later call", async () => {

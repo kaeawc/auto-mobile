@@ -6,6 +6,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import fixtures from "../../fixtures/prototype-spec/repeat/nested.json";
 import sourceFixtures from "../../fixtures/prototype-spec/repeat/nested-sources.json";
 import cellLimitFixture from "../../fixtures/prototype-spec/repeat/nested-cell-limit.json";
+import duplicateKeyFixtures from "../../fixtures/prototype-spec/repeat/nested-duplicate-keys.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PrototypeRepeatData } from "../../../src/features/prototype/prototypeData";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
@@ -273,3 +274,14 @@ test("shared cell fixtures straddle the exact contract limit", () => {
       ),
   ).toBe(contract.limits.MAX_PROTOTYPE_REPEAT_PATH_CELLS + 1);
 });
+
+for (const fixture of duplicateKeyFixtures as { name: string; spec: Raw; error: unknown }[]) {
+  test(`duplicate keys: ${fixture.name}`, () => {
+    const result = validatePrototypeSpec(JSON.stringify(fixture.spec));
+    if (fixture.error === null) {
+      expect(result).toMatchObject({ success: true });
+    } else {
+      expect(result).toMatchObject({ success: false, error: fixture.error });
+    }
+  });
+}

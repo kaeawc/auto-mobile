@@ -539,8 +539,21 @@ internal object PrototypeBindableFields {
 
     fun component(node: JsonObject, path: String): T? =
       when ((node["type"] as? JsonPrimitive)?.content) {
-        "button",
-        "fab" -> visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
+        "button" ->
+          visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
+            ?: (node["split"] as? JsonObject)?.let { split ->
+              objects(split, "menu", "$path.split").firstNotNullOfOrNull { (entry, entryPath) ->
+                visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
+                  ?: part(entry, entryPath)
+              }
+            }
+        "fab" ->
+          visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
+            ?: (node["menu"] as? JsonObject)?.let { menu ->
+              objects(menu, "items", "$path.menu").firstNotNullOfOrNull { (entry, entryPath) ->
+                part(entry, entryPath)
+              }
+            }
         "menu" ->
           objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
             visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)

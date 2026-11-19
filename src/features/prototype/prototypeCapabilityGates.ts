@@ -189,6 +189,11 @@ import {
 } from "./prototypeChecksCapability";
 
 import { PROTOTYPE_TOOLTIP_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { PROTOTYPE_M3_EXPRESSIVE_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeM3ExpressiveFields,
+  prototypeM3ExpressiveUnsupportedMessage,
+} from "./prototypeM3Expressive";
 import { prototypeTooltipFields, prototypeTooltipUnsupportedMessage } from "./prototypeTooltip";
 
 import { PROTOTYPE_DRAWER_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -330,6 +335,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_TOOLTIP_CAPABILITY,
     fields: prototypeTooltipFields,
     unsupportedMessage: prototypeTooltipUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_M3_EXPRESSIVE_CAPABILITY,
+    fields: prototypeM3ExpressiveFields,
+    unsupportedMessage: prototypeM3ExpressiveUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_STRINGS_CAPABILITY,

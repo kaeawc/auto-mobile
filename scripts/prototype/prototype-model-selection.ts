@@ -155,6 +155,15 @@ export const prototypeModelSelection = {
     doc: "An image's zoom range: 1 up to `maxScale` (1..8).",
   },
   radioOption: {},
+  buttonSplit: {
+    languages: ["kotlin"],
+    doc: "An M3 Expressive split `button`: the trailing half opens [menu]; `onTap` stays the leading action.",
+  },
+  fabMenuItem: { languages: ["kotlin"] },
+  fabMenu: {
+    languages: ["kotlin"],
+    doc: "An M3 Expressive FAB menu: tapping the `fab` toggles 2..6 [items] above it.",
+  },
   chartRange: {
     swiftName: "PrototypeChartRange",
     doc: "A fixed y axis for a chart; `max` is above `min`.",

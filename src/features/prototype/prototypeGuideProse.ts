@@ -1,5 +1,6 @@
 import { GUIDE_DISPOSABLE_APPS, GUIDE_PLATFORM_NAMESPACES } from "./prototypeGuideProseMore";
 import { GUIDE_MOTION_V3 } from "./prototypeGuideMotionV3";
+import { GUIDE_M3_EXPRESSIVE } from "./prototypeGuideM3Expressive";
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
 import {
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
@@ -459,7 +460,7 @@ Optional \`caret\` is \`auto\` (default), \`top\`, \`bottom\`, \`start\` or \`en
 
 \`drawer\` requires \`prototype_drawer_v1\`, \`edge: "start"|"end"\`, boolean \`openWhen: {key, equals}\` and a \`child\` node. Start/end follow layout direction. The renderer fixes panel width; there is no width field. Optional \`scrim\` accepts the same color value (including mode pairs) as bottomSheet and defaults to the scrim role. Optional \`dismissOnSwipe\` defaults to true, as for bottomSheet. Both nodes accept the common node fields, including \`onTap\`, but no long-press or double-tap handlers.
 
-## Menu and select
+${GUIDE_M3_EXPRESSIVE}## Menu and select
 
 \`menu\` and \`select\` require \`prototype_menus_v1\`; the host refuses them before showing or uploading assets when the connected renderer lacks it.
 

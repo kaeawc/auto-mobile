@@ -609,6 +609,7 @@ private fun polishFeatures(
   if (PrototypeStylePolishV2Rules.required(fields))
     result.add(PrototypeStylePolishV2Rules.CAPABILITY)
   if (PrototypeMotionV3.required(fields)) result.add(PrototypeMotionV3.CAPABILITY)
+  if (PrototypeM3Expressive.required(fields)) result.add(PrototypeM3Expressive.CAPABILITY)
   if (PrototypeChannels.needsRealtimeCapability(fields)) need("platform_realtime")
   if (fields.text("type") == "platform" && fields.text("call") == "share.open")
     need("platform_share")

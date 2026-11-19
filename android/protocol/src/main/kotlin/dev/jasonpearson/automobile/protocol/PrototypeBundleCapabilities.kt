@@ -15,6 +15,7 @@ internal object PrototypeBundleCapabilities {
       if (node["type"] == JsonPrimitive("pager") && "stateKey" in node)
         caps.add("prototype_pager_state_key_v1")
       if (PrototypeMotionV3.required(node)) caps.add(PrototypeMotionV3.CAPABILITY)
+      if (PrototypeM3Expressive.required(node)) caps.add(PrototypeM3Expressive.CAPABILITY)
       caps.addAll(PrototypeBundleNodeCapabilities.collect(node))
       if (PrototypeStringConditions.uses(node)) caps.add("prototype_string_conditions_v1")
       fields(node, caps)

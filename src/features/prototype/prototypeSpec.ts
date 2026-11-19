@@ -3,6 +3,7 @@ import { prototypeChannelsSchema } from "./prototypeChannelSchema";
 import { prototypeRootBlockFields } from "./prototypeRootBlockSchemas";
 import { prototypeBadgeShape, prototypeDividerShape } from "./prototypeLeafNodeShapes";
 import { prototypeSurfaceNodeSchemas } from "./prototypeWebViewSchema";
+import { prototypeM3ExpressiveSchemas } from "./prototypeM3ExpressiveSchema";
 import { prototypeMediaNodeSchemas, prototypeMediaSchema } from "./prototypeMediaSchema";
 import { prototypePressSchema } from "./prototypePressSchema";
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
@@ -374,6 +375,12 @@ const pasteButtonBaseSchema = z
     into: pointerSchema,
   })
   .strict();
+const expressive = prototypeM3ExpressiveSchemas(
+  commonNodeShape,
+  enabledShape,
+  actionListSchema,
+  () => menuItemSchema,
+);
 const buttonBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -382,6 +389,7 @@ const buttonBaseSchema = z
     label: z.string().min(1),
     variant: z.enum(["filled", "tonal", "elevated", "outlined", "text"]).optional(),
     icon: iconNameSchema.optional(),
+    split: expressive.buttonSplit.optional(),
   })
   .strict();
 const radioGroupBaseSchema = z
@@ -492,27 +500,8 @@ const iconButtonBaseSchema = z
     variant: z.enum(["standard", "filled", "tonal", "outlined"]).optional(),
   })
   .strict();
-const fabBaseSchema = z
-  .object({
-    ...commonNodeShape,
-    ...enabledShape,
-    type: z.enum(["fab"]),
-    icon: iconNameSchema,
-    label: z.string().min(1).optional(),
-    size: z.enum(["small", "regular", "large"]).optional(),
-  })
-  .strict();
-const segmentedButtonBaseSchema = z
-  .object({
-    ...commonNodeShape,
-    type: z.enum(["segmentedButton"]),
-    stateKey: stateKeyFieldSchema,
-    options: z
-      .array(z.object({ value: z.string().min(1), label: z.string().min(1) }).strict())
-      .min(2)
-      .max(5),
-  })
-  .strict();
+const fabBaseSchema = expressive.fab;
+const segmentedButtonBaseSchema = expressive.segmentedButton;
 const topAppBarBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -527,15 +516,8 @@ const topAppBarBaseSchema = z
   .strict();
 const dividerBaseSchema = z.object({ ...commonNodeShape, ...prototypeDividerShape }).strict();
 const badgeBaseSchema = z.object({ ...commonNodeShape, ...prototypeBadgeShape }).strict();
-const progressBaseSchema = z
-  .object({
-    ...commonNodeShape,
-    type: z.enum(["progress"]),
-    variant: z.enum(["linear", "circular"]).optional(),
-    stateKey: stateKeyFieldSchema.optional(),
-    max: z.number().finite().optional(),
-  })
-  .strict();
+const progressBaseSchema = expressive.progress;
+const loadingIndicatorBaseSchema = expressive.loadingIndicator;
 const chartBaseSchema = z.object({ ...commonNodeShape, ...prototypeChartShape }).strict();
 const surfaceNodeSchemas = prototypeSurfaceNodeSchemas(commonNodeShape, actionListSchema);
 const mediaNodeSchemas = prototypeMediaNodeSchemas(commonNodeShape);
@@ -732,6 +714,7 @@ export type PrototypeNode =
   | z.infer<typeof dividerBaseSchema>
   | z.infer<typeof badgeBaseSchema>
   | z.infer<typeof progressBaseSchema>
+  | z.infer<typeof loadingIndicatorBaseSchema>
   | z.infer<(typeof surfaceNodeSchemas)[number]>
   | z.infer<(typeof mediaNodeSchemas)[number]>
   | z.infer<typeof chartBaseSchema>
@@ -816,6 +799,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       dividerBaseSchema,
       badgeBaseSchema,
       progressBaseSchema,
+      loadingIndicatorBaseSchema,
       ...surfaceNodeSchemas,
       ...mediaNodeSchemas,
       chartBaseSchema,

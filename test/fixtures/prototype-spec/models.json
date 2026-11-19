@@ -553,6 +553,7 @@
     "aspectRatio": "1:1",
     "mode": "photo"
   },
+  "nodeLoadingIndicator": { "type": "loadingIndicator", "contained": true },
   "nodeDialog": {
     "type": "dialog",
     "openWhen": {

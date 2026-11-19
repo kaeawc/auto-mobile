@@ -283,6 +283,8 @@ class WebSocketServer(
     addPrototypeWindowFlags()
     add("prototype_menus_v1")
     add("prototype_tooltip_v1")
+    // M3 Expressive components drawn from stable Compose primitives (#15258).
+    add("prototype_m3_expressive_v1")
     add("prototype_adaptive_v1")
     add("prototype_drawer_v1")
     // request_action honours the semantic actions (expand, collapse, dismiss, select, scroll and

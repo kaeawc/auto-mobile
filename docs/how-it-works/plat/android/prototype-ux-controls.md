@@ -63,6 +63,20 @@ Rendering stays inside the prototype window on both platforms so `observe` and `
 
 The select field and menu surface carry the node `testTag`. Select option rows use `<testTag>.<value>`; menu item rows use `<testTag>.<index>`, with zero-based positions including dividers. Android adds row tags only when `testTag` is set; iOS falls back to `(testTag ?? id).<value>` or `(testTag ?? id).<index>`.
 
+## Material 3 Expressive components
+
+`prototype_m3_expressive_v1` gates five Material 3 Expressive variants. Android draws them from stable Compose primitives, because the pinned `material3` has none of the library components ([decision](../../../devlog/2026-11-19-m3-expressive-stable-primitives.md)). The iOS agent does not advertise the capability, so the host refuses these specs on iOS.
+
+| Field or node             | Contract                                         | Rendering                                                                                                                                                           |
+| ------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `segmentedButton.variant` | `standard` (default) or `connected`              | Joined segments; the selected segment's inner corners morph to a pill. Segments keep the `<testTag>.<value>` tags.                                                  |
+| `button.split`            | `{menu}`: 1–16 entries in the `menu.items` shape | The leading half runs `onTap`; the trailing half (`<testTag>.menu`) opens the entries inline below it, tagged `<testTag>.menu.<index>`.                             |
+| `fab.menu`                | `{items}`: 2–6 `{icon, label, onTap}`            | A FAB tap runs the FAB's own `onTap` (if any) and toggles the items above it, tagged `<testTag>.items.<index>`. An item tap closes the menu, then runs its `onTap`. |
+| `progress.variant`        | adds `wavy`                                      | A linear indicator with a sine-stroke active track, determinate when bound.                                                                                         |
+| `loadingIndicator`        | node with optional `contained` boolean           | An indeterminate, rotating seven-lobed shape; `contained` adds a primary-container circle.                                                                          |
+
+Shape and expansion use the expressive spatial spring, colour the effects spring. Under `motion: "none"` or animator scale 0 the morphs snap, and the indeterminate loops rest at a fixed frame.
+
 ## Tooltip and drawer
 
 `tooltip` requires `prototype_tooltip_v1`, nonblank `text`, boolean `openWhen: {key, equals}`,

@@ -133,6 +133,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_custom_shaders_v1",
             "prototype_choreography_v1",
             "prototype_loops_v1", // Attention loops are Android only until #14684.
+            // M3 Expressive components (#15258) are drawn on Android only; SwiftUI approximations are owed.
+            "prototype_m3_expressive_v1",
             "prototype_motion_v3", // Motion v2 does not include motion v3 or window choreography.
             "prototype_window_motion_v1",
             "prototype_platform_haptics_v1", "prototype_platform_sound_v1",

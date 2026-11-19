@@ -12,6 +12,7 @@ To add one, copy the [template](template.md).
 
 | Date       | Kind     | Entry                                                                                                                              |
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-11-19 | decision | [Material 3 Expressive components drawn from stable primitives](2026-11-19-m3-expressive-stable-primitives.md)                     |
 | 2026-11-17 | decision | [Docs navigation grouped by task and platform](2026-11-17-docs-navigation-by-task.md)                                              |
 | 2026-11-17 | concept  | [Material 3 Expressive component availability at the pinned Compose BOM](2026-11-17-m3-expressive-component-availability.md)       |
 | 2026-11-16 | decision | [Android Auto provisioning accepts the welcome screen](2026-11-16-android-auto-terms-accepted-by-provisioning.md)                  |

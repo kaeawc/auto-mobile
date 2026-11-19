@@ -215,7 +215,8 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend {
         let name = "setCurrentMode:pixelSize:carPlayProperties:completionQueue:completionHandler:"
         let result = CallbackResult()
         let completion: @convention(block) (NSError?) -> Void = { error in result.finish(error: error) }
-        typealias Call = @convention(c) (AnyObject, Selector, AnyObject, CGSize, AnyObject, AnyObject, AnyObject) -> Void
+        typealias Call = @convention(c) (AnyObject, Selector, AnyObject, CGSize, AnyObject, AnyObject, AnyObject)
+            -> Void
         let call = try unsafeBitCast(implementation(screen, name), to: Call.self)
         call(
             screen, NSSelectorFromString(name), mode, CGSize(width: width, height: height), properties,

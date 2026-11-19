@@ -13,7 +13,14 @@ private final class FakeScreenBackend: SimulatorScreenBackend {
     private var enumerations = 0
 
     static let lcd = SimulatorScreen(id: 1, name: "LCD", screenType: 0, powerState: 1, width: 1206, height: 2622)
-    static let wireless = SimulatorScreen(id: 3, name: "Wireless", screenType: 2, powerState: 0, width: 720, height: 480)
+    static let wireless = SimulatorScreen(
+        id: 3,
+        name: "Wireless",
+        screenType: 2,
+        powerState: 0,
+        width: 720,
+        height: 480
+    )
 
     // Measured on an iOS 26.5 iPhone simulator: TVOut is id 2, type 1, 720x480 until the mode change.
     static func tvOut(power: Int32, id: UInt32 = 2) -> SimulatorScreen {

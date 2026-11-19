@@ -301,3 +301,17 @@ test("unknown derived conditions report the nested authored field", () => {
     error,
   });
 });
+
+test("derived conditions inside a lazy list row template follow recomputed raw values", () => {
+  const { spec, changes } = conditionFixture.lazyRow;
+  expect(validatePrototypeSpec(spec).success).toBe(true);
+  const derive = prototypeDeriveSchema.parse(spec.derive);
+  const template = spec.root.children[0]!;
+  for (const { state, visible } of changes) {
+    const derived = memoizedPrototypeDerive(derive, spec.data, state);
+    const decided = spec.data.rows.map(() =>
+      decide(template.visibleWhen, { state, derived, platform: "android" }),
+    );
+    expect(decided).toEqual(visible);
+  }
+});

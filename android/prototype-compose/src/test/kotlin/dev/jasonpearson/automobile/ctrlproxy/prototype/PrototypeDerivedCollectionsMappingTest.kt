@@ -39,6 +39,26 @@ class PrototypeDerivedCollectionsMappingTest {
     }
   }
 
+  @Test
+  fun `shared derived condition inside a lazy row follows derived values`() {
+    val file =
+      generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
+        .map { File(it, "test/fixtures/prototype-spec/derive/conditions.json") }
+        .first { it.isFile }
+    val fixture =
+      specJson.parseToJsonElement(file.readText()).jsonObject.getValue("lazyRow").jsonObject
+    val spec = specJson.decodeFromJsonElement<PrototypeSpec>(fixture.getValue("spec"))
+    val mapper = PrototypeRenderMapper(FakePrototypeValueFormatter())
+    for (entry in fixture.getValue("changes").jsonArray) {
+      val change = entry.jsonObject
+      val state =
+        specJson.decodeFromJsonElement<Map<String, PrototypeScalar>>(change.getValue("state"))
+      val expected = change.getValue("visible").jsonArray.map { it.jsonPrimitive.boolean }
+      val list = mapper.map(spec.copy(state = state), emptyMap()).root.list!!
+      assertEquals(expected, list.rows.mapIndexed { index, row -> list.render(row, index).visible })
+    }
+  }
+
   private fun spec(): PrototypeSpec {
     val input =
       """{

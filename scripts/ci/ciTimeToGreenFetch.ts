@@ -695,6 +695,13 @@ export async function fetchBundle(
   const prs = fetchedPrs.filter((pr): pr is PrFact => pr !== null);
   const external = await fetchExternalJobs(api, cache, options, rawRuns, prs, runs, stops);
   external.unfetchedShas.forEach((sha) => omitted.add(sha));
+  // Supersession and per-PR figures compare a PR's heads, so one incomplete head drops them all.
+  const omittedPrs = new Set(
+    runs.filter((run) => omitted.has(run.headSha)).flatMap((run) => run.prNumbers),
+  );
+  runs
+    .filter((run) => run.prNumbers.some((number) => omittedPrs.has(number)))
+    .forEach((run) => omitted.add(run.headSha));
 
   const keptRuns = runs.filter((run) => !omitted.has(run.headSha));
   const keptPrNumbers = new Set(keptRuns.flatMap((run) => run.prNumbers));

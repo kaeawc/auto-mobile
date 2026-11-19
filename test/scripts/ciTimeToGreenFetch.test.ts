@@ -327,7 +327,11 @@ describe("skipped runs and partial bundles (#18691)", () => {
   });
 
   test("partial bundles drop only the head SHAs a stop left incomplete", async () => {
-    const shared = runs.map((item) => ({ ...item, head_sha: item.id === 1 ? "kept" : "dropped" }));
+    const shared = runs.map((item) =>
+      item.id === 1
+        ? { ...item, head_sha: "kept", pull_requests: [{ number: 9 }] }
+        : { ...item, head_sha: "dropped" },
+    );
     const api = new BudgetedGhApi(
       new FakeApi((path) =>
         path.includes("/actions/runs?")
@@ -337,13 +341,34 @@ describe("skipped runs and partial bundles (#18691)", () => {
       4,
     );
     const cache = new MemoryCache();
-    cache.entries.set("pull-7", { number: 7, state: "closed", head: { sha: "kept" } });
-    cache.entries.set("files-7-kept", [{ filename: "src/a.ts" }]);
+    cache.entries.set("pull-9", { number: 9, state: "closed", head: { sha: "kept" } });
+    cache.entries.set("files-9-kept", [{ filename: "src/a.ts" }]);
     // Listing plus runs 1, 2 and 5 spend the budget, so run 6 (sharing the "dropped" head) stops.
     const bundle = await fetchBundle(api, cache, { ...options, partialOnStop: true }, ["Lint"]);
     expect(bundle.meta.partial).toMatchObject({ omittedHeadShas: 1, omittedRuns: 5 });
     expect(bundle.runs.map((item) => item.id)).toEqual([1]);
-    expect(bundle.prs.map((pr) => pr.number)).toEqual([7]);
+    expect(bundle.prs.map((pr) => pr.number)).toEqual([9]);
+  });
+
+  test("an incomplete head drops every head of its PR so supersession is not misread", async () => {
+    const heads = [
+      { ...run(1, "pr.yml", "cancelled", "older"), pull_requests: [{ number: 7 }] },
+      { ...run(2, "pr.yml", "success", "newer"), pull_requests: [{ number: 7 }] },
+      { ...run(3, "pr.yml", "success", "other"), pull_requests: [{ number: 8 }] },
+    ];
+    const cache = new MemoryCache();
+    cache.entries.set("jobs-1-1", [job("Lint", "cancelled")]);
+    cache.entries.set("jobs-3-1", [job("Lint", "success")]);
+    cache.entries.set("pull-8", { number: 8, state: "closed", head: { sha: "other" } });
+    cache.entries.set("files-8-other", [{ filename: "src/a.ts" }]);
+    const api = new BudgetedGhApi(
+      new FakeApi(() => ({ total_count: heads.length, workflow_runs: heads })),
+      1,
+    );
+    const bundle = await fetchBundle(api, cache, { ...options, partialOnStop: true }, ["Lint"]);
+    expect(bundle.runs.map((item) => item.headSha)).toEqual(["other"]);
+    expect(bundle.meta.partial).toMatchObject({ omittedHeadShas: 2, omittedRuns: 2 });
+    expect(bundle.prs.map((pr) => pr.number)).toEqual([8]);
   });
 
   test("without partialOnStop a stop still throws, and the budget refuses every later call", async () => {

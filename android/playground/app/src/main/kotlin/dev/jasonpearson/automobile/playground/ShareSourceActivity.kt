@@ -24,7 +24,7 @@ class ShareSourceActivity : AppCompatActivity() {
             }
           startActivity(Intent.createChooser(send, null))
         }
-      }
+      },
     )
   }
 }

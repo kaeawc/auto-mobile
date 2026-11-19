@@ -215,10 +215,9 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
         throw unavailable(deviceId, "the capture was already closed");
       }
       // A recheck has its own bounded budget; open's verification deadline has passed by now.
-      const status = await broadcast("status", this.now() + BROADCAST_TIMEOUT_MS);
-      if (status.split(" ", 1)[0] !== "running") {
-        throw unavailable(deviceId, `the capture stopped before injection: ${status}`);
-      }
+      await this.recheckRunning(deviceId, () =>
+        broadcast("status", this.now() + BROADCAST_TIMEOUT_MS),
+      );
     };
     try {
       emulatorPid = await this.emulatorPidFor(deviceId);
@@ -255,6 +254,21 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       throw error instanceof EmulatorAudioError
         ? error
         : unavailable(deviceId, errorMessage(error));
+    }
+  }
+
+  /** One status reply must be `running`; any other reply or failure refuses injection. */
+  private async recheckRunning(deviceId: string, status: () => Promise<string>): Promise<void> {
+    let reply: string;
+    try {
+      reply = await status();
+    } catch (error) {
+      throw error instanceof EmulatorAudioError
+        ? error
+        : unavailable(deviceId, errorMessage(error));
+    }
+    if (reply.split(" ", 1)[0] !== "running") {
+      throw unavailable(deviceId, `the capture stopped before injection: ${reply}`);
     }
   }
 

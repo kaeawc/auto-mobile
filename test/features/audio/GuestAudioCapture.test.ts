@@ -581,6 +581,17 @@ describe("AdbGuestAudioCapture", () => {
     });
   }
 
+  test("assertRunning reports a transport failure as audio_guest_capture_unavailable", async () => {
+    const { adb, capture } = setup();
+    const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
+    adb.setCommandError("--es op status", new Error("adb timed out"));
+    await expect(handle.assertRunning()).rejects.toMatchObject({
+      code: "audio_guest_capture_unavailable",
+      message: expect.stringContaining("adb timed out"),
+    });
+    await handle.close();
+  });
+
   test("assertRunning refuses after close without a broadcast", async () => {
     const { adb, capture } = setup();
     const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });

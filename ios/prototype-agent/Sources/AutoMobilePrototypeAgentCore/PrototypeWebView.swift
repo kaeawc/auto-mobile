@@ -9,6 +9,11 @@ public enum PrototypeWebView {
         public let path: String
     }
 
+    static func challengeDisposition(authenticationMethod: String) -> URLSession.AuthChallengeDisposition {
+        authenticationMethod == NSURLAuthenticationMethodServerTrust
+            ? .performDefaultHandling : .cancelAuthenticationChallenge
+    }
+
     /// Checks authored node positions, including unexpanded repeat templates, depth first in a fixed
     /// order shared with Kotlin: adaptive slots (adaptive only), `header` then `footer` (list only),
     /// `child`, `children`, then `screens` by UTF-16 key order. JSON key order never matters.

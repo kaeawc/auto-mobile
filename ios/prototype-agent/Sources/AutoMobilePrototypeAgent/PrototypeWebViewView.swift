@@ -207,11 +207,12 @@
             }
 
             func webView(
-                _: WKWebView, didReceive _: URLAuthenticationChallenge,
+                _: WKWebView, didReceive challenge: URLAuthenticationChallenge,
                 completionHandler: @escaping @MainActor @Sendable (URLSession.AuthChallengeDisposition, URLCredential?)
                     -> Void
             ) {
-                completionHandler(.cancelAuthenticationChallenge, nil)
+                let method = challenge.protectionSpace.authenticationMethod
+                completionHandler(PrototypeWebView.challengeDisposition(authenticationMethod: method), nil)
             }
 
             func webView(

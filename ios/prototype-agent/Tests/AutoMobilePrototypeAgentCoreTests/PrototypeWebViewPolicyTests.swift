@@ -5,6 +5,26 @@ import XCTest
 final class PrototypeWebViewPolicyTests: XCTestCase {
     private let origins = ["https://example.com", "https://example.com:8443"]
 
+    func testUsesDefaultHandlingForServerTrustChallenges() {
+        XCTAssertEqual(
+            PrototypeWebView.challengeDisposition(authenticationMethod: NSURLAuthenticationMethodServerTrust),
+            .performDefaultHandling
+        )
+    }
+
+    func testCancelsOtherAuthenticationChallenges() {
+        for method in [
+            NSURLAuthenticationMethodHTTPBasic, NSURLAuthenticationMethodHTTPDigest, NSURLAuthenticationMethodNTLM,
+            NSURLAuthenticationMethodClientCertificate, NSURLAuthenticationMethodNegotiate,
+        ] {
+            XCTAssertEqual(
+                PrototypeWebView.challengeDisposition(authenticationMethod: method),
+                .cancelAuthenticationChallenge,
+                method
+            )
+        }
+    }
+
     func testAcceptsExactOriginsWithNormalizedHostAndPort() {
         for url in ["https://example.com", "https://EXAMPLE.com:443/x", "https://example.com:8443"] {
             XCTAssertEqual(PrototypeWebViewPolicy.check(url, allowedOrigins: origins), .allow, url)

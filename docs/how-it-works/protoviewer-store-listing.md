@@ -99,7 +99,7 @@ is no new package. The table in `scripts/store-listing/iconTargets.ts` produces:
 
 - Android, per density (mdpi to xxxhdpi): adaptive `foreground`, `background` and `monochrome` layers
   (108 dp) and the rounded legacy `ic_launcher` (48 dp).
-- Play: the 512 px store icon and the 1024 x 500 feature graphic (`android/play-store/feature-graphic.png`: the background layer filling the banner with the foreground centred, no text so it renders identically on any host).
+- Play: the 512 px store icon and the 1024 x 500 feature graphic (the background layer filling the banner with the foreground centred, no text so it renders identically on any host).
 - iOS: an `AppIcon.appiconset` with the 1024 px icon in light, dark and tinted appearances (opaque,
   no alpha) and its `Contents.json`.
 

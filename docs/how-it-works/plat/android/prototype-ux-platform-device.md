@@ -101,7 +101,8 @@ call proves presence only and returns no biometric data. Failures use the typed 
 [Android biometric runtime support](prototype-ux-platform-services.md)
 for host availability and error reasons. The iOS agent and ProtoViewer also register the module. Face ID
 requires the host's `NSFaceIDUsageDescription`; a missing key returns `unavailable` with reason
-`missing_usage_description`. Allowing device credentials selects the system passcode fallback, including
+`missing_usage_description`. A saved iOS app keeps that key only when its spec lists `biometric` in
+`requires.platform`. Allowing device credentials selects the system passcode fallback, including
 on a device without enrolled biometrics.
 
 **Window controls (#14320).** Four optional root `window` fields need

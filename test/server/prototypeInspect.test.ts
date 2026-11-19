@@ -1,3 +1,4 @@
+import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
 import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
@@ -43,6 +44,7 @@ const reported = (lastSequence: number) => ({
 });
 
 describe("prototype inspect (#10494)", () => {
+  let store: InMemoryPrototypeStatusStore;
   let client: FakeCtrlProxy;
   let fakeTimer: FakeTimer;
   let restore: () => void;
@@ -63,7 +65,9 @@ describe("prototype inspect (#10494)", () => {
       subscribeDeviceRemoval: () => () => {},
       subscribeDeviceUnbound: () => () => {},
     };
+    store = new InMemoryPrototypeStatusStore(timer);
     unsubscribe = registerPrototypeTools({
+      store,
       clientFactory: () => client,
       adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
       lastRenderedObservation: () => undefined,
@@ -274,6 +278,16 @@ describe("prototype inspect (#10494)", () => {
     const again = call({ action: "awaitEvent", id: "proto", timeoutMs: 10 });
     fakeTimer.advanceTime(10);
     expect((await again).warning).toBeUndefined();
+  });
+
+  test("CtrlProxy reconciliation preserves ownerless shown ids alongside its own ids", async () => {
+    store.adopt({ deviceId: device.deviceId }, { ...reported(0), id: "ownerless" });
+    client.setInspectReply({ success: true, prototypes: [reported(1)] });
+    await call({ action: "inspect" });
+    expect([...store.shownIds(device.deviceId)].sort()).toEqual(["ownerless", "proto"]);
+    client.setInspectReply({ success: true, prototypes: [] });
+    await call({ action: "inspect" });
+    expect(store.shownIds(device.deviceId)).toEqual(["ownerless"]);
   });
 
   test("an empty report clears a prototype the device no longer shows", async () => {

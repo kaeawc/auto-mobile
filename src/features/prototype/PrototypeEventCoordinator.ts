@@ -19,6 +19,7 @@ import { DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS } from "./prototypeEventTimeout";
 export { DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS };
 export interface PrototypeEventSource {
   readonly instanceId?: string;
+  readonly showingId?: string;
   onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void;
 }
 export interface PrototypeEventTelemetry {
@@ -34,9 +35,11 @@ interface Entry {
   id: string;
   source: PrototypeEventSource;
   instanceId?: string;
+  showingId?: string;
   buffer: PrototypeEventBuffer;
   shown: boolean;
   terminal: boolean;
+  terminalSequence?: number;
   waiters: Set<() => void>;
 }
 const scopeKey = (scope: PrototypeScope, id: string) =>
@@ -96,6 +99,7 @@ export class PrototypeEventCoordinator {
     entry.buffer.startEpoch();
     entry.shown = true;
     entry.terminal = false;
+    entry.terminalSequence = undefined;
     this.subscribe(scope.deviceId, client);
   }
 
@@ -251,7 +255,18 @@ export class PrototypeEventCoordinator {
     ) {
       entry.buffer.startEpoch();
       entry.terminal = false;
+      entry.terminalSequence = undefined;
     }
+    if (
+      client.showingId !== undefined &&
+      entry.showingId !== undefined &&
+      client.showingId !== entry.showingId
+    ) {
+      // Remounts share the process ledger: retain pending events and its high-water mark.
+      entry.terminal = false;
+      entry.terminalSequence = undefined;
+    }
+    entry.showingId = client.showingId;
     entry.source = client;
     entry.instanceId = client.instanceId;
     if (subscribe && !entry.terminal) {
@@ -303,6 +318,7 @@ export class PrototypeEventCoordinator {
     if (event.kind === "dismissed") {
       entry.shown = false;
       entry.terminal = true;
+      entry.terminalSequence = event.sequence;
       this.requests?.cancelPrototype(entry.scope.deviceId, entry.id);
       this.store.dismissed(entry.scope, entry.id);
     }
@@ -322,7 +338,7 @@ export class PrototypeEventCoordinator {
     if (!event) {
       return entry.terminal ? { ...entry.buffer.status(), reason: "dismissed" } : undefined;
     }
-    if (event.kind === "dismissed") {
+    if (event.kind === "dismissed" && event.sequence === entry.terminalSequence) {
       entry.buffer.clear();
     }
     const delivered = {

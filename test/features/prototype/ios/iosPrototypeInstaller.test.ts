@@ -118,6 +118,38 @@ describe("IosPrototypeInstaller", () => {
     });
   }
 
+  test("keeps the template Face ID usage string when the spec declares biometric", async () => {
+    const h = harness();
+    h.plist.value = { NSFaceIDUsageDescription: "Template Face ID" };
+    await h.installer.install({
+      ...input,
+      spec: { version: 1, requires: { platform: ["biometric"] } },
+    });
+    expect(h.plist.written?.value.NSFaceIDUsageDescription).toBe("Template Face ID");
+  });
+
+  test("writes a default Face ID usage string when the template lacks one", async () => {
+    const h = harness();
+    h.plist.value = { NSFaceIDUsageDescription: "  " };
+    await h.installer.install({
+      ...input,
+      spec: { version: 1, requires: { platform: ["biometric"] } },
+    });
+    expect(h.plist.written?.value.NSFaceIDUsageDescription).toBe(
+      "Confirm your identity when a prototype asks you to authenticate.",
+    );
+  });
+
+  test("strips the template Face ID usage string when biometric is not declared", async () => {
+    const h = harness();
+    h.plist.value = { NSFaceIDUsageDescription: "Template Face ID" };
+    await h.installer.install({
+      ...input,
+      spec: { version: 1, requires: { platform: ["clipboard"] } },
+    });
+    expect(h.plist.written?.value).not.toHaveProperty("NSFaceIDUsageDescription");
+  });
+
   test("permissions without usage keys and background declarations do not retain template privileges", async () => {
     const h = harness();
     h.plist.value = {

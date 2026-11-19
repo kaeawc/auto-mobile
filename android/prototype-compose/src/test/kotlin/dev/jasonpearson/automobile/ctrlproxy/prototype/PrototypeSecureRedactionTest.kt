@@ -385,6 +385,42 @@ class PrototypeSecureRedactionTest {
     }
 
   @Test
+  fun `allowSecureInRequest without secure keys keeps response headers`() = runTest {
+    val plainSpec =
+      (PrototypeSpecValidator.validate(
+          """{"id":"plain","window":{"placement":{"type":"fullscreen"}},"state":{"public":"hello"},"root":{"type":"text","text":"Plain"}}""",
+        ) as PrototypeSpecValidation.Success)
+        .spec
+    val client = PrototypeHttpClient {
+      PrototypeRequestResponse.Received(200, mapOf("x-echo" to "kept"), JsonPrimitive("ok"), 2)
+    }
+    val runtime =
+      PrototypeRuntime(
+        plainSpec,
+        PrototypeEventSink {},
+        { 42L },
+        { 1L },
+        httpClients = PrototypeHttpClients(client, client),
+        requestScope = backgroundScope,
+      )
+    runtime.handle(
+      PrototypeInteraction.Tap(
+        listOf(
+          PrototypeRequestAction(
+            url = "https://example.invalid/{public}",
+            into = "/data/result",
+            allowSecureInRequest = true,
+          ),
+        ),
+      ),
+    )
+    runCurrent()
+    val meta = runtime.current.spec.data!!.getValue("result__meta").jsonObject
+    assertEquals(JsonPrimitive("kept"), meta.getValue("headers").jsonObject["x-echo"])
+    runtime.close()
+  }
+
+  @Test
   fun `secure request response headers are absent from metadata and events for every status`() =
     runTest {
       for (status in listOf(200, 400)) {

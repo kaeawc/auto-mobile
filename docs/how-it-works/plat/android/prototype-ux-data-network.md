@@ -19,7 +19,7 @@ map.
 | `prototype_platform_realtime_v1`        | channels, realtime calls, upsertData, appendData.maxItems | Contract only     | Contract only |
 | `prototype_platform_realtime_device_v1` | channels with `via: "device"`                             | Contract only     | Contract only |
 | `prototype_network_device_v1`           | `request` with `via: "device"`                            | Advertised        | Advertised    |
-| `prototype_network_upload_v1`           | upload request bodies and progress                        | Advertised        | Contract only |
+| `prototype_network_upload_v1`           | upload request bodies and progress                        | Advertised        | Advertised    |
 
 Keyed requests and generated bindings require `prototype_data_actions_v2`. A request with
 `where: {field, equals: binding}` requires `into` naming an array at a `/data` object member.

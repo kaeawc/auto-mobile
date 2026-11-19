@@ -97,6 +97,8 @@ struct PrototypeRequestJob: Equatable, Sendable {
     let body: JSONValue?
     /// As authored; nil means the default.
     let timeoutMs: Int?
+    var uploadBody: PrototypeUploadBody? = nil
+    var progressKey: String? = nil
 
     /// The deadline the call runs under.
     var effectiveTimeoutMs: Int {
@@ -254,6 +256,7 @@ enum PrototypeRequestEvent {
             "outcome": .string(meta.error == nil ? "success" : "error"),
             "durationMs": .number(Double(meta.durationMs)),
         ]
+        if let upload = job.uploadBody { fields["uploadBytes"] = .number(Double(upload.fileBytes)) }
         if let into { fields["into"] = .string(into) }
         if let status = meta.status { fields["status"] = .number(Double(status)) }
         if let error = meta.error {

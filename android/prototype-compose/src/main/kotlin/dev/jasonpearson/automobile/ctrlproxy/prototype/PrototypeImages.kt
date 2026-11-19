@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -34,6 +36,8 @@ import dev.jasonpearson.automobile.protocol.PrototypeDimension
 import dev.jasonpearson.automobile.protocol.PrototypeImageNode
 import dev.jasonpearson.automobile.protocol.PrototypeItem
 import dev.jasonpearson.automobile.protocol.PrototypeStyle
+import java.io.ByteArrayInputStream
+import java.io.IOException
 
 /** Supplied by [PrototypeRuntimeContent]; null (previews, tests) draws every image as missing. */
 internal val LocalPrototypeImageCache = compositionLocalOf<PrototypeImageCache?> { null }
@@ -56,10 +60,8 @@ internal class BitmapPrototypeImage(val bitmap: Bitmap) : PrototypeDecodedImage 
 }
 
 /**
- * [BitmapFactory] decoding with `inSampleSize` chosen by [prototypeImageSampleSize], so only a
- * display-sized bitmap is ever allocated (never the full-resolution one). Needs real Android bitmap
- * decoding, so it is verified on a device rather than in JVM unit tests; the sampling, caching and
- * fallback logic around it is unit tested with a fake decoder.
+ * [BitmapFactory] decoding with `inSampleSize` chosen by [prototypeImageSampleSize]. Applies EXIF
+ * orientation to the sampled bitmap, preserving its pixel count.
  */
 @InternalAutoMobilePrototypeApi
 class BitmapPrototypeImageDecoder(private val maxPixels: Long = DEFAULT_MAX_DECODED_PIXELS) :
@@ -89,7 +91,36 @@ class BitmapPrototypeImageDecoder(private val maxPixels: Long = DEFAULT_MAX_DECO
       return null
     }
     val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.let(::BitmapPrototypeImage)
+    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
+    var oriented: Bitmap? = null
+    try {
+      oriented = orient(bitmap, readOrientation(bytes))
+      return BitmapPrototypeImage(oriented)
+    } finally {
+      if (oriented !== bitmap) bitmap.recycle()
+    }
+  }
+
+  private fun readOrientation(bytes: ByteArray): PrototypeExifOrientation {
+    val tag =
+      try {
+        ExifInterface(ByteArrayInputStream(bytes))
+          .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+      } catch (error: IOException) {
+        Log.w(TAG, "Could not read prototype image EXIF orientation", error)
+        ExifInterface.ORIENTATION_NORMAL
+      }
+    return prototypeExifOrientation(tag)
+  }
+
+  private fun orient(bitmap: Bitmap, orientation: PrototypeExifOrientation): Bitmap {
+    if (orientation.rotationDegrees == 0 && !orientation.flipHorizontal) return bitmap
+    val matrix =
+      Matrix().apply {
+        setRotate(orientation.rotationDegrees.toFloat())
+        if (orientation.flipHorizontal) postScale(-1f, 1f)
+      }
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, false)
   }
 
   companion object {

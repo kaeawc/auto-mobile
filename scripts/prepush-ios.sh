@@ -30,6 +30,13 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd "${script_dir}/.." && pwd)"
+# Build with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+# Shell-test fixtures that copy this script without the helper keep the active Xcode.
+if [[ -f "${project_root}/scripts/ios/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${project_root}/scripts/ios/xcode_version.sh"
+  select_pinned_xcode
+fi
 # shellcheck source=scripts/lib/spotlight-exclude.sh
 source "${project_root}/scripts/lib/spotlight-exclude.sh"
 

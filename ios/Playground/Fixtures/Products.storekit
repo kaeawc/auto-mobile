@@ -1,0 +1,72 @@
+{
+  "identifier" : "AB1331C9-DFD1-4D13-86AF-87494A1F9550",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "0.99",
+      "familyShareable" : false,
+      "internalID" : "32800F86-158F-44C4-B728-3D8260F6C2E7",
+      "localizations" : [
+        {
+          "description" : "A pack of Playground coins.",
+          "displayName" : "Playground Coins",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "dev.jasonpearson.automobile.playground.coins",
+      "referenceName" : "Playground Coins",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "1.99",
+      "familyShareable" : false,
+      "internalID" : "06D42A3D-9A0A-43DC-BCC9-B929D94DFC7F",
+      "localizations" : [
+        {
+          "description" : "A one-time Playground upgrade.",
+          "displayName" : "Playground Pro",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "dev.jasonpearson.automobile.playground.pro",
+      "referenceName" : "Playground Pro",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {},
+  "subscriptionGroups" : [
+    {
+      "id" : "1216A76E-2E01-440A-B6EA-C55FCF5D13CC",
+      "localizations" : [],
+      "name" : "Playground Plus",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "2.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "1F1A4963-F430-4835-8C45-8F6C49B9F2EE",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "A monthly Playground subscription.",
+              "displayName" : "Playground Plus",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "dev.jasonpearson.automobile.playground.plus",
+          "promotionalOffers" : [],
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Playground Plus",
+          "subscriptionGroupID" : "1216A76E-2E01-440A-B6EA-C55FCF5D13CC",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

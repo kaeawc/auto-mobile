@@ -503,5 +503,72 @@
       }
     },
     "error": null
+  },
+  {
+    "name": "lazy list accepts a derived inner key over 0 and -0",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "list",
+        "repeat": {
+          "items": {
+            "path": "/orders"
+          },
+          "as": "order",
+          "key": "id"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line",
+              "key": "label",
+              "derive": {
+                "label": {
+                  "of": {
+                    "item": "qty"
+                  },
+                  "format": {
+                    "number": {}
+                  }
+                }
+              }
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{line.sku} {line.label}"
+              }
+            ]
+          }
+        ]
+      },
+      "data": {
+        "orders": [
+          {
+            "id": "A",
+            "lines": [
+              {
+                "sku": "PEN",
+                "qty": 0
+              },
+              {
+                "sku": "INK",
+                "qty": -0.0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "error": null
   }
 ]

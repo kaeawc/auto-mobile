@@ -277,7 +277,8 @@ test("shared cell fixtures straddle the exact contract limit", () => {
 
 for (const fixture of duplicateKeyFixtures as { name: string; spec: Raw; error: unknown }[]) {
   test(`duplicate keys: ${fixture.name}`, () => {
-    const result = validatePrototypeSpec(JSON.stringify(fixture.spec));
+    // The parsed fixture keeps -0, which `JSON.stringify` would write as 0.
+    const result = validatePrototypeSpec(fixture.spec);
     if (fixture.error === null) {
       expect(result).toMatchObject({ success: true });
     } else {

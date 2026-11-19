@@ -633,7 +633,8 @@ function derivedKeyInput(
   }
   const value = Object.hasOwn(item, field) ? item[field] : undefined;
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
-    ? `${typeof value}:${String(value)}`
+    ? // `String(-0)` is "0", but a formatter renders -0 as "-0": keep the sign apart.
+      `${typeof value}:${Object.is(value, -0) ? "-0" : String(value)}`
     : undefined;
 }
 

@@ -2691,10 +2691,12 @@ jobs:
       # AutoMobile package the runner's daemon tests can use. The README Kotlin
       # coverage badge comes from merge.yml's kotlin-code-coverage, which still
       # includes junit-runner; this PR-side badge artifact covers the modules
-      # tested here.
+      # tested here. prototype-compose and prototype-saved also run their
+      # release-variant unit tests, the only variant where BuildConfig.DEBUG is
+      # false (#18623).
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :automotive-fixture:testDebugUnitTest :wear-fixture:testDebugUnitTest :content-seeder:testDebugUnitTest :tv-fixture:testDebugUnitTest :leanback-fixture:testDebugUnitTest :glasses-fixture:testDebugUnitTest :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :protoviewer:testDebugUnitTest :protoviewer:createDebugUnitTestCoverageReport :protoviewer:verifyProtoViewerDependencies :prototype-app-shell:testBaseDebugUnitTest :prototype-app-shell:verifyAppShellDependencies :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test :video-server:d8Dex"
+          gradle-tasks: ":control-proxy:testDebugUnitTest :control-proxy:createDebugUnitTestCoverageReport :automotive-fixture:testDebugUnitTest :wear-fixture:testDebugUnitTest :content-seeder:testDebugUnitTest :tv-fixture:testDebugUnitTest :leanback-fixture:testDebugUnitTest :glasses-fixture:testDebugUnitTest :prototype-compose:testDebugUnitTest :prototype-compose:createDebugUnitTestCoverageReport :prototype-compose:testReleaseUnitTest :prototype-saved:testDebugUnitTest :prototype-saved:createDebugUnitTestCoverageReport :prototype-saved:testReleaseUnitTest :protoviewer:testDebugUnitTest :protoviewer:createDebugUnitTestCoverageReport :protoviewer:verifyProtoViewerDependencies :prototype-app-shell:testBaseDebugUnitTest :prototype-app-shell:verifyAppShellDependencies :auto-mobile-sdk:testDebugUnitTest :auto-mobile-sdk:createDebugUnitTestCoverageReport :test-plan-validation:test :test-plan-validation:jacocoTestReport :protocol:test :protocol:jacocoTestReport :video-server:test :video-server:d8Dex"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
@@ -2756,11 +2758,10 @@ jobs:
   swift-code-coverage:
     timeout-minutes: 20
     name: "Swift Code Coverage"
-    # macos-26 + Xcode 26.6 (Swift 6.3): the sole coverage package, control-proxy,
-    # declares swift-tools-version 6.3 (its strict-concurrency floor, matching the
-    # repo-wide iOS 6.3 migration), which the Swift 5.10 toolchain on macos-14 /
-    # Xcode 15.4 cannot even parse. Mirrors the other Swift-6.3 jobs' toolchain.
-    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.small != 'hosted') && fromJSON('["self-hosted","automobile-mac"]') || 'macos-26' }}
+    # Xcode 27.2 (Swift 6.4), the repository pin in scripts/ios/xcode_version.sh, on
+    # the hosted xcode-27 image or the self-hosted Mac. The sole coverage package,
+    # control-proxy, declares swift-tools-version 6.3 (its strict-concurrency floor).
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.small != 'hosted') && fromJSON('["self-hosted","automobile-mac"]') || 'xcode-27' }}
     # Keep costly hosted macOS work behind the inexpensive Fast Validation gate.
     needs: [detect-changes, fast-validation, mac-pool-routing]
     if: always() && !cancelled() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
@@ -2790,11 +2791,16 @@ jobs:
           lfs: false
           clean: true
 
-      - name: "Select Xcode 26.6"
+      - name: "Select Xcode 27.2"
         if: runner.environment == 'github-hosted'
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "26.6"
+          xcode-version: "27.2"
+
+      - name: "Select self-hosted Xcode 27.2"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: bash scripts/ci/select-self-hosted-xcode.sh "27.2"
 
       - name: "Record Xcode version"
         id: coverage-xcode-version
@@ -2865,11 +2871,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # PR runs only the primary Xcode toolchain. The full version sweep
-        # (26.6) runs nightly on CircleCI — Xcode-toolchain drift is
-        # slow-moving and does not need per-PR macOS minutes.
+        # PR runs only the pinned Xcode (scripts/ios/xcode_version.sh). The
+        # nightly CircleCI sweep keeps Xcode 26.6, the published Swift 6.3
+        # toolchain floor; toolchain drift is slow-moving and does not need
+        # per-PR macOS minutes.
         config:
-          - { name: "Xcode 26.6", runner: "macos-26", xcode: "26.6" }
+          - { name: "Xcode 27.2", runner: "xcode-27", xcode: "27.2" }
     steps:
       - name: "Isolate self-hosted Swift Packages home"
         if: runner.environment == 'self-hosted'
@@ -2999,22 +3006,22 @@ jobs:
       matrix:
         config:
           - {
-              name: "prototype-agent, Xcode 26.6",
+              name: "prototype-agent, Xcode 27.2",
               app: "prototype-agent",
-              runner: "macos-26",
-              xcode: "26.6",
+              runner: "xcode-27",
+              xcode: "27.2",
             }
           - {
-              name: "prototype-viewer, Xcode 26.6",
+              name: "prototype-viewer, Xcode 27.2",
               app: "prototype-viewer",
-              runner: "macos-26",
-              xcode: "26.6",
+              runner: "xcode-27",
+              xcode: "27.2",
             }
           - {
-              name: "protoviewer, Xcode 26.6",
+              name: "protoviewer, Xcode 27.2",
               app: "protoviewer",
-              runner: "macos-26",
-              xcode: "26.6",
+              runner: "xcode-27",
+              xcode: "27.2",
             }
     steps:
       - name: "Isolate self-hosted Swift prototype apps home"
@@ -3046,7 +3053,7 @@ jobs:
       - name: "Select self-hosted Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'self-hosted'
         shell: bash
-        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
+        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}" --require-metal
 
       # ProtoViewer renders its icon with the Bun/sharp generator, which hangs in Bun's
       # auto-install without a dependency tree.
@@ -3092,7 +3099,7 @@ jobs:
       matrix:
         # PR runs only the primary Xcode toolchain; full sweep runs nightly on CircleCI.
         config:
-          - { name: "Xcode 26.6", runner: "macos-26", xcode: "26.6" }
+          - { name: "Xcode 27.2", runner: "xcode-27", xcode: "27.2" }
     steps:
       - name: "Isolate self-hosted Xcode build home"
         if: runner.environment == 'self-hosted'
@@ -3130,7 +3137,7 @@ jobs:
       - name: "Select self-hosted Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'self-hosted'
         shell: bash
-        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
+        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}" --require-metal
 
       # Same runner-independent literal and RUNNER_TEMP directory as the coverage cache above.
       - name: "Cache Xcode Swift package dependencies"
@@ -3241,7 +3248,7 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - { name: "Xcode 26.6", runner: "macos-26", xcode: "26.6" }
+          - { name: "Xcode 27.2", runner: "xcode-27", xcode: "27.2" }
     steps:
       - name: "Isolate self-hosted Playground home"
         if: runner.environment == 'self-hosted'
@@ -3272,7 +3279,7 @@ jobs:
       - name: "Select self-hosted Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'self-hosted'
         shell: bash
-        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
+        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}" --require-metal
 
       - name: "Cache Playground Swift package dependencies"
         uses: actions/cache@v5
@@ -3336,13 +3343,24 @@ jobs:
 
   ios-spm-root-package-build:
     timeout-minutes: 20
-    name: "Build Root SPM Package"
+    # The required check is the "Build Root SPM Package" roll-up below: a matrix
+    # appends its values to the job name, so this job cannot carry that name (#18816).
+    name: "Build Root SPM Package (Xcode ${{ matrix.config.xcode }})"
     # Small self-hosted Mac pool for owner-authored same-repository PRs once the
-    # pools are registered (#11011); forks use hosted macos-26. The root manifest
-    # needs the Swift 6.3 toolchain from Xcode 26.6.
-    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.small != 'hosted') && fromJSON('["self-hosted","automobile-mac"]') || 'macos-26' }}
+    # pools are registered (#11011); forks use the entry's hosted image. The root
+    # manifest declares swift-tools-version 6.3, so SDK consumers on Xcode 26.6 (the
+    # published floor, Swift 6.3) stay verified next to the pinned Xcode 27.2. No hosted
+    # image has both, so each version is its own entry.
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.small != 'hosted') && fromJSON('["self-hosted","automobile-mac"]') || matrix.config.runner }}
     needs: [detect-changes, fast-validation, mac-pool-routing]
     if: always() && !cancelled() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          # Published floor: the oldest Xcode whose Swift (6.3) parses the root manifest.
+          - { xcode: "26.6", runner: "macos-26" }
+          - { xcode: "27.2", runner: "xcode-27" }
     steps:
       - name: "Isolate self-hosted root SPM home"
         if: runner.environment == 'self-hosted'
@@ -3370,21 +3388,27 @@ jobs:
           clean: true
 
       # The root manifest declares swift-tools-version 6.3 (XCTestRunner's
-      # strict-concurrency floor), which requires the Swift 6.3 toolchain that
-      # ships with Xcode 26.6. Xcode 26.0 ships Swift 6.2 and cannot even parse
-      # a 6.3 manifest, so this floor-guarantee job builds on 26.6 to match the
-      # published SDK's toolchain floor and every other Swift-package job here.
-      # Select it explicitly so this job verifies the published compiler floor.
-      - name: "Select Xcode 26.6"
+      # strict-concurrency floor). Xcode 26.0 ships Swift 6.2 and cannot even parse
+      # a 6.3 manifest, so 26.6 is the floor entry and 27.2 the pinned toolchain.
+      - name: "Select Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'github-hosted'
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "26.6"
+          xcode-version: ${{ matrix.config.xcode }}
 
-      - name: "Select self-hosted Xcode 26.6"
+      - name: "Select self-hosted Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'self-hosted'
         shell: bash
-        run: bash scripts/ci/select-self-hosted-xcode.sh "26.6"
+        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
+
+      # Pin DEVELOPER_DIR to the entry's Xcode so scripts that call select_pinned_xcode
+      # (prototype-library-build.sh) keep it instead of switching to the 27.2 pin.
+      - name: "Report Xcode ${{ matrix.config.xcode }}"
+        shell: bash
+        run: |
+          echo "DEVELOPER_DIR=${DEVELOPER_DIR:-$(xcode-select -p)}" >> "$GITHUB_ENV"
+          xcodebuild -version
+          swift --version
 
       # Same runner-independent literal and RUNNER_TEMP directory as the coverage cache above.
       - name: "Cache root Swift package dependencies"
@@ -3394,9 +3418,9 @@ jobs:
           path: |
             ${{ runner.environment == 'self-hosted' && '../../_temp/automobile-swiftpm-cache' || '~/Library/Caches/org.swift.swiftpm' }}
             ${{ runner.environment != 'self-hosted' && '~/.swiftpm/cache' || '' }}
-          key: ${{ runner.os }}-${{ runner.environment }}-spm-root-package-26.6-${{ hashFiles('Package.swift') }}
+          key: ${{ runner.os }}-${{ runner.environment }}-spm-root-package-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.environment }}-spm-root-package-26.6-
+            ${{ runner.os }}-${{ runner.environment }}-spm-root-package-${{ matrix.config.xcode }}-
 
       - name: "Resolve root Swift package dependencies"
         run: swift package resolve
@@ -3418,16 +3442,49 @@ jobs:
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/root-spm-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
+  # Roll-up for the required "Build Root SPM Package" check (#18816): fails when any
+  # matrix entry failed or was cancelled; a skipped matrix (no iOS change) passes,
+  # as the single job's skip did before.
+  ios-spm-root-package-gate:
+    timeout-minutes: 10
+    name: "Build Root SPM Package"
+    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
+    needs:
+      - detect-changes
+      - ios-spm-root-package-build
+    # Roll-up only reads needs.*.result — it needs no token scopes.
+    permissions: {}
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
+    steps:
+      - name: "Check results"
+        run: |
+          declare -A results=(
+            [detect-changes]="${{ needs.detect-changes.result }}"
+            [ios-spm-root-package-build]="${{ needs.ios-spm-root-package-build.result }}"
+          )
+          fail=
+          for name in "${!results[@]}"; do
+            r="${results[$name]}"
+            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+              echo "::error::Build Root SPM Package dependency ${name} = ${r}"
+              fail=1
+            fi
+          done
+          if [[ -n "${fail}" ]]; then
+            echo "One or more jobs failed or were cancelled"
+            exit 1
+          fi
+
   # "Prototype Simulator": per-runtime smoke test for the iOS prototype agent (#10569),
   # moved from CircleCI to the heavy self-hosted lane (#11011). Injection depends
   # on simulator dyld behaviour and each runtime's Swift runtime, so a new Xcode or
   # runtime can break it silently. Each leg creates ONE fresh simulator, uses it
   # serially and deletes it. Advisory: simulator tests must not gate merges, so
   # this check stays OFF the required list.
-  # Run locally on a Mac: bash scripts/ios/prototype-agent-smoke.sh 26
+  # Run locally on a Mac: bash scripts/ios/prototype-agent-smoke.sh 27.2
   prototype-simulator:
     name: "Prototype Simulator iOS ${{ matrix.ios }}"
-    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.heavy != 'hosted') && fromJSON('["self-hosted","automobile-mac-heavy"]') || 'macos-26' }}
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.heavy != 'hosted') && fromJSON('["self-hosted","automobile-mac-heavy"]') || 'xcode-27' }}
     # Waits for ios-xcode-build so the one heavy runner serves the job behind the
     # required "iOS Build" gate before this advisory one (#11580). always() keeps
     # this job running whatever that build's result, including skipped (a
@@ -3439,9 +3496,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One leg per iOS runtime. Add a version (e.g. "27") once the runners
-        # ship that runtime.
-        ios: ["26"]
+        # One leg per iOS runtime: the pinned Xcode's simulator runtime.
+        ios: ["27.2"]
     steps:
       - name: "Isolate self-hosted Prototype Simulator home"
         if: runner.environment == 'self-hosted'
@@ -3463,16 +3519,16 @@ jobs:
           lfs: false
           clean: true
 
-      - name: "Select Xcode 26.6"
+      - name: "Select Xcode 27.2"
         if: runner.environment == 'github-hosted'
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "26.6"
+          xcode-version: "27.2"
 
-      - name: "Select self-hosted Xcode 26.6"
+      - name: "Select self-hosted Xcode 27.2"
         if: runner.environment == 'self-hosted'
         shell: bash
-        run: bash scripts/ci/select-self-hosted-xcode.sh "26.6"
+        run: bash scripts/ci/select-self-hosted-xcode.sh "27.2" --require-metal
 
       - name: "Report toolchain"
         run: xcodebuild -version && xcrun simctl list runtimes iOS

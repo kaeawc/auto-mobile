@@ -124,7 +124,7 @@ Playground registers a contract `AutoMobileObservationBridge` that declares `tap
 and `clearText`. The bridge publishes synthetic nodes: `contract-save` (counts taps into
 `contract-tap-count`), `contract-email` (always focused, so `sendKeys` needs no XCTest focus tap),
 `contract-arm-stale` and `contract-hold` (placed over the status bar). The harness runs these steps
-with the MCP tools, in order, then writes `<runId>.actions-done`; Playground waits up to 180 s for
+with the MCP tools, in order, then writes `<runId>.actions-done`; Playground waits up to 1,440 s (8 tool calls at the 180 s per-call budget) for
 it before writing the manifest with the host's action log.
 
 | Step                     | Tool result must show                                  | Host log must show             |
@@ -189,4 +189,4 @@ reachable SDK reporting the wrong state is `sdk-adapter`; `BRIDGE_UNAVAILABLE` w
 - CtrlProxy never confirms the fault rules: `ctrlproxy-command`, and the harness skips the fault
   cases. Playground stops waiting for `<runId>.rules-ready` after 60 s.
 - The harness never writes `<runId>.actions-done`: Playground fails the observation scenario after
-  180 s, reported as `fixture-host`.
+  1,440 s, reported as `fixture-host`.

@@ -126,6 +126,19 @@ describe("clipContentHiddenRegions (#18675)", () => {
     ).toEqual([region(0, 0, 1000, 600, 30)]);
   });
 
+  test("keeps a region whose own window has no reported bounds", () => {
+    expect(
+      clipContentHiddenRegions([region(0, 100, 1000, 1800, 85)], {
+        screenWidth: 1000,
+        screenHeight: 2000,
+        windows: [
+          { id: 1, type: 1 },
+          { id: 2, type: 3, bounds: { left: 0, top: 0, right: 1000, bottom: 100 } },
+        ],
+      }),
+    ).toEqual([region(0, 100, 1000, 1800, 85)]);
+  });
+
   test("drops a region entirely off screen", () => {
     expect(
       clipContentHiddenRegions([region(0, 2100, 1000, 2900, 40)], {

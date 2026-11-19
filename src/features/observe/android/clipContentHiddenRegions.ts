@@ -113,9 +113,13 @@ export function clipContentHiddenRegions(
     return regions;
   }
   const screen = screenBounds(context);
-  const windowBounds = (context.windows ?? [])
-    .map((window) => parseBounds(window.bounds))
-    .filter((bounds): bounds is ElementBounds => bounds !== null);
+  const windows = context.windows ?? [];
+  const parsedWindows = windows.map((window) => parseBounds(window.bounds));
+  // A window without bounds (e.g. a recovered app window) means the list is not a complete map of
+  // what is visible, so other windows cannot prove a region off-window: skip the window clip.
+  const windowBounds = parsedWindows.every((bounds) => bounds !== null)
+    ? parsedWindows.filter((bounds): bounds is ElementBounds => bounds !== null)
+    : [];
   const hostBounds = composeHostBounds(context.hierarchy);
   const screenArea = screen ? boundsArea(screen) : 0;
 

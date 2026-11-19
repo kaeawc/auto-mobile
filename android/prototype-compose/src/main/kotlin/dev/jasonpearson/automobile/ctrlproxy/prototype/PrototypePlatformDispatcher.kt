@@ -2,11 +2,10 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.PrototypePlatformAction
 import dev.jasonpearson.automobile.protocol.PrototypePlatformCalls
-import dev.jasonpearson.automobile.protocol.PrototypePlatformReport
 import dev.jasonpearson.automobile.prototype.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Runtime-owned subscriptions and calls; all mutations and callbacks execute under the host lock.
@@ -45,64 +44,10 @@ internal class PrototypePlatformDispatcher(
   @Volatile private var closed = false
   private var subscribed = false
 
-  private fun inFlightByModule(): Map<String, Int> =
+  fun inFlightByModule(): Map<String, Int> =
     synchronized(pending) {
       pending.values.groupingBy { it.action.call.substringBefore('.') }.eachCount()
     }
-
-  fun report(runtime: PrototypePlatformReport.Runtime, appState: String): PrototypePlatformReport {
-    val inFlight = inFlightByModule()
-    val defaultMode =
-      PrototypePlatformReport.Mode.REAL.takeIf {
-        runtime == PrototypePlatformReport.Runtime.CTRL_PROXY
-      }
-    return PrototypePlatformReport(
-      runtime,
-      registry.modules.associate { module ->
-        module.name to moduleStatus(module, defaultMode, inFlight[module.name] ?: 0)
-      },
-      appState = appState,
-      permissions =
-        (registry.module("permissions") as? PrototypePermissionsModule)?.permissionReport,
-    )
-  }
-
-  private fun moduleStatus(
-    module: PrototypePlatformModule,
-    defaultMode: PrototypePlatformReport.Mode?,
-    inFlight: Int,
-  ): PrototypePlatformReport.Module {
-    val availability = module.availability()
-    val mode = (module as? PrototypePlatformModeSource)?.platformMode ?: defaultMode
-    val reason =
-      when (availability) {
-        is PlatformAvailability.NeedsPermission -> PrototypePlatformReport.Reason.PERMISSION_DENIED
-        is PlatformAvailability.Unavailable ->
-          PrototypePlatformReport.Reason.entries.firstOrNull { it.wire == availability.reason }
-        PlatformAvailability.Ready ->
-          PrototypePlatformReport.Reason.FAKE_MODE.takeIf {
-            mode == PrototypePlatformReport.Mode.FAKE
-          }
-      }
-    return PrototypePlatformReport.Module(
-      if (availability == PlatformAvailability.Ready) PrototypePlatformReport.Availability.READY
-      else PrototypePlatformReport.Availability.UNAVAILABLE,
-      mode,
-      reason,
-      inFlight,
-    )
-  }
-
-  fun outcomeMetadata(call: String): JsonObject {
-    val module = registry.module(call) ?: return JsonObject(emptyMap())
-    return buildJsonObject {
-      put("inFlight", inFlightByModule()[module.name] ?: 0)
-      val mode = (module as? PrototypePlatformModeSource)?.platformMode
-      mode?.let {
-        put("mode", Json.encodeToJsonElement(PrototypePlatformReport.Mode.serializer(), it))
-      }
-    }
-  }
 
   fun subscribe() {
     if (subscribed || closed) return

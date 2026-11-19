@@ -443,11 +443,14 @@ class PrototypeRuntime(
       monotonicMs,
     )
 
+  private val platformReporting =
+    PrototypePlatformReporting(platformRegistry, platformDispatcher::inFlightByModule)
+
   private var platformModulesStarted = false
   private var platformForeground = true
 
   fun platformRuntimeReport(runtime: PrototypePlatformReport.Runtime): PrototypePlatformReport =
-    platformDispatcher.report(runtime, if (platformForeground) "active" else "background")
+    platformReporting.report(runtime, if (platformForeground) "active" else "background")
 
   private fun locationModules(): List<PrototypeLocationModule> {
     return platformRegistry.modules.filterIsInstance<PrototypeLocationModule>()
@@ -1552,7 +1555,7 @@ class PrototypeRuntime(
   ): JsonObject =
     JsonObject(
       platformCallPayload(call, error, durationMs) +
-        platformDispatcher.outcomeMetadata(call.action.call),
+        platformReporting.outcomeMetadata(call.action.call),
     )
 
   /** Writes a call's result and metadata under `into`; returns the error to report. */

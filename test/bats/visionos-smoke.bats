@@ -98,7 +98,7 @@ STUB
   # The protected CI simulator and other lanes' devices must never appear here.
   run bash -c "grep -E 'simctl (boot|bootstatus|install|launch|io|terminate|uninstall|shutdown|delete) ' '${STUB_LOG}' | grep -v '${STUB_CREATED_UDID}' || true"
   [ -z "${output}" ]
-  ! grep -q "18A2D9B1-CDFA-445A-93AA-A532EA4B5498" "${STUB_LOG}"
+  ! grep -q "AutoMobile CI iPhone" "${STUB_LOG}"
 }
 
 @test "never issues Simulator.app or pattern-based kill commands" {

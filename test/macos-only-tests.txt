@@ -30,6 +30,8 @@ portable test/daemon/iosCameraPosterSessionCleanup.test.ts  # fake session manag
 
 portable test/utils/ios/carPlayProjection.test.ts                        # JSON contract and injected exec only; no host processes
 portable test/utils/ios/carPlayScreenPower.test.ts                       # JSON contract and injected exec only; no host processes
+portable test/utils/ios/healthKitSeeder*.test.ts                         # HealthKit seeder over fake runner, sheet, builder and FakeTimer; temp dirs only
+portable test/utils/ios/simctlHealthSimulatorRunner.test.ts              # injected exec only; no simctl runs
 
 # Source, workflow and script scans read repository files and run no iOS code.
 portable test/features/prototype/web/webIosParity*.test.ts               # Chromium/file-based parity checks; no iOS host commands

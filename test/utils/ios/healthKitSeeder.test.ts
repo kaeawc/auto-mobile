@@ -11,8 +11,11 @@ import {
   type SheetElement,
 } from "../../../src/utils/ios/healthKitSeeder";
 import { HealthSeedError } from "../../../src/utils/ios/healthSeedError";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   HEALTHKIT_SEEDER_BUNDLE_ID,
+  type HealthKitAppBuild,
+  type HealthKitAppBuilder,
   HEALTHKIT_SEEDER_ENTITLEMENTS,
   HEALTHKIT_SEEDER_INFO_PLIST,
 } from "../../../src/utils/ios/healthKitSeederApp";
@@ -31,9 +34,28 @@ const sheetBeforeTurnOn = JSON.parse(
 
 const run1 = fixture("probe-run1-first-launch.txt");
 
+type Deferred = { promise: Promise<string>; resolve: (output: string) => void };
+
+function deferred(): Deferred {
+  let resolve: (output: string) => void = () => undefined;
+  const promise = new Promise<string>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+/**
+ * Like the real app, a launch prints `HKPROBE done` only after the sheet is accepted,
+ * or straight away when it is already authorized (`completeOn: "launch"`), or when the
+ * test releases it (`completeOn: "manual"`).
+ */
 class FakeRunner implements HealthSimulatorRunner {
   calls: string[] = [];
-  constructor(private readonly output: string) {}
+  private readonly pending: Array<{ udid: string; output: Deferred }> = [];
+  constructor(
+    private readonly output: string,
+    private readonly completeOn: "launch" | "allow" | "manual",
+  ) {}
   async install(udid: string, appPath: string): Promise<void> {
     this.calls.push(`install ${udid} ${appPath}`);
   }
@@ -42,13 +64,27 @@ class FakeRunner implements HealthSimulatorRunner {
   }
   async launch(udid: string, bundleId: string, args: string[]): Promise<HealthAppRun> {
     this.calls.push(`launch ${udid} ${bundleId} ${args.join(" ")}`);
-    return { waitForOutput: async () => this.output };
+    const output = deferred();
+    if (this.completeOn === "launch") {
+      output.resolve(this.output);
+    } else {
+      this.pending.push({ udid, output });
+    }
+    return { waitForOutput: () => output.promise };
+  }
+  /** Finishes the oldest running launch (on `udid`, when given). */
+  finish(udid?: string): void {
+    const index = this.pending.findIndex((p) => udid === undefined || p.udid === udid);
+    if (index >= 0) {
+      this.pending.splice(index, 1)[0].output.resolve(this.output);
+    }
   }
 }
 
 class FakeSheet implements HealthSheetUi {
   taps: string[] = [];
   polls = 0;
+  onAllow: () => void = () => undefined;
   constructor(private readonly screens: SheetElement[][]) {}
   async elements(): Promise<SheetElement[]> {
     const screen = this.screens[Math.min(this.polls, this.screens.length - 1)];
@@ -57,26 +93,68 @@ class FakeSheet implements HealthSheetUi {
   }
   async tapText(_udid: string, text: string): Promise<void> {
     this.taps.push(text);
+    if (text === "Allow") {
+      this.onAllow();
+    }
   }
 }
 
-function seeder(output: string, screens: SheetElement[][]) {
-  const runner = new FakeRunner(output);
+class FakeBuilder implements HealthKitAppBuilder {
+  events: string[] = [];
+  async build(): Promise<HealthKitAppBuild> {
+    this.events.push("build");
+    return {
+      appPath: "/work/hkseeder.app",
+      dispose: async () => {
+        this.events.push("dispose");
+      },
+    };
+  }
+}
+
+const hasSheet = (screens: SheetElement[][]): boolean =>
+  screens.some((screen) => planHealthSheetTaps(screen).length > 0);
+
+function seeder(
+  output: string,
+  screens: SheetElement[][],
+  options: { sheetPolls?: number; completeOn?: "launch" | "allow" | "manual" } = {},
+) {
+  const runner = new FakeRunner(
+    output,
+    options.completeOn ?? (hasSheet(screens) ? "allow" : "launch"),
+  );
   const sheet = new FakeSheet(screens);
-  const sleeps: number[] = [];
+  sheet.onAllow = () => runner.finish();
+  const builder = new FakeBuilder();
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
   const instance = new HealthKitSeeder({
-    builder: { build: async () => "/work/hkseeder.app" },
+    builder,
     runner,
     sheet,
-    timer: {
-      sleep: async (ms) => {
-        sleeps.push(ms);
-      },
-    },
-    sheetPolls: 3,
+    timer,
+    sheetPolls: options.sheetPolls ?? 3,
   });
-  return { instance, runner, sheet, sleeps };
+  return { instance, runner, sheet, timer, builder };
 }
+
+/** Lets queued promise chains (builds, lock hand-offs) run. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
+const savedOutput = (reads: string): string =>
+  [
+    "HKPROBE available=true args=[]",
+    "HKPROBE requestAuthorization ok=true err=nil",
+    "HKPROBE save ok=true err=nil",
+    reads,
+    "HKPROBE done",
+    "",
+  ].join("\n");
 
 describe("parseHealthProbeOutput", () => {
   test("parses the captured first launch", () => {
@@ -147,9 +225,9 @@ describe("HealthKitSeeder", () => {
   });
 
   test("polls with the timer until the sheet appears", async () => {
-    const { instance, sheet, sleeps } = seeder(run1, [[], [], sheetBeforeTurnOn]);
+    const { instance, sheet, timer } = seeder(run1, [[], [], sheetBeforeTurnOn]);
     await instance.seed("UDID");
-    expect(sleeps).toEqual([500, 500]);
+    expect(timer.getSleepHistory()).toEqual([500, 500]);
     expect(sheet.taps).toEqual(["Turn On All", "Allow"]);
   });
 
@@ -158,6 +236,72 @@ describe("HealthKitSeeder", () => {
     const result = await instance.seed("UDID");
     expect(result.sheetAccepted).toBe(false);
     expect(sheet.taps).toEqual([]);
+  });
+
+  test("stops polling for the sheet once the app finishes without one", async () => {
+    const { instance, sheet, timer } = seeder(run1, [[]], { sheetPolls: 20 });
+    const result = await instance.seed("UDID");
+    expect(result.sheetAccepted).toBe(false);
+    expect(sheet.polls).toBe(1);
+    expect(timer.getSleepCallCount()).toBeLessThanOrEqual(1);
+  });
+
+  test("removes the build after install, and when install fails", async () => {
+    const ok = seeder(run1, [[]]);
+    await ok.instance.seed("UDID");
+    expect(ok.builder.events).toEqual(["build", "dispose"]);
+
+    const failing = seeder(run1, [[]]);
+    failing.runner.install = async () => {
+      throw new Error("install failed");
+    };
+    await expect(failing.instance.seed("UDID")).rejects.toThrow("install failed");
+    expect(failing.builder.events).toEqual(["build", "dispose"]);
+  });
+
+  test("serializes seeds on one simulator and keeps other simulators concurrent", async () => {
+    const { instance, runner } = seeder(run1, [[]], { completeOn: "manual" });
+    const first = instance.seed("LOCK-A");
+    const second = instance.seed("LOCK-A");
+    const other = instance.seed("LOCK-B");
+    await settle();
+    const installs = () => runner.calls.filter((c) => c.startsWith("install "));
+    expect(installs()).toEqual([
+      "install LOCK-A /work/hkseeder.app",
+      "install LOCK-B /work/hkseeder.app",
+    ]);
+
+    runner.finish("LOCK-A");
+    await first;
+    await settle();
+    expect(installs()).toHaveLength(3);
+
+    runner.finish("LOCK-A");
+    runner.finish("LOCK-B");
+    await Promise.all([second, other]);
+  });
+
+  test("verification_failed when a read fails with an error other than not-determined", async () => {
+    const out = savedOutput(
+      [
+        "HKPROBE read HKQuantityTypeIdentifierStepCount n=-1 err=Optional(Error Domain=com.apple.healthkit Code=3)",
+        "HKPROBE read HKQuantityTypeIdentifierHeartRate n=1 err=nil",
+        "HKPROBE read HKCategoryTypeIdentifierSleepAnalysis n=1 err=nil",
+      ].join("\n"),
+    );
+    const { instance } = seeder(out, [[]]);
+    const error = await instance.seed("UDID").catch((e) => e);
+    expect(error).toBeInstanceOf(HealthSeedError);
+    expect(error.code).toBe("verification_failed");
+    expect(error.message).toContain("HKQuantityTypeIdentifierStepCount");
+  });
+
+  test("verification_failed when a seeded type has no read", async () => {
+    const out = savedOutput("HKPROBE read HKQuantityTypeIdentifierStepCount n=1 err=nil");
+    const { instance } = seeder(out, [[]]);
+    const error = await instance.seed("UDID").catch((e) => e);
+    expect(error.code).toBe("verification_failed");
+    expect(error.message).toContain("HKQuantityTypeIdentifierHeartRate");
   });
 
   test("unavailable when HealthKit reports no health data", async () => {

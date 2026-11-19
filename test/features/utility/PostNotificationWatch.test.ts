@@ -12,6 +12,12 @@ const capture = readFileSync(
   new URL("../../fixtures/ios/watch-log-saving-notification.txt", import.meta.url),
   "utf8",
 );
+const FOREGROUND_BUNDLE_ID = "dev.jasonpearson.automobile.ctrlproxy.watch";
+// Captured on watchOS 26.5 with the app frontmost and a delegate returning no presentation options.
+const foregroundCapture = readFileSync(
+  new URL("../../fixtures/ios/watch-log-saving-notification-foreground.txt", import.meta.url),
+  "utf8",
+);
 const noOnly = capture
   .split("\n")
   .filter((line) => line.includes(": NO ["))
@@ -181,6 +187,16 @@ describe("PostNotification - watchOS simulator", () => {
     expect(result.error).toContain("The watch dropped the push");
     expect(simctl.getMethodCalls("readNotificationDeliveryLog")).toHaveLength(3);
     expect(timer.getSleepHistory()).toEqual([100]);
+  });
+
+  test("reports delivered-without-banner, not denied, when the foreground app declines presentation", async () => {
+    simctl.notificationDeliveryLogs = ["", foregroundCapture];
+    const result = await make().execute({ title: "T", body: "B", appId: FOREGROUND_BUNDLE_ID });
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.warning).toContain("showed no banner");
+    expect(result.warning).toContain("Background the app");
+    expect(pushCalls()).toHaveLength(1);
   });
 
   test("uses an empty baseline when the pre-push log read fails", async () => {

@@ -35,41 +35,63 @@ int main(void) {
         }
         NSDictionary *state = @{
             @"found": @NO, @"tag": NSNull.null, @"displayId": NSNull.null,
-            @"displayType": NSNull.null, @"identity": NSNull.null,
+            @"deviceName": NSNull.null, @"displayType": NSNull.null, @"identity": NSNull.null,
             @"isCarDisplay": @NO, @"isCarInstrumentsDisplay": @NO
         };
+        SEL nameSelector = sel_registerName("deviceName");
+        SEL tagSelector = sel_registerName("tag");
+        SEL typeSelector = sel_registerName("displayType");
+        SEL idSelector = sel_registerName("displayId");
+        id selectedDisplay = nil;
+        NSString *selectedName = nil;
+        long long selectedTag = 0;
+        int selectedPriority = 0;
         NSArray *displays = ((id (*)(id, SEL))objc_msgSend)(displayClass, displaysSelector);
         for (id display in displays) {
-            SEL nameSelector = sel_registerName("deviceName");
             if (![display respondsToSelector:nameSelector]) {
                 fprintf(stderr, "CADisplay deviceName is unavailable.\n");
                 return 1;
             }
             NSString *name = ((id (*)(id, SEL))objc_msgSend)(display, nameSelector);
-            if (![name isEqualToString:@"wireless0"]) {
-                continue;
-            }
-            SEL tagSelector = sel_registerName("tag");
-            SEL typeSelector = sel_registerName("displayType");
-            SEL idSelector = sel_registerName("displayId");
-            if (![display respondsToSelector:tagSelector] ||
-                ![display respondsToSelector:typeSelector] ||
-                ![display respondsToSelector:idSelector]) {
+            if (![display respondsToSelector:tagSelector]) {
                 fprintf(stderr, "CADisplay tag, displayType or displayId is unavailable.\n");
                 return 1;
             }
             // These scalar casts match the tag-only simulator probe. Never construct
             // FBSDisplayConfiguration: an attached, powered-off display can crash it.
             long long tag = ((long long (*)(id, SEL))objc_msgSend)(display, tagSelector);
-            long long displayType = ((long long (*)(id, SEL))objc_msgSend)(display, typeSelector);
-            int displayId = ((int (*)(id, SEL))objc_msgSend)(display, idSelector);
+            int priority = 0;
+            if (tag & 0x20) {
+                priority = 4;
+            } else if (tag & 0x40) {
+                priority = 3;
+            } else if ([name isEqualToString:@"wireless0"]) {
+                priority = 2;
+            } else if (tag & 0x4) {
+                priority = 1;
+            }
+            if (priority > selectedPriority) {
+                selectedDisplay = display;
+                selectedName = name;
+                selectedTag = tag;
+                selectedPriority = priority;
+            }
+        }
+        if (selectedDisplay) {
+            if (![selectedDisplay respondsToSelector:typeSelector] ||
+                ![selectedDisplay respondsToSelector:idSelector]) {
+                fprintf(stderr, "CADisplay tag, displayType or displayId is unavailable.\n");
+                return 1;
+            }
+            long long displayType = ((long long (*)(id, SEL))objc_msgSend)(selectedDisplay, typeSelector);
+            int displayId = ((int (*)(id, SEL))objc_msgSend)(selectedDisplay, idSelector);
             state = @{
-                @"found": @YES, @"tag": @(tag), @"displayId": @(displayId),
-                @"displayType": @(displayType), @"identity": displayIdentity(tag, displayId),
-                @"isCarDisplay": ((tag & 0x20) != 0) ? @YES : @NO,
-                @"isCarInstrumentsDisplay": ((tag & 0x40) != 0) ? @YES : @NO
+                @"found": @YES, @"tag": @(selectedTag), @"displayId": @(displayId),
+                @"deviceName": selectedName ?: @"", @"displayType": @(displayType),
+                @"identity": displayIdentity(selectedTag, displayId),
+                @"isCarDisplay": ((selectedTag & 0x20) != 0) ? @YES : @NO,
+                @"isCarInstrumentsDisplay": ((selectedTag & 0x40) != 0) ? @YES : @NO
             };
-            break;
         }
         NSError *error = nil;
         NSData *json = [NSJSONSerialization dataWithJSONObject:state

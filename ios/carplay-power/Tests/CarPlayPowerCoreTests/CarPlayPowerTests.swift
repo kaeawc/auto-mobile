@@ -5,101 +5,149 @@ import XCTest
 private final class FakeScreenBackend: SimulatorScreenBackend {
     var calls: [String] = []
     var failure: CarPlayPowerError?
-    var failureStep: String?
-    var before: [SimulatorScreen] = [FakeScreenBackend.screen(power: 0)]
-    var after: [SimulatorScreen] = [FakeScreenBackend.screen(power: 1)]
+    var failureCallIndex = 0
+    var runtimeMajor = 26
+    var before: [SimulatorScreen] = [FakeScreenBackend.tvOut(power: 0, width: 720)]
+    var after: [SimulatorScreen] = [FakeScreenBackend.tvOut(power: 1)]
     private var enumerations = 0
 
-    static func screen(power: Int32, id: UInt32 = 3, type: UInt64 = 2) -> SimulatorScreen {
-        SimulatorScreen(id: id, name: "Wireless", screenType: type, powerState: power, width: 720, height: 480)
+    static let wireless = SimulatorScreen(
+        id: 3, name: "Wireless", screenType: 2, powerState: 1, width: 800, height: 480
+    )
+
+    static func tvOut(power: Int32, id: UInt32 = 2, width: Double = 800, height: Double = 480) -> SimulatorScreen {
+        SimulatorScreen(id: id, name: "TVOut", screenType: 1, powerState: power, width: width, height: height)
     }
 
     private func record(_ call: String) throws {
         calls.append(call)
-        if let failure, failureStep == nil || failureStep == call { throw failure }
+        if let failure, calls.count - 1 == failureCallIndex { throw failure }
     }
 
     func selectBootedDevice(udid: String) throws { try record("select:\(udid)") }
-    func enableCarPlay() throws { try record("enable") }
-    func settle() throws { try record("settle") }
+
+    func iOSRuntimeMajorVersion() throws -> Int {
+        try record("runtime")
+        return runtimeMajor
+    }
+
+    func writeStarkConfig(width: Int, height: Int) throws { try record("writeStarkConfig:\(width)x\(height)") }
+
     func screens() throws -> [SimulatorScreen] {
         try record("enumerate")
         enumerations += 1
         return enumerations == 1 ? before : after
     }
 
+    func configureCarPlay(screenID: UInt32, width: Int, height: Int) throws {
+        try record("configure:\(screenID):\(width)x\(height)")
+    }
+
     func powerOn(screenID: UInt32) throws { try record("power:\(screenID)") }
 }
 
 final class CarPlayPowerTests: XCTestCase {
-    func testEnableSettlePowerVerifyOrdering() throws {
+    private let powerOnCalls = [
+        "select:d", "runtime", "writeStarkConfig:800x480", "enumerate", "configure:2:800x480", "power:2", "enumerate",
+    ]
+
+    func testConfiguresAndPowersTVOutInOrder() throws {
         let backend = FakeScreenBackend()
-        // Selection is by type, not the incidental id 3 in the reference capture.
-        backend.before = [FakeScreenBackend.screen(power: 0, id: 7)]
-        backend.after = [FakeScreenBackend.screen(power: 1, id: 7)]
-        let result = try CarPlayPowerController(backend: backend).run(udid: "device", powerOn: true, enable: true)
-        XCTAssertEqual(backend.calls, ["select:device", "enable", "settle", "enumerate", "power:7", "enumerate"])
-        XCTAssertEqual(result.carPlay.powerState, 1)
-        XCTAssertEqual(result.carPlay.enabled, true)
+        backend.before = [FakeScreenBackend.wireless, FakeScreenBackend.tvOut(power: 0, id: 7, width: 720)]
+        backend.after = [FakeScreenBackend.wireless, FakeScreenBackend.tvOut(power: 1, id: 7)]
+        let result = try CarPlayPowerController(backend: backend).run(udid: "d", powerOn: true)
+        XCTAssertEqual(backend.calls, [
+            "select:d", "runtime", "writeStarkConfig:800x480", "enumerate", "configure:7:800x480", "power:7",
+            "enumerate",
+        ])
+        XCTAssertEqual(result.screens, backend.after)
+        XCTAssertEqual(result.carPlay, CarPlayState(found: true, powerState: 1))
     }
 
-    func testStatusDoesNotMutateAndEncodesNullUnknowns() throws {
+    func testRefusesNewerRuntimesBeforeWritingConfig() {
+        for major in [27, 28] {
+            let backend = FakeScreenBackend()
+            backend.runtimeMajor = major
+            XCTAssertThrowsError(try CarPlayPowerController(backend: backend).run(udid: "d", powerOn: true)) {
+                XCTAssertEqual(($0 as? CarPlayPowerError)?.code, .unsupportedRuntime)
+            }
+            XCTAssertEqual(backend.calls, ["select:d", "runtime"])
+        }
+    }
+
+    func testOlderRuntimeProceedsThroughPowerOn() throws {
         let backend = FakeScreenBackend()
-        backend.before = []
-        let state = try CarPlayPowerController(backend: backend).run(udid: "device", powerOn: false)
-        XCTAssertEqual(backend.calls, ["select:device", "enumerate"])
+        backend.runtimeMajor = 18
+        _ = try CarPlayPowerController(backend: backend).run(udid: "d", powerOn: true)
+        XCTAssertEqual(backend.calls, powerOnCalls)
+    }
+
+    func testStatusOnIOS27ReportsTVOutWithoutMutating() throws {
+        let backend = FakeScreenBackend()
+        backend.runtimeMajor = 27
+        backend.before.insert(FakeScreenBackend.wireless, at: 0)
+        let state = try CarPlayPowerController(backend: backend).run(udid: "d", powerOn: false)
+        XCTAssertEqual(backend.calls, ["select:d", "enumerate"])
+        XCTAssertEqual(state.carPlay, CarPlayState(found: true, powerState: 0))
+    }
+
+    func testStatusWithoutTVOutEncodesNullPowerState() throws {
+        let backend = FakeScreenBackend()
+        backend.before = [FakeScreenBackend.wireless]
+        let state = try CarPlayPowerController(backend: backend).run(udid: "d", powerOn: false)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as? [String: Any])
         let carPlay = try XCTUnwrap(json["carPlay"] as? [String: Any])
+        XCTAssertEqual(Set(carPlay.keys), ["found", "powerState"])
         XCTAssertEqual(carPlay["found"] as? Bool, false)
         XCTAssertTrue(carPlay["powerState"] is NSNull)
-        XCTAssertTrue(carPlay["enabled"] is NSNull)
     }
 
-    func testMissingCarPlayScreen() {
+    func testMissingTVOutStopsBeforeConfiguration() {
         let backend = FakeScreenBackend()
-        backend.before = [FakeScreenBackend.screen(power: 0, type: 0)]
+        backend.before = [FakeScreenBackend.wireless]
         XCTAssertThrowsError(try CarPlayPowerController(backend: backend).run(udid: "d", powerOn: true)) {
             XCTAssertEqual(($0 as? CarPlayPowerError)?.code, .noCarPlayScreen)
         }
-        XCTAssertEqual(backend.calls, ["select:d", "enumerate"])
+        XCTAssertEqual(backend.calls, Array(powerOnCalls.prefix(4)))
     }
 
-    func testRequiresVerifiedPowerOnSameCarPlayScreen() {
-        for screens in [[FakeScreenBackend.screen(power: 0)], [], [FakeScreenBackend.screen(power: 1, id: 4)]] {
+    func testRequiresSameTVOutScreenPoweredAtExpectedSize() {
+        let unverifiedScreens: [[SimulatorScreen]] = [
+            [FakeScreenBackend.tvOut(power: 0)],
+            [FakeScreenBackend.tvOut(power: 1, width: 720)],
+            [FakeScreenBackend.tvOut(power: 1, height: 400)],
+            [FakeScreenBackend.tvOut(power: 1, id: 4)],
+            [],
+        ]
+        for screens in unverifiedScreens {
             let backend = FakeScreenBackend()
             backend.after = screens
             XCTAssertThrowsError(try CarPlayPowerController(backend: backend).run(udid: "d", powerOn: true)) {
                 XCTAssertEqual(($0 as? CarPlayPowerError)?.code, .powerOnFailed)
             }
-            XCTAssertEqual(backend.calls, ["select:d", "enumerate", "power:3", "enumerate"])
+            XCTAssertEqual(backend.calls, powerOnCalls)
         }
     }
 
-    func testStopsAtFailedEnableEnumerationOrPowerCallback() {
-        let expected = ["select:d", "enable", "settle", "enumerate", "power:3"]
-        for step in ["enable", "settle", "enumerate", "power:3"] {
+    func testStopsAtEveryBackendFailure() {
+        for index in powerOnCalls.indices {
             let backend = FakeScreenBackend()
             let failure = CarPlayPowerError(.powerOnFailed, "backend refused")
             backend.failure = failure
-            backend.failureStep = step
-            XCTAssertThrowsError(try CarPlayPowerController(backend: backend).run(
-                udid: "d", powerOn: true, enable: true
-            )) {
-                XCTAssertEqual($0 as? CarPlayPowerError, failure)
-            }
-            XCTAssertEqual(backend.calls, Array(expected.prefix(while: { $0 != step })) + [step])
-        }
-    }
-
-    func testEveryErrorCodePropagatesAndEncodes() throws {
-        for code in CarPlayErrorCode.allCases {
-            let backend = FakeScreenBackend()
-            let failure = CarPlayPowerError(code, "remedy")
-            backend.failure = failure
+            backend.failureCallIndex = index
             XCTAssertThrowsError(try CarPlayPowerController(backend: backend).run(udid: "d", powerOn: true)) {
                 XCTAssertEqual($0 as? CarPlayPowerError, failure)
             }
+            XCTAssertEqual(backend.calls, Array(powerOnCalls.prefix(index + 1)))
+        }
+    }
+
+    func testEveryErrorCodeEncodes() throws {
+        for code in CarPlayErrorCode.allCases {
+            let failure = CarPlayPowerError(code, "remedy")
             let data = try JSONEncoder().encode(CarPlayErrorResponse(error: failure))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: [String: String]])
+            XCTAssertEqual(json, ["error": ["code": code.rawValue, "message": "remedy"]])
             XCTAssertEqual(try JSONDecoder().decode(CarPlayErrorResponse.self, from: data).error, failure)
         }
     }
@@ -115,5 +163,9 @@ final class CarPlayPowerTests: XCTestCase {
             try Set(XCTUnwrap(screens.first).keys),
             ["id", "name", "screenType", "powerState", "width", "height"]
         )
+        let carPlay = try XCTUnwrap(json["carPlay"] as? [String: Any])
+        XCTAssertEqual(Set(carPlay.keys), ["found", "powerState"])
+        XCTAssertEqual(carPlay["found"] as? Bool, true)
+        XCTAssertEqual(carPlay["powerState"] as? Int, 0)
     }
 }

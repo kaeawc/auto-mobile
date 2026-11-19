@@ -21,7 +21,6 @@ const stateSchema = z
       .object({
         found: z.boolean(),
         powerState: z.number().int().nullable(),
-        enabled: z.boolean().nullable(),
       })
       .strict(),
   })
@@ -34,6 +33,7 @@ const failureSchema = z
           "device-not-found",
           "device-not-booted",
           "private-api-unavailable",
+          "unsupported-runtime",
           "no-carplay-screen",
           "power-on-failed",
           "usage",
@@ -46,7 +46,7 @@ const failureSchema = z
 export type CarPlayPowerState = z.infer<typeof stateSchema>;
 export interface CarPlayScreenPowerer {
   status(udid: string): Promise<CarPlayPowerState>;
-  powerOn(udid: string, options: { enable: boolean }): Promise<CarPlayPowerState>;
+  powerOn(udid: string): Promise<CarPlayPowerState>;
 }
 
 export function parseCarPlayPowerState(json: string): CarPlayPowerState {
@@ -67,20 +67,20 @@ export class DefaultCarPlayScreenPowerer implements CarPlayScreenPowerer {
   ) {}
 
   status(udid: string): Promise<CarPlayPowerState> {
-    return this.run(udid, "status", false);
+    return this.run(udid, "status");
   }
-  powerOn(udid: string, options: { enable: boolean }): Promise<CarPlayPowerState> {
-    return this.run(udid, "power-on", options.enable);
+  powerOn(udid: string): Promise<CarPlayPowerState> {
+    return this.run(udid, "power-on");
   }
 
-  private async run(udid: string, action: string, enable: boolean): Promise<CarPlayPowerState> {
+  private async run(udid: string, action: "status" | "power-on"): Promise<CarPlayPowerState> {
     const path = readEnvRaw(ENV.CARPLAY_POWER_HELPER_PATH, this.env);
     if (!path?.trim()) {
       throw new ActionableError(
         "Build ios/carplay-power and set AUTOMOBILE_CARPLAY_POWER_HELPER_PATH to its carplay-power-helper executable.",
       );
     }
-    const args = [udid, action, ...(enable ? ["--enable"] : [])];
+    const args = [udid, action];
     try {
       const result = await runExecSeam(
         (options) => this.exec(path, args, options),

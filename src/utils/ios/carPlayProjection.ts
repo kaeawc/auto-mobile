@@ -10,6 +10,7 @@ export const carPlayProjectionStateSchema = z.discriminatedUnion("found", [
       found: z.literal(true),
       tag: z.number().int(),
       displayId: z.number().int(),
+      deviceName: z.string().min(1),
       displayType: z.number().int(),
       identity: z.string().min(1),
       isCarDisplay: z.boolean(),
@@ -21,6 +22,7 @@ export const carPlayProjectionStateSchema = z.discriminatedUnion("found", [
       found: z.literal(false),
       tag: z.null(),
       displayId: z.null(),
+      deviceName: z.null(),
       displayType: z.null(),
       identity: z.null(),
       isCarDisplay: z.literal(false),
@@ -30,6 +32,8 @@ export const carPlayProjectionStateSchema = z.discriminatedUnion("found", [
 ]);
 
 export type CarPlayProjectionState = z.infer<typeof carPlayProjectionStateSchema>;
+export type CarPlayProjectingState = Extract<CarPlayProjectionState, { found: true }> &
+  ({ isCarDisplay: true } | { isCarInstrumentsDisplay: true });
 
 export interface CarPlayProjectionProbe {
   probe(udid: string): Promise<CarPlayProjectionState>;
@@ -76,16 +80,18 @@ export class DefaultCarPlayProjectionProbe implements CarPlayProjectionProbe {
   }
 }
 
-export function assertCarPlayProjecting(state: CarPlayProjectionState): void {
-  if (state.isCarDisplay || state.isCarInstrumentsDisplay) {
+export function assertCarPlayProjecting(
+  state: CarPlayProjectionState,
+): asserts state is CarPlayProjectingState {
+  if (state.found && (state.isCarDisplay || state.isCarInstrumentsDisplay)) {
     return;
   }
   const status = state.found
     ? `CarPlay screen is attached but not projecting (${state.identity}).`
-    : "CarPlay screen was not found (wireless0); it is not projecting.";
+    : "No CarPlay display was found.";
   const power =
     !state.found || state.tag === 0
-      ? "Enable CarPlay and power the screen on first via ios/carplay-power. "
+      ? "On iOS 26.x, power on the CarPlay screen via ios/carplay-power. "
       : "";
   throw new ActionableError(
     `${status} Capture was skipped because the frame would be black. ${power}Open the CarPlay window in Simulator.app, then retry.`,
@@ -95,6 +101,8 @@ export function assertCarPlayProjecting(state: CarPlayProjectionState): void {
 export async function requireCarPlayProjection(
   udid: string,
   probe: CarPlayProjectionProbe,
-): Promise<void> {
-  assertCarPlayProjecting(await probe.probe(udid));
+): Promise<CarPlayProjectingState> {
+  const state = await probe.probe(udid);
+  assertCarPlayProjecting(state);
+  return state;
 }

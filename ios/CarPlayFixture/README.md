@@ -11,17 +11,21 @@ xcodebuild -project ios/CarPlayFixture/CarPlayFixture.xcodeproj -scheme CarPlayF
 
 The generated project is checked in, following Playground. The repository XcodeGen drift check discovers project.yml files; its pbxproj normalizer only sorts target arrays (this project has one target). Use the pinned XcodeGen version from scripts/ios/xcodegen_version.sh.
 
-For manual use on an already booted simulator:
+The project enables ad-hoc signing with `CODE_SIGNING_ALLOWED: YES` and `CODE_SIGN_IDENTITY: "-"`.
+The signature embeds the charging entitlement. An unsigned build installs on the simulator but
+never appears on CarPlay. Device distribution requires Apple's charging entitlement approval and
+a signing profile.
+
+For headless use, boot an iOS 26.x simulator and run the following commands with its UDID. Run
+`power-on` after every boot to restore the CarPlay configuration.
 
 ```bash
-xcrun simctl install booted scratch/carplay-fixture-dd/Build/Products/Debug-iphonesimulator/CarPlayFixture.app
-xcrun simctl launch booted dev.jasonpearson.automobile.CarPlayFixture
+swift run --package-path ios/carplay-power carplay-power-helper <udid> power-on
+xcrun simctl install <udid> scratch/carplay-fixture-dd/Build/Products/Debug-iphonesimulator/CarPlayFixture.app
+xcrun simctl launch <udid> dev.jasonpearson.automobile.CarPlayFixture
+xcrun simctl io <udid> screenshot --display=2
 ```
 
-In Simulator, select **I/O > External Displays > CarPlay**, then open the fixture on the CarPlay display. The headless alternative is the `ios/carplay-power` helper:
-
-```bash
-swift run --package-path ios/carplay-power carplay-power-helper <udid> power-on --enable
-```
-
-This powers the display without opening Simulator.app. Device distribution requires Apple's charging entitlement approval and a signing profile; simulator builds disable signing. No image assets or app icon catalog are required.
+For interactive use on iOS 26.x, select **I/O > External Displays > CarPlay** in Simulator, then
+open the fixture on the CarPlay display. iOS 27.x simulators lack CarPlay projection support.
+Use the SDK route (`GET /carplay/templates`) for template snapshots there.

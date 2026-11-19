@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { join } from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
   assertCarPlayProjecting,
@@ -11,23 +11,22 @@ import {
 } from "../../../src/utils/ios/carPlayProjection";
 import { FakeCarPlayProjectionProbe } from "../../fakes/FakeCarPlayProjectionProbe";
 
-// Real projection probe captures with boolean serialization corrected:
-// wireless0 tag=0 dt=2 did=3 (powered off)
-// wireless0 tag=4 dt=2 did=3 (powered on, AirPlay identity)
-const untaggedJson =
-  '{"displayId":3,"displayType":2,"found":true,"identity":"Untagged[3]","isCarDisplay":false,"isCarInstrumentsDisplay":false,"tag":0}';
-const airPlayJson =
-  '{"displayId":3,"displayType":2,"found":true,"identity":"AirPlay[3]","isCarDisplay":false,"isCarInstrumentsDisplay":false,"tag":4}';
-// Synthetic positive control: no real Car capture exists yet.
-const carJson =
-  '{"found":true,"tag":32,"displayId":3,"displayType":2,"identity":"Car[3]","isCarDisplay":true,"isCarInstrumentsDisplay":false}';
-// Synthetic instruments control, also not a real capture.
-const instrumentsJson =
-  '{"found":true,"tag":64,"displayId":3,"displayType":2,"identity":"CarInstruments[3]","isCarDisplay":false,"isCarInstrumentsDisplay":true}';
+const fixtureDir = join(import.meta.dir, "../../fixtures/ios-carplay");
+const carJson = readFileSync(join(fixtureDir, "projection-probe-ios26.5-car.json"), "utf8");
+const airPlayJson = readFileSync(join(fixtureDir, "projection-probe-ios26.5-airplay.json"), "utf8");
+const absentJson = readFileSync(
+  join(fixtureDir, "projection-probe-ios26.5-not-found.json"),
+  "utf8",
+);
+const untaggedJson = readFileSync(
+  join(fixtureDir, "projection-probe-ios27.0-wireless0-untagged.json"),
+  "utf8",
+);
 const absent = {
   found: false as const,
   tag: null,
   displayId: null,
+  deviceName: null,
   displayType: null,
   identity: null,
   isCarDisplay: false as const,
@@ -36,23 +35,24 @@ const absent = {
 const env = { AUTOMOBILE_CARPLAY_PROJECTION_PROBE_PATH: "/probe with spaces" };
 
 describe("CarPlay projection", () => {
-  test("parses measured off/AirPlay states and synthetic Car state", () => {
-    for (const [json, tag, identity] of [
-      [untaggedJson, 0, "Untagged[3]"],
-      [airPlayJson, 4, "AirPlay[3]"],
-      [carJson, 32, "Car[3]"],
+  test("parses captured iOS 26.5 and 27.0 probe states", () => {
+    for (const [json, tag, displayId, deviceName, displayType, identity] of [
+      [carJson, 32, 2, "PurpleTVOut", 1, "Car[2]"],
+      [airPlayJson, 6, 2, "PurpleTVOut", 1, "AirPlay[2]"],
+      [untaggedJson, 0, 3, "wireless0", 2, "Untagged[3]"],
     ] as const) {
-      expect(parseCarPlayProjectionState(json + "\n")).toEqual({
+      expect(parseCarPlayProjectionState(json)).toEqual({
         found: true,
         tag,
-        displayId: 3,
-        displayType: 2,
+        displayId,
+        deviceName,
+        displayType,
         identity,
         isCarDisplay: tag === 32,
         isCarInstrumentsDisplay: false,
       });
     }
-    expect(parseCarPlayProjectionState(JSON.stringify(absent))).toEqual(absent);
+    expect(parseCarPlayProjectionState(absentJson)).toEqual(absent);
   });
 
   test("rejects malformed, extra, missing, wrongly typed and inconsistent absent fields", () => {
@@ -64,9 +64,13 @@ describe("CarPlay projection", () => {
       JSON.stringify({ ...car, extra: true }),
       JSON.stringify({ ...car, tag: "32" }),
       JSON.stringify({ ...car, displayId: 3.5 }),
+      JSON.stringify({ ...car, deviceName: "" }),
+      JSON.stringify({ ...car, deviceName: null }),
+      JSON.stringify({ ...car, deviceName: undefined }),
       JSON.stringify({ ...car, identity: null }),
       JSON.stringify({ ...car, isCarDisplay: undefined }),
       JSON.stringify({ ...absent, tag: 0 }),
+      JSON.stringify({ ...absent, deviceName: "PurpleTVOut" }),
       JSON.stringify({ ...absent, isCarDisplay: true }),
     ]) {
       expect(() => parseCarPlayProjectionState(value)).toThrow(ActionableError);
@@ -132,7 +136,7 @@ describe("CarPlay projection", () => {
   test("refuses AirPlay projection with identity, black-frame explanation and remedy", () => {
     const state = parseCarPlayProjectionState(airPlayJson);
     for (const message of [
-      "attached but not projecting (AirPlay[3])",
+      "attached but not projecting (AirPlay[2])",
       "Capture was skipped because the frame would be black",
       "Open the CarPlay window in Simulator.app, then retry.",
     ]) {
@@ -141,32 +145,44 @@ describe("CarPlay projection", () => {
     expect(() => assertCarPlayProjecting(state)).toThrow(/^(?![\s\S]*(#\d|\]\(|https?:))/);
   });
 
-  test("requires enablement and screen power for untagged or missing wireless0", () => {
-    for (const state of [parseCarPlayProjectionState(untaggedJson), absent]) {
+  test("provides the iOS 26.x power-on hint for untagged or missing displays", () => {
+    for (const json of [untaggedJson, absentJson]) {
+      const state = parseCarPlayProjectionState(json);
       expect(() => assertCarPlayProjecting(state)).toThrow(ActionableError);
       expect(() => assertCarPlayProjecting(state)).toThrow(
-        "Enable CarPlay and power the screen on first",
+        "On iOS 26.x, power on the CarPlay screen via ios/carplay-power.",
       );
       expect(() => assertCarPlayProjecting(state)).toThrow("frame would be black");
     }
-    expect(() => assertCarPlayProjecting(absent)).toThrow("not found (wireless0)");
+    expect(() => assertCarPlayProjecting(absent)).toThrow("No CarPlay display was found");
     expect(() => assertCarPlayProjecting(parseCarPlayProjectionState(untaggedJson))).toThrow(
       "Untagged[3]",
     );
   });
 
-  test("allows synthetic Car and CarInstruments states", () => {
+  test("allows the captured Car state and a synthetic CarInstruments state", () => {
     const car = parseCarPlayProjectionState(carJson);
+    const instruments = parseCarPlayProjectionState(
+      JSON.stringify({
+        ...car,
+        tag: 64,
+        identity: "CarInstruments[2]",
+        isCarDisplay: false,
+        isCarInstrumentsDisplay: true,
+      }),
+    );
     expect(assertCarPlayProjecting(car)).toBeUndefined();
-    expect(assertCarPlayProjecting(parseCarPlayProjectionState(instrumentsJson))).toBeUndefined();
+    expect(assertCarPlayProjecting(instruments)).toBeUndefined();
   });
 
   test("require probes the selected device and propagates refusal or probe failure", async () => {
-    const fake = new FakeCarPlayProjectionProbe(parseCarPlayProjectionState(carJson));
-    expect(await requireCarPlayProjection("one", fake)).toBeUndefined();
+    const car = parseCarPlayProjectionState(carJson);
+    assertCarPlayProjecting(car);
+    const fake = new FakeCarPlayProjectionProbe(car);
+    expect(await requireCarPlayProjection("one", fake)).toBe(car);
     fake.state = parseCarPlayProjectionState(airPlayJson);
     await expect(requireCarPlayProjection("two", fake)).rejects.toThrow(
-      "not projecting (AirPlay[3])",
+      "not projecting (AirPlay[2])",
     );
     fake.error = new ActionableError("probe failed");
     await expect(requireCarPlayProjection("three", fake)).rejects.toBe(fake.error);
@@ -175,7 +191,7 @@ describe("CarPlay projection", () => {
 
   test("probe.m emits exactly the schema's keys in both branches, with a self-deadline", () => {
     const source = readFileSync(
-      resolve(import.meta.dir, "../../../ios/carplay-projection-probe/probe.m"),
+      join(import.meta.dir, "../../../ios/carplay-projection-probe/probe.m"),
       "utf8",
     );
     // Each `state = @{ ... }` literal is one JSON branch the probe can print.

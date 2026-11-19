@@ -39,6 +39,7 @@ To add one, copy the [template](template.md).
 | 2026-11-10 | decision | [Android Auto projection: no Google account](2026-11-10-android-auto-projection-provisioning-no-account.md)                        |
 | 2026-11-08 | concept  | [Android Auto stub and DHU 2.1 on a Play emulator](2026-11-08-form-factors-android-auto-dhu-stub.md)                               |
 | 2026-11-08 | decision | [AndroidX baseline profile tooling for CtrlProxy](2026-11-08-androidx-baseline-profile-generator.md)                               |
+| 2026-11-07 | decision | [Defer Apple Watch prototypes](2026-11-07-watch-prototypes-deferred.md)                                                            |
 | 2026-11-06 | decision | [Keystore StrongBox fault: pre-generation check](2026-11-06-keystore-strongbox-fault-pre-generation-check.md)                      |
 | 2026-11-06 | decision | [AndroidX TV libraries for the Android TV fixture apps](2026-11-06-androidx-tv-fixture-libraries.md)                               |
 | 2026-11-05 | decision | [Prototype remote image URLs](2026-11-05-prototype-ux-remote-image-urls.md)                                                        |

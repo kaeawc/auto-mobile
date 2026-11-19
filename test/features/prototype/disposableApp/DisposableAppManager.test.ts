@@ -226,6 +226,26 @@ describe("DisposableAppManager.install", () => {
 });
 
 describe("DisposableAppManager TTL and uninstall", () => {
+  test("sweeps empty and unexpired registries without querying Android packages", async () => {
+    class InstallerWithoutPackageReads extends FakeDisposableAppInstaller {
+      override async installedIds(): Promise<string[]> {
+        throw new Error("Unexpected package listing");
+      }
+
+      override async inspect(): Promise<never> {
+        throw new Error("Unexpected package inspection");
+      }
+    }
+    const sweeper = new DisposableAppManager({
+      platforms: { android: { stamper, installer: new InstallerWithoutPackageReads() } },
+      registry,
+      timer,
+    });
+    expect(await sweeper.sweepExpired(DEVICE, "android")).toEqual({ removed: [], skipped: [] });
+    await manager.install(input({ ttlHours: 1 }));
+    expect(await sweeper.sweepExpired(DEVICE, "android")).toEqual({ removed: [], skipped: [] });
+  });
+
   test("the expiry sweep removes only apps whose TTL has passed", async () => {
     await manager.install(input({ ttlHours: 1 }));
     await manager.install(input({ slug: "keeper", ttlHours: 0 }));

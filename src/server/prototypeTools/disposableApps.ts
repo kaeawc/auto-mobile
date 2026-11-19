@@ -1,23 +1,18 @@
 import type { z } from "zod/v4";
+import { defaultDisposableAppManager } from "../../features/prototype/disposableApp/defaultDisposableAppManager";
+export { defaultDisposableAppManager };
 import {
   DisposableAppManager,
   type DisposableAppInstallInput,
   type DisposableAppUninstallTarget,
 } from "../../features/prototype/disposableApp/DisposableAppManager";
 import type { DisposableAppPlatform } from "../../features/prototype/disposableApp/disposableAppId";
-import { FileDisposableAppRegistry } from "../../features/prototype/disposableApp/DisposableAppRegistry";
-import { NodeDisposableAppRegistryStore } from "../../features/prototype/disposableApp/NodeDisposableAppRegistryStore";
-import {
-  AndroidDisposableAppInstaller,
-  androidDisposableAppDevices,
-} from "../../features/prototype/disposableApp/android/AndroidDisposableAppInstaller";
-import { AndroidDisposableAppStamper } from "../../features/prototype/disposableApp/android/AndroidDisposableAppStamper";
 import type { PrototypeJson } from "../../features/prototype/prototypeJson";
 import type { BootedDevice } from "../../models";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
-import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import type { Timer } from "../../utils/SystemTimer";
 import type { prototypeSchema } from "./schemas";
 import type { PrototypeOutput } from "./types";
 
@@ -32,24 +27,6 @@ export const isDisposableAppAction = (action: string): action is PrototypeDispos
 
 /** The manager calls these actions make; tests inject a manager over fakes. */
 export type PrototypeDisposableApps = Pick<DisposableAppManager, "install" | "list" | "uninstall">;
-
-/** The daemon's manager: Android stamping and adb, with the registry under the data dir. */
-export function defaultDisposableAppManager(
-  dependencies: { adbFactory?: AdbClientFactory; timer?: Pick<Timer, "now"> } = {},
-): DisposableAppManager {
-  return new DisposableAppManager({
-    platforms: {
-      android: {
-        stamper: new AndroidDisposableAppStamper(),
-        installer: new AndroidDisposableAppInstaller(
-          androidDisposableAppDevices(dependencies.adbFactory),
-        ),
-      },
-    },
-    registry: new FileDisposableAppRegistry(new NodeDisposableAppRegistryStore()),
-    timer: dependencies.timer ?? defaultTimer,
-  });
-}
 
 /**
  * The injected manager, or the daemon's built on the first disposable-app call, so other actions

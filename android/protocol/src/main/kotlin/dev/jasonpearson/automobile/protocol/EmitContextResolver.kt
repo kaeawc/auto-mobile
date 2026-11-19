@@ -13,6 +13,8 @@ interface EmitContextInputs {
 
   fun data(pointer: String): JsonElement?
 
+  fun derived(name: String): JsonElement? = null
+
   fun platform(pointer: String): JsonElement? = null
 
   fun event(pointer: String): JsonElement? = null
@@ -39,6 +41,7 @@ object EmitContextResolver {
           "page" in binding ->
             inputs.page(binding.getValue("page").jsonPrimitive.content)?.let(::JsonPrimitive)
           "data" in binding -> inputs.data(binding.getValue("data").jsonPrimitive.content)
+          "derived" in binding -> inputs.derived(binding.getValue("derived").jsonPrimitive.content)
           "platform" in binding ->
             inputs.platform(binding.getValue("platform").jsonPrimitive.content)
           "event" in binding -> inputs.event(binding.getValue("event").jsonPrimitive.content)

@@ -57,6 +57,7 @@ public enum PrototypeSpecStrictValidator {
                 sensors: fields["sensors"],
                 notifications: fields["notifications"],
                 media: fields["media"],
+                derive: fields["derive"],
                 root: root,
                 state: state
             )
@@ -184,11 +185,16 @@ public enum PrototypeSpecStrictValidator {
         }.map { PrototypeLocatedValue(value: ["stateKey": $0.value["stateKey"] ?? .null], path: $0.path) }
         let secure = Set(repeats.bound(secureNodes).compactMap { $0.value["stateKey"]?.stringValue })
         guard !secure.isEmpty else { return }
+        let derive = fields["derive"]?.objectFields ?? [:]
         var bindings: [(text: String, path: String, key: Bool, request: Bool)] = []
         func append(_ raw: JSONValue?, path: String, request: Bool = false) {
             if let text = raw?.stringValue { bindings.append((text, path, false, request)) }
-            if let key = raw?.objectFields?["state"]?.stringValue {
-                bindings.append((key, "\(path).state", true, request))
+            guard let binding = raw?.objectFields else { return }
+            let member = binding["derived"] == nil ? "state" : "derived"
+            for source in PrototypeDerivedValidator.sources(binding, entries: derive) {
+                if let key = source["state"]?.stringValue {
+                    bindings.append((key, "\(path).\(member)", true, request))
+                }
             }
         }
         for (id, raw) in fields["channels"]?.objectFields ?? [:] {

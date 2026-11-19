@@ -168,5 +168,10 @@ Use `visibleWhen: {"derived":"cartCount","gt":0}` to show checkout when a derive
 positive. Derived conditions compare raw values, before formatting, and update when their inputs
 change. They also work in `enabledWhen`, `errorWhen`, and `styleWhen`. Operators are `equals`,
 `notEquals`, `gt`, `lt`, `empty`, `contains`, `startsWith`, `lengthGt`, and `lengthLt`.
-Collections and derived conditions require `prototype_derive_v1`; update a renderer that refuses
-this capability.
+Use `{"derived":"cartCount"}` in data action values and selectors, emit context, or request
+query and body values. The action reads the current raw value. An unset value becomes null in
+emit context and fails a data write or request.
+
+Use `enabledWhen: {"key":"confirm","equalsKey":"password"}` to enable a control when both state
+keys are set and their values match. Collections, derived bindings, derived conditions, and
+`equalsKey` require `prototype_derive_v1`.

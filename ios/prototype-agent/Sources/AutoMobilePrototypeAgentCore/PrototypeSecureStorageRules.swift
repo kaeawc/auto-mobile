@@ -32,7 +32,9 @@ enum PrototypeSecureStorageRules {
 
     private static func validateList(
         _ secure: [JSONValue], keys: [String], platform: [String], state: [String: JSONValue]
-    ) throws {
+    )
+        throws
+    {
         guard platform.contains("secureStorage") else {
             throw PrototypeContractValidator.invalid(
                 "storage.secure", "storage.secure requires secureStorage in requires.platform"
@@ -50,12 +52,16 @@ enum PrototypeSecureStorageRules {
         PrototypeContractValidator.strings(storage?.objectFields?["secure"])
     }
 
-    static func validateEmit(_ fields: [String: JSONValue], path: String, secure: [String]) throws {
+    static func validateEmit(
+        _ fields: [String: JSONValue], path: String, secure: [String], derive: [String: JSONValue]
+    )
+        throws
+    {
         guard fields["type"] == .string("emit"), !secure.isEmpty,
               let context = fields["context"]?.objectFields else { return }
         for name in context.keys.sorted() {
-            guard case let .string(key)? = context[name]?.objectFields?["state"],
-                  let leaked = secureKey(for: key, secure: secure) else { continue }
+            guard let binding = context[name]?.objectFields,
+                  let leaked = bindingKey(binding, secure: secure, derive: derive) else { continue }
             throw PrototypeContractValidator.invalid(
                 PrototypeLimits.dataMemberPath("\(path).context", key: name),
                 "Secure storage key \(leaked) cannot be sent in an emit context"
@@ -66,7 +72,11 @@ enum PrototypeSecureStorageRules {
     /// A `request` that sends a secure key without `allowSecureInRequest: true`: a `{state}` binding in a
     /// header, query value or body (a whole body, a form entry or a multipart value), or a `{key}` placeholder
     /// in the URL, a header or a query value. Members are checked in sorted order.
-    static func validateRequest(_ fields: [String: JSONValue], path: String, secure: [String]) throws {
+    static func validateRequest(
+        _ fields: [String: JSONValue], path: String, secure: [String], derive: [String: JSONValue]
+    )
+        throws
+    {
         guard fields["type"] == .string("request"), !secure.isEmpty,
               fields["allowSecureInRequest"] != .bool(true) else { return }
         let body = fields["body"]?.objectFields
@@ -84,7 +94,7 @@ enum PrototypeSecureStorageRules {
         for (value, at) in candidates {
             let leaked: String? = switch value {
             case let .string(text)?: placeholderKey(text, secure: secure)
-            case let .object(binding)?: binding["state"]?.stringValue.flatMap { secureKey(for: $0, secure: secure) }
+            case let .object(binding)?: bindingKey(binding, secure: secure, derive: derive)
             default: nil
             }
             if let leaked {
@@ -93,6 +103,16 @@ enum PrototypeSecureStorageRules {
                 )
             }
         }
+    }
+
+    private static func bindingKey(
+        _ binding: [String: JSONValue], secure: [String], derive: [String: JSONValue]
+    )
+        -> String?
+    {
+        PrototypeDerivedValidator.sources(binding, entries: derive).lazy.compactMap { source in
+            source["state"]?.stringValue.flatMap { secureKey(for: $0, secure: secure) }
+        }.first
     }
 
     /// The secure key a `{key}` text placeholder names. Every `{...}` group that closes is checked, at every
@@ -153,7 +173,6 @@ enum PrototypeSecureStorageRules {
         }
         return nil
     }
-
 
     private static func keyError(_ entry: String?, state: [String: JSONValue], keys: [String]) -> String? {
         guard let entry, entry.hasPrefix("state:") else { return "Secure storage keys are state:<key>" }

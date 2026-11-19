@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
 import java.io.File
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.*
 import kotlinx.serialization.json.Json
 import org.junit.Assert.*
@@ -22,11 +24,7 @@ class PrototypeDerivedCollectionsMappingTest {
 
   @Test
   fun `shared derived conditions follow recomputed raw values`() {
-    val file =
-      generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
-        .map { File(it, "test/fixtures/prototype-spec/derive/conditions.json") }
-        .first { it.isFile }
-    val fixture = specJson.parseToJsonElement(file.readText()).jsonObject
+    val fixture = fixture("conditions")
     val spec = specJson.decodeFromJsonElement<PrototypeSpec>(fixture.getValue("spec"))
     val mapper = PrototypeRenderMapper(FakePrototypeValueFormatter())
     for (entry in fixture.getValue("changes").jsonArray) {
@@ -37,6 +35,64 @@ class PrototypeDerivedCollectionsMappingTest {
       val root = mapper.map(spec.copy(state = state), emptyMap()).root
       assertEquals(expected, root.children.map { it.visible })
     }
+  }
+
+  @Test
+  fun `shared state key comparisons follow both input keys`() {
+    val fixture = fixture("bindings")
+    val spec = specJson.decodeFromJsonElement<PrototypeSpec>(fixture.getValue("spec"))
+    val mapper = PrototypeRenderMapper(FakePrototypeValueFormatter())
+    for (entry in fixture.getValue("changes").jsonArray) {
+      val change = entry.jsonObject
+      val state =
+        specJson.decodeFromJsonElement<Map<String, PrototypeScalar>>(change.getValue("state"))
+      val enabled = mapper.map(spec.copy(state = state), emptyMap()).root.children.single().enabled
+      assertEquals(change.getValue("visible").jsonPrimitive.boolean, enabled)
+    }
+  }
+
+  @Test
+  fun `shared action bindings read raw derived values`() = runTest {
+    val fixture = fixture("bindings")
+    val expected = fixture.getValue("expected").jsonObject
+    val spec = specJson.decodeFromJsonElement<PrototypeSpec>(fixture.getValue("spec"))
+    val events = mutableListOf<PrototypeEvent>()
+    val requests = mutableListOf<PrototypeHttpRequest>()
+    val client = PrototypeHttpClient {
+      requests += it
+      PrototypeRequestResponse.Received(204, emptyMap(), null, 0)
+    }
+    var sequence = 0L
+    val runtime =
+      PrototypeRuntime(
+        spec,
+        sink = PrototypeEventSink { events += it },
+        clock = { 0L },
+        nextSequence = { ++sequence },
+        warn = { error(it) },
+        httpClients = PrototypeHttpClients(client, client),
+        requestScope = backgroundScope,
+        newRequestId = { "cart-request" },
+        monotonicMs = { 0L },
+      )
+    val button = runtime.renderModel().root.children.single()
+    assertTrue(button.enabled)
+    runtime.handle(PrototypeInteraction.Tap(checkNotNull(button.source?.onTap)))
+    runCurrent()
+
+    assertEquals(expected.getValue("count"), runtime.current.spec.data?.get("count"))
+    assertEquals(expected.getValue("context"), events.single { it.name == "checkout" }.context)
+    val request = requests.single()
+    assertEquals(expected.getValue("url").jsonPrimitive.content, request.url)
+    assertEquals(expected.getValue("body"), request.body)
+  }
+
+  private fun fixture(name: String): JsonObject {
+    val file =
+      generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
+        .map { File(it, "test/fixtures/prototype-spec/derive/$name.json") }
+        .first { it.isFile }
+    return specJson.parseToJsonElement(file.readText()).jsonObject
   }
 
   private fun spec(): PrototypeSpec {

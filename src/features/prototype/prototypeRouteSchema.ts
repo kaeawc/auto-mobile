@@ -4,7 +4,7 @@ import contract from "../../../schemas/prototype-spec-contract.json";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import {
   buildPrototypeActionListSchema,
-  prototypeDataActionValueSchema,
+  prototypeValueBindingSchema,
   type PrototypeDataActionValue,
 } from "./prototypeActionValues";
 
@@ -19,7 +19,7 @@ export const routeParamsSchema: z.ZodType<RouteParams, z.ZodTypeDef, unknown> =
       z.string(),
       z.number().finite(),
       z.boolean(),
-      ...prototypeDataActionValueSchema.options.slice(0, 4),
+      ...prototypeValueBindingSchema.options.slice(0, 4),
     ]),
   ).refine((value) => Object.keys(value).length <= 16);
 

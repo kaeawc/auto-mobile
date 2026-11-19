@@ -19,12 +19,16 @@ export const pointerSchema = z
   .max(contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH)
   .regex(prototypeContractPatterns.pointer);
 /** The emit.context binding forms except `page`; `{value: literal}` is the literal form. */
-export const prototypeDataActionValueSchema = z.union([
+export const prototypeValueBindingSchema = z.union([
   z.object({ state: stateKeySchema }).strict(),
   z.object({ item: keySchema }).strict(),
   z.object({ index: z.literal(true) }).strict(),
   z.object({ data: pointerSchema }).strict(),
   z.object({ value: prototypeJsonSchema }).strict(),
+]);
+export const prototypeDataActionValueSchema = z.union([
+  ...prototypeValueBindingSchema.options,
+  z.object({ derived: keySchema }).strict(),
 ]);
 /** A single unescaped object member; never interpreted as a pointer. */
 export const dataMemberSchema = z

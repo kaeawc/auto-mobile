@@ -28,9 +28,11 @@ Each nonempty context name has a strict binding object with exactly one key:
 - `{page: pagerId}` reads an existing pager's current numeric page.
 - `{data: pointer}` reads any JSON value via the existing data pointer syntax and
   `MAX_PROTOTYPE_DATA_POINTER_LENGTH`; it also requires `prototype_data_model_v1`.
+- `{derived: name}` reads the raw value of a top-level `derive` entry and requires
+  `prototype_derive_v1`.
 - `{value: json}` is literal JSON, subject to the emit payload depth limit.
 
-Missing state keys and data paths resolve to null. `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` bounds the
+Missing state keys, data paths, and derived values resolve to null. `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` bounds the
 number of entries. The resolved object's compact JSON UTF-8 bytes
 are bounded by `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`; this runtime count includes multibyte strings
 and compact JSON numbers, rather than the payload validator's conservative numeric cost.
@@ -62,11 +64,12 @@ the complete result of `show`, `patch` and `replaceNode`).
   `/data` alone is refused. Inside a `repeat`, a whole `{index}` segment (`/data/cart/{index}`) binds
   to the current row; `{index}` elsewhere, outside a repeat, or `{alias.field}`, is a validation error.
 - `value` takes the `emit.context` binding forms except `page`: `{value: json}` (the literal form),
-  `{state: key}`, `{data: pointer}` and, in a repeat, `{item: field}` and `{index: true}`. A written
-  value is data: no null.
+  `{state: key}`, `{data: pointer}`, `{derived: name}` and, in a repeat, `{item: field}` and
+  `{index: true}`. A written value must satisfy the data rules. A missing derived value produces
+  `not_found`.
 - `where: {field, equals: binding}` selects one object in the array at `path`, using JSON identity.
   No match returns `not_found`; duplicate matches return `ambiguous_match`. `equals` uses
-  `{value}`, `{state}`, `{data}` or repeat `{item}`/`{index}` bindings. On `setData`, optional
+  `{value}`, `{state}`, `{data}`, `{derived}` or repeat `{item}`/`{index}` bindings. On `setData`, optional
   `member` creates or replaces that object member; omitting it replaces the whole element.
   `field` and `member` must be non-empty names without `/` or `~`; `member` requires `where`.
 - Semantics are one pure function, `applyPrototypeDataWrite` (`src/features/prototype/prototypeDataWrite.ts`),

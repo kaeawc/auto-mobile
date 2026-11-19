@@ -10,6 +10,7 @@ A condition is exactly one of these forms. `visibleWhen` takes any of them;
 | Form                        | Holds when                                                                            |
 | --------------------------- | ------------------------------------------------------------------------------------- |
 | `{key, equals: scalar}`     | The state value is exactly equal (same type). A missing key never holds.              |
+| `{key, equalsKey: key}`     | Both state keys are set and their scalar values are equal.                            |
 | `{key, notEquals: scalar}`  | The state value differs, including when the key is missing.                           |
 | `{key, gt: number}`         | The state value is a number greater than `gt`. Any other type is false.               |
 | `{key, lt: number}`         | The state value is a number less than `lt`. Any other type is false.                  |
@@ -30,7 +31,8 @@ Numbers compare by value, so a state of `-0` equals `0` on every platform (#1140
 
 Conditions nest to a depth of 8 (`MAX_PROTOTYPE_CONDITION_DEPTH` in the shared
 contract). The `key`, `data`, `platform` and `derived` forms each take one comparison. Derived conditions require
-`prototype_derive_v1` and update when the named entry recomputes.
+`prototype_derive_v1` and update when the named entry recomputes. The `equalsKey` operator also
+requires `prototype_derive_v1`; both keys can bind repeat placeholders.
 Errors point at the offending field (for example `root.visibleWhen.gt`).
 The `toggle`, `increment` and `decrement` actions validate their `key` against the declared `state`
 (`root.onTap[0].key`). They are no-ops at runtime if other means changed the key's type.

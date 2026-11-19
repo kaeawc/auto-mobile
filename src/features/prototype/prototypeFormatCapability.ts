@@ -1,5 +1,10 @@
 import { prototypeSpecNodeRoots, prototypeNodeChildren } from "./prototypeNodeChildren";
-import { mapBindableFields, record } from "./prototypeTemplate";
+import {
+  mapBindableFields,
+  record,
+  visitPrototypeHandlerFields,
+  type FieldVisitor,
+} from "./prototypeTemplate";
 export function prototypeFormatFields(spec: unknown): string[] {
   const fields = Object.values(record(record(spec)?.derive) ?? {}).some(
     (entry) =>
@@ -37,6 +42,12 @@ export function prototypeDeriveFields(spec: unknown): string[] {
   const fields = Object.entries(record(record(spec)?.derive) ?? {})
     .filter(([, entry]) => Object.hasOwn(record(entry) ?? {}, "collection"))
     .map(([name]) => `derive.${name}.collection`);
+  const scan: FieldVisitor = (field, at, kind) => {
+    if (kind === "derivedCondition" || kind === "derivedBinding" || kind === "equalsKey") {
+      fields.push(at);
+    }
+    return field;
+  };
   const pending = prototypeSpecNodeRoots(spec);
   while (pending.length) {
     const { node, path } = pending.pop()!;
@@ -44,12 +55,7 @@ export function prototypeDeriveFields(spec: unknown): string[] {
     if (!value) {
       continue;
     }
-    mapBindableFields(value, path, (field, at, kind) => {
-      if (kind === "derivedCondition") {
-        fields.push(at);
-      }
-      return field;
-    });
+    mapBindableFields(value, path, scan);
     if (Object.hasOwn(record(record(value.repeat)?.items) ?? {}, "derived")) {
       fields.push(`${path}.repeat.items.derived`);
     }
@@ -60,6 +66,7 @@ export function prototypeDeriveFields(spec: unknown): string[] {
       })),
     );
   }
+  visitPrototypeHandlerFields(spec, scan);
   return fields;
 }
 export function prototypeDeriveUnsupportedMessage(

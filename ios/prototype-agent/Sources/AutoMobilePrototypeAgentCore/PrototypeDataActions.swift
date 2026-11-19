@@ -54,7 +54,7 @@ enum PrototypeDataWrite {
 
     // MARK: Value
 
-    /// `{value}` is the literal, `{state}` and `{data}` read the committed values at the action. A
+    /// `{value}` is the literal. `{state}`, `{data}` and `{derived}` read the committed values at the action. A
     /// missing source is an error. `{item}` and `{index}` are bound by repeat expansion before an
     /// action runs, so one left here was written outside a repeat. `page` is not a data binding.
     static func resolveValue(
@@ -83,6 +83,13 @@ enum PrototypeDataWrite {
             guard let pointer = pointer.stringValue, let value = inputs.data(pointer) else {
                 return .failure(.init(
                     code: .notFound, message: "Data pointer \(form[kind]?.stringValue ?? "") does not exist"
+                ))
+            }
+            return .success(value)
+        case let ("derived", raw?):
+            guard let name = raw.stringValue, let value = inputs.derived(name) else {
+                return .failure(.init(
+                    code: .notFound, message: "Derived value \(raw.stringValue ?? "") is not set"
                 ))
             }
             return .success(value)

@@ -34,6 +34,26 @@ class PrototypeAssetStoreTest {
   }
 
   @Test
+  fun `upload file lookups by an escaping id never leave the asset directory`() {
+    val root = kotlin.io.path.createTempDirectory("prototype-assets").toFile()
+    try {
+      val dir = java.io.File(root, "assets")
+      java.io.File(root, "hero").writeBytes(byteArrayOf(9))
+      val onDisk = PrototypeAssetStore(PrototypeAssetDirectory(dir))
+      assertTrue(
+        onDisk.put("hero", "image/png", PrototypeAssetBytes.png(20))
+          is PrototypeAssetPutResult.Stored,
+      )
+      assertEquals(dir.canonicalFile, onDisk.file("hero")?.canonicalFile?.parentFile)
+      for (id in listOf("../hero", "../../hero", "/etc/hosts", "assets/../hero", "asset-0")) {
+        assertNull(id, onDisk.file(id))
+      }
+    } finally {
+      root.deleteRecursively()
+    }
+  }
+
+  @Test
   fun `defaults come from the shared contract`() {
     val defaults = PrototypeAssetLimits()
     assertEquals(4 * 1024 * 1024, defaults.maxAssetBytes)

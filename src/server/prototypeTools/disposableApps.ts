@@ -96,15 +96,21 @@ async function run(
   apps: PrototypeDisposableApps,
   device: BootedDevice,
   args: PrototypeArgs,
+  attachments?: { forget(deviceId: string, appId: string): Promise<void> },
 ): Promise<PrototypeOutput> {
   if (args.action === "installApp") {
-    return { success: true, disposableApp: await apps.install(installInput(device, args)) };
+    const disposableApp = await apps.install(installInput(device, args));
+    await attachments?.forget(device.deviceId, disposableApp.appId);
+    return { success: true, disposableApp };
   }
   if (args.action === "listApps") {
     return { success: true, disposableApps: await apps.list(device.deviceId, appPlatform(device)) };
   }
   const target = uninstallTarget(args);
   const uninstalled = await apps.uninstall(device.deviceId, appPlatform(device), target);
+  await Promise.all(
+    uninstalled.removed.map(({ appId }) => attachments?.forget(device.deviceId, appId)),
+  );
   return { success: true, uninstalled };
 }
 
@@ -113,9 +119,10 @@ export async function disposableAppOutput(
   apps: PrototypeDisposableApps,
   device: BootedDevice,
   args: PrototypeArgs,
+  attachments?: { forget(deviceId: string, appId: string): Promise<void> },
 ): Promise<PrototypeOutput> {
   try {
-    return await run(apps, device, args);
+    return await run(apps, device, args, attachments);
   } catch (error) {
     logger.warn(`prototype ${args.action} failed on ${device.deviceId}`, error);
     return {

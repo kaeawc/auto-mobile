@@ -22,6 +22,15 @@ final class PrototypeCapabilityMinimumOSTests: XCTestCase {
         Set(PrototypeAgentProtocol.advertisedCapabilities(os: FakeOSVersion(majorVersion: major), minimumOS: table))
     }
 
+    func testUploadAndDeviceCapabilitiesAppearExactlyOnce() {
+        for capability in [
+            PrototypeAgentProtocol.networkUploadCapability,
+            PrototypeAgentProtocol.networkDeviceCapability,
+        ] {
+            XCTAssertEqual(PrototypeAgentProtocol.capabilities.filter { $0 == capability }.count, 1)
+        }
+    }
+
     func testEachOSTierAdvertisesExactlyItsCapabilities() {
         let all = Set(PrototypeAgentProtocol.capabilities)
         let chart = PrototypeAgentProtocol.chartCapability

@@ -516,7 +516,8 @@ class CtrlProxy : AccessibilityService() {
       pinner = PinnedPrototypeShortcuts(AndroidPinnedShortcutPlatform(this)),
       // Deleting a saved prototype also removes the values its storage block kept.
       clearStorage = { id ->
-        if (::prototypeController.isInitialized) prototypeController.clearStoredValues(id)
+        if (::prototypeController.isInitialized)
+          prototypeController.clearStoredValues(id, keepSessionValues = true)
         else purgePrototypeSecureStorage(id) + prototypeStorage.clear(id)
       },
     )

@@ -10,6 +10,7 @@ struct PrototypeHttpRequest: Equatable, Sendable {
     let url: String
     let headers: [String: String]
     let body: Data?
+    var uploadBody: PrototypeUploadBody? = nil
     /// Total time the call may take.
     let timeoutMs: Int
     /// The client stops reading, and fails with `too_large`, once a 2xx body crosses this. A non-2xx
@@ -35,6 +36,13 @@ struct PrototypeHttpRequest: Equatable, Sendable {
                 body = Data(PrototypeJSONText.string(value).utf8)
                 if !hasContentType { headers["Content-Type"] = "application/json" }
             }
+        }
+        let upload = job.method.allowsBody ? job.uploadBody : nil
+        uploadBody = upload
+        if let upload {
+            headers = headers.filter { $0.key.lowercased() != "content-type" }
+            headers["Content-Type"] = upload.contentType
+            body = nil
         }
         self.headers = headers
         self.body = body
@@ -68,10 +76,18 @@ struct PrototypeHttpFailure: Error, Equatable, Sendable {
     var localNetworkDenied = false
 }
 
+typealias PrototypeUploadProgressCallback = @Sendable (Int64, Int64) -> Void
+
 protocol PrototypeHttpClient: Sendable {
     /// Runs the call. Cancelling the calling task ends it with a `cancelled` failure. Throws
     /// `PrototypeHttpFailure` only.
     func perform(_ request: PrototypeHttpRequest) async throws -> PrototypeHttpResponse
+    /// Byte counters may restart on redirects. The driver owns throttling and monotonic state writes.
+    /// The default implementation rejects uploads for older clients; wrappers forward this overload.
+    func perform(
+        _ request: PrototypeHttpRequest, delivery: PrototypeDeliveryCheck,
+        uploadProgress: PrototypeUploadProgressCallback?
+    ) async throws -> PrototypeHttpResponse
     /// Wrapper clients must forward `delivery` to their wrapped client so consent is rechecked at delivery.
     func perform(
         _ request: PrototypeHttpRequest, delivery: PrototypeDeliveryCheck
@@ -79,6 +95,21 @@ protocol PrototypeHttpClient: Sendable {
 }
 
 extension PrototypeHttpClient {
+    func perform(
+        _ request: PrototypeHttpRequest, delivery: PrototypeDeliveryCheck,
+        uploadProgress _: PrototypeUploadProgressCallback?
+    )
+        async throws -> PrototypeHttpResponse
+    {
+        // Legacy clients cannot silently discard an upload. Upload-aware clients override this.
+        guard request.uploadBody == nil else {
+            throw PrototypeHttpFailure(
+                error: .init(.invalidRequest, "This HTTP client does not support upload bodies."), durationMs: 0
+            )
+        }
+        return try await perform(request, delivery: delivery)
+    }
+
     func perform(
         _ request: PrototypeHttpRequest, delivery _: PrototypeDeliveryCheck
     )

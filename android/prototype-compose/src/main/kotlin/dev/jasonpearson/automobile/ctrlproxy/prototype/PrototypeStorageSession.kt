@@ -116,6 +116,12 @@ internal constructor(
 
   /** The reset succeeded: forget the old values and accept only subsequent changes. */
   fun reset() = finish { sessions.forEach { it.reset() } }
+
+  /**
+   * The disk was emptied under an enclosing hold that still decides the outcome (a saved-prototype
+   * delete): keep the values, so a resume of that hold writes them back to both backends.
+   */
+  fun releaseKeepingValues() = finish { sessions.forEach { it.releaseKeepingValues() } }
 }
 
 /**
@@ -607,6 +613,19 @@ internal constructor(
     }
   }
 
+  /** The disk was emptied, but an enclosing hold may still resume: everything held is owed. */
+  internal fun releaseKeepingValues() {
+    synchronized(lock) {
+      persistedValues = emptyMap()
+      persistedSecureValues = emptyMap()
+      secureBaselineStale = true
+      if (values.isNotEmpty() || secureValues.isNotEmpty()) dirty = true
+      // No write is scheduled here: the enclosing hold's resume schedules it, its invalidate drops
+      // it.
+      if (quiesceDepth > 0) quiesceDepth--
+    }
+  }
+
   /** The id was deleted: drop the pending write and every later one. Touches no disk. */
   @InternalAutoMobilePrototypeApi
   fun invalidate() {
@@ -692,6 +711,12 @@ internal constructor(
       markDirty()
     }
 
+  /**
+   * What this session holds to store, read from the live sets: plain `keys` and secure `present`
+   * both reflect a change inside the debounce window before its write lands, and a value too large
+   * to store is listed in `skippedKeys` instead. iOS reports the same live view because its callers
+   * flush before reporting.
+   */
   fun report(): PrototypeStorageReport =
     synchronized(lock) {
       PrototypeStorageReport(
@@ -703,7 +728,7 @@ internal constructor(
         secure =
           secureKeys
             .map { key ->
-              val value = if (secureBaselineStale) null else persistedSecureValues[key]
+              val value = secureValues[key]
               PrototypeStorageSecureMetadata(
                 key,
                 value != null,

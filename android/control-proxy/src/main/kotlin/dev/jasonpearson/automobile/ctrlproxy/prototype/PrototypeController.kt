@@ -1206,8 +1206,12 @@ class PrototypeController(
     }
   }
 
-  /** The stored keys removed for [id]; callers hold no controller state of their own. */
-  suspend fun clearStoredValues(id: String): Int {
+  /**
+   * The stored keys removed for [id]; callers hold no controller state of their own. With
+   * [keepSessionValues] (a saved-prototype delete that has yet to remove its entry) open sessions
+   * keep what they hold, so the caller's resume can write it back if the entry delete fails.
+   */
+  suspend fun clearStoredValues(id: String, keepSessionValues: Boolean = false): Int {
     val held = storageSessions.quiesce(id)
     val removed =
       try {
@@ -1219,7 +1223,7 @@ class PrototypeController(
         held.resume()
         throw error
       }
-    held.reset()
+    if (keepSessionValues) held.releaseKeepingValues() else held.reset()
     return removed
   }
 

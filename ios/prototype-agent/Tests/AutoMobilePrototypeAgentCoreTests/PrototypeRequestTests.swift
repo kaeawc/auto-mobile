@@ -701,6 +701,12 @@ final class PrototypeRequestTests: XCTestCase {
 
     func testTheAgentAdvertisesBothNetworkCapabilities() {
         XCTAssertEqual(PrototypeAgentProtocol.networkCapability, "prototype_network_v1")
+        XCTAssertEqual(PrototypeAgentProtocol.networkUploadCapability, "prototype_network_upload_v1")
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.networkUploadCapability))
+        XCTAssertTrue(
+            AutoMobilePrototypeCapabilities.supported
+                .contains(PrototypeAgentProtocol.networkUploadCapability)
+        )
         XCTAssertEqual(PrototypeAgentProtocol.networkDeviceCapability, "prototype_network_device_v1")
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.networkCapability))
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.networkDeviceCapability))

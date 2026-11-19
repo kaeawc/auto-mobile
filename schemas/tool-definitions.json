@@ -34949,6 +34949,13 @@
                 "additionalProperties": false
               },
               "description": "Apps left installed, with why (outside the prefix or another signer)"
+            },
+            "pending": {
+              "description": "all/expired only: apps not started before the call's deadline; call again with the same target",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": ["removed", "skipped"],

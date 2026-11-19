@@ -322,6 +322,20 @@ internal object PrototypeBindableFields {
     return if (body.containsKey("file")) null else binding(value, path)
   }
 
+  private fun <T : Any> Visitor<T>.nestedCondition(condition: JsonObject, path: String): T? {
+    condition(condition["not"], "$path.not")?.let {
+      return it
+    }
+    for (form in listOf("all", "any")) {
+      for ((member, memberPath) in objects(condition, form, path)) {
+        condition(member, memberPath)?.let {
+          return it
+        }
+      }
+    }
+    return null
+  }
+
   private class Visitor<T : Any>(
     val visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
   ) {
@@ -366,20 +380,6 @@ internal object PrototypeBindableFields {
         }
       }
       return nestedCondition(condition, path)
-    }
-
-    private fun nestedCondition(condition: JsonObject, path: String): T? {
-      condition(condition["not"], "$path.not")?.let {
-        return it
-      }
-      for (form in listOf("all", "any")) {
-        for ((member, memberPath) in objects(condition, form, path)) {
-          condition(member, memberPath)?.let {
-            return it
-          }
-        }
-      }
-      return null
     }
 
     fun action(action: JsonObject, path: String): T? {

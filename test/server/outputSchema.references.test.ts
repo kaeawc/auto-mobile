@@ -26,6 +26,9 @@ const rebuilt = new Map<string, Record<string, unknown> | undefined>();
 const reversed = new Map<string, Record<string, unknown> | undefined>();
 const inlineBytes = new Map<string, number>();
 const collapsedBounds = new Map<string, Record<string, unknown>>();
+// Building and compiling every tool's output schema takes ~2.5 s on an idle
+// runner, so Bun's 5 s default hook timeout trips on a loaded shared shard.
+const SCHEMA_SETUP_HOOK_TIMEOUT_MS = 30_000;
 
 beforeAll(() => {
   createMcpServer();
@@ -65,7 +68,7 @@ beforeAll(() => {
       errors.set(tool.name, error);
     }
   }
-});
+}, SCHEMA_SETUP_HOOK_TIMEOUT_MS);
 
 test.each(outputTools)(
   "$name outputSchema has only resolvable document-local references",

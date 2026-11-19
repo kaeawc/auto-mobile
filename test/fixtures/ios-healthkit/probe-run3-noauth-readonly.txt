@@ -1,0 +1,8 @@
+HKPROBE available=true args=["noauth", "readonly"]
+HKPROBE status steps=2 hr=2
+HKPROBE read HKCategoryTypeIdentifierSleepAnalysis n=1 err=nil
+HKPROBE read HKQuantityTypeIdentifierStepCount n=1 err=nil
+HKPROBE   value=4242 count
+HKPROBE read HKQuantityTypeIdentifierHeartRate n=1 err=nil
+HKPROBE   value=72 count/min
+HKPROBE done

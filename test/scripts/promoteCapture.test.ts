@@ -25,6 +25,7 @@ function capture(overrides: Partial<ParsedCapture["provenance"]> = {}): ParsedCa
       tool: { name: "measureStartup" },
       captureDate: "2026-11-19T12:00:00.000Z",
       automobileVersion: "0.0.96+gabc1234",
+      sourceTreeState: "clean",
       device: baseDevice,
       ...overrides,
     }),
@@ -45,6 +46,15 @@ function capture(overrides: Partial<ParsedCapture["provenance"]> = {}): ParsedCa
         stdout: "",
         stderr: "",
         redacted: true,
+      },
+      {
+        index: 2,
+        argv: ["adb", "shell", "dumpsys"],
+        exitCode: 0,
+        durationMs: 1,
+        stdout: "head<truncated:fixture-capture-limit>",
+        stderr: "",
+        truncated: true,
       },
     ]),
   );
@@ -86,7 +96,10 @@ describe("promote-capture", () => {
   test("refuses a redacted command, a missing device, and a form-factor mismatch", () => {
     const input = { commandIndex: 0, stream: "stdout" as const, destination, homeDir: "/h" };
     expect(() => buildPromotion({ ...input, capture: capture(), commandIndex: 1 })).toThrow(
-      "password input",
+      "redacted at capture time",
+    );
+    expect(() => buildPromotion({ ...input, capture: capture(), commandIndex: 2 })).toThrow(
+      "truncated",
     );
     expect(() => buildPromotion({ ...input, capture: capture({ device: undefined }) })).toThrow(
       "resolved no device",
@@ -99,6 +112,30 @@ describe("promote-capture", () => {
     expect(sourceCommitOf("0.0.96+g0123abcd")).toBe("0123abcd");
     expect(() => sourceCommitOf("0.0.96")).toThrow("names no source commit");
     expect(() => sourceCommitOf("0.0.96+gabc1234.dirty")).toThrow("dirty checkout");
+  });
+
+  test.each(["unknown", "dirty"] as const)(
+    "refuses a clean-looking version whose tree state is %s",
+    (sourceTreeState) => {
+      const input = { commandIndex: 0, stream: "stdout" as const, destination, homeDir: "/h" };
+      expect(() => buildPromotion({ ...input, capture: capture({ sourceTreeState }) })).toThrow(
+        `tree state is ${sourceTreeState}`,
+      );
+    },
+  );
+
+  test("refuses a capture that records no tree state", () => {
+    expect(() =>
+      parseCapture(
+        JSON.stringify({
+          schemaVersion: 1,
+          tool: { name: "observe" },
+          captureDate: "2026-11-19T12:00:00.000Z",
+          automobileVersion: "0.0.96+gabc1234",
+        }),
+        "[]",
+      ),
+    ).toThrow();
   });
 
   test("accepts only test/fixtures/<area>/<form-factor>/<name>.txt", () => {

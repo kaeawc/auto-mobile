@@ -1,10 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import { runExecSeam, type ExecSeamOptions } from "../../../src/utils/ExecSeam";
 import {
   REDACTED_COMMAND_ARG,
+  TRUNCATED_OUTPUT_MARKER,
   type ToolCallCapture,
 } from "../../../src/utils/fixtureCapture/fixtureCaptureFormat";
+import { logger } from "../../../src/utils/logger";
 import {
   fixtureCaptureFromEnv,
   withToolCallCapture,
@@ -14,8 +17,11 @@ import type { FixtureCaptureWriter } from "../../../src/utils/fixtureCapture/Fix
 import {
   beginCapturedCommand,
   noteFixtureCaptureDevice,
+  outsideFixtureCapture,
   runWithFixtureCapture,
   withFixtureCaptureRedaction,
+  withFixtureCaptureScrub,
+  type CaptureSourceIdentity,
   type FixtureCaptureDeps,
 } from "../../../src/utils/fixtureCapture/fixtureCaptureScope";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -31,7 +37,11 @@ function captureDeps(): { deps: FixtureCaptureDeps; writer: FakeCaptureWriter; t
   const writer = new FakeCaptureWriter();
   const timer = new FakeTimer();
   timer.setCurrentTime(Date.UTC(2026, 10, 19, 12, 0, 0));
-  return { deps: { writer, timer, automobileVersion: () => "0.0.96+gabc1234" }, writer, timer };
+  const sourceIdentity = async () => ({
+    automobileVersion: "0.0.96+gabc1234",
+    sourceTreeState: "clean" as const,
+  });
+  return { deps: { writer, timer, sourceIdentity }, writer, timer };
 }
 
 /** Runs one command through the real exec seam; `advanceMs` is how long it "takes". */
@@ -100,6 +110,7 @@ describe("fixture capture scope", () => {
       tool: { name: "observe" },
       captureDate: "2026-11-19T12:00:00.000Z",
       automobileVersion: "0.0.96+gabc1234",
+      sourceTreeState: "clean",
       device: {
         platform: "android",
         deviceId: "emulator-5554",
@@ -175,6 +186,112 @@ describe("fixture capture scope", () => {
       writer.captures.map((c) => [c.provenance.tool.name, c.commands.map((cmd) => cmd.argv[1])]),
     );
     expect(byTool).toEqual({ observe: ["inner"], executePlan: ["outer-before", "outer-after"] });
+  });
+
+  test("a repeating sampler armed in a call records nothing once the call is written", async () => {
+    const { deps, writer, timer } = captureDeps();
+    const ok = { stdout: "tick", stderr: "" };
+    const handles: unknown[] = [];
+    let straggler: ReturnType<typeof beginCapturedCommand>;
+    await runWithFixtureCapture("observe", deps, async () => {
+      // A real timer keeps the arming call's async context; bind models that on FakeTimer.
+      timer.setInterval(
+        AsyncLocalStorage.bind(() => {
+          handles.push(beginCapturedCommand(["adb", "shell", "dumpsys"]));
+          void seamCommand(timer, ["shell", "dumpsys"], ok);
+        }),
+        500,
+      );
+      straggler = beginCapturedCommand(["adb", "slow"]);
+      await seamCommand(timer, ["in-call"], ok);
+    });
+    const written = writer.captures[0]?.commands;
+    expect(written?.map((command) => command.argv[1])).toEqual(["in-call"]);
+    straggler?.finish(ok);
+    timer.advanceTime(1500);
+    await Promise.resolve();
+    expect(handles).toEqual([undefined, undefined, undefined]);
+    expect(written).toHaveLength(1);
+    expect(writer.captures).toHaveLength(1);
+  });
+
+  test("outsideFixtureCapture hides the scope from work it runs", async () => {
+    const { deps, writer, timer } = captureDeps();
+    await runWithFixtureCapture("observe", deps, async () => {
+      expect(outsideFixtureCapture(() => beginCapturedCommand(["adb"]))).toBeUndefined();
+      await outsideFixtureCapture(() =>
+        seamCommand(timer, ["background"], { stdout: "", stderr: "" }),
+      );
+    });
+    expect(writer.captures[0]?.commands).toEqual([]);
+  });
+
+  test("cuts a stream at the per-command limit and the rest at the per-call limit", async () => {
+    const { deps, writer, timer } = captureDeps();
+    const limited = { ...deps, limits: { streamChars: 4, callChars: 6 } };
+    await runWithFixtureCapture("observe", limited, async () => {
+      await seamCommand(timer, ["a"], { stdout: "abcdefgh", stderr: "" });
+      await seamCommand(timer, ["b"], { stdout: "xy", stderr: "zzz" });
+      await seamCommand(timer, ["c"], { stdout: "", stderr: "" });
+    });
+    const commands = writer.captures[0]?.commands;
+    expect(
+      commands?.map(({ stdout, stderr, truncated }) => ({ stdout, stderr, truncated })),
+    ).toEqual([
+      { stdout: `abcd${TRUNCATED_OUTPUT_MARKER}`, stderr: "", truncated: true },
+      { stdout: "xy", stderr: TRUNCATED_OUTPUT_MARKER, truncated: true },
+      { stdout: "", stderr: "", truncated: undefined },
+    ]);
+    expect(commands?.[2]?.argv).toEqual(["adb", "c"]);
+  });
+
+  test("applies a caller's scrubber before truncation and marks the command redacted", async () => {
+    const { deps, writer, timer } = captureDeps();
+    const scrub = (value: string) => value.split("s3cret").join("<redacted>");
+    const limited = { ...deps, limits: { streamChars: 20, callChars: 100 } };
+    await runWithFixtureCapture("installApp", limited, () =>
+      withFixtureCaptureScrub(scrub, async () => {
+        await seamCommand(timer, ["--pass=s3cret"], { stdout: "", stderr: "bad pass s3cret!" });
+        await seamCommand(timer, ["clean"], { stdout: "ok", stderr: "" });
+      }),
+    );
+    const [scrubbed, clean] = writer.captures[0]?.commands ?? [];
+    expect(scrubbed).toMatchObject({
+      argv: ["adb", "--pass=<redacted>"],
+      stderr: "bad pass <redacted>!",
+      redacted: true,
+    });
+    expect(clean?.redacted).toBeUndefined();
+  });
+
+  test("awaits the settled source identity, and records unknown when it fails", async () => {
+    const { deps, writer } = captureDeps();
+    const pending = Promise.withResolvers<CaptureSourceIdentity>();
+    const settled = runWithFixtureCapture(
+      "observe",
+      { ...deps, sourceIdentity: () => pending.promise },
+      async () => "done",
+    );
+    await Promise.resolve();
+    expect(writer.captures).toHaveLength(0);
+    pending.resolve({ automobileVersion: "0.0.96+gabc1234.dirty.0123", sourceTreeState: "dirty" });
+    expect(await settled).toBe("done");
+    expect(writer.captures[0]?.provenance.sourceTreeState).toBe("dirty");
+
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await runWithFixtureCapture(
+        "observe",
+        { ...deps, sourceIdentity: () => Promise.reject(new Error("git timed out")) },
+        async () => undefined,
+      );
+    } finally {
+      warn.mockRestore();
+    }
+    expect(writer.captures[1]?.provenance).toMatchObject({
+      automobileVersion: "unknown",
+      sourceTreeState: "unknown",
+    });
   });
 });
 

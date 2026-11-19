@@ -56,6 +56,7 @@ const provenanceSchema = z.object({
   tool: z.object({ name: z.string().min(1) }),
   captureDate: z.string().min(1),
   automobileVersion: z.string().min(1),
+  sourceTreeState: z.enum(["clean", "dirty", "unknown"]),
   device: deviceSchema.optional(),
 });
 
@@ -70,6 +71,7 @@ const commandSchema = z.object({
   stdout: z.string(),
   stderr: z.string(),
   redacted: z.literal(true).optional(),
+  truncated: z.literal(true).optional(),
 });
 
 export interface ParsedCapture {
@@ -107,6 +109,20 @@ export function parseFixtureDestination(dest: string): FixtureDestination {
     );
   }
   return { relativePath, area, formFactor: formFactor as FixtureFormFactor };
+}
+
+/**
+ * The commit a capture was taken from. Refuses a dirty or unstamped build, and a capture whose
+ * daemon never established the tree was clean (its dirty probe failed or timed out).
+ */
+export function sourceCommitOfCapture(provenance: ParsedCapture["provenance"]): string {
+  const commit = sourceCommitOf(provenance.automobileVersion);
+  if (provenance.sourceTreeState !== "clean") {
+    throw new Error(
+      `capture source tree state is ${provenance.sourceTreeState}, not clean; commit, then recapture`,
+    );
+  }
+  return commit;
 }
 
 /** The commit a source-checkout version names (`+g<sha>`); refuses a dirty or unstamped build. */
@@ -202,10 +218,17 @@ export function buildPromotion(input: PromotionInput): Promotion {
     throw new Error(`capture has no command ${commandIndex} (it has ${capture.commands.length})`);
   }
   if (command.redacted) {
-    throw new Error(`command ${commandIndex} carried password input and cannot be promoted`);
+    throw new Error(
+      `command ${commandIndex} was redacted at capture time (password input or a scrubbed secret) and cannot be promoted`,
+    );
+  }
+  if (command.truncated) {
+    throw new Error(
+      `command ${commandIndex} output was truncated at a capture limit and cannot be promoted`,
+    );
   }
   const { device, declared } = promotionDevice(capture, destination);
-  const sourceCommit = sourceCommitOf(capture.provenance.automobileVersion);
+  const sourceCommit = sourceCommitOfCapture(capture.provenance);
   const redactions: Redaction[] = [
     { secret: device.deviceId, token: device.platform === "android" ? "<serial>" : "<udid>" },
     { secret: homeDir, token: "~" },

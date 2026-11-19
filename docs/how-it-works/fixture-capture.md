@@ -12,18 +12,26 @@ Capture is off unless `AUTOMOBILE_CAPTURE_FIXTURES_DIR` names a directory in the
 
 Commands are recorded in `runExecSeam` (`src/utils/ExecSeam.ts`), the one exec path that `AdbClient`, the simctl/xcrun runners, `HostCommandExecutor`, `xcodebuild`, `security` and the emulator client share. Each command records its argv, working directory, stdout, stderr, exit code (or the signal or node error code for a command that never exited normally) and duration. Every recorded command ran on the host, so its output is a real capture.
 
+A scope closes when its capture is written, and a closed scope records nothing more. Background work a call starts can keep its async context after the call returns, so without this a repeating loop would keep adding commands to a finished capture. The performance sampler's 500 ms interval also runs its ticks under `outsideFixtureCapture`, so its commands are never attributed to the call that armed it.
+
+### Size limits
+
+Each stream of a command keeps at most `MAX_CAPTURED_STREAM_CHARS` (1 MiB, node's default `maxBuffer`) characters, and one tool call keeps at most `MAX_CAPTURED_CALL_CHARS` (8 MiB) of stdout plus stderr across all its commands. A stream cut by either limit ends in `<truncated:fixture-capture-limit>` and its command is marked `truncated: true`. Once a call's limit is used up, later commands are still recorded with their argv and exit code, but with empty, truncated output. A truncated command cannot be promoted.
+
 Not recorded: long-lived spawned processes (`AdbClient.spawn`, streaming `screenrecord`/`logcat`), CtrlProxy WebSocket frames and XCTestRunner result frames. iOS CtrlProxy exchanges have their own recorder, `AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR`.
 
 ### Redaction at capture time
 
-Owner policy is to redact nothing at capture time except text typed into a password field. A command that passes `AdbExecuteOptions.logLabel` (password typing, lock-screen PIN settings) is already kept out of logs, and runs under `withFixtureCaptureRedaction`, so its argv is recorded as the executable plus `<redacted:password-field>` and it is marked `redacted: true`. A redacted command cannot be promoted.
+Owner policy is to redact nothing at capture time except text typed into a password field. A command that passes `AdbExecuteOptions.logLabel` (password typing, lock-screen PIN settings) is already kept out of logs, and runs under `withFixtureCaptureRedaction`, so its argv is recorded as the executable plus `<redacted:password-field>` and it is marked `redacted: true`.
+
+A caller that scrubs secrets from its own logs applies the same scrubber to the capture with `withFixtureCaptureScrub`. bundletool `build-apks` output can echo keystore passwords, so it runs under `scrubBundletoolText`: the passwords are replaced in argv, stdout and stderr before any truncation, and a command whose text the scrubber changed is marked `redacted: true`. A redacted command cannot be promoted.
 
 ## On-disk format
 
 Each tool call writes `<dir>/<tool>_<epoch-ms>_<id>/` once the call settles, whether it succeeded or threw:
 
-- `provenance.json`: `schemaVersion`, `tool.name`, `captureDate` (ISO-8601 UTC call start), `automobileVersion` (a source checkout carries the commit as `+g<sha>[.dirty]`), and `device` when one was resolved: platform, device id, name, model, device type, form factor, OS version, API level, iOS version, runtime id.
-- `commands.json`: the commands in issue order, each with `index`, `argv`, `cwd`, `exitCode`, `signal`, `errorCode`, `durationMs`, `stdout`, `stderr` and `redacted`.
+- `provenance.json`: `schemaVersion`, `tool.name`, `captureDate` (ISO-8601 UTC call start), `automobileVersion` (a source checkout carries the commit as `+g<sha>[.dirty]`), `sourceTreeState` (`clean`, `dirty` or `unknown`; the writer awaits the daemon's dirty-state probe first, and a probe that failed or timed out gives `unknown`), and `device` when one was resolved: platform, device id, name, model, device type, form factor, OS version, API level, iOS version, runtime id.
+- `commands.json`: the commands in issue order, each with `index`, `argv`, `cwd`, `exitCode`, `signal`, `errorCode`, `durationMs`, `stdout`, `stderr`, `redacted` and `truncated`.
 
 A failure to write a capture is logged as a warning and never fails the tool call. A change to the format bumps `FIXTURE_CAPTURE_SCHEMA_VERSION`; the promote step accepts only the current version.
 
@@ -37,7 +45,7 @@ bun scripts/fixtures/promote-capture.ts --capture "$DIR/measureStartup_<ms>_<id>
 ```
 
 - The destination must be `test/fixtures/<area>/<form-factor>/<name>.txt`. The form-factor directory is one of the device model's form factors (`phone`, `tablet`, `foldable`, `tv`, `watch`, `automotive`, `xr-headset`, `xr-glasses`). Only `.txt` is accepted, because oxfmt would rewrite a JSON or Markdown capture.
-- The step refuses a capture without a device, without an OS version or API level, whose device reports a different form factor, or whose `automobileVersion` names no commit or a dirty checkout. A device that reports no form factor takes the directory's form factor, and the sidecar marks it `formFactorDeclared`.
+- The step refuses a capture without a device, without an OS version or API level, whose device reports a different form factor, whose `automobileVersion` names no commit or a dirty checkout, or whose `sourceTreeState` is not `clean`. It also refuses a redacted or truncated command. A device that reports no form factor takes the directory's form factor, and the sidecar marks it `formFactorDeclared`.
 - The device id becomes `<serial>` (Android) or `<udid>` (Apple platforms), the home directory becomes `~`, and the executable in argv becomes its basename.
 - Next to the fixture it writes `<name>.provenance.json`: `provenance: "captured"`, tool, redacted argv, exit code, stream, capture date, source commit, AutoMobile version and the device's platform, form factor, model, device type, OS version, API level and runtime id. The sidecar is formatted with oxfmt.
-- When `git check-attr eol` does not already report `lf` for the fixture, it adds `test/fixtures/<area>/<form-factor>/* text eol=lf` to `.gitattributes`, after the last entry for the same area (or the last `test/fixtures/` entry), so Windows checkouts keep the fixture byte-identical.
+- When `git check-attr eol` does not already report `lf` for the fixture, it adds `test/fixtures/<area>/<form-factor>/* text eol=lf` to `.gitattributes`, after the last entry for the same area (or the last `test/fixtures/` entry), so Windows checkouts do not convert the fixture to CRLF. The pin also makes git normalise line endings on commit: a capture with CRLF line endings (older-API `adb shell` output) is stored and checked out with LF, so the committed fixture is not byte-identical to that capture.

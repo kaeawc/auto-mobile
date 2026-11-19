@@ -32,6 +32,7 @@ const capture: ToolCallCapture = {
     tool: { name: "observe" },
     captureDate: "2026-11-19T12:00:00.000Z",
     automobileVersion: "0.0.96+gabc1234",
+    sourceTreeState: "clean",
   },
   commands: [
     { index: 0, argv: ["adb", "devices"], exitCode: 0, durationMs: 3, stdout: "x", stderr: "" },

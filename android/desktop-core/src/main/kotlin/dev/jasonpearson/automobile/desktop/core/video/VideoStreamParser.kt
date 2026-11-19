@@ -36,7 +36,8 @@ private const val ROTATION_MASK = 0b11L shl ROTATION_SHIFT
 /**
  * Bit 60 on a non-CONFIG, zero-payload packet: a relay-originated heartbeat (issue #7549). Bit 60
  * is otherwise only meaningful on a CONFIG packet (part of the rotation field), so it is free to
- * reuse here as long as CONFIG stays clear. See `src/daemon/streams/videoStreamFraming.ts` for the encoder.
+ * reuse here as long as CONFIG stays clear. See `src/daemon/streams/videoStreamFraming.ts` for the
+ * encoder.
  */
 private const val FLAG_HEARTBEAT = 1L shl 60
 

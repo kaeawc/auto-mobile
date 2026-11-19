@@ -155,6 +155,87 @@ function knownPositiveSize(observation: ObserveResult | undefined): boolean {
   return (observation?.screenSize.width ?? 0) > 0 && (observation?.screenSize.height ?? 0) > 0;
 }
 
+type Size = { width: number; height: number };
+
+function positiveSize(size: Size | undefined): size is Size {
+  return (
+    size !== undefined &&
+    Number.isFinite(size.width) &&
+    Number.isFinite(size.height) &&
+    size.width > 0 &&
+    size.height > 0
+  );
+}
+
+/**
+ * The whole display in points: the full screenshot raster divided by the runner's native scale.
+ * `screenSize` cannot give it, because it is the app window's size when the window floats (#18829).
+ */
+export function iosDisplayPointSize(observation: ObserveResult | undefined): Size | undefined {
+  const raster = observation?.screenshotImageSize;
+  const hierarchy = observation?.viewHierarchy;
+  const scale = hierarchy?.nativeScale ?? hierarchy?.screenScale;
+  if (!positiveSize(raster) || scale === undefined || !Number.isFinite(scale) || scale <= 0) {
+    return undefined;
+  }
+  return { width: raster.width / scale, height: raster.height / scale };
+}
+
+// One point of slack absorbs rounding between the raster and the runner's integer root bounds.
+const FULL_SCREEN_SLACK_POINTS = 1;
+
+/**
+ * An iPad app window that is not screen-sized (Windowed Apps, Stage Manager): the observed root
+ * fits inside the display in some orientation and fills it in none. Multi-panel (Duo) observations
+ * never count, so their panel refusals stay size-based.
+ */
+export function isFloatingIosWindow(observation: ObserveResult | undefined): boolean {
+  const role = observation?.display.role;
+  if (!observation || role === "cover" || role === "inner" || observation.otherDisplays?.length) {
+    return false;
+  }
+  const root = observation.screenSize;
+  const display = iosDisplayPointSize(observation);
+  if (!positiveSize(root) || !display) {
+    return false;
+  }
+  const orientations = [display, { width: display.height, height: display.width }];
+  const fits = orientations.filter(
+    (o) =>
+      root.width <= o.width + FULL_SCREEN_SLACK_POINTS &&
+      root.height <= o.height + FULL_SCREEN_SLACK_POINTS,
+  );
+  const fills = fits.some(
+    (o) =>
+      o.width - root.width <= FULL_SCREEN_SLACK_POINTS &&
+      o.height - root.height <= FULL_SCREEN_SLACK_POINTS,
+  );
+  return fits.length > 0 && !fills;
+}
+
+/** The observation's reported rotation only, without the screen-shape fallback. */
+function reportedIosOrientation(observation: ObserveResult | undefined): Orientation {
+  const rotation = observation?.rotation;
+  if (rotation === 0 || rotation === 2) {
+    return "portrait";
+  }
+  return rotation === 1 || rotation === 3 ? "landscape" : "unknown";
+}
+
+// A floating window keeps its size when the device rotates, so its unchanged size is no evidence
+// that the rotation failed. Only the reported interface rotation reaching the requested axis
+// confirms it: the size fallback reads the window's shape, so a missing rotation keeps the refusal.
+function floatingWindowRotationConfirmed(
+  result: RotateResult,
+  requested: "portrait" | "landscape",
+  previousObservation: ObserveResult | undefined,
+): boolean {
+  return (
+    reportedIosOrientation(result.observation) === requested &&
+    (isFloatingIosWindow(previousObservation) || isFloatingIosWindow(result.observation))
+  );
+}
+
 // Only a cross-axis rotation must change the screen size. A same-axis repair
 // (the app already showed the requested axis but XCUIDevice still remembered
 // the other one) legitimately keeps its dimensions and must stay a success.
@@ -172,7 +253,8 @@ function isUnverifiedIosRotationSize(
       (current === requested || current === "unknown") &&
       knownPositiveSize(previousObservation) &&
       knownPositiveSize(result.observation) &&
-      iosRotationScreenSizeUnchanged(previousObservation, result)) === true
+      iosRotationScreenSizeUnchanged(previousObservation, result) &&
+      !floatingWindowRotationConfirmed(result, requested, previousObservation)) === true
   );
 }
 
@@ -255,6 +337,10 @@ function verifyCompletedIosRotation(
 }
 
 export function restoreTargetIosOrientation(observation: ObserveResult | undefined): Orientation {
+  // A floating window's shape says nothing about the device orientation (#18829).
+  if (isFloatingIosWindow(observation)) {
+    return reportedIosOrientation(observation);
+  }
   const { width, height } = observation?.screenSize ?? { width: 0, height: 0 };
   // Duo inner panels can report a stale portrait rotation while drawn landscape (#17101).
   if (width > 0 && height > 0 && width !== height) {

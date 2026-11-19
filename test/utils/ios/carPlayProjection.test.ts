@@ -145,7 +145,8 @@ describe("CarPlay projection", () => {
     for (const message of [
       "CarPlay screen Wireless is attached but not projecting (AirPlay[3])",
       "Capture was skipped because the frame would be black",
-      "Run carplay-power-helper power-on (ios/carplay-power) after every boot",
+      "Run carplay-power-helper power-on",
+      "after every boot of an iOS 26.x simulator",
       "the iOS 27 Simulator does not support CarPlay",
     ]) {
       expect(() => assertCarPlayProjecting(state)).toThrow(message);

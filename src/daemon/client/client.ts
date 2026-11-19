@@ -394,10 +394,8 @@ export class DaemonClient {
     for (const cleanup of this.timedOutRequestAbortCleanups.values()) {
       cleanup();
     }
-    for (const [
-      ,
-      { reject, timeout, removeAbortListener, disconnectCause },
-    ] of this.pendingRequests) {
+    for (const [, { reject, timeout, removeAbortListener, disconnectCause }] of this
+      .pendingRequests) {
       this.timer.clearTimeout(timeout);
       removeAbortListener?.();
       reject(

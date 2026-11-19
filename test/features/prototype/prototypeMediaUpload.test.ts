@@ -197,6 +197,31 @@ describe("prototype media chunked upload", () => {
     expect(client.types()).toEqual(["put_prototype_asset_begin"]);
   });
 
+  test("a begin lost in transit still aborts on the device", async () => {
+    const client: PrototypeMediaTransportClient & { sent: PrototypeMediaTransportMessage[] } = {
+      sent: [],
+      async sendPrototypeMediaMessage(message) {
+        this.sent.push(message);
+        if (message.type === "put_prototype_asset_begin") {
+          throw new Error("acknowledgement timed out");
+        }
+        return { success: true };
+      },
+    };
+    const files = new FakeMediaFiles({ "/m/clip.mp4": MP4 });
+    const outcome = await uploadPrototypeMediaAsset(
+      client,
+      { id: "clip", path: "/m/clip.mp4" },
+      { opener: files },
+    );
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("timed out");
+    expect(client.sent.map((message) => message.type)).toEqual([
+      "put_prototype_asset_begin",
+      "put_prototype_asset_abort",
+    ]);
+  });
+
   test("cancellation between chunks aborts on the device", async () => {
     const controller = new AbortController();
     const client = new FakeMediaClient((message) => {

@@ -230,7 +230,7 @@ class PrototypeMediaUploadReceiver(
     }
     // A new begin for an id restarts its upload; the earlier partial file is dropped first.
     pending.remove(id)?.partial?.discard()
-    capacityProblem(limits, id, size, stored.values, pending.values.map { it.size })?.let {
+    capacityProblem(limits, id, size, stored.values, pending.mapValues { it.value.size })?.let {
       return reject(it.first, it.second)
     }
     val fileName = newName()
@@ -392,19 +392,20 @@ private fun beginProblem(
   }
 
 /**
- * Count and byte caps over committed assets other than [id] (a replacement is not counted twice)
- * plus every in-flight upload's declared size.
+ * Count and byte caps reserved per asset id: an id with an upload in flight reserves that upload's
+ * declared size, any other committed id its stored size. A replacement, whether this begin or one
+ * already in flight, is never counted twice.
  */
 private fun capacityProblem(
   limits: PrototypeMediaLimits,
   id: String,
   size: Long,
   stored: Collection<PrototypeMediaInfo>,
-  pendingSizes: List<Long>,
+  pendingSizes: Map<String, Long>,
 ): Problem? {
-  val otherStored = stored.filter { it.id != id }
-  val count = otherStored.size + pendingSizes.size + 1
-  val bytes = otherStored.sumOf { it.byteCount } + pendingSizes.sum() + size
+  val reserved = stored.associate { it.id to it.byteCount } + pendingSizes + (id to size)
+  val count = reserved.size
+  val bytes = reserved.values.sum()
   return when {
     count > limits.maxCount ->
       PrototypeMediaRejection.COUNT_LIMIT to

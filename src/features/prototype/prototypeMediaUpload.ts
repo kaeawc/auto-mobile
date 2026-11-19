@@ -147,6 +147,8 @@ class MediaUploadFailure extends Error {
   constructor(
     readonly code: PrototypeMediaRejection | undefined,
     message: string,
+    /** The device answered and said no, so it holds nothing for the message it refused. */
+    readonly refused = false,
   ) {
     super(message);
   }
@@ -202,6 +204,7 @@ async function send(
     throw new MediaUploadFailure(
       result.code,
       `device refused ${message.type}: ${result.error ?? "no detail"}`,
+      true,
     );
   }
 }
@@ -267,7 +270,15 @@ async function uploadOpenMedia(
   if (problem !== null) {
     throw new MediaUploadFailure(problem.code, problem.message);
   }
-  await send(client, { type: "put_prototype_asset_begin", ...begin }, signal);
+  try {
+    await send(client, { type: "put_prototype_asset_begin", ...begin }, signal);
+  } catch (error) {
+    // A begin lost in transit may still have reserved space on the device; only a refusal did not.
+    if (!(error instanceof MediaUploadFailure && error.refused)) {
+      await abortOnDevice(client, id);
+    }
+    throw error;
+  }
   try {
     await streamMedia(context);
   } catch (error) {

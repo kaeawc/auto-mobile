@@ -207,6 +207,22 @@ class PrototypeMediaUploadReceiverTest {
   }
 
   @Test
+  fun `concurrent replacements reserve each id once`() {
+    val small =
+      PrototypeMediaUploadReceiver(
+        files,
+        PrototypeMediaLimits(maxCount = 2, maxTotalBytes = 72),
+        newName = { "f${counter++}" },
+      )
+    assertIs<PrototypeMediaResult.Stored>(upload(small, "a", mp4))
+    assertIs<PrototypeMediaResult.Stored>(upload(small, "b", mp4))
+    assertIs<PrototypeMediaResult.Accepted>(small.begin("a", "video/mp4", 36, sha256(mp4)))
+    assertIs<PrototypeMediaResult.Accepted>(small.begin("b", "video/mp4", 36, sha256(mp4)))
+    assertEquals("count_limit", rejection(small.begin("c", "video/mp4", 1, sha256(mp4))))
+    assertEquals("total_limit", rejection(small.begin("a", "video/mp4", 37, sha256(mp4))))
+  }
+
+  @Test
   fun `in-flight uploads count against the byte budget`() {
     val small =
       PrototypeMediaUploadReceiver(

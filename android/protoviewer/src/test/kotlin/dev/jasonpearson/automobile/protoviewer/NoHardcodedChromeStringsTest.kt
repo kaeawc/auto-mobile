@@ -23,7 +23,7 @@ class NoHardcodedChromeStringsTest {
 
   @Test
   fun importRejectionReasonsAreNamedTokensWithAMessage() {
-    // A raw literal would reach the import screen untranslated; use an IMPORT_REASON_* token that
+    // A raw literal or resolved string would bypass the mapping; use an IMPORT_REASON_* token that
     // importRejectionReason maps to a string resource.
     val violations = violations { REJECTION_LITERAL.containsMatchIn(it) }
     assertTrue(violations.joinToString("\n"), violations.isEmpty())
@@ -44,6 +44,9 @@ class NoHardcodedChromeStringsTest {
     )
     assertEquals(false, CHROME_LITERAL.containsMatchIn("""Text(stringResource(R.string.back))"""))
     assertTrue(REJECTION_LITERAL.containsMatchIn("""Rejected("uri", "Bad uri")"""))
+    assertTrue(
+      REJECTION_LITERAL.containsMatchIn("""Rejected("content", getString(R.string.import_x))"""),
+    )
     assertEquals(
       false,
       REJECTION_LITERAL.containsMatchIn("""Rejected("uri", IMPORT_REASON_URI_REQUIRED)"""),
@@ -79,7 +82,8 @@ class NoHardcodedChromeStringsTest {
           )
           .joinToString("|"),
       )
-    val REJECTION_LITERAL = Regex("\\bRejected\\s*\\([^,()]+,\\s*\"")
+    // A resolved string as the reason would also bypass importRejectionReason's mapping.
+    val REJECTION_LITERAL = Regex("\\bRejected\\s*\\([^,()]+,\\s*(?:\"|getString\\s*\\()")
     // Left/right APIs ignore RTL mirroring; use start/end and the relative Alignment/Arrangement.
     val ABSOLUTE_DIRECTION =
       Regex(

@@ -16,6 +16,8 @@ class ImportMessagesTest {
         IMPORT_REASON_UNREADABLE to R.string.import_reason_unreadable,
         IMPORT_REASON_INVALID_IMAGE to R.string.import_reason_invalid_image,
         UNSUPPORTED_PROTOTYPE_REASON to R.string.unsupported,
+        IMPORT_REASON_INTERRUPTED to R.string.import_interrupted,
+        IMPORT_REASON_UNAVAILABLE to R.string.import_unavailable,
       )
     expected.forEach { (reason, message) ->
       assertEquals(

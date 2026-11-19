@@ -52,7 +52,7 @@ class ImportActivity : ComponentActivity() {
       }
     }
     if (savedInstanceState != null) {
-      rejection = LibraryImportResult.Rejected("content", getString(R.string.import_interrupted))
+      rejection = LibraryImportResult.Rejected("content", IMPORT_REASON_INTERRUPTED)
       return
     }
     val action =
@@ -111,8 +111,7 @@ class ImportActivity : ComponentActivity() {
         finish()
       }
       is LibraryImportResult.Rejected -> rejection = result
-      null ->
-        rejection = LibraryImportResult.Rejected("library", getString(R.string.import_unavailable))
+      null -> rejection = LibraryImportResult.Rejected("library", IMPORT_REASON_UNAVAILABLE)
     }
   }
 }

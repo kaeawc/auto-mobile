@@ -3,6 +3,10 @@ package dev.jasonpearson.automobile.protoviewer
 import androidx.annotation.StringRes
 import dev.jasonpearson.automobile.protocol.PrototypeBundleErrorCode
 
+// Activity-owned status tokens: the import screen itself, not the importer, reports these.
+internal const val IMPORT_REASON_INTERRUPTED = "Import interrupted"
+internal const val IMPORT_REASON_UNAVAILABLE = "Import unavailable"
+
 /**
  * The string resource shown for an import rejection. [LibraryImportResult.Rejected.reason] stays a
  * stable English token for MCP results; users only ever see a translated message.
@@ -16,6 +20,8 @@ internal fun importRejectionReason(rejected: LibraryImportResult.Rejected): Int 
     reason == IMPORT_REASON_UNREADABLE -> R.string.import_reason_unreadable
     reason == IMPORT_REASON_INVALID_IMAGE -> R.string.import_reason_invalid_image
     reason == UNSUPPORTED_PROTOTYPE_REASON -> R.string.unsupported
+    reason == IMPORT_REASON_INTERRUPTED -> R.string.import_interrupted
+    reason == IMPORT_REASON_UNAVAILABLE -> R.string.import_unavailable
     // Spec policy messages come from the shared validator in English; the path names the field.
     rejected.path.startsWith("spec.json:") -> R.string.import_reason_spec_invalid
     rejected.path == "library" ->

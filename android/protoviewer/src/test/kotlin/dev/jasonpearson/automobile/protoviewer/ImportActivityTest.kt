@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.protoviewer
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -174,6 +175,25 @@ class ImportActivityTest {
     assertTrue(LibraryImportResult.Rejected("library", LibraryError.Hidden.name).isHidden)
     assertFalse(LibraryImportResult.Rejected("library", LibraryError.Limit.name).isHidden)
     assertFalse(LibraryImportResult.Rejected("spec.json", LibraryError.Hidden.name).isHidden)
+  }
+
+  @Test
+  fun recreatedImportShowsInterruptedMessageNotAnInvalidPrototype() {
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("content://external/file"))
+    val controller = Robolectric.buildActivity(ImportActivity::class.java, intent).setup(Bundle())
+    compose.waitForIdle()
+    val context = ApplicationProvider.getApplicationContext<ProtoViewerApplication>()
+    compose
+      .onNodeWithText(
+        context.getString(
+          R.string.import_rejected,
+          "content",
+          context.getString(R.string.import_interrupted),
+        ),
+      )
+      .assertIsDisplayed()
+    assertTrue(importer.requests.isEmpty())
+    controller.pause().stop().destroy()
   }
 
   @Test

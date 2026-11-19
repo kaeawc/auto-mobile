@@ -98,7 +98,7 @@ function screenBounds(context: ContentHiddenRegionClipContext): ElementBounds | 
 
 /**
  * Clips CtrlProxy's `contentHiddenRegions` (#18675) to what can actually be drawn: the screen, the
- * visible window the region overlaps most, and the Compose host view that owns it. The runner
+ * Compose host view that owns it, then the visible window that host-clipped region overlaps most. The runner
  * reports the raw bounds of the flagged Compose node, which can be larger than its `ComposeView`
  * host (a fill-max-size child of a host that is shorter than the window) and so extend past the
  * screen and over sibling Views such as a bottom navigation bar. The host's parent clips that
@@ -125,18 +125,20 @@ export function clipContentHiddenRegions(
       return [region];
     }
     const onScreen = screen ? intersectBounds(raw, screen) : raw;
-    const inWindow = onScreen && clipToBestWindow(onScreen, windowBounds);
+    // Host first: the window is then chosen from what the owning host can draw, so an overflow
+    // into a split-screen neighbour cannot pick that neighbour and erase the region.
     const host = owningHost(raw, hostBounds);
-    const inHost = inWindow && (host ? intersectBounds(inWindow, host) : inWindow);
-    if (!inHost) {
+    const inHost = onScreen && (host ? intersectBounds(onScreen, host) : onScreen);
+    const inWindow = inHost && clipToBestWindow(inHost, windowBounds);
+    if (!inWindow) {
       return [];
     }
     if (screenArea === 0) {
-      return [{ ...region, bounds: inHost }];
+      return [{ ...region, bounds: inWindow }];
     }
-    const fraction = boundsArea(inHost) / screenArea;
+    const fraction = boundsArea(inWindow) / screenArea;
     return fraction > MIN_HIDDEN_REGION_SCREEN_FRACTION
-      ? [{ ...region, bounds: inHost, areaPercent: Math.floor(fraction * 100) }]
+      ? [{ ...region, bounds: inWindow, areaPercent: Math.floor(fraction * 100) }]
       : [];
   });
   return clipped.length > 0 ? clipped : undefined;

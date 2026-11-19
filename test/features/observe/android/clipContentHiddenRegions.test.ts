@@ -103,6 +103,29 @@ describe("clipContentHiddenRegions (#18675)", () => {
     ).toEqual([region(0, 0, 1000, 600, 30)]);
   });
 
+  test("picks the window after the host clip, so a split-screen neighbour cannot erase it", () => {
+    const window = (id: number, top: number, bottom: number): ViewHierarchyWindowInfo => ({
+      id,
+      type: 1,
+      bounds: { left: 0, top, right: 1000, bottom },
+    });
+    expect(
+      clipContentHiddenRegions([region(0, 0, 1000, 2000, 100)], {
+        screenWidth: 1000,
+        screenHeight: 2000,
+        windows: [window(1, 0, 600), window(2, 600, 2000)],
+        hierarchy: {
+          node: [
+            {
+              class: "androidx.compose.ui.platform.ComposeView",
+              bounds: { left: 0, top: 0, right: 1000, bottom: 600 },
+            },
+          ],
+        },
+      }),
+    ).toEqual([region(0, 0, 1000, 600, 30)]);
+  });
+
   test("drops a region entirely off screen", () => {
     expect(
       clipContentHiddenRegions([region(0, 2100, 1000, 2900, 40)], {

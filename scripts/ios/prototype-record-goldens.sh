@@ -10,8 +10,6 @@ usage() {
 [[ $# -gt 0 && "$1" != -* ]] || { usage >&2; exit 2; }
 udid="$1"
 shift
-# Compare case-insensitively so this exclusion cannot be bypassed by lower-case input.
-[[ "$(printf '%s' "${udid}" | tr '[:lower:]' '[:upper:]')" != 18A2D9B1-CDFA-445A-93AA-A532EA4B5498 ]] || fail 'refusing the CI iPhone UDID'
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/ios/run_with_timeout.sh
 source "${repo_root}/scripts/ios/run_with_timeout.sh"
@@ -45,6 +43,10 @@ done
 
 devices="$(xcrun simctl list devices --json)"
 device="$(jq -cer --arg udid "${udid}" '[.devices[][] | select((.udid | ascii_upcase) == ($udid | ascii_upcase))] | if length == 1 then .[0] else error("device not found or ambiguous") end' <<< "${devices}")" || fail "device does not exist: ${udid}"
+# CI boot recovery owns every simulator named "AutoMobile CI iPhone (<runtime>)"; never record on one.
+case "$(jq -r '.name // ""' <<< "${device}")" in
+  "AutoMobile CI iPhone"*) fail "refusing the CI iPhone simulator ${udid}" ;;
+esac
 [[ "$(jq -r '.state' <<< "${device}")" == Booted ]] || fail "device must already be Booted; run: xcrun simctl boot ${udid}"
 [[ "$(jq -r '.deviceTypeIdentifier' <<< "${device}")" == com.apple.CoreSimulator.SimDeviceType.iPhone-16 ]] || fail 'device type must be iPhone 16'
 

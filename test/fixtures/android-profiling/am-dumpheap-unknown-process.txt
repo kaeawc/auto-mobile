@@ -1,1 +1,16 @@
-Unknown process: com.example.app
+File: /data/local/tmp/automobile-heap-heap-1.hprof
+
+Exception occurred while executing 'dumpheap':
+java.lang.IllegalArgumentException: Unknown process: com.example.app
+	at com.android.server.am.ActivityManagerService.dumpHeap(ActivityManagerService.java:17950)
+	at com.android.server.am.ActivityManagerShellCommand.runDumpHeap(ActivityManagerShellCommand.java:1343)
+	at com.android.server.am.ActivityManagerShellCommand.onCommand(ActivityManagerShellCommand.java:291)
+	at com.android.modules.utils.BasicShellCommandHandler.exec(BasicShellCommandHandler.java:97)
+	at android.os.ShellCommand.exec(ShellCommand.java:38)
+	at com.android.server.am.ActivityManagerService.onShellCommand(ActivityManagerService.java:10471)
+	at android.os.Binder.shellCommand(Binder.java:1230)
+	at android.os.Binder.onTransact(Binder.java:1043)
+	at android.app.IActivityManager$Stub.onTransact(IActivityManager.java:5675)
+	at com.android.server.am.ActivityManagerService.onTransact(ActivityManagerService.java:2812)
+	at android.os.Binder.execTransactInternal(Binder.java:1505)
+	at android.os.Binder.execTransact(Binder.java:1444)

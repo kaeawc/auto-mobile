@@ -243,7 +243,7 @@ removal rules. The host does not wire iOS stamping (#14186) yet. The iOS-specifi
   `dev.jasonpearson.automobile.proto.`.
 - **Info.plist.** Usage descriptions come from `requires.permissions`: each entry's `purpose` is
   written under its usage key. The table is `DISPOSABLE_APP_IOS_USAGE_KEYS`, which the saved-Viewer
-  installer also reads. Neither `notifications` nor `nearbyWifi` has a usage key. The `UIBackgroundModes` key
+  installer also reads. `nearbyWifi` maps to `NSLocalNetworkUsageDescription`; `notifications` has no usage key. The `UIBackgroundModes` key
   comes from `requires.background`: `audio` and `microphone` map to `audio`, `location` to
   `location`, `call` to `voip`, `connectedDevice` to `bluetooth-central`, `transfer` to
   `processing` and `remoteNotification` to `remote-notification`. The `camera` value has no iOS background

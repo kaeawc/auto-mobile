@@ -12,7 +12,7 @@
 #   --check-only  Only report whether the runtime is present; do not download.
 #
 # Outputs (stdout):
-#   major_minor=<version>       e.g. "26.3"
+#   major_minor=<version>       e.g. "26.3" (SDK 26.3 or 26.3.1)
 #   needs_download=true|false
 #   runtime_count=<N>
 #
@@ -30,13 +30,23 @@ for arg in "$@"; do
   esac
 done
 
+# shellcheck source=scripts/ios/simulator-select.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/simulator-select.sh"
+
 sdk_version=$(xcrun --sdk iphonesimulator --show-sdk-version)
-major_minor="${sdk_version%.*}"
+# Major.minor of the SDK: "26.6" and "26.6.1" both need an iOS 26.6 runtime.
+# (`${sdk_version%.*}` turned "26.6" into "26", so an unusable 26.5 runtime
+# satisfied the check and 26.6 was never downloaded.)
+IFS=. read -r sdk_major sdk_minor _ <<< "${sdk_version}"
+major_minor="${sdk_major}.${sdk_minor:-0}"
 echo "Xcode SDK version: ${sdk_version} (need iOS ${major_minor} runtime)" >&2
 
+# Counts usable runtimes only (available, with a supported architecture, not a
+# device-specific runtime such as iOS-27-2-iPhone19-4); see simulator-select.sh.
 count_runtimes() {
-  xcrun simctl list runtimes iOS --json \
-    | jq --arg v "$1" '[.runtimes[] | select(.version | startswith($v + "."))] | length'
+  local runtimes_json
+  runtimes_json=$(xcrun simctl list runtimes iOS --json)
+  jq --arg v "$1" "${IOS_SIM_COUNT_MATCHING_RUNTIMES_JQ}" <<< "${runtimes_json}"
 }
 
 match_count=$(count_runtimes "${major_minor}")

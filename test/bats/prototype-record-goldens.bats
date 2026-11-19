@@ -27,7 +27,7 @@ STUB
 #!/usr/bin/env bash
 printf 'xcrun %s\n' "$*" >> "${CALLS}"
 case "$2" in
-  list) printf '{"devices":{"runtime":[{"udid":"test-udid","state":"%s","deviceTypeIdentifier":"%s"}]}}\n' "${DEVICE_STATE}" "${DEVICE_TYPE}" ;;
+  list) printf '{"devices":{"runtime":[{"udid":"test-udid","name":"%s","state":"%s","deviceTypeIdentifier":"%s"}]}}\n' "${DEVICE_NAME:-Golden iPhone 16}" "${DEVICE_STATE}" "${DEVICE_TYPE}" ;;
   get_app_container) printf '%s/container\n' "${STUB_ROOT}" ;;
   io)
     count=0
@@ -94,11 +94,15 @@ record() {
   run bash "${SCRIPT}" test-udid --viewer "${STUB_ROOT}/Viewer.app" --out "${STUB_ROOT}/out" "$@"
 }
 
-@test "recorder refuses the CI iPhone UDID including lower-case spelling" {
-  run bash "${SCRIPT}" 18a2d9b1-cdfa-445a-93aa-a532ea4b5498
-  [ "${status}" -eq 2 ]
-  [[ "${output}" == *"refusing the CI iPhone"* ]]
-  [ ! -e "${CALLS}" ]
+@test "recorder refuses any simulator named AutoMobile CI iPhone before touching it" {
+  for name in "AutoMobile CI iPhone" "AutoMobile CI iPhone (26.5)" "AutoMobile CI iPhone (27.2)"; do
+    rm -f "${CALLS}"
+    DEVICE_NAME="${name}" run bash "${SCRIPT}" test-udid --viewer "${STUB_ROOT}/Viewer.app"
+    [ "${status}" -eq 2 ]
+    [[ "${output}" == *"refusing the CI iPhone simulator test-udid"* ]]
+    [ "$(grep -c '^xcrun ' "${CALLS}")" -eq 1 ]
+    grep -q '^xcrun simctl list devices --json$' "${CALLS}"
+  done
 }
 
 @test "recorder refuses non-darwin without invoking simctl" {

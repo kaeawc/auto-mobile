@@ -1411,7 +1411,6 @@ test/features/utility/elementProperties.property.test.ts
 test/features/utility/elementPropertiesRaw.test.ts
 test/features/utility/elementTargetingRePort.test.ts
 test/features/utility/iosPushPayload.test.ts
-test/features/utility/iosSimulatorCapabilities.test.ts
 test/features/utility/screenLock/AndroidLockSettings.test.ts
 test/features/utility/screenLock/DeviceStateScreenLock.test.ts
 test/features/utility/selectionRank.property.test.ts

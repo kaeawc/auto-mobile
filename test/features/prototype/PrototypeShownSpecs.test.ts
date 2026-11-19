@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { PrototypeShownSpecs } from "../../../src/features/prototype/PrototypeShownSpecs";
+import {
+  PrototypeShownSpecs,
+  type DeviceDataWriteOutcome,
+} from "../../../src/features/prototype/PrototypeShownSpecs";
+import {
+  PROTOTYPE_BASE_BUDGET,
+  PROTOTYPE_LARGE_BUDGET,
+  type PrototypeRuntimeBudget,
+} from "../../../src/features/prototype/prototypeRuntimeBudget";
 
 const spec = { data: { count: 1 } };
 function shown(store: PrototypeShownSpecs, device = "d", id = "panel") {
@@ -219,3 +227,21 @@ test("remembers the platform a show was sent to and which devices show an id (#1
   specs.forget("emu", "a");
   expect(specs.devicesShowing("a")).toEqual(["sim"]);
 });
+
+const budgetCases: [PrototypeRuntimeBudget, DeviceDataWriteOutcome["kind"]][] = [
+  [PROTOTYPE_LARGE_BUDGET, "mirrored"],
+  [PROTOTYPE_BASE_BUDGET, "dropped"],
+];
+test.each(budgetCases)(
+  "device writes are mirrored with the runtime budget the spec was shown under (#18804)",
+  (budget, kind) => {
+    const specs = new PrototypeShownSpecs();
+    const rows = { data: { rows: Array.from({ length: 2001 }, (_, id) => ({ id })), flag: false } };
+    const ticket = specs.beginShow("d", "feed", true, "android");
+    specs.endShow("d", ticket, { id: "feed", spec: rows, budget });
+    expect(specs.budgetOf("d", "feed")).toBe(budget);
+    const write = { op: "set" as const, path: "/data/flag", value: true, revision: 1 };
+    expect(specs.recordDeviceDataWrite("d", "feed", write).kind).toBe(kind);
+    expect(specs.read("d", "feed").kind).toBe(kind === "mirrored" ? "known" : "unknown");
+  },
+);

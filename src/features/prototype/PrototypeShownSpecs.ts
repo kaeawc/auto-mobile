@@ -1,6 +1,7 @@
 import { prototypeDataPointerTokens } from "./prototypeData";
 import { applyPrototypeDataWrite } from "./prototypeDataWrite";
 import type { PrototypeDataWriteEvent } from "./prototypeDataWriteEvent";
+import { PROTOTYPE_BASE_BUDGET, type PrototypeRuntimeBudget } from "./prototypeRuntimeBudget";
 import type { PrototypeData } from "./prototypeSpec";
 import type { PrototypeSpecRevisionRecorder, PrototypeSpecVariant } from "./prototypeSpecRevisions";
 
@@ -47,6 +48,8 @@ interface DeviceSpecs {
   /** The device's platform, as the show that created this state reported it. */
   platform?: "android" | "ios";
   entries: Map<string, ShownSpecJson>;
+  /** The runtime budget each entry was shown under; device writes are mirrored with it (#18804). */
+  budgets: Map<string, PrototypeRuntimeBudget>;
   dataWrites: Map<string, DataWriteLog>;
   epoch: number;
   issued: number;
@@ -61,6 +64,31 @@ interface AcceptedShow {
   variant?: PrototypeSpecVariant;
   /** The MCP connection that issued the show, recorded on its spec revision (#17358). */
   mcpSessionId?: string;
+  /** The budget of the runtime the show was sent to (#18804); the base budget when omitted. */
+  budget?: PrototypeRuntimeBudget;
+}
+/**
+ * Applies a reported device write to `data` with the runtime's `budget`; `undefined` when the
+ * value did not travel with the event.
+ */
+export function applyDeviceDataWrite(
+  data: unknown,
+  write: PrototypeDataWriteEvent,
+  budget: PrototypeRuntimeBudget,
+): ReturnType<typeof applyPrototypeDataWrite> | undefined {
+  if (write.op === "remove") {
+    return applyPrototypeDataWrite(
+      data,
+      { op: "remove", path: write.path, where: write.where },
+      budget,
+    );
+  }
+  if (write.value === undefined) {
+    return undefined;
+  }
+  return write.op === "extend" || write.op === "prepend"
+    ? applyPrototypeDataWrite(data, { ...write, value: write.value }, budget)
+    : applyPrototypeDataWrite(data, { ...write, value: write.value }, budget);
 }
 /** Tracks acknowledged device specs, forgetting outcomes whose wire order is indeterminate. */
 export class PrototypeShownSpecs {
@@ -78,6 +106,7 @@ export class PrototypeShownSpecs {
   ): number {
     const state = this.devices.get(deviceId) ?? {
       entries: new Map<string, ShownSpecJson>(),
+      budgets: new Map<string, PrototypeRuntimeBudget>(),
       dataWrites: new Map<string, DataWriteLog>(),
       epoch: 0,
       issued: 0,
@@ -141,6 +170,7 @@ export class PrototypeShownSpecs {
     // until the next show.
     if (shown.spec) {
       state.entries.set(shown.id, structuredClone(shown.spec));
+      state.budgets.set(shown.id, shown.budget ?? PROTOTYPE_BASE_BUDGET);
       this.revisions?.recordShow(shown.id, {
         spec: shown.spec,
         platform: state.platform,
@@ -161,6 +191,11 @@ export class PrototypeShownSpecs {
     }
     const spec = state?.entries.get(id);
     return spec && state ? { kind: "known", spec, version: state.epoch } : { kind: "unknown" };
+  }
+
+  /** The runtime budget the prototype was shown under; the base budget when none is known. */
+  budgetOf(deviceId: string, id: string): PrototypeRuntimeBudget {
+    return this.devices.get(deviceId)?.budgets.get(id) ?? PROTOTYPE_BASE_BUDGET;
   }
 
   /** The platform of a device a show was sent to, while its state is kept. */
@@ -232,14 +267,7 @@ export class PrototypeShownSpecs {
     if (!spec) {
       return { kind: "untracked" };
     }
-    const applied =
-      write.op === "remove"
-        ? applyPrototypeDataWrite(spec.data, { op: "remove", path: write.path, where: write.where })
-        : write.value === undefined
-          ? undefined
-          : write.op === "extend" || write.op === "prepend"
-            ? applyPrototypeDataWrite(spec.data, { ...write, value: write.value })
-            : applyPrototypeDataWrite(spec.data, { ...write, value: write.value });
+    const applied = applyDeviceDataWrite(spec.data, write, this.budgetOf(deviceId, id));
     if (!applied?.success) {
       this.forget(deviceId, id);
       return { kind: "dropped" };

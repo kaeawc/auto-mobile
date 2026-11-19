@@ -1,4 +1,5 @@
 import { event } from "../../helpers/prototypeTestEvent";
+import { PROTOTYPE_LARGE_BUDGET } from "../../../src/features/prototype/prototypeRuntimeBudget";
 import { describe, expect, test } from "bun:test";
 import { InMemoryPrototypeStatusStore } from "../../../src/features/prototype/PrototypeStatusStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -491,6 +492,23 @@ describe("patch spec and data hooks", () => {
     write(2, "/data/count", { op: "set", revision: 3 });
     expect(store.status(scope).prototypes[0]).not.toHaveProperty("data");
     expect(store.shownSpecs.read(scope.deviceId, "panel")).toEqual({ kind: "unknown" });
+  });
+  test("a large-budget show keeps reported data through a device write (#18804)", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    const data = { rows: Array.from({ length: 2001 }, (_, id) => ({ id })), flag: false };
+    const ticket = store.shownSpecs.beginShow(scope.deviceId, "panel");
+    store.shownSpecs.endShow(scope.deviceId, ticket, {
+      id: "panel",
+      spec: { data },
+      budget: PROTOTYPE_LARGE_BUDGET,
+    });
+    store.record(scope, "show", { id: "panel" }, { result: ok, details: { data } });
+    store.recordEvent(scope, {
+      ...event(1, "panel", "change", "/data/flag"),
+      payload: { op: "set", value: true, revision: 2 },
+    });
+    expect(store.status(scope).prototypes[0].data).toEqual({ ...data, flag: true });
+    expect(store.shownSpecs.read(scope.deviceId, "panel").kind).toBe("known");
   });
   test.each(["dismissed", "dismiss", "all", "clearDevice", "clearSession"])(
     "%s removes tracked specs",

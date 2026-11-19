@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.protoviewer
 
+import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeDirectoryStore
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeLimits
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeLoadResult
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeSaveRequest
@@ -9,6 +10,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.sha256Hex
 import dev.jasonpearson.automobile.protocol.PrototypeRuntimeBudget
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
+import java.io.File
 import java.util.UUID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -17,6 +19,14 @@ import kotlinx.serialization.json.Json
 const val MAX_LIBRARY_PROTOTYPES = 200
 const val MAX_LIBRARY_BYTES = 100L * 1024 * 1024
 val libraryLimits = SavedPrototypeLimits(maxSavedPrototypes = MAX_LIBRARY_PROTOTYPES)
+
+/** The library's backing store, validating with ProtoViewer's runtime budget (#18804). */
+internal fun librarySavedStore(root: File): SavedPrototypeDirectoryStore =
+  SavedPrototypeDirectoryStore(
+    root,
+    limits = libraryLimits,
+    budget = PrototypeRuntimeBudget.forCapabilities(protoViewerCapabilities),
+  )
 
 fun interface IdGenerator {
   fun newId(): String

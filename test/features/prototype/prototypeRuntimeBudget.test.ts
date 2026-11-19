@@ -117,6 +117,23 @@ describe("prototype runtime budgets (#18804)", () => {
     expect(prototypeLargeBudgetFields(appendFeed(2000))).toEqual([]);
   });
 
+  test("a data action literal over the base budget needs the large-budget capability", () => {
+    const setFeed = (value: unknown) =>
+      feed(1, {
+        onEndReached: [{ type: "setData", path: "/data/feed/items", value: { value } }],
+      });
+    const rows = setFeed(Array.from({ length: 2001 }, (_, id) => ({ id })));
+    expect(validatePrototypeSpec(rows).success).toBe(false);
+    expect(prototypeLargeBudgetFields(rows)).toEqual(["root.onEndReached[0].value.value"]);
+    expect(requiredPrototypeCapabilities(rows)).toContain(PROTOTYPE_LARGE_BUDGET_CAPABILITY);
+
+    const bytes = setFeed({ blob: "x".repeat(800 * 1024) });
+    expect(validatePrototypeSpec(bytes).success).toBe(false);
+    expect(prototypeLargeBudgetFields(bytes)).toEqual(["root.onEndReached[0].value.value"]);
+
+    expect(prototypeLargeBudgetFields(setFeed([{ id: 1 }]))).toEqual([]);
+  });
+
   test("spec and data bytes over the base budget validate only against the large budget", () => {
     const spec = feed(1, {}, { blob: "x".repeat(1.5 * MIB) });
     expect(validatePrototypeSpec(spec)).toEqual({

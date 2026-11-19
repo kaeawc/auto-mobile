@@ -2,6 +2,7 @@ import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_LARGE_BUDGET_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { expandPrototypeComponents } from "./prototypeComponents";
 import { resolvePrototypeDataPointer } from "./prototypeData";
+import { PROTOTYPE_DATA_ACTION_TYPES } from "./prototypeDataActions";
 import { jsonCost } from "./prototypeJsonCost";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { record } from "./prototypeTemplate";
@@ -102,18 +103,53 @@ function oversizedActionWindows(value: unknown, path: string, fields: string[]):
   if (!object) {
     return;
   }
-  if (
-    typeof object.type === "string" &&
-    WINDOWED_DATA_ACTIONS.has(object.type) &&
-    typeof object.maxItems === "number" &&
-    object.maxItems > PROTOTYPE_BASE_BUDGET.MAX_PROTOTYPE_DATA_ARRAY_ITEMS
-  ) {
-    fields.push(`${path}.maxItems`);
-  }
+  oversizedDataAction(object, path, fields);
   for (const key of Object.keys(object).sort()) {
     if (!OPAQUE_FIELDS.has(key)) {
       oversizedActionWindows(object[key], path ? `${path}.${key}` : key, fields);
     }
+  }
+}
+
+/** A data action whose window or literal value is over the base budget. */
+function oversizedDataAction(
+  action: Record<string, unknown>,
+  path: string,
+  fields: string[],
+): void {
+  const type = typeof action.type === "string" ? action.type : "";
+  if (
+    WINDOWED_DATA_ACTIONS.has(type) &&
+    typeof action.maxItems === "number" &&
+    action.maxItems > PROTOTYPE_BASE_BUDGET.MAX_PROTOTYPE_DATA_ARRAY_ITEMS
+  ) {
+    fields.push(`${path}.maxItems`);
+  }
+  // Read at call time: prototypeDataActions and this module are in one import cycle.
+  if (PROTOTYPE_DATA_ACTION_TYPES.some((name) => name === type)) {
+    oversizedLiteral(record(action.value), `${path}.value.value`, fields);
+  }
+}
+
+/**
+ * A data action's `{value: literal}` is checked like data (`{value: literal}` against the data byte
+ * and array limits), so a literal over the base budget needs the large budget too.
+ */
+function oversizedLiteral(
+  binding: Record<string, unknown> | undefined,
+  path: string,
+  fields: string[],
+): void {
+  if (!binding || !Object.hasOwn(binding, "value")) {
+    return;
+  }
+  const before = fields.length;
+  oversizedArrays(binding.value, path, fields);
+  if (
+    fields.length === before &&
+    jsonCost({ value: binding.value }) > PROTOTYPE_BASE_BUDGET.MAX_PROTOTYPE_DATA_BYTES
+  ) {
+    fields.push(path);
   }
 }
 
@@ -125,7 +161,8 @@ function specBytes(spec: unknown): number {
  * Where a spec is over the base budget, so only a runtime advertising
  * `prototype_large_budget_v1` can show it: `$` for spec bytes (authored or expanded), `data` for
  * data bytes, each oversized `/data` array, each list whose items or `maxItems` exceed the base
- * list limit and each `appendData`/`upsertData` whose `maxItems` exceeds the base array limit.
+ * list limit, each `appendData`/`upsertData` whose `maxItems` exceeds the base array limit and
+ * each data action literal (`value.value`) over the base data byte or array limits.
  * Paths are those of the component-expanded spec the validator checks.
  */
 export function prototypeLargeBudgetFields(spec: unknown): string[] {

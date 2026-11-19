@@ -1092,8 +1092,27 @@ internal fun bindPrototypeListRow(
               PrototypeScalar.serializer(),
               value,
             )
-          },
+          }
+          .mapValues { (_, value) -> shieldPrototypeRowScalar(value) },
         index,
         source = item,
       ),
     )
+
+private const val ROW_SHIELD = '\uE000'
+
+/**
+ * Row values are bound before the lazy row's data text resolves, so a literal `{data:` or
+ * `{platform:` inside one must not be scanned as an authored placeholder. The marker is removed by
+ * [unshieldPrototypeRowText] once the node's own text has resolved.
+ */
+private fun shieldPrototypeRowScalar(scalar: PrototypeScalar): PrototypeScalar =
+  if (scalar is PrototypeScalar.Text)
+    PrototypeScalar.Text(
+      scalar.value
+        .replace("{data:", "{${ROW_SHIELD}data:")
+        .replace("{platform:", "{${ROW_SHIELD}platform:"),
+    )
+  else scalar
+
+internal fun unshieldPrototypeRowText(text: String): String = text.replace("{$ROW_SHIELD", "{")

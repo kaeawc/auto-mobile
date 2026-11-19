@@ -17,6 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -204,8 +206,9 @@ internal fun resolvePrototypeListNodeText(node: PrototypeNode, data: JsonObject?
   val json = listNodeJson
   val raw = json.encodeToJsonElement(PrototypeNode.serializer(), node).jsonObject
   val resolved = PrototypeDataResolver.resolveNodeText(raw, data)
-  if (resolved == raw) return node
-  val decoded = json.decodeFromJsonElement(PrototypeNode.serializer(), resolved)
+  val unshielded = unshieldPrototypeRowJson(resolved).jsonObject
+  if (unshielded == raw) return node
+  val decoded = json.decodeFromJsonElement(PrototypeNode.serializer(), unshielded)
   // The wire format omits runtime repeat metadata. Keep bound repeats and descendants intact;
   // each descendant resolves its own text only after its row tokens have bound.
   return restorePrototypeListContainerChildren(node, decoded)
@@ -286,4 +289,12 @@ private fun restorePrototypeListOtherChildren(
         footer = node.footer,
       )
     else -> decoded
+  }
+
+private fun unshieldPrototypeRowJson(element: JsonElement): JsonElement =
+  when (element) {
+    is JsonObject -> JsonObject(element.mapValues { unshieldPrototypeRowJson(it.value) })
+    is JsonArray -> JsonArray(element.map(::unshieldPrototypeRowJson))
+    is JsonPrimitive ->
+      if (element.isString) JsonPrimitive(unshieldPrototypeRowText(element.content)) else element
   }

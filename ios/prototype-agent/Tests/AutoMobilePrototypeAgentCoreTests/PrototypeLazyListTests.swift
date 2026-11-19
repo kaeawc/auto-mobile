@@ -357,6 +357,32 @@ final class PrototypeLazyListTests: XCTestCase {
         XCTAssertEqual(row.json.objectFields?["text"], .string("iOS: One"))
     }
 
+    func testRowValuesLookingLikeDataOrPlatformTokensStayLiteral() throws {
+        let json = lazySpec(
+            text: "{row.name}",
+            data: #"{"other":"Expanded","posts":[{"id":"a","name":"{data:/other}"},{"id":"b","name":"{platform:/name}"}]}"#
+        )
+        XCTAssertEqual(try rowText(json, index: 0), "{data:/other}")
+        XCTAssertEqual(try rowText(json, index: 1), "{platform:/name}")
+    }
+
+    func testPlatformTextSurvivesTheFullBuildPathIntoLazyRows() throws {
+        let json = lazySpec(
+            text: "Device {platform:/device/widthClass} {row.id}",
+            data: #"{"posts":[{"id":"a"}]}"#
+        )
+        let authored = try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
+        let root = try PrototypeSpec.buildRoot(
+            XCTUnwrap(authored.objectFields?["root"]), data: authored.objectFields?["data"]?.objectFields,
+            menuState: [:], strings: nil, locales: [],
+            platform: ["device": .object(["widthClass": .string("compact")])]
+        )
+        let row = try XCTUnwrap(PrototypeLazyList.resolvedRow(
+            node: root, data: authored.objectFields?["data"]?.objectFields, index: 0
+        ))
+        XCTAssertEqual(row.json.objectFields?["text"], .string("Device compact a"))
+    }
+
     func testRowIndexBindsInsideDataPointerBeforeResolving() throws {
         let json = lazySpec(
             text: "{data:/rows/{index}/name}",

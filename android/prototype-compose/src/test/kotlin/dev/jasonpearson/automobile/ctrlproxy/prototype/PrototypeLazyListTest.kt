@@ -224,6 +224,18 @@ class PrototypeLazyListTest {
   }
 
   @Test
+  fun `lazy row values that look like data or platform tokens stay literal`() {
+    val input =
+      dataList(
+        "{row.name}",
+        """{"rows":[{"id":"a","name":"{data:/other}"},{"id":"b","name":"{platform:/device/widthClass}"}],"other":"Expanded"}""",
+      )
+    val model = checkNotNull(mapPrototypeSpec(input).root.list)
+    assertEquals("{data:/other}", model.render(model.rows[0], 0).text)
+    assertEquals("{platform:/device/widthClass}", model.render(model.rows[1], 1).text)
+  }
+
+  @Test
   fun `nested repeat binds inner row data last and retains its outer alias`() {
     val base =
       dataList(

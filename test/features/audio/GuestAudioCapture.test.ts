@@ -557,6 +557,41 @@ describe("AdbGuestAudioCapture", () => {
       ).toHaveLength(1);
     });
   }
+  test("assertRunning sends one status for the held lease and accepts running", async () => {
+    const { adb, capture } = setup();
+    const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
+    const before = adb.getExecutedCommands().length;
+    await handle.assertRunning();
+    expect(adb.getExecutedCommands().slice(before)).toEqual([
+      `shell am broadcast -n ${COMPONENT} -a ${ACTION} --es op status --es lease capture-1`,
+    ]);
+    await handle.close();
+  });
+
+  for (const state of ["absent", "stopped", "failed capture read returned -3"]) {
+    test(`assertRunning refuses a recorder that is ${state} (#18687)`, async () => {
+      const { adb, capture } = setup();
+      const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
+      adb.setCommandResponse("--es op status", reply(state));
+      await expect(handle.assertRunning()).rejects.toMatchObject({
+        code: "audio_guest_capture_unavailable",
+        message: expect.stringContaining(state),
+      });
+      await handle.close();
+    });
+  }
+
+  test("assertRunning refuses after close without a broadcast", async () => {
+    const { adb, capture } = setup();
+    const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
+    await handle.close();
+    const before = adb.getExecutedCommands().length;
+    await expect(handle.assertRunning()).rejects.toMatchObject({
+      code: "audio_guest_capture_unavailable",
+    });
+    expect(adb.getExecutedCommands()).toHaveLength(before);
+  });
+
   test("close transport errors are actionable", async () => {
     const { adb, capture } = setup();
     const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });

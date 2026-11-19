@@ -59,6 +59,7 @@ fun androidPrototypePermissionSources(
 /** One in-flight permission dialog per Activity, across every source and runtime session. */
 internal class PrototypePromptSlot {
   var requesting = false
+  var settling = false
 }
 
 internal fun declaresPermission(context: Context, name: String): Boolean {

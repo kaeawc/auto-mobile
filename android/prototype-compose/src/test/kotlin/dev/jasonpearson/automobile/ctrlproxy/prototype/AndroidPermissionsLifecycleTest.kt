@@ -91,4 +91,33 @@ class AndroidPermissionsLifecycleTest {
     assertEquals("android.permission.RECORD_AUDIO", registry.input)
     controller.pause().stop().destroy()
   }
+
+  @Test
+  fun `a delivered result settles the Activity prompt until the next resume`() {
+    val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+    val registry = Registry()
+    val slot = PrototypePromptSlot()
+    val camera =
+      FrameworkPermissionsGateway(
+        controller.get(),
+        registry,
+        PrototypeRuntimePermission.CAMERA,
+        slot,
+      )
+    val microphone =
+      FrameworkPermissionsGateway(
+        controller.get(),
+        registry,
+        PrototypeRuntimePermission.MICROPHONE,
+        slot,
+      )
+    controller.pause()
+    val unregister = camera.request({}, {})!!
+    registry.dispatchResult(registry.requestCode, true)
+    unregister()
+    assertTrue(microphone.settling)
+    controller.resume()
+    assertFalse(microphone.settling)
+    controller.pause().stop().destroy()
+  }
 }

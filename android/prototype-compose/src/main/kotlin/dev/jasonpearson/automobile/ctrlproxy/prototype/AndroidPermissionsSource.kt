@@ -28,6 +28,13 @@ internal interface AndroidPermissionsGateway {
   val hardware: Boolean
     get() = true
 
+  /**
+   * A permission dialog of this Activity delivered its result and the Activity has not resumed
+   * since. A follow-up request waits for that resume instead of reading `unavailable`.
+   */
+  val settling: Boolean
+    get() = false
+
   val sdk: Int
   val foreground: Boolean
   val granted: Boolean
@@ -66,6 +73,7 @@ internal constructor(
   )
 
   private var closed = false
+  private val closing = MutableStateFlow(false)
   private var finish: (() -> Unit)? = null
   override val changes: Flow<PrototypePermissionState> =
     gateway.resumes.filter { !closed && finish == null }.map { status() }.flowOn(dispatcher)
@@ -97,6 +105,10 @@ internal constructor(
     AndroidPermissionsSource(gateway, SessionPermissionRequestStore(), dispatcher)
 
   override fun request(): Flow<PrototypePermissionOutcome> = flow {
+    if (!awaitSettled()) {
+      emit(PrototypePermissionOutcome.Cancelled)
+      return@flow
+    }
     val current = status()
     if (finish != null) {
       emit(PrototypePermissionOutcome.Busy)
@@ -145,8 +157,20 @@ internal constructor(
   }
     .flowOn(dispatcher)
 
+  /**
+   * A previous prompt's result can precede ON_RESUME; wait for the Activity to come back before
+   * prompting again. False when the source closed while waiting.
+   */
+  private suspend fun awaitSettled(): Boolean {
+    val idle = !closed && finish == null
+    if (!idle || gateway.foreground || !gateway.settling) return true
+    merge(gateway.resumes, closing.filter { it }.map {}).first()
+    return !closed
+  }
+
   override fun close() {
     closed = true
+    closing.value = true
     store.rationaleSeen = false
     finish?.invoke()
   }
@@ -168,6 +192,12 @@ internal class FrameworkPermissionsGateway(
 
   override val hardware
     get() = captureHardwarePresent(activity, permission)
+
+  override val settling: Boolean
+    get() {
+      if (foreground) slot.settling = false
+      return slot.settling
+    }
 
   override val sdk
     get() = Build.VERSION.SDK_INT
@@ -219,7 +249,10 @@ internal class FrameworkPermissionsGateway(
         "prototype.${permission.wire}.${nextRequest.incrementAndGet()}",
         ActivityResultContracts.RequestPermission(),
       ) { granted ->
-        if (active && !activity.isDestroyed) deliver(granted)
+        if (active && !activity.isDestroyed) {
+          slot.settling = true
+          deliver(granted)
+        }
       }
     slot.requesting = true
     activity.lifecycle.addObserver(observer)

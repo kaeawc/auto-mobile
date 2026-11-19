@@ -34,6 +34,7 @@
   <!-- Neither permission may make a camera or microphone a hard install requirement. -->
   <uses-feature android:name="android.hardware.camera" android:required="false" />
   <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+  <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
   <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
   <!-- Prototype request actions with via "device" make their own HTTP calls (#12528). -->

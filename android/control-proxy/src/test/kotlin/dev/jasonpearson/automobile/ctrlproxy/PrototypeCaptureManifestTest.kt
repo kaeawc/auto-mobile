@@ -58,6 +58,7 @@ class PrototypeCaptureManifestTest {
       listOf(
         "android.hardware.camera",
         "android.hardware.camera.any",
+        "android.hardware.camera.autofocus",
         "android.hardware.microphone",
       )
   }

@@ -47,6 +47,16 @@ jobs:
         with:
           lfs: false
 
+      # swift-build.sh builds ProtoViewer, whose icon generator needs Bun and sharp.
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
       - name: "Select Xcode 27.2"
         uses: maxim-lobanov/setup-xcode@v1
         with:

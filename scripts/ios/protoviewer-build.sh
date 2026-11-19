@@ -76,8 +76,19 @@ done
 # The home-screen icon is the store art (#14152), rendered from store-listing/icon by the icon
 # generator and downscaled to the loose 120/180 px PNGs CFBundleIconFiles names. No asset catalog:
 # the guard below still rejects Assets.car, and a CFBundleIconName anywhere would break stamping.
+# The rasters are PNGs, which the repository routes through Git LFS and never commits, so they must
+# be rendered here; the generator needs Bun and the installed `sharp`. Fail fast instead of letting
+# Bun auto-install a missing package and hang a CI job until its timeout: `--no-install` makes an
+# absent `sharp` an immediate error.
 icon_dir="${out_dir}/icons"
-bun "${repo_root}/scripts/store-listing/generate-icons.ts" --out "${icon_dir}" > /dev/null
+if ! command -v bun > /dev/null 2>&1; then
+  echo "bun is required to render the ProtoViewer icon; install Bun and run scripts/ci/install-bun-deps.sh" >&2
+  exit 1
+fi
+if ! bun --no-install "${repo_root}/scripts/store-listing/generate-icons.ts" --out "${icon_dir}" > /dev/null; then
+  echo "Icon generator failed; install the Bun dependencies (scripts/ci/install-bun-deps.sh) so sharp resolves" >&2
+  exit 1
+fi
 icon_source="${icon_dir}/ios/AppIcon.appiconset/AppIcon-1024.png"
 [[ -s "${icon_source}" ]] || { echo "Icon generator did not write ${icon_source}" >&2; exit 1; }
 cat > "${out_dir}/viewer-icons.swift" <<'SWIFT'

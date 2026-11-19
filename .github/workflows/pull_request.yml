@@ -3048,6 +3048,19 @@ jobs:
         shell: bash
         run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
 
+      # ProtoViewer renders its icon with the Bun/sharp generator, which hangs in Bun's
+      # auto-install without a dependency tree.
+      - name: "Setup Bun"
+        if: matrix.config.app == 'protoviewer'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: "Install Bun dependencies"
+        if: matrix.config.app == 'protoviewer'
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
       - name: "Build ${{ matrix.config.app }}"
         run: ./scripts/ios/swift-build-prototype-apps.sh "${{ matrix.config.app }}"
 

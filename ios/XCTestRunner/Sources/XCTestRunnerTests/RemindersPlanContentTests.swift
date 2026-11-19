@@ -308,7 +308,11 @@ final class RemindersPlanContentTests: XCTestCase {
         let keyboardWaitIndex = continueTapIndex - 1
         XCTAssertGreaterThan(keyboardWaitIndex, titleWaitIndex, "Wait for the keyboard sheet after the Title field")
         let keyboardWait = steps[keyboardWaitIndex]
-        XCTAssertEqual(keyboardWait.tool, "observe", "The keyboard Continue tap must immediately follow an observe guard")
+        XCTAssertEqual(
+            keyboardWait.tool,
+            "observe",
+            "The keyboard Continue tap must immediately follow an observe guard"
+        )
         XCTAssertTrue(keyboardWait.hasWaitFor && keyboardWait.mentions("Continue"))
         XCTAssertTrue(keyboardWait.isOptional, "The keyboard Continue wait must be optional")
         XCTAssertEqual(keyboardWait.waitForTimeoutMs, 3000)

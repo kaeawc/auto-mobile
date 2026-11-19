@@ -146,6 +146,7 @@ export type FieldKind =
   | "text"
   | "operand"
   | "substring"
+  | "derivedCondition"
   | "emitName"
   | "key"
   | "emitBinding"
@@ -224,11 +225,12 @@ function mapKeyList(data: Raw, key: string, path: string, visit: FieldVisitor): 
 }
 
 function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
+  mapField(condition, "derived", path, { kind: "derivedCondition", visit });
   mapField(condition, "data", path, { kind: "routePointer", visit });
   mapField(condition, "key", path, { kind: "key", visit });
   mapKeyList(condition, "valid", path, visit);
   const operandVisit: FieldVisitor = (value, fieldPath, kind) =>
-    visit(value, fieldPath, kind, Object.hasOwn(condition, "data"));
+    visit(value, fieldPath, kind, "data" in condition);
   mapField(condition, "equals", path, { kind: "operand", visit: operandVisit });
   mapField(condition, "notEquals", path, { kind: "operand", visit: operandVisit });
   mapField(condition, "contains", path, { kind: "substring", visit: operandVisit });

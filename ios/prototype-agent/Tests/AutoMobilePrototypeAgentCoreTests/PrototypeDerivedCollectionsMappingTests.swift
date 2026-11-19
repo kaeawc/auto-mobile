@@ -15,6 +15,75 @@ final class PrototypeDerivedCollectionsMappingTests: XCTestCase {
         } catch { XCTFail("Could not initialize mapping tests: \(error)") }
     }
 
+    private func conditionFixture() throws -> [String: JSONValue] {
+        let path = PrototypeSpecFixtures.directory.appendingPathComponent("derive/conditions.json")
+        return try XCTUnwrap(JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: path)).objectFields)
+    }
+
+    func testSharedDerivedConditionsRecomputeAndValidateNames() throws {
+        let fixture = try conditionFixture()
+        let raw = try XCTUnwrap(fixture["spec"])
+        let data = try JSONEncoder().encode(raw)
+        try PrototypeSpecStrictValidator.validate(data: data)
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: data)
+        var session = PrototypeSession()
+        session.show(spec)
+        for entry in PrototypeStrictBindings.array(fixture["changes"]) {
+            let change = try XCTUnwrap(entry.objectFields)
+            let state = try XCTUnwrap(change["state"]?.objectFields)
+            _ = session.setStates(state.map { ($0.key, $0.value) })
+            let actual = session.spec?.root.children?.map { node in
+                node.visibleWhen?.holds(state) ?? true
+            }
+            let expected = PrototypeStrictBindings.array(change["visible"]).map { $0 == .bool(true) }
+            XCTAssertEqual(actual, expected)
+        }
+        var invalid = try XCTUnwrap(raw.objectFields)
+        var root = try XCTUnwrap(invalid["root"]?.objectFields)
+        var children = PrototypeStrictBindings.array(root["children"])
+        var child = try XCTUnwrap(children.first?.objectFields)
+        child["visibleWhen"] = fixture["unknownCondition"]
+        children[0] = .object(child)
+        root["children"] = .array(children)
+        invalid["root"] = .object(root)
+        let invalidData = try JSONEncoder().encode(JSONValue.object(invalid))
+        let expected = try XCTUnwrap(fixture["error"]?.objectFields)
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: invalidData)) { error in
+            guard case let PrototypeLoadError.invalidSpec(path, message) = error else { return XCTFail("\(error)") }
+            XCTAssertEqual(path, expected["path"]?.stringValue)
+            XCTAssertEqual(message, expected["message"]?.stringValue)
+        }
+    }
+
+    func testDerivedStringConditionSurvivesLazyRowBinding() throws {
+        var raw = try XCTUnwrap(conditionFixture()["spec"]?.objectFields)
+        raw["state"] = .object(["query": .string("Apple")])
+        raw["root"] = .object([
+            "type": .string("list"),
+            "repeat": .object([
+                "items": .object(["path": .string("/rows")]),
+                "as": .string("row"),
+                "key": .string("name"),
+            ]),
+            "children": .array([.object([
+                "type": .string("text"),
+                "text": .string("{row.name}"),
+                "visibleWhen": .object(["derived": .string("queryText"), "equals": .string("{row.name}")]),
+            ])]),
+        ])
+        let data = try JSONEncoder().encode(JSONValue.object(raw))
+        try PrototypeSpecStrictValidator.validate(data: data)
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: data)
+        let row = try XCTUnwrap(PrototypeLazyList.row(node: spec.root, data: spec.data, index: 0))
+        XCTAssertEqual(row.node.visibleWhen?.holds([:]), true)
+        let changed = try spec.replacingDerivedInputs(
+            data: spec.data, state: ["query": .string("Pear")],
+            changed: PrototypeDeriveChanges(stateKeys: ["query"])
+        )
+        let next = try XCTUnwrap(PrototypeLazyList.row(node: changed.root, data: changed.data, index: 0))
+        XCTAssertEqual(next.node.visibleWhen?.holds([:]), false)
+    }
+
     private func spec(lazy: Bool = false, count: Int = 3) throws -> PrototypeSpec {
         let template = #"""
         {"id":"catalog","window":{"placement":{"type":"fullscreen"}},"state":{"query":""},

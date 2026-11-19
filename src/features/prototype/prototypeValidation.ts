@@ -335,7 +335,7 @@ function objectConstraint(
   }
   return undefined;
 }
-/** Single-trigger dependents are optional; a pipe-separated trigger group requires exactly one. */
+/** Multi-trigger groups require one dependent unless the contract marks the group optional. */
 function formConstraint(
   data: Record<string, unknown>,
   rule: Rule,
@@ -355,7 +355,11 @@ function formConstraint(
       if (present.length > 0) {
         return fail(keyPath(path, present[0]), `Requires ${trigger.split("|").join(" or ")}`);
       }
-    } else if (trigger.includes("|") && present.length !== 1) {
+    } else if (
+      trigger.includes("|") &&
+      !rule.optionalDependentGroups?.includes(trigger) &&
+      present.length !== 1
+    ) {
       const target = present[1] ?? dependents[0];
       return fail(keyPath(path, target), `Exactly one of ${dependents.join(", ")} is required`);
     }

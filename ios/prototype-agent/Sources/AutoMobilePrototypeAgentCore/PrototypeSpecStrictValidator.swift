@@ -80,7 +80,7 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeLimits.guardAuthoredTree(root)
             try PrototypeMenus.validateAuthoredText(root)
             try PrototypeRepeat.validateEmitContexts(collections, data: modelData)
-            let resolved = PrototypeDataResolver.resolveRoot(collections, data: modelData)
+            let resolved = PrototypeDataResolver.resolveRoot(collections, data: modelData, derived: derivedValues)
             try PrototypeLimits.guardTree(resolved)
             let expanded = PrototypeRepeat.expand(resolved)
             try PrototypeBarScroll.validate(expanded)

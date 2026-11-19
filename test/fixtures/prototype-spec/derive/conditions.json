@@ -1,0 +1,66 @@
+{
+  "spec": {
+    "id": "cart-conditions",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": { "query": "" },
+    "data": { "rows": [{ "name": "Apple" }] },
+    "derive": {
+      "cartCount": {
+        "collection": {
+          "of": { "data": "/rows" },
+          "where": [{ "field": "name", "op": "contains", "value": { "state": "query" } }]
+        },
+        "reduce": { "op": "count" },
+        "format": { "number": { "minFraction": 2 } }
+      },
+      "queryText": { "of": { "state": "query" }, "format": { "number": {} } },
+      "cartRows": { "collection": { "of": { "data": "/rows" } } }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        { "type": "text", "text": "Checkout", "visibleWhen": { "derived": "cartCount", "gt": 0 } },
+        {
+          "type": "text",
+          "text": "Empty cart",
+          "visibleWhen": {
+            "all": [
+              { "derived": "cartCount", "equals": 0 },
+              { "derived": "cartCount", "lt": 1 },
+              { "not": { "derived": "cartCount", "notEquals": 0 } }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "No matching item",
+          "visibleWhen": {
+            "any": [
+              {
+                "all": [
+                  { "derived": "queryText", "contains": "pear" },
+                  { "derived": "queryText", "startsWith": "pe" },
+                  { "derived": "queryText", "lengthGt": 3 },
+                  { "derived": "queryText", "lengthLt": 5 }
+                ]
+              },
+              { "derived": "cartRows", "empty": true }
+            ]
+          }
+        },
+        { "type": "text", "text": "Browse", "visibleWhen": { "key": "query", "notEquals": "hide" } }
+      ]
+    }
+  },
+  "changes": [
+    { "state": { "query": "" }, "visible": [true, false, false, true] },
+    { "state": { "query": "pear" }, "visible": [false, true, true, true] },
+    { "state": { "query": "apple" }, "visible": [true, false, false, true] },
+    { "state": { "query": "hide" }, "visible": [false, true, false, false] }
+  ],
+  "unknownCondition": { "not": { "all": [{ "derived": "missing", "gt": 0 }] } },
+  "error": {
+    "path": "root.children[0].visibleWhen.not.all[0].derived",
+    "message": "Unknown derived value \"missing\""
+  }
+}

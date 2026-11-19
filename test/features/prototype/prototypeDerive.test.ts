@@ -1,3 +1,6 @@
+import { findVirtualTapTarget } from "../../../src/features/prototype/headless/virtualPrototypeInteraction";
+import { decide } from "../../../src/features/prototype/web/webCondition";
+import conditionFixture from "../../fixtures/prototype-spec/derive/conditions.json";
 import { resolvePrototypeDerived } from "../../../src/features/prototype/prototypeFormat";
 import { webRepeatRows } from "../../../src/features/prototype/web/webRepeat";
 import { expect, test } from "bun:test";
@@ -269,4 +272,32 @@ test("resolvePrototypeDerived reuses one evaluation for every placeholder of a r
   const first = memoizedPrototypeDerive(spec.derive, data, {});
   expect(resolvePrototypeDerived(spec, "count", { data, state: {}, env })).toBe("1");
   expect(memoizedPrototypeDerive(spec.derive, data, {})).toBe(first);
+});
+
+test("derived conditions validate and follow recomputed raw values", () => {
+  const { spec, changes } = conditionFixture;
+  expect(validatePrototypeSpec(spec).success).toBe(true);
+  const derive = prototypeDeriveSchema.parse(spec.derive);
+  for (const { state, visible } of changes) {
+    const derived = memoizedPrototypeDerive(derive, spec.data, state);
+    expect(
+      spec.root.children.map((node) =>
+        decide(node.visibleWhen, { state, derived, platform: "android" }),
+      ),
+    ).toEqual(visible);
+    const snapshot = { spec, state, pages: {}, stacks: {} };
+    const checkout = findVirtualTapTarget(snapshot, { text: "Checkout", exactText: true });
+    expect(checkout !== undefined).toBe(visible[0]!);
+  }
+});
+
+test("unknown derived conditions report the nested authored field", () => {
+  const { spec, unknownCondition, error } = conditionFixture;
+  const children = spec.root.children.map((node, index) =>
+    index === 0 ? { ...node, visibleWhen: unknownCondition } : node,
+  );
+  expect(validatePrototypeSpec({ ...spec, root: { ...spec.root, children } })).toEqual({
+    success: false,
+    error,
+  });
 });

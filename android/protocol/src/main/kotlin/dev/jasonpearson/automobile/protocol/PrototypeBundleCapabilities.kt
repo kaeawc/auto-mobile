@@ -137,6 +137,7 @@ internal object PrototypeBundleCapabilities {
     if (repeat?.let { "key" in it || it["items"] is JsonObject } == true)
       caps.add("prototype_data_model_v1")
     PrototypeBindableFields.first<Unit>(node, "") { value, _, kind ->
+      if (kind == PrototypeBindableKind.DERIVED_CONDITION) caps.add("prototype_derive_v1")
       val bound =
         when (kind) {
           PrototypeBindableKind.TEXT -> text(value)?.let(PrototypeDataText::hasBinding) == true

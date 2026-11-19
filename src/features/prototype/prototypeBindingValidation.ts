@@ -15,6 +15,7 @@ export interface Rule {
   preferMatchingFields?: boolean;
   atMostOne?: string[];
   dependents?: Record<string, string[]>;
+  optionalDependentGroups?: string[];
   integer?: boolean;
   min?: number;
   max?: number;

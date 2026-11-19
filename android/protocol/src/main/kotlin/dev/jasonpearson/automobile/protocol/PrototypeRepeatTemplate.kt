@@ -174,6 +174,7 @@ internal enum class PrototypeBindableKind {
   TEXT,
   OPERAND,
   DATA_OPERAND,
+  DERIVED_CONDITION,
   EMIT_NAME,
   EMIT_BINDING,
   KEY,
@@ -338,6 +339,9 @@ internal object PrototypeBindableFields {
 
     fun condition(value: JsonElement?, path: String): T? {
       val condition = value as? JsonObject ?: return null
+      field(condition, "derived", path, PrototypeBindableKind.DERIVED_CONDITION)?.let {
+        return it
+      }
       field(condition, "data", path, PrototypeBindableKind.ROUTE_POINTER)?.let {
         return it
       }

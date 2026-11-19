@@ -118,7 +118,10 @@ Bind original rows with \`repeat.items:{derived:"results"}\`.
 Optional \`reduce:{op:"count"}\` or \`reduce:{op:"sum"|"min"|"max",field:"amount"}\`
 runs after limit; numeric reductions ignore non-numbers and empty reductions yield zero.
 Reduced scalars support the existing format, locale and timeZone options.
-Collections and derived repeat items require \`prototype_derive_v1\`.
+Use a derived condition such as \`visibleWhen:{derived:"cartCount",gt:0}\`. These conditions compare
+raw values and follow their inputs. They accept equals, notEquals, gt, lt, empty, contains, startsWith,
+lengthGt and lengthLt.
+Collections, derived repeat items and derived conditions require \`prototype_derive_v1\`.
 Scalar and formatted collection entries and repeat derive maps require \`prototype_format_v1\`; use literal strings with older renderers.
 \`dateTime\`, \`duration\`, \`plural\`, and \`fileSize\` are unsupported follow-ups.
 `;

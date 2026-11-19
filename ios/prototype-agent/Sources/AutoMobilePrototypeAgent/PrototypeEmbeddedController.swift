@@ -54,6 +54,9 @@
             guard let loaded else { return }
             let driver = network.driver()
             driver.onComplete = { [weak model] id, response in model?.completeRequest(id, response) }
+            driver.onUploadProgress = { [weak model] id, key, value in
+                model?.writeUploadProgress(id, key: key, value: value)
+            }
             model.requestDriver = driver
             model.onEmbeddedEvent = { [weak self] event in
                 self?.onEvent(event)

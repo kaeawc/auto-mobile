@@ -76,12 +76,31 @@ export interface PrototypeInstallInput {
   icon?: PrototypeIconInput;
 }
 
-function permissionUsageStrings(spec: PrototypeJson): Record<string, string> {
-  const requires = prototypeRequiresSchema.parse(
+const FACE_ID_USAGE_KEY = "NSFaceIDUsageDescription";
+const DEFAULT_FACE_ID_USAGE = "Confirm your identity when a prototype asks you to authenticate.";
+
+function moduleRequires(spec: PrototypeJson) {
+  const parsed = prototypeRequiresSchema.parse(
     spec && typeof spec === "object" && !Array.isArray(spec) ? (spec.requires ?? {}) : {},
   );
+  return Array.isArray(parsed) ? {} : parsed;
+}
+
+function permissionUsageStrings(
+  spec: PrototypeJson,
+  templateFaceIdUsage: unknown,
+): Record<string, string> {
+  const requires = moduleRequires(spec);
   const strings: Record<string, string> = {};
-  for (const permission of Array.isArray(requires) ? [] : (requires.permissions ?? [])) {
+  // A Face ID host without this key refuses biometric.authenticate (#14328), so a saved app that
+  // declares the `biometric` module keeps the template's string, or gets the default.
+  if (requires.platform?.includes("biometric")) {
+    strings[FACE_ID_USAGE_KEY] =
+      typeof templateFaceIdUsage === "string" && templateFaceIdUsage.trim() !== ""
+        ? templateFaceIdUsage
+        : DEFAULT_FACE_ID_USAGE;
+  }
+  for (const permission of requires.permissions ?? []) {
     // Notifications and nearbyWifi have no iOS Info.plist usage key.
     const key = DISPOSABLE_APP_IOS_USAGE_KEYS[permission.name];
     if (key) {
@@ -207,6 +226,7 @@ export class IosPrototypeInstaller {
       throw new Error("Template Info.plist must be a dictionary");
     }
     const derived: Record<string, unknown> = { ...value };
+    const templateFaceIdUsage = derived[FACE_ID_USAGE_KEY];
     for (const key of Object.keys(derived)) {
       if (/^NS.*UsageDescription$/.test(key) || key === "UIBackgroundModes") {
         delete derived[key];
@@ -216,7 +236,7 @@ export class IosPrototypeInstaller {
     // unambiguous mapping to Apple's modes. Never inherit modes from the template.
     await this.deps.plist.writeXmlFromJson(plistPath, {
       ...derived,
-      ...permissionUsageStrings(spec),
+      ...permissionUsageStrings(spec, templateFaceIdUsage),
       CFBundleIdentifier: bundleId,
       CFBundleDisplayName: displayName,
       CFBundleName: displayName,

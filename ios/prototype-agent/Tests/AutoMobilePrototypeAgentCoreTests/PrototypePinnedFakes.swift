@@ -73,11 +73,17 @@ final class FakePinnedDeadline: PrototypeDNSDeadlineScheduling, @unchecked Senda
     private var callback: (@Sendable () -> Void)?
     var immediate = false
     private var calls = 0
+    private var delays: [Int] = []
+    private var cancellations = 0
+    var onSchedule: (@Sendable () -> Void)?
+    var scheduledDelays: [Int] { lock.withLock { delays } }
+    var cancelCount: Int { lock.withLock { cancellations } }
     var scheduleCount: Int { lock.withLock { calls } }
     func schedule(afterMilliseconds: Int, _ fire: @escaping @Sendable () -> Void) -> @Sendable () -> Void {
-        lock.withLock { callback = fire; calls += 1 }
+        lock.withLock { callback = fire; calls += 1; delays.append(afterMilliseconds) }
         if immediate { fire() }
-        return { [self] in lock.withLock { callback = nil } }
+        onSchedule?()
+        return { [self] in lock.withLock { callback = nil; cancellations += 1 } }
     }
 
     func fire() { lock.withLock { callback }?() }

@@ -5,12 +5,17 @@ import {
   AndroidStartupMeasurement,
   DEFAULT_STARTUP_MEASUREMENT_TIMING,
 } from "../../../src/features/performance/AndroidStartupMeasurement";
+import { parseResumedActivityForDisplay } from "../../../src/utils/android-cmdline-tools/parseResumedActivity";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const APP = "dev.jasonpearson.automobile.playground";
 const COMPONENT = `${APP}/.MainActivity`;
+const DUMPSYS_ACTIVITIES = "shell dumpsys activity activities";
+const SETTINGS_RESUMED =
+  "    topResumedActivity=ActivityRecord{139507919 u0 com.android.settings/.Settings t13}";
+const TARGET_RESUMED = SETTINGS_RESUMED.replace("com.android.settings/.Settings", COMPONENT);
 
 function fixture(name: string): string {
   return readFileSync(path.join(import.meta.dir, "../../fixtures/android-startup", name), "utf8");
@@ -48,6 +53,12 @@ function commandsMatching(pattern: string): string[] {
 }
 
 describe("AndroidStartupMeasurement", () => {
+  test("reads the package from a captured top-resumed activity record", () => {
+    expect(parseResumedActivityForDisplay(SETTINGS_RESUMED).activity?.packageName).toBe(
+      "com.android.settings",
+    );
+  });
+
   test("cold: force-stops before every launch and summarizes TotalTime", async () => {
     adb.setCommandResponseSequence(
       "am start -W",
@@ -69,6 +80,73 @@ describe("AndroidStartupMeasurement", () => {
     expect(commandsMatching("am force-stop")).toHaveLength(3);
     expect(commandsMatching("am start -W")).toHaveLength(3);
     expect(commandsMatching("--activity-clear-task")).toEqual([]);
+    expect(commandsMatching(DUMPSYS_ACTIVITIES)).toEqual([]);
+  });
+
+  test.each(["hot", "warm"] as const)(
+    "%s: waits for HOME to move the target out of the foreground before launching",
+    async (mode) => {
+      const launchSleepHistories: number[][] = [];
+      measurement = new AndroidStartupMeasurement(
+        {
+          async executeCommand(command, options) {
+            if (command.includes("am start -W")) {
+              launchSleepHistories.push(timer.getSleepHistory());
+            }
+            return adb.executeCommand(command, options);
+          },
+          getDeviceTimestampMs: () => adb.getDeviceTimestampMs(),
+        },
+        timer,
+      );
+      adb.setCommandResponseSequence(
+        DUMPSYS_ACTIVITIES,
+        [TARGET_RESUMED, TARGET_RESUMED, SETTINGS_RESUMED].map((out) => createExecResult(out, "")),
+      );
+      adb.setCommandResponseSequence(
+        "am start -W",
+        [amStart("COLD", 1300), amStart(mode.toUpperCase(), 128)].map((out) =>
+          createExecResult(out, ""),
+        ),
+      );
+
+      const result = await measurement.measure({ appId: APP, mode, iterations: 1 });
+
+      expect(result.ttid.samples).toEqual([128]);
+      expect(launchSleepHistories).toEqual([[], [1500, 250, 250, 500]]);
+      expect(
+        adb
+          .getExecutedCommands()
+          .filter(
+            (command) =>
+              command.includes("KEYCODE_HOME") ||
+              command.includes(DUMPSYS_ACTIVITIES) ||
+              command.includes("am start -W"),
+          )
+          .map((command) => command.split(" ").slice(0, 4).join(" ")),
+      ).toEqual([
+        "shell am start -W",
+        "shell input keyevent KEYCODE_HOME",
+        DUMPSYS_ACTIVITIES,
+        DUMPSYS_ACTIVITIES,
+        DUMPSYS_ACTIVITIES,
+        "shell am start -W",
+      ]);
+    },
+  );
+
+  test("hot: continues with the measured launch when HOME settling times out", async () => {
+    adb.setCommandResponse(DUMPSYS_ACTIVITIES, createExecResult(TARGET_RESUMED, ""));
+    adb.setCommandResponse("am start -W", createExecResult(amStart("HOT", 128), ""));
+
+    const result = await measurement.measure({ appId: APP, mode: "hot", iterations: 1 });
+
+    expect(result.ttid.samples).toEqual([128]);
+    expect(commandsMatching(DUMPSYS_ACTIVITIES)).toHaveLength(20);
+    const polls = adb.getCommandCalls().filter(({ command }) => command === DUMPSYS_ACTIVITIES);
+    expect(polls[0]?.timeoutMs).toBe(5000);
+    expect(polls.at(-1)?.timeoutMs).toBe(250);
+    expect(timer.getSleepHistory()).toEqual([1500, ...Array<number>(20).fill(250), 500, 1500]);
   });
 
   test("warm: primes once, then recreates the activity in the live process", async () => {

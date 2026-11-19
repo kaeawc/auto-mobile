@@ -28,3 +28,19 @@ export function adbFailureOutput(error: unknown): { stdout: string; stderr: stri
   }
   return { stdout: stdout.join("\n"), stderr: stderr.join("\n") };
 }
+
+/** A clean `pidof` miss in a raw execFile rejection or an adb command wrapper. */
+export function isPidofNoMatch(error: unknown): boolean {
+  // wrapCommandError keeps the raw exit status and streams on cause.
+  const failure = error instanceof Error && !("code" in error) ? error.cause : error;
+  if (typeof failure !== "object" || failure === null) {
+    return false;
+  }
+  const { code, stdout, stderr } = failure as {
+    code?: unknown;
+    stdout?: unknown;
+    stderr?: unknown;
+  };
+  const empty = (value: unknown) => value === undefined || String(value).trim().length === 0;
+  return code === 1 && empty(stdout) && empty(stderr);
+}

@@ -300,6 +300,7 @@ nav:
       - "Platforms":
           - "Android phones and tablets": using/android.md
           - "iPhone and iPad": using/ios.md
+          - "CarPlay on the iOS Simulator": using/carplay.md
           - "Android TV": using/android-tv.md
           - "Wear OS": using/wear-os.md
           - "Wear OS tiles and watch faces": using/wear-os-watch-faces.md

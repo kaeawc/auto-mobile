@@ -6,6 +6,8 @@ import type {
 export class FakeCarPlayProjectionProbe implements CarPlayProjectionProbe {
   readonly calls: string[] = [];
   error?: Error;
+  /** States returned, in order, before `state`. */
+  readonly queued: CarPlayProjectionState[] = [];
 
   constructor(public state: CarPlayProjectionState) {}
 
@@ -14,6 +16,6 @@ export class FakeCarPlayProjectionProbe implements CarPlayProjectionProbe {
     if (this.error) {
       throw this.error;
     }
-    return this.state;
+    return this.queued.shift() ?? this.state;
   }
 }

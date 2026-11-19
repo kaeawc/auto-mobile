@@ -224,13 +224,13 @@ public final class CtrlProxy {
     #if canImport(XCTest) && os(iOS)
         /// Sets the application under test with its bundle ID.
         public func setApplication(_ app: XCUIApplication, bundleId: String? = nil) {
-            application = app
             if let bundleId {
                 elementLocator.setApplication(app, bundleId: bundleId)
             } else {
                 elementLocator.setApplication(app)
             }
             gesturePerformer.setApplication(app, bundleId: bundleId)
+            application = app
         }
 
         /// Activates an explicitly requested app and starts the service. Sampler start/stop is
@@ -244,7 +244,7 @@ public final class CtrlProxy {
                 explicitBundleId: bundleId,
                 detectedForeground: detectedForeground
             )
-            let app = XCUIApplication(bundleIdentifier: plan.track)
+            let app = XCUIApplication.withoutUIInterruptions(bundleIdentifier: plan.track)
             if plan.activate != nil {
                 app.activate()
                 print("[CtrlProxy] Activated app: \(plan.track)")

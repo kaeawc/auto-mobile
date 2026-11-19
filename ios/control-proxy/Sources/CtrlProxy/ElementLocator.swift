@@ -9,7 +9,7 @@ import Foundation
         func rawState(bundleId: String) -> UInt {
             do {
                 return try catchingObjCException {
-                    XCUIApplication(bundleIdentifier: bundleId).state.rawValue
+                    XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId).state.rawValue
                 }
             } catch {
                 // An unreadable state is safely unknown (0), preserving lifecycle polling behavior.
@@ -102,7 +102,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         }
 
         /// Springboard app for detecting foreground app - always kept
-        lazy var springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        lazy var springboard = XCUIApplication.withoutUIInterruptions(bundleIdentifier: "com.apple.springboard")
 
         static let spotlightBundleId = "com.apple.Spotlight"
 
@@ -119,6 +119,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             appStateProbe: (any AppStateProbing)? = nil
         ) {
             DeviceRotation.startMonitoring()
+            application?.skipUIInterruptions()
             tracker.setApplication(application, bundleId: nil, observe: false)
             self.perf = perf
             appStateWaiter = AppStateWaiter(clock: appStateClock, probe: appStateProbe ?? XCUIAppStateProbe())
@@ -141,6 +142,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         }
 
         public func setApplication(_ app: XCUIApplication) {
+            app.skipUIInterruptions()
             tracker.setApplication(app, bundleId: nil, observe: false)
             elementCache.removeAll()
             gestureGeometry = nil
@@ -153,6 +155,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
         /// Set the application to observe with its bundle ID
         public func setApplication(_ app: XCUIApplication, bundleId: String) {
+            app.skipUIInterruptions()
             tracker.setApplication(app, bundleId: bundleId, observe: bundleId != "com.apple.springboard")
             elementCache.removeAll()
             gestureGeometry = nil
@@ -163,7 +166,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         public func switchForegroundApp(bundleId: String) {
             clearAppSwitcherHint()
             let isSpringboard = bundleId == "com.apple.springboard"
-            let app: XCUIApplication = isSpringboard ? springboard : XCUIApplication(bundleIdentifier: bundleId)
+            let app: XCUIApplication = isSpringboard ? springboard : XCUIApplication
+                .withoutUIInterruptions(bundleIdentifier: bundleId)
             let previousBundleId = tracker.switchForeground(
                 app: app,
                 bundleId: bundleId,
@@ -279,7 +283,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             let (snapshot, typedTextInputSnapshots, keyboardFocus, screenMetrics) = try tracked("snapshot") {
                 try catchingObjCException {
                     let capture = try DeviceRotation.capture {
-                        let freshApp = XCUIApplication(bundleIdentifier: bundleId)
+                        let freshApp = XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId)
                         let snap = try freshApp.snapshot()
                         // Derive text-input candidates by walking the already-captured
                         // snapshot tree instead of issuing fresh live

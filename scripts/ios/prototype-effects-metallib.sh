@@ -10,7 +10,8 @@
 # Prints the path of the generated PrototypeEffectsMetallib.swift. Env:
 #   PROTOTYPE_AGENT_MIN_IOS   deployment target of the shader (default 17.0)
 #   PROTOTYPE_EFFECTS_SOURCE  override the .metal file (tests)
-#   PROTOTYPE_EFFECTS_NO_DOWNLOAD=1  fail instead of downloading the Metal Toolchain
+#   PROTOTYPE_EFFECTS_NO_DOWNLOAD=1  fail instead of downloading the Metal Toolchain (implied on a
+#                                    self-hosted GitHub Actions runner, RUNNER_ENVIRONMENT=self-hosted)
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -19,10 +20,14 @@ out_dir="${1:?usage: prototype-effects-metallib.sh <output-dir>}"
 min_ios="${PROTOTYPE_AGENT_MIN_IOS:-17.0}"
 mkdir -p "${out_dir}"
 
-# Since Xcode 26 the Metal Toolchain is a separate component; CI installs it here on first use.
+# Since Xcode 26 the Metal Toolchain is a separate component. Hosted CI installs it here on first
+# use; a self-hosted Mac must already have it for the selected Xcode (owner setup step), so a missing
+# toolchain fails fast there instead of downloading ~839 MB inside the job.
 if ! xcrun --sdk iphonesimulator metal --version > /dev/null 2>&1; then
-  if [[ "${PROTOTYPE_EFFECTS_NO_DOWNLOAD:-}" == 1 ]]; then
-    echo "The Metal Toolchain is not installed (xcodebuild -downloadComponent metalToolchain)" >&2
+  if [[ "${PROTOTYPE_EFFECTS_NO_DOWNLOAD:-}" == 1 || "${RUNNER_ENVIRONMENT:-}" == self-hosted ]]; then
+    developer_dir="${DEVELOPER_DIR:-$(xcode-select -p 2> /dev/null || echo unknown)}"
+    echo "The Metal Toolchain is not installed for the Xcode at ${developer_dir}." >&2
+    echo "Install it once: DEVELOPER_DIR=${developer_dir} xcodebuild -downloadComponent metalToolchain" >&2
     exit 1
   fi
   xcodebuild -downloadComponent metalToolchain >&2

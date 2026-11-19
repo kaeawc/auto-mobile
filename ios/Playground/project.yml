@@ -9,6 +9,9 @@ configFiles:
   Debug: Configurations/Debug.xcconfig
   Release: Configurations/Release.xcconfig
 
+fileGroups:
+  - Fixtures/Products.storekit
+
 settings:
   base:
     SWIFT_VERSION: "6"
@@ -103,6 +106,7 @@ schemes:
         PlaygroundTests: [test]
     run:
       config: Debug
+      storeKitConfiguration: Fixtures/Products.storekit
     test:
       config: Debug
       targets:

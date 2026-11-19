@@ -7,11 +7,13 @@ import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -187,13 +189,17 @@ class PrototypeChannelController(
   suspend fun close() {
     if (closing) return
     closing = true
-    lock.withLock {
-      flush?.cancel()
-      window.clear()
-      slots.values.forEach(::abandon)
-      slots.clear()
+    // closing is already set, so a later close() returns at once: this cleanup must finish even if
+    // the caller is cancelled while a sink call holds the lock.
+    withContext(NonCancellable) {
+      lock.withLock {
+        flush?.cancel()
+        window.clear()
+        slots.values.forEach(::abandon)
+        slots.clear()
+      }
+      inbox.close()
     }
-    inbox.close()
   }
 
   private fun sendError(slot: Slot, data: String): PrototypeChannelError? {

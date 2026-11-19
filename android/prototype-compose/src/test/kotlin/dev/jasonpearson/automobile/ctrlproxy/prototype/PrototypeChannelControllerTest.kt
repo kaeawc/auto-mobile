@@ -731,6 +731,26 @@ class PrototypeChannelControllerTest {
     assertEquals(PrototypeChannelController.GOING_AWAY, connection.closedWith)
   }
 
+  @Test
+  fun `close still cleans up when its caller is cancelled waiting for the lock`() = runTest {
+    val h = Harness(this)
+    h.controller.update(mapOf("chat" to websocket))
+    h.controller.show()
+    val gate = CompletableDeferred<Unit>()
+    h.sink.gate = gate
+    h.sink.gateWhen = { it.kind == "state" && it.status == "open" }
+    val connection = h.host.last
+    connection.listener.onOpen(null)
+    runCurrent()
+    val closing = launch { h.controller.close() }
+    runCurrent()
+    closing.cancel()
+    gate.complete(Unit)
+    runCurrent()
+    assertEquals(PrototypeChannelController.GOING_AWAY, connection.closedWith)
+    assertNull(h.controller.state("chat"))
+  }
+
   private fun vectors(name: String): JsonObject {
     val file =
       generateSequence(File(System.getProperty("user.dir")).absoluteFile) { it.parentFile }

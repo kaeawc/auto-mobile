@@ -1,7 +1,7 @@
 import { keystoreResetSchema } from "../features/storage/keystoreReset";
 import { keystoreFaultSchema } from "../features/storage/keystoreFault";
 import { z } from "zod/v4";
-import { APP_TRIM_MEMORY_LEVELS } from "../models/AppLifecycleResult";
+import { APP_LIFECYCLE_TRIM_LEVELS } from "../models/AppLifecycleResult";
 
 const appPlatformOutputSchema = z.enum(["android", "ios"]);
 /** listApps also answers for an Apple Watch simulator (#14908). */
@@ -210,8 +210,15 @@ export const appLifecycleResultSchema = z.object({
   action: z.enum(["background", "killBackgrounded", "trimMemory"]),
   platform: z.enum(["android", "ios"]),
   appId: z.string(),
-  mechanism: z.enum(["home", "am-kill", "am-send-trim-memory", "ios-sigkill", "unsupported"]),
-  trimLevel: z.enum(APP_TRIM_MEMORY_LEVELS).optional(),
+  mechanism: z.enum([
+    "home",
+    "am-kill",
+    "am-send-trim-memory",
+    "ios-sigkill",
+    "simulator-memory-warning-file",
+    "unsupported",
+  ]),
+  trimLevel: z.enum(APP_LIFECYCLE_TRIM_LEVELS).optional(),
   userId: z.number().int().nonnegative().optional(),
   pid: z.number().int().positive().optional(),
   pidBefore: z.number().int().positive().optional(),
@@ -221,6 +228,7 @@ export const appLifecycleResultSchema = z.object({
     .enum([
       "app_not_running",
       "app_in_foreground",
+      "app_not_foreground",
       "background_not_verified",
       "kill_failed",
       "ambiguous_user",

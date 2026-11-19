@@ -299,6 +299,7 @@ enum PrototypeRepeat {
         case .string("button")?, .string("fab")?: string("label", &fields)
         // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
         case .string("image")?: string("asset", &fields)
+        case .string("webView")?: string("url", &fields)
         case .string("listItem")?:
             string("headline", &fields)
             string("supporting", &fields)
@@ -426,7 +427,15 @@ extension PrototypeRepeat {
         throws
     {
         guard case let .object(fields) = node else { return }
-        for name in ["onTap", "onLongPress", "onDoubleTap", "onEndReached", "onAppear"] {
+        for name in [
+            "onTap",
+            "onLongPress",
+            "onDoubleTap",
+            "onEndReached",
+            "onAppear",
+            "onNavigate",
+            "onBlockedNavigation",
+        ] {
             try validateEmitActions(fields[name], path: "\(path).\(name)", scope: scope)
         }
         if let linkify = fields["linkify"]?.objectFields {

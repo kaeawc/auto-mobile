@@ -48,6 +48,8 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeScheduledTask
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureValueStore
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWebFetcher
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWebViewModule
 import dev.jasonpearson.automobile.protocol.PrototypeLibraryProvenance
 import dev.jasonpearson.automobile.protocol.PrototypeWebView
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
@@ -136,6 +138,7 @@ class ViewerActivity : ComponentActivity() {
         stores.secure,
         host,
         services.networkClient,
+        services.webFetcher,
       )
   }
 
@@ -228,10 +231,7 @@ class ViewerActivity : ComponentActivity() {
     runtime?.close()
     runtime = null
     content = null
-    val result =
-      withContext(services.io) {
-        if (reset) services.repository.resetStorage(id) else LibraryResult.Success(Unit)
-      }
+    val result = if (reset) services.resetStorage(id) else LibraryResult.Success(Unit)
     if (result is LibraryResult.Failure) {
       restarting = false
       restartFailed = true
@@ -306,6 +306,7 @@ private class ViewerContent(
   val secure: PrototypeSecureValueStore?,
   val host: EmbeddedPrototypeHost,
   client: PrototypeHttpClient,
+  private val webFetcher: PrototypeWebFetcher,
 ) {
   val importError = viewerImportError(prototype.saved.specJson, networkAllowed = false)
   val sensitiveModules = PrototypeLibraryProvenance.sensitiveModules(prototype.saved.specJson)
@@ -351,6 +352,7 @@ private class ViewerContent(
             PrototypeBiometricModule(AndroidBiometricSource(activity)),
             PrototypePermissionsModule(AndroidPermissionsSource(activity)),
             secure?.let(::PrototypeSecureStorageModule),
+            PrototypeWebViewModule(webFetcher),
           ),
         )
       }

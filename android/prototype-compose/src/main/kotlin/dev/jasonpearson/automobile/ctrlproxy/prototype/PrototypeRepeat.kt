@@ -771,7 +771,6 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
       )
-    // Contract only (#14312): no renderer draws a web view yet.
     is PrototypeWebViewNode ->
       copy(
         semantics = semantics,
@@ -780,6 +779,9 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         shared = shared,
         visibleWhen = visibleWhen,
+        url = instance.interpolate(url),
+        onNavigate = onNavigate?.map { it.bound(instance) },
+        onBlockedNavigation = onBlockedNavigation?.map { it.bound(instance) },
       )
     is PrototypeCameraPreviewNode ->
       copy(

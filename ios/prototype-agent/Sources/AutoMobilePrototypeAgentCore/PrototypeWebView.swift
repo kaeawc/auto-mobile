@@ -3,8 +3,7 @@ import Foundation
 /// Rules for the `webView` node (#14312) that the contract cannot express, the twin of the host's
 /// `prototypeWebView.ts`: `webview` in `requires.platform`; allowed origins that name a DNS host, never
 /// an IP literal or `localhost`; a literal URL authority that is one of the allowed origins; and
-/// navigation, title and back keys that name declared state of the right type. Contract only: no
-/// runtime draws a web view.
+/// navigation, title and back keys that name declared state of the right type.
 public enum PrototypeWebView {
     public struct ImportError: Error, Equatable, Sendable {
         public let path: String

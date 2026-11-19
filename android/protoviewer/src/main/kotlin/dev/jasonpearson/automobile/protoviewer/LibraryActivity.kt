@@ -155,9 +155,7 @@ class LibraryActivity : ComponentActivity() {
   private fun delete(entry: LibraryEntry) {
     lifecycleScope.launch {
       ViewerLaunch.close(this@LibraryActivity, entry.libraryId)
-      actionFailed =
-        withContext(services.io) { services.repository.delete(entry.libraryId) } is
-          LibraryResult.Failure
+      actionFailed = services.delete(entry.libraryId) is LibraryResult.Failure
       entries = withContext(services.io) { services.repository.list() }
     }
   }
@@ -238,7 +236,7 @@ class LibraryActivity : ComponentActivity() {
       actionFailed = false
       if (relaunch && services.restart(entry.libraryId, reset)) return@launch
       if (reset) {
-        val result = withContext(services.io) { services.repository.resetStorage(entry.libraryId) }
+        val result = services.resetStorage(entry.libraryId)
         if (result is LibraryResult.Failure) {
           actionFailed = true
           return@launch

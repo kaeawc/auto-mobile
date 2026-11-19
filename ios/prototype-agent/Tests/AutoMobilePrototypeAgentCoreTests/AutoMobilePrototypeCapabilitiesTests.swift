@@ -48,6 +48,18 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testWebViewIsAdvertisedOnlyThroughItsRegisteredModule() async {
+        struct MinimumOS: OSVersionProvider { let majorVersion = 17 }
+        let capability = PrototypeWebViewModule.capabilityName
+        XCTAssertFalse(AutoMobilePrototypeCapabilities.supported.contains(capability))
+        XCTAssertFalse(PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS()).contains(capability))
+        let registry = PrototypePlatformRegistry(modules: [PrototypeWebViewModule()])
+        XCTAssertTrue(PrototypeAgentProtocol.advertisedCapabilities(
+            os: MinimumOS(), registryCapabilities: registry.capabilities
+        ).contains(capability))
+    }
+
     func testLayoutDirectionIsAdvertisedAtTheMinimumOS() {
         struct OS: OSVersionProvider { let majorVersion = 17 }
         XCTAssertTrue(PrototypeAgentProtocol.advertisedCapabilities(os: OS()).contains("prototype_layout_direction_v1"))
@@ -95,7 +107,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             // Contract only; map backends are advertised once their renderers can serve them (#14302).
             "prototype_platform_map_google_v1",
             "prototype_platform_map_maplibre_v1",
-            // Contract only; the web view runtimes and the ProtoViewer import rule are owed (#14312).
+            // Registered by ProtoViewer; absent from the agent advertisement.
             "prototype_platform_webview_v1",
             // Registered by the agent and Viewer registries, not the static list.
             "prototype_platform_location_v1",

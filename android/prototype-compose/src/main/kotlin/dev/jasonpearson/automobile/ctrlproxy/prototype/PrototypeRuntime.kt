@@ -60,7 +60,9 @@ data class PrototypeRuntimeSnapshot(
 sealed interface PrototypeInteraction {
   /** Device observation and restored pager positions do not extend the host's idle expiry. */
   fun countsAsUserActivity(pages: Map<String, Int>): Boolean =
-    this !is DeviceState && (this !is PagerMotion || scrolling || pages[pager] != page)
+    this !is DeviceState &&
+      this !is WebNavigation &&
+      (this !is PagerMotion || scrolling || pages[pager] != page)
 
   data class Guarded(val identity: String, val interaction: PrototypeInteraction) :
     PrototypeInteraction
@@ -72,6 +74,11 @@ sealed interface PrototypeInteraction {
   data object Back : PrototypeInteraction
 
   data class Tap(val actions: List<PrototypeAction>) : PrototypeInteraction
+
+  data class WebNavigation(
+    val writes: Map<String, PrototypeScalar>,
+    val actions: List<PrototypeAction>,
+  ) : PrototypeInteraction
 
   data class DeviceState(val snapshot: JsonObject) : PrototypeInteraction
 
@@ -424,6 +431,7 @@ class PrototypeRuntime(
         is PrototypePermissionsModule -> it.session(requestScope)
         is PrototypeLocationModule -> it.session(requestScope)
         is PrototypeSensorsModule -> it.session(requestScope)
+        is PrototypeWebViewModule -> it.session()
         else -> it
       }
     }
@@ -646,6 +654,7 @@ class PrototypeRuntime(
     platformRegistry.modules.filterIsInstance<PrototypePermissionsModule>().forEach { it.detach() }
     locationModules().forEach { it.detach() }
     sensorsModules().forEach { it.detach() }
+    platformRegistry.modules.filterIsInstance<PrototypeWebViewModule>().forEach { it.close() }
     platformDispatcher.close()
     platformState.close()
     mutableSnapshot.value = current.copy(active = false)
@@ -723,13 +732,8 @@ class PrototypeRuntime(
       // eligible, preserve the existing Back dismissal rather than changing a hidden screen.
       PrototypeInteraction.Back -> if (!popTopmostStack()) dismiss()
       is PrototypeInteraction.Tap -> control(emptyMap(), interaction.actions)
-      is PrototypeInteraction.TimerFire -> {
-        try {
-          control(emptyMap(), interaction.actions)
-        } catch (error: IllegalArgumentException) {
-          warn("Refused timer fire: ${error.message}")
-        }
-      }
+      is PrototypeInteraction.WebNavigation -> control(interaction.writes, interaction.actions)
+      is PrototypeInteraction.TimerFire -> fireTimer(interaction.actions)
       is PrototypeInteraction.DeadTap -> deadTap(interaction)
       is PrototypeInteraction.PagerMotion ->
         if (!interaction.scrolling) setPage(interaction.pager, interaction.page)
@@ -764,6 +768,14 @@ class PrototypeRuntime(
           interaction.actions,
         )
       }
+    }
+  }
+
+  private suspend fun fireTimer(actions: List<PrototypeAction>) {
+    try {
+      control(emptyMap(), actions)
+    } catch (error: IllegalArgumentException) {
+      warn("Refused timer fire: ${error.message}")
     }
   }
 

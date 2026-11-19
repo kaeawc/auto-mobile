@@ -8,9 +8,9 @@
 ## Context
 
 #16528 has the prototype web page inline one minified bundle, the same build as the library's
-`mount`, and draw the shown view in the browser. `buildPrototypeWebPage` is synchronous and runs in
-the server, and `dist/` does not ship `src/`, so the server cannot bundle the renderer when a page
-is requested. The library build was already about 197 KB minified and 64 KB gzip, over the
+`mount`, and draw the shown view in the browser. The page builder is synchronous and runs in the
+server. Since `dist/` does not ship `src/`, the server cannot bundle the renderer when a page is
+requested. The library build was already about 197 KB minified and 64 KB gzip, over the
 issue's earlier static-page targets of 110 KB / 34 KB and 250 KB / 75 KB.
 
 ## Options

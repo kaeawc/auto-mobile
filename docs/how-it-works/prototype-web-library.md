@@ -18,15 +18,16 @@ no interactive runtime. The planned release is in the devlog entries under Backg
 - `bun run build` in that directory bundles each entry on its own with `bun build --target=browser`
   into `dist/index.js` and `dist/element.js` (gitignored). `dist/element.js` is the package's only
   side effect. The library source is `src/features/prototype/web/embed/`.
-- The same build bundles the page entry `packages/prototype-web/src/page.ts` (`mount`, plus a boot
-  that mounts the options in the page's `script[type="application/json"][data-prototype-page]` on
-  its `[data-prototype-host]`) into the committed
-  `src/features/prototype/web/prototypeWebPageBundle.generated.ts`. The server reads that file
-  through `prototypeWebPageBundle()` and never bundles at request time. The file carries a version
-  mark where the bundle names the root `package.json` version, and `prototypeWebPageBundle()`
-  replaces it with the release's version, so a version bump does not change the file.
-  `prototypeWebPageBundle.test.ts` rebuilds it and fails when the committed file differs;
-  regenerate with `bun run build` in `packages/prototype-web/` (or check with `bun build.ts --check`).
+- The same build bundles the page entry `packages/prototype-web/src/page.ts` into the committed
+  `src/features/prototype/web/prototypeWebPageBundle.generated.ts`. The entry holds `mount` and a
+  boot that mounts the options in the page's `script[type="application/json"][data-prototype-page]`
+  on its `[data-prototype-host]`. The server reads that file through `prototypeWebPageBundle()` and
+  never bundles at request time.
+- The file carries a version mark where the bundle names the root `package.json` version. The
+  server replaces the mark with the release's version, so a version bump does not change the file.
+- The test `prototypeWebPageBundle.test.ts` rebuilds the file and fails when the committed one
+  differs. Regenerate it with `bun run build` in `packages/prototype-web/`, or compare with
+  `bun build.ts --check`.
 - Every export has one budget: 500,000 bytes of HTML, JS and CSS counted together, minified, with
   no gzip limit (`MAX_PROTOTYPE_WEB_EXPORT_BYTES` in `build.ts`). The build refuses to write an
   export over it, and the bundle tests fail on one.

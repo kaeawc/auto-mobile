@@ -69,10 +69,21 @@ class PrototypeDataBindingTest {
     for (file in files) {
       val fixture = json.parseToJsonElement(file.readText()).jsonObject
       val spec = validated(fixture.getValue("spec").toString())
-      val root = json.decodeFromJsonElement<PrototypeNode>(fixture.getValue("root"))
+      // The renderer's resolution is the shared fixture root plus the shield on inserted values,
+      // which keeps a data value such as `{status}` literal in the render (#18628).
+      val shielded = PrototypeDataResolver.resolve(spec, shield = true).root
       assertEquals(
         file.name,
-        // The fixture root is already resolved; inserted data text must not be scanned again.
+        json.decodeFromJsonElement<PrototypeNode>(fixture.getValue("root")),
+        json.decodeFromString<PrototypeNode>(
+          PrototypeTextShield.unshield(
+            json.encodeToString(PrototypeNode.serializer(), shielded),
+          ),
+        ),
+      )
+      val root = shielded
+      assertEquals(
+        file.name,
         prototypeRenderModel(
           spec,
           PrototypeNodeMapping(
@@ -81,6 +92,7 @@ class PrototypeDataBindingTest {
               fillWindowRoot =
                 spec.window.placement is PrototypeFullscreenPlacement ||
                   spec.window.placement is PrototypeSheetPlacement,
+              shieldedInputs = true,
             )
             .map(root, "root"),
         ),

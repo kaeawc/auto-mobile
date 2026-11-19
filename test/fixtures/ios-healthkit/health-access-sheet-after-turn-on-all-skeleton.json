@@ -1,0 +1,294 @@
+[
+  {
+    "bounds": [
+      38,
+      150,
+      364,
+      232
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "healthauthorization_icon_large"
+  },
+  {
+    "bounds": [
+      22,
+      420,
+      380,
+      472
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "UIA.Health.AuthSheet.AllCategoryButton",
+    "label": "Turn Off All"
+  },
+  {
+    "bounds": [
+      22,
+      527,
+      380,
+      579
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "UIA.Health.Write.HeartRate.SwitchCell",
+    "label": "Heart Rate"
+  },
+  {
+    "bounds": [
+      36,
+      541,
+      63,
+      565
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "heart.fill",
+    "label": "love",
+    "index": 0
+  },
+  {
+    "bounds": [
+      297,
+      539,
+      360,
+      567
+    ],
+    "affordances": [
+      "tap",
+      "toggle"
+    ],
+    "elementId": "UIA.Health.Steps.SwitchCell.Switch",
+    "label": "Heart Rate",
+    "checked": true,
+    "index": 0
+  },
+  {
+    "bounds": [
+      22,
+      579,
+      380,
+      631
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "UIA.Health.Write.Sleep.SwitchCell",
+    "label": "Sleep"
+  },
+  {
+    "bounds": [
+      33,
+      594,
+      66,
+      615
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "bed.double.fill",
+    "label": "bedtime",
+    "index": 0
+  },
+  {
+    "bounds": [
+      297,
+      591,
+      360,
+      619
+    ],
+    "affordances": [
+      "tap",
+      "toggle"
+    ],
+    "elementId": "UIA.Health.Sleep.SwitchCell.Switch",
+    "label": "Sleep",
+    "checked": true,
+    "index": 0
+  },
+  {
+    "bounds": [
+      22,
+      631,
+      380,
+      683
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "UIA.Health.Write.Steps.SwitchCell",
+    "label": "Steps"
+  },
+  {
+    "bounds": [
+      39,
+      642,
+      60,
+      669
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "flame.fill",
+    "label": "Flame",
+    "index": 0
+  },
+  {
+    "bounds": [
+      297,
+      643,
+      360,
+      671
+    ],
+    "affordances": [
+      "tap",
+      "toggle"
+    ],
+    "elementId": "UIA.Health.Sleep.SwitchCell.Switch",
+    "label": "Steps",
+    "checked": true,
+    "index": 1
+  },
+  {
+    "bounds": [
+      22,
+      683,
+      380,
+      735
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "UIA.Health.Write.Workouts.SwitchCell",
+    "label": "Workouts"
+  },
+  {
+    "bounds": [
+      39,
+      694,
+      60,
+      721
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "flame.fill",
+    "label": "Flame",
+    "index": 1
+  },
+  {
+    "bounds": [
+      297,
+      695,
+      360,
+      723
+    ],
+    "affordances": [
+      "tap",
+      "toggle"
+    ],
+    "elementId": "UIA.Health.Workouts.SwitchCell.Switch",
+    "label": "Workouts",
+    "checked": true,
+    "index": 0
+  },
+  {
+    "bounds": [
+      22,
+      810,
+      380,
+      862
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "UIA.Health.Read.HeartRate.SwitchCell",
+    "label": "Heart Rate"
+  },
+  {
+    "bounds": [
+      36,
+      824,
+      63,
+      848
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "heart.fill",
+    "label": "love",
+    "index": 1
+  },
+  {
+    "bounds": [
+      297,
+      822,
+      360,
+      850
+    ],
+    "affordances": [
+      "tap",
+      "toggle"
+    ],
+    "elementId": "UIA.Health.Steps.SwitchCell.Switch",
+    "label": "Heart Rate",
+    "checked": true,
+    "index": 1
+  },
+  {
+    "bounds": [
+      22,
+      862,
+      380,
+      914
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "UIA.Health.Read.Sleep.SwitchCell",
+    "label": "Sleep"
+  },
+  {
+    "bounds": [
+      38,
+      722,
+      364,
+      774
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "UIA.Health.Allow.Button",
+    "label": "Allow"
+  },
+  {
+    "bounds": [
+      38,
+      784,
+      364,
+      836
+    ],
+    "affordances": [
+      "tap"
+    ],
+    "elementId": "UIA.Health.DoNotAllow.Button",
+    "label": "Don’t Allow"
+  },
+  {
+    "bounds": [
+      0,
+      62,
+      402,
+      874
+    ],
+    "affordances": [
+      "scroll"
+    ],
+    "elementId": "s2-fa04dce0635335fa",
+    "label": "hkprobe"
+  }
+]

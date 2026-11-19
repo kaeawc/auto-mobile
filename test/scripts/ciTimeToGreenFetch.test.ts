@@ -395,6 +395,20 @@ describe("skipped runs and partial bundles (#18691)", () => {
     expect([...omitted].sort()).toEqual(["orphan", "sibling", "x", "y", "z"]);
   });
 
+  test("an omitted head with no PR number and no branch drops every head", () => {
+    const raws = [
+      { ...run(1, "pr.yml", "success", "unlinked"), pull_requests: [] },
+      { ...run(2, "pr.yml", "success", "kept"), head_branch: "other" },
+    ];
+    const facts = [
+      { ...normalizeRun(raws[0], []), prNumbers: [] },
+      { ...normalizeRun(raws[1], []), prNumbers: [6] },
+    ];
+    const omitted = new Set(["unlinked"]);
+    omitRelatedHeads(facts, raws, omitted);
+    expect([...omitted].sort()).toEqual(["kept", "unlinked"]);
+  });
+
   test("without partialOnStop a stop still throws, and the budget refuses every later call", async () => {
     const inner = new FakeApi(routes);
     const api = new BudgetedGhApi(inner, 2);

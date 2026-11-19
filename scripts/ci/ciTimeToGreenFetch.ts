@@ -665,7 +665,7 @@ async function fetchRunJobs(
  * Supersession and per-PR figures compare a PR's heads, so one incomplete head drops every head it
  * may share a PR with: heads linked by a PR number, and heads on the same branch (an unresolved
  * head has no PR number, so its branch stands in). Repeats until no head is added, since a head
- * can link several PRs.
+ * can link several PRs. An omitted head with no link at all (null `head_branch`) drops every head.
  */
 export function omitRelatedHeads(
   runs: readonly RunFact[],
@@ -677,6 +677,11 @@ export function omitRelatedHeads(
     ...run.prNumbers.map((number) => `pr:${number}`),
     ...(branchById.get(run.id) ? [`branch:${branchById.get(run.id)}`] : []),
   ];
+  // An omitted head with neither a PR number nor a branch could belong to any PR, so every head goes.
+  if (runs.some((run) => omitted.has(run.headSha) && links(run).length === 0)) {
+    runs.forEach((run) => omitted.add(run.headSha));
+    return;
+  }
   for (let grew = omitted.size > 0; grew;) {
     const dropped = new Set(runs.filter((run) => omitted.has(run.headSha)).flatMap(links));
     const added = runs.filter(

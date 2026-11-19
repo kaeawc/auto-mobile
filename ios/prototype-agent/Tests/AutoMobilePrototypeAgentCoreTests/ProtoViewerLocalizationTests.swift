@@ -1,3 +1,4 @@
+@testable import AutoMobilePrototypeAgentCore
 import Foundation
 import XCTest
 
@@ -63,7 +64,9 @@ final class ProtoViewerLocalizationTests: XCTestCase {
         XCTAssertEqual(metadata["CFBundleDevelopmentRegion"] as? String, "en")
         XCTAssertEqual(metadata["CFBundleLocalizations"] as? [String], ["en"])
         let strings = try catalog("InfoPlist")
-        for key in ["CFBundleDisplayName", "NSLocalNetworkUsageDescription"] {
+        let permissionKeys = try ["camera", "microphone", "photos", "photosAdd", "contacts", "calendar", "location"]
+            .map { try XCTUnwrap(PrototypePlatformPermissions.mapping(for: $0)?.ios.usageKey) }
+        for key in ["CFBundleDisplayName", "NSLocalNetworkUsageDescription"] + permissionKeys {
             let entry = try XCTUnwrap(strings[key] as? [String: Any])
             let locales = try XCTUnwrap(entry["localizations"] as? [String: Any])
             let english = try XCTUnwrap(locales["en"] as? [String: Any])

@@ -15,16 +15,30 @@ jobs:
   tvos-smoke-advisory:
     name: "tvOS Router Smoke (Advisory)"
     if: github.event_name != 'pull_request' || github.event.label.name == 'run-tvos-sim'
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
         with:
           lfs: false
-      - name: "Select Xcode 26.6"
+      - name: "Select Xcode 27.2"
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "26.6"
+          xcode-version: "27.2"
+      # The smoke picks the newest installed tvOS runtime; fetch the one matching the
+      # selected SDK when the image does not carry it.
+      - name: "Ensure tvOS runtime"
+        run: |
+          sdk_version="$(xcrun --sdk appletvsimulator --show-sdk-version)"
+          has_runtime() {
+            xcrun simctl list runtimes available tvOS --json |
+              jq -e --arg version "${sdk_version}" \
+                'any(.runtimes[]; .isAvailable != false and .version == $version)'
+          }
+          if ! has_runtime; then
+            xcodebuild -downloadPlatform tvOS
+          fi
+          has_runtime
       - name: "Run advisory tvOS smoke"
         env:
           TVOS_SMOKE_LOG_DIR: "${{ github.workspace }}/scratch/tvos-smoke"

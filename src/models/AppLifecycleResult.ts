@@ -12,15 +12,31 @@ export const APP_TRIM_MEMORY_LEVELS = [
   "COMPLETE",
 ] as const;
 export type AppTrimMemoryLevel = (typeof APP_TRIM_MEMORY_LEVELS)[number];
+/** iOS simulators: a simulated `didReceiveMemoryWarning` for the foreground app (#18754). */
+export const IOS_MEMORY_WARNING_LEVEL = "memoryWarning";
+/** Every level appLifecycle trimMemory accepts: the Android trim levels and the iOS one. */
+export const APP_LIFECYCLE_TRIM_LEVELS = [
+  ...APP_TRIM_MEMORY_LEVELS,
+  IOS_MEMORY_WARNING_LEVEL,
+] as const;
+export type AppLifecycleTrimLevel = (typeof APP_LIFECYCLE_TRIM_LEVELS)[number];
+
+export function isAndroidTrimMemoryLevel(
+  level: AppLifecycleTrimLevel,
+): level is AppTrimMemoryLevel {
+  return level !== IOS_MEMORY_WARNING_LEVEL;
+}
 export type AppLifecycleMechanism =
   | "home"
   | "am-kill"
   | "am-send-trim-memory"
   | "ios-sigkill"
+  | "simulator-memory-warning-file"
   | "unsupported";
 export type AppLifecycleErrorCode =
   | "app_not_running"
   | "app_in_foreground"
+  | "app_not_foreground"
   | "background_not_verified"
   | "kill_failed"
   | "ambiguous_user"
@@ -43,8 +59,8 @@ export interface AppLifecycleResult {
   /** Latest verified main PID, or null when no package process was observed. */
   pidAfter?: number | null;
   processReclaimed?: boolean;
-  /** The `onTrimMemory` level that was sent, for the trimMemory action. */
-  trimLevel?: AppTrimMemoryLevel;
+  /** The trim level that was sent, for the trimMemory action. */
+  trimLevel?: AppLifecycleTrimLevel;
   message?: string;
   errorCode?: AppLifecycleErrorCode;
   error?: string;

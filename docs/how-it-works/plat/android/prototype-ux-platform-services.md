@@ -159,7 +159,8 @@ platform-call deadline. This module does not publish
 | Unknown future value        | `unavailable`   |
 
 Android Activity hosts register `permissions` for `notifications`: ProtoViewer, disposable apps and
-CtrlProxy's SavedPrototypeActivity advertise the capability. A plain Activity without an
+CtrlProxy's SavedPrototypeActivity advertise the capability. ProtoViewer and SavedPrototypeActivity
+also register `camera` (`CAMERA`) and `microphone` (`RECORD_AUDIO`). A plain Activity without an
 ActivityResultRegistry and the CtrlProxy overlay omit it. Other canonical names return `unavailable`.
 The result is `{results: {<name>: <state>}}`; each result also updates `/platform/permissions/<name>`.
 Bound request lists must name declared permissions, just like literal lists. Only one request can be
@@ -180,6 +181,24 @@ launch delivers a denial, and is cleared on reset or teardown and whenever a gra
 | API 33+, not granted and no denial recorded in this session             | `notDetermined` |
 | API 33+, denial recorded and rationale available                        | `denied`        |
 | API 33+, denial recorded and no rationale (including user-fixed denial) | `blocked`       |
+
+| Android camera or microphone authorization                        | State           |
+| ----------------------------------------------------------------- | --------------- |
+| Activity is not resumed, or source is closed                      | `unavailable`   |
+| Host manifest lacks the permission, or no camera id / audio input | `unavailable`   |
+| Granted                                                           | `granted`       |
+| Not granted and no denial recorded in this session                | `notDetermined` |
+| Denial recorded and rationale available                           | `denied`        |
+| Denial recorded and no rationale                                  | `blocked`       |
+
+Camera and microphone are runtime permissions on every supported API level, so they prompt on any
+version and ignore the notification setting. The notification, camera and microphone sources of one
+Activity share its prompt: while one dialog is open, a request for another returns
+`too_many_in_flight`. A host that declares `CAMERA` must hold the grant before it launches
+`ACTION_IMAGE_CAPTURE`, which otherwise throws `SecurityException`. A host registers the `camera` and
+`audioRecorder` modules, and so advertises `prototype_platform_camera_v1` and
+`prototype_platform_audioRecorder_v1`, only when its manifest declares the permission and the device
+reports a camera id (`CameraManager.getCameraIdList()`) or an audio input device.
 
 `POST_NOTIFICATIONS` is a runtime permission starting at API 33. Earlier versions never prompt;
 Settings alone controls notification availability. Already-granted and blocked requests return their

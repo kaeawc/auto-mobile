@@ -70,9 +70,12 @@ Android 17 (API 37) requires for private LAN connections. The prototype location
 `ACCESS_COARSE_LOCATION` and `ACCESS_FINE_LOCATION`; grants come from the device or host, and the app
 never requests them itself. The normal `USE_BIOMETRIC` permission supports framework biometric
 prompts. `POST_NOTIFICATIONS` supports explicit `permissions.request` calls for notification
-authorization on API 33+; see [Runtime permissions](plat/android/prototype-ux-platform-services.md).
+authorization on API 33+. `CAMERA` and `RECORD_AUDIO` are requested only when the open prototype
+calls `permissions.request` for `camera` or `microphone`, and read `unavailable` while the viewer is
+not resumed; the camera and microphone features are declared `required="false"`. See
+[Runtime permissions](plat/android/prototype-ux-platform-services.md).
 
-It declares no accessibility, input method, overlay, device-admin or camera permissions. The app
+It declares no accessibility, input method, overlay or device-admin permissions. The app
 requests `ACCESS_LOCAL_NETWORK` only when the user turns on "Allow network for imported prototypes"
 (section 6), never at install or first launch. If the user denies it, the switch turns off and the
 library explains that network access is disabled until permission is granted. The validator rejects

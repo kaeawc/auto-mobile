@@ -3,6 +3,12 @@
   <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+  <!-- Requested only when an open prototype calls permissions.request for camera or microphone. -->
+  <uses-permission android:name="android.permission.CAMERA" />
+  <uses-permission android:name="android.permission.RECORD_AUDIO" />
+  <uses-feature android:name="android.hardware.camera" android:required="false" />
+  <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+  <uses-feature android:name="android.hardware.microphone" android:required="false" />
   <!-- Requested only when the user enables imported-prototype networking (API 37+). -->
   <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
   <!-- AndroidX adds this compatibility permission for dynamic receivers. This app has none. -->

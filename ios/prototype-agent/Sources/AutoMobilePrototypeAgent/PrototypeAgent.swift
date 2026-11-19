@@ -684,6 +684,7 @@ final class PrototypeAgent: NSObject {
 
     private func showPrototype(_ message: [String: Any], result: ProtocolResult) throws {
         let spec = try decode(PrototypeSpec.self, message["spec"])
+        if let refusal = model.platformRegistry.notificationRefusal(for: spec) { return result(false, refusal) }
         // The host resolves element anchors to bounds (#9316); drawing one that it did not
         // would silently misplace the node, so the show is refused and nothing changes.
         if let path = spec.root.unresolvedAnchorPath() {

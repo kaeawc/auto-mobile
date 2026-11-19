@@ -162,6 +162,16 @@ public final class PrototypePlatformRegistry {
         } else { modules["sensors"]?.configure(root: sensorsBlock) }
     }
 
+    func configureNotifications(for spec: PrototypeSpec?) {
+        (modules["notifications"] as? PrototypeNotificationsModule)?
+            .configure(prototypeId: spec?.id, block: spec?.notificationsBlock)
+    }
+
+    func notificationRefusal(for spec: PrototypeSpec) -> String? {
+        guard spec.requiresNotifications, modules["notifications"] == nil else { return nil }
+        return "The notifications platform module requires the standalone iOS Prototype Viewer. Use prototype save with an icon to install the per-prototype Viewer app."
+    }
+
     public var capabilities: [String] { Set(modules.values.map(\.capability)).sorted() }
 
     // Production membership lives here so pure core tests exercise the same factories as UIKit.
@@ -204,7 +214,8 @@ public final class PrototypePlatformRegistry {
         location: (any PrototypeLocationSource)? = nil,
         sensors: (any PrototypeSensorSource)? = nil,
         permissions: (any PrototypeNotificationAuthorizationSource)? = nil,
-        biometric: (any PrototypeBiometricSource)? = nil
+        biometric: (any PrototypeBiometricSource)? = nil,
+        notifications: (any NotificationCenterClient)? = nil
     )
         -> PrototypePlatformRegistry
     {
@@ -218,6 +229,7 @@ public final class PrototypePlatformRegistry {
         if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
         if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
         if let permissions { modules.append(PrototypePermissionsModule(source: permissions)) }
+        if let notifications { modules.append(PrototypeNotificationsModule(client: notifications)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 

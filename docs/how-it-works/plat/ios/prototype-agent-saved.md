@@ -125,6 +125,14 @@ simulator the host grants and denies with `simctl privacy grant|revoke` before l
 `notGrantableOnSimulator` with `verified: false` and leaves them to the system-alert policy. No Viewer
 advertises the module yet (#14299). See the permission table in `prototype-ux.md`.
 
+The per-prototype iOS Viewer posts local notifications under its own bundle identity. It uses one request
+identifier per prototype and notification id, and cancels matching delivered and scheduled requests by
+id, group, or all. Pending requests reserve space in the active limit because iOS can deliver them while
+the Viewer is suspended. Channel importance maps to passive or active interruption, and the module
+reports the Viewer's authorization state. The launch delegate presents foreground notifications and
+routes taps, buttons, and replies to the prototype, queuing cold-start responses until its event stream
+is ready. The injected agent directs specs that require notifications to the standalone Viewer.
+
 ## Platform namespaces (#15257)
 
 Prefer portable fields, portable theme tokens, then `theme.design`; reserve `ios`/`android`

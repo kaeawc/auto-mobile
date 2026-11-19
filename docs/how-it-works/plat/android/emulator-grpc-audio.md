@@ -54,17 +54,17 @@ prove that voice is healthy. Host-mic passthrough (`-allow-host-audio`) is not u
   restart also loses the lease. No broadcast waits for PCM reads or joins the reader thread.
 - The host requires `running` from start and every status poll (100 ms by default) throughout
   a three-second settle window, within an eight-second total deadline. Any other answer
-  immediately refuses injection with `audio_guest_capture_unavailable`. After authorization,
-  immediately before the `injectAudio` stream opens, one more status broadcast must answer
-  `running`, or injection is refused with the same code and no stream opens. Opening
-  `injectAudio` while the guest has no open recorder crashes the emulator (#18687), so every
-  client of the RPC must hold this lease; this refusal does not count as an injection start for
-  the repeat rule below. Before guest capture and
+  immediately refuses injection with `audio_guest_capture_unavailable`. Before guest capture and
   again before opening the gRPC session, injection also refuses captured host microphone failures
   with `audio_host_microphone_unavailable`, and a repeat injection in the same serial + discovered
   endpoint PID incarnation with `audio_repeat_injection_unsafe`. Both host safety errors carry
   `retryable: false` and a remedy to grant macOS Microphone permission to the emulator's host app
   (System Settings > Privacy and Security > Microphone) or restart the emulator.
+- Opening `injectAudio` while the guest has no open recorder crashes the emulator (#18687), so
+  every client of the RPC must hold this lease. After authorization, immediately before the stream
+  opens, one more status broadcast must answer `running`. Otherwise injection is refused with
+  `audio_guest_capture_unavailable` and no stream opens. This refusal does not count as an
+  injection start for the repeat rule.
 - Permission alone
   does not clear repeat history: a serial with a new PID starts with no repeat history. The host-voice
   check also runs after authorization, immediately before the stream opens. No reliable

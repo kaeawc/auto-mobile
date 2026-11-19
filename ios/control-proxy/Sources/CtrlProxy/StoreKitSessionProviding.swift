@@ -34,8 +34,9 @@ protocol StoreKitSessionProviding: Sendable {
     func execute(_ request: RequestStoreKit) async throws -> [StoreKitTransaction]?
 }
 
-/// Serializes session access on the main actor. The shared default outlives handlers
-/// and WebSocket connections; tests inject a store with an in-memory factory.
+/// Serializes session access on the main actor and allows one active environment at a time.
+/// The shared default outlives handlers and WebSocket connections; tests inject a store with
+/// an in-memory factory.
 @MainActor
 final class StoreKitSessionStore: StoreKitSessionProviding {
     nonisolated static let shared = StoreKitSessionStore()
@@ -69,6 +70,13 @@ final class StoreKitSessionStore: StoreKitSessionProviding {
             let path = try required(request.configPath, name: "configPath")
             guard path.hasPrefix("/"), URL(fileURLWithPath: path).pathExtension == "storekit" else {
                 throw CommandError.invalidParameter("configPath", "expected an absolute .storekit path")
+            }
+            // SKTestSession state is process-global, so a second bundle's reset would erase the first's.
+            if let active = sessions.keys.first(where: { $0 != request.bundleId }) {
+                throw VerbatimLocalizedError(
+                    message: "storekit environment active for bundleId \(active); "
+                        + "send clear for it before loading another bundle"
+                )
             }
             let session = try factory(path)
             session.resetToDefaultState()

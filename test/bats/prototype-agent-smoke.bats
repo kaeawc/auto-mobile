@@ -57,6 +57,10 @@ case "$1 $2" in
   "supportedDeviceTypes":[{"identifier":"dt.iPhone17","productFamily":"iPhone"}]},
  {"version":"26.5","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-5","isAvailable":true,
   "supportedDeviceTypes":[{"identifier":"dt.iPhone17","productFamily":"iPhone"},{"identifier":"dt.iPhone17Pro","productFamily":"iPhone"},{"identifier":"dt.iPad","productFamily":"iPad"}]},
+ {"version":"27.2","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-2","isAvailable":true,
+  "supportedDeviceTypes":[{"identifier":"dt.iPhone18Pro","name":"iPhone 18 Pro","productFamily":"iPhone"},{"identifier":"dt.iPhone11","name":"iPhone 11","productFamily":"iPhone"},{"identifier":"dt.iPhoneDuo","name":"iPhone Duo","productFamily":"iPhone"}]},
+ {"version":"27.2","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4","isAvailable":true,
+  "supportedDeviceTypes":[{"identifier":"dt.iPhoneDuo","name":"iPhone Duo","productFamily":"iPhone"}]},
  {"version":"17.5","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-17-5","isAvailable":false,
   "supportedDeviceTypes":[{"identifier":"dt.iPhone15","productFamily":"iPhone"}]}
 ]}
@@ -253,7 +257,7 @@ STUB
 @test "builds the agent before creating a simulator" {
   run bash "${script}" latest
   [ "${status}" -eq 0 ]
-  [[ ${output} == *"PASS on iOS 26.5"* ]]
+  [[ ${output} == *"PASS on iOS 27.2"* ]]
   build_line="$(grep -n '^build$' "${STUB_LOG}" | head -1 | cut -d: -f1)"
   create_line="$(grep -n 'simctl create' "${STUB_LOG}" | head -1 | cut -d: -f1)"
   [ "${build_line}" -lt "${create_line}" ]
@@ -264,6 +268,14 @@ STUB
   [ "${status}" -eq 0 ]
   [[ ${output} == *"PASS on iOS 18.5"* ]]
   grep -q "dt.iPhone16" "${STUB_LOG}"
+}
+
+@test "skips the device-specific Duo runtime and the multi-display iPhone Duo type" {
+  run bash "${script}" 27.2
+  [ "${status}" -eq 0 ]
+  [[ ${output} == *"PASS on iOS 27.2"* ]]
+  grep -q "xcrun simctl create prototype-agent-smoke-27.2-.* dt.iPhone18Pro com.apple.CoreSimulator.SimRuntime.iOS-27-2$" "${STUB_LOG}"
+  ! grep -q "dt.iPhoneDuo" "${STUB_LOG}"
 }
 
 @test "an unavailable or missing runtime exits 3 without creating a simulator" {

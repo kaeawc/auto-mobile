@@ -97,6 +97,10 @@ case "$*" in
     else
       payload="$(jq -n --arg id "$id" '{screenshotPath:"stub.png",skeleton:[],context:[{label:$id,bounds:[2,144,206,200],affordances:[]}]}')"
     fi
+    if [[ -n ${ALERT_CLEARS_AFTER_OBSERVES:-} && -f "$CALLS.alert-tapped" && ! -f "$CALLS.dismissed" ]]; then
+      echo observe >> "$CALLS.alert-tapped"
+      (( $(wc -l < "$CALLS.alert-tapped") > ALERT_CLEARS_AFTER_OBSERVES )) && touch "$CALLS.dismissed"
+    fi
     if [[ ${ALERT:-} == 1 && ! -f "$CALLS.dismissed" ]]; then
       # Octal bytes spell U+2019 so the stub source stays ASCII.
       dont="Don$(printf '\342\200\231')t Allow"
@@ -115,7 +119,8 @@ case "$*" in
     curly="Don$(printf '\342\200\231')t Allow"
     if [[ "$text" == "$curly" || "$text" == "Don't Allow" ]]; then
       printf 'alert-tap %s\n' "$text" >> "$CALLS"
-      [[ ${ALERT_STAYS:-} == 1 ]] || touch "$CALLS.dismissed"
+      if [[ -n ${ALERT_CLEARS_AFTER_OBSERVES:-} ]]; then echo tap > "$CALLS.alert-tapped"
+      else [[ ${ALERT_STAYS:-} == 1 ]] || touch "$CALLS.dismissed"; fi
       echo '{"success":true,"effect":{"screenChanged":true,"basis":"hierarchy"}}'
       exit
     fi
@@ -366,12 +371,20 @@ teardown() {
 }
 
 @test "alert that survives its Don't Allow tap fails before any row tap" {
-  export ALERT=1 ALERT_STAYS=1
+  export ALERT=1 ALERT_STAYS=1 ALERT_CLEAR_POLL_SECONDS=0
   run bash "$SCRIPT" latest
   [ "$status" -eq 1 ]
   [[ "$output" == *'system alert still covers the app after tapping'* ]]
   [ ! -f "$CALLS.tapped" ]
   grep -q -- '--daemon stop' "$CALLS"
+}
+
+@test "alert that is still drawn on the first read after its Don't Allow tap is re-observed until it clears" {
+  export ALERT=1 ALERT_CLEARS_AFTER_OBSERVES=2 ALERT_CLEAR_POLL_SECONDS=0
+  run bash "$SCRIPT" latest
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'watch-smoke-lane: PASS'* ]]
+  [ -f "$CALLS.tapped" ]
 }
 
 @test "row taps that never navigate fail after one fallback attempt and clean up" {

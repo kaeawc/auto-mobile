@@ -69,7 +69,8 @@ background or the simulator receives no fresh frame metrics. `memory` takes a sn
 `appId` on Android and checks its RSS growth over three seconds on iOS Simulator.
 
 Each result has `passed`, its metrics and its violations; `failed` is set when `failOn` matched.
-On Android, when the app rendered no frames during the check (an idle screen), the frame-time percentiles
+On Android, frame-time percentiles and jank counts both cover only the frames rendered during the check, not
+frames from app launch or earlier screens. When the app rendered no frames during the check (an idle screen), the frame-time percentiles
 `p50Ms`–`p99Ms` are null and `metrics.frameTimeUnmeasured` says why. AutoMobile then skips the
 frame-time check, so it does not fail the call. For raw captures use `performanceTrace`,
 `captureTrace`, `measureStartup` or `heapDump`.

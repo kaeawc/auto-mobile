@@ -7,6 +7,7 @@
  * Without arguments every docs/**\/*.md file is checked.
  */
 import { join, relative } from "node:path";
+import { dropGitIgnored } from "../lib/gitIgnored";
 import {
   type Allowlist,
   type BannedPhraseList,
@@ -25,7 +26,10 @@ async function docsFiles(args: string[]): Promise<string[]> {
     return args.map((arg) => relative(ROOT, join(process.cwd(), arg)).replaceAll("\\", "/"));
   }
   const files = await Array.fromAsync(new Bun.Glob("docs/**/*.md").scan({ cwd: ROOT }));
-  return files.map((file) => file.replaceAll("\\", "/")).sort();
+  return dropGitIgnored(
+    ROOT,
+    files.map((file) => file.replaceAll("\\", "/")),
+  ).sort();
 }
 
 async function main(): Promise<number> {

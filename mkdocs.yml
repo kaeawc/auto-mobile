@@ -271,6 +271,7 @@ nav:
           - "Keystore state": using/keystore-test-state.md
           - "Keystore metadata": using/keystore-metadata.md
           - "Device condition fixtures": using/device-condition.md
+          - "App lifecycle": using/app-lifecycle.md
           - "Kill profiles": using/kill-profiles.md
           - "Manufacturer profiles": using/oem-personas.md
           - "SDK capabilities": using/sdk-capabilities.md
@@ -372,6 +373,7 @@ nav:
           - "Android XR headset baseline": how-it-works/plat/android/xr-headset.md
           - "Car App Library template snapshots": how-it-works/plat/android/car-app-templates.md
           - "Android Auto projection provisioning": how-it-works/plat/android/android-auto-projection-provisioning.md
+          - "Automotive prototypes": how-it-works/plat/android/automotive-prototypes.md
           - "CtrlProxy baseline profile": how-it-works/plat/android/ctrlproxy-baseline-profile.md
           - "Android port reverse ownership": how-it-works/plat/android/port-reverse.md
           - "InputConnection trace comparison": how-it-works/plat/android/ime-trace-conformance.md
@@ -406,6 +408,7 @@ nav:
           - "tvOS tool support matrix": how-it-works/plat/tvos/tool-matrix.md
           - "watchOS XCUITest spike": how-it-works/plat/watchos/xcuitest-spike.md
           - "watchOS Smart Stack cells": how-it-works/plat/watchos/smart-stack.md
+          - "Apple Watch prototypes": how-it-works/plat/ios/watch-prototypes.md
           - "visionOS XCUITest capability boundary": how-it-works/plat/visionos/xcuitest-capabilities.md
       - "Prototyping platform":
           - "Android prototype specification":
@@ -501,6 +504,7 @@ nav:
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-19: Headless CarPlay on TVOut with a StarkConfig": devlog/2026-11-19-headless-carplay-tvout-stark.md
       - "2026-11-17: Docs navigation grouped by task and platform": devlog/2026-11-17-docs-navigation-by-task.md
       - "2026-11-17: Material 3 Expressive component availability at the pinned Compose BOM": devlog/2026-11-17-m3-expressive-component-availability.md
       - "2026-11-16: Android Auto provisioning accepts the welcome screen": devlog/2026-11-16-android-auto-terms-accepted-by-provisioning.md
@@ -528,6 +532,8 @@ nav:
       - "2026-11-10: Android Auto projection: no Google account": devlog/2026-11-10-android-auto-projection-provisioning-no-account.md
       - "2026-11-08: Android Auto stub and DHU 2.1 on a Play emulator": devlog/2026-11-08-form-factors-android-auto-dhu-stub.md
       - "2026-11-08: AndroidX baseline profile tooling for CtrlProxy": devlog/2026-11-08-androidx-baseline-profile-generator.md
+      - "2026-11-07: Defer Apple Watch prototypes": devlog/2026-11-07-watch-prototypes-deferred.md
+      - "2026-11-07: Defer car-specific prototypes on AAOS": devlog/2026-11-07-automotive-prototypes-deferred.md
       - "2026-11-06: Keystore StrongBox fault: pre-generation check": devlog/2026-11-06-keystore-strongbox-fault-pre-generation-check.md
       - "2026-11-06: AndroidX TV libraries for the Android TV fixture apps": devlog/2026-11-06-androidx-tv-fixture-libraries.md
       - "2026-11-05: Prototype remote image URLs": devlog/2026-11-05-prototype-ux-remote-image-urls.md

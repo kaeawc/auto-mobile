@@ -1,10 +1,7 @@
 package dev.jasonpearson.automobile.protocol
 
 import dev.jasonpearson.automobile.protocol.PrototypeSpecInput.canonicalString
-import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.MAX_PROTOTYPE_DATA_ARRAY_ITEMS
-import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.MAX_PROTOTYPE_DATA_BYTES
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.MAX_PROTOTYPE_DATA_DEPTH
-import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.MAX_PROTOTYPE_DATA_WRITE_BYTES
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH
 import dev.jasonpearson.automobile.protocol.PrototypeStateChecks.Context
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.fail
@@ -19,10 +16,13 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 
 internal object PrototypeDataRules {
-  fun dataError(value: JsonElement): PrototypeSpecError? {
+  fun dataError(
+    value: JsonElement,
+    budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
+  ): PrototypeSpecError? {
     if (value !is JsonObject) return fail("data", "Expected object")
-    return walkDataValue(value, "data", 1)
-      ?: if (jsonCost(value) > MAX_PROTOTYPE_DATA_BYTES) fail("data", "Data byte limit exceeded")
+    return walkDataValue(value, "data", 1, budget.maxDataArrayItems)
+      ?: if (jsonCost(value) > budget.maxDataBytes) fail("data", "Data byte limit exceeded")
       else null
   }
 
@@ -31,10 +31,12 @@ internal object PrototypeDataRules {
    * in place of the spec's own. A message containing "limit" is a limit refusal; any other is a
    * value data cannot hold.
    */
-  internal fun dataWriteError(value: JsonObject): PrototypeSpecError? =
-    walkDataValue(value, "data", 1)
-      ?: if (jsonCost(value) > MAX_PROTOTYPE_DATA_WRITE_BYTES)
-        fail("data", "Data byte limit exceeded")
+  internal fun dataWriteError(
+    value: JsonObject,
+    budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
+  ): PrototypeSpecError? =
+    walkDataValue(value, "data", 1, budget.maxDataArrayItems)
+      ?: if (jsonCost(value) > budget.maxDataWriteBytes) fail("data", "Data byte limit exceeded")
       else null
 
   val dataActionTypes = setOf("setData", "appendData", "prependData", "upsertData", "removeData")
@@ -107,16 +109,21 @@ internal object PrototypeDataRules {
       else -> emptyList()
     }
 
-  fun walkDataValue(value: JsonElement, path: String, depth: Int): PrototypeSpecError? {
+  fun walkDataValue(
+    value: JsonElement,
+    path: String,
+    depth: Int,
+    maxArrayItems: Int = PrototypeRuntimeBudget.BASE.maxDataArrayItems,
+  ): PrototypeSpecError? {
     if (value !is JsonObject && value !is JsonArray) {
       return if (PrototypeDataValues.isScalar(value)) null else fail(path, "Invalid data value")
     }
     if (depth > MAX_PROTOTYPE_DATA_DEPTH) return fail(path, "Data depth limit exceeded")
-    if (value is JsonArray && value.size > MAX_PROTOTYPE_DATA_ARRAY_ITEMS) {
+    if (value is JsonArray && value.size > maxArrayItems) {
       return fail(path, "Data array limit exceeded")
     }
     return dataChildren(value, path).firstNotNullOfOrNull { (child, childPath) ->
-      walkDataValue(child, childPath, depth + 1)
+      walkDataValue(child, childPath, depth + 1, maxArrayItems)
     }
   }
 

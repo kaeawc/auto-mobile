@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeBundleExportResult
 import dev.jasonpearson.automobile.protocol.PrototypeBundleLimits
 import dev.jasonpearson.automobile.protocol.PrototypeBundleReadResult
 import dev.jasonpearson.automobile.protocol.PrototypeBundleReader
+import dev.jasonpearson.automobile.protocol.PrototypeRuntimeBudget
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import java.io.ByteArrayOutputStream
@@ -137,10 +138,12 @@ class ValidatedLibraryImporter(
   }
 
   private fun validate(bundle: PrototypeBundle): LibraryImportResult.Rejected? {
-    val policy = PrototypeSpecValidator.validate(bundle.spec, library = true)
+    val budget = PrototypeRuntimeBudget.forCapabilities(capabilities)
+    val policy = PrototypeSpecValidator.validate(bundle.spec, library = true, budget = budget)
     if (policy is PrototypeSpecValidation.Failure)
       return LibraryImportResult.Rejected("spec.json:${policy.error.path}", policy.error.message)
-    val supported = PrototypeSpecValidator.validate(bundle.spec, capabilities, library = true)
+    val supported =
+      PrototypeSpecValidator.validate(bundle.spec, capabilities, library = true, budget = budget)
     if (supported is PrototypeSpecValidation.Failure || !capabilities.containsAll(bundle.requires))
       return LibraryImportResult.Rejected(
         "spec.json",

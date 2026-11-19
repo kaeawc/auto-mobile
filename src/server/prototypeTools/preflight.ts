@@ -1,4 +1,7 @@
-import { PROTOTYPE_DEAD_TAP_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_DEAD_TAP_CAPABILITY,
+  PROTOTYPE_LARGE_BUDGET_CAPABILITY,
+} from "../../features/observe/android/ctrlProxyProtocol";
 import { prototypeDeadTapsUnsupportedMessage } from "../../features/prototype/prototypeDeadTaps";
 import { z } from "zod/v4";
 import { createDeviceHierarchyCapture } from "../../features/observe/DeviceHierarchyCapture";
@@ -33,6 +36,10 @@ import {
   PROTOTYPE_SHADERS_ANDROID_ONLY_ERROR,
 } from "../../features/prototype/prototypeShaders";
 import { prototypeRequiredCapabilities } from "../../features/prototype/prototypeCapabilityGates";
+import {
+  prototypeLargeBudgetFields,
+  prototypeLargeBudgetUnsupportedMessage,
+} from "../../features/prototype/prototypeRuntimeBudget";
 import {
   PROTOTYPE_IOS_MINIMUM_OS,
   prototypeIosMinimumOsNote,
@@ -240,7 +247,34 @@ export async function specCapabilityRefusal(
       return { success: false, error: new ActionableError(message).message };
     }
   }
-  return undefined;
+  return largeBudgetRefusal(target, spec, signal);
+}
+
+/** A spec over the base runtime budget needs a runtime advertising the large one (#18804). */
+async function largeBudgetRefusal(
+  target: {
+    android?: Pick<NonNullable<PrototypeTarget["android"]>, "supportsCommand">;
+    ios?: Pick<NonNullable<PrototypeTarget["ios"]>, "supportsCapability">;
+  },
+  spec: unknown,
+  signal: AbortSignal | undefined,
+): Promise<PrototypeResult | undefined> {
+  const fields = prototypeLargeBudgetFields(spec);
+  if (fields.length === 0) {
+    return undefined;
+  }
+  const supported = target.android
+    ? await target.android.supportsCommand(PROTOTYPE_LARGE_BUDGET_CAPABILITY)
+    : target.ios?.supportsCapability(PROTOTYPE_LARGE_BUDGET_CAPABILITY) === true;
+  signal?.throwIfAborted();
+  if (supported) {
+    return undefined;
+  }
+  const message = prototypeLargeBudgetUnsupportedMessage(
+    fields,
+    target.android ? "android" : "ios",
+  );
+  return { success: false, error: new ActionableError(message).message };
 }
 
 /**

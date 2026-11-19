@@ -31,6 +31,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.collectStackBackProgress
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeInitialDeviceState
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeEventKind
+import dev.jasonpearson.automobile.protocol.PrototypeRuntimeBudget
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
@@ -93,7 +94,7 @@ fun AutoMobilePrototype(
     }
   val validation =
     remember(spec, runtimePlatform) {
-      val parsed = PrototypeSpecValidator.validate(spec)
+      val parsed = PrototypeSpecValidator.validate(spec, budget = PrototypeRuntimeBudget.LARGE)
       if (
         parsed is PrototypeSpecValidation.Success &&
           "secureStorage" in parsed.spec.requires?.platform.orEmpty() &&
@@ -392,8 +393,10 @@ private class EmbeddedOwner(
           registry = config.environment.host?.storageRegistry,
         )
         .prepare(config.spec) {
-          PrototypeSpecValidator.validate(Json.encodeToString(it)) is
-            PrototypeSpecValidation.Success
+          PrototypeSpecValidator.validate(
+            Json.encodeToString(it),
+            budget = PrototypeRuntimeBudget.LARGE,
+          ) is PrototypeSpecValidation.Success
         }
     opened.commit()
     withContext(io) { source.prepareFonts(opened.spec, config.cacheDir) }
@@ -415,6 +418,7 @@ private class EmbeddedOwner(
         exclusively = { block -> interactions.withLock { block() } },
         newRequestId = config.environment.requestId,
         initialPlatformState = config.initialDeviceState,
+        budget = PrototypeRuntimeBudget.LARGE,
       )
     // Seed before publishing the session, so its first rendered frame is already localized.
     runtime.updateLocales(config.locales())

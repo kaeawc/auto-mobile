@@ -15,7 +15,6 @@ import dev.jasonpearson.automobile.protocol.PrototypeRequestRules.requestActionE
 import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.definitions
 import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.json
 import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.numberTokenPattern
-import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.MAX_PROTOTYPE_SPEC_BYTES
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.validate
 import dev.jasonpearson.automobile.protocol.PrototypeStateChecks.Context
 import dev.jasonpearson.automobile.protocol.PrototypeStateChecks.stateTypeErrors
@@ -40,7 +39,7 @@ import kotlinx.serialization.json.jsonPrimitive
 
 internal object PrototypeSpecInput {
   fun validateInput(input: String, context: Context): PrototypeSpecValidation {
-    if (input.toByteArray(Charsets.UTF_8).size > MAX_PROTOTYPE_SPEC_BYTES) {
+    if (input.toByteArray(Charsets.UTF_8).size > context.budget.maxSpecBytes) {
       return PrototypeSpecValidation.Failure(fail("", "Spec byte limit exceeded"))
     }
     if (hasUnescapedControl(input)) return PrototypeSpecValidation.Failure(fail("", "Invalid JSON"))
@@ -128,7 +127,7 @@ internal object PrototypeSpecInput {
 
   fun validateElement(value: JsonElement, context: Context): PrototypeSpecValidation {
     context.root = value
-    val repeats = PrototypeRepeatData.fromSpec(value)
+    val repeats = PrototypeRepeatData.fromSpec(value, context.budget.maxListItems)
     val error =
       structuralError(value, context)
         ?: PrototypeKeyframesRules.validate(context)
@@ -157,7 +156,7 @@ internal object PrototypeSpecInput {
   }
 
   private fun structuralError(value: JsonElement, context: Context): PrototypeSpecError? =
-    PrototypeLazyListRules.limitError(value)
+    PrototypeLazyListRules.limitError(value, context.budget.maxListItems)
       ?: walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
       ?: excludeAccessoryReferences(context)
       ?: PrototypeRouteRules.error(value.jsonObject, context)

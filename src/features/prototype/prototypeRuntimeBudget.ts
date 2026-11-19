@@ -1,0 +1,118 @@
+import contract from "../../../schemas/prototype-spec-contract.json";
+import { PROTOTYPE_LARGE_BUDGET_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { resolvePrototypeDataPointer } from "./prototypeData";
+import { jsonCost } from "./prototypeJsonCost";
+import { walkPrototypeNodes } from "./prototypeNodeChildren";
+import { record } from "./prototypeTemplate";
+
+/**
+ * The contract limits a runtime budget can raise (#18804). The contract's `runtimeBudgets` table
+ * is the only place their raised values live; every other limit is the same in every runtime.
+ */
+export type PrototypeBudgetLimit =
+  keyof (typeof contract.runtimeBudgets)[typeof PROTOTYPE_LARGE_BUDGET_CAPABILITY];
+
+/** The limits one runtime validates a spec against. */
+export type PrototypeRuntimeBudget = Readonly<Record<PrototypeBudgetLimit, number>>;
+
+const LARGE: PrototypeRuntimeBudget = contract.runtimeBudgets[PROTOTYPE_LARGE_BUDGET_CAPABILITY];
+
+const BUDGET_LIMITS = Object.keys(LARGE) as PrototypeBudgetLimit[];
+
+/** Today's limits: the overlay, the iOS agent and any runtime without a budget capability. */
+export const PROTOTYPE_BASE_BUDGET: PrototypeRuntimeBudget = Object.fromEntries(
+  BUDGET_LIMITS.map((name) => [name, contract.limits[name]]),
+) as PrototypeRuntimeBudget;
+
+/** An activity-hosted runtime advertising `prototype_large_budget_v1`. */
+export const PROTOTYPE_LARGE_BUDGET: PrototypeRuntimeBudget = LARGE;
+
+export function isPrototypeBudgetLimit(name: string): name is PrototypeBudgetLimit {
+  return Object.hasOwn(LARGE, name);
+}
+
+/** A `maxLimit` rule's bound is the budget's value of that limit; `max` is the base value. */
+export function prototypeBudgetRule<R extends { max?: number; maxLimit?: string }>(
+  rule: R,
+  limits: PrototypeRuntimeBudget,
+): R {
+  return rule.maxLimit !== undefined && isPrototypeBudgetLimit(rule.maxLimit)
+    ? { ...rule, max: limits[rule.maxLimit] }
+    : rule;
+}
+
+/** The budget of a runtime advertising `capabilities`; no capabilities is the base budget. */
+export function prototypeRuntimeBudget(
+  capabilities: Iterable<string> | undefined,
+): PrototypeRuntimeBudget {
+  return capabilities && new Set(capabilities).has(PROTOTYPE_LARGE_BUDGET_CAPABILITY)
+    ? PROTOTYPE_LARGE_BUDGET
+    : PROTOTYPE_BASE_BUDGET;
+}
+
+function oversizedArrays(value: unknown, path: string, fields: string[]): void {
+  if (Array.isArray(value)) {
+    if (value.length > PROTOTYPE_BASE_BUDGET.MAX_PROTOTYPE_DATA_ARRAY_ITEMS) {
+      fields.push(path);
+    }
+    for (const [index, child] of value.entries()) {
+      oversizedArrays(child, `${path}[${index}]`, fields);
+    }
+    return;
+  }
+  const object = record(value);
+  for (const key of Object.keys(object ?? {}).sort()) {
+    oversizedArrays(object?.[key], `${path}.${key}`, fields);
+  }
+}
+
+function oversizedLists(spec: unknown, fields: string[]): void {
+  const data = record(spec)?.data;
+  walkPrototypeNodes(spec, (node, path) => {
+    if (node.type !== "list") {
+      return;
+    }
+    if (
+      typeof node.maxItems === "number" &&
+      node.maxItems > PROTOTYPE_BASE_BUDGET.MAX_PROTOTYPE_LIST_ITEMS
+    ) {
+      fields.push(`${path}.maxItems`);
+    }
+    const pointer = record(record(node.repeat)?.items)?.path;
+    const items = typeof pointer === "string" ? resolvePrototypeDataPointer(data, pointer) : [];
+    if (Array.isArray(items) && items.length > PROTOTYPE_BASE_BUDGET.MAX_PROTOTYPE_LIST_ITEMS) {
+      fields.push(`${path}.repeat.items.path`);
+    }
+  });
+}
+
+/**
+ * Where a spec is over the base budget, so only a runtime advertising
+ * `prototype_large_budget_v1` can show it: `$` for spec bytes, `data` for data bytes, each
+ * oversized `/data` array and each list whose items or `maxItems` exceed the base list limit.
+ * A data action's own `maxItems` is not listed; the base-budget validator on the overlay refuses it.
+ */
+export function prototypeLargeBudgetFields(spec: unknown): string[] {
+  const fields: string[] = [];
+  const bytes = Buffer.byteLength(JSON.stringify(spec) ?? "", "utf8");
+  if (bytes > PROTOTYPE_BASE_BUDGET.MAX_PROTOTYPE_SPEC_BYTES) {
+    fields.push("$");
+  }
+  const data = record(spec)?.data;
+  if (data !== undefined && jsonCost(data) > PROTOTYPE_BASE_BUDGET.MAX_PROTOTYPE_DATA_BYTES) {
+    fields.push("data");
+  }
+  oversizedArrays(data, "data", fields);
+  oversizedLists(spec, fields);
+  return [...new Set(fields)];
+}
+
+export function prototypeLargeBudgetUnsupportedMessage(
+  fields: readonly string[],
+  platform: "android" | "ios",
+): string {
+  const runtime = platform === "ios" ? "connected iOS prototype agent" : "connected CtrlProxy";
+  const base = PROTOTYPE_BASE_BUDGET;
+  const more = fields.length > 1 ? ` (and ${fields.length - 1} more)` : "";
+  return `The ${runtime} does not advertise ${PROTOTYPE_LARGE_BUDGET_CAPABILITY}, so it keeps the base budget (${base.MAX_PROTOTYPE_LIST_ITEMS} list items, ${base.MAX_PROTOTYPE_SPEC_BYTES} spec bytes, ${base.MAX_PROTOTYPE_DATA_BYTES} data bytes), which ${fields[0]}${more} exceeds. Nothing was shown. Show it in a disposable app or ProtoViewer, or shrink the data.`;
+}

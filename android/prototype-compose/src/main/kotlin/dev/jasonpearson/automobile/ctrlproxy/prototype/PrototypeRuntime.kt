@@ -188,6 +188,12 @@ class PrototypeRuntime(
   private val requestHideKeyboard: suspend () -> Unit = {},
   monotonicMs: () -> Long = { System.nanoTime() / 1_000_000L },
   private val uploadAssets: PrototypeAssetSource? = null,
+  /**
+   * The limits state and data writes are checked against (#18804): the overlay keeps the base
+   * budget, an activity-hosted runtime advertising `prototype_large_budget_v1` passes the large
+   * one.
+   */
+  private val budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
 ) {
   private val reportWarning = warn
 
@@ -203,7 +209,7 @@ class PrototypeRuntime(
 
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
-    PrototypeSpecValidator.prepareStateWrites(it, runtimeJson)
+    PrototypeSpecValidator.prepareStateWrites(it, runtimeJson, budget)
   }
 
   // A runtime is owned by one show; list disposal during navigation never clears its signatures.
@@ -1358,11 +1364,11 @@ class PrototypeRuntime(
     write: PrototypeDataWrite,
   ): StagedWrite {
     val data =
-      when (val result = PrototypeDataWriter.apply(from.data, write)) {
+      when (val result = PrototypeDataWriter.apply(from.data, write, budget)) {
         is PrototypeDataWriteResult.Success -> result.data
         is PrototypeDataWriteResult.Failure -> return StagedWrite.Refused(result.error)
       }
-    prototypeListDataWriteError(from, data, write.path)?.let {
+    prototypeListDataWriteError(from, data, write.path, budget)?.let {
       return StagedWrite.Refused(
         PrototypeDataWriteError(PrototypeDataWriteErrorCode.INVALID_VALUE, it.message),
       )

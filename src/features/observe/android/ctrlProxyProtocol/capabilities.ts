@@ -159,6 +159,12 @@ export const PROTOTYPE_CHART_CAPABILITY = "prototype_chart_v1";
 /** Chat-list scroll options and the `scrollTo` action (#14232); see prototypeChatScroll.ts. */
 export const PROTOTYPE_ROUTES_CAPABILITY = "prototype_routes_v1";
 export const PROTOTYPE_CHAT_SCROLL_CAPABILITY = "prototype_chat_scroll_v1";
+/**
+ * Advertised by an activity-hosted runtime (disposable app, ProtoViewer, an embedding app) whose
+ * process can hold a larger spec than the overlay (#18804). Its limits are the contract's
+ * `runtimeBudgets` entry of this name; a runtime without it keeps the contract `limits`.
+ */
+export const PROTOTYPE_LARGE_BUDGET_CAPABILITY = "prototype_large_budget_v1";
 
 /** Runs long-press and double-tap action lists on generic prototype gesture nodes. */
 export const PROTOTYPE_SCROLL_MOTION_CAPABILITY = "prototype_scroll_motion_v1";

@@ -31,8 +31,10 @@ an axis; cross-axis scrolling is allowed. The row template cannot contain anothe
 
 The row template counts once against node/image limits, even for zero rows; header/footer count
 once each. Per-item field, state-key, action, substitution and repeat-path-cell budgets still
-apply. List paths accept up to `MAX_PROTOTYPE_LIST_ITEMS` (2000), with overflow reported at
-`<list>.repeat.items.path` as `Repeat path resolves to more than 2000 items`. A source longer than
+apply. List paths accept up to `MAX_PROTOTYPE_LIST_ITEMS` of the runtime's budget (2000 in the base
+budget, 10000 with `prototype_large_budget_v1`; see
+[Runtime budgets](prototype-ux-envelope.md#envelope-and-limits)). Overflow is reported at
+`<list>.repeat.items.path` as `Repeat path resolves to more than <limit> items`. A source longer than
 `maxItems` fails there with `List data has more items than maxItems`. Ordinary repeats keep their
 128-item cap and count expanded instances.
 

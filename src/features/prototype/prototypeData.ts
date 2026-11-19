@@ -150,7 +150,11 @@ export class PrototypeRepeatData {
 
   derived: Record<string, unknown> = {};
 
-  constructor(private readonly data: unknown) {}
+  /** The list item limit of the target runtime's budget (#18804); the base budget by default. */
+  constructor(
+    private readonly data: unknown,
+    readonly listItems: number = limits.MAX_PROTOTYPE_LIST_ITEMS,
+  ) {}
 
   source(pointer: string): unknown {
     if (!this.sources.has(pointer)) {
@@ -205,10 +209,7 @@ export class PrototypeRepeatData {
       ? source.filter((item) => record(item) !== undefined)
       : [];
     let cells = 0;
-    for (const item of objects.slice(
-      0,
-      Math.max(PROTOTYPE_REPEAT_ITEMS_MAX, limits.MAX_PROTOTYPE_LIST_ITEMS),
-    )) {
+    for (const item of objects.slice(0, Math.max(PROTOTYPE_REPEAT_ITEMS_MAX, this.listItems))) {
       let members = 0;
       for (const [key, value] of Object.entries(item)) {
         if (projectableMember(key, value)) {

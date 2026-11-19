@@ -5,8 +5,13 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /** Lazy renderers resolve row data without expanding the template or copying the node tree. */
 object PrototypeListRows {
+  /**
+   * The spec was validated against its runtime's budget, so rows draw up to the largest (#18804).
+   */
   fun items(list: PrototypeListNode, data: JsonObject?): List<JsonObject> =
-    list.repeat.itemsPath?.let { PrototypeRepeatData(data).items(it) }.orEmpty()
+    list.repeat.itemsPath
+      ?.let { PrototypeRepeatData(data, PrototypeRuntimeBudget.LARGE.maxListItems).items(it) }
+      .orEmpty()
 
   /** Stable identity has the same scalar spelling used by repeat key validation. */
   fun key(list: PrototypeListNode, item: JsonObject): String = key(list, item, 0)

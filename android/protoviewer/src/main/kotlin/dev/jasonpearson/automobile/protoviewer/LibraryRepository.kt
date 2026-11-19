@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeSaveRequest
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeSaveResult
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeStore
 import dev.jasonpearson.automobile.ctrlproxy.prototype.sha256Hex
+import dev.jasonpearson.automobile.protocol.PrototypeRuntimeBudget
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import java.util.UUID
@@ -335,8 +336,12 @@ internal fun <T> storageResult(block: () -> T): LibraryResult<T> =
   }
 
 private fun validLibrarySpec(spec: String): Boolean =
-  PrototypeSpecValidator.validate(spec, protoViewerCapabilities, library = true) is
-    PrototypeSpecValidation.Success
+  PrototypeSpecValidator.validate(
+    spec,
+    protoViewerCapabilities,
+    library = true,
+    budget = PrototypeRuntimeBudget.forCapabilities(protoViewerCapabilities),
+  ) is PrototypeSpecValidation.Success
 
 /**
  * Validity and admission checks for a new entry. [DirectoryLibraryRepository.add] repeats the

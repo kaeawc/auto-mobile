@@ -95,19 +95,23 @@ object PrototypeDataWriter {
     return pointer.takeIf(PrototypeDataPointer::isValid)
   }
 
-  fun apply(data: JsonObject?, write: PrototypeDataWrite): PrototypeDataWriteResult {
+  fun apply(
+    data: JsonObject?,
+    write: PrototypeDataWrite,
+    budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
+  ): PrototypeDataWriteResult {
     val pointer =
       pathPointer(write.path)
         ?: return refused(
           PrototypeDataWriteErrorCode.INVALID_PATH,
           "${write.path} is not a /data/<pointer> path",
         )
-    valueRefusal(write)?.let {
+    valueRefusal(write, budget)?.let {
       return it
     }
     val current = data ?: JsonObject(emptyMap())
     if (PrototypeKeyedDataWrite.appliesTo(write))
-      return PrototypeKeyedDataWrite.apply(current, pointer, write)
+      return PrototypeKeyedDataWrite.apply(current, pointer, write, budget)
     targetRefusal(current, pointer, write)?.let {
       return it
     }
@@ -128,7 +132,7 @@ object PrototypeDataWriter {
         is PrototypeDataWrite.Remove -> remove(current, tokens)
       }
         as JsonObject
-    val invalid = PrototypeSpecValidator.dataWriteError(next)
+    val invalid = PrototypeSpecValidator.dataWriteError(next, budget)
     if (invalid != null) {
       val code =
         if (invalid.message.contains("limit")) PrototypeDataWriteErrorCode.LIMIT_EXCEEDED
@@ -138,11 +142,18 @@ object PrototypeDataWriter {
     return PrototypeDataWriteResult.Success(next, trimmed)
   }
 
-  private fun exceedsWindowLimit(write: PrototypeDataWrite, maxItems: Double): Boolean =
+  private fun exceedsWindowLimit(
+    write: PrototypeDataWrite,
+    maxItems: Double,
+    budget: PrototypeRuntimeBudget,
+  ): Boolean =
     (write is PrototypeDataWrite.Upsert || write is PrototypeDataWrite.Append) &&
-      maxItems > PrototypeSpecValidator.MAX_PROTOTYPE_DATA_ARRAY_ITEMS
+      maxItems > budget.maxDataArrayItems
 
-  private fun valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult? {
+  private fun valueRefusal(
+    write: PrototypeDataWrite,
+    budget: PrototypeRuntimeBudget,
+  ): PrototypeDataWriteResult? {
     if (
       write is PrototypeDataWrite.Upsert &&
         (!PrototypeDataPointer.isValid(write.key) ||
@@ -165,7 +176,7 @@ object PrototypeDataWriter {
         "$name needs an array value",
       )
     val maxItems = PrototypeDataArrayWindow.maximum(write) ?: return null
-    return if (!positiveSafeInteger(maxItems) || exceedsWindowLimit(write, maxItems))
+    return if (!positiveSafeInteger(maxItems) || exceedsWindowLimit(write, maxItems, budget))
       refused(
         PrototypeDataWriteErrorCode.INVALID_VALUE,
         "$name maxItems must be a positive safe integer",

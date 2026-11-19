@@ -123,5 +123,12 @@ final class PrototypeAgentRuntimeIsolationTests: XCTestCase {
         )
         XCTAssertNil(viewer.notificationRefusal(for: spec))
         XCTAssertTrue(viewer.capabilities.contains(capability))
+        // A `notifications.schedule` spec is gated on this one; without it show preflight refuses it.
+        let scheduled = "prototype_platform_notifications_scheduled_v1"
+        XCTAssertTrue(viewer.capabilities.contains(scheduled))
+        XCTAssertTrue(PrototypeAgentProtocol.advertisedCapabilities(
+            registryCapabilities: viewer.capabilities
+        ).contains(scheduled))
+        XCTAssertFalse(injected.capabilities.contains(scheduled))
     }
 }

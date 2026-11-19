@@ -71,6 +71,9 @@ protocol NotificationCenterClient: AnyObject {
 final class PrototypeNotificationsModule: PrototypePlatformModule {
     let name = "notifications"
     let capability = "prototype_platform_notifications_v1"
+    /// Gates `notifications.schedule` (`delaySeconds`) in the contract; advertised beside `capability`.
+    static let scheduledCapability = "prototype_platform_notifications_scheduled_v1"
+    var capabilities: [String] { [capability, Self.scheduledCapability] }
     private let client: any NotificationCenterClient
     private let clock: any PrototypeMonotonicClock
     private var prototypeId: String?

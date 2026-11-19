@@ -7,7 +7,7 @@ AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public final clas
 AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public func copy(text: String, sensitive: Bool, label _: String?)
 AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public func paste() async throws -> String
 AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public init(pasteboard: UIPasteboard = .general, now: @escaping () -> Date = Date.init)
-AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public static let system =
+AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public static let system = makeSystemRegistry()
 AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public var hasText: Bool
 AutoMobilePrototypeAgentCore/AutoMobilePrototypeCapabilities.swift: public enum AutoMobilePrototypeCapabilities
 AutoMobilePrototypeAgentCore/AutoMobilePrototypeCapabilities.swift: public static let supported: [String] = PrototypeAgentProtocol.advertisedCapabilities()

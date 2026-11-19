@@ -172,7 +172,11 @@ public final class PrototypePlatformRegistry {
         return "The notifications platform module requires the standalone iOS Prototype Viewer. Use prototype save with an icon to install the per-prototype Viewer app."
     }
 
-    public var capabilities: [String] { Set(modules.values.map(\.capability)).sorted() }
+    public var capabilities: [String] {
+        Set(modules.values.flatMap { module in
+            (module as? PrototypeNotificationsModule)?.capabilities ?? [module.capability]
+        }).sorted()
+    }
 
     // Production membership lives here so pure core tests exercise the same factories as UIKit.
     static func feedbackModules(

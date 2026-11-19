@@ -129,7 +129,7 @@ fields identified by secure metadata, always redact their values.
 | `listDeviceImages`            | pass              |                                                                                                                                                  |
 | `listDevices`                 | pass              | Filters with `platform: "tvos"`.                                                                                                                 |
 | `manufacturerProfile`         | refused-by-design | Android-only.                                                                                                                                    |
-| `measureStartup`              | refused-by-design | Android-only.                                                                                                                                    |
+| `measureStartup`              | refused-by-design | Available on Android and iOS Simulator.                                                                                                          |
 | `mediaSession`                | refused-by-design | Android-only.                                                                                                                                    |
 | `mockNetwork`                 | not-supported     |                                                                                                                                                  |
 | `multiTouch`                  | refused-by-design | No touch surface.                                                                                                                                |

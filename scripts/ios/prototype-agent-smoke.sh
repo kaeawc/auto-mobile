@@ -28,8 +28,10 @@
 #   PROTOTYPE_SMOKE_LOG_DIR            output dir (default scratch/prototype-agent-smoke/ios-<version>)
 #   PROTOTYPE_SMOKE_BUILD_SCRIPT       dylib build script (default: prototype-agent-build.sh beside this)
 #   PROTOTYPE_SMOKE_DRIVER             host driver command (default: bun prototype-agent-demo.ts)
-#   PROTOTYPE_SMOKE_DEVICE_TYPE        simulator device type identifier (default: newest iPhone the
-#                                    runtime supports)
+#   PROTOTYPE_SMOKE_DEVICE_TYPE        simulator device type identifier (default: the highest-numbered
+#                                    iPhone the runtime supports; unnumbered multi-display types such
+#                                    as iPhone Duo sort first, since `simctl io screenshot` needs
+#                                    --display on them)
 #   PROTOTYPE_SMOKE_PORT               TCP port (default: a free random port in 20000-59999)
 #   PROTOTYPE_SMOKE_BOOT_TIMEOUT       seconds for bootstatus (default 600)
 #   PROTOTYPE_SMOKE_CONNECT_ATTEMPTS   agent status polls after launch (default 20)
@@ -108,6 +110,8 @@ fi
 runtime_line="$(printf '%s' "${runtimes_json}" | jq -r --arg p "${prefix}" '
   [.runtimes[]
     | select(.isAvailable != false)
+    # Skip device-specific runtimes such as iOS-27-2-iPhone19-4 (iPhone Duo only).
+    | select(.identifier | test("\\.iOS-[0-9-]+-[A-Za-z]") | not)
     | select($p == "" or .version == $p or (.version | startswith($p + ".")))]
   | sort_by(.version | split(".") | map(tonumber? // 0))
   | last // empty
@@ -130,7 +134,9 @@ device_type="${PROTOTYPE_SMOKE_DEVICE_TYPE:-}"
 if [[ -z ${device_type} ]]; then
   device_type="$(printf '%s' "${runtimes_json}" | jq -r --arg id "${runtime_id}" '
     [.runtimes[] | select(.identifier == $id) | .supportedDeviceTypes[]
-      | select(.productFamily == "iPhone")] | last // empty | .identifier')"
+      | select(.productFamily == "iPhone")
+      | . + {gen: ([(.name // "") | match("iPhone ([0-9]+)") | .captures[0].string | tonumber][0] // 0)}]
+    | sort_by(.gen) | last // empty | .identifier')"
 fi
 if [[ -z ${device_type} ]]; then
   echo "prototype-agent-smoke: runtime ${runtime_id} lists no iPhone device type" >&2

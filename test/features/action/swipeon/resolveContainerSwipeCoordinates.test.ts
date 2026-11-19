@@ -338,3 +338,47 @@ describe("iOS drag-handle containers", () => {
     expect(result.warning).toContain("swipe started in the navigation bar");
   });
 });
+
+describe("Android container under the status bar (#18646)", () => {
+  // Row bounds and screen from mt0097a: the `Latte` row of a fullscreen
+  // prototype overlay sits at [0,0][1080,147], above the `Mocha` row (147..294).
+  const latte = containerElement(bounds(0, 0, 1080, 147));
+  const androidObservation = (top: number): ObserveResult => {
+    const fixture = loadAndroidHomeObserve().observe;
+    return { ...fixture, systemInsets: { top, right: 0, bottom: 0, left: 0 } };
+  };
+  const resolve = (top: number, includeSystemInsets?: boolean) => {
+    const fixture = androidObservation(top);
+    return resolveContainerSwipeCoordinates({
+      geometry,
+      overlayDetector: noOverlayAnalyzer,
+      options: { direction: "left", includeSystemInsets } as SwipeOnResolvedOptions,
+      viewHierarchy: fixture.viewHierarchy!,
+      containerElement: latte,
+      observeResult: fixture,
+      platform: "android",
+    });
+  };
+
+  test("refuses a row entirely inside the top inset instead of swiping the next row", () => {
+    // A 167 px top inset clamps the row to the inverted band 167..147, whose
+    // midpoint is the observed y=157 inside `Mocha`.
+    expect(() => resolve(167)).toThrow(/includeSystemInsets: true/);
+  });
+
+  test("swipes the visible slice of a row the status bar mostly covers", () => {
+    const result = resolve(136);
+    for (const y of [result.startY, result.endY]) {
+      expect(y).toBeGreaterThanOrEqual(136);
+      expect(y).toBeLessThan(147);
+    }
+    expect(result.warning).toMatch(/includeSystemInsets: true/);
+  });
+
+  test("swipes inside the row when includeSystemInsets is true", () => {
+    const result = resolve(167, true);
+    expect(result.startY).toBe(73);
+    expect(result.endY).toBe(73);
+    expect(result.warning).toBeUndefined();
+  });
+});

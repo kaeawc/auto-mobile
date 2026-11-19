@@ -54,7 +54,9 @@ them. Status, inspect, patch conflicts and events omit secure state values, incl
 payload values. Storage reports add optional `secure: [{key, present, bytes}]` metadata for
 persisted values. Neither values nor ciphertext appear in reports or runtime warnings.
 
-Secure keys cannot leave through an emit `context`. Requests may reference them only with
+Secure keys cannot leave through an emit `context`. Host validation also refuses a `{state}` value
+that reads one in `setData`, `appendData`, `upsertData` or `prependData`, which would copy it into
+`/data`, its change event and any stored data key. Requests may reference them only with
 `allowSecureInRequest: true`; otherwise validation refuses state bindings and text placeholders
 in URLs, headers, query values and bodies. See [request bindings](prototype-ux-request.md).
 

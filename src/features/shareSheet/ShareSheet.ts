@@ -15,7 +15,10 @@ import {
 } from "../action/coordinateTapDispatch";
 import { ORDINARY_TAP_DURATION_MS } from "../action/gestureTransportTimeout";
 import { inputOnDisplay } from "../action/pressButtonDisplay";
+import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
+import type { HierarchyCapture, HierarchyCaptureRequest } from "../observe/HierarchyCapture";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
+import { isSessionlessDeviceRead } from "../toolSelection/toolSelectionContext";
 import { CHOOSER_SCAN_PAGES, swipeChooserList } from "../utility/chooserHierarchy";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -45,6 +48,67 @@ interface IosShareSheetDevice {
   tap(point: Point, frameContext?: string, signal?: AbortSignal): Promise<void>;
 }
 
+type AndroidSheet = NonNullable<ReturnType<typeof extractAndroidShareSheet>>;
+type AndroidShareRow = AndroidSheet["rows"][number];
+interface AndroidSheetPage {
+  hierarchy: ViewHierarchyResult;
+  sheet: AndroidSheet;
+}
+
+const AMBIGUITY_GUIDANCE = "Use a unique label or verified appId.";
+const SCROLL_TOLERANCE_PX = 2;
+
+function targetKey({ label, appId, kind }: ShareTarget): string {
+  return JSON.stringify([label, appId ?? null, kind]);
+}
+
+function uniqueRowsByKey(sheet: AndroidSheet): Map<string, AndroidShareRow> {
+  const counts = new Map<string, AndroidShareRow[]>();
+  for (const row of sheet.rows) {
+    const key = targetKey(row.target);
+    counts.set(key, [...(counts.get(key) ?? []), row]);
+  }
+  return new Map(
+    [...counts].filter(([, rows]) => rows.length === 1).map(([key, [row]]) => [key, row]),
+  );
+}
+
+/**
+ * True when `match` on the page after a scroll is the previous page's match carried along
+ * by the scroll (viewport overlap) or pinned in place, rather than another row with the
+ * same label. The scroll distance comes from the other rows visible on both pages.
+ */
+function isSameRowAfterScroll(
+  previous: { sheet: AndroidSheet; match?: AndroidShareRow },
+  sheet: AndroidSheet,
+  match: AndroidShareRow,
+): boolean {
+  const key = targetKey(match.target);
+  const old = previous.match?.element.bounds;
+  if (
+    !previous.match ||
+    !old ||
+    targetKey(previous.match.target) !== key ||
+    Math.abs(old.left - match.element.bounds.left) > SCROLL_TOLERANCE_PX
+  ) {
+    return false;
+  }
+  const moved = old.top - match.element.bounds.top;
+  // Copy and other actions can sit outside the scrolling list.
+  if (moved === 0 && match.target.kind === "action") {
+    return true;
+  }
+  const before = uniqueRowsByKey(previous.sheet);
+  return [...uniqueRowsByKey(sheet)].some(([otherKey, row]) => {
+    const old = before.get(otherKey);
+    return (
+      otherKey !== key &&
+      old !== undefined &&
+      Math.abs(old.element.bounds.top - row.element.bounds.top - moved) <= SCROLL_TOLERANCE_PX
+    );
+  });
+}
+
 export type IosShareSheetClientFactory = (device: BootedDevice) => IosCoordinateTapClient;
 
 interface ShareSheetResult {
@@ -55,12 +119,45 @@ interface ShareSheetResult {
   selected?: ShareTarget;
 }
 
-function androidShareSheetDevice(device: BootedDevice): AndroidShareSheetDevice {
+export type ShareSheetCaptureFactory = (device: BootedDevice) => HierarchyCapture;
+
+/**
+ * A sessionless `list` (#10830) reads through the isolated observer capture, so a caller that
+ * does not hold the device only connects to a running hierarchy service and never drives the
+ * holder's resident client into its runner or service setup.
+ */
+async function observerRead(
+  device: BootedDevice,
+  captureFactory: ShareSheetCaptureFactory,
+  request: Pick<HierarchyCaptureRequest, "minTimestamp" | "timeoutMs" | "signal">,
+): Promise<ViewHierarchyResult> {
+  const snapshot = await captureFactory(device).capture({
+    freshness: "fresh",
+    observerMode: true,
+    ...request,
+  });
+  return snapshot.hierarchy;
+}
+
+function androidShareSheetDevice(
+  device: BootedDevice,
+  captureFactory: ShareSheetCaptureFactory,
+): AndroidShareSheetDevice {
   const adb = defaultAdbClientFactory.create(device);
-  const hierarchy = new ViewHierarchy(device);
+  const hierarchy = isSessionlessDeviceRead() ? undefined : new ViewHierarchy(device);
   return {
     platform: "android",
     async read(minTimestamp, signal) {
+      if (!hierarchy) {
+        // The observer capture's "fresh" request supplies its own freshness proof.
+        const capture = await observerRead(device, captureFactory, {
+          minTimestamp,
+          timeoutMs: 3000,
+          signal,
+        });
+        requireFreshCapture(capture, minTimestamp);
+        return capture;
+      }
       const floor =
         minTimestamp ?? (await adb.getDeviceTimestampMsWithSource(3000, signal)).timestampMs;
       throwIfAborted(signal);
@@ -84,12 +181,16 @@ function androidShareSheetDevice(device: BootedDevice): AndroidShareSheetDevice 
 
 function iosShareSheetDevice(
   device: BootedDevice,
+  captureFactory: ShareSheetCaptureFactory,
   iosClientFactory?: IosShareSheetClientFactory,
 ): IosShareSheetDevice {
-  const hierarchy = new ViewHierarchy(device);
+  const hierarchy = isSessionlessDeviceRead() ? undefined : new ViewHierarchy(device);
   return {
     platform: "ios",
     async read(signal) {
+      if (!hierarchy) {
+        return observerRead(device, captureFactory, { minTimestamp: defaultTimer.now(), signal });
+      }
       const capture = await hierarchy.getViewHierarchy(undefined, {
         minTimestamp: defaultTimer.now(),
         skipWaitForFresh: true,
@@ -120,6 +221,7 @@ export class ShareSheet {
     private readonly device: BootedDevice,
     private readonly io?: AndroidShareSheetDevice | IosShareSheetDevice,
     private readonly iosClientFactory?: IosShareSheetClientFactory,
+    private readonly captureFactory: ShareSheetCaptureFactory = createDeviceHierarchyCapture,
   ) {}
 
   async execute(request: ShareSheetRequest, signal?: AbortSignal): Promise<ShareSheetResult> {
@@ -144,11 +246,14 @@ export class ShareSheet {
       const io =
         this.io?.platform === "ios"
           ? this.io
-          : iosShareSheetDevice(this.device, this.iosClientFactory);
+          : iosShareSheetDevice(this.device, this.captureFactory, this.iosClientFactory);
       return this.executeIos(io, request, signal);
     }
 
-    const io = this.io?.platform === "android" ? this.io : androidShareSheetDevice(this.device);
+    const io =
+      this.io?.platform === "android"
+        ? this.io
+        : androidShareSheetDevice(this.device, this.captureFactory);
     return this.executeAndroid(io, request, signal);
   }
 
@@ -224,56 +329,108 @@ export class ShareSheet {
 
   private async select(
     io: AndroidShareSheetDevice,
-    initial: { hierarchy: ViewHierarchyResult; sheet: ReturnType<ShareSheet["requireSheet"]> },
+    initial: AndroidSheetPage,
     { appId, label }: Pick<ShareSheetRequest, "appId" | "label">,
     signal?: AbortSignal,
   ): Promise<ShareTarget> {
-    let { hierarchy, sheet } = initial;
     const selector = appId ?? label;
-    for (let page = 0; page < CHOOSER_SCAN_PAGES; page++) {
+    const pageMatch = (sheet: AndroidSheet): AndroidShareRow | undefined => {
       const matches = sheet.rows.filter(({ target, primaryLabel }) =>
         appId !== undefined
           ? target.appId === appId
           : target.label === label || primaryLabel === label,
       );
       if (matches.length > 1) {
-        throw ambiguousTarget(selector, matches, "Use a unique label or verified appId.");
+        throw ambiguousTarget(selector, matches, AMBIGUITY_GUIDANCE);
       }
-      const match = matches[0];
+      return matches[0];
+    };
+
+    const scan = await this.scanForMatch(io, initial, { pageMatch, selector }, signal);
+    // Every matching row in the scanned list is the one candidate. The forward scan may
+    // have moved it off screen, so scroll back until it reappears.
+    let current = scan.last;
+    for (let back = 0; ; back++) {
+      const match = pageMatch(current.sheet);
       if (match) {
         const { x, y } = this.geometry.getElementCenter(match.element);
-        await this.sendInput(io, hierarchy, ["tap", String(x), String(y)], signal);
+        await this.sendInput(io, current.hierarchy, ["tap", String(x), String(y)], signal);
         return match.target;
       }
-      if (page === CHOOSER_SCAN_PAGES - 1) {
-        break;
+      const previous =
+        back < scan.swipes ? await this.swipeList(io, current, "down", signal) : null;
+      if (!previous) {
+        throw new ActionableError(
+          `Share target ${JSON.stringify(selector)} was no longer visible after scanning the list. Reopen the share sheet from the app and retry.`,
+        );
       }
-      const fresh = await swipeChooserList(hierarchy, sheet.list.bounds, {
-        signal,
-        swipe: (args, signal) => io.input(args, hierarchy.displayId ?? undefined, signal),
-        read: (minTimestamp, signal) => io.read(minTimestamp, signal),
-        validate: (next, minTimestamp) => {
-          requireFreshCapture(next, minTimestamp);
-          if (
-            next.packageName !== hierarchy.packageName ||
-            (next.displayId ?? undefined) !== (hierarchy.displayId ?? undefined)
-          ) {
-            throw new ActionableError(
-              "The Android share sheet changed while scrolling. Reopen it from the app and retry.",
-            );
-          }
-        },
-      });
-      if (!fresh) {
-        break;
-      }
-      hierarchy = fresh;
-      sheet = this.requireSheet(hierarchy);
+      current = previous;
     }
+  }
 
-    throw new ActionableError(
-      `No share target matches ${JSON.stringify(selector)}. Run shareSheet list to see current labels and verified appIds.`,
-    );
+  /**
+   * Scans every page before anything is tapped, so a same-label target further down the
+   * list is refused as ambiguous instead of the first page's match being tapped (#14246).
+   */
+  private async scanForMatch(
+    io: AndroidShareSheetDevice,
+    initial: AndroidSheetPage,
+    {
+      pageMatch,
+      selector,
+    }: { pageMatch: (sheet: AndroidSheet) => AndroidShareRow | undefined; selector?: string },
+    signal?: AbortSignal,
+  ): Promise<{ last: AndroidSheetPage; swipes: number }> {
+    const candidates: AndroidShareRow[] = [];
+    let current = initial;
+    let previous: { sheet: AndroidSheet; match?: AndroidShareRow } | undefined;
+    for (let page = 0; ; page++) {
+      const match = pageMatch(current.sheet);
+      if (match && !(previous && isSameRowAfterScroll(previous, current.sheet, match))) {
+        candidates.push(match);
+      }
+      if (candidates.length > 1) {
+        throw ambiguousTarget(selector, candidates, AMBIGUITY_GUIDANCE);
+      }
+      previous = { sheet: current.sheet, match };
+      const next =
+        page < CHOOSER_SCAN_PAGES - 1 ? await this.swipeList(io, current, "up", signal) : null;
+      if (!next) {
+        if (candidates.length === 0) {
+          throw new ActionableError(
+            `No share target matches ${JSON.stringify(selector)}. Run shareSheet list to see current labels and verified appIds.`,
+          );
+        }
+        return { last: current, swipes: page };
+      }
+      current = next;
+    }
+  }
+
+  private async swipeList(
+    io: AndroidShareSheetDevice,
+    { hierarchy, sheet }: AndroidSheetPage,
+    direction: "up" | "down",
+    signal?: AbortSignal,
+  ): Promise<AndroidSheetPage | null> {
+    const fresh = await swipeChooserList(hierarchy, sheet.list.bounds, {
+      direction,
+      signal,
+      swipe: (args, signal) => io.input(args, hierarchy.displayId ?? undefined, signal),
+      read: (minTimestamp, signal) => io.read(minTimestamp, signal),
+      validate: (next, minTimestamp) => {
+        requireFreshCapture(next, minTimestamp);
+        if (
+          next.packageName !== hierarchy.packageName ||
+          (next.displayId ?? undefined) !== (hierarchy.displayId ?? undefined)
+        ) {
+          throw new ActionableError(
+            "The Android share sheet changed while scrolling. Reopen it from the app and retry.",
+          );
+        }
+      },
+    });
+    return fresh ? { hierarchy: fresh, sheet: this.requireSheet(fresh) } : null;
   }
 
   private requireSheet(hierarchy: ViewHierarchyResult) {

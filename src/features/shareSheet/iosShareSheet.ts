@@ -94,6 +94,9 @@ function exposedDismissPoint(
     { ...bounds, top: Math.max(bounds.top, sheet.bounds.bottom) },
     { ...bounds, right: Math.min(bounds.right, sheet.bounds.left) },
     { ...bounds, left: Math.max(bounds.left, sheet.bounds.right) },
-  ].find((area) => boundsArea(area) > 0);
-  return exposed && geometry.getElementCenter({ ...dismiss, bounds: exposed });
+  ]
+    .filter((area) => boundsArea(area) > 0)
+    .map((area) => geometry.getElementCenter({ ...dismiss, bounds: area }));
+  // A one-point strip rounds onto the sheet's inclusive edge, which would tap the sheet.
+  return exposed.find((point) => !geometry.isPointInElement(sheet, point.x, point.y));
 }

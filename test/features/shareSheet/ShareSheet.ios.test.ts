@@ -7,6 +7,11 @@ import type {
   ViewHierarchyNode,
   ViewHierarchyResult,
 } from "../../../src/models";
+import type {
+  HierarchyCaptureRequest,
+  HierarchySnapshot,
+} from "../../../src/features/observe/HierarchyCapture";
+import { runWithToolSelectionContext } from "../../../src/features/toolSelection/toolSelectionContext";
 import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import { getStructuredField, type StructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -135,6 +140,43 @@ describe("iOS share sheet", () => {
     const { tool, taps } = makeShareSheet(expanded);
     await tool.execute({ action: "dismiss" });
     expect(taps).toEqual([{ point: { x: 201, y: 150 }, frameContext: ios26.frameContext }]);
+  });
+
+  test("does not tap a one-point exposed strip that rounds onto the sheet edge", async () => {
+    const nearlyCovered = structuredClone(ios26);
+    // The popup region is [0,0,402,874]; only the strip [873,874) stays exposed below the sheet.
+    nodeAttributes(findNode(nearlyCovered, "ShareSheet.RemoteContainerView")).bounds = [
+      0, 0, 402, 873,
+    ];
+    const { tool, taps } = makeShareSheet(nearlyCovered);
+    await expect(tool.execute({ action: "dismiss" })).rejects.toThrow(
+      /no tappable "dismiss popup" region/,
+    );
+    expect(taps).toEqual([]);
+  });
+
+  test("lists a sessionless device read through the connect-only observer capture", async () => {
+    const requests: HierarchyCaptureRequest[] = [];
+    const tool = new ShareSheet(device, undefined, undefined, () => ({
+      async capture(request) {
+        requests.push(request);
+        const snapshot: HierarchySnapshot = {
+          captureId: "observer-read",
+          platform: "ios",
+          requestedFreshness: request.freshness,
+          receivedAt: 0,
+          hierarchy: ios26,
+          nodes: [],
+        };
+        return snapshot;
+      },
+    }));
+    const result = await runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
+      tool.execute({ action: "list" }),
+    );
+    expect(result.targets?.map(({ label }) => label)).toContain("Playground");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ freshness: "fresh", observerMode: true });
   });
 
   test("reports a missing popup dismiss region without tapping", async () => {

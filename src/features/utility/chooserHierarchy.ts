@@ -1,6 +1,7 @@
-import { ViewHierarchyResult } from "../../models";
+import type { ElementBounds, ExecResult, ViewHierarchyResult } from "../../models";
 import { type ViewHierarchyNode } from "../../models/ViewHierarchyResult";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { logger } from "../../utils/logger";
 import { textOrDescription, toSearchable } from "./SearchableNode";
 
@@ -93,4 +94,45 @@ export function detectIntentChooser(
     logger.warn(`[DeepLinkManager] Error detecting intent chooser: ${error}`);
     return false;
   }
+}
+
+export const CHOOSER_SCAN_PAGES = 4;
+
+interface ChooserSwipe {
+  direction?: "up" | "down";
+  capturedAt?: number;
+  signal?: AbortSignal;
+  swipe(args: string[], signal?: AbortSignal): Promise<Pick<ExecResult, "stderr" | "error">>;
+  read(minTimestamp: number, signal?: AbortSignal): Promise<ViewHierarchyResult>;
+  validate(hierarchy: ViewHierarchyResult, minTimestamp: number): void;
+}
+
+/** Moves a chooser viewport and returns a refreshed tree when the swipe changed it. */
+export async function swipeChooserList(
+  current: ViewHierarchyResult,
+  bounds: ElementBounds | undefined,
+  { direction = "up", capturedAt, signal, swipe, read, validate }: ChooserSwipe,
+): Promise<ViewHierarchyResult | null> {
+  if (!bounds || bounds.bottom - bounds.top < 40) {
+    return null;
+  }
+  const centerX = Math.round((bounds.left + bounds.right) / 2);
+  const height = bounds.bottom - bounds.top;
+  const lowerY = Math.round(bounds.bottom - height / 4);
+  const upperY = Math.round(bounds.top + height / 4);
+  const [fromY, toY] = direction === "up" ? [lowerY, upperY] : [upperY, lowerY];
+  throwIfAborted(signal);
+  const result = await awaitWhileRequestIsLive(
+    swipe(["swipe", String(centerX), String(fromY), String(centerX), String(toY), "350"], signal),
+    signal,
+  );
+  const failure = result.error || result.stderr?.trim();
+  if (failure) {
+    throw new Error(`Could not scroll chooser app list: ${failure}`);
+  }
+  const minTimestamp = Math.max(current.updatedAt ?? 0, capturedAt ?? 0) + 1;
+  throwIfAborted(signal);
+  const fresh = await awaitWhileRequestIsLive(read(minTimestamp, signal), signal);
+  validate(fresh, minTimestamp);
+  return JSON.stringify(fresh.hierarchy) === JSON.stringify(current.hierarchy) ? null : fresh;
 }

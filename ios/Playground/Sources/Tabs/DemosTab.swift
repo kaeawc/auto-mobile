@@ -184,6 +184,15 @@ struct DemosTab: View {
                         StatusSheetDemo()
                     }
 
+                    ShareLink(item: "AutoMobile share sheet demo") {
+                        DemoRow(
+                            title: "Share Text",
+                            description: "Opens the system share sheet",
+                            icon: "square.and.arrow.up"
+                        )
+                    }
+                    .accessibilityIdentifier("open_share_sheet")
+
                     NavigationLink {
                         UIKitSemanticLinksDemo()
                     } label: {

@@ -409,6 +409,12 @@ function directToolMutations(
           args.action === "paste" ? "focused-field" : "device",
         ),
       ];
+    case "shareSheet":
+      return (platform === "android" || platform === "ios") &&
+        args.action === "select" &&
+        typeof args.label === "string"
+        ? [mutation("clipboard")]
+        : [];
     case "openLink":
       return [mutation("opened-url", String(args.url))];
     default:

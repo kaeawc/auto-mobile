@@ -18,6 +18,7 @@ import type { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
 import type { DpadTapOnResult } from "../../features/action/DpadTapOn";
 import type { FocusNavigateTarget } from "../../features/action/FocusNavigate";
 import type { SetPosture } from "../../features/device/SetPosture";
+import type { IosShareSheetClientFactory } from "../../features/shareSheet/ShareSheet";
 import type { RealObserveScreen } from "../../features/observe/ObserveScreen";
 import type { BootedDevice, ObserveResult, OpenURLResult } from "../../models";
 import type { Timer } from "../../utils/SystemTimer";
@@ -90,6 +91,7 @@ export interface InteractionToolDependencies {
   openLinkChooserFactory?: (device: BootedDevice) => Pick<HandleIntentChooser, "execute">;
   shakeFactory?: (device: BootedDevice) => Pick<Shake, "execute">;
   recentAppsFactory?: (device: BootedDevice) => Pick<RecentApps, "execute">;
+  iosShareSheet?: IosShareSheetClientFactory;
   clipboardFactory?: (device: BootedDevice) => Pick<Clipboard, "execute">;
   wakeAndUnlockFactory?: (device: BootedDevice) => Pick<WakeAndUnlock, "execute">;
   keyboardProfile?: KeyboardProfileToolDependencies;

@@ -64,12 +64,14 @@ every runtime.
 A rule with `maxLimit` takes its bound from the named limit of the runtime's budget, and its literal
 `max` is the base value. The `list`, `appendData` and `upsertData` `maxItems` rules use it. Tool input
 and `specPath` files admit the large budget. A show then refuses a spec over the base budget on a
-runtime without the capability, and `requiredPrototypeCapabilities` lists the capability for such a
-spec, including one whose data action literal is over the base budget. On the device, the validator
-and the runtime's state and data writes check the runtime's own budget. The host mirrors device data
-writes and validates patches with the budget of the runtime the spec was shown on, and ProtoViewer's
-library store saves and reloads specs with ProtoViewer's budget. ProtoViewer bundles keep their own 1 MiB `spec.json` cap. The web library keeps the base
-budget and does not advertise the capability. See the
+runtime without the capability. `requiredPrototypeCapabilities` lists the capability for such a spec,
+including one whose data action literal is over the base budget.
+
+On the device, the validator and the runtime's state and data writes check the runtime's own budget.
+The host mirrors device data writes and validates patches with the budget of the runtime the spec was
+shown on. ProtoViewer's library store saves and reloads specs with ProtoViewer's budget. ProtoViewer
+bundles keep their own 1 MiB `spec.json` cap. The web library keeps the base budget and does not
+advertise the capability. See the
 [devlog entry](../../../devlog/2026-11-19-prototype-runtime-budgets.md).
 
 Stack-screen budgets (#14213). Renderers draw only a stack's top screen, so node and image bounds

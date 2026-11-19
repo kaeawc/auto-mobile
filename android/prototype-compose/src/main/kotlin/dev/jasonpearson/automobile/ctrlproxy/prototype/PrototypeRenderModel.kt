@@ -243,7 +243,20 @@ internal class PrototypeNodeMapping(
       data,
       state.mapValues { EmitContextResolver.scalar(it.value) },
     ),
+  /** Whether inserted values may carry a shield; null computes it from data, state and derived. */
+  private val shieldedInputs: Boolean? = null,
 ) {
+  private val inputsHaveBrace by lazy {
+    shieldedInputs
+      ?: (PrototypeTextShield.hasBrace(data) ||
+        derivedValues.values.any(PrototypeTextShield::hasBrace) ||
+        state.values.any { (it as? PrototypeScalar.Text)?.value?.contains('{') == true })
+  }
+  private var repeatItemsHaveBrace = false
+  /** Only then can a node hold a shield (#18628); other specs skip the unshield pass. */
+  private val mayShield: Boolean
+    get() = repeatItemsHaveBrace || inputsHaveBrace
+
   private val derivedState by lazy {
     derive
       .map { (name, entry) ->
@@ -266,6 +279,7 @@ internal class PrototypeNodeMapping(
     pagerState: Map<String, PrototypeScalar>? = null,
     staggerDelayMs: Int = 0,
   ): PrototypeRenderNode {
+    if (!repeatItemsHaveBrace && prototypeRepeatItemsHaveBrace(node)) repeatItemsHaveBrace = true
     val localState =
       derivedState +
         (if (node is PrototypePagerNode)
@@ -349,11 +363,12 @@ internal class PrototypeNodeMapping(
         node.safeAreaPadding,
         prototypeNodeIconName(node),
         children,
-        if (derive.isEmpty()) node
-        else
-          PrototypeDerivedText.bindNode(node) {
-            interpolatePrototypeText(it, derivedState, readLater = true)
-          },
+        (if (derive.isEmpty()) node
+          else
+            PrototypeDerivedText.bindNode(node) {
+              interpolatePrototypeText(it, derivedState, readLater = true)
+            })
+          .let { if (mayShield) PrototypeTextShield.unshieldNode(it) else it },
         path,
         (node as? PrototypePagerNode)?.let { pages[it.id] } ?: 0,
         selected.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
@@ -432,6 +447,7 @@ internal class PrototypeNodeMapping(
                   derive = derive,
                   derivedValues = derivedValues,
                   formatter = formatter,
+                  shieldedInputs = mayShield,
                 )
                 .map(
                   bindPrototypeListRow(list, item, index),
@@ -556,14 +572,14 @@ private fun prototypeNodeText(
       prototypePlainText(node) { interpolatePrototypeText(it, localState, inPager) }
     is PrototypeTextFieldNode -> (state[node.stateKey] as? PrototypeScalar.Text)?.value.orEmpty()
     is PrototypeSearchBarNode -> (state[node.stateKey] as? PrototypeScalar.Text)?.value.orEmpty()
-    is PrototypeSwitchNode -> PrototypeTextShield.unshield(node.label.orEmpty())
-    is PrototypeCheckboxNode -> PrototypeTextShield.unshield(node.label.orEmpty())
+    is PrototypeSwitchNode -> node.label.orEmpty()
+    is PrototypeCheckboxNode -> node.label.orEmpty()
     is PrototypePasteButtonNode -> "Paste"
     is PrototypeButtonNode ->
       interpolatePrototypeText(node.label, localState, inPager, derivedOnly = true)
-    is PrototypeListItemNode -> PrototypeTextShield.unshield(node.headline)
-    is PrototypeSliderNode -> PrototypeTextShield.unshield(node.label.orEmpty())
-    is PrototypeChipNode -> PrototypeTextShield.unshield(node.label)
+    is PrototypeListItemNode -> node.headline
+    is PrototypeSliderNode -> node.label.orEmpty()
+    is PrototypeChipNode -> node.label
     is PrototypeIconNode -> node.name
     is PrototypeFabNode ->
       interpolatePrototypeText(node.label.orEmpty(), localState, inPager, derivedOnly = true)

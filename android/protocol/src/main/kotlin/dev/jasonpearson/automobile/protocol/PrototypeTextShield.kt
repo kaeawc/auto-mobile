@@ -1,5 +1,11 @@
 package dev.jasonpearson.automobile.protocol
 
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+
 /**
  * Keeps an inserted value literal through every later placeholder scan (#18628). A data, row,
  * derived or state value is inserted into authored text before later passes read that text for
@@ -42,6 +48,37 @@ object PrototypeTextShield {
     }
     return out.toString()
   }
+
+  /**
+   * [node] with the shield removed from its own text fields, for the components and accessibility
+   * text that read those fields directly. Child nodes keep theirs until they are mapped.
+   */
+  fun unshieldNode(node: PrototypeNode): PrototypeNode {
+    val json = PrototypeSpecValidator.json
+    val encoded = json.encodeToJsonElement(PrototypeNode.serializer(), node).jsonObject
+    val replacements = mutableMapOf<String, JsonElement>()
+    PrototypeBindableFields.first<Boolean>(encoded, "") { value, path, kind ->
+      val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
+      if (kind == PrototypeBindableKind.TEXT && text != null && text.indexOf(MARK) >= 0)
+        replacements[path] = JsonPrimitive(unshield(text))
+      null
+    }
+    return if (replacements.isEmpty()) node
+    else
+      json.decodeFromJsonElement(
+        PrototypeNode.serializer(),
+        PrototypeRepeatKeyBindings.replace(encoded, "", replacements),
+      )
+  }
+
+  /** Whether any string in [element] holds a `{`, so a value inserted from it may be shielded. */
+  fun hasBrace(element: JsonElement?): Boolean =
+    when (element) {
+      is JsonPrimitive -> element.isString && element.content.indexOf('{') >= 0
+      is JsonObject -> element.values.any(::hasBrace)
+      is JsonArray -> element.any(::hasBrace)
+      else -> false
+    }
 
   /** Whether the joiners from [start] are followed by a key's first character. */
   private fun opensAfterMarks(text: String, start: Int): Boolean {

@@ -108,4 +108,37 @@ class PrototypeInsertedTextLiteralTest {
     assertEquals("{secret} LEAK", list.render(list.rows[0], 0).text)
     assertEquals("{derived:x} LEAK", list.render(list.rows[1], 1).text)
   }
+
+  private fun nodes(node: PrototypeRenderNode): List<PrototypeRenderNode> =
+    listOf(node) + node.children.flatMap(::nodes)
+
+  @Test
+  fun `components that read their own fields get the inserted value exactly`() {
+    val spec =
+      PrototypeSpec(
+        "fields",
+        window,
+        root =
+          PrototypeColumnNode(
+            repeat =
+              PrototypeRepeat(listOf(mapOf("label" to PrototypeScalar.Text("{secret}"))), "item"),
+            children =
+              listOf(
+                PrototypeSelectNode(
+                  testTag = "select",
+                  stateKey = "choice",
+                  options = listOf(PrototypeRadioOption("a", "{item.label}")),
+                ),
+                PrototypeListItemNode(testTag = "item", headline = "{item.label}"),
+              ),
+          ),
+        state = state,
+        data = data,
+      )
+    val mapped = nodes(mapPrototypeSpec(spec).root)
+    val select = mapped.single { it.testTag == "select" }.source as PrototypeSelectNode
+    assertEquals("{secret}", select.options.single().label)
+    val item = mapped.single { it.testTag == "item" }.source as PrototypeListItemNode
+    assertEquals("{secret}", item.headline)
+  }
 }

@@ -118,6 +118,12 @@ private fun PrototypeNode.repeatSpec(): PrototypeRepeat? =
     else -> null
   }
 
+/** Whether [node]'s literal repeat items hold a `{`, so its rows may insert shielded values. */
+internal fun prototypeRepeatItemsHaveBrace(node: PrototypeNode): Boolean =
+  node.repeatSpec()?.items.orEmpty().any { row ->
+    row.values.any { (it as? PrototypeScalar.Text)?.value?.contains('{') == true }
+  }
+
 internal fun prototypeRepeatDerivedName(node: PrototypeNode): String? =
   node.repeatSpec()?.itemsDerived
 
@@ -630,8 +636,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeListItemNode ->
       copy(
-        headline = instance.display(headline),
-        supporting = supporting?.let(instance::display),
+        headline = instance.interpolate(headline),
+        supporting = supporting?.let(instance::interpolate),
         enabledWhen = enabledWhen?.bound(instance),
         semantics = semantics,
         onAppear = onAppear,

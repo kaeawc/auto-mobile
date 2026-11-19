@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeSheetPlacement
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStrings
+import dev.jasonpearson.automobile.protocol.PrototypeTextShield
 import java.util.IdentityHashMap
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -143,6 +144,7 @@ internal class PrototypeRenderMapper(
             derive = resolved.derive.orEmpty(),
             derivedValues = derived.evaluate(resolved),
             formatter = derivedFormatter,
+            shieldedInputs = if (PrototypeTextShield.hasBrace(platform)) true else null,
             fillWindowRoot =
               resolved.window.placement is PrototypeFullscreenPlacement ||
                 resolved.window.placement is PrototypeSheetPlacement,

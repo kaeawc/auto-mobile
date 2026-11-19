@@ -213,9 +213,14 @@ export function isFloatingIosWindow(observation: ObserveResult | undefined): boo
   return fits.length > 0 && !fills;
 }
 
-/** The observation's reported rotation only, without the screen-shape fallback. */
+/**
+ * The runner's raw interface rotation only. `ObserveResult.rotation` is resolved through
+ * `resolveIosObserveRotation`, which synthesizes an axis from the window's shape when the runner
+ * reports none and overrides landscape on a portrait-shaped root; neither says anything about a
+ * floating window.
+ */
 function reportedIosOrientation(observation: ObserveResult | undefined): Orientation {
-  const rotation = observation?.rotation;
+  const rotation = observation?.viewHierarchy?.rotation;
   if (rotation === 0 || rotation === 2) {
     return "portrait";
   }
@@ -223,8 +228,8 @@ function reportedIosOrientation(observation: ObserveResult | undefined): Orienta
 }
 
 // A floating window keeps its size when the device rotates, so its unchanged size is no evidence
-// that the rotation failed. Only the reported interface rotation reaching the requested axis
-// confirms it: the size fallback reads the window's shape, so a missing rotation keeps the refusal.
+// that the rotation failed. Only the runner's raw interface rotation reaching the requested axis
+// confirms it, so a missing runner rotation keeps the refusal.
 function floatingWindowRotationConfirmed(
   result: RotateResult,
   requested: "portrait" | "landscape",

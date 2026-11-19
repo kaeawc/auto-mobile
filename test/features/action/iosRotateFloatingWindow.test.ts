@@ -5,6 +5,7 @@ import {
   restoreTargetIosOrientation,
   verifyIosRotation,
 } from "../../../src/features/action/iosRotateVerification";
+import { resolveIosObserveRotation } from "../../../src/features/observe/iosObserveRotation";
 import type { ObserveResult, RotateResult } from "../../../src/models";
 
 // Captured on an iPad Pro 13-inch (M5) simulator, iOS 26.5, Files floating in Windowed Apps
@@ -15,18 +16,21 @@ const RASTER = { width: 2064, height: 2752 };
 const NATIVE_SCALE = RASTER.width / 1032;
 const IPAD_LANDSCAPE_POINTS = { width: 1376, height: 1032 };
 
+// `runnerRotation` is the runner's raw hierarchy rotation; the observation's own rotation goes
+// through the same normalization as IosObservationCollector, which synthesizes an axis from the
+// window's shape when the runner reports none.
 const ipadObservation = (
-  rotation: number | undefined,
+  runnerRotation: number | undefined,
   screenSize: { width: number; height: number },
   overrides: Partial<ObserveResult> = {},
 ): ObserveResult => ({
   updatedAt: 1000,
   observationId: "ipad-observation",
   display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
-  rotation,
+  rotation: resolveIosObserveRotation(runnerRotation, screenSize),
   screenSize,
   screenshotImageSize: RASTER,
-  viewHierarchy: { hierarchy: {}, nativeScale: NATIVE_SCALE },
+  viewHierarchy: { hierarchy: {}, nativeScale: NATIVE_SCALE, rotation: runnerRotation },
   systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
   ...overrides,
 });
@@ -88,9 +92,11 @@ describe("iPad floating window rotate verification (#18829)", () => {
     expect(result.warning).toContain("changed from portrait to landscape");
   });
 
-  test("keeps the size refusal when the observed rotation did not reach the requested axis", () => {
+  test("keeps the size refusal when the runner reports no rotation after the rotate", () => {
     const previous = ipadObservation(0, FLOATING_WINDOW);
     const unknownAfter = ipadObservation(undefined, FLOATING_WINDOW);
+    // The normalized observation reads the 997x782 window's shape as landscape; that is no evidence.
+    expect(unknownAfter.rotation).toBe(1);
     const result = verifyIosRotation(runnerRotation(unknownAfter), "landscape", previous);
     expect(result).toMatchObject({ success: false, rotationPerformed: false });
     expect(result.error).toBe(UNCHANGED_SIZE_ERROR);
@@ -103,8 +109,10 @@ describe("iPad floating window rotate verification (#18829)", () => {
       "landscape",
       ipadObservation(0, fullScreen),
     );
+    // Normalization reconciles landscape on a portrait-shaped root to 0, so this is refused as a
+    // mismatch before the size check; either way a screen-sized app gets no floating bypass.
     expect(result).toMatchObject({ success: false, rotationPerformed: false });
-    expect(result.error).toBe(UNCHANGED_SIZE_ERROR);
+    expect(result.currentOrientation).toBe("portrait");
   });
 
   test("never treats a Duo panel as floating, so its refusals stay size-based", () => {

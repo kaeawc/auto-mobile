@@ -160,8 +160,8 @@ platform-call deadline. This module does not publish
 
 Android Activity hosts register `permissions` for `notifications`: ProtoViewer, disposable apps and
 CtrlProxy's SavedPrototypeActivity advertise the capability. A plain Activity without an
-ActivityResultRegistry and the CtrlProxy overlay omit it. See
-[ProtoViewer](../../protoviewer.md#31-standalone-unprivileged-apps) for camera and microphone.
+ActivityResultRegistry and the CtrlProxy overlay omit it. Camera and microphone: see
+[ProtoViewer](../../protoviewer.md#31-standalone-unprivileged-apps).
 The result is `{results: {<name>: <state>}}`; each result also updates `/platform/permissions/<name>`.
 Bound request lists must name declared permissions, just like literal lists. Only one request can be
 in flight per Activity; a second returns `too_many_in_flight`. A permission prompt waits for the user

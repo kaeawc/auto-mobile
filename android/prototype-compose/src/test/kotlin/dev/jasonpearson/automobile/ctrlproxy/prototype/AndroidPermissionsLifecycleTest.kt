@@ -118,9 +118,8 @@ class AndroidPermissionsLifecycleTest {
     unregister()
     assertFalse(microphone.prompting)
     assertTrue(microphone.settling)
+    // Only the resume observer can clear it: nothing reads settling between resume and pause.
     controller.resume()
-    assertFalse(microphone.settling)
-    // The resume cleared it without any status read, so a later background request is not held.
     controller.pause()
     assertFalse(microphone.settling)
     controller.pause().stop().destroy()

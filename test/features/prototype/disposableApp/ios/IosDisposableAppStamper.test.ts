@@ -145,7 +145,9 @@ describe("IosDisposableAppStamper", () => {
 
   test("falls back to the default Face ID string when the template has none", async () => {
     const { stamper, plist } = harness();
-    delete plist.value?.NSFaceIDUsageDescription;
+    plist.value = Object.fromEntries(
+      Object.entries(plist.value ?? {}).filter(([key]) => key !== "NSFaceIDUsageDescription"),
+    );
     const biometricSpec = { id: "f", requires: { platform: ["biometric"] } };
     await stamper.stamp({
       appId,

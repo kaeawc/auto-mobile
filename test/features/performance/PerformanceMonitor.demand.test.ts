@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, test } from "bun:test";
 import { createDaemonPerformanceDemandProbe } from "../../../src/features/performance/PerformanceDemandProbe";
 import type { PerformanceDemandProbe } from "../../../src/features/performance/PerformanceMonitorTypes";
@@ -11,6 +12,7 @@ import { SdkFrameMetricsStore } from "../../../src/features/performance/SdkFrame
 import { TelemetryPushSocketServer } from "../../../src/daemon/streams/telemetryPushSocketServer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSocket } from "../../fakes/FakeNetServer";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainUntilQuiescent } from "../../helpers/fakeTimerStepping";
 
@@ -44,6 +46,14 @@ class RecordingBuffer extends PerfWindowBuffer {
   }
 }
 
+const launchctlCapture = readFileSync(
+  new URL("../../fixtures/ios-sim-process-resolver/launchctl-list.txt", import.meta.url),
+  "utf8",
+);
+const simulatorA = "00547A72-3AAE-44FE-93DD-C6F46D071AE0";
+const simulatorB = "BBBBBBBB-0000-0000-0000-000000000002";
+const bundleId = "com.apple.Preferences";
+
 const monitors: PerformanceMonitor[] = [];
 function setup(demandProbe?: PerformanceDemandProbe) {
   const timer = new FakeTimer();
@@ -54,6 +64,9 @@ function setup(demandProbe?: PerformanceDemandProbe) {
   const probes: string[] = [];
   const pushes: LivePerformanceData[] = [];
   const ps: string[] = [];
+  const simCtl = new FakeSimctl();
+  simCtl.setCommandArgsResult(["spawn", simulatorA, "launchctl", "list"], launchctlCapture);
+  simCtl.setCommandArgsResult(["spawn", simulatorB, "launchctl", "list"], launchctlCapture);
   const monitor = new PerformanceMonitor(timer, {
     adbClientFactory: adb,
     demandProbe: demandProbe ?? {
@@ -62,6 +75,7 @@ function setup(demandProbe?: PerformanceDemandProbe) {
         return demanded.has(deviceId);
       },
     },
+    simCtlClientFactory: { create: () => simCtl },
     execFileAsync: async (file) => {
       ps.push(file);
       return { stdout: "", stderr: "" };
@@ -82,7 +96,7 @@ function setup(demandProbe?: PerformanceDemandProbe) {
   const registerFleet = () => {
     monitor.startMonitoring("android-a", "com.a", "android");
     monitor.startMonitoring("android-b", "com.b", "android");
-    monitor.startMonitoring("ios-a", "com.c", "ios");
+    monitor.startMonitoring(simulatorA, bundleId, "ios");
   };
   return {
     timer,
@@ -183,12 +197,12 @@ describe("PerformanceMonitor demand", () => {
     test(`all demand retains 312 adb and shared 30 ps/minute with ${iosCount} iOS devices`, async () => {
       const { adb, demanded, pushes, ps, advance, registerFleet, monitor } = setup();
       registerFleet();
-      for (const id of ["android-a", "android-b", "ios-a"]) {
+      for (const id of ["android-a", "android-b", simulatorA]) {
         demanded.add(id);
       }
       if (iosCount === 2) {
-        monitor.startMonitoring("ios-b", "com.d", "ios");
-        demanded.add("ios-b");
+        monitor.startMonitoring(simulatorB, bundleId, "ios");
+        demanded.add(simulatorB);
       }
       await advance(60000);
       console.log(

@@ -16,6 +16,7 @@ import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { LivePerformanceData } from "../../../src/daemon/streams/performancePushSocketServer";
 import { PerfWindowBuffer } from "../../../src/features/performance/PerfWindowBuffer";
 import { SdkFrameMetricsStore } from "../../../src/features/performance/SdkFrameMetricsStore";
+import { createIOSPerformanceProcessResolver } from "../../../src/features/performance/iosPerformanceProcessSnapshot";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -1204,10 +1205,6 @@ describe("PerformanceMonitor", () => {
 });
 
 /**
- * Fake SimCtl implementation for testing iOS monitoring.
- */
-
-/**
  * Fake SimCtlClientFactory for testing.
  */
 class FakeSimctlFactory implements SimCtlClientFactory {
@@ -1239,32 +1236,73 @@ function createFakeExecFileAsync(options: {
 }
 
 const IOS_PS_CAPTURE = readFileSync(
-  new URL("../../fixtures/ios-sim-fleet/ps-snapshot-two-booted-simulators.txt", import.meta.url),
+  new URL("../../fixtures/ios-sim-process-resolver/ps-rows.txt", import.meta.url),
   "utf8",
 );
-const IOS_APP_ROW = IOS_PS_CAPTURE.split("\n").find((line) => line.includes("Playground.app"))!;
+const IOS_LAUNCHCTL_CAPTURE = readFileSync(
+  new URL("../../fixtures/ios-sim-process-resolver/launchctl-list.txt", import.meta.url),
+  "utf8",
+);
+const IOS_SIMULATOR_ID = "00547A72-3AAE-44FE-93DD-C6F46D071AE0";
+const IOS_BUNDLE_ID = "com.apple.Preferences";
 
-/**
- * Build a realistic host process snapshot row for a simulator app process. Simulator
- * apps run as macOS processes whose command line is the app binary under the
- * device's CoreSimulator data container, so the line carries both the device
- * UDID and the bundle id — the two substrings the device-scoped matcher
- * requires (#5109).
- */
-function iosSimPsLine(opts: {
-  pid: number;
-  cpu: number;
-  rssKb: number;
-  deviceId: string;
-  bundleId: string;
-}): string {
-  return IOS_APP_ROW.replace(
-    "90012 90011 150000   1.2",
-    `${opts.pid} 90011 ${opts.rssKb} ${opts.cpu}`,
-  )
-    .replaceAll("2300914A-231E-4874-8F8A-40C3D2F1E24B", opts.deviceId)
-    .replaceAll("Playground", opts.bundleId);
-}
+describe("createIOSPerformanceProcessResolver", () => {
+  const launchctlArgs = ["spawn", IOS_SIMULATOR_ID, "launchctl", "list"];
+
+  it("joins a captured launchctl app PID to the host RSS and CPU row", async () => {
+    const simCtl = new FakeSimCtl();
+    simCtl.setCommandArgsResult(launchctlArgs, IOS_LAUNCHCTL_CAPTURE);
+    const resolveProcess = createIOSPerformanceProcessResolver(
+      async () => ({ stdout: IOS_PS_CAPTURE }),
+      new FakeSimctlFactory(simCtl),
+    );
+
+    expect(await resolveProcess(IOS_SIMULATOR_ID, IOS_BUNDLE_ID)).toMatchObject({
+      pid: 97462,
+      rssBytes: 486768 * 1024,
+      cpuPercent: 0,
+    });
+  });
+
+  it("returns null when the launchctl PID has no host ps row", async () => {
+    const simCtl = new FakeSimCtl();
+    simCtl.setCommandArgsResult(launchctlArgs, IOS_LAUNCHCTL_CAPTURE);
+    const resolveProcess = createIOSPerformanceProcessResolver(
+      async () => ({ stdout: IOS_PS_CAPTURE.split("\n")[0] }),
+      new FakeSimctlFactory(simCtl),
+    );
+
+    expect(await resolveProcess(IOS_SIMULATOR_ID, IOS_BUNDLE_ID)).toBeNull();
+  });
+
+  it("skips host ps when launchctl does not list the bundle or the lookup fails", async () => {
+    const simCtl = new FakeSimCtl();
+    simCtl.setCommandArgsResult(launchctlArgs, IOS_LAUNCHCTL_CAPTURE);
+    let snapshots = 0;
+    const resolveProcess = createIOSPerformanceProcessResolver(async () => {
+      snapshots++;
+      return { stdout: IOS_PS_CAPTURE };
+    }, new FakeSimctlFactory(simCtl));
+
+    expect(await resolveProcess(IOS_SIMULATOR_ID, "com.example.missing")).toBeNull();
+    simCtl.setCommandArgsError(launchctlArgs, new Error("simulator shut down"));
+    expect(await resolveProcess(IOS_SIMULATOR_ID, IOS_BUNDLE_ID)).toBeNull();
+    expect(snapshots).toBe(0);
+  });
+
+  it("skips simulator commands for a physical device", async () => {
+    const simCtl = new FakeSimCtl();
+    let snapshots = 0;
+    const resolveProcess = createIOSPerformanceProcessResolver(async () => {
+      snapshots++;
+      return { stdout: IOS_PS_CAPTURE };
+    }, new FakeSimctlFactory(simCtl));
+
+    expect(await resolveProcess("00008030-001C2D3E1234567A", IOS_BUNDLE_ID)).toBeNull();
+    expect(simCtl.getMethodCallCount("executeCommandArgs")).toBe(0);
+    expect(snapshots).toBe(0);
+  });
+});
 
 describe("PerformanceMonitor iOS", () => {
   let fakeTimer: FakeTimer;
@@ -1281,6 +1319,10 @@ describe("PerformanceMonitor iOS", () => {
     fakeAdbClient = new FakeAdbClient();
     fakeAdbFactory = new FakeAdbClientFactory(fakeAdbClient);
     fakeSimCtl = new FakeSimCtl();
+    fakeSimCtl.setCommandArgsResult(
+      ["spawn", IOS_SIMULATOR_ID, "launchctl", "list"],
+      IOS_LAUNCHCTL_CAPTURE,
+    );
     fakeSimCtlFactory = new FakeSimctlFactory(fakeSimCtl);
     fakePusher = new FakePerformancePusher();
     serverGetter = () => fakePusher;
@@ -1297,7 +1339,7 @@ describe("PerformanceMonitor iOS", () => {
   it("should collect iOS CPU metrics via the shared ps snapshot", async () => {
     // Set up fake ps snapshot response on the host
     const fakeExec = createFakeExecFileAsync({
-      stdout: `${iosSimPsLine({ pid: 12345, cpu: 15.5, rssKb: 89012, deviceId: "ios-device-1", bundleId: "com.example.iosapp" })}`,
+      stdout: IOS_PS_CAPTURE,
     });
 
     monitor = new PerformanceMonitor(fakeTimer, {
@@ -1307,21 +1349,21 @@ describe("PerformanceMonitor iOS", () => {
       execFileAsync: fakeExec,
     });
     monitor.start();
-    monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
+    monitor.startMonitoring(IOS_SIMULATOR_ID, IOS_BUNDLE_ID, "ios");
 
     await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
 
     const data = fakePusher.getLastPushedData();
     expect(data).toBeDefined();
-    expect(data!.deviceId).toBe("ios-device-1");
-    expect(data!.packageName).toBe("com.example.iosapp");
-    expect(data!.metrics.cpuUsagePercent).toBe(15.5);
+    expect(data!.deviceId).toBe(IOS_SIMULATOR_ID);
+    expect(data!.packageName).toBe(IOS_BUNDLE_ID);
+    expect(data!.metrics.cpuUsagePercent).toBe(0);
   });
 
   it("should collect iOS memory metrics via the shared ps snapshot (RSS)", async () => {
     // Set up fake ps snapshot response on the host
     const fakeExec = createFakeExecFileAsync({
-      stdout: `${iosSimPsLine({ pid: 12345, cpu: 5.0, rssKb: 102400, deviceId: "ios-device-1", bundleId: "com.example.iosapp" })}`,
+      stdout: IOS_PS_CAPTURE,
     });
 
     monitor = new PerformanceMonitor(fakeTimer, {
@@ -1331,26 +1373,19 @@ describe("PerformanceMonitor iOS", () => {
       execFileAsync: fakeExec,
     });
     monitor.start();
-    monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
+    monitor.startMonitoring(IOS_SIMULATOR_ID, IOS_BUNDLE_ID, "ios");
 
     // Advance enough for slow metrics (memory)
     await advanceTimeAndWait(fakeTimer, PerformanceMonitor.SLOW_INTERVAL_MS);
 
     const data = fakePusher.getLastPushedData();
     expect(data).toBeDefined();
-    // RSS is 102400 KB = 100 MB
-    expect(data!.metrics.memoryUsageMb).toBe(100);
+    expect(data!.metrics.memoryUsageMb).toBe(486768 / 1024);
   });
 
   it("should return null FPS/frame time for iOS (not available)", async () => {
     const fakeExec = createFakeExecFileAsync({
-      stdout: iosSimPsLine({
-        pid: 12345,
-        cpu: 5.0,
-        rssKb: 102400,
-        deviceId: "ios-device-1",
-        bundleId: "com.example.iosapp",
-      }),
+      stdout: IOS_PS_CAPTURE,
     });
 
     monitor = new PerformanceMonitor(fakeTimer, {
@@ -1360,7 +1395,7 @@ describe("PerformanceMonitor iOS", () => {
       execFileAsync: fakeExec,
     });
     monitor.start();
-    monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
+    monitor.startMonitoring(IOS_SIMULATOR_ID, IOS_BUNDLE_ID, "ios");
 
     await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
 
@@ -1377,10 +1412,10 @@ describe("PerformanceMonitor iOS", () => {
     it(`uses only fresh matching iOS SDK frames (${source}) while retaining app CPU/memory`, async () => {
       const store = new SdkFrameMetricsStore();
       const buffer = new PerfWindowBuffer();
-      const deviceId = "ios-device-1";
-      const bundleId = "com.example.iosapp";
+      const deviceId = IOS_SIMULATOR_ID;
+      const bundleId = IOS_BUNDLE_ID;
       const fakeExec = createFakeExecFileAsync({
-        stdout: iosSimPsLine({ pid: 12345, cpu: 5, rssKb: 102400, deviceId, bundleId }),
+        stdout: IOS_PS_CAPTURE,
       });
       if (source !== "missing") {
         store.ingest(
@@ -1406,8 +1441,8 @@ describe("PerformanceMonitor iOS", () => {
       monitor.startMonitoring(deviceId, bundleId, "ios");
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
       const metrics = fakePusher.getLastPushedData()!.metrics;
-      expect(metrics.cpuUsagePercent).toBe(5);
-      expect(metrics.memoryUsageMb).toBe(100);
+      expect(metrics.cpuUsagePercent).toBe(0);
+      expect(metrics.memoryUsageMb).toBe(486768 / 1024);
       expect(metrics.fps).toBe(source === "fresh" ? 42 : null);
       expect(metrics.frameTimeMs).toBe(source === "fresh" ? 23.8 : null);
       expect(metrics.jankFrames).toBe(source === "fresh" ? 3 : null);
@@ -1418,7 +1453,6 @@ describe("PerformanceMonitor iOS", () => {
   }
 
   it("should handle iOS process not found gracefully", async () => {
-    // The captured host snapshot does not include our bundle ID
     const fakeExec = createFakeExecFileAsync({
       stdout: IOS_PS_CAPTURE,
     });
@@ -1430,7 +1464,7 @@ describe("PerformanceMonitor iOS", () => {
       execFileAsync: fakeExec,
     });
     monitor.start();
-    monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
+    monitor.startMonitoring(IOS_SIMULATOR_ID, "com.example.missing", "ios");
 
     await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
 
@@ -1452,7 +1486,7 @@ describe("PerformanceMonitor iOS", () => {
       execFileAsync: fakeExec,
     });
     monitor.start();
-    monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
+    monitor.startMonitoring(IOS_SIMULATOR_ID, IOS_BUNDLE_ID, "ios");
 
     await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
 
@@ -1462,16 +1496,18 @@ describe("PerformanceMonitor iOS", () => {
   });
 
   it("scopes iOS metrics per simulator when two sims run the same bundle (#5109)", async () => {
-    // Same bundle booted on two simulators. The host process snapshot lists both
-    // processes; each app line carries its own simulator UDID in the
-    // CoreSimulator data-container path. Metrics must be scoped by deviceId,
-    // not resolved to the first matching process.
-    const bundleId = "com.example.iosapp";
-    const udidA = "AAAAAAAA-0000-0000-0000-000000000001";
+    const udidA = IOS_SIMULATOR_ID;
     const udidB = "BBBBBBBB-0000-0000-0000-000000000002";
+    fakeSimCtl.setCommandArgsResult(
+      ["spawn", udidB, "launchctl", "list"],
+      IOS_LAUNCHCTL_CAPTURE.replace("97462\t", "97463\t"),
+    );
+    const secondAppRow = IOS_PS_CAPTURE.split("\n")[1].replace(
+      "97462 96106 486768   0.0",
+      "97463 96107 204800   22.0",
+    );
     const fakeExec = createFakeExecFileAsync({
-      stdout: `${iosSimPsLine({ pid: 111, cpu: 11.0, rssKb: 51200, deviceId: udidA, bundleId })}
-${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId })}`,
+      stdout: IOS_PS_CAPTURE + secondAppRow,
     });
 
     monitor = new PerformanceMonitor(fakeTimer, {
@@ -1481,8 +1517,8 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
       execFileAsync: fakeExec,
     });
     monitor.start();
-    monitor.startMonitoring(udidA, bundleId, "ios");
-    monitor.startMonitoring(udidB, bundleId, "ios");
+    monitor.startMonitoring(udidA, IOS_BUNDLE_ID, "ios");
+    monitor.startMonitoring(udidB, IOS_BUNDLE_ID, "ios");
 
     // Advance far enough to also collect the slow-interval memory metric.
     await advanceTimeAndWait(fakeTimer, PerformanceMonitor.SLOW_INTERVAL_MS);
@@ -1493,9 +1529,8 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
 
     expect(dataA).toBeDefined();
     expect(dataB).toBeDefined();
-    // Each device gets its own process's CPU and RSS — not the first match's.
-    expect(dataA!.metrics.cpuUsagePercent).toBe(11.0);
-    expect(dataA!.metrics.memoryUsageMb).toBe(50); // 51200 KB
+    expect(dataA!.metrics.cpuUsagePercent).toBe(0);
+    expect(dataA!.metrics.memoryUsageMb).toBe(486768 / 1024);
     expect(dataB!.metrics.cpuUsagePercent).toBe(22.0);
     expect(dataB!.metrics.memoryUsageMb).toBe(200); // 204800 KB
   });

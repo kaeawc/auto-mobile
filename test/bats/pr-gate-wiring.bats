@@ -34,11 +34,12 @@ load yq-helpers
 @test "required gate jobs exist with stable context names" {
   require_mikefarah_yq
   local job expected
-  for job in ide-plugin-gate ios-build-gate shell-tests-gate; do
+  for job in ide-plugin-gate ios-build-gate shell-tests-gate ios-spm-root-package-gate; do
     case "$job" in
       ide-plugin-gate) expected="IDE Plugin" ;;
       ios-build-gate) expected="iOS Build" ;;
       shell-tests-gate) expected="Shell Tests" ;;
+      ios-spm-root-package-gate) expected="Build Root SPM Package" ;;
     esac
     run yq -r ".jobs.\"${job}\".name" "$WF"
     [ "$status" -eq 0 ]

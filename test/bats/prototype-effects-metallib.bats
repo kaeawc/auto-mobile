@@ -38,6 +38,19 @@ MOCK
   [[ "$output" == *"Metal Toolchain is not installed"* ]]
 }
 
+@test "fails fast on a self-hosted runner instead of downloading the Metal Toolchain" {
+  cat > "${MOCK_BIN}/xcodebuild" <<'MOCK'
+#!/usr/bin/env bash
+echo "xcodebuild $*" >> "$XCRUN_LOG"
+MOCK
+  chmod +x "${MOCK_BIN}/xcodebuild"
+  MOCK_NO_METAL=1 RUNNER_ENVIRONMENT=self-hosted DEVELOPER_DIR=/Applications/Xcode-27.2.0.app/Contents/Developer \
+    run bash "$SCRIPT" "$OUT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DEVELOPER_DIR=/Applications/Xcode-27.2.0.app/Contents/Developer xcodebuild -downloadComponent metalToolchain"* ]]
+  ! grep -q "downloadComponent" "$XCRUN_LOG"
+}
+
 @test "the shader source declares every function the renderer calls" {
   for name in pixelate chromaticAberration wave ripple noise gradientMesh; do
     grep -q "$name(" "${REPO_ROOT}/ios/prototype-agent/Shaders/PrototypeEffects.metal"

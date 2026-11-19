@@ -1,8 +1,12 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.os.Build
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
 import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
+import dev.jasonpearson.automobile.protocol.PrototypeCornerRadius
 import dev.jasonpearson.automobile.protocol.PrototypeFullscreenPlacement
 import dev.jasonpearson.automobile.protocol.PrototypeGlass
 import dev.jasonpearson.automobile.protocol.PrototypeModeValue
@@ -21,6 +25,23 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 class PrototypeGlassBackdropTest {
+  @Test
+  fun `glass without a cornerRadius is a capsule and other surfaces stay rectangles`() {
+    val shapes = androidx.compose.material3.Shapes()
+    assertEquals(
+      RoundedCornerShape(percent = 50),
+      prototypeSurfaceShape(shapes, PrototypeStyle(surface = "glass")),
+    )
+    assertEquals(RectangleShape, prototypeSurfaceShape(shapes, PrototypeStyle()))
+    assertEquals(
+      RoundedCornerShape(8.dp),
+      prototypeSurfaceShape(
+        shapes,
+        PrototypeStyle(surface = "glass", cornerRadius = PrototypeCornerRadius.Dp(8.0)),
+      ),
+    )
+  }
+
   @Test
   @Config(sdk = [30])
   fun `Android 11 glass uses the themed tonal scrim`() {

@@ -1619,7 +1619,8 @@ private fun prototypeNodeModifier(
       .prototypeEffectOverlay(effects, shape, effectElapsed)
       .prototypeEffectLayer(effects, effectElapsed)
   modifier = modifier.prototypeGlassSource(node.identity)
-  if (style.cornerRadius != null || style.cornerStyle != null) modifier = modifier.clip(shape)
+  if (style.cornerRadius != null || style.cornerStyle != null || style.surface == "glass")
+    modifier = modifier.clip(shape)
   modifier = modifier.prototypeGlassEffect(node.identity, style.glassMaterial())
   prototypeThemedColor(node.style.background, style.background)?.let {
     modifier = modifier.background(prototypeAnimatedColor(node, it), shape)

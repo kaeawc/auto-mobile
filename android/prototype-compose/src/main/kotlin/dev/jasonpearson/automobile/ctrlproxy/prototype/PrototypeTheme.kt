@@ -718,8 +718,18 @@ internal fun prototypeCornerShape(shapes: Shapes, radius: PrototypeCornerRadius)
 fun prototypeRootBackdropShape(model: PrototypeRenderModel): Shape =
   prototypeSurfaceShape(prototypeShapes(model.theme?.shapes), model.root.style.source)
 
+/**
+ * A node's surface shape. Without a `cornerRadius` it is a rectangle, except for a glass surface,
+ * whose documented default is a capsule.
+ */
 internal fun prototypeSurfaceShape(shapes: Shapes, style: PrototypeStyle): Shape {
-  val radius = style.cornerRadius ?: return RectangleShape
+  val radius =
+    style.cornerRadius
+      ?: return if (style.surface == "glass") {
+        RoundedCornerShape(percent = FULL_CORNER_PERCENT)
+      } else {
+        RectangleShape
+      }
   val rounded = prototypeCornerShape(shapes, radius)
   return if (style.cornerStyle == "continuous") PrototypeContinuousShape(rounded) else rounded
 }

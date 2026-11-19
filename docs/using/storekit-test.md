@@ -29,6 +29,10 @@ fails the call before anything reaches the device.
 
 1. `load` starts the session: it resets StoreKit to its default state, clears transactions and
    disables purchase dialogs. Every other action needs a loaded session for that `appId`.
+   Only one `appId` can be loaded at a time on a simulator. Loading another `appId` while one is
+   loaded fails with `storekit environment active for bundleId <appId>; send clear for it before
+   loading another bundle` and changes nothing; `clear` the named `appId`, then `load` again.
+   Loading the already-loaded `appId` again starts it over.
 2. `buy`, `refund`, `expire`, `list` and `clear` return `transactions`, each with `identifier`,
    `productId`, `state` (`purchased`, `purchasing`, `failed`, `restored`, `deferred` or
    `unknown`) and `originalIdentifier` for renewals.

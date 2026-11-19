@@ -70,10 +70,15 @@ Android 17 (API 37) requires for private LAN connections. The prototype location
 `ACCESS_COARSE_LOCATION` and `ACCESS_FINE_LOCATION`; grants come from the device or host, and the app
 never requests them itself. The normal `USE_BIOMETRIC` permission supports framework biometric
 prompts. `POST_NOTIFICATIONS` supports explicit `permissions.request` calls for notification
-authorization on API 33+. `CAMERA` and `RECORD_AUDIO` are requested only when the open prototype
-calls `permissions.request` for `camera` or `microphone`, and read `unavailable` while the viewer is
-not resumed; the camera and microphone features are declared `required="false"`. See
-[Runtime permissions](plat/android/prototype-ux-platform-services.md).
+authorization on API 33+; see [Runtime permissions](plat/android/prototype-ux-platform-services.md).
+
+ProtoViewer and CtrlProxy's SavedPrototypeActivity also register `camera` (`CAMERA`) and
+`microphone` (`RECORD_AUDIO`), requested only when the open prototype calls `permissions.request`.
+Each reads `unavailable` while the Activity is not resumed, when the manifest lacks the permission,
+or when the device has no camera id or audio input. Otherwise it maps like API 33+ notifications on
+every API level. One Activity shows one dialog at a time across all names. A `camera` or
+`audioRecorder` module, and so its capability, registers only under the same manifest and hardware
+conditions. Both apps declare the camera and microphone features `required="false"`.
 
 It declares no accessibility, input method, overlay or device-admin permissions. The app
 requests `ACCESS_LOCAL_NETWORK` only when the user turns on "Allow network for imported prototypes"

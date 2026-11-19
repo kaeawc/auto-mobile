@@ -3,6 +3,8 @@
 # select their Xcode per job through DEVELOPER_DIR and fail loudly when the
 # requested toolchain is missing.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   script="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)/scripts/ci/select-self-hosted-xcode.sh"
   export XCODE_APPLICATIONS_DIR="${BATS_TEST_TMPDIR}/Applications"
@@ -79,4 +81,55 @@ fake_xcode() {
 @test "rejects a malformed version" {
   run bash "${script}" latest
   [ "$status" -eq 2 ]
+}
+
+@test "defaults to the repository pin when no version is given" {
+  source "$(dirname "${script}")/../ios/xcode_version.sh"
+  fake_xcode Xcode.app 26.6
+  fake_xcode "Xcode-${AUTOMOBILE_XCODE_VERSION}.0.app" "${AUTOMOBILE_XCODE_VERSION}"
+  run bash "${script}"
+  [ "$status" -eq 0 ]
+  [ "$(cat "${GITHUB_ENV}")" = "DEVELOPER_DIR=${XCODE_APPLICATIONS_DIR}/Xcode-${AUTOMOBILE_XCODE_VERSION}.0.app/Contents/Developer" ]
+}
+
+@test "--exact refuses the same-major fallback" {
+  fake_xcode Xcode.app 26.6
+  run bash "${script}" --exact 26.5
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Xcode 26.5 is not installed"* ]]
+  [ ! -s "${GITHUB_ENV}" ]
+}
+
+@test "--print writes only the developer dir to stdout and leaves GITHUB_ENV alone" {
+  fake_xcode Xcode-26.5.0.app 26.5
+  run --separate-stderr bash "${script}" --print 26.5
+  [ "$status" -eq 0 ]
+  [ "$output" = "${XCODE_APPLICATIONS_DIR}/Xcode-26.5.0.app/Contents/Developer" ]
+  [ ! -s "${GITHUB_ENV}" ]
+}
+
+@test "rejects an unknown option" {
+  run bash "${script}" --bogus 26.5
+  [ "$status" -eq 2 ]
+}
+
+@test "--require-metal passes when the selected Xcode has the Metal Toolchain" {
+  fake_xcode Xcode-27.2.0.app 27.2
+  printf '#!/usr/bin/env bash\necho "xcrun DEVELOPER_DIR=${DEVELOPER_DIR} $*" >> "%s/xcrun.log"\n' "${BATS_TEST_TMPDIR}" > "${BATS_TEST_TMPDIR}/bin/xcrun"
+  chmod +x "${BATS_TEST_TMPDIR}/bin/xcrun"
+  run bash "${script}" 27.2 --require-metal
+  [ "$status" -eq 0 ]
+  grep -q "DEVELOPER_DIR=${XCODE_APPLICATIONS_DIR}/Xcode-27.2.0.app/Contents/Developer --sdk iphonesimulator metal --version" "${BATS_TEST_TMPDIR}/xcrun.log"
+  [[ "$(cat "${GITHUB_ENV}")" == *"/Xcode-27.2.0.app/Contents/Developer" ]]
+}
+
+@test "--require-metal fails fast with the install command and exports nothing" {
+  fake_xcode Xcode-27.2.0.app 27.2
+  printf '#!/usr/bin/env bash\nexit 1\n' > "${BATS_TEST_TMPDIR}/bin/xcrun"
+  chmod +x "${BATS_TEST_TMPDIR}/bin/xcrun"
+  run bash "${script}" --require-metal 27.2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"has no Metal Toolchain"* ]]
+  [[ "$output" == *"DEVELOPER_DIR=${XCODE_APPLICATIONS_DIR}/Xcode-27.2.0.app/Contents/Developer xcodebuild -downloadComponent metalToolchain"* ]]
+  [ ! -s "${GITHUB_ENV}" ]
 }

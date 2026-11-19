@@ -13,6 +13,7 @@ To add one, copy the [template](template.md).
 | Date       | Kind     | Entry                                                                                                                              |
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-11-19 | decision | [Typed platform restriction for device-aware tools](2026-11-19-typed-tool-platform-restriction.md)                                 |
+| 2026-11-19 | decision | [Headless CarPlay on TVOut with a StarkConfig](2026-11-19-headless-carplay-tvout-stark.md)                                         |
 | 2026-11-17 | decision | [Docs navigation grouped by task and platform](2026-11-17-docs-navigation-by-task.md)                                              |
 | 2026-11-17 | concept  | [Material 3 Expressive component availability at the pinned Compose BOM](2026-11-17-m3-expressive-component-availability.md)       |
 | 2026-11-16 | decision | [Android Auto provisioning accepts the welcome screen](2026-11-16-android-auto-terms-accepted-by-provisioning.md)                  |
@@ -40,6 +41,7 @@ To add one, copy the [template](template.md).
 | 2026-11-10 | decision | [Android Auto projection: no Google account](2026-11-10-android-auto-projection-provisioning-no-account.md)                        |
 | 2026-11-08 | concept  | [Android Auto stub and DHU 2.1 on a Play emulator](2026-11-08-form-factors-android-auto-dhu-stub.md)                               |
 | 2026-11-08 | decision | [AndroidX baseline profile tooling for CtrlProxy](2026-11-08-androidx-baseline-profile-generator.md)                               |
+| 2026-11-07 | decision | [Defer car-specific prototypes on AAOS](2026-11-07-automotive-prototypes-deferred.md)                                              |
 | 2026-11-06 | decision | [Keystore StrongBox fault: pre-generation check](2026-11-06-keystore-strongbox-fault-pre-generation-check.md)                      |
 | 2026-11-06 | decision | [AndroidX TV libraries for the Android TV fixture apps](2026-11-06-androidx-tv-fixture-libraries.md)                               |
 | 2026-11-05 | decision | [Prototype remote image URLs](2026-11-05-prototype-ux-remote-image-urls.md)                                                        |

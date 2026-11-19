@@ -119,7 +119,8 @@ The car
 top bar can be taller than the `systemBars` top inset the overlay window receives. For fullscreen and
 top-gravity floating windows, the host therefore uses the larger of that inset and the display's `systemBars` top
 inset. The dismiss bar, the escape pill and top-edge `safeAreaPadding` clear the whole bar. With `none`,
-authored content without top-edge `safeAreaPadding` still starts behind the car top bar. Car App Library templates and car-specific spec nodes are out of scope.
+authored content without top-edge `safeAreaPadding` still starts behind the car top bar. Car App Library templates and car-specific spec nodes are out of scope; see
+[Automotive prototypes](automotive-prototypes.md).
 
 ## Common node properties
 

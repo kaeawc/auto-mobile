@@ -1,3 +1,4 @@
+import type { ClearPrototypeStorageMessage } from "../../../prototype/prototypeStorageWire";
 /** Prototype lifecycle requests, results and push-event contracts. */
 import type { PrototypePlatformOutcome } from "../../../prototype/prototypePlatformOutcomes";
 import type { PrototypeHiddenReason } from "../../../prototype/prototypeHidden";
@@ -340,3 +341,18 @@ export interface PrototypeEvent {
   pages: Record<string, number>;
   stacks?: Record<string, PrototypeStackSnapshot>;
 }
+
+/** Every prototype request the client sends over the authenticated socket. */
+export type PrototypeRequestMessage =
+  | ShowPrototypeMessage
+  | DismissPrototypeMessage
+  | InspectPrototypesMessage
+  | PatchPrototypeMessage
+  | PinSavedPrototypeMessage
+  | SavePrototypeMessage
+  | ListSavedPrototypesMessage
+  | DeleteSavedPrototypeMessage
+  | ClearPrototypeStorageMessage
+  | AdvancePrototypeClockMessage
+  | SimulatePrototypePlatformMessage
+  | QueuePrototypeCallOutcomeMessage;

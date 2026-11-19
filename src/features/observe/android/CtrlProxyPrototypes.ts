@@ -1,6 +1,6 @@
 import {
-  validatePrototypePlatformOutcome,
-  prototypePlatformOutcomesUnsupportedMessage,
+  queuePrototypeCallOutcomeMessage,
+  requirePrototypePlatformOutcomesSupport,
 } from "../../prototype/prototypePlatformOutcomes";
 import {
   requirePrototypePlatformSimulationSupport,
@@ -78,30 +78,19 @@ import {
 import { PROTOTYPE_RESPONSE_MESSAGE_TYPE } from "../../prototype/prototypeRequestProtocol";
 import {
   ctrlProxyRequests,
-  PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY,
   PROTOTYPE_SAVED_CAPABILITY,
-  type QueuePrototypeCallOutcomeMessage,
+  type PrototypeRequestMessage,
   type PrototypePlatformOutcomeRequest,
   type PrototypePlatformSimulationRequest,
   isSavedPrototypeErrorCode,
-  type SavePrototypeMessage,
-  type PinSavedPrototypeMessage,
-  type ListSavedPrototypesMessage,
-  type ClearPrototypeStorageMessage,
-  type AdvancePrototypeClockMessage,
-  type SimulatePrototypePlatformMessage,
-  type DeleteSavedPrototypeMessage,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_MULTI_SURFACE_CAPABILITY,
   PROTOTYPE_PATCH_CAPABILITY,
-  type PatchPrototypeMessage,
   PROTOTYPE_EVENT_KINDS,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   UNKNOWN_PROTOTYPE_EVENT_KIND,
-  type InspectPrototypesMessage,
   type ShowPrototypeMessage,
-  type DismissPrototypeMessage,
   type PrototypeAssetResult,
   type PrototypeDismiss,
   type PrototypeEvent,
@@ -447,17 +436,8 @@ export class CtrlProxyPrototypes {
     timeoutMs = 5000,
     perf?: PerformanceTracker,
   ): Promise<PrototypeResult> {
-    const { issue } = validatePrototypePlatformOutcome(request.call, request.outcome);
-    if (!request.id || issue) {
-      throw new ActionableError(issue?.[1] ?? "simulate requires id");
-    }
-    return this.request(
-      ctrlProxyRequests.queuePrototypeCallOutcome({ ...request, requestId: "" }),
-      timeoutMs,
-      perf,
-    );
+    return this.request(queuePrototypeCallOutcomeMessage(request), timeoutMs, perf);
   }
-
   async requestSimulatePrototypePlatform(
     simulation: PrototypePlatformSimulationRequest,
     timeoutMs = 5000,
@@ -869,19 +849,7 @@ export class CtrlProxyPrototypes {
   }
 
   private async request(
-    message:
-      | ShowPrototypeMessage
-      | DismissPrototypeMessage
-      | InspectPrototypesMessage
-      | PatchPrototypeMessage
-      | PinSavedPrototypeMessage
-      | SavePrototypeMessage
-      | ListSavedPrototypesMessage
-      | DeleteSavedPrototypeMessage
-      | ClearPrototypeStorageMessage
-      | AdvancePrototypeClockMessage
-      | SimulatePrototypePlatformMessage
-      | QueuePrototypeCallOutcomeMessage,
+    message: PrototypeRequestMessage,
     timeoutMs: number,
     perf?: PerformanceTracker,
     deliveryOptions: Pick<SendCommandOptions<PrototypeResult>, "onDispatch" | "timeoutError"> = {},
@@ -909,21 +877,7 @@ export class CtrlProxyPrototypes {
     });
   }
 
-  private requirePrototypeSupport(
-    message:
-      | ShowPrototypeMessage
-      | DismissPrototypeMessage
-      | InspectPrototypesMessage
-      | PatchPrototypeMessage
-      | PinSavedPrototypeMessage
-      | SavePrototypeMessage
-      | ListSavedPrototypesMessage
-      | DeleteSavedPrototypeMessage
-      | ClearPrototypeStorageMessage
-      | AdvancePrototypeClockMessage
-      | SimulatePrototypePlatformMessage
-      | QueuePrototypeCallOutcomeMessage,
-  ): void {
+  private requirePrototypeSupport(message: PrototypeRequestMessage): void {
     const supports = (command: string) => this.context.isCommandSupported?.(command);
     this.requireShaderSpecSupport(message, supports);
     if (message.type === "patch_prototype" && supports(PROTOTYPE_PATCH_CAPABILITY) !== true) {
@@ -940,12 +894,7 @@ export class CtrlProxyPrototypes {
     requirePrototypeStorageSupport(message.type, supports);
     requirePrototypeTimersSupport(message.type, supports);
     requirePrototypePlatformSimulationSupport(message.type, supports);
-    if (
-      message.type === "queue_prototype_call_outcome" &&
-      supports(PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY) !== true
-    ) {
-      throw new ActionableError(prototypePlatformOutcomesUnsupportedMessage());
-    }
+    requirePrototypePlatformOutcomesSupport(message.type, supports);
     const type = message.type;
     if (
       [

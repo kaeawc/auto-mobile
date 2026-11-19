@@ -1,4 +1,10 @@
 import { z } from "zod/v4";
+import type {
+  PrototypePlatformOutcomeRequest,
+  QueuePrototypeCallOutcomeMessage,
+} from "../observe/android/ctrlProxyProtocol/prototypeMessages";
+import { ctrlProxyRequests } from "../observe/android/ctrlProxyProtocol/requestBuilders";
+import { ActionableError } from "../../models/ActionableError";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY } from "../observe/android/ctrlProxyProtocol/capabilities";
 import { prototypeJsonSchema, type PrototypeJson } from "./prototypeJson";
@@ -66,4 +72,28 @@ export function validatePrototypePlatformOutcome(
 
 export function prototypePlatformOutcomesUnsupportedMessage(): string {
   return `simulate: queued call outcomes require the connected prototype runtime advertising ${PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY}. Update the runtime and use a module that supports simulation (debug test.echo).`;
+}
+
+/** Refuse before dispatch, including when an older connection has no capability list. */
+export function requirePrototypePlatformOutcomesSupport(
+  requestType: string,
+  supports: (capability: string) => boolean | undefined,
+): void {
+  if (
+    requestType === "queue_prototype_call_outcome" &&
+    supports(PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY) !== true
+  ) {
+    throw new ActionableError(prototypePlatformOutcomesUnsupportedMessage());
+  }
+}
+
+/** Typed wire builder shared by direct client requests and the host tool path. */
+export function queuePrototypeCallOutcomeMessage(
+  args: PrototypePlatformOutcomeRequest & { requestId?: string },
+): QueuePrototypeCallOutcomeMessage {
+  const { issue } = validatePrototypePlatformOutcome(args.call, args.outcome);
+  if (!args.id || issue) {
+    throw new ActionableError(issue?.[1] ?? "simulate requires id");
+  }
+  return ctrlProxyRequests.queuePrototypeCallOutcome({ ...args, requestId: args.requestId ?? "" });
 }

@@ -227,24 +227,12 @@ function simulateInputIssue(value: {
   if (value.id === undefined) {
     return ["id", "simulate requires id"];
   }
-  if (value.call === undefined && value.outcome !== undefined) {
-    return ["call", "simulate outcome requires call"];
-  }
-  if (value.call !== undefined && value.outcome === undefined) {
-    return ["outcome", "simulate call requires outcome"];
-  }
-  const modes = [value.advanceTimeMs, value.event, value.call];
-  if (modes.filter((mode) => mode !== undefined).length !== 1) {
-    return [
-      "advanceTimeMs",
-      "simulate requires exactly one of advanceTimeMs, event, or call with outcome",
-    ];
+  const modeIssue = simulateModeIssue(value);
+  if (modeIssue) {
+    return modeIssue;
   }
   if (value.call !== undefined) {
-    if (value.data !== undefined || value.transport !== undefined) {
-      return [value.data === undefined ? "transport" : "data", "data and transport need event"];
-    }
-    return validatePrototypePlatformOutcome(value.call, value.outcome).issue;
+    return simulateCallInputIssue(value);
   }
   if (value.event !== undefined) {
     return simulateEventInputIssue(value.event, value.data, value.transport);
@@ -253,6 +241,37 @@ function simulateInputIssue(value: {
     return [value.data === undefined ? "transport" : "data", "data and transport need event"];
   }
   return undefined;
+}
+function simulateModeIssue(value: {
+  advanceTimeMs?: number;
+  event?: string;
+  call?: string;
+  outcome?: unknown;
+}): [string, string] | undefined {
+  if ((value.call === undefined) !== (value.outcome === undefined)) {
+    return value.call === undefined
+      ? ["call", "simulate outcome requires call"]
+      : ["outcome", "simulate call requires outcome"];
+  }
+  const modes = [value.advanceTimeMs, value.event, value.call];
+  if (modes.filter((mode) => mode !== undefined).length !== 1) {
+    return [
+      "advanceTimeMs",
+      "simulate requires exactly one of advanceTimeMs, event, or call with outcome",
+    ];
+  }
+  return undefined;
+}
+function simulateCallInputIssue(value: {
+  call?: string;
+  outcome?: unknown;
+  data?: unknown;
+  transport?: string;
+}): [string, string] | undefined {
+  if (value.data !== undefined || value.transport !== undefined) {
+    return [value.data === undefined ? "transport" : "data", "data and transport need event"];
+  }
+  return validatePrototypePlatformOutcome(value.call!, value.outcome).issue;
 }
 function simulateEventInputIssue(
   event: string,

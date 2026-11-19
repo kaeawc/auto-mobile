@@ -55,6 +55,47 @@ function errorText(raw: string): string | null {
   return raw === "nil" ? null : raw;
 }
 
+type ReportHandler = (report: HealthProbeReport, match: RegExpExecArray) => void;
+
+const HANDLERS: Array<[RegExp, ReportHandler]> = [
+  [
+    /^available=(true|false)/,
+    (r, m) => {
+      r.available = m[1] === "true";
+    },
+  ],
+  [
+    /^requestAuthorization ok=(true|false) err=(.*)$/,
+    (r, m) => {
+      r.authorizationOk = m[1] === "true";
+      r.authorizationError = errorText(m[2]);
+    },
+  ],
+  [
+    /^save ok=(true|false) err=(.*)$/,
+    (r, m) => {
+      r.saveOk = m[1] === "true";
+      r.saveError = errorText(m[2]);
+    },
+  ],
+  [
+    /^read (\S+) n=(-?\d+) err=(.*)$/,
+    (r, m) => {
+      r.reads[m[1]] = Number(m[2]);
+      const err = errorText(m[3]);
+      if (err) {
+        r.readErrors[m[1]] = err;
+      }
+    },
+  ],
+  [
+    /^done$/,
+    (r) => {
+      r.done = true;
+    },
+  ],
+];
+
 /** Parses the `HKPROBE` stdout lines printed by the disposable seeding app. */
 export function parseHealthProbeOutput(output: string): HealthProbeReport {
   const report: HealthProbeReport = {
@@ -68,30 +109,12 @@ export function parseHealthProbeOutput(output: string): HealthProbeReport {
     done: false,
   };
   for (const raw of output.split(/\r?\n/)) {
-    const body = LINE.exec(raw)?.[1];
-    if (body === undefined) {
-      continue;
-    }
-    if (body === "done") {
-      report.done = true;
-    } else if (body.startsWith("available=")) {
-      report.available = body.startsWith("available=true");
-    } else if (body.startsWith("requestAuthorization ")) {
-      const m = /^requestAuthorization ok=(true|false) err=(.*)$/.exec(body);
-      report.authorizationOk = m?.[1] === "true";
-      report.authorizationError = errorText(m?.[2] ?? "");
-    } else if (body.startsWith("save ")) {
-      const m = /^save ok=(true|false) err=(.*)$/.exec(body);
-      report.saveOk = m?.[1] === "true";
-      report.saveError = errorText(m?.[2] ?? "");
-    } else if (body.startsWith("read ")) {
-      const m = /^read (\S+) n=(-?\d+) err=(.*)$/.exec(body);
-      if (m) {
-        report.reads[m[1]] = Number(m[2]);
-        const err = errorText(m[3]);
-        if (err) {
-          report.readErrors[m[1]] = err;
-        }
+    const body = LINE.exec(raw)?.[1] ?? "";
+    for (const [pattern, handle] of HANDLERS) {
+      const match = pattern.exec(body);
+      if (match) {
+        handle(report, match);
+        break;
       }
     }
   }
@@ -246,8 +269,10 @@ export class SimctlHealthSimulatorRunner implements HealthSimulatorRunner {
     private readonly exec: ExecFileAsync,
     private readonly timer: Pick<Timer, "sleep">,
     private readonly outputDir: string,
-    private readonly timeoutPolls = 240,
-    private readonly pollMs = 500,
+    private readonly polling: { maxPolls: number; intervalMs: number } = {
+      maxPolls: 240,
+      intervalMs: 500,
+    },
   ) {}
 
   async install(udid: string, appPath: string): Promise<void> {
@@ -276,12 +301,12 @@ export class SimctlHealthSimulatorRunner implements HealthSimulatorRunner {
     ]);
     return {
       waitForOutput: async () => {
-        for (let poll = 0; poll < this.timeoutPolls; poll += 1) {
+        for (let poll = 0; poll < this.polling.maxPolls; poll += 1) {
           const text = await readFile(outputPath, "utf8");
           if (/^HKPROBE done$/m.test(text)) {
             return text;
           }
-          await this.timer.sleep(this.pollMs);
+          await this.timer.sleep(this.polling.intervalMs);
         }
         throw new HealthSeedError(
           "permission_denied",

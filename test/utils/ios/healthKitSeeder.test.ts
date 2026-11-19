@@ -20,11 +20,10 @@ import {
 const fixture = (name: string): string =>
   readFileSync(join(import.meta.dir, "../../fixtures/ios-healthkit", name), "utf8");
 
-const sheetResponse = JSON.parse(fixture("health-access-sheet-turn-on-all-response.json")) as {
-  structuredContent: { observation: { skeleton: SheetElement[] } };
-};
 // Captured right after "Turn On All": the button already reads "Turn Off All".
-const sheetAfterTurnOn = sheetResponse.structuredContent.observation.skeleton;
+const sheetAfterTurnOn = JSON.parse(
+  fixture("health-access-sheet-after-turn-on-all-skeleton.json"),
+) as SheetElement[];
 // Captured with `observe` while the sheet first shows: "Turn On All", no Allow button on screen.
 const sheetBeforeTurnOn = JSON.parse(
   fixture("health-access-sheet-initial-skeleton.json"),

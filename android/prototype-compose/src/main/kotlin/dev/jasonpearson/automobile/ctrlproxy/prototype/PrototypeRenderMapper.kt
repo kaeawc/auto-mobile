@@ -204,14 +204,19 @@ internal class PrototypeRenderMapper(
     val root =
       if (resolvedFromSameSources(spec, platform, locales)) checkNotNull(resolvedRoot)
       else {
-        PrototypeStrings.resolve(PrototypeDataResolver.resolve(spec, platform), locales).root.also {
-          sourceLocales = locales.toList()
-          sourceStrings = spec.strings
-          sourcePlatform = platform
-          sourceRoot = spec.root
-          sourceData = spec.data
-          resolvedRoot = it
-        }
+        PrototypeStrings.resolve(
+            PrototypeDataResolver.resolve(spec, platform, shield = true),
+            locales,
+          )
+          .root
+          .also {
+            sourceLocales = locales.toList()
+            sourceStrings = spec.strings
+            sourcePlatform = platform
+            sourceRoot = spec.root
+            sourceData = spec.data
+            resolvedRoot = it
+          }
       }
     val resolved = if (root === spec.root) spec else spec.copy(root = root)
     authoredSpec = spec

@@ -166,6 +166,7 @@ fun mapPrototypeSpec(
       dev.jasonpearson.automobile.protocol.PrototypeStrings.resolve(
         PrototypeDataResolver.resolve(
           spec.copy(root = PrototypeRouteRuntime.bindRoot(spec.root, stacks)),
+          shield = true,
         ),
         locales,
       )

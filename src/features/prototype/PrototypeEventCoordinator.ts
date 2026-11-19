@@ -248,11 +248,9 @@ export class PrototypeEventCoordinator {
       };
       this.entries.set(key, entry);
     }
-    if (
-      client.instanceId !== undefined &&
-      entry.instanceId !== undefined &&
-      client.instanceId !== entry.instanceId
-    ) {
+    // Any identity change is a new sequence ledger (#18635): a different app instance, or a move
+    // between a CtrlProxy host (no instanceId) and a disposable app (with one) in either direction.
+    if (client.instanceId !== entry.instanceId) {
       entry.buffer.startEpoch();
       entry.terminal = false;
       entry.terminalSequence = undefined;

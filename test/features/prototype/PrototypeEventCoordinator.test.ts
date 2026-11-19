@@ -43,6 +43,35 @@ describe("PrototypeEventCoordinator", () => {
     expect((await waiting).event?.sequence).toBe(1);
   });
 
+  test.each([
+    { label: "CtrlProxy to app", from: undefined, to: "app-1", resets: true },
+    { label: "app to CtrlProxy", from: "app-1", to: undefined, resets: true },
+    { label: "app to relaunched app", from: "app-1", to: "app-2", resets: true },
+    { label: "same app reconnect", from: "app-1", to: "app-1", resets: false },
+    { label: "CtrlProxy reconnect", from: undefined, to: undefined, resets: false },
+  ])("$label: new epoch $resets (#18635)", async ({ from, to, resets }) => {
+    const source = (instanceId: string | undefined) => {
+      const fake = new FakeCtrlProxy(timer);
+      return { fake, instanceId, onPrototypeEvent: fake.onPrototypeEvent.bind(fake) };
+    };
+    const first = source(from);
+    coordinator.adopt(scope, "panel", first, { replayed: [], lastSequence: 5 });
+    const next = source(to);
+    const waiting = coordinator.awaitEvent(scope, "panel", next, {});
+    next.fake.emitPrototypeEvent(event(3));
+    if (resets) {
+      expect((await waiting).event?.sequence).toBe(3);
+      expect(coordinator.counts(scope, "panel")?.lastSequence).toBe(3);
+    } else {
+      expect(coordinator.counts(scope, "panel")).toMatchObject({
+        pendingCount: 0,
+        lastSequence: 5,
+      });
+      next.fake.emitPrototypeEvent(event(6));
+      expect((await waiting).event?.sequence).toBe(6);
+    }
+  });
+
   test.each([{ eventName: "next" }, { kind: "emit" as const }])(
     "same-process remount resumes a filtered wait %j without losing pending events",
     async (filter) => {

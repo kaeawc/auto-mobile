@@ -230,7 +230,7 @@ class PrototypeExpressiveComponentsTest {
 
   @Test
   fun `wave and lobed paths stay inside their bounds`() {
-    val wave = prototypeWavePath(0f, 200f, 10f, 3f, 40f, 0.25f).getBounds()
+    val wave = prototypeWavePath(0f, 200f, 10f, PrototypeWave(3f, 40f, 0.25f)).getBounds()
     assertTrue(wave.top >= 7f - 0.01f && wave.bottom <= 13f + 0.01f)
     assertEquals(0f, wave.left, 0.01f)
     val lobes = prototypeLobedPath(50f, 7, 0.1f, Offset(50f, 50f)).getBounds()

@@ -53,7 +53,46 @@ object FixtureCatalog {
       FixtureRow("template_pane", "Pane template", "Four fixed rows"),
       FixtureRow("template_navigation", "Navigation template", "Four fixed places"),
       FixtureRow("template_list_long", "List 30", "Thirty fixed rows"),
+      FixtureRow("template_tabs", "Tab template", "Two tabs"),
+      FixtureRow("template_refresh", "Refresh list", "Items change on tap"),
+      FixtureRow("template_silent", "Silent change", "Template changes, pixels do not"),
+      FixtureRow("template_restrictions", "Restrictions", "Shows the host content limits"),
     )
+
+  /** Tab titles, in order. Each tab's list has a different set of rows. */
+  val tabTitles: List<String> = listOf("Tab One", "Tab Two")
+
+  fun tabId(index: Int): String = "tab_${index + 1}"
+
+  fun tabRows(index: Int): List<FixtureRow> =
+    (1..3).map { FixtureRow("tab_${index + 1}_row_$it", "Tab ${index + 1} row $it", "Tab detail") }
+
+  const val REFRESH_ACTION_TITLE = "Refresh items"
+
+  /** The refreshing list's data rows after [revision] refreshes; the action row is separate. */
+  fun refreshRows(revision: Int): List<FixtureRow> =
+    (1..3).map { FixtureRow("refresh_row_$it", "Refresh item $it", "Refresh $revision") }
+
+  const val SILENT_ACTION_TITLE = "Change without redrawing"
+  const val SILENT_ROW_TITLE = "Silent row"
+  const val SILENT_BASE_SUBTITLE = "Looks the same"
+
+  /**
+   * The silent row's subtitle after [revision] changes: the base text plus [revision] zero-width
+   * spaces. The template differs on every revision while the rendered pixels stay identical.
+   */
+  fun silentSubtitle(revision: Int): String = SILENT_BASE_SUBTITLE + "\u200B".repeat(revision)
+
+  const val RESTRICTIONS_ACTION_TITLE = "Re-read limits"
+
+  /**
+   * One line per host content limit, so the head unit shows what the host currently allows. A
+   * driving restriction lowers these limits, which makes `restrict all` visible on screen.
+   */
+  fun restrictionRows(limits: Map<String, Int>): List<FixtureRow> =
+    limits.map { (name, limit) ->
+      FixtureRow("limit_${name.lowercase()}", "$name limit", limit.toString())
+    }
 
   /** Six rows: within the list-template row limit on every host. */
   val listTemplateRows: List<FixtureRow> =

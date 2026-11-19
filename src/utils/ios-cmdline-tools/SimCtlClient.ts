@@ -69,11 +69,7 @@ import {
   simulatorProfiles,
   type SimulatorDeviceTypeProfileSource,
 } from "./SimulatorDeviceTypeProfiles";
-import {
-  parseSimulatorScreens,
-  type SimulatorDisplay,
-  type SimulatorScreens,
-} from "./SimulatorDisplays";
+import { parseSimulatorScreens, type SimulatorScreens } from "./SimulatorDisplays";
 import type { DeviceDisplays } from "../../models/DisplayPanel";
 import { type TransitionalSimulator } from "../../models/TransitionalSimulator";
 import { SimctlUnavailableError } from "./SimctlUnavailableError";
@@ -914,7 +910,7 @@ export class SimCtlClient implements SimCtl {
     deviceId: string,
     timeoutMs?: number,
     signal?: AbortSignal,
-  ): Promise<SimulatorDisplay[]> {
+  ): Promise<SimulatorScreens["integrated"]> {
     return (await this.enumerateScreens(deviceId, timeoutMs, signal)).integrated;
   }
 

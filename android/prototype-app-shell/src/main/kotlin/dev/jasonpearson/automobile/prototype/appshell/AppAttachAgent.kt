@@ -50,13 +50,18 @@ internal val attachJson = Json {
 }
 
 /** No Android dependencies: the scope supplies scheduling (including virtual hello deadlines). */
+@Suppress("LongParameterList") // Independent test seams plus the restored journal and its writer.
 internal class AppAttachAgent(
   token: String?,
   private val target: AttachTarget,
   private val scope: CoroutineScope,
-  private val capacity: Int = 200,
+  private val capacity: Int = MAX_PENDING_EVENTS,
   private val clock: () -> Long = System::currentTimeMillis,
   private val log: (String) -> Unit,
+  restored: AttachJournalState? = null,
+  private val persist: (pending: List<PrototypeEvent>, dropped: Long, lastSequence: Long) -> Unit =
+    { _, _, _ ->
+    },
 ) {
   private val tokenBytes = token?.trim()?.takeIf { it.isNotEmpty() }?.toByteArray(Charsets.UTF_8)
   val enabled: Boolean
@@ -66,13 +71,14 @@ internal class AppAttachAgent(
   private val requests = Mutex()
 
   init {
-    require(capacity in 1..200)
+    require(capacity in 1..MAX_PENDING_EVENTS)
+    require((restored?.pending?.size ?: 0) <= capacity)
   }
 
   // Retained until host acknowledgement, including writes accepted only by adbd.
-  private val pending = ArrayDeque<PrototypeEvent>()
-  private var dropped = 0L
-  private var lastSequence = 0L
+  private val pending = ArrayDeque(restored?.pending.orEmpty())
+  private var dropped = restored?.dropped ?: 0L
+  private var lastSequence = restored?.lastSequence ?: 0L
   private var active: Session? = null
 
   private class Session(val connection: AttachConnection) {
@@ -219,12 +225,15 @@ internal class AppAttachAgent(
       dropped++
     }
     pending.addLast(event)
+    persist(pending.toList(), dropped, lastSequence)
     active?.let { enqueue(it, frame(event)) }
   }
 
   private fun acknowledge(sequence: Long) {
     require(sequence in 0..lastSequence) { "Invalid attach acknowledgement" }
+    val previousSize = pending.size
     while (pending.firstOrNull()?.let { it.sequence <= sequence } == true) pending.removeFirst()
+    if (pending.size != previousSize) persist(pending.toList(), dropped, lastSequence)
   }
 
   // Call only under delivery; a full queue drops the peer, never blocks the producer.
@@ -271,6 +280,7 @@ internal class AppAttachAgent(
     attachJson.encodeToString(WebSocketResponse.serializer(), response)
 
   companion object {
+    const val MAX_PENDING_EVENTS = 200
     const val OUTBOUND_CAPACITY = 256
     const val WRITE_TIMEOUT_MS = 5000L
     const val HELLO_MAX_BYTES = 4096

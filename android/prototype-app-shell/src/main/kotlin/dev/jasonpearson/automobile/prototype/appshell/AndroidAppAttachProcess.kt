@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.prototype.appshell
 
 import android.content.Context
 import android.util.Log
+import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,10 +23,12 @@ internal object AndroidAppAttachProcess {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val token = asset(application, "attach-token")
     val allowPhysicalDevice = asset(application, "attach-allow-physical-device") == "true"
+    val log: (String) -> Unit = { Log.w("PrototypeAppShell", it) }
     return AppAttachProcess(
         token,
         scope,
-        log = { Log.w("PrototypeAppShell", it) },
+        log = log,
+        journal = FileAttachJournal(File(application.filesDir, "attach-journal.json"), log),
         startListener = { agent ->
           AppAttachServer.start(
             application.packageName,

@@ -196,9 +196,10 @@ The listener requires a nonblank `assets/prototype/attach-token` and an emulator
 to permit physical devices. This applies to debug and release templates alike, independently of APK debuggability. The token-in-APK model is development-only: anyone who can read the APK can recover the token. Reinstalling a slug in place reuses the token. A second connection cannot
 replace an authenticated live peer. Status and patch conflicts redact `storage.secure` state keys.
 
-Events replay at least once. A process-scoped agent keeps its listener, buffer, sequence ledger
-and `appInstanceId` across reconnects and Activity recreation. Activities rebind targets. A
-new process resets identity and epoch. `hello_result` reports identity and an optional
+Events replay at least once. Activities rebind targets to a process-scoped attach listener.
+The `appInstanceId`, sequence ledger and unacknowledged events persist in app storage across
+process kills. Reinstalling the app or clearing its data resets the journal.
+`hello_result` reports identity and an optional
 `showingId`, which changes when the Activity mounts a new runtime. A same-process remount clears
 the dismissal and keeps pending events. Older apps without `showingId` keep process-only identity.
 One daemon-host attacher serves every MCP registration and keeps app/device cursors. `hello` sends
@@ -208,9 +209,9 @@ replay. Status reconciles only its app. The 256-event buffer closes on overflow 
 cleanup and host disposal close sockets, remove adb forwards and forget device cursors. Uninstall
 and reinstall each forget only that app's cursors.
 
-Events stay buffered until acknowledged and replay on the next hello; the host de-duplicates
-replays by sequence, within the connection and coordinator. The app retains 200 events, drops the
-oldest on overflow, and reports cumulative `droppedEvents` in hello and status; sequence gaps expose
+The app stores up to 200 unacknowledged events and replays them on the next hello. The host
+de-duplicates replays by sequence within the connection and coordinator. The app drops the oldest
+event on overflow and reports cumulative `droppedEvents` in hello and status. Sequence gaps expose
 missing events. A separate writer uses a 256-frame queue and five-second write deadline. Queue
 overflow or blocked writes close the peer, and events and requests continue with replay retained.
 

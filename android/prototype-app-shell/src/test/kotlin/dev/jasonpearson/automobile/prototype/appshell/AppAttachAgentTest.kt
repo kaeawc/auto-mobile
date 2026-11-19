@@ -73,11 +73,111 @@ class AppAttachAgentTest {
     }
   }
 
+  private class MemoryJournal : AttachJournal {
+    var state: AttachJournalState? = null
+      private set
+
+    var writes = 0
+      private set
+
+    override fun load() = state
+
+    override fun save(state: AttachJournalState) {
+      this.state = state
+      writes++
+    }
+  }
+
   private fun TestScope.agent(token: String? = "secret", target: AttachTarget = Target()) =
     AppAttachAgent(token, target, backgroundScope, clock = { testScheduler.currentTime }, log = {})
 
   private fun event(sequence: Long) =
     PrototypeEvent(0, "panel", sequence, PrototypeEventKind.EMIT, null, null, emptyMap())
+
+  private fun TestScope.process(journal: AttachJournal, appInstanceId: String? = null) =
+    AppAttachProcess(
+      "secret",
+      backgroundScope,
+      appInstanceId = appInstanceId,
+      clock = { testScheduler.currentTime },
+      log = {},
+      journal = journal,
+    )
+
+  @Test
+  fun `restarted process replays only events newer than the hello acknowledgement`() = runTest {
+    val journal = MemoryJournal()
+    val original = process(journal, "test-instance")
+    repeat(3) { original.agent.emit(event(original.nextSequence())) }
+    assertEquals(7, journal.writes)
+    assertEquals(listOf(1L, 2L, 3L), journal.state?.pending?.map { it.sequence })
+
+    val restored = process(journal)
+    val connection = Connection().also { it.hello(acknowledged = 1) }
+    backgroundScope.launch { restored.agent.serve(connection) }
+    runCurrent()
+
+    assertEquals(
+      "test-instance",
+      connection.written.first()["appInstanceId"]?.jsonPrimitive?.content,
+    )
+    assertEquals(
+      listOf(2L, 3L),
+      connection.written.drop(1).map { it.getValue("sequence").jsonPrimitive.long },
+    )
+    assertEquals(listOf(2L, 3L), journal.state?.pending?.map { it.sequence })
+    assertEquals(8, journal.writes)
+    connection.send("""{"type":"ack","sequence":3,"appInstanceId":"test-instance"}""")
+    runCurrent()
+    assertEquals(emptyList<PrototypeEvent>(), journal.state?.pending)
+    assertEquals(9, journal.writes)
+    connection.send("""{"type":"ack","sequence":3,"appInstanceId":"test-instance"}""")
+    runCurrent()
+    assertEquals(9, journal.writes)
+  }
+
+  @Test
+  fun `overflow persists only the newest 200 events and restores the dropped count`() = runTest {
+    val journal = MemoryJournal()
+    val original = process(journal, "test-instance")
+    repeat(205) { original.agent.emit(event(original.nextSequence())) }
+    assertEquals((6L..205L).toList(), journal.state?.pending?.map { it.sequence })
+    assertEquals(5L, journal.state?.dropped)
+    assertEquals(411, journal.writes)
+
+    val restored = process(journal)
+    val connection = Connection().also { it.hello() }
+    backgroundScope.launch { restored.agent.serve(connection) }
+    runCurrent()
+    assertEquals(5L, connection.written.first().getValue("droppedEvents").jsonPrimitive.long)
+    assertEquals(
+      (6L..205L).toList(),
+      connection.written.drop(1).map { it.getValue("sequence").jsonPrimitive.long },
+    )
+  }
+
+  @Test
+  fun `restart restores the ledger and showing counter without restoring the Activity target`() =
+    runTest {
+      val journal = MemoryJournal()
+      val original = process(journal, "test-instance")
+      val detach = original.bind(Target())
+      assertEquals("test-showing", original.showingId)
+      detach()
+      assertEquals("test-instance:1", original.nextShowingId())
+      assertEquals("test-instance:2", original.nextShowingId())
+      original.agent.emit(event(original.nextSequence()))
+      assertEquals(2L, original.nextSequence()) // A kill can happen before this event is emitted.
+
+      val restored = process(journal)
+      assertEquals(original.appInstanceId, restored.appInstanceId)
+      assertEquals(2L, restored.lastSequence)
+      assertEquals(3L, restored.nextSequence())
+      assertNull(restored.showingId)
+      assertFalse(restored.status().getValue("shown").jsonPrimitive.boolean)
+      assertEquals("test-instance:3", restored.nextShowingId())
+      assertEquals(listOf(1L), journal.state?.pending?.map { it.sequence })
+    }
 
   @Test
   fun `activity rebinding retains listener identity sequences and unacknowledged events`() =

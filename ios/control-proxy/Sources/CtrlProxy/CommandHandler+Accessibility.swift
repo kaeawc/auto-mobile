@@ -359,7 +359,7 @@ struct DefaultAccessibilityAuditor: AccessibilityAuditing {
             }
             let collector = AccessibilityAuditCollector()
             do {
-                let app = XCUIApplication(bundleIdentifier: bundleId)
+                let app = XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId)
                 try catchingObjCException {
                     try app.performAccessibilityAudit(for: types) { issue in
                         collector.issues.append(Self.describe(issue))

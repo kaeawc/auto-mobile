@@ -147,8 +147,12 @@ class MediaUploadFailure extends Error {
   constructor(
     readonly code: PrototypeMediaRejection | undefined,
     message: string,
-    /** The device answered and said no, so it holds nothing for the message it refused. */
-    readonly refused = false,
+    /**
+     * The device holds nothing for the message: it answered with a refusal, or the message was
+     * never sent. Only then may a failed begin skip the abort, which would otherwise also drop
+     * another upload in flight under the same id.
+     */
+    readonly nothingHeld = false,
   ) {
     super(message);
   }
@@ -197,7 +201,7 @@ async function send(
   signal: AbortSignal | undefined,
 ): Promise<void> {
   if (signal?.aborted) {
-    throw new MediaUploadFailure(undefined, "upload was cancelled");
+    throw new MediaUploadFailure(undefined, "upload was cancelled", true);
   }
   const result = await client.sendPrototypeMediaMessage(message, { abortSignal: signal });
   if (!result.success) {
@@ -273,8 +277,8 @@ async function uploadOpenMedia(
   try {
     await send(client, { type: "put_prototype_asset_begin", ...begin }, signal);
   } catch (error) {
-    // A begin lost in transit may still have reserved space on the device; only a refusal did not.
-    if (!(error instanceof MediaUploadFailure && error.refused)) {
+    // A begin lost in transit may still have reserved space on the device; a refused or unsent one did not.
+    if (!(error instanceof MediaUploadFailure && error.nothingHeld)) {
       await abortOnDevice(client, id);
     }
     throw error;

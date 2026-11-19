@@ -223,6 +223,22 @@ describe("prototype media chunked upload", () => {
     ]);
   });
 
+  test("a cancellation before begin is sent sends nothing, not even an abort", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const client = new FakeMediaClient();
+    const files = new FakeMediaFiles({ "/m/clip.mp4": MP4 });
+    const outcome = await uploadPrototypeMediaAsset(
+      client,
+      { id: "clip", path: "/m/clip.mp4" },
+      { opener: files, signal: controller.signal },
+    );
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain("cancelled");
+    // An abort here would drop another upload in flight under the same id.
+    expect(client.sent).toEqual([]);
+  });
+
   test("cancellation between chunks aborts on the device", async () => {
     const controller = new AbortController();
     const client = new FakeMediaClient((message) => {

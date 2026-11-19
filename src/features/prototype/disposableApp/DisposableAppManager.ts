@@ -208,6 +208,18 @@ export class DisposableAppManager {
     return this.withAppLock(input.deviceId, appId, () => this.installLocked(input, appId));
   }
 
+  private async installAndRelease(
+    { stamper, installer }: { stamper: DisposableAppStamper; installer: DisposableAppInstaller },
+    [deviceId, appId]: readonly [string, string],
+    artifactPath: string,
+  ): Promise<void> {
+    try {
+      await installer.install(deviceId, appId, artifactPath);
+    } finally {
+      await stamper.release?.(artifactPath);
+    }
+  }
+
   private async installLocked(
     input: DisposableAppInstallInput,
     appId: string,
@@ -235,11 +247,11 @@ export class DisposableAppManager {
       template,
       declarations,
     });
-    try {
-      await installer.install(input.deviceId, appId, stamped.artifactPath);
-    } finally {
-      await stamper.release?.(stamped.artifactPath);
-    }
+    await this.installAndRelease(
+      { stamper, installer },
+      [input.deviceId, appId],
+      stamped.artifactPath,
+    );
     // Record the app as soon as it is on the device, so a reset or permission failure below cannot
     // leave it untracked or keep a previous install's expiry for the sweep to act on (#16506).
     const installedAt = this.deps.timer.now();

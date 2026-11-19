@@ -58,6 +58,14 @@ function launchScreenWithoutNamedColor(value: unknown): Record<string, unknown> 
   return settings;
 }
 
+function stripDeclaredKeys(plist: Record<string, unknown>): void {
+  for (const key of Object.keys(plist)) {
+    if (/^NS.*UsageDescription$/.test(key) || key === "UIBackgroundModes") {
+      delete plist[key];
+    }
+  }
+}
+
 export class IosDisposableAppStamper implements DisposableAppStamper {
   constructor(private readonly deps: IosDisposableAppStamperDependencies) {}
 
@@ -135,11 +143,7 @@ export class IosDisposableAppStamper implements DisposableAppStamper {
       throw new ActionableError("Template Info.plist must specify an app version.");
     }
     const faceId = faceIdUsageString(input.spec, plist[FACE_ID_USAGE_KEY]);
-    for (const key of Object.keys(plist)) {
-      if (/^NS.*UsageDescription$/.test(key) || key === "UIBackgroundModes") {
-        delete plist[key];
-      }
-    }
+    stripDeclaredKeys(plist);
     const { usageDescriptions, backgroundModes } = input.declarations.ios;
     if (backgroundModes.length > 0) {
       plist.UIBackgroundModes = backgroundModes;

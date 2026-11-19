@@ -4,6 +4,7 @@ import { IosDisposableAppStamper } from "../../../../../src/features/prototype/d
 import { disposableAppId } from "../../../../../src/features/prototype/disposableApp/disposableAppId";
 import { disposableAppDeclarations } from "../../../../../src/features/prototype/disposableApp/disposableAppPermissions";
 import { selectDisposableAppTemplate } from "../../../../../src/features/prototype/disposableApp/disposableAppTemplates";
+import type { PrototypeJson } from "../../../../../src/features/prototype/prototypeJson";
 import { ActionableError } from "../../../../../src/models/ActionableError";
 import { FakeHostCommandExecutor } from "../../../../fakes/FakeHostCommandExecutor";
 import {
@@ -125,10 +126,11 @@ describe("IosDisposableAppStamper", () => {
 
   test("keeps the template Face ID string only for a spec that declares the biometric module", async () => {
     const { stamper, plist } = harness();
-    for (const [biometricSpec, expected] of [
+    const cases: [PrototypeJson, string | undefined][] = [
       [{ id: "f", requires: { platform: ["biometric"] } }, "Template Face ID"],
       [{ id: "f" }, undefined],
-    ] as const) {
+    ];
+    for (const [biometricSpec, expected] of cases) {
       await stamper.stamp({
         appId,
         slug: "feedly",
@@ -137,7 +139,7 @@ describe("IosDisposableAppStamper", () => {
         template: selectDisposableAppTemplate(biometricSpec, await stamper.templates()),
         declarations: disposableAppDeclarations(biometricSpec),
       });
-      expect(plist.written?.value.NSFaceIDUsageDescription).toBe(expected);
+      expect(plist.written?.value?.["NSFaceIDUsageDescription"]).toBe(expected);
     }
   });
 
@@ -153,7 +155,7 @@ describe("IosDisposableAppStamper", () => {
       template: selectDisposableAppTemplate(biometricSpec, await stamper.templates()),
       declarations: disposableAppDeclarations(biometricSpec),
     });
-    expect(plist.written?.value.NSFaceIDUsageDescription).toContain("authenticate");
+    expect(String(plist.written?.value?.["NSFaceIDUsageDescription"])).toContain("authenticate");
   });
 
   test("release removes the temporary directory holding the stamped bundle", async () => {

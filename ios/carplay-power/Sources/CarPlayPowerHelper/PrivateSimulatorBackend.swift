@@ -63,7 +63,7 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend {
         return result
     }
 
-    func selectBootedDevice(udid: String) throws {
+    func selectBootedDevice(udid: String) throws -> SimulatorDevice {
         guard dlopen("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator", RTLD_NOW) != nil,
               let contextClass = NSClassFromString("SimServiceContext")
         else { throw unavailable("SimServiceContext") }
@@ -105,6 +105,10 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend {
             )
         }
         device = selected
+        guard let dataPath = try object(selected, "dataPath") as? NSString,
+              let version = try object(object(selected, "runtime"), "versionString") as? NSString
+        else { throw unavailable("SimDevice.dataPath or runtime.versionString") }
+        return SimulatorDevice(runtimeVersion: version as String, dataPath: dataPath as String)
     }
 
     private func developerDirectory() throws -> String {
@@ -127,25 +131,6 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend {
         guard let device else { throw CarPlayPowerError(.deviceNotFound, "Select a booted simulator first.") }
         return device
     }
-
-    func enableCarPlay() throws {
-        let device = try selectedDevice()
-        let name = "enableCarPlay:error:"
-        typealias Call = @convention(c) (
-            AnyObject, Selector, Bool, AutoreleasingUnsafeMutablePointer<NSError?>
-        )
-            -> Bool
-        let call = try unsafeBitCast(implementation(device, name), to: Call.self)
-        var error: NSError?
-        guard call(device, NSSelectorFromString(name), true, &error) else {
-            throw CarPlayPowerError(
-                .powerOnFailed,
-                "enableCarPlay failed: \(error?.localizedDescription ?? "CoreSimulator refused enablement")"
-            )
-        }
-    }
-
-    func settle() throws { Thread.sleep(forTimeInterval: 3) }
 
     func screens() throws -> [SimulatorScreen] {
         let deviceIO = try object(selectedDevice(), "io")
@@ -200,16 +185,43 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend {
         )
     }
 
-    func powerOn(screenID: UInt32) throws {
-        guard let screen = screenObjects[screenID] else {
-            throw CarPlayPowerError(.noCarPlayScreen, "CarPlay screen disappeared; enumerate and retry.")
+    func writeFile(_ data: Data, path: String) throws {
+        do {
+            try FileManager.default.createDirectory(
+                atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true
+            )
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        } catch {
+            throw CarPlayPowerError(.powerOnFailed, "Cannot write \(path): \(error.localizedDescription)")
         }
-        let name = "setPowerState:completionQueue:completionHandler:"
+    }
+
+    private func carPlayPropertyKey(_ symbol: String) throws -> NSString {
+        guard let pointer = dlsym(UnsafeMutableRawPointer(bitPattern: -2), symbol) else { throw unavailable(symbol) }
+        return pointer.assumingMemoryBound(to: NSString.self).pointee
+    }
+
+    /// Switching TVOut's mode with CarPlay properties powers it on; backboardd then re-reads
+    /// the StarkConfig plist and makes TVOut the car display.
+    func setCarPlayMode(screenID: UInt32, width: Double, height: Double) throws {
+        guard let screen = screenObjects[screenID] else {
+            throw CarPlayPowerError(.noCarPlayScreen, "TVOut screen disappeared; enumerate and retry.")
+        }
+        let mode = try object(object(screen, "screenProperties"), "currentMode")
+        let properties: NSDictionary = try [
+            carPlayPropertyKey("SimCarPlayPropertyKeyHasTouchScreen"): true,
+            carPlayPropertyKey("SimCarPlayPropertyKeyStark"): true,
+        ]
+        let name = "setCurrentMode:pixelSize:carPlayProperties:completionQueue:completionHandler:"
         let result = CallbackResult()
         let completion: @convention(block) (NSError?) -> Void = { error in result.finish(error: error) }
-        typealias Call = @convention(c) (AnyObject, Selector, Int32, AnyObject, AnyObject) -> Void
+        typealias Call = @convention(c) (AnyObject, Selector, AnyObject, CGSize, AnyObject, AnyObject, AnyObject)
+            -> Void
         let call = try unsafeBitCast(implementation(screen, name), to: Call.self)
-        call(screen, NSSelectorFromString(name), 1, queue as AnyObject, completion as AnyObject)
-        _ = try result.wait(code: .powerOnFailed)
+        call(
+            screen, NSSelectorFromString(name), mode, CGSize(width: width, height: height), properties,
+            queue as AnyObject, completion as AnyObject
+        )
+        _ = try result.wait(code: .powerOnFailed, timeout: 20)
     }
 }

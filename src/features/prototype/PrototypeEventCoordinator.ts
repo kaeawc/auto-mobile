@@ -248,11 +248,9 @@ export class PrototypeEventCoordinator {
       };
       this.entries.set(key, entry);
     }
-    if (
-      client.instanceId !== undefined &&
-      entry.instanceId !== undefined &&
-      client.instanceId !== entry.instanceId
-    ) {
+    // A different process identity is a different sequence ledger, including a switch between
+    // a source with no identity (CtrlProxy) and one with an identity (disposable app) (#18667).
+    if (client.instanceId !== entry.instanceId) {
       entry.buffer.startEpoch();
       entry.terminal = false;
       entry.terminalSequence = undefined;

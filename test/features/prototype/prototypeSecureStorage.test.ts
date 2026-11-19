@@ -234,6 +234,57 @@ describe("secure route params and platform args", () => {
   });
 });
 
+describe("secure data-write values", () => {
+  const error = (action: Record<string, unknown>, root = spec()) =>
+    prototypePlatformError(root, [{ value: action, path: "root.onTap[0]" }], () => undefined);
+  const writes = ["setData", "appendData", "upsertData", "prependData"].map((type) => ({
+    type,
+    path: "/data/copy",
+    value: { state: "token" },
+  }));
+
+  for (const action of writes) {
+    test(`${action.type} refuses a secure state value with a located path`, () => {
+      expect(error(action)).toEqual({
+        path: "root.onTap[0].value",
+        message: "Secure storage key state:token cannot be written to data",
+      });
+      expect(error({ ...action, value: { state: "tok{item.id}" } })).toEqual({
+        path: "root.onTap[0].value",
+        message: "Secure storage key state:token cannot be written to data",
+      });
+    });
+  }
+
+  test("public values, literals and specs without secure keys pass; opt-in does not apply", () => {
+    for (const action of writes) {
+      expect(error({ ...action, value: { state: "remember" } })).toBeUndefined();
+      expect(error({ ...action, value: { value: "{token}" } })).toBeUndefined();
+      expect(error(action, spec({ storage: storage({}) }))).toBeUndefined();
+      expect(error({ ...action, allowSecureInRequest: true })).toBeDefined();
+    }
+    expect(error({ type: "removeData", path: "/data/copy" })).toBeUndefined();
+  });
+
+  test("the host validator rejects a secure setData value in a complete spec", () => {
+    expect(
+      validatePrototypeSpec({
+        ...spec(),
+        id: "vault",
+        window: { placement: { type: "fullscreen" } },
+        data: { copy: "" },
+        root: { type: "button", label: "Copy", onTap: [writes[0]] },
+      }),
+    ).toMatchObject({
+      success: false,
+      error: {
+        path: "root.onTap[0].value",
+        message: "Secure storage key state:token cannot be written to data",
+      },
+    });
+  });
+});
+
 describe("secure key template matching", () => {
   const leak = (stateKey: string, secure: string[]) =>
     prototypeSecureStorageEmitError(

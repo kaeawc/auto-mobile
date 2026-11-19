@@ -31,10 +31,7 @@ describe("disposableAppDeclarations", () => {
     expect(DISPOSABLE_APP_IOS_USAGE_KEYS).toEqual(
       Object.fromEntries(
         Object.entries(permissionMapping).flatMap(([name, mapping]) =>
-          // Tracked in #18634: IosPrototypeInstaller omits NSLocalNetworkUsageDescription for nearbyWifi.
-          mapping.ios.usageKey === null || name === "nearbyWifi"
-            ? []
-            : [[name, mapping.ios.usageKey]],
+          mapping.ios.usageKey === null ? [] : [[name, mapping.ios.usageKey]],
         ),
       ),
     );
@@ -54,6 +51,15 @@ describe("disposableAppDeclarations", () => {
     expect(declarations.ios).toEqual({
       usageDescriptions: { NSCameraUsageDescription: "Scan a code" },
       backgroundModes: ["audio"],
+    });
+  });
+
+  test("nearbyWifi writes its purpose under NSLocalNetworkUsageDescription", () => {
+    const declarations = disposableAppDeclarations({
+      requires: { permissions: [{ name: "nearbyWifi", purpose: "Find the speaker" }] },
+    });
+    expect(declarations.ios.usageDescriptions).toEqual({
+      NSLocalNetworkUsageDescription: "Find the speaker",
     });
   });
 

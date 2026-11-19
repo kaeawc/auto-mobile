@@ -4,6 +4,7 @@ import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.security.MessageDigest
+import java.util.Base64
 import java.util.HexFormat
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -52,6 +53,15 @@ private class FakeMediaFiles(private val failAppend: Boolean = false) : Prototyp
   }
 }
 
+private var nextName = 0
+
+/** A receiver with JVM base64 and a unique file name per upload unless a test pins names. */
+private fun newReceiver(
+  files: PrototypeMediaFiles,
+  limits: PrototypeMediaLimits = PrototypeMediaLimits(),
+  newName: () -> String = { "n${nextName++}" },
+) = PrototypeMediaUploadReceiver(files, limits, newName, Base64.getDecoder()::decode)
+
 private object MediaCases {
   val root: JsonObject by lazy {
     val fixture =
@@ -78,7 +88,7 @@ private fun rejection(result: PrototypeMediaResult): String? =
 class PrototypeMediaUploadReceiverTest {
   private var counter = 0
   private val files = FakeMediaFiles()
-  private val receiver = PrototypeMediaUploadReceiver(files, newName = { "f${counter++}" })
+  private val receiver = newReceiver(files, newName = { "f${counter++}" })
 
   private val mp4 =
     hex(MediaCases.list("signatures").first { it.text("name") == "mp4 ftyp box" }.text("hex")!!)
@@ -131,7 +141,7 @@ class PrototypeMediaUploadReceiverTest {
     MediaCases.list("begins").map { case ->
       DynamicTest.dynamicTest(case.text("name")!!) {
         val result =
-          PrototypeMediaUploadReceiver(FakeMediaFiles())
+          newReceiver(FakeMediaFiles())
             .begin(
               case.text("id")!!,
               case.text("mimeType")!!,
@@ -147,7 +157,7 @@ class PrototypeMediaUploadReceiverTest {
     MediaCases.list("streams").map { case ->
       DynamicTest.dynamicTest(case.text("name")!!) {
         val fake = FakeMediaFiles()
-        val target = PrototypeMediaUploadReceiver(fake, newName = { "f" })
+        val target = newReceiver(fake, newName = { "f" })
         val content = hex(case.text("contentHex")!!)
         val begun =
           target.begin(
@@ -190,7 +200,7 @@ class PrototypeMediaUploadReceiverTest {
   @Test
   fun `a full store rejects a new upload without evicting`() {
     val small =
-      PrototypeMediaUploadReceiver(
+      newReceiver(
         files,
         PrototypeMediaLimits(maxCount = 2),
         newName = { "f${counter++}" },
@@ -209,7 +219,7 @@ class PrototypeMediaUploadReceiverTest {
   @Test
   fun `concurrent replacements reserve each id once`() {
     val small =
-      PrototypeMediaUploadReceiver(
+      newReceiver(
         files,
         PrototypeMediaLimits(maxCount = 2, maxTotalBytes = 72),
         newName = { "f${counter++}" },
@@ -223,9 +233,26 @@ class PrototypeMediaUploadReceiverTest {
   }
 
   @Test
+  fun `a smaller pending replacement keeps the committed bytes reserved`() {
+    val small =
+      newReceiver(
+        files,
+        PrototypeMediaLimits(maxTotalBytes = 50),
+        newName = { "f${counter++}" },
+      )
+    assertIs<PrototypeMediaResult.Stored>(upload(small, "a", mp4))
+    val smaller = mp4.copyOf(16)
+    assertIs<PrototypeMediaResult.Accepted>(small.begin("a", "video/mp4", 16, sha256(smaller)))
+    // 36 committed bytes stay reserved for 'a' until its replacement commits.
+    assertEquals("total_limit", rejection(small.begin("b", "video/mp4", 16, sha256(smaller))))
+    small.abort("a")
+    assertEquals(36, small.lookup("a")!!.byteCount)
+  }
+
+  @Test
   fun `in-flight uploads count against the byte budget`() {
     val small =
-      PrototypeMediaUploadReceiver(
+      newReceiver(
         files,
         PrototypeMediaLimits(maxTotalBytes = 60),
         newName = { "f${counter++}" },
@@ -251,7 +278,7 @@ class PrototypeMediaUploadReceiverTest {
 
   @Test
   fun `chunks over the cap and malformed base64 are rejected before decoding`() {
-    val tiny = PrototypeMediaUploadReceiver(files, PrototypeMediaLimits(maxChunkBytes = 12))
+    val tiny = newReceiver(files, PrototypeMediaLimits(maxChunkBytes = 12))
     tiny.begin("a", "video/mp4", 36, sha256(mp4))
     assertEquals("chunk_too_large", rejection(tiny.chunkBase64("a", 0, "A".repeat(17))))
     tiny.begin("a", "video/mp4", 36, sha256(mp4))
@@ -264,7 +291,7 @@ class PrototypeMediaUploadReceiverTest {
   @Test
   fun `a storage failure drops the upload`() {
     val failing = FakeMediaFiles(failAppend = true)
-    val target = PrototypeMediaUploadReceiver(failing)
+    val target = newReceiver(failing)
     target.begin("a", "video/mp4", 36, sha256(mp4))
     assertEquals("storage_failure", rejection(target.chunk("a", 0, mp4)))
     assertTrue(failing.partials.isEmpty())
@@ -285,7 +312,7 @@ class PrototypeMediaUploadReceiverTest {
     val dir = Files.createTempDirectory("media").toFile()
     try {
       val target =
-        PrototypeMediaUploadReceiver(
+        newReceiver(
           DirectoryPrototypeMediaFiles(dir),
           newName = { "n${counter++}" },
         )

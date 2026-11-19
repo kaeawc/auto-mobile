@@ -8,8 +8,6 @@ import java.nio.CharBuffer
 import java.nio.charset.CharsetDecoder
 import java.nio.charset.CodingErrorAction
 import java.security.MessageDigest
-import java.util.Base64
-import java.util.HexFormat
 import java.util.UUID
 
 /**
@@ -153,6 +151,12 @@ class PrototypeMediaUploadReceiver(
   private val files: PrototypeMediaFiles,
   val limits: PrototypeMediaLimits = PrototypeMediaLimits(),
   private val newName: () -> String = { "media-${UUID.randomUUID()}" },
+  /**
+   * Strict base64 decoding for [chunkBase64]; throws IllegalArgumentException on bad input.
+   * Injected because `java.util.Base64` needs Android API 26 and CtrlProxy's minSdk is 24, so the
+   * device passes `android.util.Base64` and JVM callers pass `java.util.Base64.getDecoder()`.
+   */
+  private val decodeBase64: (String) -> ByteArray,
 ) {
   private class Upload(
     val mimeType: String,
@@ -203,7 +207,7 @@ class PrototypeMediaUploadReceiver(
         }
       }
       if (utf8?.finish() == false) return NOT_UTF8_PROBLEM
-      val actual = HexFormat.of().formatHex(digest.digest())
+      val actual = lowercaseHex(digest.digest())
       return if (actual == sha256) null
       else
         PrototypeMediaRejection.SHA256_MISMATCH to "Media bytes do not match the declared sha256."
@@ -259,7 +263,7 @@ class PrototypeMediaUploadReceiver(
     }
     val bytes =
       try {
-        Base64.getDecoder().decode(dataBase64)
+        decodeBase64(dataBase64)
       } catch (error: IllegalArgumentException) {
         return fail(
           id,
@@ -392,9 +396,10 @@ private fun beginProblem(
   }
 
 /**
- * Count and byte caps reserved per asset id: an id with an upload in flight reserves that upload's
- * declared size, any other committed id its stored size. A replacement, whether this begin or one
- * already in flight, is never counted twice.
+ * Count and byte caps reserved per asset id. A committed asset keeps its bytes until a replacement
+ * commits, so an id with an upload in flight reserves the larger of its committed and declared
+ * sizes; an abort or failed replacement can therefore never leave the store over budget. Each id
+ * counts once, so a replacement is never counted twice.
  */
 private fun capacityProblem(
   limits: PrototypeMediaLimits,
@@ -403,7 +408,10 @@ private fun capacityProblem(
   stored: Collection<PrototypeMediaInfo>,
   pendingSizes: Map<String, Long>,
 ): Problem? {
-  val reserved = stored.associate { it.id to it.byteCount } + pendingSizes + (id to size)
+  val reserved = stored.associateTo(HashMap()) { it.id to it.byteCount }
+  (pendingSizes + (id to size)).forEach { (key, bytes) ->
+    reserved[key] = maxOf(reserved[key] ?: 0L, bytes)
+  }
   val count = reserved.size
   val bytes = reserved.values.sum()
   return when {
@@ -415,6 +423,19 @@ private fun capacityProblem(
         "Media assets would total $bytes bytes; the limit is ${limits.maxTotalBytes}."
     else -> null
   }
+}
+
+private val HEX_DIGITS = "0123456789abcdef".toCharArray()
+
+/** Lowercase hex without `java.util.HexFormat`, which Android only ships from API 34. */
+private fun lowercaseHex(bytes: ByteArray): String {
+  val out = CharArray(bytes.size * 2)
+  bytes.forEachIndexed { index, byte ->
+    val value = byte.toInt() and 0xff
+    out[index * 2] = HEX_DIGITS[value ushr 4]
+    out[index * 2 + 1] = HEX_DIGITS[value and 0x0f]
+  }
+  return String(out)
 }
 
 /** Strict streaming UTF-8 check: a code point may span chunks, malformed input is rejected. */

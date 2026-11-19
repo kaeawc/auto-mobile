@@ -298,7 +298,12 @@ internal object PrototypeDataText {
       for ((span, source) in sources.sortedBy { it.first.start }) {
         if (span.start < cursor) continue
         append(text.substring(cursor, span.start))
-        append(PrototypeDataValues.rendered(PrototypeDataPointer.resolve(source, span.pointer)))
+        // State and row placeholders are read later; a data value never supplies one (#18628).
+        append(
+          PrototypeTextShield.shield(
+            PrototypeDataValues.rendered(PrototypeDataPointer.resolve(source, span.pointer)),
+          ),
+        )
         cursor = span.end
       }
       append(text.substring(cursor))

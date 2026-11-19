@@ -351,7 +351,7 @@ internal class PrototypeNodeMapping(
         if (derive.isEmpty()) node
         else
           PrototypeDerivedText.bindNode(node) {
-            interpolatePrototypeText(it, derivedState)
+            interpolatePrototypeText(it, derivedState, readLater = true)
           },
         path,
         (node as? PrototypePagerNode)?.let { pages[it.id] } ?: 0,
@@ -555,14 +555,14 @@ private fun prototypeNodeText(
       prototypePlainText(node) { interpolatePrototypeText(it, localState, inPager) }
     is PrototypeTextFieldNode -> (state[node.stateKey] as? PrototypeScalar.Text)?.value.orEmpty()
     is PrototypeSearchBarNode -> (state[node.stateKey] as? PrototypeScalar.Text)?.value.orEmpty()
-    is PrototypeSwitchNode -> node.label.orEmpty()
-    is PrototypeCheckboxNode -> node.label.orEmpty()
+    is PrototypeSwitchNode -> PrototypeTextShield.unshield(node.label.orEmpty())
+    is PrototypeCheckboxNode -> PrototypeTextShield.unshield(node.label.orEmpty())
     is PrototypePasteButtonNode -> "Paste"
     is PrototypeButtonNode ->
       interpolatePrototypeText(node.label, localState, inPager, derivedOnly = true)
-    is PrototypeListItemNode -> node.headline
-    is PrototypeSliderNode -> node.label.orEmpty()
-    is PrototypeChipNode -> node.label
+    is PrototypeListItemNode -> PrototypeTextShield.unshield(node.headline)
+    is PrototypeSliderNode -> PrototypeTextShield.unshield(node.label.orEmpty())
+    is PrototypeChipNode -> PrototypeTextShield.unshield(node.label)
     is PrototypeIconNode -> node.name
     is PrototypeFabNode ->
       interpolatePrototypeText(node.label.orEmpty(), localState, inPager, derivedOnly = true)
@@ -626,22 +626,32 @@ private fun prototypeStateInt(state: Map<String, PrototypeScalar>, key: String?)
  * Tokens (`{key}` with an ASCII identifier key) are found by a plain string scan rather than a
  * regex: Android's ICU regex engine rejects a lone `}` that the desktop JVM accepts, which broke
  * every prototype `show` on a device (#9947) while the JVM unit tests stayed green.
+ *
+ * Values inserted by earlier passes (data, rows, derived) are shielded and stay literal; this pass
+ * removes the shield (#18628). Pass [readLater] when another pass will scan the result: inserted
+ * values are then shielded and earlier shields are kept.
  */
 internal fun interpolatePrototypeText(
   text: String,
   state: Map<String, PrototypeScalar>,
   inPager: Boolean = false,
   derivedOnly: Boolean = false,
+  readLater: Boolean = false,
 ): String {
   val out = StringBuilder(text.length)
   var substitutedLength = 0
+  var literalStart = 0
   var index = 0
+  fun appendLiteral(until: Int) {
+    val literal = text.substring(literalStart, until)
+    out.append(if (readLater) literal else PrototypeTextShield.unshield(literal))
+  }
   while (index < text.length) {
     val end = interpolationTokenEnd(text, index)
     if (end < 0) {
-      out.append(text[index])
       index++
     } else {
+      appendLiteral(index)
       val token = text.substring(index, end)
       val value =
         if (derivedOnly && !token.startsWith("{derived:")) null
@@ -651,14 +661,16 @@ internal fun interpolatePrototypeText(
           value.length <=
             PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH - substitutedLength
       ) {
-        out.append(value)
+        out.append(if (readLater) PrototypeTextShield.shield(value) else value)
         substitutedLength += value.length
       } else {
         out.append(token)
       }
       index = end
+      literalStart = end
     }
   }
+  appendLiteral(text.length)
   return out.toString()
 }
 

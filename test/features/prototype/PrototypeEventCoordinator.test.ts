@@ -43,6 +43,32 @@ describe("PrototypeEventCoordinator", () => {
     expect((await waiting).event?.sequence).toBe(1);
   });
 
+  test.each([
+    { label: "CtrlProxy to app", from: undefined, to: "app" },
+    { label: "app to CtrlProxy", from: "app", to: undefined },
+  ])("instance identity switching $label resets the epoch", async ({ from, to }) => {
+    const source = (instanceId: string | undefined) => {
+      const fake = new FakeCtrlProxy(timer);
+      return { fake, instanceId, onPrototypeEvent: fake.onPrototypeEvent.bind(fake) };
+    };
+    coordinator.adopt(scope, "panel", source(from), { replayed: [], lastSequence: 10 });
+    const next = source(to);
+    const waiting = coordinator.awaitEvent(scope, "panel", next, {});
+    next.fake.emitPrototypeEvent(event(1));
+    expect(coordinator.counts(scope, "panel")?.lastSequence).toBe(1);
+    expect((await waiting).event?.sequence).toBe(1);
+  });
+
+  test("a source with no instance identity keeps the epoch across reconnects", () => {
+    const source = () => {
+      const fake = new FakeCtrlProxy(timer);
+      return { fake, onPrototypeEvent: fake.onPrototypeEvent.bind(fake) };
+    };
+    coordinator.adopt(scope, "panel", source(), { replayed: [], lastSequence: 10 });
+    coordinator.adopt(scope, "panel", source(), { replayed: [event(1)], lastSequence: 0 });
+    expect(coordinator.counts(scope, "panel")).toMatchObject({ pendingCount: 0, lastSequence: 10 });
+  });
+
   test.each([{ eventName: "next" }, { kind: "emit" as const }])(
     "same-process remount resumes a filtered wait %j without losing pending events",
     async (filter) => {

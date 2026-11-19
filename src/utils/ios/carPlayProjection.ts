@@ -12,6 +12,8 @@ export const carPlayProjectionStateSchema = z.discriminatedUnion("found", [
       displayId: z.number().int(),
       displayType: z.number().int(),
       identity: z.string().min(1),
+      name: z.string(),
+      deviceName: z.string(),
       isCarDisplay: z.boolean(),
       isCarInstrumentsDisplay: z.boolean(),
     })
@@ -23,6 +25,8 @@ export const carPlayProjectionStateSchema = z.discriminatedUnion("found", [
       displayId: z.null(),
       displayType: z.null(),
       identity: z.null(),
+      name: z.null(),
+      deviceName: z.null(),
       isCarDisplay: z.literal(false),
       isCarInstrumentsDisplay: z.literal(false),
     })
@@ -81,14 +85,10 @@ export function assertCarPlayProjecting(state: CarPlayProjectionState): void {
     return;
   }
   const status = state.found
-    ? `CarPlay screen is attached but not projecting (${state.identity}).`
-    : "CarPlay screen was not found (wireless0); it is not projecting.";
-  const power =
-    !state.found || state.tag === 0
-      ? "Enable CarPlay and power the screen on first via ios/carplay-power. "
-      : "";
+    ? `CarPlay screen ${state.name} is attached but not projecting (${state.identity}).`
+    : "No CarPlay screen (TVOut or AirPlay display) was found; it is not projecting.";
   throw new ActionableError(
-    `${status} Capture was skipped because the frame would be black. ${power}Open the CarPlay window in Simulator.app, then retry.`,
+    `${status} Capture was skipped because the frame would be black. Run carplay-power-helper power-on (ios/carplay-power) after every boot of an iOS 26.x simulator, then retry; the iOS 27 Simulator does not support CarPlay.`,
   );
 }
 

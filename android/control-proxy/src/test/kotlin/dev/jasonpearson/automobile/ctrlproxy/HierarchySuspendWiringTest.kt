@@ -64,7 +64,12 @@ class HierarchySuspendWiringTest {
       functionBody("private fun refreshHierarchyAfterTextInput()", "TextInputController.kt")
     assertTrue(refresh.contains("serviceScope.launch"))
     assertTrue(refresh.contains("host.publishSettledHierarchy()"))
-    val publish = functionBody("override suspend fun publishSettledHierarchy()")
+    // The service hooks are forwarding host classes in CtrlProxyControllerHosts.kt (#11876).
+    val publish =
+      functionBody(
+        "override suspend fun publishSettledHierarchy()",
+        "CtrlProxyControllerHosts.kt",
+      )
     assertTrue(publish.contains("hierarchyController.publishSettledHierarchy()"))
     val settledPublish =
       functionBody("fun HierarchyController.publishSettledHierarchy()", "HierarchyController.kt")

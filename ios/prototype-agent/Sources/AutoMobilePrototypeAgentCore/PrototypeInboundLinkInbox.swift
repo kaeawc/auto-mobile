@@ -14,6 +14,24 @@ enum PrototypeInboundLinkSchemes {
     static func capabilities(installed: Bool, schemes: [String]) -> [String] {
         installed && !registered(schemes).isEmpty ? [PrototypeAgentProtocol.linksCapability] : []
     }
+
+    /// One list for import checks and embedded rendering, so an accepted import always renders.
+    static func rendererCapabilities(registry: [String], delivery: [String]) -> [String] {
+        AutoMobilePrototypeCapabilities.supported + registry + delivery
+    }
+}
+
+/// What ProtoViewer's SwiftUI URL callback does with an opened URL.
+enum PrototypeViewerURLRoute: Equatable {
+    case mcp
+    case share
+    /// The installed delegate hook already delivered it; routing it again would deliver it twice.
+    case delegateOwned
+
+    static func route(_ url: URL) -> Self {
+        if url.scheme?.lowercased() == "automobile-proto" { return .mcp }
+        return url.isFileURL ? .share : .delegateOwned
+    }
 }
 
 @MainActor

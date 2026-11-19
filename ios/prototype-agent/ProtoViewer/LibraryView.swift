@@ -253,10 +253,10 @@ struct LibraryView: View {
     }
 
     private func receiveURL(_ url: URL) {
-        guard url.scheme?.lowercased() == "automobile-proto" else {
-            if url.isFileURL { receive(url, source: .share) }
-            // The installed delegate hook already delivers non-file, non-MCP URLs.
-            return
+        switch PrototypeViewerURLRoute.route(url) {
+        case .mcp: break
+        case .share: receive(url, source: .share); return
+        case .delegateOwned: return
         }
         // Even malformed MCP URLs are consumed: they must never enter the share-file alert path.
         guard let command = PrototypeMcpRequest.parse(url) else {

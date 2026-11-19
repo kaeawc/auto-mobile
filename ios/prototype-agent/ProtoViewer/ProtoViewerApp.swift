@@ -11,7 +11,9 @@ struct ProtoViewerApp: App {
 
     init() {
         PrototypeURLDelivery.hookExistingDelegates()
-        let capabilities = AutoMobilePrototypeCapabilities.supported + PrototypeURLDelivery.capabilities
+        let capabilities = PrototypeInboundLinkSchemes.rendererCapabilities(
+            registry: [], delivery: PrototypeURLDelivery.capabilities
+        )
         library = Result {
             let support = try FileManager.default.url(
                 for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true

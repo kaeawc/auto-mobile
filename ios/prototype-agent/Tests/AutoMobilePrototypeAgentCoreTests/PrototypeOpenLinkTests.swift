@@ -239,3 +239,49 @@ final class PrototypeInboundLinkInboxTests: XCTestCase {
         XCTAssertEqual(current.urls, ["amp-demo://post/41"])
     }
 }
+
+@MainActor
+final class PrototypeViewerLinkDeliveryTests: XCTestCase {
+    private final class Target: PrototypeInboundLinkTarget {
+        var isReadyForInboundLinks = true
+        var urls: [String] = []
+        func receiveInboundLink(_ url: String) { urls.append(url) }
+    }
+
+    func testViewerURLCallbackLeavesRegisteredSchemesToTheDelegateHook() throws {
+        let inbox = PrototypeInboundLinkInbox()
+        let target = Target()
+        inbox.attach(target)
+        let url = try XCTUnwrap(URL(string: "amp-demo://post/41"))
+        // UIKit calls the hooked scene delegate first, then SwiftUI's onOpenURL with the same URL.
+        if PrototypeInboundLinkSchemes.accepts(url, schemes: ["amp-demo"]) { inbox.receive(url.absoluteString) }
+        if PrototypeViewerURLRoute.route(url) != .delegateOwned { inbox.receive(url.absoluteString) }
+        XCTAssertEqual(target.urls, ["amp-demo://post/41"])
+        XCTAssertEqual(PrototypeViewerURLRoute.route(try XCTUnwrap(URL(string: "https://host/post/41"))), .delegateOwned)
+        XCTAssertEqual(PrototypeViewerURLRoute.route(URL(fileURLWithPath: "/tmp/spec.json")), .share)
+        for mcp in ["automobile-proto://open?id=1", "AutoMobile-Proto://open"] {
+            XCTAssertEqual(PrototypeViewerURLRoute.route(try XCTUnwrap(URL(string: mcp))), .mcp)
+        }
+    }
+
+    func testEmbeddedRendererAcceptsTheLinksCapabilityTheViewerImportAdvertises() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("test/fixtures/prototype-spec/valid/links-routes.json")
+        let data = try Data(contentsOf: url)
+        let delivered = PrototypeInboundLinkSchemes.capabilities(installed: true, schemes: ["amp-demo"])
+        let imports = PrototypeInboundLinkSchemes.rendererCapabilities(registry: [], delivery: delivered)
+        XCTAssertTrue(imports.contains(PrototypeAgentProtocol.linksCapability))
+        XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data, supportedCapabilities: Set(imports)))
+        XCTAssertNoThrow(try PrototypeEmbeddedSpec.load(
+            data: data, supported: PrototypeInboundLinkSchemes.rendererCapabilities(registry: [], delivery: delivered)
+        ))
+        let undelivered = PrototypeInboundLinkSchemes.capabilities(installed: false, schemes: ["amp-demo"])
+        XCTAssertThrowsError(try PrototypeEmbeddedSpec.load(
+            data: data, supported: PrototypeInboundLinkSchemes.rendererCapabilities(registry: [], delivery: undelivered)
+        )) { error in
+            XCTAssertEqual(error as? PrototypeLoadError, .unsupportedCapabilities([PrototypeAgentProtocol.linksCapability]))
+        }
+    }
+}

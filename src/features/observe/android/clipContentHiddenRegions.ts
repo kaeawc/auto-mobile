@@ -49,23 +49,41 @@ function composeHostBounds(hierarchy: unknown): ElementBounds[] {
 }
 
 /**
- * Clips `bounds` to the candidate it overlaps most. Returns `bounds` unchanged when there are no
- * candidates, or null when candidates exist but none overlaps (`requireOverlap`).
+ * Clips `bounds` to the window it overlaps most. Returns `bounds` unchanged when there are no
+ * windows, or null when windows exist but none overlaps.
  */
-function clipToBestOverlap(
+function clipToBestWindow(
   bounds: ElementBounds,
   candidates: ElementBounds[],
-  requireOverlap: boolean,
 ): ElementBounds | null {
   const overlaps = candidates
     .map((candidate) => intersectBounds(bounds, candidate))
     .filter((overlap): overlap is ElementBounds => overlap !== null);
   if (overlaps.length === 0) {
-    return requireOverlap && candidates.length > 0 ? null : bounds;
+    return candidates.length > 0 ? null : bounds;
   }
   return overlaps.reduce((best, overlap) =>
     boundsArea(overlap) > boundsArea(best) ? overlap : best,
   );
+}
+
+/**
+ * The Compose host that owns a region: the innermost host containing the flagged node's top-left
+ * corner. A child is laid out from inside its own host, so an overflow into a larger sibling host
+ * never takes ownership of the region.
+ */
+function owningHost(region: ElementBounds, hosts: ElementBounds[]): ElementBounds | null {
+  const containing = hosts.filter(
+    (host) =>
+      region.left >= host.left &&
+      region.left < host.right &&
+      region.top >= host.top &&
+      region.top < host.bottom,
+  );
+  if (containing.length === 0) {
+    return null;
+  }
+  return containing.reduce((inner, host) => (boundsArea(host) < boundsArea(inner) ? host : inner));
 }
 
 function screenBounds(context: ContentHiddenRegionClipContext): ElementBounds | null {
@@ -80,7 +98,7 @@ function screenBounds(context: ContentHiddenRegionClipContext): ElementBounds | 
 
 /**
  * Clips CtrlProxy's `contentHiddenRegions` (#18675) to what can actually be drawn: the screen, the
- * visible window the region overlaps most, and the Compose host view it overlaps most. The runner
+ * visible window the region overlaps most, and the Compose host view that owns it. The runner
  * reports the raw bounds of the flagged Compose node, which can be larger than its `ComposeView`
  * host (a fill-max-size child of a host that is shorter than the window) and so extend past the
  * screen and over sibling Views such as a bottom navigation bar. The host's parent clips that
@@ -107,8 +125,9 @@ export function clipContentHiddenRegions(
       return [region];
     }
     const onScreen = screen ? intersectBounds(raw, screen) : raw;
-    const inWindow = onScreen && clipToBestOverlap(onScreen, windowBounds, true);
-    const inHost = inWindow && clipToBestOverlap(inWindow, hostBounds, false);
+    const inWindow = onScreen && clipToBestWindow(onScreen, windowBounds);
+    const host = owningHost(raw, hostBounds);
+    const inHost = inWindow && (host ? intersectBounds(inWindow, host) : inWindow);
     if (!inHost) {
       return [];
     }

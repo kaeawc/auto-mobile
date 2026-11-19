@@ -88,6 +88,21 @@ describe("clipContentHiddenRegions (#18675)", () => {
     ).toBeUndefined();
   });
 
+  test("clips to the owning host, not a larger sibling host the child overflows into", () => {
+    const composeHost = (top: number, bottom: number) => ({
+      class: "androidx.compose.ui.platform.ComposeView",
+      bounds: { left: 0, top, right: 1000, bottom },
+    });
+    expect(
+      clipContentHiddenRegions([region(0, 0, 1000, 2000, 100)], {
+        screenWidth: 1000,
+        screenHeight: 2000,
+        windows: [appWindow],
+        hierarchy: { node: [composeHost(0, 600), composeHost(600, 2000)] },
+      }),
+    ).toEqual([region(0, 0, 1000, 600, 30)]);
+  });
+
   test("drops a region entirely off screen", () => {
     expect(
       clipContentHiddenRegions([region(0, 2100, 1000, 2900, 40)], {

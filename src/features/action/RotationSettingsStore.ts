@@ -84,12 +84,15 @@ export class RotationSettingsStore {
   }): Promise<void> {
     const { state, signal, assertCurrentDevice, skipIfCurrent } = options;
     const cleanup: RotationSettingCleanup = { needed: false, assertCurrentDevice };
+    const accelerometerRotation = skipIfCurrent
+      ? await this.accelerometerRestoreTarget(state, signal)
+      : state.accelerometerRotation;
     const targets: Array<readonly [RotationSettingKey, number]> = [];
     if (state.userRotation !== null) {
       targets.push(["user_rotation", state.userRotation]);
     }
-    if (state.accelerometerRotation !== null) {
-      targets.push(["accelerometer_rotation", state.accelerometerRotation]);
+    if (accelerometerRotation !== null) {
+      targets.push(["accelerometer_rotation", accelerometerRotation]);
     }
     // No observation or device discovery is needed for a settings-only restoration.
     // Teardown drains admitted mutations before restoring; late setup hands off after writes settle.
@@ -133,10 +136,10 @@ export class RotationSettingsStore {
       if (state.userRotation !== null) {
         await this.writeSystemSetting("user_rotation", String(state.userRotation), signal, cleanup);
       }
-      if (state.accelerometerRotation !== null) {
+      if (accelerometerRotation !== null) {
         await this.writeSystemSetting(
           "accelerometer_rotation",
-          String(state.accelerometerRotation),
+          String(accelerometerRotation),
           signal,
           cleanup,
         );
@@ -148,6 +151,36 @@ export class RotationSettingsStore {
         }
       }
     });
+  }
+
+  /**
+   * The `accelerometer_rotation` value a session release writes. Android keeps auto-rotate per
+   * device state: restoring `device_state_rotation_lock` re-applies the current posture's own
+   * setting, so when the device left the posture the original was captured in, the captured
+   * value belongs to another posture and writing it would overwrite the current posture's entry.
+   * An unreadable current posture keeps the captured value (the pre-#18833 behaviour).
+   */
+  private async accelerometerRestoreTarget(
+    state: RotationRestoreState,
+    signal?: AbortSignal,
+  ): Promise<0 | 1 | null> {
+    const captured = state.deviceStateRotationLockState;
+    if (
+      state.accelerometerRotation === null ||
+      state.deviceStateRotationLock === undefined ||
+      captured === undefined
+    ) {
+      return state.accelerometerRotation;
+    }
+    const current = await this.readCommittedDeviceState();
+    throwIfAborted(signal);
+    if (current < 0 || current === captured) {
+      return state.accelerometerRotation;
+    }
+    logger.info(
+      `[Rotate] Device state changed from ${captured} to ${current} since auto-rotate was captured; device_state_rotation_lock decides accelerometer_rotation for this posture.`,
+    );
+    return null;
   }
 
   private async settingsAlreadyMatch(
@@ -367,7 +400,8 @@ export class RotationSettingsStore {
     return true;
   }
 
-  private async readCommittedDeviceState(): Promise<number> {
+  /** The committed device state identifier, or -1 when it cannot be read. */
+  async readCommittedDeviceState(): Promise<number> {
     try {
       const { stdout } = await this.ctx().adb.executeCommand("shell cmd device_state state", {
         timeoutMs: ROTATION_SETTING_CLEANUP_TIMEOUT_MS,

@@ -587,6 +587,11 @@ export class Rotate extends BaseVisualChange {
     const lock = await this.store.readSetting("secure", DEVICE_STATE_ROTATION_LOCK, signal);
     if (lock !== null) {
       state.deviceStateRotationLock = lock;
+      const deviceState = await this.store.readCommittedDeviceState();
+      throwIfAborted(signal);
+      if (deviceState >= 0) {
+        state.deviceStateRotationLockState = deviceState;
+      }
     }
   }
 
@@ -751,8 +756,9 @@ export class Rotate extends BaseVisualChange {
     // regardless of whether it was already off beforehand. Remember the
     // pre-existing value so it can be restored once the forced rotation
     // completes, instead of leaving auto-rotate permanently disabled
-    // (#6129). An explicit persistent request takes ownership of this state,
-    // while omission and false preserve the known prior auto-rotate state.
+    // (#6129). true, and omission in a device session (#18833), keep auto-rotate
+    // off so the orientation holds until session release restores the originals;
+    // false and direct-call omission turn auto-rotate back on before returning.
 
     try {
       this.outcomes.logAutoRotatePlan(autoRotateState, preserveLock, restoreAutomaticRotation);
@@ -769,7 +775,7 @@ export class Rotate extends BaseVisualChange {
           throwIfAborted(signal);
           cleanup.needed = shouldRestoreAutoRotate && autoRotateState !== "locked";
           await this.planDeviceStateLock(cleanup, {
-            shouldRestoreAutoRotate: shouldRestoreAutoRotate || plan.restoreAfterConfirmation,
+            shouldRestoreAutoRotate,
             autoRotateState,
             signal,
           });
@@ -798,7 +804,7 @@ export class Rotate extends BaseVisualChange {
       let warning: string | undefined;
       let restoreConfirmed = true;
 
-      if (shouldRestoreAutoRotate || plan.restoreAfterConfirmation) {
+      if (shouldRestoreAutoRotate) {
         ({ achievedOrientation, warning, restoreConfirmed } =
           await this.outcomes.restoreAutoRotateAndConfirmOrientation(orientation, signal, cleanup));
       }
@@ -976,19 +982,10 @@ export class Rotate extends BaseVisualChange {
       slot,
       signal,
     });
-    let { achievedOrientation, warning } = confirmation;
+    const { achievedOrientation } = confirmation;
+    let { warning } = confirmation;
     if (achievedOrientation === orientation) {
-      let restoreConfirmed = !restoreFailure;
-      if (plan.restoreAfterConfirmation) {
-        const restored = await this.outcomes.restoreAutoRotateAndConfirmOrientation(
-          orientation,
-          signal,
-          cleanup,
-        );
-        achievedOrientation = restored.achievedOrientation;
-        warning = [warning, restored.warning].filter(Boolean).join(" ") || undefined;
-        restoreConfirmed = restored.restoreConfirmed;
-      }
+      const restoreConfirmed = !restoreFailure;
       const result = await this.outcomes.finalizeAndroidRotation({
         orientation,
         value,

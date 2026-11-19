@@ -32,6 +32,19 @@ const PHONE_STATES = readFileSync(
   join(__dirname, "..", "fixtures", "android-display", "phone-states.txt"),
   "utf8",
 );
+// Captured `cmd device_state state` output from a pixel_fold emulator, opened and closed.
+const foldState = (posture: "open" | "closed") =>
+  readFileSync(
+    join(
+      __dirname,
+      "..",
+      "fixtures",
+      "android-display",
+      "fold-pixel10pf-api36",
+      `fold-${posture}-device-state.txt`,
+    ),
+    "utf8",
+  );
 
 const device = { deviceId: "rotation-device", name: "Pixel", platform: "android" as const };
 const flush = async () => {
@@ -56,6 +69,8 @@ class RotationAdb extends FakeAdbExecutor {
   mismatch = false;
   /** `cmd device_state print-states` output; empty reads as a single-state device. */
   printStatesOutput = "";
+  /** `cmd device_state state` output; empty reads as an unknown committed state. */
+  committedStateOutput = "";
   blockRead?: () => Promise<void>;
   /**
    * `secure device_state_rotation_lock`; null models a device without the setting. When set,
@@ -71,6 +86,9 @@ class RotationAdb extends FakeAdbExecutor {
     await super.executeCommand(command);
     if (command === "shell cmd device_state print-states") {
       return output(this.printStatesOutput);
+    }
+    if (command === "shell cmd device_state state") {
+      return output(this.committedStateOutput);
     }
     const words = command.split(" ");
     const key = words[4];
@@ -265,6 +283,94 @@ describe("session rotation restoration", () => {
     } finally {
       h.manager.stopCleanupTimer();
     }
+  });
+
+  describe("omitted lockOrientation keeps the rotation until release (#18833)", () => {
+    test("auto-rotate on: the call leaves auto-rotate off and release restores it", async () => {
+      const h = harness();
+      try {
+        await h.manager.createSession("rotation-session", device.deviceId, "android");
+        const result = await h.rotate.execute("landscape");
+        expect(result.success).toBe(true);
+        expect(result.orientationLockState).toBe("locked");
+        expect(h.adb.auto).toBe(0);
+        expect(h.adb.live).toBe(1);
+        expect(h.adb.writes()).not.toContain("shell settings put system accelerometer_rotation 1");
+        await h.manager.releaseSession("rotation-session");
+        expect(h.adb.auto).toBe(1);
+        expect(h.adb.user).toBe(2);
+      } finally {
+        h.manager.stopCleanupTimer();
+      }
+    });
+
+    test("explicit false still turns auto-rotate back on before returning", async () => {
+      const h = harness();
+      try {
+        await h.manager.createSession("rotation-session", device.deviceId, "android");
+        await h.rotate.execute("landscape", { lockOrientation: false });
+        expect(h.adb.auto).toBe(1);
+        expect(h.adb.writes()).toContain("shell settings put system accelerometer_rotation 1");
+      } finally {
+        h.manager.stopCleanupTimer();
+      }
+    });
+
+    test("an already-locked device stays locked and release writes no accelerometer_rotation", async () => {
+      const h = harness();
+      h.adb.auto = 0;
+      try {
+        await h.manager.createSession("rotation-session", device.deviceId, "android");
+        const result = await h.rotate.execute("landscape");
+        expect(result.success).toBe(true);
+        expect(h.adb.auto).toBe(0);
+        await h.manager.releaseSession("rotation-session");
+        expect(h.adb.auto).toBe(0);
+        expect(h.adb.user).toBe(2);
+        expect(h.adb.writes()).not.toContain("shell settings put system accelerometer_rotation 1");
+      } finally {
+        h.manager.stopCleanupTimer();
+      }
+    });
+
+    test.each([
+      { label: "same posture", releaseIn: "open" as const, accelerometerWritten: true },
+      { label: "posture changed", releaseIn: "closed" as const, accelerometerWritten: false },
+    ])(
+      "foldable release in the $label restores the per-state map first",
+      async ({ releaseIn, accelerometerWritten }) => {
+        const h = harness();
+        h.adb.lock = "0:1:1:2:2:0";
+        h.adb.lockBaseline = "0:1:1:2:2:0";
+        h.adb.printStatesOutput = FOLD_STATES;
+        h.adb.committedStateOutput = foldState("open");
+        try {
+          await h.manager.createSession("rotation-session", device.deviceId, "android");
+          await h.rotate.execute("landscape");
+          expect(h.manager.getRotation("rotation-session")).toEqual({
+            accelerometerRotation: 1,
+            userRotation: 2,
+            deviceStateRotationLock: "0:1:1:2:2:0",
+            deviceStateRotationLockState: 2,
+          });
+          h.adb.committedStateOutput = foldState(releaseIn);
+          const start = h.adb.getExecutedCommands().length;
+          await h.manager.releaseSession("rotation-session");
+          const released = h.adb.getExecutedCommands().slice(start);
+          expect(released).toContain(
+            "shell settings put secure device_state_rotation_lock 0:1:1:2:2:0",
+          );
+          expect(released.includes("shell settings put system accelerometer_rotation 1")).toBe(
+            accelerometerWritten,
+          );
+          expect(h.adb.lock).toBe("0:1:1:2:2:0");
+          expect(h.adb.user).toBe(2);
+          expect(h.manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
+        } finally {
+          h.manager.stopCleanupTimer();
+        }
+      },
+    );
   });
 
   test("release read-back mismatch quarantines and retries on FakeTimer", async () => {

@@ -636,14 +636,14 @@ describe("Rotate", () => {
       ]);
     }
 
-    test("session default restores auto-rotate and records originals before writes", async () => {
+    test("session default keeps auto-rotate off and records originals before writes (#18833)", async () => {
       const original = useSession();
-      settingsSequence(["1"]);
+      settingsSequence(["1", "0"]);
       const result = await rotate.execute("landscape");
       expect(result.success).toBe(true);
-      expect(result.orientationLockState).toBe("unlocked");
+      expect(result.orientationLockState).toBe("locked");
       expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(
-        true,
+        false,
       );
       expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
       const calls = fakeAdb.getExecutedCommands();

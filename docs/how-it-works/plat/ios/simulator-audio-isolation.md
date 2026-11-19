@@ -1,18 +1,10 @@
 # iOS Simulator audio isolation
 
-Per-simulator audio isolation for `injectAudioInput` and `captureAudio` (#13632). The shared route
-is in [iOS Simulator audio loopback](simulator-audio-loopback.md); this note covers what separates
-two concurrent simulators and what a headless host constrains.
-
-## Options
-
-1. **Serialize.** One loopback pair as the host default input and output; one audio test at a time
-   per host. Needs no new code, and is the current behavior.
-2. **Host defaults per slot.** Change the Mac's default devices before each test. This is a system
-   setting shared by every simulator, so it cannot isolate concurrent runs and is rejected.
-3. **Per-simulator pin.** Give each simulator its own input and output loopback device through
-   CoreSimulator's per-device audio routing. This is the only option that isolates concurrent
-   simulators.
+Per-simulator audio routing behind `injectAudioInput` and `captureAudio` (#13632). The shared route
+is in [iOS Simulator audio loopback](simulator-audio-loopback.md). This page covers the routing API
+that could separate two concurrent simulators and what a headless host constrains. Today one
+loopback pair is the host default and one audio test runs at a time per host; the
+[decision record](../../../devlog/2026-11-19-ios-simulator-audio-isolation.md) holds the options.
 
 ## Per-simulator routing
 
@@ -43,7 +35,7 @@ Observed on one simulator (iOS 26.5, CoreSimulator 1174.9.2):
   guest hears the pinned device was not verified: it needs an in-simulator audio client.
 
 A pin therefore needs a long-lived client (the daemon) that routes after each boot and keeps its
-connection. Confirm with an in-simulator recorder before building on it.
+connection.
 
 ## Headless host constraints
 
@@ -54,15 +46,7 @@ connection. Confirm with an in-simulator recorder before building on it.
   never a channel map.
 - Installing a HAL driver and restarting `coreaudiod` are system changes, so provisioning is an
   owner or image-build step, never a test step.
-- The Microphone permission for the process that reads a loopback input cannot be pre-granted by
-  an MDM profile, and no prompt can be answered without a GUI session. Capture of a loopback input
-  by a LaunchDaemon-owned process is unmeasured.
+- An MDM profile cannot pre-grant the Microphone permission for the process that reads a loopback
+  input, and no prompt can be answered without a GUI session. Capture of a loopback input by a
+  LaunchDaemon-owned process is unmeasured.
 - Sample rate is fixed per device; resample in the helper, not the device.
-
-## Recommendation
-
-Keep option 1 as the supported route. Pursue option 3 only after two measurements on a drained
-host with two real loopback pairs: that the guest hears its pinned device while the other
-simulator stays silent, and that a daemon-owned helper receives frames under the Microphone
-permission. The `audio-loopback-helper` would then take explicit device UIDs instead of reading the
-host defaults. If either fails, stay on option 1 and document it.

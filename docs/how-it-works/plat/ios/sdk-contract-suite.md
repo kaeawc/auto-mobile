@@ -124,8 +124,8 @@ Playground registers a contract `AutoMobileObservationBridge` that declares `tap
 and `clearText`. The bridge publishes synthetic nodes: `contract-save` (counts taps into
 `contract-tap-count`), `contract-email` (always focused, so `sendKeys` needs no XCTest focus tap),
 `contract-arm-stale` and `contract-hold` (placed over the status bar). The harness runs these steps
-with the MCP tools, in order, then writes `<runId>.actions-done`; Playground waits up to 1,440 s (8 tool calls at the 180 s per-call budget) for
-it before writing the manifest with the host's action log.
+with the MCP tools, in order, then writes `<runId>.actions-done`. Playground waits up to 1,440 s for that file (8 tool calls at the
+180 s per-call budget) before writing the manifest with the host's action log.
 
 | Step                     | Tool result must show                                  | Host log must show             |
 | ------------------------ | ------------------------------------------------------ | ------------------------------ |

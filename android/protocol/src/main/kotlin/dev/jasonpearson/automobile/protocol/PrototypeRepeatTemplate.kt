@@ -539,10 +539,6 @@ internal object PrototypeBindableFields {
 
     fun component(node: JsonObject, path: String): T? =
       when ((node["type"] as? JsonPrimitive)?.content) {
-        "button",
-        "fab" ->
-          visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
-            ?: expressiveMenu(node, path)
         "menu" ->
           objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
             visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
@@ -568,28 +564,13 @@ internal object PrototypeBindableFields {
         "dialog",
         "snackbar" -> formComponent(node, path)
         "tooltip",
-        "image" -> contentComponent(node, path)
+        "image",
+        "button",
+        "fab" -> contentComponent(node, path)
         // The url binds placeholders like TypeScript's webView visitor (#16573).
         "webView" -> visitor.field(node, "url", path, PrototypeBindableKind.TEXT)
         else -> null
       }
-
-    /**
-     * M3 Expressive menus (#15258): a split button's `split.menu` entries bind like `menu.items`, a
-     * FAB's `menu.items` like parts.
-     */
-    private fun expressiveMenu(node: JsonObject, path: String): T? {
-      (node["split"] as? JsonObject)?.let { split ->
-        return objects(split, "menu", "$path.split").firstNotNullOfOrNull { (entry, entryPath) ->
-          visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
-            ?: part(entry, entryPath)
-        }
-      }
-      val menu = node["menu"] as? JsonObject ?: return null
-      return objects(menu, "items", "$path.menu").firstNotNullOfOrNull { (entry, entryPath) ->
-        part(entry, entryPath)
-      }
-    }
 
     private fun formComponent(node: JsonObject, path: String): T? =
       when ((node["type"] as? JsonPrimitive)?.content) {
@@ -626,6 +607,23 @@ internal object PrototypeBindableFields {
             }
         // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
         "image" -> visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
+        // An M3 Expressive split button's menu entries bind like `menu.items` (#15258).
+        "button" ->
+          visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
+            ?: objects(
+                node["split"] as? JsonObject ?: JsonObject(emptyMap()),
+                "menu",
+                "$path.split",
+              )
+              .firstNotNullOfOrNull { (entry, entryPath) ->
+                visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
+                  ?: part(entry, entryPath)
+              }
+        // An M3 Expressive FAB menu's items bind like parts (#15258).
+        "fab" ->
+          visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
+            ?: objects(node["menu"] as? JsonObject ?: JsonObject(emptyMap()), "items", "$path.menu")
+              .firstNotNullOfOrNull { (entry, entryPath) -> part(entry, entryPath) }
         else -> null
       }
 

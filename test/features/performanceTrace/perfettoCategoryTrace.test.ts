@@ -162,6 +162,19 @@ describe("Perfetto recorder with categories (#18688)", () => {
     });
   });
 
+  test("an exit probe that fails after the SIGTERM still cleans up the host and device copies", async () => {
+    const { device, recorder, registry, removedHostFiles } = setup();
+    const recording = await recorder.start(categoryRequest("com.example.app"));
+    device.failing.set("kill -0", "adb: device offline");
+
+    await expect(recording.stop()).rejects.toThrow("device offline");
+
+    expect(recording.signalled).toBe(true);
+    expect(removedHostFiles).toEqual([recording.artifactPath]);
+    expect(device.deviceFiles.has(REMOTE)).toBe(false);
+    expect(registry.takeOwnedBy(android.deviceId, "s-1")).toEqual({ deviceFiles: [] });
+  });
+
   test("a stop whose SIGTERM never reaches the device reports the recorder unsignalled", async () => {
     const { device, recorder, removedHostFiles } = setup();
     const recording = await recorder.start(categoryRequest("com.example.app"));

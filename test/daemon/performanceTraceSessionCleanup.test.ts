@@ -3,6 +3,7 @@ import { registerPerformanceTraceSessionCleanup } from "../../src/daemon/perform
 import { PerformanceTraceManager } from "../../src/features/performanceTrace/PerformanceTraceManager";
 import type { PerformanceTraceRecorder } from "../../src/features/performanceTrace/PerformanceTraceRecorder";
 import type { BootedDevice } from "../../src/models";
+import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeSessionCleanupManager } from "../fakes/FakeSessionCleanupManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -13,12 +14,16 @@ const trace = { categories: ["sched" as const], timeLimitMs: 10_000 };
 
 function setup() {
   const stops: string[] = [];
+  const stopSignals: Array<AbortSignal | undefined> = [];
   const recorder: PerformanceTraceRecorder = {
     start: async (request) => ({
       artifactPath: `/artifacts/${request.traceId}.perfetto-trace`,
       warnings: [],
       signalled: true,
-      stop: async () => void stops.push(request.traceId),
+      stop: async () => {
+        stops.push(request.traceId);
+        stopSignals.push(getAbortSignal());
+      },
       summarize: async () => ({ summary: {}, warnings: [] }),
     }),
   };
@@ -30,7 +35,7 @@ function setup() {
   });
   const sessions = new FakeSessionCleanupManager();
   registerPerformanceTraceSessionCleanup(sessions, { manager: () => traces });
-  return { traces, sessions, stops };
+  return { traces, sessions, stops, stopSignals };
 }
 
 describe("registerPerformanceTraceSessionCleanup (#18688)", () => {
@@ -58,6 +63,21 @@ describe("registerPerformanceTraceSessionCleanup (#18688)", () => {
 
     expect(sessions.pendingCleanups).toHaveLength(1);
     expect(stops).toEqual(["trace-t-1"]);
+  });
+
+  test("a release inside an aborted request still stops the trace, outside that request", async () => {
+    const { traces, sessions, stops, stopSignals } = setup();
+    await traces.start(deviceA, { ...trace, ownerSessionUuid: "s-1" });
+    const aborted = new AbortController();
+    aborted.abort();
+
+    await runWithAbortSignal(aborted.signal, async () => {
+      sessions.release("s-1", deviceA.deviceId);
+    });
+    await sessions.settle();
+
+    expect(stops).toEqual(["trace-t-1"]);
+    expect(stopSignals).toEqual([undefined]);
   });
 
   test("other sessions, other devices, upgrades and replaced devices are left alone", async () => {

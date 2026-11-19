@@ -15,6 +15,7 @@ import {
   PERFORMANCE_TRACE_TEMPLATES,
 } from "../features/performanceTrace/performanceTraceTemplates";
 import type { BootedDevice } from "../models";
+import { runOutsideRequestContext } from "../utils/AbortContext";
 import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { registerPerformanceTraceResources } from "./performanceTraceResources";
@@ -141,16 +142,19 @@ export const performanceTraceResultSchema = z.object({
 /** Releasing a session, or losing its device, stops its recorders so none are orphaned. */
 function subscribeTraceCleanup(manager: PerformanceTraceManager): () => void {
   const cleanups = [
-    SessionReleaseBroadcaster.subscribe((sessionUuid, _reason, snapshot, extras) => {
-      void manager.stopTracesForSession(sessionUuid);
-      // An upgrade-only re-announcement's device may belong to its next owner by now (#11206).
-      if (snapshot?.deviceId && !extras?.upgradeOnly) {
-        void manager.stopTracesOnDevice(snapshot.deviceId);
-      }
-    }),
-    getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved((deviceId) => {
-      void manager.stopTracesOnDevice(deviceId);
-    }),
+    // Not part of whichever request triggered the release: its abort must not cut the stops short.
+    SessionReleaseBroadcaster.subscribe((sessionUuid, _reason, snapshot, extras) =>
+      runOutsideRequestContext(() => {
+        void manager.stopTracesForSession(sessionUuid);
+        // An upgrade-only re-announcement's device may belong to its next owner by now (#11206).
+        if (snapshot?.deviceId && !extras?.upgradeOnly) {
+          void manager.stopTracesOnDevice(snapshot.deviceId);
+        }
+      }),
+    ),
+    getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved((deviceId) =>
+      runOutsideRequestContext(() => void manager.stopTracesOnDevice(deviceId)),
+    ),
   ];
   return () => cleanups.forEach((cleanup) => cleanup());
 }

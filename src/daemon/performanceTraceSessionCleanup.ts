@@ -1,5 +1,6 @@
 import { getDefaultPerformanceTraceManager } from "../features/performanceTrace/defaultPerformanceTraceManager";
 import type { PerformanceTraceManager } from "../features/performanceTrace/PerformanceTraceManager";
+import { runOutsideRequestContext } from "../utils/AbortContext";
 import { logger } from "../utils/logger";
 import type { SessionManager, SessionReleaseOptions } from "./sessionManager";
 
@@ -55,9 +56,10 @@ export function registerPerformanceTraceSessionCleanup(
       );
       return;
     }
+    // Not part of whichever request triggered the release: its abort must not cut the stop short.
     sessionManager.registerPendingDeviceCleanup(
       deviceId,
-      manager.stopSessionTracesOnDevice(sessionId, deviceId),
+      runOutsideRequestContext(() => manager.stopSessionTracesOnDevice(sessionId, deviceId)),
       {
         name: "stop released session's performance trace recorder",
         leftover: "a perfetto or xctrace recorder the released session started",

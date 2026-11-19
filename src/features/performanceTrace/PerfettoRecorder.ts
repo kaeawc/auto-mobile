@@ -108,17 +108,15 @@ export class PerfettoRecorder implements PerformanceTraceRecorder {
         return signalled;
       },
       stop: async (signal) => {
-        // Until the SIGTERM reaches the device the recorder is still running: a failure here leaves
-        // the trace for a retry or release cleanup, and its file must stay for that stop to fill.
-        await stopPerfettoRecorder(adb, this.deps.timer, pid, {
-          warnings,
-          poll: this.deps,
-          signal,
-          onSignalled: () => {
-            signalled = true;
-          },
-        });
         try {
+          await stopPerfettoRecorder(adb, this.deps.timer, pid, {
+            warnings,
+            poll: this.deps,
+            signal,
+            onSignalled: () => {
+              signalled = true;
+            },
+          });
           await awaitFlushedDeviceFile(adb, this.deps.timer, remotePath, {
             logTag: LOG_TAG,
             poll: this.deps,
@@ -130,10 +128,18 @@ export class PerfettoRecorder implements PerformanceTraceRecorder {
             signal,
           });
         } catch (error) {
-          await (this.deps.removeHostFile ?? removeHostFile)(artifactPath);
+          // Until the SIGTERM reaches the device the recorder is still running: a failure then
+          // leaves the trace for a retry or release cleanup, and its file must stay for that stop
+          // to fill. After the signal nothing retries, so any failure (an exit probe, the flush
+          // wait, the pull) cleans up here.
+          if (signalled) {
+            await (this.deps.removeHostFile ?? removeHostFile)(artifactPath);
+          }
           throw error;
         } finally {
-          await this.removeRemote(adb, remotePath, request);
+          if (signalled) {
+            await this.removeRemote(adb, remotePath, request);
+          }
         }
       },
       summarize: async (signal) => {

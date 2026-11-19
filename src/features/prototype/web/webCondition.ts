@@ -13,6 +13,17 @@ export interface ConditionScope {
 /** `undefined` means the still render cannot decide. */
 type Decision = boolean | undefined;
 
+function isEmpty(value: unknown, derived: boolean): boolean {
+  const object = derived ? record(value) : undefined;
+  return (
+    value === undefined ||
+    (derived && value === null) ||
+    value === "" ||
+    (Array.isArray(value) && value.length === 0) ||
+    (object !== undefined && Object.keys(object).length === 0)
+  );
+}
+
 function compare(value: unknown, condition: Raw, derived = false): Decision {
   if ("equals" in condition) {
     return value === condition.equals;
@@ -27,14 +38,7 @@ function compare(value: unknown, condition: Raw, derived = false): Decision {
     return typeof value === "number" && value < condition.lt;
   }
   if (typeof condition.empty === "boolean") {
-    const object = derived ? record(value) : undefined;
-    const isEmpty =
-      value === undefined ||
-      (derived && value === null) ||
-      value === "" ||
-      (Array.isArray(value) && value.length === 0) ||
-      (object !== undefined && Object.keys(object).length === 0);
-    return isEmpty === condition.empty;
+    return isEmpty(value, derived) === condition.empty;
   }
   if (derived) {
     return stringCondition(value, condition);
@@ -90,6 +94,10 @@ export function decide(condition: unknown, scope: ConditionScope): Decision {
     const inner = decide(raw.not, scope);
     return inner === undefined ? undefined : !inner;
   }
+  return decideLeaf(raw, scope);
+}
+
+function decideLeaf(raw: Raw, scope: ConditionScope): Decision {
   if (typeof raw.derived === "string" && scope.derived) {
     const value = Object.hasOwn(scope.derived, raw.derived)
       ? scope.derived[raw.derived]

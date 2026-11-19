@@ -335,7 +335,6 @@ function objectConstraint(
   }
   return undefined;
 }
-/** Multi-trigger groups require one dependent unless the contract marks the group optional. */
 function formConstraint(
   data: Record<string, unknown>,
   rule: Rule,
@@ -347,16 +346,26 @@ function formConstraint(
       `Exactly one of ${rule.exactlyOne.join(", ")} is required`,
     );
   }
+  return dependentConstraint(data, rule, path);
+}
+
+/** Multi-trigger groups require one dependent unless the contract marks the group optional. */
+function dependentConstraint(
+  data: Record<string, unknown>,
+  rule: Rule,
+  path: string,
+): PrototypeValidationError | undefined {
   const dependencies = rule.dependents ?? {};
   for (const trigger of Object.keys(dependencies).sort()) {
     const dependents = dependencies[trigger];
     const present = dependents.filter((key) => Object.hasOwn(data, key));
-    if (!trigger.split("|").some((key) => Object.hasOwn(data, key))) {
+    const triggers = trigger.split("|");
+    if (!triggers.some((key) => Object.hasOwn(data, key))) {
       if (present.length > 0) {
-        return fail(keyPath(path, present[0]), `Requires ${trigger.split("|").join(" or ")}`);
+        return fail(keyPath(path, present[0]), `Requires ${triggers.join(" or ")}`);
       }
     } else if (
-      trigger.includes("|") &&
+      triggers.length > 1 &&
       !rule.optionalDependentGroups?.includes(trigger) &&
       present.length !== 1
     ) {

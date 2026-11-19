@@ -153,9 +153,11 @@ final class RemindersPlanContentTests: XCTestCase {
             XCTFail("Plan is missing the inputText title step")
             return
         }
-        XCTAssertGreaterThan(inputIndex, 0)
-        let guardStep = steps[inputIndex - 1]
-        XCTAssertEqual(guardStep.tool, "observe", "The title input must follow an observe guard")
+        let guardStep = try XCTUnwrap(
+            steps.prefix(inputIndex).last(where: { !$0.isOptional }),
+            "The title input must follow a required step"
+        )
+        XCTAssertEqual(guardStep.tool, "observe", "The last required step before title input must be an observe guard")
         XCTAssertTrue(guardStep.hasWaitFor, "The title input guard must use waitFor")
         XCTAssertTrue(guardStep.mentions("Title"), "The title input guard must target the Title field")
     }
@@ -260,6 +262,56 @@ final class RemindersPlanContentTests: XCTestCase {
             30000,
             "waitFor timeout should stay bounded so a genuinely-broken observe fails fast per attempt"
         )
+    }
+
+    /// A fresh simulator can show the Welcome sheet before Reminders exposes its create control.
+    func testDismissesFirstRunWelcomeSheetBeforeCreating() throws {
+        let steps = try PlanStepSequence.parse(loadAddReminderPlan())
+        let launchWaitIndex = try XCTUnwrap(steps.firstIndex(where: {
+            $0.tool == "observe" && $0.hasWaitFor && $0.mentions("Reminders")
+        }), "Plan must wait for Reminders after launch")
+        let createWaitIndex = try XCTUnwrap(steps.firstIndex(where: {
+            $0.tool == "observe" && $0.hasWaitFor && $0.mentions("New Reminder")
+        }), "Plan must wait for the New Reminder control")
+        let continueTapIndex = try XCTUnwrap(
+            steps.prefix(createWaitIndex).dropFirst(launchWaitIndex + 1).firstIndex(where: {
+                $0.tool == "tapOn" && $0.mentions("Continue")
+            }),
+            "Plan must tap Continue between waiting for Reminders and waiting for New Reminder"
+        )
+
+        XCTAssertTrue(steps[continueTapIndex].isOptional, "The Continue tap must be optional")
+
+        let welcomeWait = steps[continueTapIndex - 1]
+        XCTAssertEqual(welcomeWait.tool, "observe", "The Continue tap must immediately follow an observe guard")
+        XCTAssertTrue(welcomeWait.hasWaitFor && welcomeWait.mentions("Continue"))
+        XCTAssertTrue(welcomeWait.isOptional, "The Continue wait must be optional")
+    }
+
+    /// The one-time Slide to Type sheet can cover the keyboard after the Title field appears.
+    func testDismissesFirstUseKeyboardSheetBeforeTyping() throws {
+        let steps = try PlanStepSequence.parse(loadAddReminderPlan())
+        let titleWaitIndex = try XCTUnwrap(steps.firstIndex(where: {
+            $0.tool == "observe" && $0.hasWaitFor && $0.mentions("Title")
+        }), "Plan must wait for the Title field")
+        let inputIndex = try XCTUnwrap(steps.firstIndex(where: {
+            $0.tool == "inputText" && $0.mentions("${REMINDER_TITLE}")
+        }), "Plan must type the reminder title")
+        let continueTapIndex = try XCTUnwrap(
+            steps.prefix(inputIndex).dropFirst(titleWaitIndex + 1).firstIndex(where: {
+                $0.tool == "tapOn" && $0.mentions("Continue")
+            }),
+            "Plan must tap Continue between waiting for the Title field and typing"
+        )
+        XCTAssertTrue(steps[continueTapIndex].isOptional, "The keyboard Continue tap must be optional")
+
+        let keyboardWaitIndex = continueTapIndex - 1
+        XCTAssertGreaterThan(keyboardWaitIndex, titleWaitIndex, "Wait for the keyboard sheet after the Title field")
+        let keyboardWait = steps[keyboardWaitIndex]
+        XCTAssertEqual(keyboardWait.tool, "observe", "The keyboard Continue tap must immediately follow an observe guard")
+        XCTAssertTrue(keyboardWait.hasWaitFor && keyboardWait.mentions("Continue"))
+        XCTAssertTrue(keyboardWait.isOptional, "The keyboard Continue wait must be optional")
+        XCTAssertEqual(keyboardWait.waitForTimeoutMs, 3000)
     }
 
     /// The intermittent "Enable iCloud Syncing?" alert must be dismissed best-effort before the

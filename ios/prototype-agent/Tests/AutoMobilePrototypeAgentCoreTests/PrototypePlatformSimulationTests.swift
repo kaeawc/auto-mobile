@@ -368,8 +368,8 @@ extension PrototypePlatformSimulationTests {
         for call in ["test.protected", "test.echo"] {
             XCTAssertNil(driver.queueCallOutcome(id: "p", call: call, outcome: outcome, session: shown))
         }
-        let invalid = await echo(driver, args: ["message": .number(123)])
-        XCTAssertEqual(invalid, .failure(.invalidArgs, "Invalid argument: message"))
+        let invalid = await echo(driver, args: ["bogus": .number(1)])
+        XCTAssertEqual(invalid, .failure(.invalidArgs, "Unknown argument: bogus"))
         let scripted = await echo(driver)
         XCTAssertEqual(scripted, .success(.null))
         XCTAssertEqual(module.calls, 0)

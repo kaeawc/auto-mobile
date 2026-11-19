@@ -227,7 +227,7 @@ class PrototypeRuntime(
 
   /** Called only after the host accepts the show. A preserving replacement seeds without firing. */
   suspend fun shown(preservingState: Boolean = false) {
-    platformDispatcher.clearOutcomes()
+    platformDispatcher.outcomes.clear()
     appeared = if (preservingState) visibleAppearances().keys else emptySet()
     // Each stack's first screen enters once per show (#14188); a preserving show skips only the
     // stacks whose paths it kept, so a stack new to the replacement still enters. A stack an

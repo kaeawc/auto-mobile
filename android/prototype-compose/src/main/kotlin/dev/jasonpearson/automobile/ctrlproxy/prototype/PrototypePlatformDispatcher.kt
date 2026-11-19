@@ -39,7 +39,7 @@ internal class PrototypePlatformDispatcher(
   }
 
   private val rateLimiter = PrototypePlatformRateLimiter(monotonicMs)
-  private val outcomes = PrototypePlatformOutcomes()
+  internal val outcomes = PrototypePlatformOutcomes()
   private val pending = linkedMapOf<String, Pending>()
   private val subscriptions = mutableListOf<Job>()
   @Volatile private var closed = false
@@ -85,8 +85,6 @@ internal class PrototypePlatformDispatcher(
       outcomes.enqueue(call, outcome)
     }
   }
-
-  fun clearOutcomes() = synchronized(pending) { outcomes.clear() }
 
   private suspend fun deliverEvent(
     module: PrototypePlatformModule,

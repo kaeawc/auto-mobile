@@ -106,7 +106,8 @@ class PrototypePlatformOutcomesTest {
       val runtime = runtime(module, events = events)
       runtime.queueCallOutcome("test.protected", scripted)
       runtime.queueCallOutcome("test.echo", scripted)
-      runtime.echo(buildJsonObject { put("message", 123) })
+      runtime.echo(buildJsonObject { put("bogus", 1) })
+      runCurrent()
       assertEquals(
         JsonPrimitive("invalid_args"),
         events

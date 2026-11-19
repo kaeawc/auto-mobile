@@ -7,10 +7,11 @@ import dev.jasonpearson.automobile.prototype.PlatformErrorCode
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-/** One FIFO per contract call, owned by the runtime's dispatcher and guarded by its lock. */
+/** One FIFO per contract call, owned by the runtime's dispatcher and self-synchronized. */
 internal class PrototypePlatformOutcomes {
   private val queues = mutableMapOf<String, ArrayDeque<PlatformCallResult>>()
 
+  @Synchronized
   fun enqueue(call: String, outcome: JsonObject) {
     require(
       outcome.toString().toByteArray(Charsets.UTF_8).size <=
@@ -26,6 +27,7 @@ internal class PrototypePlatformOutcomes {
     (queue ?: ArrayDeque<PlatformCallResult>().also { queues[call] = it }).addLast(result)
   }
 
+  @Synchronized
   fun consume(call: String): PlatformCallResult? {
     val queue = queues[call] ?: return null
     val result = queue.removeFirst()
@@ -33,7 +35,7 @@ internal class PrototypePlatformOutcomes {
     return result
   }
 
-  fun clear() = queues.clear()
+  @Synchronized fun clear() = queues.clear()
 
   private fun decode(outcome: JsonObject): PlatformCallResult {
     require(outcome.size == 1) { "Provide exactly one result or error" }

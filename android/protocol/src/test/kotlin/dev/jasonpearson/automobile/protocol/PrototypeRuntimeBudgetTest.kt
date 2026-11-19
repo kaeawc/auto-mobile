@@ -186,4 +186,49 @@ class PrototypeRuntimeBudgetTest {
     )
     assertNull(PrototypeSpecValidator.prepareStateWrites(spec, json, large).validate(state))
   }
+
+  private fun withRoot(
+    spec: String,
+    extra: Map<String, kotlinx.serialization.json.JsonElement>,
+  ): String = JsonObject(Json.parseToJsonElement(spec).jsonObject + extra).toString()
+
+  @Test
+  fun `a setData literal follows the budget`() {
+    val root = Json.parseToJsonElement(feed(1)).jsonObject.getValue("root").jsonObject
+    val onEnd = buildJsonArray {
+      add(
+        buildJsonObject {
+          put("type", "setData")
+          put("path", "/data/more")
+          putJsonObject("value") { put("value", rows(2001)) }
+        },
+      )
+    }
+    val spec = withRoot(feed(1), mapOf("root" to JsonObject(root + ("onEndReached" to onEnd))))
+    assertTrue(PrototypeSpecValidator.validate(spec) is PrototypeSpecValidation.Failure)
+    assertTrue(
+      PrototypeSpecValidator.validate(spec, budget = large) is PrototypeSpecValidation.Success,
+    )
+  }
+
+  @Test
+  fun `a stored data value restores against the runtime budget`() {
+    val storage = buildJsonObject {
+      put("version", 1)
+      putJsonArray("keys") { add(JsonPrimitive("data:/flag")) }
+    }
+    val data =
+      Json.parseToJsonElement(feed(2001)).jsonObject.getValue("data").jsonObject +
+        ("flag" to JsonPrimitive(false))
+    val json = withRoot(feed(2001), mapOf("storage" to storage, "data" to JsonObject(data)))
+    val spec =
+      (PrototypeSpecValidator.validate(json, budget = large) as PrototypeSpecValidation.Success)
+        .spec
+    val stored = PrototypeStoredValues(1, mapOf("data:/flag" to JsonPrimitive(true)))
+    val base = PrototypeStorageRestorer.restore(spec, stored)
+    assertEquals(listOf("data:/flag"), base.dropped.map { it.key })
+    val restored = PrototypeStorageRestorer.restore(spec, stored, large)
+    assertEquals(listOf("data:/flag"), restored.applied)
+    assertEquals(JsonPrimitive(true), restored.spec.data?.get("flag"))
+  }
 }

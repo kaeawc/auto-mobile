@@ -392,12 +392,16 @@ private class EmbeddedOwner(
           io,
           registry = config.environment.host?.storageRegistry,
         )
-        .prepare(config.spec) {
-          PrototypeSpecValidator.validate(
-            Json.encodeToString(it),
-            budget = PrototypeRuntimeBudget.LARGE,
-          ) is PrototypeSpecValidation.Success
-        }
+        .prepare(
+          config.spec,
+          fits = {
+            PrototypeSpecValidator.validate(
+              Json.encodeToString(it),
+              budget = PrototypeRuntimeBudget.LARGE,
+            ) is PrototypeSpecValidation.Success
+          },
+          budget = PrototypeRuntimeBudget.LARGE,
+        )
     opened.commit()
     withContext(io) { source.prepareFonts(opened.spec, config.cacheDir) }
     var sequence = 0L

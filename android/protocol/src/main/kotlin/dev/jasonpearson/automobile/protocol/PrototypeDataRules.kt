@@ -63,7 +63,7 @@ internal object PrototypeDataRules {
             "$path.path",
             "Data action paths are /data/<RFC 6901 pointer> and address a member of data",
           )
-      dataLiteralError(value, path)?.let {
+      dataLiteralError(value, path, context.budget)?.let {
         return it
       }
       if (
@@ -79,7 +79,11 @@ internal object PrototypeDataRules {
     return null
   }
 
-  private fun dataLiteralError(value: JsonObject, path: String): PrototypeSpecError? {
+  private fun dataLiteralError(
+    value: JsonObject,
+    path: String,
+    budget: PrototypeRuntimeBudget,
+  ): PrototypeSpecError? {
     val type = value.text("type")
     val literal = (value["value"] as? JsonObject)?.get("value")
     if (type == "upsertData" && literal != null) {
@@ -90,7 +94,7 @@ internal object PrototypeDataRules {
           "upsertData key pointer must be present and non-null in the literal value",
         )
     }
-    if (literal != null && dataError(JsonObject(mapOf("value" to literal))) != null) {
+    if (literal != null && dataError(JsonObject(mapOf("value" to literal)), budget) != null) {
       return fail(
         "$path.value.value",
         "A data write value must be a string, boolean, finite number, array or object",

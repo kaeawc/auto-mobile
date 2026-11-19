@@ -257,12 +257,24 @@ describe("AndroidStartupMeasurement", () => {
   test("fails when no launch reported a TotalTime", async () => {
     adb.setCommandResponse(
       "am start -W",
-      createExecResult("Status: ok\nLaunchState: UNKNOWN (0)\nComplete\n", ""),
+      createExecResult(fixture("am-start-W-already-top-api35.txt"), ""),
     );
 
     await expect(measurement.measure({ appId: APP, mode: "cold", iterations: 2 })).rejects.toThrow(
       "reported no TotalTime",
     );
+  });
+
+  test("excludes an already-on-top launch from the TTID samples and warns", async () => {
+    adb.setCommandResponseSequence("am start -W", [
+      createExecResult(fixture("am-start-W-cold-api35.txt"), ""),
+      createExecResult(fixture("am-start-W-already-top-api35.txt"), ""),
+    ]);
+
+    const result = await measurement.measure({ appId: APP, mode: "cold", iterations: 2 });
+
+    expect(result.ttid.min).toBeGreaterThan(0);
+    expect(result.warnings).toContain("1 of 2 launches reported no TotalTime.");
   });
 
   test("surfaces an am start error", async () => {

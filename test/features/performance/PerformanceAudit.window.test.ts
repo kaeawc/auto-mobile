@@ -8,7 +8,10 @@ import {
   PERF_AUDIT_WINDOW_MS,
   computeCpuUsagePercent,
   computeJankWindow,
+  computeWindowFramePercentiles,
   counterDelta,
+  histogramDelta,
+  parseFrameHistogram,
   parseJankyFrames,
   parseProcStat,
   type CpuSample,
@@ -178,6 +181,35 @@ describe("computeJankWindow", () => {
     expect(computeJankWindow(gfx(), gfx(), 0)).toBeNull();
     expect(counterDelta(null, 5)).toBeNull();
     expect(counterDelta(5, null)).toBeNull();
+  });
+});
+
+describe("window frame histogram", () => {
+  const h = (...counts: number[]) =>
+    [8, 12, 900, 1250].map((bucketMs, index) => ({ bucketMs, count: counts[index] ?? 0 }));
+
+  test("parseFrameHistogram reads the frame HISTOGRAM line of a real dump, not the GPU one", () => {
+    const histogram = parseFrameHistogram(capturedGfxinfo);
+    expect(histogram?.[0]).toEqual({ bucketMs: 5, count: 0 });
+    expect(histogram?.at(-1)).toEqual({ bucketMs: 4950, count: 0 });
+    expect(histogram?.some((bucket) => bucket.bucketMs === 1)).toBe(false);
+    expect(parseFrameHistogram("GPU HISTOGRAM: 1ms=3")).toBeNull();
+    expect(parseFrameHistogram("")).toBeNull();
+  });
+
+  test("histogramDelta subtracts bucket counts, or keeps the end reading after a reset", () => {
+    expect(histogramDelta(h(0, 0, 2, 2), h(6, 1, 2, 2))).toEqual(h(6, 1, 0, 0));
+    expect(histogramDelta(h(5, 0, 2, 2), h(1, 1, 0, 0))).toEqual(h(1, 1, 0, 0));
+  });
+
+  test("histogramDelta refuses readings with different bucket bounds", () => {
+    expect(histogramDelta(h(1), h(1).slice(1))).toBeNull();
+    expect(histogramDelta(h(1), [{ bucketMs: 7, count: 1 }, ...h(1).slice(1)])).toBeNull();
+  });
+
+  test("computeWindowFramePercentiles is null without a histogram in both dumps", () => {
+    expect(computeWindowFramePercentiles(capturedGfxinfo, "")).toBeNull();
+    expect(computeWindowFramePercentiles(capturedGfxinfo, capturedGfxinfo)).toEqual({ frames: 0 });
   });
 });
 
@@ -357,14 +389,22 @@ describe("PerformanceAudit windowed CPU and jank", () => {
     expect(audit.validateMetrics({ ...baseMetrics, ...result }, thresholds)).toEqual([]);
   });
 
-  test("frame time: rendered frames keep their percentiles and no unmeasured note", async () => {
+  const stubGfxDumps = (opening: string, closing: string) =>
+    factory
+      .getFakeClient()
+      .setCommandResultSequence("shell dumpsys gfxinfo 'com.example'", [opening, closing]);
+
+  test("frame time: rendered frames on a dump without a histogram keep their percentiles", async () => {
+    // A build that prints no HISTOGRAM line: the window rendered 120 frames from a reset, so the
+    // closing reading's percentiles are the window's.
     const rendered = capturedGfxinfo
+      .replace(/^HISTOGRAM:.*$/m, "")
       .replace("Total frames rendered: 0", "Total frames rendered: 120")
       .replace("50th percentile: 4950ms", "50th percentile: 9ms")
       .replace("90th percentile: 4950ms", "90th percentile: 14ms")
       .replace("95th percentile: 4950ms", "95th percentile: 18ms")
       .replace("99th percentile: 4950ms", "99th percentile: 30ms");
-    factory.getFakeClient().setCommandResult("shell dumpsys gfxinfo 'com.example'", rendered);
+    stubGfxDumps(capturedGfxinfo.replace(/^HISTOGRAM:.*$/m, ""), rendered);
 
     const result = await audit.collectGfxMetrics("com.example", perf);
 
@@ -373,6 +413,72 @@ describe("PerformanceAudit windowed CPU and jank", () => {
     expect(
       audit.validateMetrics({ ...baseMetrics, ...result }, thresholds).map((v) => v.metric),
     ).toEqual(["p99"]);
+  });
+
+  test("frame time: an idle app after launch passes; launch frames are outside the window (#18802)", async () => {
+    // Verbatim gfxinfo header from #18802 (Pixel Tablet AVD, API 36): 4 launch frames, all janky,
+    // and nothing rendered since. Read twice, the window holds no frames, matching its 0 counts.
+    const launched = [
+      "Applications Graphics Acceleration Info:",
+      "Uptime: 436596 Realtime: 436596",
+      "",
+      "** Graphics info for pid 7183 [dev.jasonpearson.automobile.playground] **",
+      "",
+      "Stats since: 431717752663ns",
+      "Total frames rendered: 4",
+      "Janky frames: 4 (100.00%)",
+      "Janky frames (legacy): 4 (100.00%)",
+      "50th percentile: 900ms",
+      "90th percentile: 1250ms",
+      "95th percentile: 1250ms",
+      "99th percentile: 1250ms",
+      "Number Missed Vsync: 2",
+      "Number High input latency: 0",
+      "Number Slow UI thread: 2",
+      "Number Slow bitmap uploads: 0",
+      "Number Slow issue draw commands: 4",
+      "Number Frame deadline missed: 4",
+      "Number Frame deadline missed (legacy): 4",
+    ].join("\n");
+    stubGfxDumps(launched, launched);
+
+    const result = await audit.collectGfxMetrics("com.example", perf);
+
+    expect(result.jankCount).toBe(0);
+    expect(result.missedVsyncCount).toBe(0);
+    expect([result.p50Ms, result.p90Ms, result.p95Ms, result.p99Ms]).toEqual([
+      null,
+      null,
+      null,
+      null,
+    ]);
+    expect(result.frameTimeUnmeasured).toBe(NO_FRAMES_RENDERED);
+    expect(audit.validateMetrics({ ...baseMetrics, ...result }, thresholds)).toEqual([]);
+  });
+
+  test("frame time: percentiles come from the window's histogram delta, not lifetime frames (#18802)", async () => {
+    // Opening: 4 slow launch frames (900 ms x2, 1250 ms x2). Closing adds 10 smooth frames.
+    const withHistogram = (total: number, buckets: Record<string, number>) =>
+      Object.entries(buckets).reduce(
+        (dump, [bucket, count]) => dump.replace(` ${bucket}=0`, ` ${bucket}=${count}`),
+        capturedGfxinfo
+          .replace("Total frames rendered: 0", `Total frames rendered: ${total}`)
+          .replace("50th percentile: 4950ms", "50th percentile: 900ms")
+          .replace("90th percentile: 4950ms", "90th percentile: 1250ms")
+          .replace("95th percentile: 4950ms", "95th percentile: 1250ms")
+          .replace("99th percentile: 4950ms", "99th percentile: 1250ms"),
+      );
+    const launch = { "900ms": 2, "1250ms": 2 };
+    stubGfxDumps(
+      withHistogram(4, launch),
+      withHistogram(14, { ...launch, "8ms": 6, "9ms": 3, "12ms": 1 }),
+    );
+
+    const result = await audit.collectGfxMetrics("com.example", perf);
+
+    expect([result.p50Ms, result.p90Ms, result.p95Ms, result.p99Ms]).toEqual([8, 12, 12, 12]);
+    expect(result.frameTimeUnmeasured).toBeUndefined();
+    expect(audit.validateMetrics({ ...baseMetrics, ...result }, thresholds)).toEqual([]);
   });
 
   test("jank: an unreadable gfxinfo reading reports no figure rather than zero", async () => {

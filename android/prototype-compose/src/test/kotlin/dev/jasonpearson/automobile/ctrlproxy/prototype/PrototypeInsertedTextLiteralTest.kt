@@ -141,4 +141,24 @@ class PrototypeInsertedTextLiteralTest {
     val item = mapped.single { it.testTag == "item" }.source as PrototypeListItemNode
     assertEquals("{secret}", item.headline)
   }
+
+  @Test
+  fun `a shown error message keeps an inserted value exactly`() {
+    val spec =
+      PrototypeSpec(
+        "error",
+        window,
+        root =
+          PrototypeTextFieldNode(
+            testTag = "field",
+            stateKey = "input",
+            errorWhen = PrototypeCondition(key = "secret", equals = PrototypeScalar.Text("LEAK")),
+            errorText = "{data:/note} {secret}",
+          ),
+        state = state + ("input" to PrototypeScalar.Text("")),
+        data = data,
+      )
+    // Error text is shown as written, so the authored `{secret}` stays literal too.
+    assertEquals("{secret} {secret}", mapPrototypeSpec(spec).root.errorMessage)
+  }
 }

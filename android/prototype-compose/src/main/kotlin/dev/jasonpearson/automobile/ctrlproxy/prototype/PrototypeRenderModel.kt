@@ -375,7 +375,10 @@ internal class PrototypeNodeMapping(
         prototypeOpenWhen(node)?.let { state[it.key] == PrototypeScalar.BooleanValue(it.equals) }
           ?: false,
         enabled = node.enabledCondition()?.holds(localState, validity) ?: true,
-        errorMessage = prototypeShownError(node, localState, shownErrors, validity),
+        // A shown error is read as is, so an inserted value in it loses its shield here.
+        errorMessage =
+          prototypeShownError(node, localState, shownErrors, validity)
+            ?.let(PrototypeTextShield::unshield),
         isError = prototypeIsError(node, localState, shownErrors, validity),
         checked =
           (prototypeToggleKey(node)

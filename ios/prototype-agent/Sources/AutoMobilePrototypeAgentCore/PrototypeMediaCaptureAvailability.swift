@@ -64,7 +64,9 @@ public struct PrototypeMediaCaptureAvailability: Equatable {
 
     private static func availability(
         present: Bool, absentDetail: String, key: String, bundle: any PrototypeBundleReader
-    ) -> PlatformAvailability {
+    )
+        -> PlatformAvailability
+    {
         guard present else { return .unavailable(absentDetail) }
         return bundle.containsInfoPlistKey(key) ? .ready : .unavailable("missing_usage_description")
     }

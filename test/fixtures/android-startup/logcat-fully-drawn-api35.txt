@@ -1,0 +1,7 @@
+--------- beginning of system
+         1795080632.536   568  1955 W ActivityTaskManager: callingPackage for (uid=2000, pid=4370) has no WPC
+         1795080632.539   568  1955 I ActivityTaskManager: START u0 {act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 cmp=dev.l18722.dbg/dev.l18722.Main} with LAUNCH_MULTIPLE from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+         1795080632.545   568   599 I ActivityManager: Start proc 4373:dev.l18722.dbg/u0a207 for next-top-activity {dev.l18722.dbg/dev.l18722.Main}
+--------- beginning of main
+         1795080632.994   568   588 I ActivityTaskManager: Displayed dev.l18722.dbg/dev.l18722.Main for user 0: +457ms
+         1795080634.318   568   588 I ActivityTaskManager: Fully drawn dev.l18722.dbg/dev.l18722.Main: +1s781ms

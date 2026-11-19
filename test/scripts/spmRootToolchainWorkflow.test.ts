@@ -23,7 +23,7 @@ const HEAVY_LANE_JOBS = ["ios-xcode-build", "ios-playground-tests", "prototype-s
 const FALLBACK: Record<string, string> = {
   "ios-swift-packages": "matrix.config.runner",
   "ios-swift-prototype-apps": "matrix.config.runner",
-  "ios-spm-root-package-build": "'xcode-27'",
+  "ios-spm-root-package-build": "matrix.config.runner",
   "ios-xcode-build": "matrix.config.runner",
   "ios-playground-tests": "matrix.config.runner",
   "prototype-simulator": "'xcode-27'",
@@ -412,19 +412,40 @@ describe("root SPM toolchain floor workflow", () => {
     );
   });
 
-  test("selects Xcode 27.2 on every runner before building the root package", () => {
+  test("builds the root package on the 26.6 floor and the 27.2 pin behind one roll-up", () => {
+    const jobs = loadJobs(".github/workflows/pull_request.yml");
+    const matrix = jobs["ios-spm-root-package-build"];
+    expect(matrix?.name).toBe("Build Root SPM Package (Xcode ${{ matrix.config.xcode }})");
+    expect(matrix?.strategy?.matrix?.config).toEqual([
+      { xcode: "26.6", runner: "macos-26" },
+      { xcode: "27.2", runner: "xcode-27" },
+    ]);
+    const gate = jobs["ios-spm-root-package-gate"];
+    expect(gate?.name).toBe("Build Root SPM Package");
+    expect(gate?.needs).toContain("ios-spm-root-package-build");
+    expect(gate?.if).toContain("always()");
+    expect(gate?.steps?.[0]?.run).toContain(
+      'if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then',
+    );
+
     const steps = loadJobSteps(".github/workflows/pull_request.yml", "ios-spm-root-package-build");
-    const selectXcode = stepNamed(steps, "Select Xcode 27.2");
-    const selfHosted = stepNamed(steps, "Select self-hosted Xcode 27.2");
+    const selectXcode = stepNamed(steps, "Select Xcode ${{ matrix.config.xcode }}");
+    const selfHosted = stepNamed(steps, "Select self-hosted Xcode ${{ matrix.config.xcode }}");
+    const report = stepNamed(steps, "Report Xcode ${{ matrix.config.xcode }}");
     const build = steps.findIndex((step) => step.name === "Build root Package.swift");
 
-    expect(steps.length).toBeGreaterThan(0);
     expect(selectXcode?.if).toBe("runner.environment == 'github-hosted'");
     expect(selectXcode?.uses).toBe("maxim-lobanov/setup-xcode@v1");
-    expect(selectXcode?.with?.["xcode-version"]).toBe("27.2");
-    expect(selfHosted?.run).toBe('bash scripts/ci/select-self-hosted-xcode.sh "27.2"');
-    expect(steps.indexOf(selectXcode!)).toBeLessThan(build);
-    expect(steps.indexOf(selfHosted!)).toBeLessThan(build);
+    expect(selectXcode?.with?.["xcode-version"]).toBe("${{ matrix.config.xcode }}");
+    expect(selfHosted?.run).toBe(
+      'bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"',
+    );
+    expect(report?.run).toContain('echo "DEVELOPER_DIR=${DEVELOPER_DIR:-$(xcode-select -p)}"');
+    expect(steps.indexOf(selectXcode!)).toBeLessThan(steps.indexOf(report!));
+    expect(steps.indexOf(selfHosted!)).toBeLessThan(steps.indexOf(report!));
+    expect(steps.indexOf(report!)).toBeLessThan(build);
+    const cache = stepNamed(steps, "Cache root Swift package dependencies");
+    expect(cache?.with?.key).toContain("spm-root-package-${{ matrix.config.xcode }}-");
     const prototypeBuild = stepNamed(steps, "Build AutoMobilePrototype library and embed consumer");
     expect(prototypeBuild?.run).toBe("bash scripts/ios/prototype-library-build.sh");
     expect(steps.indexOf(prototypeBuild!)).toBeGreaterThan(build);

@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# Wiring guard for the advisory Xcode 27.2 workflow on the hosted xcode-27 image (#18363).
+# Wiring guard for the advisory Xcode 27.2 runner-build workflow on the hosted xcode-27 image
+# (#18363, trimmed to the runner builds in #18816).
 # Assertions read the workflow through js-yaml, so a commented-out line cannot satisfy them.
 
 WORKFLOW=".github/workflows/ios-xcode-27-2.yml"
@@ -34,14 +35,9 @@ wf_query() {
   [ "${output}" = "" ]
 }
 
-@test "the lane builds the packages, apps, and tvOS/watchOS/visionOS runners" {
-  [ "$(wf_query "${WORKFLOW}" 'Object.keys(wf.jobs).join(",")')" = "swift-packages,xcode-projects,simulator-runners" ]
+@test "the lane builds only the tvOS/watchOS/visionOS runners the required jobs do not" {
+  [ "$(wf_query "${WORKFLOW}" 'Object.keys(wf.jobs).join(",")')" = "simulator-runners" ]
   runs="$(wf_query "${WORKFLOW}" 'Object.values(wf.jobs).flatMap((j) => j.steps.map((s) => s.run ?? "")).join("\n")')"
-  [[ "${runs}" == *"./scripts/ios/swift-build.sh"* ]]
-  [[ "${runs}" == *"./scripts/ios/swift-test.sh"* ]]
-  [[ "${runs}" == *"swift build -c release"* ]]
-  [[ "${runs}" == *"./scripts/ios/xcode-build.sh Playground"* ]]
-  [[ "${runs}" == *"./scripts/ios/xcode-build.sh CtrlProxy"* ]]
   [[ "${runs}" == *"scripts/ios/build-tvos-runner-release.sh"* ]]
   [[ "${runs}" == *"scripts/ios/build-simulator-runner-release.sh --platform"* ]]
   [ "$(wf_query "${WORKFLOW}" 'wf.jobs["simulator-runners"].strategy.matrix.platform.map((p) => p.id).join(",")')" = "tvos,watchos,visionos" ]

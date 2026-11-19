@@ -189,7 +189,9 @@ job does not skip it.
   Jobs that compile `.metal` sources pass `--require-metal`, which fails fast when
   that Xcode lacks its Metal Toolchain. Local scripts call `select_pinned_xcode`.
   `test/bats/xcode-version-pin.bats` fails when a workflow job selects another
-  version. Only the CircleCI nightly sweeps stay on Xcode 26.6, the Swift 6.3 floor.
+  version. The CircleCI nightly sweeps and the 26.6 entry of the Build Root SPM
+  Package matrix keep Xcode 26.6, the Swift 6.3 floor, verified. A roll-up job keeps
+  the required check name.
 - Swift Packages builds unsigned on the Mac: its signing flags are false
   whenever the job is routed there, so no certificate is imported into the
   owner's keychains.
@@ -250,28 +252,28 @@ ports. Use that fallback only with the heavy runner under a dedicated user.
 
 ## Job → runner
 
-| Job                                                                            | Same-repo PR                               | Fork PR        |
-| ------------------------------------------------------------------------------ | ------------------------------------------ | -------------- |
-| SwiftLint                                                                      | `ubuntu-24.04`                             | `ubuntu-24.04` |
-| Swift Code Coverage                                                            | self-hosted `automobile-mac`               | `xcode-27`     |
-| Build Desktop App / Installer Minimal (macOS)                                  | self-hosted `automobile-mac`               | `macos-latest` |
-| Swift Packages (Xcode 27.2)                                                    | self-hosted `automobile-mac`               | `xcode-27`     |
-| Swift Prototype Apps (one leg per simulator app, Xcode 27.2)                   | self-hosted `automobile-mac`               | `xcode-27`     |
-| Build Root SPM Package                                                         | self-hosted `automobile-mac`               | `xcode-27`     |
-| Build Xcode Projects (Playground, CtrlProxy)                                   | self-hosted `automobile-mac-heavy`         | `xcode-27`     |
-| Prototype Simulator iOS 27.2                                                   | self-hosted `automobile-mac-heavy`         | `xcode-27`     |
-| iOS Playground Tests                                                           | CircleCI (heavy lane if label-forced)      | CircleCI       |
-| iOS Device Capture to WHEP                                                     | Namespace `auto-mobile-macos`              | `macos-26`     |
-| XCTestRunner Simulator Tests (`run-ios-sim`, contract inputs)                  | hosted `xcode-27` (exception, see above)   | `xcode-27`     |
-| merge.yml: Build Desktop App (macOS), Generate/Build Xcode Projects            | CircleCI post-merge, path-gated, coalesced | n/a            |
-| nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | CircleCI `nightly-macos`                   | n/a            |
-| Xcode 27.2 (Advisory): packages, projects, tvOS/watchOS/visionOS runners       | hosted `xcode-27`                          | `xcode-27`     |
+| Job                                                                            | Same-repo PR                               | Fork PR                |
+| ------------------------------------------------------------------------------ | ------------------------------------------ | ---------------------- |
+| SwiftLint                                                                      | `ubuntu-24.04`                             | `ubuntu-24.04`         |
+| Swift Code Coverage                                                            | self-hosted `automobile-mac`               | `xcode-27`             |
+| Build Desktop App / Installer Minimal (macOS)                                  | self-hosted `automobile-mac`               | `macos-latest`         |
+| Swift Packages (Xcode 27.2)                                                    | self-hosted `automobile-mac`               | `xcode-27`             |
+| Swift Prototype Apps (one leg per simulator app, Xcode 27.2)                   | self-hosted `automobile-mac`               | `xcode-27`             |
+| Build Root SPM Package (Xcode 26.6 and 27.2 entries, one roll-up)              | self-hosted `automobile-mac`               | `macos-26`, `xcode-27` |
+| Build Xcode Projects (Playground, CtrlProxy)                                   | self-hosted `automobile-mac-heavy`         | `xcode-27`             |
+| Prototype Simulator iOS 27.2                                                   | self-hosted `automobile-mac-heavy`         | `xcode-27`             |
+| iOS Playground Tests                                                           | CircleCI (heavy lane if label-forced)      | CircleCI               |
+| iOS Device Capture to WHEP                                                     | Namespace `auto-mobile-macos`              | `macos-26`             |
+| XCTestRunner Simulator Tests (`run-ios-sim`, contract inputs)                  | hosted `xcode-27` (exception, see above)   | `xcode-27`             |
+| merge.yml: Build Desktop App (macOS), Generate/Build Xcode Projects            | CircleCI post-merge, path-gated, coalesced | n/a                    |
+| nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | CircleCI `nightly-macos`                   | n/a                    |
+| Build tvOS/watchOS/visionOS Runner (Xcode 27.2, Advisory)                      | hosted `xcode-27`                          | `xcode-27`             |
 
 Until the owner steps below are done, the self-hosted and Namespace jobs run on
 their hosted fallback. A self-hosted placement falls back to
 hosted for any run where Mac Pool Routing finds that pool offline.
 
-The Xcode 27.2 row is `ios-xcode-27-2.yml`, a separate advisory workflow outside the
+The runner row is `ios-xcode-27-2.yml`, a separate advisory workflow outside the
 ruleset that selects 27.2 explicitly (the image default is 27.1)
 ([devlog](../../devlog/2026-11-15-xcode-27-2-advisory-workflow.md)).
 
@@ -298,9 +300,9 @@ These need a login or a credential.
 
 Run on the Mac as the user that owns `~/actions-runner`:
 
-1. Keep the pinned Xcode installed (currently 27.2 at
-   `/Applications/Xcode-27.2.0.app`; 26.6 at `/Applications/Xcode.app` stays the
-   `xcode-select` default). Install its simulator platforms and Metal Toolchain once:
+1. Keep Xcode 27.2 at `/Applications/Xcode-27.2.0.app` and 26.6 (the root SPM floor
+   entry and `xcode-select` default) at `/Applications/Xcode.app`. Install 27.2's
+   platforms and Metal Toolchain once:
 
    ```bash
    export DEVELOPER_DIR=/Applications/Xcode-27.2.0.app/Contents/Developer
@@ -308,9 +310,8 @@ Run on the Mac as the user that owns `~/actions-runner`:
    xcodebuild -downloadComponent metalToolchain
    ```
 
-   Without the Metal Toolchain, the prototype app, Build Xcode Projects, Playground
-   and Prototype Simulator jobs fail at Xcode selection. The selector falls back to
-   the newest installed 27.x at or above 27.2 and never crosses majors (#11422).
+   Without it, jobs that compile `.metal` sources fail at Xcode selection. The
+   selector never crosses majors (#11422).
 
 2. Get a registration token (valid for one hour):
 

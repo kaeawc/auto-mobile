@@ -13,9 +13,11 @@ setup() {
   pin="${AUTOMOBILE_XCODE_VERSION}"
 }
 
-# Deliberate exceptions, each with its reason. Keys are `<workflow file>:<job id>`.
-# None today: every job that selects an Xcode, tvOS/watchOS/visionOS included, is on the pin.
-EXEMPT_JOBS=""
+# Deliberate exceptions, each with its reason. Keys are `<workflow file>:<job id>` (the whole
+# job) or `<workflow file>:<job id>:<version>` (one matrix entry).
+#   ios-spm-root-package-build 26.6: the root manifest's published Swift 6.3 floor entry,
+#   built next to the pinned 27.2 entry (#18816).
+EXEMPT_JOBS="pull_request.yml:ios-spm-root-package-build:26.6"
 
 # Print `<file>:<job>:<version>` for each Xcode selection in workflow file $1 that is not
 # the pin, resolving matrix.config.xcode and env.XCODE_VERSION references.
@@ -43,7 +45,7 @@ off_pin() {
           if (step.uses === "./.github/actions/ios-simulator-bring-up") picks.push(step.with?.["xcode-version"]);
           for (const raw of picks) {
             const version = resolve(raw, config);
-            if (version !== pin) bad.push(`${file}:${id}:${version}`);
+            if (version !== pin && !exempted.has(`${file}:${id}:${version}`)) bad.push(`${file}:${id}:${version}`);
           }
         }
       }

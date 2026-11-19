@@ -3328,13 +3328,24 @@ jobs:
 
   ios-spm-root-package-build:
     timeout-minutes: 20
-    name: "Build Root SPM Package"
+    # The required check is the "Build Root SPM Package" roll-up below: a matrix
+    # appends its values to the job name, so this job cannot carry that name (#18816).
+    name: "Build Root SPM Package (Xcode ${{ matrix.config.xcode }})"
     # Small self-hosted Mac pool for owner-authored same-repository PRs once the
-    # pools are registered (#11011); forks use the hosted xcode-27 image. The root
-    # manifest needs at least the Swift 6.3 toolchain; it builds on the pinned Xcode 27.2.
-    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.small != 'hosted') && fromJSON('["self-hosted","automobile-mac"]') || 'xcode-27' }}
+    # pools are registered (#11011); forks use the entry's hosted image. The root
+    # manifest declares swift-tools-version 6.3, so SDK consumers on Xcode 26.6 (the
+    # published floor, Swift 6.3) stay verified next to the pinned Xcode 27.2. No hosted
+    # image has both, so each version is its own entry.
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.small != 'hosted') && fromJSON('["self-hosted","automobile-mac"]') || matrix.config.runner }}
     needs: [detect-changes, fast-validation, mac-pool-routing]
     if: always() && !cancelled() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          # Published floor: the oldest Xcode whose Swift (6.3) parses the root manifest.
+          - { xcode: "26.6", runner: "macos-26" }
+          - { xcode: "27.2", runner: "xcode-27" }
     steps:
       - name: "Isolate self-hosted root SPM home"
         if: runner.environment == 'self-hosted'
@@ -3363,18 +3374,26 @@ jobs:
 
       # The root manifest declares swift-tools-version 6.3 (XCTestRunner's
       # strict-concurrency floor). Xcode 26.0 ships Swift 6.2 and cannot even parse
-      # a 6.3 manifest. PRs build on the pinned Xcode 27.2 (Swift 6.4) like every
-      # other Swift-package job here; the nightly CircleCI sweep keeps the 26.6 floor.
-      - name: "Select Xcode 27.2"
+      # a 6.3 manifest, so 26.6 is the floor entry and 27.2 the pinned toolchain.
+      - name: "Select Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'github-hosted'
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "27.2"
+          xcode-version: ${{ matrix.config.xcode }}
 
-      - name: "Select self-hosted Xcode 27.2"
+      - name: "Select self-hosted Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'self-hosted'
         shell: bash
-        run: bash scripts/ci/select-self-hosted-xcode.sh "27.2"
+        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
+
+      # Pin DEVELOPER_DIR to the entry's Xcode so scripts that call select_pinned_xcode
+      # (prototype-library-build.sh) keep it instead of switching to the 27.2 pin.
+      - name: "Report Xcode ${{ matrix.config.xcode }}"
+        shell: bash
+        run: |
+          echo "DEVELOPER_DIR=${DEVELOPER_DIR:-$(xcode-select -p)}" >> "$GITHUB_ENV"
+          xcodebuild -version
+          swift --version
 
       # Same runner-independent literal and RUNNER_TEMP directory as the coverage cache above.
       - name: "Cache root Swift package dependencies"
@@ -3384,9 +3403,9 @@ jobs:
           path: |
             ${{ runner.environment == 'self-hosted' && '../../_temp/automobile-swiftpm-cache' || '~/Library/Caches/org.swift.swiftpm' }}
             ${{ runner.environment != 'self-hosted' && '~/.swiftpm/cache' || '' }}
-          key: ${{ runner.os }}-${{ runner.environment }}-spm-root-package-27.2-${{ hashFiles('Package.swift') }}
+          key: ${{ runner.os }}-${{ runner.environment }}-spm-root-package-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.environment }}-spm-root-package-27.2-
+            ${{ runner.os }}-${{ runner.environment }}-spm-root-package-${{ matrix.config.xcode }}-
 
       - name: "Resolve root Swift package dependencies"
         run: swift package resolve
@@ -3407,6 +3426,39 @@ jobs:
         if: always() && runner.environment == 'self-hosted'
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/root-spm-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
+  # Roll-up for the required "Build Root SPM Package" check (#18816): fails when any
+  # matrix entry failed or was cancelled; a skipped matrix (no iOS change) passes,
+  # as the single job's skip did before.
+  ios-spm-root-package-gate:
+    timeout-minutes: 10
+    name: "Build Root SPM Package"
+    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
+    needs:
+      - detect-changes
+      - ios-spm-root-package-build
+    # Roll-up only reads needs.*.result — it needs no token scopes.
+    permissions: {}
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
+    steps:
+      - name: "Check results"
+        run: |
+          declare -A results=(
+            [detect-changes]="${{ needs.detect-changes.result }}"
+            [ios-spm-root-package-build]="${{ needs.ios-spm-root-package-build.result }}"
+          )
+          fail=
+          for name in "${!results[@]}"; do
+            r="${results[$name]}"
+            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+              echo "::error::Build Root SPM Package dependency ${name} = ${r}"
+              fail=1
+            fi
+          done
+          if [[ -n "${fail}" ]]; then
+            echo "One or more jobs failed or were cancelled"
+            exit 1
+          fi
 
   # "Prototype Simulator": per-runtime smoke test for the iOS prototype agent (#10569),
   # moved from CircleCI to the heavy self-hosted lane (#11011). Injection depends

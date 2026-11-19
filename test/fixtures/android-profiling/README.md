@@ -11,7 +11,7 @@ captures when a device is available, and record the device, API level and captur
 | `dumpsys-package-release-flags.txt`     | `dumpsys package <pkg>` (flags lines)  | Non-debuggable app: `pkgFlags` has no `DEBUGGABLE`                |
 | `dumpsys-package-profileable-flags.txt` | `dumpsys package <pkg>` (flags lines)  | **Guess:** a profileable-by-shell token in `privateFlags`         |
 | `am-dumpheap-not-debuggable.txt`        | `am dumpheap <pkg> <path>`             | SecurityException refusal text for a non-debuggable app           |
-| `am-dumpheap-unknown-process.txt`       | `am dumpheap <pkg> <path>` (not run)   | Process-not-found text                                            |
+| `am-dumpheap-unknown-process.txt`       | `am dumpheap <pkg> <path>` (API 35)    | Process-not-found text                                            |
 | `am-dumpheap-success.txt`               | `am dumpheap <pkg> <path>`             | Current releases print the path and block until the dump finishes |
 | `perfetto-background-start.txt`         | `perfetto --background -c - --txt ...` | Last line is the detached recorder's pid                          |
 | `perfetto-background-missing.txt`       | `perfetto ...` on an image without it  | No pid line, so the start fails                                   |

@@ -128,7 +128,7 @@ extension ElementLocator {
         /// Finds a SpringBoard element only when it belongs to an alert snapshot that
         /// `getAlertsFromSpringboard` would expose through `observe` (#4014).
         private func findSpringBoardAlertElement(byResourceId resourceId: String) -> XCUIElement? {
-            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let springboard = XCUIApplication.withoutUIInterruptions(bundleIdentifier: "com.apple.springboard")
             guard let snapshot = try? springboard.snapshot() else { return nil }
             let matchingFrames = Self.matchingFrames(
                 in: collectAlertElements(from: snapshot),
@@ -138,7 +138,7 @@ extension ElementLocator {
         }
 
         private func findSpringBoardAlertElement(byText text: String) -> XCUIElement? {
-            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let springboard = XCUIApplication.withoutUIInterruptions(bundleIdentifier: "com.apple.springboard")
             guard let snapshot = try? springboard.snapshot() else { return nil }
             let matchingFrames = Self.matchingFrames(
                 in: collectAlertElements(from: snapshot),
@@ -153,7 +153,7 @@ extension ElementLocator {
         )
             -> XCUIElement?
         {
-            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let springboard = XCUIApplication.withoutUIInterruptions(bundleIdentifier: "com.apple.springboard")
             guard let snapshot = try? springboard.snapshot() else { return nil }
             let candidates = Self.resolvedFrameCandidates(
                 roots: collectAlertElements(from: snapshot),

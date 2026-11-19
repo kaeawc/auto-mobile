@@ -61,7 +61,7 @@ androidx-tv-material = "1.1.0"
 androidx-leanback = "1.2.0"
 
 # Library versions
-clikt = "5.1.0"
+clikt = "5.2.0"
 junit-jupiter-api = "6.1.3"
 junit-vintage-engine = "6.1.3"
 koog-agents = "1.3.0"

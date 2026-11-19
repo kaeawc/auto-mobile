@@ -113,10 +113,15 @@ class AndroidPermissionsLifecycleTest {
       )
     controller.pause()
     val unregister = camera.request({}, {})!!
+    assertTrue(microphone.prompting)
     registry.dispatchResult(registry.requestCode, true)
     unregister()
+    assertFalse(microphone.prompting)
     assertTrue(microphone.settling)
     controller.resume()
+    assertFalse(microphone.settling)
+    // The resume cleared it without any status read, so a later background request is not held.
+    controller.pause()
     assertFalse(microphone.settling)
     controller.pause().stop().destroy()
   }

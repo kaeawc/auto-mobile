@@ -9,6 +9,7 @@ import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -33,6 +34,10 @@ internal interface AndroidPermissionsGateway {
    * since. A follow-up request waits for that resume instead of reading `unavailable`.
    */
   val settling: Boolean
+    get() = false
+
+  /** Another source or session of this Activity has its permission dialog open. */
+  val prompting: Boolean
     get() = false
 
   val sdk: Int
@@ -109,11 +114,12 @@ internal constructor(
       emit(PrototypePermissionOutcome.Cancelled)
       return@flow
     }
-    val current = status()
-    if (finish != null) {
+    // While any dialog is open the Activity is paused, so check ownership before status.
+    if (finish != null || gateway.prompting) {
       emit(PrototypePermissionOutcome.Busy)
       return@flow
     }
+    val current = status()
     if (
       current !in setOf(PrototypePermissionState.NOT_DETERMINED, PrototypePermissionState.DENIED)
     ) {
@@ -193,11 +199,11 @@ internal class FrameworkPermissionsGateway(
   override val hardware
     get() = captureHardwarePresent(activity, permission)
 
-  override val settling: Boolean
-    get() {
-      if (foreground) slot.settling = false
-      return slot.settling
-    }
+  override val settling
+    get() = slot.settling
+
+  override val prompting
+    get() = slot.requesting
 
   override val sdk
     get() = Build.VERSION.SDK_INT
@@ -250,7 +256,7 @@ internal class FrameworkPermissionsGateway(
         ActivityResultContracts.RequestPermission(),
       ) { granted ->
         if (active && !activity.isDestroyed) {
-          slot.settling = true
+          settleUntilResume()
           deliver(granted)
         }
       }
@@ -263,6 +269,20 @@ internal class FrameworkPermissionsGateway(
       throw error
     }
     return unregister
+  }
+
+  /** Marks the slot settling until the Activity's next resume (or destruction) clears it. */
+  private fun settleUntilResume() {
+    slot.settling = true
+    activity.lifecycle.addObserver(
+      object : LifecycleEventObserver {
+        override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
+          if (event != Lifecycle.Event.ON_RESUME && event != Lifecycle.Event.ON_DESTROY) return
+          slot.settling = false
+          source.lifecycle.removeObserver(this)
+        }
+      },
+    )
   }
 
   companion object {

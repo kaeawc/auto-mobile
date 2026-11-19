@@ -22,6 +22,7 @@ class AndroidPermissionsSourceTest {
     override var declared = true
     override var hardware = true
     override var settling = false
+    override var prompting = false
     override var sdk = 33
     override var foreground = true
     override var granted = false
@@ -539,5 +540,24 @@ class AndroidPermissionsSourceTest {
     source.close()
     assertEquals(PrototypePermissionOutcome.Cancelled, pending.await())
     assertEquals(0, gateway.registrations)
+  }
+
+  @Test
+  fun `a request while another dialog of the Activity is open is busy`() = runTest {
+    val gateway =
+      Gateway().apply {
+        permission = PrototypeRuntimePermission.MICROPHONE
+        foreground = false
+        prompting = true
+      }
+    val source = AndroidPermissionsSource(gateway, Store(), StandardTestDispatcher(testScheduler))
+    assertEquals(PrototypePermissionOutcome.Busy, source.request().single())
+    assertEquals(0, gateway.registrations)
+    gateway.prompting = false
+    assertEquals(
+      PrototypePermissionOutcome.Status(PrototypePermissionState.UNAVAILABLE),
+      source.request().single(),
+    )
+    source.close()
   }
 }

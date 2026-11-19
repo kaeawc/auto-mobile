@@ -41,8 +41,9 @@ Treat an imported prototype like any file you open: turn the switch on only for 
 
 The Android app declares camera and microphone permissions for prototypes that use them. It asks
 only when an open prototype requests that permission, and the prototype can use it only while it is
-on screen. Nothing it captures is sent anywhere by the app. Decline, or revoke the permission in
-system settings, and the prototype reports the permission as denied.
+on screen. Nothing it captures is sent anywhere by the app. If you decline or revoke the
+permission, the prototype reports it as denied. If you decline it a second time, Android stops
+asking and the prototype reports it as blocked until you allow it in system settings.
 
 ## iOS privacy manifests
 

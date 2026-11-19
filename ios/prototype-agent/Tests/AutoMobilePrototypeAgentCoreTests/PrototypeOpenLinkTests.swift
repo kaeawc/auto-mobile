@@ -2,6 +2,11 @@
 import XCTest
 
 final class PrototypeOpenLinkTests: XCTestCase {
+    override static func setUp() {
+        super.setUp()
+        _ = try? PrototypeSpecStrictValidator.validate(data: Data("{}".utf8))
+    }
+
     func testExplicitCapabilitiesAreCombinedWithInferredCapabilities() {
         let required = PrototypeStrictCapabilities.required([
             "requires": .array([.string("prototype_future_v1")]),
@@ -20,6 +25,61 @@ final class PrototypeOpenLinkTests: XCTestCase {
         }
         XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: data, supportedCapabilities: []))
         XCTAssertNoThrow(try PrototypeEmbeddedSpec.load(data: data, supported: ["prototype_future_v1"]))
+    }
+
+    func testLinksWithPlatformRequirementsValidateDecodeAndDeliver() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("test/fixtures/prototype-spec/valid/links-platform.json")
+        let data = try Data(contentsOf: url)
+        let supported: Set<String> = [
+            "prototype_data_model_v1",
+            "prototype_links_v1",
+            "prototype_platform_v1",
+            "prototype_platform_location_v1",
+        ]
+        try PrototypeSpecStrictValidator.validate(data: data, supportedCapabilities: supported)
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(
+            data: data, supportedCapabilities: supported.subtracting(["prototype_links_v1"])
+        ))
+        let decoded = try JSONDecoder().decode(PrototypeSpec.self, from: data)
+        XCTAssertEqual(decoded.requiredCapabilities, ["prototype_links_v1"])
+        var session = PrototypeSession(clock: PrototypeLibraryFakeClock())
+        try session.show(decoded)
+        let events = session.openLink("amp-demo://nearby", registeredSchemes: ["amp-demo"])
+        XCTAssertEqual(events.first?.wireKind, "link_opened")
+        XCTAssertEqual(session.state["located"], .bool(true))
+        var fields = try XCTUnwrap(JSONDecoder().decode(JSONValue.self, from: data).objectFields)
+        var requires = try XCTUnwrap(fields["requires"]?.objectFields)
+        requires.removeValue(forKey: "capabilities")
+        fields["requires"] = .object(requires)
+        let missing = try JSONEncoder().encode(JSONValue.object(fields))
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: missing)) { error in
+            XCTAssertEqual(
+                error as? PrototypeLoadError,
+                .invalidSpec(path: "requires", message: "links requires prototype_links_v1")
+            )
+        }
+    }
+
+    func testObjectCapabilitiesHaveTheSameStrictHandlingAsArrayCapabilities() throws {
+        let declarations: [JSONValue] = [
+            .array([.string("prototype_future_v1")]),
+            .object(["capabilities": .array([.string("prototype_future_v1")])]),
+        ]
+        for requires in declarations {
+            XCTAssertEqual(PrototypeStrictCapabilities.required(["requires": requires]), ["prototype_future_v1"])
+            let data = try JSONEncoder().encode(JSONValue.object([
+                "id": .string("future"), "window": .object(["placement": .object(["type": .string("fullscreen")])]),
+                "root": .object(["type": .string("text"), "text": .string("Hello")]), "requires": requires,
+            ]))
+            XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: data, supportedCapabilities: []))
+            XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(
+                data: data,
+                supportedCapabilities: ["prototype_future_v1"]
+            ))
+        }
     }
 
     private func spec(

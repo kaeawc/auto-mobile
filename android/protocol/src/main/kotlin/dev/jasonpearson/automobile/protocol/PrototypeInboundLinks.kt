@@ -53,12 +53,7 @@ internal object PrototypeInboundLinks {
     PrototypeLinkMatcher.validateLinkTable(table).firstOrNull()?.let {
       return PrototypeSpecError("links[${it.index}]", it.message)
     }
-    if (
-      "links" in spec &&
-        (spec["requires"] as? JsonArray).orEmpty().none {
-          (it as? JsonPrimitive)?.content == "prototype_links_v1"
-        }
-    )
+    if ("links" in spec && "prototype_links_v1" !in declaredPrototypeCapabilities(spec["requires"]))
       return PrototypeSpecError("requires", "links requires prototype_links_v1")
     for ((action, path) in context.actions) {
       actionError(action, path, table, spec, context)?.let {

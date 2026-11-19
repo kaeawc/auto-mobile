@@ -137,6 +137,7 @@
     "linkify-repeat-rows.json",
     "linkify-timeline.json",
     "links-bindings.json",
+    "links-platform.json",
     "links-routes.json",
     "links-secret-query.json",
     "list-basic.json",
@@ -1690,6 +1691,7 @@
     "request-upload-secure-form.json",
     "request-upload-secure-multipart.json",
     "request-upload-unknown-part.json",
+    "requires-capabilities-item.json",
     "reserved-test-tag.json",
     "root-text-wrong-type-before-sheet-height-over-max-first-error.json",
     "routes-17-declarations.json",
@@ -3656,6 +3658,12 @@
       "prototype_data_model_v1",
       "prototype_emit_context_v1",
       "prototype_links_v1"
+    ],
+    "links-platform.json": [
+      "prototype_data_model_v1",
+      "prototype_links_v1",
+      "prototype_platform_location_v1",
+      "prototype_platform_v1"
     ]
   }
 }

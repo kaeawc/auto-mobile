@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.protocol
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -287,13 +289,14 @@ data class PrototypeSpec(
   val links: JsonArray? = null,
 )
 
-/** The root `requires` block (#14294): platform modules, permissions and background needs. */
+/** Root module, permission, background and explicit capability requirements. */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class PrototypeRequires(
   val platform: List<String>? = null,
   val permissions: List<PrototypePermissionRequirement>? = null,
   val background: List<String>? = null,
-  @kotlinx.serialization.Transient val capabilities: List<String> = emptyList(),
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val capabilities: List<String> = emptyList(),
 )
 
 /** One declared permission: a canonical [name] and the [purpose] shown to the user. */

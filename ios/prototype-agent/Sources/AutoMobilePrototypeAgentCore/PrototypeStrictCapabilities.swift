@@ -9,7 +9,7 @@ enum PrototypeStrictCapabilities {
     static func required(_ spec: [String: JSONValue], includeAgentGates: Bool = false) -> Set<String> {
         var result = PrototypePlatformValidator.backendCapabilities(spec)
         // Array requirements name capabilities directly; the object form declares platform needs below.
-        result.formUnion(PrototypeContractValidator.strings(spec["requires"]))
+        result.formUnion(PrototypePlatformValidator.capabilities(spec["requires"]))
         func need(_ feature: String) { result.insert("prototype_\(feature)_v1") }
         if PrototypeContractValidator.locatedActionTypes(.object(spec)).contains("hideKeyboard") {
             need("hide_keyboard")

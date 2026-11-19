@@ -396,7 +396,12 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
   const uses: PrototypePlatformUse[] = [];
   const requires = record(root.requires);
   if (requires) {
-    uses.push({ kind: "requires", path: "requires" });
+    if (
+      Object.keys(requires).some((key) => key !== "capabilities") ||
+      !Object.hasOwn(requires, "capabilities")
+    ) {
+      uses.push({ kind: "requires", path: "requires" });
+    }
     const declared = Array.isArray(requires.platform) ? requires.platform : [];
     declared.forEach((name, index) => {
       if (typeof name === "string") {

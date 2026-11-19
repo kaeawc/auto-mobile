@@ -15,6 +15,16 @@ describe("selectDisposableAppTemplate", () => {
     );
   });
 
+  test("object-form capabilities participate in template selection alongside platform modules", () => {
+    const spec = {
+      ...fixture,
+      requires: { ...fixture.requires, capabilities: ["prototype_links_v1"] },
+    };
+    const links = { name: "links", capabilities: [...platform, "prototype_links_v1"], size: 4 };
+    expect(selectDisposableAppTemplate(spec, [base, media, links]).name).toBe("links");
+    expect(() => selectDisposableAppTemplate(spec, [media])).toThrow("prototype_links_v1");
+  });
+
   test("refuses with the capabilities no flavor advertises", () => {
     expect(() => selectDisposableAppTemplate(fixture, [base])).toThrow(
       "The spec needs prototype_platform_test_v1, prototype_platform_v1, which no disposable app template advertises (closest: base; available: base).",

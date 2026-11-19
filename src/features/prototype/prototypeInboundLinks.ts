@@ -1,3 +1,4 @@
+import { prototypeDeclaredCapabilities } from "./prototypeDeclaredCapabilities";
 import { validateLinkTable, type PrototypeLinkEntry } from "./prototypeLinkMatcher";
 import { record, type Raw } from "./prototypeTemplate";
 import type { Located, PrototypeValidationError } from "./prototypeBindingValidation";
@@ -119,7 +120,7 @@ export function prototypeInboundLinksError(
   }
   if (
     root.links !== undefined &&
-    (!Array.isArray(root.requires) || !root.requires.includes("prototype_links_v1"))
+    !prototypeDeclaredCapabilities(root.requires).includes("prototype_links_v1")
   ) {
     return { path: "requires", message: "links requires prototype_links_v1" };
   }

@@ -17433,6 +17433,17 @@
                       }
                     },
                     "optional": true
+                  },
+                  "capabilities": {
+                    "rule": {
+                      "kind": "array",
+                      "min": 1,
+                      "max": 128,
+                      "item": {
+                        "kind": "string"
+                      }
+                    },
+                    "optional": true
                   }
                 }
               },
@@ -19411,6 +19422,17 @@
                 "microphone",
                 "remoteNotification"
               ]
+            }
+          },
+          "optional": true
+        },
+        "capabilities": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 128,
+            "item": {
+              "kind": "string"
             }
           },
           "optional": true

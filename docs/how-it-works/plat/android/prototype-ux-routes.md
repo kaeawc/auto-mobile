@@ -89,7 +89,8 @@ Runtime (shared by `PrototypeRuntime` on Android and the iOS session; pure helpe
 ## Inbound link contract
 
 Root `links` accepts up to 32 ordered `{path,query?,actions}` entries with
-`requires:["prototype_links_v1"]`. Paths contain literals or `{name}` captures; query declarations
+`requires:["prototype_links_v1"]` or `requires:{platform:["location"],capabilities:["prototype_links_v1"]}`
+when platform modules are also needed. `capabilities` accepts 1–128 non-empty strings. Paths contain literals or `{name}` captures; query declarations
 use `string`, `int`, `number` or `boolean`, optionally suffixed `?`. A declaration may instead be
 `{type:"string?",secret:true}`. Entry actions read captures and declared query values through
 `{link:"name"}`; captures must be used and route parameter types must agree. The shared matcher

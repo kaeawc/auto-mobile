@@ -150,7 +150,7 @@ struct PrototypeSpec: Decodable {
         locationBlock = try container.decodeIfPresent(JSONValue.self, forKey: .location)
         sensorsBlock = try container.decodeIfPresent(JSONValue.self, forKey: .sensors)
         links = try container.decodeIfPresent([JSONValue].self, forKey: .links) ?? []
-        requiredCapabilities = try PrototypeContractValidator.strings(
+        requiredCapabilities = try PrototypePlatformValidator.capabilities(
             container.decodeIfPresent(JSONValue.self, forKey: .requires)
         )
         id = try container.decode(String.self, forKey: .id)

@@ -59,7 +59,7 @@ enum PrototypeInboundLinks {
             throw PrototypeContractValidator.invalid("links[\(error.index)]", error.message)
         }
         if spec["links"] != nil,
-           !PrototypeContractValidator.strings(spec["requires"]).contains("prototype_links_v1")
+           !PrototypePlatformValidator.capabilities(spec["requires"]).contains("prototype_links_v1")
         { throw PrototypeContractValidator.invalid("requires", "links requires prototype_links_v1") }
         for action in context.actions {
             let types = types(scope(action.path, table: table))

@@ -22,4 +22,3 @@ tasks.withType<Test>().configureEach {
     .withPathSensitivity(PathSensitivity.RELATIVE)
     .withPropertyName("protoViewerVersionCodes")
 }
-

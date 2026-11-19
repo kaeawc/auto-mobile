@@ -51,7 +51,7 @@ export interface WorkflowJob {
     "fail-fast"?: boolean;
     matrix?: {
       os?: string[];
-      config?: { runner?: string }[];
+      config?: { runner?: string; xcode?: string }[];
       runner?: string[];
       part?: number[];
     };

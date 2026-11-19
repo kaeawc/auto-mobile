@@ -505,6 +505,7 @@ nav:
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-19: Committed page bundle and one export budget": devlog/2026-11-19-prototype-web-page-bundle.md
       - "2026-11-19: Headless CarPlay on TVOut with a StarkConfig": devlog/2026-11-19-headless-carplay-tvout-stark.md
       - "2026-11-17: Docs navigation grouped by task and platform": devlog/2026-11-17-docs-navigation-by-task.md
       - "2026-11-17: Material 3 Expressive component availability at the pinned Compose BOM": devlog/2026-11-17-m3-expressive-component-availability.md

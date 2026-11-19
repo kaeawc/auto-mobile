@@ -480,6 +480,7 @@ nav:
           - "Manual-test harness: sessions": how-it-works/manual-test-harness-sessions.md
           - "Manual-test harness: broker scenarios": how-it-works/manual-test-harness-broker.md
           - "Live device acceptance": how-it-works/live-device-acceptance.md
+          - "Fixture capture mode": how-it-works/fixture-capture.md
           - "Device-description audit": how-it-works/device-description-audit.md
           - "Agent benchmarks": how-it-works/agent-benchmarks.md
           - "iOS Simulator fleet cost measurement": how-it-works/ios-simulator-fleet-cost.md

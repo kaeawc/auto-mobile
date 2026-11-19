@@ -2359,10 +2359,7 @@ data class PrototypeRadioOption(
   val label: String,
 )
 
-/**
- * An M3 Expressive split `button`: the trailing half opens [menu]; `onTap` stays the leading
- * action.
- */
+/** An M3 Expressive split `button`: its trailing half opens [menu]. */
 @Serializable
 data class PrototypeButtonSplit(
   val menu: List<PrototypeMenuItem>,

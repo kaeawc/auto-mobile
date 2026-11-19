@@ -157,7 +157,7 @@ export const prototypeModelSelection = {
   radioOption: {},
   buttonSplit: {
     languages: ["kotlin"],
-    doc: "An M3 Expressive split `button`: the trailing half opens [menu]; `onTap` stays the leading action.",
+    doc: "An M3 Expressive split `button`: its trailing half opens [menu].",
   },
   fabMenuItem: { languages: ["kotlin"] },
   fabMenu: {

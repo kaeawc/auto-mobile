@@ -54,8 +54,7 @@ function unsupported(
   fields: readonly string[],
   platform: "android" | "ios",
   capability: string,
-  { what, fallback }: { what: string; fallback: string },
-  runtime?: PrototypeRuntimeKind,
+  { what, fallback, runtime }: { what: string; fallback: string; runtime?: PrototypeRuntimeKind },
 ): string {
   const { device, advice } = prototypeRuntimeRefusalGuidance(platform, runtime);
   const more = fields.length > 1 ? ` (and ${fields.length - 1} more)` : "";
@@ -72,16 +71,11 @@ export function prototypeNetworkUnsupportedMessage(
   platform: "android" | "ios",
   runtime?: PrototypeRuntimeKind,
 ): string {
-  return unsupported(
-    fields,
-    platform,
-    PROTOTYPE_NETWORK_CAPABILITY,
-    {
-      what: "the request action",
-      fallback: "or load data with a /data patch instead",
-    },
+  return unsupported(fields, platform, PROTOTYPE_NETWORK_CAPABILITY, {
+    what: "the request action",
+    fallback: "or load data with a /data patch instead",
     runtime,
-  );
+  });
 }
 
 export function prototypeNetworkDeviceUnsupportedMessage(
@@ -89,16 +83,11 @@ export function prototypeNetworkDeviceUnsupportedMessage(
   platform: "android" | "ios",
   runtime?: PrototypeRuntimeKind,
 ): string {
-  return unsupported(
-    fields,
-    platform,
-    PROTOTYPE_NETWORK_DEVICE_CAPABILITY,
-    {
-      what: 'a request with via "device"',
-      fallback: 'or use via "host", which the host executes',
-    },
+  return unsupported(fields, platform, PROTOTYPE_NETWORK_DEVICE_CAPABILITY, {
+    what: 'a request with via "device"',
+    fallback: 'or use via "host", which the host executes',
     runtime,
-  );
+  });
 }
 
 /** The `<into>__meta` pointer: the same path with `__meta` appended to its last segment. */

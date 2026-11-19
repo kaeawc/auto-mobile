@@ -211,13 +211,42 @@ function shaderRefusalFor(
   return optIn ? { success: false, error: optIn } : undefined;
 }
 
+interface SpecCapabilityTarget {
+  disposableApp?: true;
+  android?: Pick<NonNullable<PrototypeTarget["android"]>, "supportsCommand">;
+  ios?: Pick<NonNullable<PrototypeTarget["ios"]>, "supportsCapability">;
+}
+
+function specCapabilityRuntime(target: SpecCapabilityTarget): PrototypeRuntimeKind | undefined {
+  if (target.disposableApp) {
+    return "disposableApp";
+  }
+  if (target.android) {
+    return "ctrlproxy";
+  }
+  if (target.ios) {
+    return target.ios.supportsCapability(PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY)
+      ? "iosViewer"
+      : "iosAgent";
+  }
+  return undefined;
+}
+
+function unsupportedSpecCapability(
+  target: SpecCapabilityTarget,
+  gate: ReturnType<typeof prototypeRequiredCapabilities>[number],
+  platform: "android" | "ios",
+  iosMinimumOs: Readonly<Record<string, number>>,
+): PrototypeResult {
+  const note = platform === "ios" ? prototypeIosMinimumOsNote(gate.capability, iosMinimumOs) : "";
+  const runtime = specCapabilityRuntime(target);
+  const message = gate.unsupportedMessage(gate.fields, platform, runtime) + note;
+  return { success: false, error: new ActionableError(message).message };
+}
+
 /** Refuses spec-introduced features before a show or patch reaches the device. */
 export async function specCapabilityRefusal(
-  target: {
-    disposableApp?: true;
-    android?: Pick<NonNullable<PrototypeTarget["android"]>, "supportsCommand">;
-    ios?: Pick<NonNullable<PrototypeTarget["ios"]>, "supportsCapability">;
-  },
+  target: SpecCapabilityTarget,
   spec: unknown,
   signal: AbortSignal | undefined,
   {
@@ -241,20 +270,7 @@ export async function specCapabilityRefusal(
     // A capability lookup may wait for the connection and handshake.
     signal?.throwIfAborted();
     if (!supported) {
-      const note =
-        platform === "ios" ? prototypeIosMinimumOsNote(gate.capability, iosMinimumOs) : "";
-      let runtime: PrototypeRuntimeKind | undefined;
-      if (target.disposableApp) {
-        runtime = "disposableApp";
-      } else if (target.android) {
-        runtime = "ctrlproxy";
-      } else if (target.ios) {
-        runtime = target.ios.supportsCapability(PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY)
-          ? "iosViewer"
-          : "iosAgent";
-      }
-      const message = gate.unsupportedMessage(gate.fields, platform, runtime) + note;
-      return { success: false, error: new ActionableError(message).message };
+      return unsupportedSpecCapability(target, gate, platform, iosMinimumOs);
     }
   }
   return undefined;

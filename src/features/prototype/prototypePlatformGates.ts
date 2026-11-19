@@ -92,9 +92,11 @@ function unsupported(
   fields: readonly string[],
   platform: "android" | "ios",
   capability: string,
-  what: string,
-  runtime?: PrototypeRuntimeKind,
-  appAdvice?: string,
+  {
+    what,
+    runtime,
+    appAdvice,
+  }: { what: string; runtime?: PrototypeRuntimeKind; appAdvice?: string },
 ): string {
   const { device, advice } = prototypeRuntimeRefusalGuidance(platform, runtime);
   const more = fields.length > 1 ? ` (and ${fields.length - 1} more)` : "";
@@ -120,13 +122,10 @@ export function prototypePlatformUnsupportedMessage(
   platform: "android" | "ios",
   runtime?: PrototypeRuntimeKind,
 ): string {
-  return unsupported(
-    fields,
-    platform,
-    PROTOTYPE_PLATFORM_CAPABILITY,
-    "the platform vocabulary",
+  return unsupported(fields, platform, PROTOTYPE_PLATFORM_CAPABILITY, {
+    what: "the platform vocabulary",
     runtime,
-  );
+  });
 }
 
 /** Authored call and handler paths whose definition names `capability` beyond its module's. */
@@ -203,16 +202,13 @@ const PROTOTYPE_PLATFORM_CALL_GATES = callCapabilities().map(({ capability, call
     platform: "android" | "ios",
     runtime?: PrototypeRuntimeKind,
   ) =>
-    unsupported(
-      fields,
-      platform,
-      capability,
-      [
+    unsupported(fields, platform, capability, {
+      what: [
         ...calls,
         ...(CALL_CAPABILITY_FIELDS[capability] ? [CALL_CAPABILITY_FIELDS[capability].name] : []),
       ].join(" or "),
       runtime,
-    ),
+    }),
 }));
 
 /** One generated gate per module in the `platformModules` table, then one per call capability. */
@@ -226,14 +222,11 @@ const PROTOTYPE_PLATFORM_MODULE_ONLY_GATES = Object.entries(PROTOTYPE_PLATFORM_M
         platform: "android" | "ios",
         runtime?: PrototypeRuntimeKind,
       ) =>
-        unsupported(
-          fields,
-          platform,
-          definition.capability,
-          `the ${name} platform module`,
+        unsupported(fields, platform, definition.capability, {
+          what: `the ${name} platform module`,
           runtime,
-          platformModuleAppAdvice(name, runtime),
-        ),
+          appAdvice: platformModuleAppAdvice(name, runtime),
+        }),
     },
     ...Object.entries(definition.backends ?? {}).map(([backend, { capability }]) => ({
       capability,
@@ -242,7 +235,11 @@ const PROTOTYPE_PLATFORM_MODULE_ONLY_GATES = Object.entries(PROTOTYPE_PLATFORM_M
         fields: readonly string[],
         platform: "android" | "ios",
         runtime?: PrototypeRuntimeKind,
-      ) => unsupported(fields, platform, capability, `the ${name} \`${backend}\` backend`, runtime),
+      ) =>
+        unsupported(fields, platform, capability, {
+          what: `the ${name} \`${backend}\` backend`,
+          runtime,
+        }),
     })),
     ...(definition.deviceCapability
       ? [
@@ -254,13 +251,10 @@ const PROTOTYPE_PLATFORM_MODULE_ONLY_GATES = Object.entries(PROTOTYPE_PLATFORM_M
               platform: "android" | "ios",
               runtime?: PrototypeRuntimeKind,
             ) =>
-              unsupported(
-                fields,
-                platform,
-                definition.deviceCapability!,
-                "device realtime channels",
+              unsupported(fields, platform, definition.deviceCapability!, {
+                what: "device realtime channels",
                 runtime,
-              ),
+              }),
           },
         ]
       : []),

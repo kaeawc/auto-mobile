@@ -467,29 +467,41 @@ async function platformNotesOutput(
     notes.push(...prototypeRuntimeNotes(device.platform === "ios" ? "ios" : "android", report));
   }
   notes.push(...prototypeStringsFallbackNotes(args.spec as PrototypeSpec, args.locale));
-  const gestures = device.platform === "ios" ? prototypeGestureFields(args.spec) : [];
-  if (gestures.length > 0) {
-    notes.push({
-      platform: "ios",
-      construct: "node.gestures",
-      effect: "substituted",
-      paths: gestures.slice(0, 20),
-      ...(gestures.length > 20 ? { total: gestures.length } : {}),
-      detail: [
-        ...(gestures.some((path) => path.endsWith(".onLongPress"))
-          ? [
-              "Long-press uses the platform default threshold (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).",
-            ]
-          : []),
-        ...(gestures.some((path) => path.endsWith(".onDoubleTap"))
-          ? [
-              "The double-tap window is the system's. With onDoubleTap, onTap fires only after that window elapses.",
-            ]
-          : []),
-      ].join(" "),
-    });
+  if (device.platform === "ios") {
+    const gestureNote = iosGestureNote(args.spec);
+    if (gestureNote) {
+      notes.push(gestureNote);
+    }
   }
   return notes.length > 0 ? { platformNotes: notes } : {};
+}
+
+function iosGestureNote(
+  spec: unknown,
+): NonNullable<PrototypeOutput["platformNotes"]>[number] | undefined {
+  const gestures = prototypeGestureFields(spec);
+  if (gestures.length === 0) {
+    return undefined;
+  }
+  return {
+    platform: "ios",
+    construct: "node.gestures",
+    effect: "substituted",
+    paths: gestures.slice(0, 20),
+    ...(gestures.length > 20 ? { total: gestures.length } : {}),
+    detail: [
+      ...(gestures.some((path) => path.endsWith(".onLongPress"))
+        ? [
+            "Long-press uses the platform default threshold (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).",
+          ]
+        : []),
+      ...(gestures.some((path) => path.endsWith(".onDoubleTap"))
+        ? [
+            "The double-tap window is the system's. With onDoubleTap, onTap fires only after that window elapses.",
+          ]
+        : []),
+    ].join(" "),
+  };
 }
 
 /**

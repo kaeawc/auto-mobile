@@ -365,23 +365,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     const patched = this.patchedFields(scope.deviceId, prototype.id);
     // Adoption transfers this id to the inspecting scope while retaining its siblings.
     this.clearShown(scope.deviceId, prototype.id);
-    const entry: PrototypeLastResult = {
-      id: prototype.id,
-      lastAction: "show",
-      adopted: true,
-      ...(prototype.persistent === undefined ? {} : { persistent: prototype.persistent }),
-      ...(prototype.suspended === true ? { suspended: true as const } : {}),
-      ...(prototype.hiddenReason ? { hiddenReason: prototype.hiddenReason } : {}),
-      ...adoptedWindowControls(prototype),
-      ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
-      ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
-      ...prototypeDegradedEffectsField(prototype.degradedEffects),
-      ...(prototype.timers ? { timers: structuredClone(prototype.timers) } : {}),
-      ...adoptedFeedbackLog(prototype),
-      shaderFailures: structuredClone(prototype.shaderFailures),
-      success: true,
-      timestamp: this.clock.now(),
-    };
+    const entry = this.createAdoptedResult(prototype);
     if (prototype.platformRuntime) {
       stored.platformRuntime = {
         id: prototype.id,
@@ -406,10 +390,32 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     this.remember(key, stored);
   }
 
+  private createAdoptedResult(prototype: AdoptedPrototype): PrototypeLastResult {
+    return {
+      id: prototype.id,
+      lastAction: "show",
+      adopted: true,
+      ...(prototype.persistent === undefined ? {} : { persistent: prototype.persistent }),
+      ...(prototype.suspended === true ? { suspended: true as const } : {}),
+      ...(prototype.hiddenReason ? { hiddenReason: prototype.hiddenReason } : {}),
+      ...adoptedWindowControls(prototype),
+      ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
+      ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
+      ...prototypeDegradedEffectsField(prototype.degradedEffects),
+      ...(prototype.timers ? { timers: structuredClone(prototype.timers) } : {}),
+      ...adoptedFeedbackLog(prototype),
+      shaderFailures: structuredClone(prototype.shaderFailures),
+      success: true,
+      timestamp: this.clock.now(),
+    };
+  }
+
   clearPlatformRuntime(scope: PrototypeScope): void {
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const stored = this.scopes.get(key);
-    if (stored) delete stored.platformRuntime;
+    if (stored) {
+      delete stored.platformRuntime;
+    }
   }
 
   /** Accepted pushes may precede the successful show acknowledgement. */
@@ -463,8 +469,19 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       return;
     }
     snapshot.eventTimes.set(name, event.timestamp);
-    if (call.mode !== undefined) module.mode = call.mode;
-    if (call.inFlight !== undefined) module.inFlight = call.inFlight;
+    this.updatePlatformRuntimeModule(module, call);
+  }
+
+  private updatePlatformRuntimeModule(
+    module: PrototypePlatformReport["modules"][string],
+    call: NonNullable<ReturnType<typeof prototypePlatformCallEventOf>>,
+  ): void {
+    if (call.mode !== undefined) {
+      module.mode = call.mode;
+    }
+    if (call.inFlight !== undefined) {
+      module.inFlight = call.inFlight;
+    }
   }
 
   /**
@@ -535,12 +552,20 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       { ...presence, ...shownData(action, result, details.data) },
       details.replaceOthers,
     );
-    if (action === "show" && result.success && entry.id) {
+    this.recordShowPlatformRuntime(stored, entry, result);
+    this.remember(key, stored);
+    return structuredClone(entry);
+  }
+
+  private recordShowPlatformRuntime(
+    stored: StoredPrototypeStatus,
+    entry: PrototypeLastResult,
+    result: PrototypeResult,
+  ): void {
+    if (entry.lastAction === "show" && result.success && entry.id) {
       const report = parsePrototypePlatformReport(result.platformRuntime);
       stored.platformRuntime = report && { id: entry.id, report, eventTimes: new Map() };
     }
-    this.remember(key, stored);
-    return structuredClone(entry);
   }
 
   /**

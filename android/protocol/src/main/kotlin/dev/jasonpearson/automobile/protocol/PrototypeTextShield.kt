@@ -36,18 +36,14 @@ object PrototypeTextShield {
     var index = 0
     while (index < text.length) {
       out.append(text[index])
-      index +=
-        if (
-          text[index] == '{' &&
-            index + 1 < text.length &&
-            text[index + 1] == MARK &&
-            opensAfterMarks(text, index + 1)
-        )
-          2
-        else 1
+      index += if (isShieldedOpen(text, index)) 2 else 1
     }
     return out.toString()
   }
+
+  /** Whether a shielded `{` starts at [index]: a joiner follows it and then a key. */
+  private fun isShieldedOpen(text: String, index: Int): Boolean =
+    text[index] == '{' && text.getOrNull(index + 1) == MARK && opensAfterMarks(text, index + 1)
 
   /**
    * [node] with the shield removed from its own text fields, for the components and accessibility

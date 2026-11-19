@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.chrisbanes.haze.rememberHazeState
 import dev.jasonpearson.automobile.protocol.*
 import dev.jasonpearson.automobile.protocol.resolvedSharedKey
 import kotlin.math.hypot
@@ -283,8 +284,11 @@ fun PrototypeSpecContent(
       val anchorLocals = remember { PrototypeAnchorLocals() }
       val menuLayers = remember { PrototypeMenuLayers() }
       val menuParents = remember(root) { prototypeMenuParents(root) }
+      val hazeState = rememberHazeState()
+      val glassLayers = remember(root, hazeState) { prototypeGlassLayers(root, hazeState) }
       CompositionLocalProvider(
         *prototypeContentLocals(root, scrollOffsets, anchorLocals, menuLayers, gestureTaps),
+        LocalPrototypeGlassLayers provides glassLayers,
       ) {
         PrototypeShaderFrameSampling(checkNotNull(LocalPrototypeShaderSession.current))
         Box(
@@ -298,6 +302,7 @@ fun PrototypeSpecContent(
             .onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
             .semantics { testTagsAsResourceId = true },
         ) {
+          if (glassLayers != null) Box(Modifier.matchParentSize().prototypeGlassBaseSource())
           val modals = prototypeModalLayers(root)
           PrototypeModalPage(modals) {
             RenderPrototypeNode(root, interact, windowRoot = true)
@@ -1590,10 +1595,7 @@ private fun prototypeNodeModifier(
   if (anchor == null || !prototypeAnchorCovers(anchor))
     modifier = authoredSizeModifier(modifier, style, weightAxis)
   modifier = modifier.alpha(prototypeAnimatedAlpha(node))
-  val roundedShape =
-    prototypeCornerShape(MaterialTheme.shapes, style.cornerRadius ?: PrototypeCornerRadius.Dp(0.0))
-  val shape =
-    if (style.cornerStyle == "continuous") PrototypeContinuousShape(roundedShape) else roundedShape
+  val shape = prototypeSurfaceShape(MaterialTheme.shapes, style)
   // Before clip/background/border so the shadow is drawn outside the clipped content.
   style.elevation
     ?.takeIf { style.shadows == null }
@@ -1616,7 +1618,9 @@ private fun prototypeNodeModifier(
     modifier
       .prototypeEffectOverlay(effects, shape, effectElapsed)
       .prototypeEffectLayer(effects, effectElapsed)
+  modifier = modifier.prototypeGlassSource(node.identity)
   if (style.cornerRadius != null || style.cornerStyle != null) modifier = modifier.clip(shape)
+  modifier = modifier.prototypeGlassEffect(node.identity, style.glassMaterial())
   prototypeThemedColor(node.style.background, style.background)?.let {
     modifier = modifier.background(prototypeAnimatedColor(node, it), shape)
   }

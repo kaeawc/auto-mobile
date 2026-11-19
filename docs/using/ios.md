@@ -21,6 +21,8 @@ Most tools work the same on Android and iOS. These guides cover iOS:
 - [Device condition fixtures](device-condition.md) set the status bar, privacy
   decisions or location on a simulator.
 - [Storage capabilities](storage-capabilities.md)
+- [App lifecycle](app-lifecycle.md) sends a simulated memory warning to the
+  foreground app on a simulator.
 - [Emulator and simulator audio](emulator-audio.md)
 - [Accessibility and performance audits](audits.md) and
   [Performance traces](performance-trace.md)

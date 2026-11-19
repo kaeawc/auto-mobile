@@ -20,6 +20,7 @@ STUB
   cat > "$FAKE_BIN/bun" <<'STUB'
 #!/usr/bin/env bash
 printf '%s %s\n' "${1##*/}" "${AAOS_SMOKE_OS_VERSION:-}" >> "$BUN_LOG"
+printf 'avd_home=%s\n' "${ANDROID_AVD_HOME:-}" >> "$BUN_LOG"
 case "$1" in
   *enableFeatureFlags.ts) exit "${FAKE_FLAGS_STATUS:-0}" ;;
   *aaosSmoke.ts)
@@ -43,6 +44,10 @@ STUB
   export AAOS_SMOKE_OUT_DIR="$OUT"
   export AAOS_SMOKE_DIAGNOSTICS_SCRIPT="$BATS_TEST_TMPDIR/diagnostics.sh"
   export GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/step-summary.md"
+  # A throwaway HOME keeps the default AVD directory off the host's ~/.android.
+  export HOME="$BATS_TEST_TMPDIR/home"
+  export XDG_CONFIG_HOME="$HOME/.config"
+  unset ANDROID_AVD_HOME ANDROID_USER_HOME
   unset AAOS_SMOKE_OS_VERSION AAOS_SMOKE_SYSTEM_IMAGE AAOS_SMOKE_SKIP_IMAGE_INSTALL ANDROID_SDK_ROOT
 }
 
@@ -129,4 +134,26 @@ STUB
   FAKE_SMOKE_SUMMARY=1 FAKE_SMOKE_STATUS=1 AAOS_SMOKE_SKIP_IMAGE_INSTALL=1 run bash "$SCRIPT"
   [ "$status" -eq 1 ]
   [ ! -e "$GITHUB_STEP_SUMMARY" ]
+}
+
+@test "startDevice and the emulator share one pinned AVD directory, not the XDG one" {
+  AAOS_SMOKE_SKIP_IMAGE_INSTALL=1 run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -d "$HOME/.android/avd" ]
+  [ "$(grep -cx "avd_home=$HOME/.android/avd" "$BUN_LOG")" -eq 2 ]
+  grep -qx "$HOME/.android/avd:" "$OUT/avd-homes.txt"
+  grep -qx "$XDG_CONFIG_HOME/.android/avd:" "$OUT/avd-homes.txt"
+}
+
+@test "ANDROID_USER_HOME places the AVD directory" {
+  ANDROID_USER_HOME="$BATS_TEST_TMPDIR/user-home" AAOS_SMOKE_SKIP_IMAGE_INSTALL=1 run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -qx "avd_home=$BATS_TEST_TMPDIR/user-home/avd" "$BUN_LOG"
+}
+
+@test "an existing ANDROID_AVD_HOME is kept" {
+  ANDROID_AVD_HOME="$BATS_TEST_TMPDIR/avds" AAOS_SMOKE_SKIP_IMAGE_INSTALL=1 run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -d "$BATS_TEST_TMPDIR/avds" ]
+  grep -qx "avd_home=$BATS_TEST_TMPDIR/avds" "$BUN_LOG"
 }

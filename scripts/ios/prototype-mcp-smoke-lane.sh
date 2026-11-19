@@ -189,6 +189,8 @@ if [[ ${requested} == latest ]]; then prefix=""; fi
 runtime_line="$(printf '%s' "${runtimes_json}" | jq -r --arg p "${prefix}" '
   [.runtimes[]
     | select(.isAvailable != false)
+    # Skip device-specific runtimes such as iOS-27-2-iPhone19-4 (iPhone Duo only).
+    | select(.identifier | test("\\.iOS-[0-9-]+-[A-Za-z]") | not)
     | select($p == "" or .version == $p or (.version | startswith($p + ".")))]
   | sort_by(.version | split(".") | map(tonumber? // 0))
   | last // empty

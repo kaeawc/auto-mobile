@@ -17,6 +17,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Glob } from "bun";
+import { dropGitIgnored } from "../lib/gitIgnored";
 import {
   checkPage,
   failingFindings,
@@ -31,9 +32,12 @@ const ROOT = join(import.meta.dir, "..", "..");
 const DEFAULT_CONFIG = join(import.meta.dir, "readability-budgets.json");
 
 export function checkRepository(root: string, config: ReadabilityConfig): Finding[] {
-  const files = Array.from(new Glob("docs/**/*.md").scanSync({ cwd: root }))
-    .map((file) => file.split("\\").join("/"))
-    .sort();
+  const files = dropGitIgnored(
+    root,
+    Array.from(new Glob("docs/**/*.md").scanSync({ cwd: root })).map((file) =>
+      file.split("\\").join("/"),
+    ),
+  ).sort();
   return files.flatMap((file) => {
     const budget = sectionFor(config, file);
     return budget ? checkPage(file, readFileSync(join(root, file), "utf8"), budget) : [];

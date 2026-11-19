@@ -142,6 +142,14 @@ checks that the output is not silent on hosts where emulator or Simulator audio 
 `permission_denied` or `error`; `/platform/camera/flashAvailable`, `recordingMs` and `source`
 (`camera` or `injected`, the fake frame source on a Simulator) complete the state.
 
+An iOS Simulator has no capture devices (AVFoundation discovery returns none) but does have an audio
+input. It therefore advertises `prototype_platform_audioRecorder_v1` and not `prototype_platform_camera_v1`,
+and serves the viewfinder from injected frames (`source` is `injected`). A physical iPhone advertises a
+module only when its hardware is present and its usage description (`NSCameraUsageDescription`,
+`NSMicrophoneUsageDescription`) is in the Info.plist; a missing key reports `unavailable` with detail
+`missing_usage_description`. The rule is `PrototypeMediaCaptureAvailability`; the modules that consume it are
+owed (#14203, #14204).
+
 The `cameraPreview` node is that viewfinder; a story-capture screen pairs it with ordinary buttons:
 
 ```json

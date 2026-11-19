@@ -365,6 +365,10 @@ internal object PrototypeBindableFields {
           return it
         }
       }
+      return nestedCondition(condition, path)
+    }
+
+    private fun nestedCondition(condition: JsonObject, path: String): T? {
       condition(condition["not"], "$path.not")?.let {
         return it
       }

@@ -58,3 +58,54 @@ serves all of them, so there is no per-simulator separation on this route.
 
 Per-simulator isolation needs a device pair per simulator, pinned through CoreSimulator's per-device
 audio routing (#13631-#13633). That is not built yet.
+
+## Per-simulator pinning
+
+Measured on Xcode 26.6, macOS 26.6.2 and the iOS 27.0 runtime, headless (Simulator.app closed).
+
+**Mechanisms**
+
+- Each booted simulator keeps its own routing in `<device>/data/var/run/com.apple.coresimulator.audio.plist`:
+  `sim_input_device_uid`, `sim_output_device_uid`, `useHostDefaultInputDevice`,
+  `useHostDefaultOutputDevice`. `simulatoraudio/audiosettings.plist` mirrors the UIDs plus volume
+  and ringer state, with no "use host default" flag. Pinning one simulator leaves the others at
+  `true/true`.
+- Post-boot, the private `SimulatorKit` `SimDeviceAudioClient.routeGuestWithScope:to:completionQueue:completionHandler:`
+  works without Simulator.app for both scopes (`1` input, `2` output; `to:` is an NSString UID).
+  `currentState` and the plist flag update before the next read, and `changedEventHandler` fires
+  once per change. The client comes from `SimServiceContext` -> default device set -> `devicesByUDID`.
+- There is no `simctl` or `defaults` audio verb.
+
+**Silent failure modes (the pin is never rejected loudly)**
+
+- A live route to an unknown UID: completion `error == nil`, state and plist unchanged.
+- A pre-boot plist pin to an unknown UID: the UID is rewritten to the host default and
+  `useHostDefault*` stays `false`.
+- A pre-boot pin to a device the router rejects (BlackHole 2ch): the whole plist resets to the
+  built-ins with both flags back to `true`.
+- Nothing relevant is logged at default level.
+- Routing to a device that is already the default is accepted and leaves `useHostDefault*=true`.
+- A `nil` UID does not restore "use host default".
+
+So `useDefault*Device == false` does not prove the pin held. Always compare
+`selected{Input,Output}Device.uniqueIdentifier` to the requested UID.
+
+**Loopback devices**
+
+A combined input+output virtual device (BlackHole 2ch) is listed in `inputDevices` and
+`outputDevices` with `scope` 3 and `isDefaultInScopes` 0, and every route or pre-boot pin to it is
+dropped. Built-ins have scope 1 (input) or 2 (output). The working hypothesis is that the router
+accepts only a device whose scope equals the requested scope; unconfirmed.
+
+**Not answered**
+
+- Two simulators on two different non-default devices: needs a second host input device or an
+  input-only or output-only virtual device.
+- Whether the pin survives a `coreaudiod` restart: needs sudo and interrupts every booted simulator.
+
+**Recommendation**
+
+Build post-boot `routeGuest` with mandatory read-back first: it confirms synchronously and needs no
+shutdown, while the plist route gives no feedback. Treat the plist as a pre-boot hint. Do not rely on
+combined-scope loopbacks for isolation until a scope-1 or scope-2 virtual device is shown to be
+accepted.

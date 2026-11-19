@@ -55,9 +55,9 @@ when `UDID` is empty:
 curl -s -H "X-AutoMobile-Simulator-UDID: $UDID" http://127.0.0.1:8766/carplay/templates
 ```
 
-`GET /carplay/templates` answers while your app is in the background, because CarPlay can stay
-active then. `POST /carplay/action` needs the app in the foreground; otherwise it returns HTTP 409
-`app_not_active`.
+Both `GET /carplay/templates` and `POST /carplay/action` answer while your app is in the
+background, because CarPlay can stay active then. The simulator identity check still applies to
+both.
 
 | Field       | Meaning                                                                   |
 | ----------- | ------------------------------------------------------------------------- |

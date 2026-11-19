@@ -62,8 +62,8 @@ independently. Identity is seed-free, chosen in priority order: `Car[id]`, `CarI
 `simctl io --display` accepts.
 
 `carPlayProjection.ts` validates the strict JSON over the injectable exec seam with a 15 s timeout.
-`requireCarPlayProjection` probes and refuses capture unless either Car flag is true, reporting the
-screen, identity, black-frame reason and recovery action. Attachment and power-on alone are not
+`requireCarPlayProjection` probes and refuses capture unless either Car flag is true. Its error
+names the screen and identity, explains the black frame and gives the recovery step. Attachment and power-on alone are not
 enough: TVOut stays untagged without the StarkConfig. A positive tag is a readiness signal, not
 verification of a captured image. No `observe` display selector uses this module yet.
 

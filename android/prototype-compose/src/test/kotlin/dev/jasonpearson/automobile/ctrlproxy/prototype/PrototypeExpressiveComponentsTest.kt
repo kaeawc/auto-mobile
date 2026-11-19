@@ -14,6 +14,8 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -191,6 +193,67 @@ class PrototypeExpressiveComponentsTest {
       interactions.last(),
     )
     compose.onNodeWithTag("send.menu.2").assertDoesNotExist()
+  }
+
+  @Test
+  fun `split button leading half is a labelled control that runs the leading action`() {
+    val node =
+      model(
+        PrototypeButtonNode(
+          testTag = "send",
+          label = "Send",
+          onTap = listOf(PrototypeEmitAction("send")),
+          split = PrototypeButtonSplit(listOf(PrototypeMenuEntry("Draft"))),
+        ),
+      )
+    render(motion = false) { RenderPrototypeButton(node, Modifier) { interactions += it } }
+    compose.onNode(hasContentDescription("Send") and hasClickAction()).performClick()
+    assertEquals(
+      PrototypeInteraction.Tap(listOf(PrototypeEmitAction("send"))),
+      interactions.single(),
+    )
+  }
+
+  @Test
+  fun `reduced profile snaps the selection morph and rests the indicator loops`() {
+    var selected by mutableStateOf(false)
+    var corner = 0.dp
+    var loops = true
+    render(motion = true) {
+      CompositionLocalProvider(
+        LocalPrototypeMotionProfile provides PrototypeMotionProfile.REDUCED,
+      ) {
+        corner = animatePrototypeConnectedCorner(selected).value
+        loops = prototypeExpressiveLoops()
+      }
+    }
+    compose.waitForIdle()
+    assertFalse(loops)
+    compose.mainClock.autoAdvance = false
+    compose.runOnUiThread {
+      selected = true
+      Snapshot.sendApplyNotifications()
+    }
+    repeat(2) { compose.mainClock.advanceTimeByFrame() }
+    assertEquals(PROTOTYPE_CONNECTED_FULL_CORNER, corner)
+  }
+
+  @Test
+  fun `full motion keeps the indicator loops running`() {
+    var loops = false
+    render(motion = true) { loops = prototypeExpressiveLoops() }
+    compose.waitForIdle()
+    assertTrue(loops)
+  }
+
+  @Test
+  fun `labelled fab keeps its label when it has a menu`() {
+    val node = model(fab.copy(label = "New", contentDescription = null))
+    render(motion = false) {
+      RenderPrototypeFab(node, Modifier.testTag("create")) { interactions += it }
+    }
+    compose.onNode(hasContentDescription("New") and hasClickAction()).performClick()
+    compose.onNodeWithTag("create.items.0").assertExists()
   }
 
   @Test

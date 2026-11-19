@@ -75,7 +75,7 @@ The select field and menu surface carry the node `testTag`. Select option rows u
 | `progress.variant`        | adds `wavy`                                      | A linear indicator with a sine-stroke active track, determinate when bound.                                                                                         |
 | `loadingIndicator`        | node with optional `contained` boolean           | An indeterminate, rotating seven-lobed shape; `contained` adds a primary-container circle.                                                                          |
 
-Shape and expansion use the expressive spatial spring, colour the effects spring. Under `motion: "none"` or animator scale 0 the morphs snap, and the indeterminate loops rest at a fixed frame.
+Shape and expansion use the expressive spatial spring, colour the effects spring. Under `motion: "none"`, animator scale 0 or `motion: "reduced"` the shape and expansion morphs snap and the indeterminate loops rest at a fixed frame; reduced keeps the colour changes.
 
 ## Tooltip and drawer
 

@@ -9,6 +9,6 @@ These require \`prototype_m3_expressive_v1\` (Android only; the host refuses the
 - \`progress.variant: "wavy"\` draws a linear progress with a wavy active track; determinate with \`stateKey\`, otherwise indeterminate.
 - \`loadingIndicator\` is an indeterminate, shape-morphing indicator; \`contained: true\` draws it on a filled container.
 
-Shape changes and expansion use the expressive spatial springs, colour changes the effects springs, and everything snaps when motion is off.
+Shape changes and expansion use the expressive spatial springs, colour changes the effects springs, and everything snaps when motion is off. Reduced motion snaps shape and expansion and rests the indeterminate loops, keeping colour changes.
 
 `;

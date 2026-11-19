@@ -56,7 +56,7 @@ internal fun RenderPrototypeWavyProgress(node: PrototypeRenderNode, modifier: Mo
   val source = node.source as? PrototypeProgressNode ?: return
   val indeterminate = source.stateKey == null
   val fraction = prototypeProgressFraction(node.sliderValue, source.max)
-  val moving = indeterminate && LocalPrototypeMotion.current
+  val moving = indeterminate && prototypeExpressiveLoops()
   val phase = if (moving) prototypeLoopFraction(1200) else 0f
   val active = MaterialTheme.colorScheme.primary
   val track = MaterialTheme.colorScheme.secondaryContainer
@@ -114,6 +114,14 @@ internal fun prototypeWavePath(startX: Float, endX: Float, mid: Float, wave: Pro
   return path
 }
 
+/**
+ * Indeterminate loops run only with motion on and outside the reduced profile, which rests them.
+ */
+@Composable
+internal fun prototypeExpressiveLoops(): Boolean =
+  LocalPrototypeMotion.current &&
+    LocalPrototypeMotionProfile.current != PrototypeMotionProfile.REDUCED
+
 @Composable
 private fun prototypeLoopFraction(durationMs: Int): Float {
   val transition = rememberInfiniteTransition(label = "expressiveLoop")
@@ -139,7 +147,7 @@ private val LOADING_ACTIVE = 38.dp
 internal fun RenderPrototypeLoadingIndicator(node: PrototypeRenderNode, modifier: Modifier) {
   val source = node.source as? PrototypeLoadingIndicatorNode ?: return
   val contained = source.contained == true
-  val moving = LocalPrototypeMotion.current
+  val moving = prototypeExpressiveLoops()
   val loop = if (moving) prototypeLoopFraction(2600) else 0f
   val colors = MaterialTheme.colorScheme
   val color = if (contained) colors.onPrimaryContainer else colors.primary

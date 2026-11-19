@@ -1,8 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,18 +18,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,7 +52,6 @@ import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.PrototypeButtonNode
-import dev.jasonpearson.automobile.protocol.PrototypeFabNode
 import dev.jasonpearson.automobile.protocol.PrototypeMenuDivider
 import dev.jasonpearson.automobile.protocol.PrototypeMenuEntry
 import dev.jasonpearson.automobile.protocol.PrototypeMenuItem
@@ -67,6 +65,15 @@ import dev.jasonpearson.automobile.protocol.PrototypeSegmentedButtonNode
  * Menus expand inline rather than in a popup, as the renderer never opens popup windows.
  */
 
+/**
+ * The expressive spatial spring, snapped under the reduced profile, which keeps colour changes but
+ * no spatial motion; [prototypeExpressiveSpec] already snaps when motion is off.
+ */
+@Composable
+internal fun <T> prototypeExpressiveSpatialSpec(): FiniteAnimationSpec<T> =
+  if (LocalPrototypeMotionProfile.current == PrototypeMotionProfile.REDUCED) snap()
+  else prototypeExpressiveSpec()
+
 /** Inner corner of a connected segment: small at rest, a full pill once selected. */
 internal val PROTOTYPE_CONNECTED_INNER_CORNER = 8.dp
 internal val PROTOTYPE_CONNECTED_FULL_CORNER = 20.dp
@@ -77,7 +84,7 @@ private val CONNECTED_HEIGHT = 40.dp
 internal fun animatePrototypeConnectedCorner(selected: Boolean): State<Dp> =
   animateDpAsState(
     if (selected) PROTOTYPE_CONNECTED_FULL_CORNER else PROTOTYPE_CONNECTED_INNER_CORNER,
-    prototypeExpressiveSpec(),
+    prototypeExpressiveSpatialSpec(),
     label = "connectedCorner",
   )
 
@@ -144,81 +151,16 @@ internal fun RenderPrototypeConnectedSegments(
 /** Expansion of a FAB or split-button menu: 0 closed, 1 open, on the expressive spatial spring. */
 @Composable
 internal fun animatePrototypeMenuExpansion(open: Boolean): State<Float> =
-  animateFloatAsState(if (open) 1f else 0f, prototypeExpressiveSpec(), label = "menuExpansion")
+  animateFloatAsState(
+    if (open) 1f else 0f,
+    prototypeExpressiveSpatialSpec(),
+    label = "menuExpansion",
+  )
 
-private fun Modifier.expansion(fraction: Float): Modifier = graphicsLayer {
+internal fun Modifier.prototypeMenuExpansion(fraction: Float): Modifier = graphicsLayer {
   alpha = fraction.coerceIn(0f, 1f)
   scaleX = 0.6f + 0.4f * fraction
   scaleY = 0.6f + 0.4f * fraction
-}
-
-/**
- * A FAB whose tap opens a menu of 2-6 items stacked above it (`fab.menu`). The FAB runs its own
- * `onTap` (if any) and toggles the menu; an item tap closes the menu, then runs the item's `onTap`.
- * Items are tagged `<testTag>.items.<index>`. While open the FAB shows a close icon.
- */
-@Composable
-internal fun RenderPrototypeFabMenu(
-  node: PrototypeRenderNode,
-  modifier: Modifier,
-  interact: (PrototypeInteraction) -> Unit,
-) {
-  val source = node.source as? PrototypeFabNode ?: return
-  val menu = source.menu ?: return
-  var open by remember(node.identity) { mutableStateOf(false) }
-  val expansion by animatePrototypeMenuExpansion(open)
-  Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    if (open || expansion > 0f) {
-      menu.items.forEachIndexed { index, item ->
-        Surface(
-          shape = CircleShape,
-          color = MaterialTheme.colorScheme.primaryContainer,
-          contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-          modifier =
-            Modifier.expansion(expansion)
-              .heightIn(min = 56.dp)
-              .clickable(enabled = open, role = Role.Button) {
-                open = false
-                interact(PrototypeInteraction.Tap(item.onTap))
-              }
-              .semantics(mergeDescendants = true) {
-                contentDescription = item.label
-                prototypePartTag(node.testTag, "items.$index")?.let { testTag = it }
-              },
-        ) {
-          Row(
-            Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            prototypeIcon(item.icon)?.let { Icon(it, contentDescription = null) }
-            Text(item.label, Modifier.clearAndSetSemantics {})
-          }
-        }
-      }
-    }
-    val onClick = {
-      source.onTap?.takeIf { it.isNotEmpty() }?.let { interact(PrototypeInteraction.Tap(it)) }
-      open = !open
-    }
-    val icon: @Composable () -> Unit = {
-      prototypeIcon(if (open) "close" else source.icon)?.let {
-        Icon(it, contentDescription = null)
-      }
-    }
-    when {
-      !node.enabled -> RenderPrototypeFab(node, modifier, interact)
-      source.size == "small" ->
-        SmallFloatingActionButton(onClick, modifier, shape = CircleShape, content = icon)
-      else ->
-        FloatingActionButton(
-          onClick,
-          modifier,
-          shape = if (open) CircleShape else MaterialTheme.shapes.large,
-          content = icon,
-        )
-    }
-  }
 }
 
 /**
@@ -239,13 +181,14 @@ internal fun RenderPrototypeSplitButton(
   val trailingCorner by
     animateDpAsState(
       if (open) PROTOTYPE_CONNECTED_FULL_CORNER else SPLIT_INNER_CORNER,
-      prototypeExpressiveSpec(),
+      prototypeExpressiveSpatialSpec(),
       label = "splitCorner",
     )
   val actions = source.onTap.orEmpty()
   val full = PROTOTYPE_CONNECTED_FULL_CORNER
-  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+  // Parent layout data and the node's semantics stay on the outer layout; each half is labelled.
+  Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
       PrototypeVariantButton(
         PrototypeButtonLook(
           source.variant,
@@ -253,7 +196,7 @@ internal fun RenderPrototypeSplitButton(
           node.enabled,
         ),
         { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) },
-        Modifier,
+        Modifier.semantics { contentDescription = source.contentDescription ?: node.text },
       ) {
         prototypeIcon(source.icon)?.let {
           Icon(it, contentDescription = null, Modifier.size(ButtonDefaults.IconSize))
@@ -280,7 +223,8 @@ internal fun RenderPrototypeSplitButton(
       }
     }
     if (open || expansion > 0f) {
-      PrototypeSplitMenu(split.menu, node.testTag, open, expansion) { entry ->
+      PrototypeSplitMenu(split.menu, node.testTag, SplitMenuState(open, node.enabled), expansion) {
+        entry ->
         open = false
         interact(PrototypeInteraction.Tap(entry.onTap.orEmpty()))
       }
@@ -290,17 +234,20 @@ internal fun RenderPrototypeSplitButton(
 
 private val SPLIT_INNER_CORNER = 4.dp
 
+/** Whether the split menu is open, and whether its button is enabled (disabling every entry). */
+private data class SplitMenuState(val open: Boolean, val enabled: Boolean)
+
 /** The split button's entries below it, tagged `<testTag>.menu.<index>`; dividers keep an index. */
 @Composable
 private fun PrototypeSplitMenu(
   menu: List<PrototypeMenuItem>,
   testTag: String?,
-  open: Boolean,
+  state: SplitMenuState,
   expansion: Float,
   pick: (PrototypeMenuEntry) -> Unit,
 ) {
   Surface(
-    Modifier.expansion(expansion).widthIn(min = 112.dp, max = 320.dp),
+    Modifier.prototypeMenuExpansion(expansion).widthIn(min = 112.dp, max = 320.dp),
     shape = MaterialTheme.shapes.medium,
     tonalElevation = 3.dp,
     shadowElevation = 3.dp,
@@ -310,9 +257,9 @@ private fun PrototypeSplitMenu(
         when (item) {
           PrototypeMenuDivider -> HorizontalDivider()
           is PrototypeMenuEntry -> {
-            val enabled = item.enabled != false
+            val enabled = state.enabled && item.enabled != false
             Row(
-              Modifier.clickable(enabled = open && enabled, role = Role.Button) { pick(item) }
+              Modifier.clickable(enabled = state.open && enabled, role = Role.Button) { pick(item) }
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
                 .alpha(if (enabled) 1f else 0.38f)

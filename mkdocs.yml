@@ -374,6 +374,7 @@ nav:
           - "Android XR headset baseline": how-it-works/plat/android/xr-headset.md
           - "Car App Library template snapshots": how-it-works/plat/android/car-app-templates.md
           - "Android Auto projection provisioning": how-it-works/plat/android/android-auto-projection-provisioning.md
+          - "Automotive prototypes": how-it-works/plat/android/automotive-prototypes.md
           - "CtrlProxy baseline profile": how-it-works/plat/android/ctrlproxy-baseline-profile.md
           - "Android port reverse ownership": how-it-works/plat/android/port-reverse.md
           - "InputConnection trace comparison": how-it-works/plat/android/ime-trace-conformance.md
@@ -531,6 +532,7 @@ nav:
       - "2026-11-10: Android Auto projection: no Google account": devlog/2026-11-10-android-auto-projection-provisioning-no-account.md
       - "2026-11-08: Android Auto stub and DHU 2.1 on a Play emulator": devlog/2026-11-08-form-factors-android-auto-dhu-stub.md
       - "2026-11-08: AndroidX baseline profile tooling for CtrlProxy": devlog/2026-11-08-androidx-baseline-profile-generator.md
+      - "2026-11-07: Defer car-specific prototypes on AAOS": devlog/2026-11-07-automotive-prototypes-deferred.md
       - "2026-11-06: Keystore StrongBox fault: pre-generation check": devlog/2026-11-06-keystore-strongbox-fault-pre-generation-check.md
       - "2026-11-06: AndroidX TV libraries for the Android TV fixture apps": devlog/2026-11-06-androidx-tv-fixture-libraries.md
       - "2026-11-05: Prototype remote image URLs": devlog/2026-11-05-prototype-ux-remote-image-urls.md

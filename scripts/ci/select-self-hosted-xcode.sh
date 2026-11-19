@@ -100,7 +100,7 @@ fi
 developer_dir="${selected}/Contents/Developer"
 if [[ "${require_metal}" == true ]] \
   && ! DEVELOPER_DIR="${developer_dir}" xcrun --sdk iphonesimulator metal --version > /dev/null 2>&1; then
-  echo "::error::Xcode ${wanted} at ${selected} has no Metal Toolchain, which this job needs to compile .metal sources. Install it once on the Mac as the runner user: DEVELOPER_DIR=${developer_dir} xcodebuild -downloadComponent metalToolchain" >&2
+  echo "::error::Xcode ${wanted} at ${selected} has no Metal Toolchain, which this job needs to compile .metal sources. Install it once on the Mac as the runner user: DEVELOPER_DIR=$(printf '%q' "${developer_dir}") xcodebuild -downloadComponent metalToolchain" >&2
   exit 1
 fi
 if [[ "${print_only}" == true ]]; then

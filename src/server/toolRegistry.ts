@@ -136,6 +136,7 @@ import {
   DeviceAwareToolOptions,
   DeviceAwareToolRegistration,
   availabilityGateMetadata,
+  deviceAwareGateMetadata,
   deviceReadOnlyMetadata,
   embeddedSdkGateReason,
   InternalToolCallOptions,
@@ -475,6 +476,7 @@ export class ToolRegistryClass {
                       mutationRecording: this.mutationRecording,
                       navigationRecorder: this.navigationToolCallRecorder,
                       traits,
+                      platforms: options.platforms,
                       isResponseFailure: this.isResponseFailure,
                     });
                     if (resolvedTarget.deviceRead) {
@@ -547,10 +549,7 @@ export class ToolRegistryClass {
       deviceAwareHandler: handler,
       isDeviceReadOnlyCall: (args) => isDeviceReadOnlyCall(options, args),
       ...availabilityGateMetadata(options),
-      embeddedSdkOnly: options.embeddedSdkOnly ?? false,
-      ...(options.embeddedSdkGateHint ? { embeddedSdkGateHint: options.embeddedSdkGateHint } : {}),
-      planExecutable: options.planExecutable ?? false,
-      planOnly: options.planOnly ?? false,
+      ...deviceAwareGateMetadata(options),
       ...traits,
       hidden: options.hidden ?? false,
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,

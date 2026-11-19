@@ -54,6 +54,7 @@ import {
   assertRequestedPlatformSupported,
   assertToolSupportsDevicePlatform,
 } from "../applePlatformToolSupport";
+import { assertDeviceInToolPlatforms, type ToolPlatforms } from "../toolPlatformRestriction";
 import { toAdvertisedJsonSchema } from "./advertisedSchema";
 import type {
   ProgressCallback,
@@ -660,9 +661,14 @@ export async function invokeResolvedDeviceHandler(input: {
   navigationRecorder: NavigationToolCallRecorder;
   mutationRecording: DeviceMutationRecording;
   traits?: ToolTraits;
+  /** The tool's typed platform restriction (#18721); absent for an unrestricted tool. */
+  platforms?: ToolPlatforms;
   isResponseFailure: (response: unknown) => boolean;
 }): Promise<any> {
   const { target, name, args, handler, progress, signal, navigationRecorder, traits } = input;
+  // A restricted tool never reaches its handler on another platform (#18721); checked first so a
+  // watch hears the tool's own platforms rather than "not yet on watchOS".
+  assertDeviceInToolPlatforms(name, input.platforms, target.device);
   // Fail closed: a watch never reaches a tool that has not opted in (#14899).
   assertToolSupportsDevicePlatform(name, target.device);
   if (target.deviceRead) {

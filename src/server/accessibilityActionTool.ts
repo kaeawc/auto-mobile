@@ -59,6 +59,7 @@ export const accessibilityActionTool = defineDeviceTool({
     return withIsErrorOnFailure(createStructuredToolResponse(result), result.success);
   },
   options: {
+    platforms: ["android"],
     ...PLAN_RELEVANT,
     defaultEnabled: false,
     outputSchema: accessibilityActionResultSchema,

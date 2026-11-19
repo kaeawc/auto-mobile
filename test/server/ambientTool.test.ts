@@ -70,15 +70,6 @@ describe("ambient tool", () => {
     },
   );
 
-  test("iOS is refused before constructing the port", async () => {
-    const handler = createAmbientHandler(() => {
-      throw new Error("must not construct");
-    });
-    await expect(
-      handler({ ...android, platform: "ios" }, { action: "enter" }),
-    ).rejects.toBeInstanceOf(ActionableError);
-  });
-
   test("adb failures at the tool boundary become actionable", async () => {
     const port: Ambient = {
       change: async () => {

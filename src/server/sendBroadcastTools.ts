@@ -40,16 +40,6 @@ export function createSendBroadcastHandler(
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
-    if (device.platform !== "android") {
-      return createStructuredToolResponse({
-        message: "sendBroadcast is Android-only: iOS has no broadcast intents.",
-        success: false,
-        status: "unsupported" as const,
-        delivered: false,
-        deviceId: device.deviceId,
-        appId: args.appId,
-      });
-    }
     const result = await new SendBroadcast(adbFor(device)).send(
       { appId: args.appId, intent: args.intent, userId: args.userId },
       signal,
@@ -76,6 +66,7 @@ const sendBroadcastTool = defineDeviceTool({
     "Android: send an explicit broadcast to the app under test (its package, or one of its receivers) with a typed intent (action, data, categories, typed extras), e.g. to toggle a debug flag or seed data. Reports the ordered-broadcast result; protected system broadcasts are refused with a typed error.",
   input: sendBroadcastInput,
   options: {
+    platforms: ["android"],
     // A plan step: the broadcast changes app state the following steps rely on.
     ...PLAN_RELEVANT,
     defaultEnabled: false,

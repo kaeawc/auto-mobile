@@ -7,7 +7,6 @@ import { sendBroadcastResultSchema } from "../../src/server/sendBroadcastToolOut
 import type { BootedDevice, ExecResult } from "../../src/models";
 
 const ANDROID: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
-const IOS: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "SIM" };
 
 interface ToolResult {
   structuredContent: unknown;
@@ -68,14 +67,6 @@ describe("sendBroadcast tool (#14081)", () => {
     expect(result.isError).toBe(true);
     expect(sendBroadcastResultSchema.parse(result.structuredContent)).toMatchObject({
       errorCode: "protected_broadcast",
-    });
-  });
-
-  test("iOS is a typed unsupported result", async () => {
-    const result = (await createSendBroadcastHandler(adbReturning(""))(IOS, args())) as ToolResult;
-    expect(sendBroadcastResultSchema.parse(result.structuredContent)).toMatchObject({
-      status: "unsupported",
-      success: false,
     });
   });
 });

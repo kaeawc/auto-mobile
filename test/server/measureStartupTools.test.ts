@@ -12,7 +12,6 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 const APP = "dev.jasonpearson.automobile.playground";
 const android: BootedDevice = { name: "Pixel", deviceId: "emulator-5554", platform: "android" };
-const ios: BootedDevice = { name: "iPhone", deviceId: "sim-1", platform: "ios" };
 
 function setup() {
   const adb = new FakeAdbExecutor();
@@ -75,15 +74,6 @@ describe("measureStartup tool", () => {
       mode: "cold",
       ttid: { samples: [900, 900] },
     });
-  });
-
-  test("refuses iOS devices", async () => {
-    const { handler, records } = setup();
-
-    await expect(handler(ios, { appId: APP, mode: "cold" })).rejects.toThrow(
-      "only supported on Android",
-    );
-    expect(records).toEqual([]);
   });
 
   test("schema caps iterations and rejects undeclared arguments", () => {

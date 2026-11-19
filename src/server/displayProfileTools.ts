@@ -133,7 +133,12 @@ const displayProfileTool = defineDeviceTool({
     "reset restores every recorded facet, and in a daemon session release or rebind does too. Approximates OEM " +
     "look and geometry; it cannot reproduce OEM SystemUI.",
   input: displayProfileInput,
-  options: { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: displayProfileResultSchema },
+  options: {
+    platforms: ["android"],
+    ...PLAN_RELEVANT,
+    defaultEnabled: false,
+    outputSchema: displayProfileResultSchema,
+  },
 });
 
 export const displayProfileSchema = displayProfileTool.schema;

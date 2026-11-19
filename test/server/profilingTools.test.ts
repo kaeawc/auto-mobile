@@ -18,7 +18,6 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 const APP = "dev.jasonpearson.automobile.playground";
 const android: BootedDevice = { name: "Pixel", deviceId: "emulator-5554", platform: "android" };
-const ios: BootedDevice = { name: "iPhone", deviceId: "sim-1", platform: "ios" };
 
 type TestSession = { sessionId: string; assignedDevice: string };
 type Host = SessionPowerHost<TestSession>;
@@ -89,10 +88,9 @@ describe("captureTrace tool", () => {
     expect(JSON.stringify(stopped).length).toBeLessThan(1500);
   });
 
-  test("stop without a traceId, and iOS, are refused", async () => {
+  test("stop without a traceId is refused", async () => {
     const { trace } = setup();
     await expect(trace(android, { action: "stop" })).rejects.toThrow("requires the traceId");
-    await expect(trace(ios, { action: "start" })).rejects.toThrow("only supported on Android");
   });
 
   test("schema rejects raw config strings and out-of-range sizes, accepts typed categories", () => {
@@ -209,9 +207,7 @@ describe("heapDump tool", () => {
     );
   });
 
-  test("iOS is refused and the schema rejects a non-package appId", async () => {
-    const { heap } = setup();
-    await expect(heap(ios, { appId: APP })).rejects.toThrow("only supported on Android");
+  test("the schema rejects a non-package appId", () => {
     expect(heapDumpSchema.safeParse({ appId: "not a package" }).success).toBe(false);
     expect(heapDumpSchema.safeParse({ appId: APP, extra: 1 }).success).toBe(false);
   });

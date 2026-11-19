@@ -5,19 +5,26 @@ tool needs before it can run, empty when it needs nothing. The registry derives 
 from its runtime gates in `src/server/toolRequirements.ts`, so the declaration and
 the gate are the same fact.
 
-| Entry                 | Derived from                                                                                                                           |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `sdkEmbed`            | `embeddedSdkOnly`: the registry's embedded-SDK availability gate (`--embedded-sdk`)                                                    |
-| `debugBuild`          | `debugOnly`: the registry's `debug` availability gate                                                                                  |
-| `featureFlag:<key>`   | the tool's `featureFlags` registration option, checked against its handler's refusal                                                   |
-| `platform:<platform>` | device-aware tools only: the platforms `assertToolSupportsDevicePlatform` admits, narrowed to the input schema's `platform` vocabulary |
+| Entry                 | Derived from                                                                                                                                                                  |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdkEmbed`            | `embeddedSdkOnly`: the registry's embedded-SDK availability gate (`--embedded-sdk`)                                                                                           |
+| `debugBuild`          | `debugOnly`: the registry's `debug` availability gate                                                                                                                         |
+| `featureFlag:<key>`   | the tool's `featureFlags` registration option, checked against its handler's refusal                                                                                          |
+| `platform:<platform>` | device-aware tools only: the platforms `assertToolSupportsDevicePlatform` admits, narrowed to the tool's `platforms` restriction and the input schema's `platform` vocabulary |
 
 The platform gate admits Android and iOS for every device-aware tool, and watchOS,
 tvOS and visionOS for the tools listed in `APPLE_PLATFORM_SUPPORTED_TOOLS`. Plain
 tools look up their own target or need no device, so they carry no platform entry.
-A handler can still answer `unsupported` for a platform the gate admits (for example
-an Android-only action on an iOS device). Those checks are not a registry gate, and
-the list does not reflect them.
+A device-aware tool whose handler can only drive some platforms registers them as
+`platforms` (for example `["android"]`). The registry refuses any other device with one
+`ActionableError` before the handler runs, so handlers do not check the platform
+themselves. A handler can still answer `unsupported` for one action on a platform the
+gate admits (for example `killProfile` apply on iOS, whose `list` works anywhere). Those
+checks are not a registry gate, and the list does not reflect them.
+`test/lint/androidOnlyToolPlatforms.test.ts` fails when a `src/` refusal such as
+`<tool> is Android-only` or a description starting `Android:` names a device-aware tool
+that lacks the restriction and is not in its reasoned exemption list
+([decision record](../../devlog/2026-11-19-typed-tool-platform-restriction.md)).
 
 ## Drift check
 

@@ -68,10 +68,48 @@ SCRIPT
 }
 
 @test "matches runtime with correct major.minor" {
-  mock_xcrun_with_runtimes "26.3.0" '{"runtimes":[{"version":"26.3.0","identifier":"a"},{"version":"26.0.0","identifier":"b"}]}'
+  mock_xcrun_with_runtimes "26.3.0" '{"runtimes":[{"version":"26.3.0","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-3"},{"version":"26.0.0","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-0"}]}'
   export PATH="${MOCK_BIN}:${PATH}"
 
   run bash "$SCRIPT" --check-only
   [ "$status" -eq 0 ]
   [[ "$output" == *"runtime_count=1"* ]]
+}
+
+@test "a two-part SDK version keeps its minor and does not match another minor" {
+  # SDK 26.6 once became "26", so an iOS 26.5 runtime satisfied the check.
+  mock_xcrun_with_runtimes "26.6" '{"runtimes":[{"version":"26.5","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-5","isAvailable":true,"supportedArchitectures":["arm64"]}]}'
+  export PATH="${MOCK_BIN}:${PATH}"
+
+  run bash "$SCRIPT" --check-only
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"major_minor=26.6"* ]]
+  [[ "$output" == *"needs_download=true"* ]]
+}
+
+@test "matches a two-part runtime version equal to the SDK major.minor" {
+  mock_xcrun_with_runtimes "26.6" '{"runtimes":[{"version":"26.6","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-6","isAvailable":true,"supportedArchitectures":["arm64"]}]}'
+  export PATH="${MOCK_BIN}:${PATH}"
+
+  run bash "$SCRIPT" --check-only
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"runtime_count=1"* ]]
+}
+
+@test "does not count an unavailable runtime or one with no architectures" {
+  mock_xcrun_with_runtimes "26.6" '{"runtimes":[{"version":"26.6","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-6","isAvailable":false,"supportedArchitectures":["arm64"]},{"version":"26.6.1","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-6-1","isAvailable":true,"supportedArchitectures":[]}]}'
+  export PATH="${MOCK_BIN}:${PATH}"
+
+  run bash "$SCRIPT" --check-only
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"runtime_count=0"* ]]
+}
+
+@test "does not count the device-specific iPhone Duo runtime for SDK 27.2" {
+  mock_xcrun_with_runtimes "27.2" '{"runtimes":[{"version":"27.2","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4","isAvailable":true,"supportedArchitectures":["arm64"]}]}'
+  export PATH="${MOCK_BIN}:${PATH}"
+
+  run bash "$SCRIPT" --check-only
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"runtime_count=0"* ]]
 }

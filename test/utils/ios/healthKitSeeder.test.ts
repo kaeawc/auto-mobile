@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   HealthKitSeeder,
-  HealthSeedError,
   parseHealthProbeOutput,
   planHealthSheetTaps,
   type HealthAppRun,
@@ -11,6 +10,7 @@ import {
   type HealthSimulatorRunner,
   type SheetElement,
 } from "../../../src/utils/ios/healthKitSeeder";
+import { HealthSeedError } from "../../../src/utils/ios/healthSeedError";
 import {
   HEALTHKIT_SEEDER_BUNDLE_ID,
   HEALTHKIT_SEEDER_ENTITLEMENTS,

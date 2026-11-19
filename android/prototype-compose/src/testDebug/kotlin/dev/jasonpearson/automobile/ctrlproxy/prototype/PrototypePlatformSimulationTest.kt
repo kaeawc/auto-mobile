@@ -82,14 +82,14 @@ class PrototypePlatformSimulationTest {
     assertEquals(real.current.platformState, simulated.current.platformState)
     assertEquals(data, simulated.current.platformState["test"])
     assertEquals(real.current.spec.data, simulated.current.spec.data)
-    assertEquals(data["count"], simulated.current.spec.data!!["fromEvent"])
-    assertEquals(data["count"], simulated.current.spec.data!!["fromPlatform"])
+    assertEquals(data["count"], simulated.current.spec.data?.get("fromEvent"))
+    assertEquals(data["count"], simulated.current.spec.data?.get("fromPlatform"))
     val realEvent = realEvents.single { it.name == PrototypePlatform.DELIVERED_EVENT_NAME }
     val injected = simulatedEvents.single { it.name == PrototypePlatform.DELIVERED_EVENT_NAME }
     assertEquals(fixture["expected"], injected.payload)
     assertEquals(
       realEvent,
-      injected.copy(payload = JsonObject(injected.payload!!.jsonObject - "simulated")),
+      injected.copy(payload = JsonObject(checkNotNull(injected.payload).jsonObject - "simulated")),
     )
     real.close()
     simulated.close()

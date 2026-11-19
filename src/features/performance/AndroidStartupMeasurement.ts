@@ -340,8 +340,13 @@ export class AndroidStartupMeasurement {
     samples: IterationSample[],
   ): MeasureStartupResult {
     const warnings: string[] = [];
+    // An "already on top" launch prints `LaunchState: UNKNOWN` with `TotalTime: 0`
+    // (nothing was started), so it counts as having no TotalTime.
     const ttidSamples = samples.flatMap((sample) =>
-      sample.totalTimeMs === null ? [] : [sample.totalTimeMs],
+      sample.totalTimeMs === null ||
+      (sample.totalTimeMs === 0 && sample.launchState.startsWith("UNKNOWN"))
+        ? []
+        : [sample.totalTimeMs],
     );
     const ttid = summarizeStartupSamples(ttidSamples);
     if (!ttid) {

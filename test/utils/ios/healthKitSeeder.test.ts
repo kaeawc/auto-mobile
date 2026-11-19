@@ -120,7 +120,7 @@ describe("planHealthSheetTaps", () => {
     expect(planHealthSheetTaps(sheetAfterTurnOn)).toEqual(["Allow"]);
   });
   test("the first-shown sheet has no Allow button yet", () => {
-    expect(sheetBeforeTurnOn.some(e => e.elementId === "UIA.Health.Allow.Button")).toBe(false);
+    expect(sheetBeforeTurnOn.some((e) => e.elementId === "UIA.Health.Allow.Button")).toBe(false);
   });
   test("does nothing without the sheet", () => {
     expect(planHealthSheetTaps([{ elementId: "other" }])).toEqual([]);

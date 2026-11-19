@@ -27610,7 +27610,7 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Pass/fail performance checks of an app on the current screen, against the configured thresholds. kinds: performance (UI jank, frame time and touch latency of the foreground app; appId must be in the foreground) and memory (a memory snapshot of appId); default both. Each reports passed with its metrics and violations. failOn error|warning makes the call fail when a check does not pass or cannot run (performance of an appId not in the foreground is listed under unsupported), for plan assertions; default never. For raw captures use performanceTrace, captureTrace, measureStartup or heapDump. Android only.",
+    "description": "Pass/fail performance checks of an app on the current screen, against the configured thresholds. kinds: performance (UI jank, frame time and Android-only touch latency of the foreground app; appId must be in the foreground) and memory (memory usage of appId); default both. Each reports passed with its metrics and violations. failOn error|warning makes the call fail when a check does not pass or cannot run (performance of an appId not in the foreground is listed under unsupported), for plan assertions; default never. For raw captures use performanceTrace, captureTrace, measureStartup or heapDump. Android and iOS Simulator. On iOS Simulator, performance requires an app instrumented with auto-mobile-sdk.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

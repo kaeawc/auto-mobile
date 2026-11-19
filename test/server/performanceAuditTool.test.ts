@@ -86,18 +86,34 @@ describe("performanceAudit tool (#17279)", () => {
     expect(engines.calls).toEqual(["observe", "performance"]);
   });
 
-  test("iOS reports both kinds unsupported", async () => {
-    const response = await registeredHandler(
-      createPerformanceAuditTool(() => performanceScenarioEngines()),
-    )(AUDIT_IOS, {});
+  test("runs performance and memory on an iOS Simulator", async () => {
+    const engines = performanceScenarioEngines();
+    const response = await registeredHandler(createPerformanceAuditTool(() => engines))(
+      { ...AUDIT_IOS, deviceId: "A25C7946-AF1E-403B-AF98-CAD293FEF933" },
+      { failOn: "error" },
+    );
 
+    expect(engines.calls).toEqual(["observe", "performance", "memory:com.example"]);
     expect(response.isError).toBe(true);
-    expect(response.structuredContent).toMatchObject({
+    expect(response.structuredContent).toEqual(PINNED_PERFORMANCE);
+  });
+
+  test("refuses both kinds on a physical iOS device without observing", async () => {
+    const engines = performanceScenarioEngines();
+    const response = await registeredHandler(createPerformanceAuditTool(() => engines))(
+      { ...AUDIT_IOS, deviceId: "00008030-001C2D3E1234567A" },
+      {},
+    );
+
+    const error =
+      "performanceAudit on a physical iOS device is not supported; use an iOS Simulator.";
+    expect(engines.calls).toEqual([]);
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toEqual({
       success: false,
-      unsupported: {
-        performance: "The performance audit runs on Android only.",
-        memory: "The memory audit runs on Android only.",
-      },
+      failed: false,
+      unsupported: { performance: error, memory: error },
+      error,
     });
   });
 });

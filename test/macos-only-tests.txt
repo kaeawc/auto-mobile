@@ -25,6 +25,7 @@ portable test/features/utility/WatchNotificationDeliveryLog.test.ts     # pure w
 
 # --- portable: path has an iOS token but the test needs no iOS host --------------
 
+portable test/features/audit/IosOnDemandAuditEngines.test.ts              # fake observer, clock and process commands over a captured launchctl listing
 portable test/features/utility/ios/*.test.ts  # registry, env construction and injected compiler/filesystem only
 portable test/daemon/iosCameraPosterSessionCleanup.test.ts  # fake session manager and in-memory registry only
 

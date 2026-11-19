@@ -344,9 +344,7 @@ export async function uploadPrototypeMediaAsset(
     const bytes = await uploadOpenMedia(context, mimeType);
     return { success: true, id: source.id, mimeType, bytes };
   } catch (error) {
-    if (!(error instanceof MediaUploadFailure)) {
-      logger.warn(`[prototype] Media upload '${source.id}' failed: ${errorMessage(error)}`, error);
-    }
+    logger.warn(`[prototype] Media upload '${source.id}' failed: ${errorMessage(error)}`, error);
     return failure(source.id, mimeType, error);
   } finally {
     await file.close();

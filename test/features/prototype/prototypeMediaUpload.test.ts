@@ -145,7 +145,8 @@ describe("prototype media chunked upload", () => {
     const good = await uploadPrototypeMediaAsset(
       client,
       { id: "cc", path: "/m/good.vtt" },
-      { opener: files, chunkBytes: 11 },
+      // 12 ends the first chunk on 0xc3, so é's two bytes arrive in different chunks.
+      { opener: files, chunkBytes: 12 },
     );
     expect(good.success).toBe(true);
   });

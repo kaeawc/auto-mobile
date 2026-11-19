@@ -34,6 +34,13 @@ log_dir="$(cd "${log_dir}" && pwd)"
 exec > >(tee -a "${log_dir}/smoke.log") 2>&1
 # shellcheck source=scripts/ios/run_with_timeout.sh
 source "${script_dir}/run_with_timeout.sh"
+# Build with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+# Shell-test fixtures that copy this script without the helper keep the active Xcode.
+if [[ -f "${script_dir}/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${script_dir}/xcode_version.sh"
+  select_pinned_xcode
+fi
 export AUTO_MOBILE_CMD="${AUTO_MOBILE_CMD:-bun run src/index.ts --debug --embedded-sdk --cli}"
 # shellcheck source=scripts/lib/session-release.sh
 source "${script_dir}/../lib/session-release.sh"

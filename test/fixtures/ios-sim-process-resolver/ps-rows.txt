@@ -1,0 +1,2 @@
+96106     1  51104   0.3 launchd_sim <CoreSimulatorDevices>/00547A72-3AAE-44FE-93DD-C6F46D071AE0/data/var/run/launchd_bootstrap.plist
+97462 96106 486768   0.0 /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/Applications/Preferences.app/Preferences

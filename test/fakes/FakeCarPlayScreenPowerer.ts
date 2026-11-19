@@ -4,7 +4,7 @@ import type {
 } from "../../src/utils/ios/carPlayScreenPower";
 
 export class FakeCarPlayScreenPowerer implements CarPlayScreenPowerer {
-  readonly calls: Array<{ udid: string; action: "status" | "power-on"; enable?: boolean }> = [];
+  readonly calls: Array<{ udid: string; action: "status" | "power-on" }> = [];
   error?: Error;
   constructor(public state: CarPlayPowerState) {}
   async status(udid: string): Promise<CarPlayPowerState> {
@@ -14,8 +14,8 @@ export class FakeCarPlayScreenPowerer implements CarPlayScreenPowerer {
     }
     return this.state;
   }
-  async powerOn(udid: string, options: { enable: boolean }): Promise<CarPlayPowerState> {
-    this.calls.push({ udid, action: "power-on", enable: options.enable });
+  async powerOn(udid: string): Promise<CarPlayPowerState> {
+    this.calls.push({ udid, action: "power-on" });
     if (this.error) {
       throw this.error;
     }

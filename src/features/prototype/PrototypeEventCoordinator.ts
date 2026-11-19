@@ -248,8 +248,8 @@ export class PrototypeEventCoordinator {
       };
       this.entries.set(key, entry);
     }
-    // Any identity change is a new sequence ledger (#18635): a different app instance, or a move
-    // between a CtrlProxy host (no instanceId) and a disposable app (with one) in either direction.
+    // A different process identity is a different sequence ledger, including a switch between
+    // a source with no identity (CtrlProxy) and one with an identity (disposable app) (#18667).
     if (client.instanceId !== entry.instanceId) {
       entry.buffer.startEpoch();
       entry.terminal = false;

@@ -64,8 +64,8 @@ step_if_condition() {
 # array rather than a process substitution: BATS' parallel runner can otherwise
 # terminate the short-lived producer while cleaning up the test process group.
 xcode_265_leg_steps=(
-  "Ensure AutoMobile daemon ready (Xcode 26.6)"
-  "Warm up iOS CtrlProxy (Xcode 26.6)"
+  "Ensure AutoMobile daemon ready (Xcode 27.2)"
+  "Warm up iOS CtrlProxy (Xcode 27.2)"
   "Run iOS navigation graph Simulator workflow"
 )
 

@@ -3,7 +3,7 @@ import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { CarPlayObservation } from "../models/WatchObservation";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { findCarPlayScreen } from "../utils/ios-cmdline-tools/SimulatorDisplays";
-import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import {
   DefaultCarPlayProjectionProbe,
   requireCarPlayProjection,
@@ -39,7 +39,7 @@ export async function observeCarPlay(
   }
 
   const { deviceId } = device;
-  if (!isIosSimulatorUdid(deviceId)) {
+  if (resolveIosDeviceKind({ deviceId }) !== "simulator") {
     throw new ActionableError('display: "carplay" requires an iOS simulator.');
   }
   signal?.throwIfAborted();

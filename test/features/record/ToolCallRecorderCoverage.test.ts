@@ -71,8 +71,6 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   barrier: "Multi-device coordination primitive, handled by the plan executor",
   videoRecording: "Starts or stops a host-side capture; not part of the replayed interaction",
   performanceTrace: "Starts or stops a diagnostic tracer; not part of the replayed interaction",
-  captureTrace:
-    "Starts or stops a diagnostic Perfetto capture; not part of the replayed interaction",
   heapDump: "Pulls a diagnostic heap dump to the host; not part of the replayed interaction",
   injectAudioInput:
     "Streams host audio into the emulator microphone; a test environment input, not part of the replayed interaction",

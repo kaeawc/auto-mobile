@@ -149,7 +149,6 @@ export const TOOL_EMOJI: Readonly<Record<string, ToolEmojiEntry>> = Object.freez
   exportPlan: tool("📤"),
   videoRecording: tool("🎥"),
   performanceTrace: tool("📈", "docs/using/performance-trace.md"),
-  captureTrace: tool("🔬"),
   heapDump: tool("🧠"),
   // Accessibility & tooling
   accessibility: tool("🦮"),

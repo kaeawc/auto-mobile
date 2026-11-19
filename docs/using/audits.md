@@ -71,4 +71,4 @@ Each result has `passed`, its metrics and its violations; `failed` is set when `
 When the app rendered no frames during the check (an idle screen), the frame-time percentiles
 `p50Ms`–`p99Ms` are null and `metrics.frameTimeUnmeasured` says why. AutoMobile then skips the
 frame-time check, so it does not fail the call. For raw captures use `performanceTrace`,
-`captureTrace`, `measureStartup` or `heapDump`.
+`measureStartup` or `heapDump`.

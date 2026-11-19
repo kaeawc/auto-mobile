@@ -11,6 +11,7 @@ import {
   type PerfettoAdb,
   type PerfettoPollOptions,
 } from "./perfettoDevice";
+import { perfettoCategoryConfig } from "./perfettoCategoryConfig";
 import { summarizePerfettoTrace, type PerfettoTraceProcessor } from "./perfettoTraceProcessor";
 import type {
   PerformanceTraceRecorder,
@@ -30,8 +31,20 @@ export interface PerfettoRecorderDependencies extends PerfettoPollOptions {
 
 const LOG_TAG = "performanceTrace";
 
+/** Category traces record what the caller chose, which no template summary query fits. */
+export const CATEGORY_TRACE_NO_SUMMARY_WARNING =
+  "Category traces have no summary; open the artifact in Perfetto UI or trace_processor.";
+
+/** The text config for a template or category request. */
+function traceConfigFor(request: StartPerformanceTraceRequest): string {
+  return request.categoryConfig
+    ? perfettoCategoryConfig(request.categoryConfig)
+    : perfettoTraceConfig(request.template, request.appId, request.timeLimitMs);
+}
+
 /**
- * Records a Perfetto trace on an Android device (#14102). The config is passed
+ * Records a Perfetto trace on an Android device (#14102), shaped by a template or by typed
+ * categories (#18688). The config is passed
  * through stdin (base64, so no quoting can break it); `duration_ms` bounds the
  * recorder on the device itself, and stop sends SIGTERM so perfetto flushes.
  */
@@ -42,15 +55,17 @@ export class PerfettoRecorder implements PerformanceTraceRecorder {
     const adb = this.deps.adbFor(request.device);
     const fileName = `automobile-${request.traceId}.perfetto-trace`;
     const remotePath = `${DEVICE_TRACE_DIR}/${fileName}`;
-    const pid = await startPerfettoRecorder(
-      adb,
-      request.device.deviceId,
-      perfettoTraceConfig(request.template, request.appId, request.timeLimitMs),
-      { remotePath, signal: request.signal },
-    );
+    const pid = await startPerfettoRecorder(adb, request.device.deviceId, traceConfigFor(request), {
+      remotePath,
+      signal: request.signal,
+    });
     const warnings: string[] = [];
     if (!request.appId) {
-      warnings.push("No appId was given; app-scoped atrace and summaries are disabled.");
+      warnings.push(
+        request.categoryConfig
+          ? "No appId was given; app-scoped atrace tags are disabled."
+          : "No appId was given; app-scoped atrace and summaries are disabled.",
+      );
     }
     return this.recording(
       adb,
@@ -88,6 +103,9 @@ export class PerfettoRecorder implements PerformanceTraceRecorder {
         await removeDeviceFile(adb, remotePath, LOG_TAG);
       },
       summarize: async (signal) => {
+        if (!request.template) {
+          return { summary: {}, warnings: [CATEGORY_TRACE_NO_SUMMARY_WARNING] };
+        }
         const processor = await this.deps.traceProcessor();
         if (!processor) {
           return {

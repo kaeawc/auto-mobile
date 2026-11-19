@@ -80,7 +80,6 @@ fields identified by secure metadata, always redact their values.
 | `barrier`                     | not-supported     | Plan-only multi-device primitive.                                                                                                                |
 | `biometricAuth`               | refused-by-design | Apple TV has no biometric sensor.                                                                                                                |
 | `captureAudio`                | not-supported     |                                                                                                                                                  |
-| `captureTrace`                | not-supported     | Needs runner work.                                                                                                                               |
 | `changeLocalization`          | not-supported     |                                                                                                                                                  |
 | `clearKeyValueFile`           | not-supported     |                                                                                                                                                  |
 | `clearMockNetwork`            | not-supported     |                                                                                                                                                  |

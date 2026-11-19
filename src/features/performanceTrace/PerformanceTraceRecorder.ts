@@ -1,17 +1,33 @@
 import type { BootedDevice } from "../../models";
+import type { ResolvedTraceConfig } from "./perfettoCategoryConfig";
 import type { PerformanceTraceTemplate } from "./performanceTraceTemplates";
 import type { PerformanceTraceSummary } from "./PerformanceTraceSummary";
 
-export interface StartPerformanceTraceRequest {
+interface StartPerformanceTraceBase {
   traceId: string;
   device: BootedDevice;
-  template: PerformanceTraceTemplate;
   appId?: string;
   timeLimitMs: number;
   /** Host directory the finished artifact is written to. */
   artifactDir: string;
   signal?: AbortSignal;
 }
+
+/** A trace shaped by a named template (iOS and Android). */
+export interface TemplatePerformanceTraceRequest extends StartPerformanceTraceBase {
+  template: PerformanceTraceTemplate;
+  categoryConfig?: undefined;
+}
+
+/** A Perfetto trace shaped by typed categories (Android only); it has no summary. */
+export interface CategoryPerformanceTraceRequest extends StartPerformanceTraceBase {
+  template?: undefined;
+  categoryConfig: ResolvedTraceConfig;
+}
+
+export type StartPerformanceTraceRequest =
+  | TemplatePerformanceTraceRequest
+  | CategoryPerformanceTraceRequest;
 
 /** A recorder that is running (or already stopped itself at its time limit). */
 export interface RecordingPerformanceTrace {

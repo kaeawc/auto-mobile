@@ -159,3 +159,70 @@ describe("PerformanceTraceManager (#14102)", () => {
     expect(traces.lookup(started.traceId)?.result.summary).toEqual({ durationMs: 1_500 });
   });
 });
+
+const iphone: BootedDevice = { deviceId: "sim-1", name: "iPhone", platform: "ios" };
+
+describe("PerformanceTraceManager categories (#18688)", () => {
+  test("a categories start resolves the config, hands it to the recorder and echoes it", async () => {
+    const { manager: traces, recorder } = manager();
+
+    const started = await traces.start(pixel, {
+      categories: ["gfx", "binder_driver"],
+      bufferMb: 64,
+      appId: "com.example.app",
+      timeLimitMs: 10_000,
+    });
+
+    expect(recorder.started[0]?.template).toBeUndefined();
+    expect(recorder.started[0]).toMatchObject({
+      categoryConfig: {
+        categories: ["gfx", "binder_driver", "app"],
+        appId: "com.example.app",
+        bufferMb: 64,
+        maxDurationMs: 10_000,
+      },
+    });
+    expect(started).toMatchObject({ categories: ["gfx", "binder_driver", "app"], bufferMb: 64 });
+    expect(started.template).toBeUndefined();
+  });
+
+  test("a template start carries no categories", async () => {
+    const { manager: traces } = manager();
+    const started = await traces.start(pixel, hitches);
+    expect(started.categories).toBeUndefined();
+    expect(started.bufferMb).toBeUndefined();
+  });
+
+  test("categories on iOS are refused before any recorder runs", async () => {
+    const { manager: traces, recorder } = manager();
+    await expect(
+      traces.start(iphone, { categories: ["sched"], timeLimitMs: 10_000 }),
+    ).rejects.toThrow("categories are Android (Perfetto) only");
+    expect(recorder.started).toEqual([]);
+  });
+
+  test("refuses both or neither shape, bufferMb with a template, and app without an appId", async () => {
+    const { manager: traces, recorder } = manager();
+    await expect(traces.start(pixel, { ...hitches, categories: ["sched"] })).rejects.toThrow(
+      "exactly one of template or categories",
+    );
+    await expect(traces.start(pixel, { timeLimitMs: 10_000 })).rejects.toThrow(
+      "exactly one of template or categories",
+    );
+    await expect(traces.start(pixel, { ...hitches, bufferMb: 64 })).rejects.toThrow(
+      "bufferMb applies only to a categories trace",
+    );
+    await expect(traces.start(pixel, { categories: ["app"], timeLimitMs: 10_000 })).rejects.toThrow(
+      "needs an appId",
+    );
+    expect(recorder.started).toEqual([]);
+  });
+
+  test("overlapping starts on one device cannot both reach the recorder", async () => {
+    const { manager: traces, recorder } = manager();
+    const first = traces.start(pixel, hitches);
+    await expect(traces.start(pixel, hitches)).rejects.toThrow("still starting");
+    await first;
+    expect(recorder.started).toHaveLength(1);
+  });
+});

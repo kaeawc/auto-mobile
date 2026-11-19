@@ -29,6 +29,8 @@ const projecting: CarPlayProjectionState = {
   displayId: 4,
   displayType: 2,
   identity: "Car[4]",
+  name: "CarPlay",
+  deviceName: "CarPlay",
   isCarDisplay: true,
   isCarInstrumentsDisplay: false,
 };
@@ -110,7 +112,7 @@ describe("observe on an iOS simulator's CarPlay screen", () => {
     const response = observe();
     await expect(response).rejects.toThrow(ActionableError);
     await expect(response).rejects.toThrow(
-      "CarPlay screen is attached but not projecting (AirPlay[4]). Capture was skipped because the frame would be black. Open the CarPlay window in Simulator.app, then retry.",
+      "CarPlay screen CarPlay is attached but not projecting (AirPlay[4]). Capture was skipped because the frame would be black. Run carplay-power-helper power-on (ios/carplay-power) after every boot of an iOS 26.x simulator, then retry; the iOS 27 Simulator does not support CarPlay.",
     );
     expect(calls).toEqual([`probe ${simulator.deviceId}`]);
     expect(writer.written).toEqual([]);

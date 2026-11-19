@@ -129,6 +129,8 @@ describe("observe tool registration", () => {
               displayId: null,
               displayType: null,
               identity: null,
+              name: null,
+              deviceName: null,
               isCarDisplay: false,
               isCarInstrumentsDisplay: false,
             };
@@ -142,7 +144,7 @@ describe("observe tool registration", () => {
     const simulatorId = "6B1F3C2E-0000-4000-8000-00000000A7C1";
     await expect(
       handler({ name: "iPhone", deviceId: simulatorId, platform: "ios" }, args),
-    ).rejects.toThrow("CarPlay screen was not found");
+    ).rejects.toThrow("No CarPlay screen (TVOut or AirPlay display) was found");
     await expect(
       handler({ name: "Pixel", deviceId: "emulator-5554", platform: "android" }, args),
     ).rejects.toThrow("requires an iOS simulator");

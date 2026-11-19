@@ -10,6 +10,8 @@ interface StartPerformanceTraceBase {
   timeLimitMs: number;
   /** Host directory the finished artifact is written to. */
   artifactDir: string;
+  /** Session that owns the trace; device files a stop could not remove are cleaned on its release. */
+  ownerSessionUuid?: string;
   signal?: AbortSignal;
 }
 
@@ -34,6 +36,11 @@ export interface RecordingPerformanceTrace {
   /** Host path of the finished artifact: `.trace` (iOS) or `.perfetto-trace` (Android). */
   readonly artifactPath: string;
   readonly warnings: readonly string[];
+  /**
+   * Whether the recorder has been sent its stop signal (or had already exited). A stop that fails
+   * while this is false left the recorder running, so the trace stays registered for a retry.
+   */
+  readonly signalled: boolean;
   /** Stop the recorder, wait for it to finish writing, and leave the artifact on the host. */
   stop(signal?: AbortSignal): Promise<void>;
   /** Read the finished artifact into a bounded summary; failures become warnings. */

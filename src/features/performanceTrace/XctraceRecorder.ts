@@ -231,11 +231,16 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
   ): RecordingPerformanceTrace {
     const { timer, host } = this.deps;
     const stopTimeoutMs = this.deps.stopTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS;
+    let signalled = false;
     return {
       artifactPath,
       warnings,
+      get signalled() {
+        return signalled;
+      },
       stop: async () => {
         if (child.exitCode !== null || child.signalCode !== null) {
+          signalled = true;
           return;
         }
         const finalized = waitForXctraceFinalization(child, exited, {
@@ -246,6 +251,7 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
           stopMaxMs: this.deps.stopMaxMs ?? DEFAULT_STOP_MAX_MS,
         });
         child.kill("SIGINT");
+        signalled = true;
         await finalized;
       },
       summarize: (signal) => summarizeXctrace(host, artifactPath, template, signal),

@@ -38,6 +38,7 @@ import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSe
 import { registerAppLinksSessionCleanup } from "./appLinksSessionCleanup";
 import { registerScreenLockSessionCleanup } from "./screenLockSessionCleanup";
 import { registerPowerSessionCleanup } from "./powerSessionCleanup";
+import { registerPerformanceTraceSessionCleanup } from "./performanceTraceSessionCleanup";
 import { registerProfilingSessionCleanup } from "./profilingSessionCleanup";
 import { registerSystemAlertSessionCleanup } from "./systemAlertSessionCleanup";
 import {
@@ -120,20 +121,8 @@ function captureNetworkGapMarker(
   };
 }
 
-/**
- * Registers every SessionManager listener/setter the daemon needs for session-scoped cleanup,
- * in the order the daemon has always registered them (release listeners fire in that order).
- */
-export function wireSessionLifecycle(
-  sessionManager: SessionManager,
-  timer: Timer,
-  host: DaemonSessionLifecycleHost,
-): void {
-  registerLocationRouteSessionCleanup(sessionManager);
-  registerNetworkStateSessionCleanup(sessionManager, {
-    timer,
-    gapMarkerFor: (sessionId) => captureNetworkGapMarker(sessionManager, host, sessionId),
-  });
+/** The per-feature device-state restores, in their release-listener order. */
+function registerDeviceStateSessionCleanups(sessionManager: SessionManager): void {
   registerStatusBarSessionCleanup(sessionManager);
   registerAppLinksSessionCleanup(sessionManager);
   registerKillProfileSessionCleanup(sessionManager);
@@ -150,7 +139,25 @@ export function wireSessionLifecycle(
   registerScreenLockSessionCleanup(sessionManager);
   registerPowerSessionCleanup(sessionManager);
   registerProfilingSessionCleanup(sessionManager);
+  registerPerformanceTraceSessionCleanup(sessionManager);
   registerSystemAlertSessionCleanup(sessionManager);
+}
+
+/**
+ * Registers every SessionManager listener/setter the daemon needs for session-scoped cleanup,
+ * in the order the daemon has always registered them (release listeners fire in that order).
+ */
+export function wireSessionLifecycle(
+  sessionManager: SessionManager,
+  timer: Timer,
+  host: DaemonSessionLifecycleHost,
+): void {
+  registerLocationRouteSessionCleanup(sessionManager);
+  registerNetworkStateSessionCleanup(sessionManager, {
+    timer,
+    gapMarkerFor: (sessionId) => captureNetworkGapMarker(sessionManager, host, sessionId),
+  });
+  registerDeviceStateSessionCleanups(sessionManager);
   registerRecordingSessionCleanup(sessionManager, {
     ...defaultRecordingSessionCleanupDeps,
     markDeviceNeedsRecorderRecovery: createRecorderTeardownRecoveryMarker(sessionManager),

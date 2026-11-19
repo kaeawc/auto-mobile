@@ -1,7 +1,7 @@
 import { z } from "zod/v4";
 import { SessionReleaseBroadcaster } from "../daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
-import { createDefaultPerformanceTraceManager } from "../features/performanceTrace/defaultPerformanceTraceManager";
+import { getDefaultPerformanceTraceManager } from "../features/performanceTrace/defaultPerformanceTraceManager";
 import type { PerformanceTraceManager } from "../features/performanceTrace/PerformanceTraceManager";
 import {
   TRACE_CATEGORIES,
@@ -185,7 +185,7 @@ export function createPerformanceTraceHandler(manager: PerformanceTraceManager) 
  * Re-registering replaces the previous subscription.
  */
 export function registerPerformanceTraceTools(
-  manager: PerformanceTraceManager = createDefaultPerformanceTraceManager(),
+  manager: PerformanceTraceManager = getDefaultPerformanceTraceManager(),
 ): () => void {
   ToolRegistry.registerDeviceAware(
     "performanceTrace",

@@ -59,8 +59,8 @@ interface ActiveTrace {
   categoryConfig?: ResolvedTraceConfig;
   startedAtMs: number;
   recording: RecordingPerformanceTrace;
-  /** Set while a stop is in flight so concurrent stops share one teardown. */
-  stopping?: Promise<PerformanceTraceResult>;
+  /** Settles (never rejects) once the in-flight stop is done with the device; the summary may go on. */
+  deviceDone?: Promise<void>;
 }
 
 export interface PerformanceTraceManagerDependencies {
@@ -85,6 +85,8 @@ export class PerformanceTraceManager {
   private readonly stopped = new Map<string, KnownPerformanceTrace>();
   /** Stopped traces whose summary is still being generated; readable, no longer recording. */
   private readonly summarizing = new Map<string, KnownPerformanceTrace>();
+  /** Stops in flight (recorder stop, pull and summary) so concurrent stops share one teardown. */
+  private readonly finishing = new Map<string, Promise<PerformanceTraceResult>>();
 
   constructor(private readonly deps: PerformanceTraceManagerDependencies) {}
 
@@ -124,6 +126,7 @@ export class PerformanceTraceManager {
       appId: options.appId,
       timeLimitMs: options.timeLimitMs,
       artifactDir: await this.deps.artifactDir(),
+      ownerSessionUuid: options.ownerSessionUuid,
       signal: options.signal,
     };
     const recorder = this.deps.recorderFor(device.platform);
@@ -140,17 +143,38 @@ export class PerformanceTraceManager {
     if (done) {
       return done.result;
     }
+    const inFlight = this.finishing.get(traceId);
+    if (inFlight) {
+      return inFlight;
+    }
     const trace = this.active.get(traceId);
     if (!trace) {
       throw new ActionableError(`No performance trace with id ${traceId} is recording.`);
     }
-    trace.stopping ??= this.finish(trace, signal);
-    return trace.stopping;
+    const stopping = this.finish(trace, signal);
+    this.finishing.set(traceId, stopping);
+    try {
+      return await stopping;
+    } finally {
+      // A recorder that was never signalled is still active, so a retried stop starts afresh.
+      this.finishing.delete(traceId);
+    }
   }
 
-  /** Stop every trace owned by a released session. */
+  /**
+   * Stop every trace owned by a released session. Like the other release stops, this resolves
+   * once each recorder is done with its device; pulling is part of that, the summary is not.
+   */
   async stopTracesForSession(sessionUuid: string): Promise<void> {
     await this.stopMatching((trace) => trace.options.ownerSessionUuid === sessionUuid);
+  }
+
+  /** Stop the traces a session owns on one device, for a session that moved off that device. */
+  async stopSessionTracesOnDevice(sessionUuid: string, deviceId: string): Promise<void> {
+    await this.stopMatching(
+      (trace) =>
+        trace.options.ownerSessionUuid === sessionUuid && trace.device.deviceId === deviceId,
+    );
   }
 
   /** Stop every trace on a released or removed device. */
@@ -178,25 +202,25 @@ export class PerformanceTraceManager {
     const traces = [...this.active.values()].filter(match);
     await Promise.all(
       traces.map(async (trace) => {
-        try {
-          await this.stop(trace.traceId);
-        } catch (error) {
+        void this.stop(trace.traceId).catch((error: unknown) => {
           logger.warn(
             `[performanceTrace] failed to stop ${trace.traceId} on release: ${errorMessage(error)}`,
             error,
           );
-        }
+        });
+        // `stop` set it synchronously; the summary finishes in the background.
+        await trace.deviceDone;
       }),
     );
   }
 
   private async finish(trace: ActiveTrace, signal?: AbortSignal): Promise<PerformanceTraceResult> {
-    try {
-      await trace.recording.stop(signal);
-    } finally {
-      // A failed stop still frees the device: the recorder was signalled and is not retried.
-      this.active.delete(trace.traceId);
-    }
+    const recorderStopped = this.stopRecorder(trace, signal);
+    trace.deviceDone = recorderStopped.then(
+      () => undefined,
+      () => undefined,
+    );
+    await recorderStopped;
     this.summarizing.set(trace.traceId, {
       result: this.describe(trace, "stopped", [
         ...trace.recording.warnings,
@@ -225,6 +249,20 @@ export class PerformanceTraceManager {
       this.stopped.delete(this.stopped.keys().next().value!);
     }
     return result;
+  }
+
+  private async stopRecorder(trace: ActiveTrace, signal?: AbortSignal): Promise<void> {
+    try {
+      await trace.recording.stop(signal);
+    } catch (error) {
+      // A recorder that was signalled is not retried, so a failed stop after that still frees the
+      // device; one that never got its signal is still running and stays registered.
+      if (trace.recording.signalled) {
+        this.active.delete(trace.traceId);
+      }
+      throw error;
+    }
+    this.active.delete(trace.traceId);
   }
 
   private describe(

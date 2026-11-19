@@ -29,6 +29,7 @@ function fakeManager(stopError?: Error) {
       {
         artifactPath: `/artifacts/${request.traceId}.perfetto-trace`,
         warnings: [],
+        signalled: true,
         stop: async () => {
           stops.push(request.traceId);
           if (stopError) {

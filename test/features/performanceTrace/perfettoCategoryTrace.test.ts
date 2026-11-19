@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BootedDevice } from "../../../src/models";
@@ -11,6 +11,8 @@ import {
   resolveTraceConfig,
 } from "../../../src/features/performanceTrace/perfettoCategoryConfig";
 import type { PerfettoTraceProcessor } from "../../../src/features/performanceTrace/perfettoTraceProcessor";
+import { ProfilingRegistry } from "../../../src/features/profiling/ProfilingRegistry";
+import { logger } from "../../../src/utils/logger";
 import { FakeProfilingDevice } from "../../fakes/FakeProfilingDevice";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -26,6 +28,8 @@ function setup(processor?: PerfettoTraceProcessor) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const queries: string[] = [];
+  const registry = new ProfilingRegistry();
+  const removedHostFiles: string[] = [];
   const recorder = new PerfettoRecorder({
     adbFor: () => device,
     traceProcessor: async () =>
@@ -38,8 +42,13 @@ function setup(processor?: PerfettoTraceProcessor) {
     timer,
     stopPollAttempts: 3,
     flushPollAttempts: 4,
+    registry,
+    removeHostFile: async (path) => {
+      removedHostFiles.push(path);
+      device.hostFiles.delete(path);
+    },
   });
-  return { device, recorder, queries };
+  return { device, recorder, queries, registry, removedHostFiles };
 }
 
 function categoryRequest(appId?: string) {
@@ -55,8 +64,19 @@ function categoryRequest(appId?: string) {
     appId,
     timeLimitMs: 12_000,
     artifactDir: "/artifacts",
+    ownerSessionUuid: "s-1",
     categoryConfig,
   };
+}
+
+/** Silence the expected removal-failure warning. */
+async function quietly<T>(run: () => Promise<T>): Promise<T> {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    return await run();
+  } finally {
+    warn.mockRestore();
+  }
 }
 
 describe("Perfetto recorder with categories (#18688)", () => {
@@ -108,6 +128,56 @@ describe("Perfetto recorder with categories (#18688)", () => {
     expect(recording.warnings).toEqual([
       "No appId was given; app-scoped atrace tags are disabled.",
     ]);
+  });
+
+  test("a failed pull removes the host partial and the device copy", async () => {
+    const { device, recorder, registry, removedHostFiles } = setup();
+    const recording = await recorder.start(categoryRequest("com.example.app"));
+    device.failing.set("pull", "adb: device offline");
+
+    await expect(recording.stop()).rejects.toThrow("device offline");
+
+    expect(recording.signalled).toBe(true);
+    expect(removedHostFiles).toEqual([recording.artifactPath]);
+    expect(device.deviceFiles.has(REMOTE)).toBe(false);
+    expect(registry.takeOwnedBy(android.deviceId, "s-1")).toEqual({ deviceFiles: [] });
+  });
+
+  test("a device copy that cannot be removed is left to the owning session's release", async () => {
+    const { device, recorder, registry } = setup();
+    const recording = await recorder.start(categoryRequest("com.example.app"));
+    device.failing.set("pull", "adb: device offline");
+    device.failing.set("rm -f", "adb: device offline");
+
+    const error = await quietly(() =>
+      recording.stop().then(
+        () => undefined,
+        (e: unknown) => e,
+      ),
+    );
+    expect(error).toBeInstanceOf(Error);
+
+    expect(registry.takeOwnedBy(android.deviceId, "s-1")).toEqual({
+      deviceFiles: [{ deviceId: android.deviceId, sessionId: "s-1", remotePath: REMOTE }],
+    });
+  });
+
+  test("a stop whose SIGTERM never reaches the device reports the recorder unsignalled", async () => {
+    const { device, recorder, removedHostFiles } = setup();
+    const recording = await recorder.start(categoryRequest("com.example.app"));
+    device.failing.set("kill -TERM", "adb: device offline");
+
+    await expect(recording.stop()).rejects.toThrow("device offline");
+
+    expect(recording.signalled).toBe(false);
+    expect(device.runningPids.size).toBe(1);
+    expect(device.deviceFiles.has(REMOTE)).toBe(true);
+    expect(removedHostFiles).toEqual([]);
+
+    device.failing.delete("kill -TERM");
+    await recording.stop();
+    expect(recording.signalled).toBe(true);
+    expect(device.hostFiles.get(recording.artifactPath)).toBe(device.traceBytes);
   });
 
   test("a device without perfetto fails the start", async () => {

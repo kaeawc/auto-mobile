@@ -85,12 +85,23 @@ export function prototypeSecureStorageEmitError(
   return undefined;
 }
 
+/** Data actions whose `value` may be a `{state}` binding; `removeData` writes no value. */
+const DATA_WRITE_TYPES: ReadonlySet<unknown> = new Set([
+  "setData",
+  "appendData",
+  "upsertData",
+  "prependData",
+]);
+
 /** Refuses action bindings that could expose secure state outside its storage. */
 export function prototypeSecureStorageActionError(
   action: Raw,
   path: string,
   root: Raw,
 ): PrototypePlatformError | undefined {
+  if (DATA_WRITE_TYPES.has(action.type)) {
+    return dataWriteError(action.value, `${path}.value`, root);
+  }
   switch (action.type) {
     case "emit":
       return prototypeSecureStorageEmitError(action, path, root);
@@ -100,28 +111,32 @@ export function prototypeSecureStorageActionError(
     case "replace":
       return bindingMapError(action.params, `${path}.params`, root, "route params");
     case "setStack":
-      for (const [index, entry] of (Array.isArray(action.path) ? action.path : []).entries()) {
-        const error = bindingMapError(
-          record(entry)?.params,
-          `${path}.path[${index}].params`,
-          root,
-          "route params",
-        );
-        if (error) {
-          return error;
-        }
-      }
-      return undefined;
+      return stackPathError(action.path, `${path}.path`, root);
     case "platform":
       return bindingMapError(action.args, `${path}.args`, root, "platform args");
-    case "setData":
-    case "appendData":
-    case "upsertData":
-    case "prependData":
-      return dataWriteError(action.value, `${path}.value`, root);
     default:
       return undefined;
   }
+}
+
+/** The first `setStack` path entry whose route params bind a secure key. */
+function stackPathError(
+  entries: unknown,
+  path: string,
+  root: Raw,
+): PrototypePlatformError | undefined {
+  for (const [index, entry] of (Array.isArray(entries) ? entries : []).entries()) {
+    const error = bindingMapError(
+      record(entry)?.params,
+      `${path}[${index}].params`,
+      root,
+      "route params",
+    );
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
 }
 
 /**

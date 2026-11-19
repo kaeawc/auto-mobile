@@ -5,11 +5,11 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
-import java.nio.charset.CharacterCodingException
 import java.nio.charset.CharsetDecoder
 import java.nio.charset.CodingErrorAction
 import java.security.MessageDigest
 import java.util.Base64
+import java.util.HexFormat
 import java.util.UUID
 
 /**
@@ -167,6 +167,53 @@ class PrototypeMediaUploadReceiver(
     var signatureChecked = false
     val utf8: Utf8Validator? =
       if (mimeType == PrototypeMediaContract.VTT_MIME_TYPE) Utf8Validator() else null
+
+    /** Offset, size and overflow rules for the next chunk; null when it may be written. */
+    fun chunkProblem(offset: Long, bytes: ByteArray, maxChunkBytes: Int): Problem? =
+      when {
+        offset != received ->
+          PrototypeMediaRejection.OFFSET_MISMATCH to "Chunk offset $offset; expected $received."
+        bytes.isEmpty() -> PrototypeMediaRejection.EMPTY_CHUNK to "Chunk has no data."
+        bytes.size > maxChunkBytes ->
+          PrototypeMediaRejection.CHUNK_TOO_LARGE to "Chunk exceeds $maxChunkBytes bytes."
+        received + bytes.size > size ->
+          PrototypeMediaRejection.OVERFLOW to "Chunk runs past the declared $size bytes."
+        else -> null
+      }
+
+    /** Feeds the signature probe and the UTF-8 check; null when [bytes] may be written. */
+    fun contentProblem(bytes: ByteArray): Problem? {
+      val room = PrototypeMediaContract.SIGNATURE_PROBE_BYTES - head.size()
+      if (room > 0) head.write(bytes, 0, minOf(room, bytes.size))
+      if (!signatureChecked && head.size() == PrototypeMediaContract.SIGNATURE_PROBE_BYTES) {
+        signatureProblem()?.let {
+          return it
+        }
+      }
+      return if (utf8?.accept(bytes) == false) NOT_UTF8_PROBLEM else null
+    }
+
+    fun commitProblem(): Problem? {
+      if (received != size) {
+        return PrototypeMediaRejection.TRUNCATED to "Received $received of $size bytes."
+      }
+      if (!signatureChecked) {
+        signatureProblem()?.let {
+          return it
+        }
+      }
+      if (utf8?.finish() == false) return NOT_UTF8_PROBLEM
+      val actual = HexFormat.of().formatHex(digest.digest())
+      return if (actual == sha256) null
+      else
+        PrototypeMediaRejection.SHA256_MISMATCH to "Media bytes do not match the declared sha256."
+    }
+
+    private fun signatureProblem(): Problem? {
+      signatureChecked = true
+      return if (PrototypeMediaContract.signatureMatches(mimeType, head.toByteArray())) null
+      else PrototypeMediaRejection.CONTENT_MISMATCH to "Media bytes are not $mimeType."
+    }
   }
 
   private val stored = LinkedHashMap<String, PrototypeMediaInfo>()
@@ -178,12 +225,13 @@ class PrototypeMediaUploadReceiver(
 
   @Synchronized
   fun begin(id: String, mimeType: String, size: Long, sha256: String): PrototypeMediaResult {
-    beginProblem(id, mimeType, size, sha256)?.let {
-      return it
+    beginProblem(limits, id, mimeType, size, sha256)?.let {
+      return reject(it.first, it.second)
     }
+    // A new begin for an id restarts its upload; the earlier partial file is dropped first.
     pending.remove(id)?.partial?.discard()
-    capacityProblem(id, size)?.let {
-      return it
+    capacityProblem(limits, id, size, stored.values, pending.values.map { it.size })?.let {
+      return reject(it.first, it.second)
     }
     val fileName = newName()
     val partial =
@@ -230,8 +278,9 @@ class PrototypeMediaUploadReceiver(
           PrototypeMediaRejection.UNKNOWN_UPLOAD,
           "No media upload '$id' is in progress.",
         )
-    return chunkProblem(upload, offset, bytes)?.let { fail(id, it.first, it.second) }
-      ?: write(id, upload, bytes)
+    return upload.chunkProblem(offset, bytes, limits.maxChunkBytes)?.let {
+      fail(id, it.first, it.second)
+    } ?: write(id, upload, bytes)
   }
 
   @Synchronized
@@ -242,7 +291,7 @@ class PrototypeMediaUploadReceiver(
           PrototypeMediaRejection.UNKNOWN_UPLOAD,
           "No media upload '$id' is in progress.",
         )
-    commitProblem(upload)?.let {
+    upload.commitProblem()?.let {
       return fail(id, it.first, it.second)
     }
     try {
@@ -277,87 +326,9 @@ class PrototypeMediaUploadReceiver(
     stored.clear()
   }
 
-  private fun beginProblem(
-    id: String,
-    mimeType: String,
-    size: Long,
-    sha256: String,
-  ): PrototypeMediaResult.Rejected? =
-    when {
-      PrototypeAssetContract.isMediaId(id) ->
-        reject(
-          PrototypeMediaRejection.INVALID_ID,
-          "Media asset ids cannot start with ${PrototypeAssetContract.MEDIA_ID_PREFIX}.",
-        )
-      id.isEmpty() || id.length > limits.maxIdLength ->
-        reject(
-          PrototypeMediaRejection.INVALID_ID,
-          "Media asset id must be 1 to ${limits.maxIdLength} characters.",
-        )
-      mimeType !in PrototypeMediaContract.MIME_TYPES ->
-        reject(PrototypeMediaRejection.UNSUPPORTED_MIME_TYPE, "Unsupported media MIME type.")
-      size <= 0 -> reject(PrototypeMediaRejection.EMPTY, "Media asset has no data.")
-      size > limits.maxBytes(mimeType) ->
-        reject(
-          PrototypeMediaRejection.TOO_LARGE,
-          "Media asset is $size bytes; the limit for $mimeType is ${limits.maxBytes(mimeType)}.",
-        )
-      !SHA256_HEX.matches(sha256) ->
-        reject(
-          PrototypeMediaRejection.INVALID_SHA256,
-          "sha256 must be 64 lowercase hex characters.",
-        )
-      else -> null
-    }
-
-  private fun capacityProblem(id: String, size: Long): PrototypeMediaResult.Rejected? {
-    val otherStored = stored.values.filter { it.id != id }
-    val count = otherStored.size + pending.size + 1
-    val bytes = otherStored.sumOf { it.byteCount } + pending.values.sumOf { it.size } + size
-    return when {
-      count > limits.maxCount ->
-        reject(
-          PrototypeMediaRejection.COUNT_LIMIT,
-          "At most ${limits.maxCount} media assets; remove one before adding '$id'.",
-        )
-      bytes > limits.maxTotalBytes ->
-        reject(
-          PrototypeMediaRejection.TOTAL_LIMIT,
-          "Media assets would total $bytes bytes; the limit is ${limits.maxTotalBytes}.",
-        )
-      else -> null
-    }
-  }
-
-  private fun chunkProblem(
-    upload: Upload,
-    offset: Long,
-    bytes: ByteArray,
-  ): Pair<PrototypeMediaRejection, String>? =
-    when {
-      offset != upload.received ->
-        PrototypeMediaRejection.OFFSET_MISMATCH to
-          "Chunk offset $offset; expected ${upload.received}."
-      bytes.isEmpty() -> PrototypeMediaRejection.EMPTY_CHUNK to "Chunk has no data."
-      bytes.size > limits.maxChunkBytes ->
-        PrototypeMediaRejection.CHUNK_TOO_LARGE to "Chunk exceeds ${limits.maxChunkBytes} bytes."
-      upload.received + bytes.size > upload.size ->
-        PrototypeMediaRejection.OVERFLOW to "Chunk runs past the declared ${upload.size} bytes."
-      else -> null
-    }
-
   private fun write(id: String, upload: Upload, bytes: ByteArray): PrototypeMediaResult {
-    val room = PrototypeMediaContract.SIGNATURE_PROBE_BYTES - upload.head.size()
-    if (room > 0) upload.head.write(bytes, 0, minOf(room, bytes.size))
-    if (
-      !upload.signatureChecked && upload.head.size() == PrototypeMediaContract.SIGNATURE_PROBE_BYTES
-    ) {
-      signatureProblem(upload)?.let {
-        return fail(id, it.first, it.second)
-      }
-    }
-    if (upload.utf8?.accept(bytes) == false) {
-      return fail(id, PrototypeMediaRejection.NOT_UTF8, "WebVTT captions must be valid UTF-8.")
+    upload.contentProblem(bytes)?.let {
+      return fail(id, it.first, it.second)
     }
     try {
       upload.partial.append(bytes)
@@ -373,31 +344,6 @@ class PrototypeMediaUploadReceiver(
     return PrototypeMediaResult.Accepted(upload.received)
   }
 
-  private fun signatureProblem(upload: Upload): Pair<PrototypeMediaRejection, String>? {
-    upload.signatureChecked = true
-    return if (PrototypeMediaContract.signatureMatches(upload.mimeType, upload.head.toByteArray()))
-      null
-    else PrototypeMediaRejection.CONTENT_MISMATCH to "Media bytes are not ${upload.mimeType}."
-  }
-
-  private fun commitProblem(upload: Upload): Pair<PrototypeMediaRejection, String>? {
-    if (upload.received != upload.size) {
-      return PrototypeMediaRejection.TRUNCATED to
-        "Received ${upload.received} of ${upload.size} bytes."
-    }
-    if (!upload.signatureChecked) {
-      signatureProblem(upload)?.let {
-        return it
-      }
-    }
-    if (upload.utf8?.finish() == false) {
-      return PrototypeMediaRejection.NOT_UTF8 to "WebVTT captions must be valid UTF-8."
-    }
-    val actual = upload.digest.digest().joinToString("") { "%02x".format(it) }
-    return if (actual == upload.sha256) null
-    else PrototypeMediaRejection.SHA256_MISMATCH to "Media bytes do not match the declared sha256."
-  }
-
   /** Drops [id]'s upload with its partial file and returns the rejection. */
   private fun fail(
     id: String,
@@ -407,12 +353,66 @@ class PrototypeMediaUploadReceiver(
     abort(id)
     return reject(reason, message)
   }
+}
 
-  private fun reject(reason: PrototypeMediaRejection, message: String) =
-    PrototypeMediaResult.Rejected(reason, message)
+private typealias Problem = Pair<PrototypeMediaRejection, String>
 
-  private companion object {
-    val SHA256_HEX = Regex("^[0-9a-f]{64}$")
+private val NOT_UTF8_PROBLEM: Problem =
+  PrototypeMediaRejection.NOT_UTF8 to "WebVTT captions must be valid UTF-8."
+
+private val SHA256_HEX = Regex("^[0-9a-f]{64}$")
+
+private fun reject(reason: PrototypeMediaRejection, message: String) =
+  PrototypeMediaResult.Rejected(reason, message)
+
+/** Begin rules that need no store state; the receiver adds the capacity check. */
+private fun beginProblem(
+  limits: PrototypeMediaLimits,
+  id: String,
+  mimeType: String,
+  size: Long,
+  sha256: String,
+): Problem? =
+  when {
+    PrototypeAssetContract.isMediaId(id) ->
+      PrototypeMediaRejection.INVALID_ID to
+        "Media asset ids cannot start with ${PrototypeAssetContract.MEDIA_ID_PREFIX}."
+    id.isEmpty() || id.length > limits.maxIdLength ->
+      PrototypeMediaRejection.INVALID_ID to
+        "Media asset id must be 1 to ${limits.maxIdLength} characters."
+    mimeType !in PrototypeMediaContract.MIME_TYPES ->
+      PrototypeMediaRejection.UNSUPPORTED_MIME_TYPE to "Unsupported media MIME type."
+    size <= 0 -> PrototypeMediaRejection.EMPTY to "Media asset has no data."
+    size > limits.maxBytes(mimeType) ->
+      PrototypeMediaRejection.TOO_LARGE to
+        "Media asset is $size bytes; the limit for $mimeType is ${limits.maxBytes(mimeType)}."
+    !SHA256_HEX.matches(sha256) ->
+      PrototypeMediaRejection.INVALID_SHA256 to "sha256 must be 64 lowercase hex characters."
+    else -> null
+  }
+
+/**
+ * Count and byte caps over committed assets other than [id] (a replacement is not counted twice)
+ * plus every in-flight upload's declared size.
+ */
+private fun capacityProblem(
+  limits: PrototypeMediaLimits,
+  id: String,
+  size: Long,
+  stored: Collection<PrototypeMediaInfo>,
+  pendingSizes: List<Long>,
+): Problem? {
+  val otherStored = stored.filter { it.id != id }
+  val count = otherStored.size + pendingSizes.size + 1
+  val bytes = otherStored.sumOf { it.byteCount } + pendingSizes.sum() + size
+  return when {
+    count > limits.maxCount ->
+      PrototypeMediaRejection.COUNT_LIMIT to
+        "At most ${limits.maxCount} media assets; remove one before adding '$id'."
+    bytes > limits.maxTotalBytes ->
+      PrototypeMediaRejection.TOTAL_LIMIT to
+        "Media assets would total $bytes bytes; the limit is ${limits.maxTotalBytes}."
+    else -> null
   }
 }
 
@@ -441,13 +441,8 @@ internal class Utf8Validator {
     return !endOfInput || carry.isEmpty()
   }
 
-  private fun flush(): Boolean =
-    try {
-      out.clear()
-      !decoder.flush(out).isError
-    } catch (error: CharacterCodingException) {
-      // flush reports by result for UTF-8; a thrown coding error is the same malformed-input
-      // verdict.
-      false
-    }
+  private fun flush(): Boolean {
+    out.clear()
+    return !decoder.flush(out).isError
+  }
 }

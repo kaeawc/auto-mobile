@@ -4,6 +4,7 @@ import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.security.MessageDigest
+import java.util.HexFormat
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -69,7 +70,7 @@ private fun hex(value: String): ByteArray =
   value.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 
 private fun sha256(bytes: ByteArray): String =
-  MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+  HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes))
 
 private fun rejection(result: PrototypeMediaResult): String? =
   (result as? PrototypeMediaResult.Rejected)?.reason?.code

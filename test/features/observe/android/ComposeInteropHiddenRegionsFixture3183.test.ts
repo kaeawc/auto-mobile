@@ -13,6 +13,11 @@ function load(name: string): ObserveResult {
   );
 }
 
+/** Captures carry array bounds, which the static `ElementBounds` type does not express. */
+function regionsOf(observation: ObserveResult): unknown {
+  return observation.viewHierarchy?.contentHiddenRegions;
+}
+
 /** Every `class` value anywhere in the captured tree. */
 function classNames(node: unknown, found = new Set<string>()): Set<string> {
   if (Array.isArray(node)) {
@@ -35,7 +40,7 @@ describe("Compose interop hidden-region samples (#3183)", () => {
     expect(classNames(observation.viewHierarchy?.hierarchy)).toContain(
       "androidx.compose.ui.platform.ComposeView",
     );
-    expect(observation.viewHierarchy?.contentHiddenRegions).toEqual([
+    expect(regionsOf(observation)).toEqual([
       {
         bounds: [0, 478, 1080, 2486],
         reason: "compose-interop-no-hide-descendants",
@@ -50,7 +55,7 @@ describe("Compose interop hidden-region samples (#3183)", () => {
     expect(classNames(observation.viewHierarchy?.hierarchy)).toContain(
       "androidx.compose.ui.viewinterop.ViewFactoryHolder",
     );
-    expect(observation.viewHierarchy?.contentHiddenRegions).toEqual([
+    expect(regionsOf(observation)).toEqual([
       {
         bounds: [42, 732, 1038, 1867],
         reason: "compose-interop-no-hide-descendants",
@@ -65,6 +70,6 @@ describe("Compose interop hidden-region samples (#3183)", () => {
 
     expect(classes).toContain("androidx.compose.ui.viewinterop.ViewFactoryHolder");
     expect(classes).toContain("androidx.recyclerview.widget.RecyclerView");
-    expect(observation.viewHierarchy?.contentHiddenRegions).toBeUndefined();
+    expect(regionsOf(observation)).toBeUndefined();
   });
 });

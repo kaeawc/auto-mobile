@@ -54,12 +54,17 @@ enum PrototypeLazyList {
               items.indices.contains(index) else { return nil }
         let fields = PrototypeDataValues.project(items[index].objectFields ?? [:]).objectFields ?? [:]
         let bound = PrototypeRepeatInstance(alias: spec.as, item: fields, index: index).bind(raw)
-        return (fields[spec.key]?.displayString ?? "", PrototypeDataResolver.resolveRoot(bound, data: data, derived: derived))
+        return (
+            fields[spec.key]?.displayString ?? "",
+            PrototypeDataResolver.resolveRoot(bound, data: data, derived: derived)
+        )
     }
 
     static func row(
         node: PrototypeNode, data: [String: JSONValue]?, derived: [String: JSONValue] = [:], index: Int
-    ) throws -> Row? {
+    )
+        throws -> Row?
+    {
         guard let resolved = resolvedRow(node: node, data: data, derived: derived, index: index) else { return nil }
         let row = try JSONDecoder().decode(PrototypeNode.self, from: JSONEncoder().encode(resolved.json))
         return Row(key: resolved.key, index: index, node: row)
@@ -67,7 +72,9 @@ enum PrototypeLazyList {
 
     static func rows(
         node: PrototypeNode, data: [String: JSONValue]?, derived: [String: JSONValue] = [:]
-    ) throws -> [Row] {
+    )
+        throws -> [Row]
+    {
         try keys(node: node, data: data).indices.compactMap {
             try row(node: node, data: data, derived: derived, index: $0)
         }
@@ -91,7 +98,9 @@ enum PrototypeLazyList {
 
         func decode(
             node: PrototypeNode, data: [String: JSONValue]?, derived: [String: JSONValue] = [:], index: Int
-        ) -> Row? {
+        )
+            -> Row?
+        {
             do { return try load(node, data, derived, index) }
             catch {
                 if !reportedFailure {

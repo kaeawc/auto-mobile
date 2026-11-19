@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod/v4";
 import { ActionableError, type BootedDevice } from "../../src/models";
+import { invokeRecordedInternalTool } from "../../src/server/deviceMutationDispatch";
 import { invokeResolvedDeviceHandler } from "../../src/server/pipeline/deviceCallDispatch";
 import {
   assertDeviceInToolPlatforms,
   type ToolPlatforms,
 } from "../../src/server/toolPlatformRestriction";
+import type { RegisteredTool } from "../../src/server/toolRegistryTypes";
 
 const PHONE: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
 const IPHONE: BootedDevice = { deviceId: "IPHONE-UDID", platform: "ios", name: "iPhone" };
@@ -80,6 +83,45 @@ describe("the device dispatch enforces the restriction before the handler (#1872
   test("an Android device runs the handler", async () => {
     const { run, calls } = dispatch(PHONE, ["android"]);
     await run;
+    expect(calls).toEqual(["emulator-5554"]);
+  });
+});
+
+describe("pinned internal dispatch enforces the restriction too (#18721)", () => {
+  const pinnedTool = (calls: string[]): RegisteredTool => ({
+    name: "mediaSession",
+    description: "media",
+    schema: z.object({}),
+    handler: async () => ({ content: [] }),
+    deviceAwareHandler: async (device) => {
+      calls.push(device.deviceId);
+      return { content: [] };
+    },
+    defaultEnabled: true,
+    defaultDeclared: true,
+    requiresDevice: true,
+    platforms: ["android"],
+  });
+  const recording = { beforeToolCall: async () => undefined };
+
+  test("a plan step pinned to an iOS device never reaches an Android-only handler", async () => {
+    const calls: string[] = [];
+    await expect(
+      (async () =>
+        invokeRecordedInternalTool(pinnedTool(calls), {}, undefined, {
+          targetDevice: IPHONE,
+          mutationRecording: recording,
+        }))(),
+    ).rejects.toThrow("mediaSession is only supported on Android; IPHONE-UDID is iOS.");
+    expect(calls).toEqual([]);
+  });
+
+  test("a step pinned to an Android device runs the handler", async () => {
+    const calls: string[] = [];
+    await invokeRecordedInternalTool(pinnedTool(calls), {}, undefined, {
+      targetDevice: PHONE,
+      mutationRecording: recording,
+    });
     expect(calls).toEqual(["emulator-5554"]);
   });
 });

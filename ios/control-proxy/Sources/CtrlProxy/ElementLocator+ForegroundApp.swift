@@ -26,7 +26,7 @@ extension ElementLocator {
                     catchingObjCExceptionNonThrowing({
                         let sbState = self.springboard.state.rawValue
                         let freshAppState: UInt? = trackedBundleId.map { bundleId in
-                            XCUIApplication(bundleIdentifier: bundleId).state.rawValue
+                            XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId).state.rawValue
                         }
                         return (sbState, freshAppState, trackedBundleId)
                     }, fallback: (0, nil, trackedBundleId))
@@ -85,7 +85,7 @@ extension ElementLocator {
             // Check state on main thread using fresh instance (cached instances return stale state)
             let freshState: UInt? = catchingObjCExceptionNonThrowing({
                 trackedBundleId.map { bundleId in
-                    XCUIApplication(bundleIdentifier: bundleId).state.rawValue
+                    XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId).state.rawValue
                 }
             }, fallback: nil)
             let foregroundAppInForeground = (freshState ?? 0) >= 4 // .runningForeground only
@@ -150,7 +150,7 @@ extension ElementLocator {
             if let preferredSystemSurface = Self.preferredSystemSurfaceBundleId(
                 trackedBundleId: currentBundleId,
                 spotlightStateRaw: catchingObjCExceptionNonThrowing({
-                    XCUIApplication(bundleIdentifier: Self.spotlightBundleId).state.rawValue
+                    XCUIApplication.withoutUIInterruptions(bundleIdentifier: Self.spotlightBundleId).state.rawValue
                 }, fallback: 0)
             ) {
                 return preferredSystemSurface
@@ -175,7 +175,7 @@ extension ElementLocator {
                         }
 
                         let stateRawValue: UInt = catchingObjCExceptionNonThrowing({
-                            let testApp = XCUIApplication(bundleIdentifier: bundleId)
+                            let testApp = XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId)
                             return testApp.state.rawValue
                         }, fallback: 0)
                         if stateRawValue >= 4 { // .runningForeground only
@@ -200,7 +200,7 @@ extension ElementLocator {
                     }
 
                     let stateRawValue: UInt = catchingObjCExceptionNonThrowing({
-                        let testApp = XCUIApplication(bundleIdentifier: bundleId)
+                        let testApp = XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId)
                         return testApp.state.rawValue
                     }, fallback: 0)
                     if stateRawValue >= 4 { // .runningForeground only
@@ -247,7 +247,7 @@ extension ElementLocator {
                     }
 
                     let stateRawValue: UInt = catchingObjCExceptionNonThrowing({
-                        let testApp = XCUIApplication(bundleIdentifier: bundleId)
+                        let testApp = XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId)
                         return testApp.state.rawValue
                     }, fallback: 0)
                     if stateRawValue >= 4 { // .runningForeground only

@@ -24,11 +24,15 @@ export const prototypeGeneratedValueSchema = z.union([
   z.object({ now: z.enum(["epochMs", "iso"]) }).strict(),
   z.object({ lastGenerated: z.literal(true) }).strict(),
 ]);
-const prototypeExistingDataValueSchema = z.union([
+/** Read bindings shared by data actions and route params; excludes generated and literal values. */
+export const prototypeReadBindingSchema = z.union([
   z.object({ state: stateKeySchema }).strict(),
   z.object({ item: keySchema }).strict(),
   z.object({ index: z.literal(true) }).strict(),
   z.object({ data: pointerSchema }).strict(),
+]);
+const prototypeExistingDataValueSchema = z.union([
+  ...prototypeReadBindingSchema.options,
   z.object({ value: prototypeJsonSchema }).strict(),
 ]);
 export const prototypeDataActionValueSchema = z.union([

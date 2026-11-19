@@ -207,6 +207,30 @@ describe("window frame histogram", () => {
     expect(histogramDelta(h(1), [{ bucketMs: 7, count: 1 }, ...h(1).slice(1)])).toBeNull();
   });
 
+  test("a reset between readings (new Stats since) uses the closing histogram even if counts grew", () => {
+    // The live PerformanceMonitor resets gfxinfo; the closing epoch's buckets can still be >= the
+    // opening ones, so only the epoch tells a reset apart from new frames.
+    const dump = (since: string, fast: number, slow: number) =>
+      capturedGfxinfo
+        .replace("Stats since: 74390916202438ns", `Stats since: ${since}ns`)
+        .replace(" 8ms=0", ` 8ms=${fast}`)
+        .replace(" 101ms=0", ` 101ms=${slow}`);
+    expect(computeWindowFramePercentiles(dump("100", 0, 1), dump("200", 1, 1))).toEqual({
+      frames: 2,
+      p50Ms: 101,
+      p90Ms: 101,
+      p95Ms: 101,
+      p99Ms: 101,
+    });
+    expect(computeWindowFramePercentiles(dump("100", 0, 1), dump("100", 1, 1))).toEqual({
+      frames: 1,
+      p50Ms: 8,
+      p90Ms: 8,
+      p95Ms: 8,
+      p99Ms: 8,
+    });
+  });
+
   test("computeWindowFramePercentiles is null without a histogram in both dumps", () => {
     expect(computeWindowFramePercentiles(capturedGfxinfo, "")).toBeNull();
     expect(computeWindowFramePercentiles(capturedGfxinfo, capturedGfxinfo)).toEqual({ frames: 0 });

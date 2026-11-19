@@ -190,6 +190,12 @@ export function parseFrameHistogram(gfxinfo: string): FrameHistogram | null {
   return buckets.length > 0 ? buckets : null;
 }
 
+/** The `Stats since: <ns>` epoch of a gfxinfo dump; it changes when the stats are reset. */
+export function parseStatsSince(gfxinfo: string): string | null {
+  const match = gfxinfo.match(/^[ \t]*Stats since:[ \t]*(\d+)ns/m);
+  return match ? match[1] : null;
+}
+
 /**
  * The frames rendered between two histogram readings. Null when the readings do not share
  * bucket bounds. A bucket that went down means the stats were reset between the readings,
@@ -238,7 +244,13 @@ export function computeWindowFramePercentiles(
 ): WindowFramePercentiles | { frames: 0 } | null {
   const start = parseFrameHistogram(startGfxinfo);
   const end = parseFrameHistogram(endGfxinfo);
-  const window = start && end ? histogramDelta(start, end) : null;
+  const startEpoch = parseStatsSince(startGfxinfo);
+  const endEpoch = parseStatsSince(endGfxinfo);
+  // A new `Stats since:` means the stats were reset between the readings (the live
+  // PerformanceMonitor resets them): the closing histogram then holds only window frames, even
+  // when its counts are not below the opening ones.
+  const reset = startEpoch !== null && endEpoch !== null && startEpoch !== endEpoch;
+  const window = start && end ? (reset ? end : histogramDelta(start, end)) : null;
   if (!window) {
     return null;
   }

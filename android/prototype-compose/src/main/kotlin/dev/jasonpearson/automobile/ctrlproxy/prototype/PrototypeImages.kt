@@ -3,7 +3,6 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
-import android.media.ExifInterface
 import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -32,6 +31,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.exifinterface.media.ExifInterface
 import dev.jasonpearson.automobile.protocol.PrototypeDimension
 import dev.jasonpearson.automobile.protocol.PrototypeImageNode
 import dev.jasonpearson.automobile.protocol.PrototypeItem

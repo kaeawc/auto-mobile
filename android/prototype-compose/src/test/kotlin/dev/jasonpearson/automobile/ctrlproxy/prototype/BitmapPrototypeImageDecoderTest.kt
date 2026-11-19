@@ -1,7 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.graphics.Bitmap
-import android.media.ExifInterface
+import androidx.exifinterface.media.ExifInterface
 import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull

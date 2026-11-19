@@ -26,4 +26,16 @@ internal class CtrlProxyTimerHandlerTest : CtrlProxyMessageHandlerFixtures() {
       lastCall.second,
     )
   }
+
+  @Test
+  fun `queue call outcome dispatches the correlated body`() = runTest {
+    dispatch(
+      """{"type":"queue_prototype_call_outcome","requestId":"script","id":"panel","call":"test.echo","outcome":{"result":null}}""",
+    )
+    assertEquals("queuePrototypeCallOutcome", lastCall.first)
+    assertEquals(
+      listOf("script", "panel", "test.echo", buildJsonObject { put("result", JsonNull) }),
+      lastCall.second,
+    )
+  }
 }

@@ -39,6 +39,7 @@ internal class PrototypePlatformDispatcher(
   }
 
   private val rateLimiter = PrototypePlatformRateLimiter(monotonicMs)
+  private val outcomes = PrototypePlatformOutcomes()
   private val pending = linkedMapOf<String, Pending>()
   private val subscriptions = mutableListOf<Job>()
   @Volatile private var closed = false
@@ -74,6 +75,19 @@ internal class PrototypePlatformDispatcher(
     return true
   }
 
+  fun queueCallOutcome(call: String, outcome: JsonObject) {
+    val module = requireNotNull(registry.module(call)) { "No module registered for $call" }
+    require(module.supportsSimulation) {
+      "unsupported: platform module does not support simulation"
+    }
+    synchronized(pending) {
+      check(!closed) { "Prototype is inactive" }
+      outcomes.enqueue(call, outcome)
+    }
+  }
+
+  fun clearOutcomes() = synchronized(pending) { outcomes.clear() }
+
   private suspend fun deliverEvent(
     module: PrototypePlatformModule,
     event: PlatformEvent,
@@ -104,21 +118,21 @@ internal class PrototypePlatformDispatcher(
       return
     }
     rateLimiter.recordAdmission(action.call)
-    call.job =
-      scope.launch(start = CoroutineStart.LAZY) { runCall(call, action, args ?: return@launch) }
     val registered =
       synchronized(pending) {
         if (closed) false
         else {
+          val scripted = outcomes.consume(action.call)
+          call.job =
+            scope.launch(start = CoroutineStart.LAZY) {
+              if (scripted != null) exclusively { settle(call, scripted) }
+              else runCall(call, action, checkNotNull(args))
+            }
           pending[call.id] = call
           true
         }
       }
-    if (registered) call.job.start()
-    else {
-      limiter.release()
-      call.job.cancel()
-    }
+    if (registered) call.job.start() else limiter.release()
   }
 
   /** Why a call cannot start, or null once it holds a limiter slot. */
@@ -203,7 +217,11 @@ internal class PrototypePlatformDispatcher(
 
   /** Called under the interaction lock, before the old runtime is removed. */
   suspend fun cancel() {
-    val calls = synchronized(pending) { pending.values.toList().also { pending.clear() } }
+    val calls =
+      synchronized(pending) {
+        outcomes.clear()
+        pending.values.toList().also { pending.clear() }
+      }
     calls.forEach {
       it.job.cancel()
       limiter.release()
@@ -218,6 +236,7 @@ internal class PrototypePlatformDispatcher(
     val calls =
       synchronized(pending) {
         closed = true
+        outcomes.clear()
         pending.values.toList().also { pending.clear() }
       }
     subscriptions.forEach { it.cancel() }

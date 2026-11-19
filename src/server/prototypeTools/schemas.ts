@@ -1,3 +1,4 @@
+import { prototypePlatformOutcomeSchema } from "../../features/prototype/prototypePlatformOutcomes";
 import { prototypeOwnKeyRecord } from "../../features/prototype/prototypeOwnKeyRecord";
 import {
   MAX_MOCK_DOCUMENT_BYTES,
@@ -443,7 +444,20 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .max(128)
         .optional()
         .describe(
-          "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push, media.statusChanged|ended|error drives a media player; other known module events require Android prototype_platform_simulation_v1 and a module that supports simulation",
+          "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push, media.statusChanged|ended|error drives a media player; other known module events require prototype_platform_simulation_v1 and a module that supports simulation",
+        ),
+      call: z
+        .string()
+        .min(1)
+        .max(128)
+        .optional()
+        .describe(
+          "simulate only: queue an outcome for this known platform call, for example test.echo; requires prototype_platform_outcomes_v1",
+        ),
+      outcome: prototypePlatformOutcomeSchema
+        .optional()
+        .describe(
+          "simulate call only: exactly one result (any JSON value) or error; at most 4096 UTF-8 bytes total",
         ),
       data: prototypeOwnKeyRecord(z.string(), z.unknown())
         .optional()
@@ -461,7 +475,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .min(1)
         .optional()
         .describe(
-          "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; optional for status and inspect only to select an Android disposable app by its installed spec id; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
+          "Prototype id required for simulate, dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; optional for status and inspect only to select an Android disposable app by its installed spec id; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
         ),
       assets: assetsInput
         .optional()
@@ -607,6 +621,8 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "ops",
     "baseRevision",
     "advanceTimeMs",
+    "call",
+    "outcome",
     "event",
     "data",
     "transport",
@@ -656,7 +672,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     open: ["id"],
     share: ["spec", "specPath", "assets", "url"],
     clearStorage: ["id"],
-    simulate: ["id", "advanceTimeMs", "event", "data", "transport"],
+    simulate: ["id", "advanceTimeMs", "event", "data", "transport", "call", "outcome"],
     dismiss: ["id", "all"],
     testSessionBegin: ["id", "goal", "cohort"],
     testSessionEnd: ["id"],

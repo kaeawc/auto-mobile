@@ -125,6 +125,16 @@ with `injectAudioInput` before tapping Record.
 - **Rehearse timers.** `prototype` with `action: "simulate"` and `advanceTimeMs` moves prototype
   timers forward without waiting, so the dashboard timer can be shown mid-run on demand. It also
   moves a mock backend's scripted actors ahead, so a bot reply lands on demand.
+- **Rehearse platform call outcomes.** Use `prototype {action:"simulate", id:"demo",
+  call:"test.echo", outcome:{result:"scripted"}}` to queue the next outcome for a shown prototype.
+  To rehearse a failure, use `outcome:{error:{code:"unavailable", message:"Try again"}}`. Choose
+  exactly one mode per request from `advanceTimeMs`, `event`, and `call` with `outcome`. The call's
+  module must be declared in `requires.platform` and support simulation. The runtime must advertise
+  `prototype_platform_outcomes_v1`. A result can be any JSON value. An error message is optional
+  and can be up to 200 characters. The full outcome must fit within 4096 UTF-8 bytes. Each call
+  uses its queue in order (up to 16 outcomes).
+  Once the queue is empty the call runs normally. Showing the prototype again or closing it clears
+  its queues.
 
 ## Known limits
 

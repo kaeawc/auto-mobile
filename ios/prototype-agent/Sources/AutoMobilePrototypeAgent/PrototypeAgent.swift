@@ -620,6 +620,13 @@ final class PrototypeAgent: NSObject {
             // No update_prototype (#10550): a same-id show_prototype replaces the shown prototype.
             case "dismiss_prototype":
                 dismissPrototype(message, result: result)
+            case PrototypeAgentProtocol.queueCallOutcomeRequest:
+                guard let id = message["id"] as? String, !id.isEmpty,
+                      let call = message["call"] as? String,
+                      let raw = message["outcome"], let outcome = PrototypeRequestWire.json(raw)
+                else { return result(false, "queue_prototype_call_outcome needs id, call and JSON outcome") }
+                let error = model.queueCallOutcome(id: id, call: call, outcome: outcome)
+                result(error == nil, error)
             case PrototypeAgentProtocol.simulatePlatformRequest:
                 guard let id = message["id"] as? String, !id.isEmpty,
                       let event = message["event"] as? String,

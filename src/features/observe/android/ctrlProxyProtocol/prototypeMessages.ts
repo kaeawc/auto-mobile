@@ -1,4 +1,5 @@
 /** Prototype lifecycle requests, results and push-event contracts. */
+import type { PrototypePlatformOutcome } from "../../../prototype/prototypePlatformOutcomes";
 import type { PrototypeHiddenReason } from "../../../prototype/prototypeHidden";
 import type { PrototypePatchOp } from "../../../prototype/prototypePatch";
 import type { PrototypePatchConflict } from "../../../prototype/prototypePatchWire";
@@ -175,6 +176,16 @@ export interface RemovePrototypeAssetMessage {
   type: "remove_prototype_asset";
   requestId: string;
   id: string;
+}
+
+export interface QueuePrototypeCallOutcomeMessage extends PrototypePlatformOutcomeRequest {
+  type: "queue_prototype_call_outcome";
+  requestId: string;
+}
+export interface PrototypePlatformOutcomeRequest {
+  id: string;
+  call: string;
+  outcome: PrototypePlatformOutcome;
 }
 
 export interface SimulatePrototypePlatformMessage {

@@ -1,4 +1,7 @@
-import type { PrototypePlatformSimulationRequest } from "./ctrlProxyProtocol";
+import {
+  validatePrototypePlatformOutcome,
+  prototypePlatformOutcomesUnsupportedMessage,
+} from "../../prototype/prototypePlatformOutcomes";
 import {
   requirePrototypePlatformSimulationSupport,
   simulatePrototypePlatformMessage,
@@ -75,7 +78,11 @@ import {
 import { PROTOTYPE_RESPONSE_MESSAGE_TYPE } from "../../prototype/prototypeRequestProtocol";
 import {
   ctrlProxyRequests,
+  PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY,
   PROTOTYPE_SAVED_CAPABILITY,
+  type QueuePrototypeCallOutcomeMessage,
+  type PrototypePlatformOutcomeRequest,
+  type PrototypePlatformSimulationRequest,
   isSavedPrototypeErrorCode,
   type SavePrototypeMessage,
   type PinSavedPrototypeMessage,
@@ -435,6 +442,22 @@ export class CtrlProxyPrototypes {
     );
     return withHostOnlySavedPrototypes(reply, this.context.savedPrototypeMirror);
   }
+  async requestQueuePrototypeCallOutcome(
+    request: PrototypePlatformOutcomeRequest,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    const { issue } = validatePrototypePlatformOutcome(request.call, request.outcome);
+    if (!request.id || issue) {
+      throw new ActionableError(issue?.[1] ?? "simulate requires id");
+    }
+    return this.request(
+      ctrlProxyRequests.queuePrototypeCallOutcome({ ...request, requestId: "" }),
+      timeoutMs,
+      perf,
+    );
+  }
+
   async requestSimulatePrototypePlatform(
     simulation: PrototypePlatformSimulationRequest,
     timeoutMs = 5000,
@@ -857,7 +880,8 @@ export class CtrlProxyPrototypes {
       | DeleteSavedPrototypeMessage
       | ClearPrototypeStorageMessage
       | AdvancePrototypeClockMessage
-      | SimulatePrototypePlatformMessage,
+      | SimulatePrototypePlatformMessage
+      | QueuePrototypeCallOutcomeMessage,
     timeoutMs: number,
     perf?: PerformanceTracker,
     deliveryOptions: Pick<SendCommandOptions<PrototypeResult>, "onDispatch" | "timeoutError"> = {},
@@ -897,7 +921,8 @@ export class CtrlProxyPrototypes {
       | DeleteSavedPrototypeMessage
       | ClearPrototypeStorageMessage
       | AdvancePrototypeClockMessage
-      | SimulatePrototypePlatformMessage,
+      | SimulatePrototypePlatformMessage
+      | QueuePrototypeCallOutcomeMessage,
   ): void {
     const supports = (command: string) => this.context.isCommandSupported?.(command);
     this.requireShaderSpecSupport(message, supports);
@@ -915,6 +940,12 @@ export class CtrlProxyPrototypes {
     requirePrototypeStorageSupport(message.type, supports);
     requirePrototypeTimersSupport(message.type, supports);
     requirePrototypePlatformSimulationSupport(message.type, supports);
+    if (
+      message.type === "queue_prototype_call_outcome" &&
+      supports(PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY) !== true
+    ) {
+      throw new ActionableError(prototypePlatformOutcomesUnsupportedMessage());
+    }
     const type = message.type;
     if (
       [

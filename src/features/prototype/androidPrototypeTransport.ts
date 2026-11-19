@@ -1,3 +1,5 @@
+import { prototypePlatformOutcomesUnsupportedMessage } from "./prototypePlatformOutcomes";
+import type { PrototypePlatformOutcomeRequest } from "../observe/android/ctrlProxyProtocol";
 import type { PrototypeJson } from "./prototypeJson";
 import { prototypePlatformSimulationUnsupportedMessage } from "./prototypePlatformSimulation";
 import type { PrototypePatchReply, PrototypePatchRequest } from "./prototypePatchWire";
@@ -43,6 +45,7 @@ export type AndroidPrototypeClient = Pick<
       | "attachPrototypeChannelHost"
       | "requestClearPrototypeStorage"
       | "requestAdvancePrototypeClock"
+      | "requestQueuePrototypeCallOutcome"
       | "requestSimulatePrototypePlatform"
     >
   >;
@@ -103,6 +106,16 @@ export class AndroidPrototypeTransport implements PrototypeTransport {
       throw new ActionableError("Update the connected CtrlProxy to simulate prototype timers");
     }
     return this.client.requestAdvancePrototypeClock(id, advanceTimeMs, timeoutMs);
+  }
+
+  queueCallOutcome(
+    request: PrototypePlatformOutcomeRequest,
+    timeoutMs?: number,
+  ): Promise<PrototypeResult> {
+    if (!this.client.requestQueuePrototypeCallOutcome) {
+      throw new ActionableError(prototypePlatformOutcomesUnsupportedMessage());
+    }
+    return this.client.requestQueuePrototypeCallOutcome(request, timeoutMs);
   }
 
   simulatePlatformEvent(

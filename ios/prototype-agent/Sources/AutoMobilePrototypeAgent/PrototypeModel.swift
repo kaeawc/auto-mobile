@@ -335,6 +335,10 @@
         func pauseTimers() { timers.pause() }
         func resumeTimers() { timers.resume() }
 
+        func queueCallOutcome(id: String, call: String, outcome: JSONValue) -> String? {
+            platformDriver.queueCallOutcome(id: id, call: call, outcome: outcome, session: session)
+        }
+
         func simulatePlatformEvent(id: String, event: String, data: JSONValue) -> String? {
             platformDriver.simulate(id: id, event: event, data: data, session: session)
         }
@@ -462,6 +466,7 @@
             do { seeded = try (prepared?.spec ?? spec).replacingPlatform(
                 platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }
             ) } catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
+            platformDriver.clearOutcomes()
             next.show(
                 seeded, reset: reset, appearance: appearance, locale: locale, specBytes: specBytes,
                 restoredState: prepared?.state, restoredStacks: prepared?.stacks
@@ -767,6 +772,7 @@
                 onEvent?(event.wireObject(timestamp: timestamp))
             }
             if wasShown, !session.isShown {
+                platformDriver.clearOutcomes()
                 platformRegistry.configure(locationBlock: nil)
                 platformRegistry.configure(sensorsBlock: nil)
                 hitRects.removeAll()

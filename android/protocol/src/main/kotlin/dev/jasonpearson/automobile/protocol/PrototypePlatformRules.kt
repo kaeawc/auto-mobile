@@ -350,6 +350,8 @@ object PrototypePlatformCalls {
     return PrototypeRateLimit(calls, windowMs)
   }
 
+  fun callOwner(name: String): String? = callDefinition(name)?.first
+
   fun eventOwner(name: String): String? = eventModule(name)
 
   /** The contract's trailing debounce for a module event, or null when it delivers at once. */

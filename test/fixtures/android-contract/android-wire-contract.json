@@ -492,6 +492,35 @@
       ]
     },
     {
+      "serialName": "queue_prototype_call_outcome",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "call",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "outcome",
+          "type": "json",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
       "serialName": "remove_ca_cert",
       "fields": [
         {

@@ -1144,6 +1144,25 @@ class PrototypeController(
     }
   }
 
+  suspend fun queueCallOutcome(
+    requestId: String?,
+    id: String,
+    call: String,
+    outcome: JsonObject,
+  ) = mutex.withLock {
+    try {
+      check(!destroyed) { "Prototype host destroyed" }
+      val runtime = surfaces[id]?.runtime ?: error("Unknown or inactive prototype id: $id")
+      runtime.queueCallOutcome(call, outcome)
+      sink.send(requestId, true, null)
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("PrototypeController", "Could not queue platform call outcome", error)
+      sink.send(requestId, false, error.message ?: "Could not queue platform call outcome")
+    }
+  }
+
   suspend fun simulatePlatformEvent(
     requestId: String?,
     id: String,

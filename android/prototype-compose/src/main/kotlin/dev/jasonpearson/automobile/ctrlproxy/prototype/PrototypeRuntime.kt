@@ -227,6 +227,7 @@ class PrototypeRuntime(
 
   /** Called only after the host accepts the show. A preserving replacement seeds without firing. */
   suspend fun shown(preservingState: Boolean = false) {
+    platformDispatcher.clearOutcomes()
     appeared = if (preservingState) visibleAppearances().keys else emptySet()
     // Each stack's first screen enters once per show (#14188); a preserving show skips only the
     // stacks whose paths it kept, so a stack new to the replacement still enters. A stack an
@@ -310,6 +311,19 @@ class PrototypeRuntime(
   fun timerReports(): List<PrototypeTimerReport> = timerEngine.reports()
 
   suspend fun advanceClock(ms: Int): Int = timerEngine.advance(ms)
+
+  /** Host-only outcome queue, scoped to this shown runtime. */
+  fun queueCallOutcome(call: String, outcome: JsonObject) {
+    check(current.active) { "Prototype is inactive" }
+    val owner =
+      requireNotNull(PrototypePlatformCalls.callOwner(call)) {
+        "Unknown platform call: $call"
+      }
+    require(owner in current.spec.requires?.platform.orEmpty()) {
+      "Declare $owner in requires.platform before simulation"
+    }
+    platformDispatcher.queueCallOutcome(call, outcome)
+  }
 
   /** Host-only injection, deliberately absent from the spec action vocabulary. */
   suspend fun simulatePlatformEvent(name: String, data: JsonObject): Boolean {

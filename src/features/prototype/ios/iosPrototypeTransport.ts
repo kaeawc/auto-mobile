@@ -1,4 +1,12 @@
 import {
+  validatePrototypePlatformOutcome,
+  prototypePlatformOutcomesUnsupportedMessage,
+} from "../prototypePlatformOutcomes";
+import {
+  PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY,
+  type PrototypePlatformOutcomeRequest,
+} from "../../observe/android/ctrlProxyProtocol";
+import {
   prototypePlatformSimulationIssue,
   prototypePlatformSimulationUnsupportedMessage,
   simulatePrototypePlatformMessage,
@@ -359,6 +367,25 @@ export class IosPrototypeTransport implements PrototypeTransport {
   async dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult> {
     const body: PrototypeAgentMessage = target.all ? { all: true } : { id: target.id };
     return toPrototypeResult(await this.request("dismiss_prototype", body, timeoutMs));
+  }
+
+  async queueCallOutcome(
+    request: PrototypePlatformOutcomeRequest,
+    timeoutMs?: number,
+  ): Promise<PrototypeResult> {
+    if (
+      !this.supportsCapability(PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY) ||
+      !this.supportsCapability("queue_prototype_call_outcome")
+    ) {
+      throw new ActionableError(prototypePlatformOutcomesUnsupportedMessage());
+    }
+    const { issue } = validatePrototypePlatformOutcome(request.call, request.outcome);
+    if (!request.id || issue) {
+      throw new ActionableError(issue?.[1] ?? "simulate requires id");
+    }
+    return toPrototypeResult(
+      await this.request("queue_prototype_call_outcome", { ...request }, timeoutMs),
+    );
   }
 
   async simulatePlatformEvent(

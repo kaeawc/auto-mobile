@@ -112,3 +112,24 @@ fake_xcode() {
   run bash "${script}" --bogus 26.5
   [ "$status" -eq 2 ]
 }
+
+@test "--require-metal passes when the selected Xcode has the Metal Toolchain" {
+  fake_xcode Xcode-27.2.0.app 27.2
+  printf '#!/usr/bin/env bash\necho "xcrun DEVELOPER_DIR=${DEVELOPER_DIR} $*" >> "%s/xcrun.log"\n' "${BATS_TEST_TMPDIR}" > "${BATS_TEST_TMPDIR}/bin/xcrun"
+  chmod +x "${BATS_TEST_TMPDIR}/bin/xcrun"
+  run bash "${script}" 27.2 --require-metal
+  [ "$status" -eq 0 ]
+  grep -q "DEVELOPER_DIR=${XCODE_APPLICATIONS_DIR}/Xcode-27.2.0.app/Contents/Developer --sdk iphonesimulator metal --version" "${BATS_TEST_TMPDIR}/xcrun.log"
+  [[ "$(cat "${GITHUB_ENV}")" == *"/Xcode-27.2.0.app/Contents/Developer" ]]
+}
+
+@test "--require-metal fails fast with the install command and exports nothing" {
+  fake_xcode Xcode-27.2.0.app 27.2
+  printf '#!/usr/bin/env bash\nexit 1\n' > "${BATS_TEST_TMPDIR}/bin/xcrun"
+  chmod +x "${BATS_TEST_TMPDIR}/bin/xcrun"
+  run bash "${script}" --require-metal 27.2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"has no Metal Toolchain"* ]]
+  [[ "$output" == *"DEVELOPER_DIR=${XCODE_APPLICATIONS_DIR}/Xcode-27.2.0.app/Contents/Developer xcodebuild -downloadComponent metalToolchain"* ]]
+  [ ! -s "${GITHUB_ENV}" ]
+}

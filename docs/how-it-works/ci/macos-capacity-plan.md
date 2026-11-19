@@ -184,16 +184,12 @@ job does not skip it.
 - Xcode: one pin, `AUTOMOBILE_XCODE_VERSION` in `scripts/ios/xcode_version.sh`
   (27.2). Hosted runners select it with `maxim-lobanov/setup-xcode` on the
   `xcode-27` image. Self-hosted runners use
-  `scripts/ci/select-self-hosted-xcode.sh <version>` (no argument means the pin),
-  which exports `DEVELOPER_DIR` for that job only, so concurrent jobs do not fight
-  over `xcode-select` and the Mac's default Xcode is never changed. A missing
-  requested Xcode fails the job rather than building on another toolchain.
-  Local build scripts call `select_pinned_xcode` from the same file, which exports
-  `DEVELOPER_DIR` for the pinned Xcode when it is installed and `DEVELOPER_DIR` is
-  unset. `test/bats/xcode-version-pin.bats` fails when a workflow job selects
-  another version; its exempt list names the tvOS and watchOS smokes, which stay on
-  Xcode 26.6 until the Mac has tvOS/watchOS 27.2 runtimes. The CircleCI nightly
-  sweeps stay on Xcode 26.6, the published Swift 6.3 toolchain floor.
+  `scripts/ci/select-self-hosted-xcode.sh`, which exports `DEVELOPER_DIR` for that
+  job only and never changes the Mac's default Xcode. A missing Xcode fails the job.
+  Jobs that compile `.metal` sources pass `--require-metal`, which fails fast when
+  that Xcode lacks its Metal Toolchain. Local scripts call `select_pinned_xcode`.
+  `test/bats/xcode-version-pin.bats` fails when a workflow job selects another
+  version. Only the CircleCI nightly sweeps stay on Xcode 26.6, the Swift 6.3 floor.
 - Swift Packages builds unsigned on the Mac: its signing flags are false
   whenever the job is routed there, so no certificate is imported into the
   owner's keychains.
@@ -303,13 +299,19 @@ These need a login or a credential.
 Run on the Mac as the user that owns `~/actions-runner`:
 
 1. Keep the pinned Xcode installed (currently 27.2 at
-   `/Applications/Xcode-27.2.0.app`, next to 26.6 at `/Applications/Xcode.app`, the
-   `xcode-select` default) with its iOS platform
-   (`xcodebuild -downloadPlatform iOS`). Swift Code Coverage, Swift Packages, Build
-   Root SPM Package, Build Xcode Projects, the Playground fallback and Prototype
-   Simulator request 27.2. `bash scripts/ci/select-self-hosted-xcode.sh 27.2` uses
-   27.2 when installed and otherwise the newest installed 27.x at or above it,
-   printing which it chose (#11422). It never crosses majors.
+   `/Applications/Xcode-27.2.0.app`; 26.6 at `/Applications/Xcode.app` stays the
+   `xcode-select` default). Install its simulator platforms and Metal Toolchain once:
+
+   ```bash
+   export DEVELOPER_DIR=/Applications/Xcode-27.2.0.app/Contents/Developer
+   for p in iOS tvOS watchOS visionOS; do xcodebuild -downloadPlatform "$p"; done
+   xcodebuild -downloadComponent metalToolchain
+   ```
+
+   Without the Metal Toolchain, the prototype app, Build Xcode Projects, Playground
+   and Prototype Simulator jobs fail at Xcode selection. The selector falls back to
+   the newest installed 27.x at or above 27.2 and never crosses majors (#11422).
+
 2. Get a registration token (valid for one hour):
 
    ```bash

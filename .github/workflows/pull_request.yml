@@ -3051,7 +3051,7 @@ jobs:
       - name: "Select self-hosted Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'self-hosted'
         shell: bash
-        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
+        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}" --require-metal
 
       - name: "Build ${{ matrix.config.app }}"
         run: ./scripts/ios/swift-build-prototype-apps.sh "${{ matrix.config.app }}"
@@ -3122,7 +3122,7 @@ jobs:
       - name: "Select self-hosted Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'self-hosted'
         shell: bash
-        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
+        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}" --require-metal
 
       # Same runner-independent literal and RUNNER_TEMP directory as the coverage cache above.
       - name: "Cache Xcode Swift package dependencies"
@@ -3264,7 +3264,7 @@ jobs:
       - name: "Select self-hosted Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'self-hosted'
         shell: bash
-        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
+        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}" --require-metal
 
       - name: "Cache Playground Swift package dependencies"
         uses: actions/cache@v5
@@ -3461,7 +3461,7 @@ jobs:
       - name: "Select self-hosted Xcode 27.2"
         if: runner.environment == 'self-hosted'
         shell: bash
-        run: bash scripts/ci/select-self-hosted-xcode.sh "27.2"
+        run: bash scripts/ci/select-self-hosted-xcode.sh "27.2" --require-metal
 
       - name: "Report toolchain"
         run: xcodebuild -version && xcrun simctl list runtimes iOS

@@ -53,23 +53,37 @@ for package in "${TESTABLE_PACKAGES[@]}"; do
     continue
   fi
 
-  # Find the test binary (the Mach-O executable inside the .xctest bundle)
-  # The bundle name is derived from the Swift package's module name, not the directory name,
-  # so we search dynamically rather than constructing a fixed name.
-  xctest_bundle=$(find "${build_dir}" -maxdepth 1 -name "*PackageTests.xctest" 2>/dev/null | head -1)
-  if [[ -z "$xctest_bundle" ]]; then
-    echo "Warning: no test binary found for ${package}" >&2
-    continue
+  # Find the test binaries (the Mach-O executable inside each .xctest bundle).
+  # The native build system (Swift <= 6.3) links one <Module>PackageTests.xctest; the
+  # swiftbuild system (Swift 6.4 / Xcode 27.2) links one <TestTarget>.xctest per test
+  # target, so collect every bundle and pass the extras to llvm-cov as -object.
+  xctest_bundles=()
+  while IFS= read -r bundle; do
+    xctest_bundles+=("$bundle")
+  done < <(find "${build_dir}" -maxdepth 1 -name "*PackageTests.xctest" 2>/dev/null | sort)
+  if [[ "${#xctest_bundles[@]}" -eq 0 ]]; then
+    while IFS= read -r bundle; do
+      xctest_bundles+=("$bundle")
+    done < <(find "${build_dir}" -maxdepth 1 -name "*.xctest" 2>/dev/null | sort)
   fi
-  bundle_name=$(basename "${xctest_bundle}" .xctest)
-  test_binary="${xctest_bundle}/Contents/MacOS/${bundle_name}"
-  if [[ ! -f "$test_binary" ]]; then
+  binary_args=()
+  for xctest_bundle in ${xctest_bundles[@]+"${xctest_bundles[@]}"}; do
+    bundle_name=$(basename "${xctest_bundle}" .xctest)
+    test_binary="${xctest_bundle}/Contents/MacOS/${bundle_name}"
+    [[ -f "$test_binary" ]] || continue
+    if [[ "${#binary_args[@]}" -eq 0 ]]; then
+      binary_args=("$test_binary")
+    else
+      binary_args+=(-object "$test_binary")
+    fi
+  done
+  if [[ "${#binary_args[@]}" -eq 0 ]]; then
     echo "Warning: no test binary found for ${package}" >&2
     continue
   fi
 
-  # Extract line coverage using llvm-cov export (binary must precede -instr-profile)
-  coverage_json=$(xcrun llvm-cov export "$test_binary" -instr-profile "$profile" -summary-only 2>/dev/null || true)
+  # Extract line coverage using llvm-cov export (binaries must precede -instr-profile)
+  coverage_json=$(xcrun llvm-cov export "${binary_args[@]}" -instr-profile "$profile" -summary-only 2>/dev/null || true)
   if [[ -z "$coverage_json" ]]; then
     echo "Warning: llvm-cov export failed for ${package}" >&2
     continue

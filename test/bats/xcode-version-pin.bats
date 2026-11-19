@@ -14,9 +14,8 @@ setup() {
 }
 
 # Deliberate exceptions, each with its reason. Keys are `<workflow file>:<job id>`.
-#   tvOS and watchOS smokes: no tvOS/watchOS 27.2 simulator runtime is installed on the
-#   self-hosted Mac yet, so these stay on the newest toolchain that has them.
-EXEMPT_JOBS="tvos-simulator-smoke.yml:tvos-smoke-advisory watchos-sim-smoke.yml:watchos-sim-smoke"
+# None today: every job that selects an Xcode, tvOS/watchOS/visionOS included, is on the pin.
+EXEMPT_JOBS=""
 
 # Print `<file>:<job>:<version>` for each Xcode selection in workflow file $1 that is not
 # the pin, resolving matrix.config.xcode and env.XCODE_VERSION references.
@@ -40,7 +39,7 @@ off_pin() {
           const picks = [];
           if (step.uses === "maxim-lobanov/setup-xcode@v1") picks.push(step.with?.["xcode-version"]);
           const run = typeof step.run === "string" ? step.run : "";
-          for (const m of run.matchAll(/select-self-hosted-xcode\.sh(?:\s+--\w+)*(?:\s+"([^"]+)"|\s+([^\s"]+))?/g)) picks.push(m[1] ?? m[2] ?? pin);
+          for (const m of run.matchAll(/select-self-hosted-xcode\.sh(?:\s+--[\w-]+)*(?:\s+"([^"]+)"|\s+(?!--)([^\s"]+))?/g)) picks.push(m[1] ?? m[2] ?? pin);
           if (step.uses === "./.github/actions/ios-simulator-bring-up") picks.push(step.with?.["xcode-version"]);
           for (const raw of picks) {
             const version = resolve(raw, config);

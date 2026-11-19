@@ -6,12 +6,16 @@
 # steps of the job only, so concurrent jobs on the Mac never fight over the
 # global selection.
 #
-# Usage: scripts/ci/select-self-hosted-xcode.sh [--exact] [--print] [<version>]   e.g. 27.2
+# Usage: scripts/ci/select-self-hosted-xcode.sh [--exact] [--print] [--require-metal] [<version>]   e.g. 27.2
 #
 # <version> defaults to the repository pin, AUTOMOBILE_XCODE_VERSION in
 # scripts/ios/xcode_version.sh. --exact disables the same-major fallback below.
 # --print writes only the selected DEVELOPER_DIR to stdout (messages go to stderr);
 # scripts/ios/xcode_version.sh uses it to select the pin for local builds.
+# --require-metal fails unless the selected Xcode has its Metal Toolchain component.
+# Jobs that compile .metal sources pass it, so a self-hosted Mac without the
+# toolchain fails in seconds with the install command instead of downloading
+# ~839 MB inside the job (the component is per Xcode, installed once by the owner).
 #
 # Looks at every Xcode*.app in XCODE_APPLICATIONS_DIR (default /Applications) and
 # picks the one whose CFBundleShortVersionString is <version> or <version>.0.
@@ -27,17 +31,19 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: select-self-hosted-xcode.sh [--exact] [--print] [<version>]" >&2
+  echo "usage: select-self-hosted-xcode.sh [--exact] [--print] [--require-metal] [<version>]" >&2
   exit 2
 }
 
 exact=false
 print_only=false
+require_metal=false
 wanted=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --exact) exact=true ;;
     --print) print_only=true ;;
+    --require-metal) require_metal=true ;;
     *)
       [[ -z "${wanted}" && $1 =~ ^[0-9]+(\.[0-9]+)*$ ]] || usage
       wanted="$1"
@@ -92,6 +98,11 @@ if [[ -z "${selected}" ]]; then
 fi
 
 developer_dir="${selected}/Contents/Developer"
+if [[ "${require_metal}" == true ]] \
+  && ! DEVELOPER_DIR="${developer_dir}" xcrun --sdk iphonesimulator metal --version > /dev/null 2>&1; then
+  echo "::error::Xcode ${wanted} at ${selected} has no Metal Toolchain, which this job needs to compile .metal sources. Install it once on the Mac as the runner user: DEVELOPER_DIR=${developer_dir} xcodebuild -downloadComponent metalToolchain" >&2
+  exit 1
+fi
 if [[ "${print_only}" == true ]]; then
   echo "Selected Xcode ${wanted}: ${developer_dir}" >&2
   echo "${developer_dir}"

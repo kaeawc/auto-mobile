@@ -44,6 +44,8 @@ describe("parseCliArgs", () => {
     expect(options.sinceMs).toBe(NOW - 7 * 86_400_000);
     expect(options.maxApiCalls).toBe(500);
     expect(options.json).toBe(false);
+    expect(options.partialOnStop).toBe(false);
+    expect(parse(["--partial-on-stop"]).partialOnStop).toBe(true);
   });
 
   test("a call budget above 1000 needs --allow-large-api-budget and says why", () => {

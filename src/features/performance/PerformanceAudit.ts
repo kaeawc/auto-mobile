@@ -30,6 +30,8 @@ import {
   PERF_AUDIT_WINDOW_MS,
   computeCpuUsagePercent,
   computeJankWindow,
+  computeWindowFramePercentiles,
+  counterDelta,
   parseJankyFrames,
   parseProcStat,
   type CpuSample,
@@ -43,23 +45,42 @@ export const NO_FRAMES_RENDERED =
 export const NO_FRAME_COUNT =
   "gfxinfo reported no rendered-frame count, so its frame times cannot be checked.";
 
+type FrameTimeFields = Pick<
+  PerformanceMetrics,
+  "p50Ms" | "p90Ms" | "p95Ms" | "p99Ms" | "frameTimeUnmeasured"
+>;
+
+function unmeasuredFrameTime(reason: string): FrameTimeFields {
+  return { p50Ms: null, p90Ms: null, p95Ms: null, p99Ms: null, frameTimeUnmeasured: reason };
+}
+
 /**
- * Frame-time percentiles from one gfxinfo reading. With no rendered frames gfxinfo still prints
- * percentiles, all at its histogram's top bucket (4950ms); they are not measurements, so they are
- * reported as null with the reason instead of failing an idle screen (#17307). A reading without a
- * frame count cannot tell the two apart and is treated the same way.
+ * Frame-time percentiles over the audit window, the same window as the jank counters (#18802).
+ * gfxinfo's printed percentiles cover every frame since its stats were last reset (launch frames
+ * included), so they come from the delta of the two readings' histograms instead. With no frames
+ * in the window gfxinfo's percentiles are not measurements of it, so they are reported as null
+ * with the reason instead of failing an idle screen (#17307). A dump without a histogram falls
+ * back to the closing reading's percentiles when the window rendered frames; a reading without a
+ * frame count cannot tell an idle window from a busy one and is treated as unmeasured.
  */
 function frameTimePercentiles(
+  opening: { stdout: string; counters: GfxCounterSample },
+  closing: { stdout: string; counters: GfxCounterSample },
   metrics: ReturnType<Idle["parseMetrics"]>,
-): Pick<PerformanceMetrics, "p50Ms" | "p90Ms" | "p95Ms" | "p99Ms" | "frameTimeUnmeasured"> {
-  if (!metrics.totalFrames) {
-    return {
-      p50Ms: null,
-      p90Ms: null,
-      p95Ms: null,
-      p99Ms: null,
-      frameTimeUnmeasured: metrics.totalFrames === 0 ? NO_FRAMES_RENDERED : NO_FRAME_COUNT,
-    };
+): FrameTimeFields {
+  const window = computeWindowFramePercentiles(opening.stdout, closing.stdout);
+  if (window) {
+    if (!("p50Ms" in window)) {
+      return unmeasuredFrameTime(NO_FRAMES_RENDERED);
+    }
+    return { p50Ms: window.p50Ms, p90Ms: window.p90Ms, p95Ms: window.p95Ms, p99Ms: window.p99Ms };
+  }
+  const windowFrames = counterDelta(opening.counters.totalFrames, closing.counters.totalFrames);
+  if (windowFrames === null || !metrics.totalFrames) {
+    return unmeasuredFrameTime(metrics.totalFrames === 0 ? NO_FRAMES_RENDERED : NO_FRAME_COUNT);
+  }
+  if (windowFrames === 0) {
+    return unmeasuredFrameTime(NO_FRAMES_RENDERED);
   }
   return {
     p50Ms: metrics.percentile50th,
@@ -279,8 +300,8 @@ export class PerformanceAudit {
 
   /**
    * Collect graphics performance metrics using gfxinfo. Frame-time percentiles
-   * come from the closing reading; jank is the difference between an opening
-   * and a closing reading `PERF_AUDIT_WINDOW_MS` apart (#10094).
+   * and jank both come from the difference between an opening and a closing
+   * reading `PERF_AUDIT_WINDOW_MS` apart (#10094, #18802).
    *
    * Public as a test seam: tests call this directly rather than casting past
    * the type system (#11865).
@@ -300,7 +321,7 @@ export class PerformanceAudit {
       const window = computeJankWindow(opening.counters, closing.counters, elapsedMs);
 
       return {
-        ...frameTimePercentiles(metrics),
+        ...frameTimePercentiles(opening, closing, metrics),
         jankCount: window?.jankPerSecond ?? null,
         missedVsyncCount: window?.missedVsync ?? null,
         slowUiThreadCount: window?.slowUiThread ?? null,

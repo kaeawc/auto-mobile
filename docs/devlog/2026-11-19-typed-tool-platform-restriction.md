@@ -27,7 +27,7 @@ with one `ActionableError` before the Apple platform gate and the handler, and
 
 ## Consequences
 
-The restricted tools' handlers no longer check the platform, and two (`sendBroadcast`,
-`backgroundWork`) now refuse iOS with an error instead of a typed `unsupported` result.
-`test/lint/androidOnlyToolPlatforms.test.ts` fails when an Android-only refusal or description
-names a tool without the restriction.
+The restricted tools' handlers no longer check the platform. `sendBroadcast` and
+`backgroundWork` now refuse iOS with an error instead of a typed `unsupported` result.
+A lint test, `test/lint/androidOnlyToolPlatforms.test.ts`, fails when an Android-only refusal
+or description names a tool without the restriction.

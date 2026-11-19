@@ -21,9 +21,10 @@ A device-aware tool whose handler can only drive some platforms registers them a
 themselves. A handler can still answer `unsupported` for one action on a platform the
 gate admits (for example `killProfile` apply on iOS, whose `list` works anywhere). Those
 checks are not a registry gate, and the list does not reflect them.
-`test/lint/androidOnlyToolPlatforms.test.ts` fails when a `src/` refusal such as
-`<tool> is Android-only` or a description starting `Android:` names a device-aware tool
-that lacks the restriction and is not in its reasoned exemption list
+
+`test/lint/androidOnlyToolPlatforms.test.ts` checks `src/` refusals such as
+`<tool> is Android-only` and descriptions starting `Android:`. It fails when one names a
+device-aware tool that lacks the restriction and is not in its exemption list
 ([decision record](../../devlog/2026-11-19-typed-tool-platform-restriction.md)).
 
 ## Drift check

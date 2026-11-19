@@ -51,7 +51,8 @@ is seed-free, chosen in priority order: `Car[id]`, `CarInstruments[id]`, `AirPla
 `requireCarPlayProjection` probes and refuses capture unless either Car flag is true, reporting the
 identity, black-frame reason and recovery action. Attachment, `displayType == 2` and power-on alone
 are not enough: wireless0 can stay AirPlay-tagged. A positive tag is a readiness signal, not
-verification of a captured image. No `observe` display selector uses this module yet.
+verification of a captured image. `observe({display: "carplay"})` uses this guard before it selects
+the single named CarPlay screen and captures its PNG.
 
 ## Background
 

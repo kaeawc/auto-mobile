@@ -116,6 +116,42 @@ describe("observe tool registration", () => {
     expect(toolNames).toContain("observe");
   });
 
+  test("routes display carplay only on iOS simulators", async () => {
+    const probed: string[] = [];
+    registerObserveTools({
+      carPlay: {
+        projectionProbe: {
+          async probe(deviceId) {
+            probed.push(deviceId);
+            return {
+              found: false,
+              tag: null,
+              displayId: null,
+              displayType: null,
+              identity: null,
+              isCarDisplay: false,
+              isCarInstrumentsDisplay: false,
+            };
+          },
+        },
+      },
+    });
+    const tool = ToolRegistry.getTool("observe")!;
+    const handler = tool.deviceAwareHandler!;
+    const args = tool.schema.parse({ display: "carplay" });
+    const simulatorId = "6B1F3C2E-0000-4000-8000-00000000A7C1";
+    await expect(
+      handler({ name: "iPhone", deviceId: simulatorId, platform: "ios" }, args),
+    ).rejects.toThrow("CarPlay screen was not found");
+    await expect(
+      handler({ name: "Pixel", deviceId: "emulator-5554", platform: "android" }, args),
+    ).rejects.toThrow("requires an iOS simulator");
+    await expect(
+      handler({ name: "iPhone", deviceId: "00008030-001C2D3E1234567A", platform: "ios" }, args),
+    ).rejects.toThrow("requires an iOS simulator");
+    expect(probed).toEqual([simulatorId]);
+  });
+
   test("does not register rawViewHierarchy tool", () => {
     registerObserveTools();
     const toolNames = ToolRegistry.getToolDefinitions().map((t) => t.name);

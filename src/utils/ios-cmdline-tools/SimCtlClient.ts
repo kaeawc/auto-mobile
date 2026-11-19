@@ -69,7 +69,11 @@ import {
   simulatorProfiles,
   type SimulatorDeviceTypeProfileSource,
 } from "./SimulatorDeviceTypeProfiles";
-import { parseSimulatorDisplays, type SimulatorDisplay } from "./SimulatorDisplays";
+import {
+  parseSimulatorScreens,
+  type SimulatorDisplay,
+  type SimulatorScreens,
+} from "./SimulatorDisplays";
 import type { DeviceDisplays } from "../../models/DisplayPanel";
 import { type TransitionalSimulator } from "../../models/TransitionalSimulator";
 import { SimctlUnavailableError } from "./SimctlUnavailableError";
@@ -911,8 +915,16 @@ export class SimCtlClient implements SimCtl {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<SimulatorDisplay[]> {
+    return (await this.enumerateScreens(deviceId, timeoutMs, signal)).integrated;
+  }
+
+  async enumerateScreens(
+    deviceId: string,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<SimulatorScreens> {
     const result = await this.executeCommandArgs(["io", deviceId, "enumerate"], timeoutMs, signal);
-    return parseSimulatorDisplays(result.stdout);
+    return parseSimulatorScreens(result.stdout);
   }
   screenshot(deviceId: string, display?: string, signal?: AbortSignal): Promise<Buffer> {
     return this.simCtlScreenshot.screenshot(deviceId, display, signal);

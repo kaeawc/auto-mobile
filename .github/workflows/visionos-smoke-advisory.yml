@@ -33,6 +33,9 @@ jobs:
           lfs: false
           clean: true
 
+      - name: "Select self-hosted Xcode 27.2"
+        run: bash scripts/ci/select-self-hosted-xcode.sh "27.2"
+
       - name: "Report visionOS runtimes"
         run: xcrun simctl list runtimes | grep -i xrOS || echo "no visionOS runtime installed"
 

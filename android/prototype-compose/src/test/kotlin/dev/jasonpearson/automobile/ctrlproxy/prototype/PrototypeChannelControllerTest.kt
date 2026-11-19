@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import dev.jasonpearson.automobile.protocol.PrototypeChannelLimits
 import java.io.File
 import kotlin.random.Random
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -41,12 +43,17 @@ class PrototypeChannelControllerTest {
     val opened = mutableListOf<FakeConnection>()
     val openedAt = mutableListOf<Long>()
     var failEveryOpen: PrototypeChannelError? = null
+    var throwOnOpens = 0
 
     override fun open(
       request: PrototypeChannelOpenRequest,
       listener: PrototypeChannelListener,
     ): PrototypeChannelConnection {
       openedAt += clock()
+      if (throwOnOpens > 0) {
+        throwOnOpens--
+        throw IllegalStateException("transport down")
+      }
       return FakeConnection(request, listener).also { connection ->
         opened += connection
         failEveryOpen?.let { listener.onClosed(null, null, it) }
@@ -57,20 +64,52 @@ class PrototypeChannelControllerTest {
       get() = opened.last()
   }
 
+  /** One sink call, as [RecordingSink.failOnce] and [RecordingSink.gate] see it. */
+  private data class SinkCall(val kind: String, val channel: String?, val status: String?)
+
   private class RecordingSink : PrototypeChannelSink {
     val states = mutableMapOf<String, JsonObject>()
     val events = mutableListOf<Pair<String, JsonObject>>()
     val runs = mutableListOf<Triple<String, JsonArray, JsonElement>>()
 
+    /** The first call this matches throws instead of landing. */
+    var failOnce: ((SinkCall) -> Boolean)? = null
+
+    /** The first call [gateWhen] matches waits for [gate] before landing. */
+    var gate: CompletableDeferred<Unit>? = null
+    var gateWhen: (SinkCall) -> Boolean = { false }
+
+    private suspend fun intercept(call: SinkCall) {
+      gate
+        ?.takeIf { gateWhen(call) }
+        ?.let {
+          gate = null
+          it.await()
+        }
+      if (failOnce?.invoke(call) == true) {
+        failOnce = null
+        throw IllegalStateException("sink refused $call")
+      }
+    }
+
     override suspend fun state(channel: String, state: JsonObject) {
+      intercept(SinkCall("state", channel, state["status"]?.jsonPrimitive?.content))
       states[channel] = state
     }
 
     override suspend fun event(name: String, data: JsonObject) {
+      intercept(
+        SinkCall(
+          name,
+          data["channel"]?.jsonPrimitive?.content,
+          data["status"]?.jsonPrimitive?.content,
+        ),
+      )
       events += name to data
     }
 
     override suspend fun run(channel: String, actions: JsonArray, event: JsonElement) {
+      intercept(SinkCall("run", channel, null))
       runs += Triple(channel, actions, event)
     }
 
@@ -101,6 +140,7 @@ class PrototypeChannelControllerTest {
     val device = FakeTransport { scope.testScheduler.currentTime }
     val host = FakeTransport { scope.testScheduler.currentTime }
     private var ids = 0
+    val errors = mutableListOf<Throwable>()
     val controller =
       PrototypeChannelController(
         prototypeId = "proto",
@@ -108,6 +148,7 @@ class PrototypeChannelControllerTest {
         sink = sink,
         scope = scope.backgroundScope,
         random = random,
+        onError = { errors += it },
         newId = { "c${++ids}" },
       )
   }
@@ -518,6 +559,196 @@ class PrototypeChannelControllerTest {
     settle()
     assertEquals(listOf("live"), h.sink.runs.map { it.first })
     assertEquals(Json.parseToJsonElement("""{"v":1}"""), h.sink.runs.single().third)
+  }
+
+  @Test
+  fun `a throwing status commit on connect still opens the channel`() = runTest {
+    val h = Harness(this)
+    h.controller.update(mapOf("chat" to websocket))
+    h.sink.failOnce = { it.kind == "state" && it.status == "connecting" }
+    h.controller.show()
+    assertEquals(1, h.host.opened.size)
+    assertEquals(1, h.errors.size)
+    h.host.last.listener.onOpen(null)
+    runCurrent()
+    assertEquals("open", h.sink.status())
+  }
+
+  @Test
+  fun `a throwing status commit on open still drains queued sends`() = runTest {
+    val h = Harness(this)
+    h.controller.update(mapOf("chat" to websocket))
+    h.controller.show()
+    assertNull(h.controller.send("chat", "one"))
+    h.sink.failOnce = { it.kind == PrototypeChannelController.STATUS_EVENT && it.status == "open" }
+    h.host.last.listener.onOpen(null)
+    runCurrent()
+    assertEquals(listOf("one"), h.host.last.sent)
+    assertEquals(1, h.errors.size)
+    assertNull(h.controller.send("chat", "two"))
+    assertEquals(listOf("one", "two"), h.host.last.sent)
+  }
+
+  @Test
+  fun `a throwing status commit on end still installs the reconnect timer`() = runTest {
+    val h = Harness(this)
+    h.controller.update(mapOf("chat" to websocket))
+    h.controller.show()
+    h.host.last.listener.onOpen(null)
+    runCurrent()
+    h.sink.failOnce = { it.kind == "state" && it.status == "reconnecting" }
+    h.host.last.listener.onClosed(1006, "", null)
+    settle()
+    assertEquals(2, h.host.opened.size)
+    assertEquals(1, h.errors.size)
+  }
+
+  @Test
+  fun `a throwing commit while reconciling a patch still connects the replacement`() = runTest {
+    val h = Harness(this)
+    h.controller.update(mapOf("chat" to websocket))
+    h.controller.show()
+    h.host.last.listener.onOpen(null)
+    runCurrent()
+    h.sink.failOnce = { it.kind == "state" && it.status == "idle" }
+    h.controller.update(mapOf("chat" to websocket.copy(url = "wss://example.com/v2")))
+    assertEquals(2, h.host.opened.size)
+    assertEquals("wss://example.com/v2", h.host.last.request.url)
+    assertEquals(1, h.errors.size)
+  }
+
+  @Test
+  fun `show starts every on-show channel past one whose commit throws`() = runTest {
+    val h = Harness(this)
+    h.controller.update(mapOf("chat" to websocket, "feed" to websocket))
+    h.sink.failOnce = { it.channel == "chat" }
+    h.controller.show()
+    assertEquals(listOf("chat", "feed"), h.host.opened.map { it.request.channel })
+    assertEquals("connecting", h.sink.status("feed"))
+  }
+
+  @Test
+  fun `a flush runs every effect past one that throws and publishes the counters`() = runTest {
+    val h = Harness(this)
+    h.controller.update(
+      mapOf(
+        "chat" to
+          channel(
+            """{"kind":"websocket","url":"wss://e.com","routes":[
+              {"actions":[{"type":"increment","key":"n"}]}]}""",
+          ),
+      ),
+    )
+    h.controller.show()
+    h.host.last.listener.onOpen(null)
+    h.host.last.listener.onFrame("""{"n":1}""", null, null)
+    h.host.last.listener.onFrame("""{"n":2}""", null, null)
+    runCurrent()
+    h.sink.failOnce = { it.kind == "run" }
+    advanceTimeBy(PrototypeChannelLimits.flushMs.toLong() + 1)
+    assertEquals(listOf(Json.parseToJsonElement("""{"n":2}""")), h.sink.runs.map { it.third })
+    assertEquals(1, h.errors.size)
+    assertEquals("2", h.sink.states.getValue("chat")["framesIn"]?.jsonPrimitive?.content)
+  }
+
+  @Test
+  fun `a bound state write is not coalesced away by a later frame`() = runTest {
+    val h = Harness(this)
+    h.controller.update(
+      mapOf(
+        "chat" to
+          channel(
+            """{"kind":"websocket","url":"wss://e.com","routes":[
+              {"actions":[{"type":"setState","key":"latest","value":{"event":""}}]}]}""",
+          ),
+      ),
+    )
+    h.controller.show()
+    h.host.last.listener.onOpen(null)
+    // The runtime may refuse the second binding, so the valid scalar before it must still run.
+    h.host.last.listener.onFrame("2", null, null)
+    h.host.last.listener.onFrame("""{"invalid":true}""", null, null)
+    advanceTimeBy(PrototypeChannelLimits.flushMs.toLong() + 1)
+    assertEquals(
+      listOf("2", """{"invalid":true}""").map(Json::parseToJsonElement),
+      h.sink.runs.map { it.third },
+    )
+  }
+
+  @Test
+  fun `a transport that throws on open backs off and retries`() = runTest {
+    val h = Harness(this)
+    h.host.throwOnOpens = 2
+    h.controller.update(mapOf("chat" to websocket))
+    h.controller.show()
+    assertEquals("reconnecting", h.sink.status())
+    assertEquals(
+      PrototypeChannelError.NETWORK,
+      h.sink.states.getValue("chat")["error"]?.jsonObject?.get("code")?.jsonPrimitive?.content,
+    )
+    settle()
+    assertEquals(3, h.host.openedAt.size)
+    h.host.last.listener.onOpen(null)
+    runCurrent()
+    assertEquals("open", h.sink.status())
+    assertEquals(listOf("connecting", "reconnecting", "open"), h.sink.statuses())
+  }
+
+  @Test
+  fun `callbacks from a connection that ended are ignored`() = runTest {
+    val h = Harness(this)
+    h.controller.update(mapOf("chat" to websocket))
+    h.controller.show()
+    val first = h.host.last
+    first.listener.onOpen(null)
+    runCurrent()
+    first.listener.onClosed(1006, "", null)
+    first.listener.onOpen(null)
+    first.listener.onFrame("{}", null, null)
+    runCurrent()
+    assertEquals("reconnecting", h.sink.status())
+    assertEquals(1, h.sink.attempt())
+    assertEquals(listOf("connecting", "open", "reconnecting"), h.sink.statuses())
+  }
+
+  @Test
+  fun `nothing is sent once close starts while a status commit is pending`() = runTest {
+    val h = Harness(this)
+    h.controller.update(mapOf("chat" to websocket))
+    h.controller.show()
+    assertNull(h.controller.send("chat", "queued"))
+    val gate = CompletableDeferred<Unit>()
+    h.sink.gate = gate
+    h.sink.gateWhen = { it.kind == "state" && it.status == "open" }
+    val connection = h.host.last
+    connection.listener.onOpen(null)
+    runCurrent()
+    val closing = launch { h.controller.close() }
+    runCurrent()
+    gate.complete(Unit)
+    closing.join()
+    assertTrue(connection.sent.isEmpty())
+    assertEquals(PrototypeChannelController.GOING_AWAY, connection.closedWith)
+  }
+
+  @Test
+  fun `close still cleans up when its caller is cancelled waiting for the lock`() = runTest {
+    val h = Harness(this)
+    h.controller.update(mapOf("chat" to websocket))
+    h.controller.show()
+    val gate = CompletableDeferred<Unit>()
+    h.sink.gate = gate
+    h.sink.gateWhen = { it.kind == "state" && it.status == "open" }
+    val connection = h.host.last
+    connection.listener.onOpen(null)
+    runCurrent()
+    val closing = launch { h.controller.close() }
+    runCurrent()
+    closing.cancel()
+    gate.complete(Unit)
+    runCurrent()
+    assertEquals(PrototypeChannelController.GOING_AWAY, connection.closedWith)
+    assertNull(h.controller.state("chat"))
   }
 
   private fun vectors(name: String): JsonObject {

@@ -56,7 +56,7 @@ class SetTextAcknowledgementOrderTest {
     assertTrue(
       "the service's settled-hierarchy hook must publish through the hierarchy controller",
       "hierarchyController.publishSettledHierarchy()" in
-        functionBody(serviceSource, "override suspend fun publishSettledHierarchy()"),
+        hostFunctionBody("override suspend fun publishSettledHierarchy()"),
     )
     val hierarchySource = KotlinSourceScan.maskLiteralsAndComments(readHierarchySource())
     assertTrue(
@@ -374,6 +374,15 @@ class SetTextAcknowledgementOrderTest {
   }
 
   private fun readCtrlProxySource(): String = locateSource("CtrlProxy.kt").readText()
+
+  /** A body from the service's forwarding controller hosts, split out of CtrlProxy (#11876). */
+  private fun hostFunctionBody(signature: String): String =
+    functionBody(
+      KotlinSourceScan.maskLiteralsAndComments(
+        locateSource("CtrlProxyControllerHosts.kt").readText(),
+      ),
+      signature,
+    )
 
   private fun readTextInputSource(): String = locateSource("TextInputController.kt").readText()
 

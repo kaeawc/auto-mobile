@@ -58,7 +58,7 @@ export const TOOL_EMOJI: Readonly<Record<string, ToolEmojiEntry>> = Object.freez
   launchApp: tool("🚀"),
   terminateApp: tool("🛑"),
   crashApp: tool("💥"),
-  appLifecycle: tool("🔄"),
+  appLifecycle: tool("🔄", "docs/using/app-lifecycle.md"),
   installApp: tool("📲"),
   uninstallApp: tool("🗑️"),
   inspectPackageSigning: tool("🔏"),

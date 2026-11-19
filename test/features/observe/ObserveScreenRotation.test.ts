@@ -82,7 +82,8 @@ test.each([
   ["old runner portrait", portraitHierarchy(), 0, 402, 874],
   ["Duo pixel-settled landscape", issue8379Hierarchy(), 1, 951, 669],
   ["runner landscape right", { ...issue8379Hierarchy(), rotation: 3 }, 3, 951, 669],
-  ["Duo interface portrait", { ...issue8379Hierarchy(), rotation: 0 }, 0, 951, 669],
+  // A stale runner portrait on the landscape-shaped inner panel resolves from the shape (#18831).
+  ["Duo stale interface portrait", { ...issue8379Hierarchy(), rotation: 0 }, 1, 951, 669],
   ["fixed portrait display", { ...portraitHierarchy(), rotation: 1 }, 0, 402, 874],
 ] as const)(
   "collects %s and preserves it through execute/cache/device reads",

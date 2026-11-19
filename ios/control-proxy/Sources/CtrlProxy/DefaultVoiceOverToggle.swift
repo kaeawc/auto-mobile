@@ -52,7 +52,7 @@ struct DefaultVoiceOverToggle: VoiceOverToggling {
     @MainActor
     func setVoiceOver(enabled: Bool) throws {
         #if canImport(XCTest) && os(iOS)
-            let settings = XCUIApplication(bundleIdentifier: Self.settingsBundleId)
+            let settings = XCUIApplication.withoutUIInterruptions(bundleIdentifier: Self.settingsBundleId)
             settings.activate()
             if let url = URL(string: Self.accessibilityDeepLink) {
                 XCUIDevice.shared.system.open(url)

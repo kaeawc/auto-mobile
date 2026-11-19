@@ -40,7 +40,7 @@ extension ElementLocator {
         /// Snapshot once and tap captured screen coordinates; never query live system dialogs.
         func answerProtoViewerConfirmation(cleaningUp: Bool = false) throws {
             try catchingObjCException {
-                let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+                let springboard = XCUIApplication.withoutUIInterruptions(bundleIdentifier: "com.apple.springboard")
                 let snapshot = try springboard.snapshot()
                 for alert in self.collectAlertElements(from: snapshot) {
                     let descendants = self.protoViewerDialogNodes(alert)
@@ -198,7 +198,8 @@ extension ElementLocator {
             ) = try catchingObjCException {
                 let capture = DeviceRotation.capture { () -> ([(XCUIElementSnapshot, Int?)], CGRect) in
                     guard runSnapshot else { return ([], .zero) }
-                    let freshSpringboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+                    let freshSpringboard = XCUIApplication
+                        .withoutUIInterruptions(bundleIdentifier: "com.apple.springboard")
                     guard let snapshot = try? freshSpringboard.snapshot() else { return ([], .zero) }
                     let mainDisplayId = (ObjCExceptionCatcher_displayInventory() ?? [])
                         .first { $0["isMain"]?.boolValue == true }?["displayId"]?.uint64Value
@@ -245,7 +246,7 @@ extension ElementLocator {
             guard let bundleId = foregroundBundleId else { return nil }
             do {
                 return try catchingObjCException {
-                    XCUIApplication(bundleIdentifier: bundleId).windows.firstMatch.frame
+                    XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId).windows.firstMatch.frame
                 }
             } catch {
                 Logger(subsystem: "dev.jasonpearson.automobile", category: "ElementLocator")

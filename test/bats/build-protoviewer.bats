@@ -21,6 +21,13 @@ setup() {
     "${FIXTURE}/ios/prototype-agent/Viewer/ViewerApp.swift" \
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/Core.swift" \
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgent/Agent.swift"
+  mkdir -p "${FIXTURE}/scripts/store-listing"
+  cat > "${FIXTURE}/scripts/store-listing/generate-icons.ts" <<'TS'
+import { mkdirSync, writeFileSync } from "node:fs";
+const out = process.argv[process.argv.indexOf("--out") + 1];
+mkdirSync(`${out}/ios/AppIcon.appiconset`, { recursive: true });
+writeFileSync(`${out}/ios/AppIcon.appiconset/AppIcon-1024.png`, "png");
+TS
   export BUILD_LOG="${BATS_TEST_TMPDIR}/build.log"
   cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -44,7 +51,7 @@ elif [[ "$3" == swiftc ]]; then
   printf 'slice\n' > "$2"
 else
   [[ "$1 $2 $3" == '--sdk macosx swift' ]]
-  app="${!#}"
+  app="${*: -2:1}"
   touch "$app/ProtoViewerIcon60x60@2x.png" "$app/ProtoViewerIcon60x60@3x.png"
 fi
 SCRIPT

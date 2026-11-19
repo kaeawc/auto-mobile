@@ -1,8 +1,10 @@
-import type {
-  AppLifecycleAction,
-  AppLifecycleResult,
-  AppTrimMemoryLevel,
-  BootedDevice,
+import {
+  isAndroidTrimMemoryLevel,
+  type AppLifecycleAction,
+  type AppLifecycleResult,
+  type AppLifecycleTrimLevel,
+  type AppTrimMemoryLevel,
+  type BootedDevice,
 } from "../../models";
 import {
   defaultAdbClientFactory,
@@ -23,7 +25,11 @@ import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { HomeScreen } from "./HomeScreen";
-import { IosAppLifecycle, type IosAppProcessControl } from "./IosAppLifecycle";
+import {
+  IosAppLifecycle,
+  type IosAppProcessControl,
+  type IosMemoryWarningDependencies,
+} from "./IosAppLifecycle";
 import {
   DefaultDeviceWindowCacheInvalidator,
   type DeviceWindowCacheInvalidator,
@@ -45,13 +51,15 @@ export interface AppLifecycleDependencies {
   cacheInvalidator?: DeviceWindowCacheInvalidator;
   /** iOS process lookup and SIGKILL (#14098); defaults to simctl or devicectl for the device. */
   iosProcesses?: IosAppProcessControl;
+  /** iOS simulator memory warning file and foreground read (#18754). */
+  iosMemoryWarning?: IosMemoryWarningDependencies;
 }
 export interface AppLifecycleExecutionOptions {
   signal?: AbortSignal;
   /** Called immediately before a mutating operation, including one that later fails. */
   onMutation?: () => void;
-  /** `onTrimMemory` level for the trimMemory action; required for it and rejected for the others. */
-  trimLevel?: AppTrimMemoryLevel;
+  /** Level for the trimMemory action; required for it and rejected for the others. */
+  trimLevel?: AppLifecycleTrimLevel;
 }
 
 /** `am send-trim-memory` level names; the shell calls `TRIM_MEMORY_UI_HIDDEN` HIDDEN. */
@@ -110,7 +118,7 @@ export function describeTrimFailure(
 function trimArgumentError(
   base: AppLifecycleResult,
   action: AppLifecycleAction,
-  level: AppTrimMemoryLevel | undefined,
+  level: AppLifecycleTrimLevel | undefined,
 ): AppLifecycleResult | null {
   if (action === "trimMemory" && level === undefined) {
     return {
@@ -157,6 +165,7 @@ export class AppLifecycle {
             timer: this.timer,
             cacheInvalidator: this.cacheInvalidator,
             control: dependencies.iosProcesses,
+            memoryWarning: dependencies.iosMemoryWarning,
           })
         : null;
   }
@@ -208,7 +217,11 @@ export class AppLifecycle {
       return { ...base, userId, errorCode: "app_not_running", error: `${appId} is not running` };
     }
     const target = { base: { ...base, userId }, userId, pidBefore };
-    if (action === "trimMemory" && options.trimLevel) {
+    if (
+      action === "trimMemory" &&
+      options.trimLevel &&
+      isAndroidTrimMemoryLevel(options.trimLevel)
+    ) {
       return this.trimMemory(target, options.trimLevel, signal);
     }
     return action === "background"
@@ -267,7 +280,7 @@ export class AppLifecycle {
   private initialResult(
     appId: string,
     action: AppLifecycleAction,
-    trimLevel: AppTrimMemoryLevel | undefined,
+    trimLevel: AppLifecycleTrimLevel | undefined,
   ): AppLifecycleResult {
     return {
       success: false,
@@ -294,7 +307,15 @@ export class AppLifecycle {
         error: `${appId} is not a valid Android package name`,
       };
     }
-    return trimArgumentError(base, action, options.trimLevel);
+    const level = options.trimLevel;
+    if (level !== undefined && !isAndroidTrimMemoryLevel(level)) {
+      return {
+        ...base,
+        errorCode: "trim_level_not_applicable",
+        error: `${level} is for iOS simulators; send an Android onTrimMemory level, e.g. COMPLETE or RUNNING_CRITICAL`,
+      };
+    }
+    return trimArgumentError(base, action, level);
   }
 
   private async isForeground(

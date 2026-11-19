@@ -271,6 +271,7 @@ nav:
           - "Keystore state": using/keystore-test-state.md
           - "Keystore metadata": using/keystore-metadata.md
           - "Device condition fixtures": using/device-condition.md
+          - "App lifecycle": using/app-lifecycle.md
           - "Kill profiles": using/kill-profiles.md
           - "Manufacturer profiles": using/oem-personas.md
           - "SDK capabilities": using/sdk-capabilities.md

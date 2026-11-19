@@ -37,6 +37,14 @@ until you turn on **Allow network for imported prototypes** (off by default). Wh
 
 Treat an imported prototype like any file you open: turn the switch on only for prototypes you trust.
 
+## Camera and microphone
+
+The Android app declares camera and microphone permissions for prototypes that use them. It asks
+only when an open prototype requests that permission, and the prototype can use it only while it is
+on screen. Nothing it captures is sent anywhere by the app. If you decline or revoke the
+permission, the prototype reports it as denied. If you decline it a second time, Android stops
+asking and the prototype reports it as blocked until you allow it in system settings.
+
 ## iOS privacy manifests
 
 The library target `AutoMobilePrototype` and the ProtoViewer app each carry a
@@ -84,14 +92,16 @@ docs site is published, entered in App Store Connect and linked from the in-app 
 
 Reasoning: no data leaves the device on the app's own behalf. Network requests that an imported
 prototype makes, off by default and under your control, go directly to the host that prototype names
-and are not collected by us. Declared permissions: `INTERNET` and `ACCESS_LOCAL_NETWORK` (requested
-only when you enable imported-prototype networking). Play shows the "no data collected" summary
+and are not collected by us. Declared permissions include `INTERNET`, `ACCESS_LOCAL_NETWORK`
+(requested only when you enable imported-prototype networking), and `CAMERA` and `RECORD_AUDIO`
+(requested only when an open prototype asks). Play shows the "no data collected" summary
 only when the privacy policy URL on the listing points to this page.
 
 ## Verifying before a release
 
 - iOS: archive ProtoViewer, run Xcode's `Generate Privacy Report` and confirm there are no
   missing-reason warnings. The report merges the app and library manifests.
-- Android: confirm the merged manifest still has only `INTERNET` and `ACCESS_LOCAL_NETWORK`, and
+- Android: confirm the merged manifest's permissions match `EXPECTED_PERMISSIONS` in
+  `android/protoviewer/src/test/kotlin/dev/jasonpearson/automobile/protoviewer/ManifestTest.kt`, and
   that `android/protoviewer/src/main/res/xml/data_extraction_rules.xml` excludes every domain.
 - Re-check the table above against `bun scripts/ios/check-privacy-manifests.ts`.

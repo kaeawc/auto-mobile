@@ -5,7 +5,12 @@ import type { PlistReader, PlistWriter } from "../../../../utils/ios-cmdline-too
 import { logger } from "../../../../utils/logger";
 import { prototypeContractPatterns } from "../../prototypeContractPatterns";
 import type { IconRenderer } from "../../ios/iosPrototypeIconRenderer";
-import type { InstallerFileSystem, TemplateProvider } from "../../ios/iosPrototypeInstaller";
+import {
+  FACE_ID_USAGE_KEY,
+  faceIdUsageString,
+  type InstallerFileSystem,
+  type TemplateProvider,
+} from "../../ios/iosPrototypeInstaller";
 import type {
   DisposableAppIcon,
   DisposableAppStamper,
@@ -109,6 +114,11 @@ export class IosDisposableAppStamper implements DisposableAppStamper {
     }
   }
 
+  async release(artifactPath: string): Promise<void> {
+    // The stamped bundle is the only thing in its mkdtemp directory.
+    await this.removeFailedStamp(path.dirname(artifactPath));
+  }
+
   private async rewritePlist(
     app: string,
     input: DisposableAppStampInput,
@@ -124,6 +134,7 @@ export class IosDisposableAppStamper implements DisposableAppStamper {
     if (typeof version !== "string" || !version.trim()) {
       throw new ActionableError("Template Info.plist must specify an app version.");
     }
+    const faceId = faceIdUsageString(input.spec, plist[FACE_ID_USAGE_KEY]);
     for (const key of Object.keys(plist)) {
       if (/^NS.*UsageDescription$/.test(key) || key === "UIBackgroundModes") {
         delete plist[key];
@@ -138,6 +149,7 @@ export class IosDisposableAppStamper implements DisposableAppStamper {
     }
     await this.deps.plist.writeXmlFromJson(plistPath, {
       ...plist,
+      ...(faceId === undefined ? {} : { [FACE_ID_USAGE_KEY]: faceId }),
       ...usageDescriptions,
       CFBundleIdentifier: input.appId,
       CFBundleDisplayName: input.label,

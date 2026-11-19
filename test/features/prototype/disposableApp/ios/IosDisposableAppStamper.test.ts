@@ -123,6 +123,45 @@ describe("IosDisposableAppStamper", () => {
     expect(icons.inputs).toEqual([]);
   });
 
+  test("keeps the template Face ID string only for a spec that declares the biometric module", async () => {
+    const { stamper, plist } = harness();
+    for (const [biometricSpec, expected] of [
+      [{ id: "f", requires: { platform: ["biometric"] } }, "Template Face ID"],
+      [{ id: "f" }, undefined],
+    ] as const) {
+      await stamper.stamp({
+        appId,
+        slug: "feedly",
+        label: "Feedly",
+        spec: biometricSpec,
+        template: selectDisposableAppTemplate(biometricSpec, await stamper.templates()),
+        declarations: disposableAppDeclarations(biometricSpec),
+      });
+      expect(plist.written?.value.NSFaceIDUsageDescription).toBe(expected);
+    }
+  });
+
+  test("falls back to the default Face ID string when the template has none", async () => {
+    const { stamper, plist } = harness();
+    delete plist.value?.NSFaceIDUsageDescription;
+    const biometricSpec = { id: "f", requires: { platform: ["biometric"] } };
+    await stamper.stamp({
+      appId,
+      slug: "feedly",
+      label: "Feedly",
+      spec: biometricSpec,
+      template: selectDisposableAppTemplate(biometricSpec, await stamper.templates()),
+      declarations: disposableAppDeclarations(biometricSpec),
+    });
+    expect(plist.written?.value.NSFaceIDUsageDescription).toContain("authenticate");
+  });
+
+  test("release removes the temporary directory holding the stamped bundle", async () => {
+    const { stamper, files } = harness();
+    await stamper.release(path.join("tmp", "stamp", "PrototypeViewer.app"));
+    expect(files.removed).toEqual([path.join("tmp", "stamp")]);
+  });
+
   test.each(["CFBundleIdentifier", "NSUnknownUsageDescription"])(
     "rejects the usage-description key %s before copying",
     async (key) => {

@@ -80,7 +80,7 @@ describe("registerPerformanceTraceSessionCleanup (#18688)", () => {
     expect(stopSignals).toEqual([undefined]);
   });
 
-  test("other sessions, other devices, upgrades and replaced devices are left alone", async () => {
+  test("other sessions, other devices and upgrades are left alone", async () => {
     const { traces, sessions, stops } = setup();
     await traces.start(deviceA, { ...trace, ownerSessionUuid: "s-1" });
     await traces.start(deviceB, trace);
@@ -88,11 +88,24 @@ describe("registerPerformanceTraceSessionCleanup (#18688)", () => {
     sessions.unbind("s-2", deviceA.deviceId);
     sessions.unbind("s-1", deviceB.deviceId);
     sessions.release("s-1", deviceA.deviceId, true);
-    sessions.release("s-1", deviceA.deviceId, false, true);
     await sessions.settle();
 
     expect(sessions.pendingCleanups).toEqual([]);
     expect(stops).toEqual([]);
     expect(traces.activeTraceIds()).toEqual(["trace-t-1", "trace-t-2"]);
+  });
+
+  test("a replaced device drops the session's trace without signalling it", async () => {
+    const { traces, sessions, stops } = setup();
+    await traces.start(deviceA, { ...trace, ownerSessionUuid: "s-1" });
+    await traces.start(deviceB, trace);
+
+    sessions.release("s-1", deviceA.deviceId, false, true);
+    await sessions.settle();
+
+    expect(sessions.pendingCleanups).toEqual([]);
+    expect(stops).toEqual([]);
+    expect(traces.activeTraceIds()).toEqual(["trace-t-2"]);
+    await expect(traces.start(deviceA, trace)).resolves.toMatchObject({ traceId: "trace-t-3" });
   });
 });

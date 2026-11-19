@@ -177,6 +177,19 @@ export class PerformanceTraceManager {
     );
   }
 
+  /**
+   * Drop, without signalling, the traces a session owns on a device whose identity was replaced:
+   * their recorder went with the old device, and its pid means nothing on the new one.
+   */
+  forgetSessionTracesOnDevice(sessionUuid: string, deviceId: string): string[] {
+    const forgotten = [...this.active.values()].filter(
+      (trace) =>
+        trace.options.ownerSessionUuid === sessionUuid && trace.device.deviceId === deviceId,
+    );
+    forgotten.forEach((trace) => this.active.delete(trace.traceId));
+    return forgotten.map((trace) => trace.traceId);
+  }
+
   /** Stop every trace on a released or removed device. */
   async stopTracesOnDevice(deviceId: string): Promise<void> {
     await this.stopMatching((trace) => trace.device.deviceId === deviceId);

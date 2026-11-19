@@ -7,7 +7,7 @@ import type { SessionManager, SessionReleaseOptions } from "./sessionManager";
 /** The slice of the trace manager the session cleanup drives. */
 export type PerformanceTraceSessionStopper = Pick<
   PerformanceTraceManager,
-  "activeTraceIds" | "lookup" | "stopSessionTracesOnDevice"
+  "activeTraceIds" | "lookup" | "stopSessionTracesOnDevice" | "forgetSessionTracesOnDevice"
 >;
 
 export interface PerformanceTraceSessionCleanupOptions {
@@ -50,9 +50,11 @@ export function registerPerformanceTraceSessionCleanup(
       return;
     }
     if (releaseOptions?.deviceIdentityReplaced) {
-      // A different device now answers on this serial; signalling the old pid there is unsafe.
+      // A different device now answers on this serial; signalling the old pid there is unsafe,
+      // but the old entry must go so a trace can start on the replacement.
+      const forgotten = manager.forgetSessionTracesOnDevice(sessionId, deviceId);
       logger.info(
-        `[performanceTrace] Session ${sessionId}'s ${deviceId} was replaced; not stopping its trace`,
+        `[performanceTrace] Session ${sessionId}'s ${deviceId} was replaced; dropped ${forgotten.join(", ")} without signalling`,
       );
       return;
     }

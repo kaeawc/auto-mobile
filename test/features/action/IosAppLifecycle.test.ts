@@ -212,11 +212,13 @@ describe("iOS appLifecycle (#14098)", () => {
     });
   });
 
-  test("trimMemory and malformed bundle ids are refused without touching the device", async () => {
+  test("physical trimMemory and malformed bundle ids are refused without touching the device", async () => {
     const { control, events } = fakeControl([{ pid: 1 }]);
-    const h = harness(SIM, control);
+    const h = harness(PHONE, control);
 
-    expect(await h.lifecycle.execute(APP, "trimMemory", { trimLevel: "COMPLETE" })).toMatchObject({
+    expect(
+      await h.lifecycle.execute(APP, "trimMemory", { trimLevel: "memoryWarning" }),
+    ).toMatchObject({
       success: false,
       supported: false,
       mechanism: "unsupported",

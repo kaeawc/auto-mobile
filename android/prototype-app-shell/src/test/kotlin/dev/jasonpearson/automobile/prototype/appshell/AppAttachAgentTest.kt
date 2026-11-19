@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeEventKind
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import java.io.IOException
+import java.util.concurrent.Executor
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
@@ -94,7 +95,24 @@ class AppAttachAgentTest {
   private fun event(sequence: Long) =
     PrototypeEvent(0, "panel", sequence, PrototypeEventKind.EMIT, null, null, emptyMap())
 
-  private fun TestScope.process(journal: AttachJournal, appInstanceId: String? = null) =
+  /** Holds journal writes until the test runs them, standing in for the background thread. */
+  private class ManualExecutor : Executor {
+    val tasks = ArrayDeque<Runnable>()
+
+    override fun execute(command: Runnable) {
+      tasks.addLast(command)
+    }
+
+    fun runAll() {
+      while (tasks.isNotEmpty()) tasks.removeFirst().run()
+    }
+  }
+
+  private fun TestScope.process(
+    journal: AttachJournal,
+    appInstanceId: String? = null,
+    executor: Executor = Executor(Runnable::run),
+  ) =
     AppAttachProcess(
       "secret",
       backgroundScope,
@@ -102,14 +120,84 @@ class AppAttachAgentTest {
       clock = { testScheduler.currentTime },
       log = {},
       journal = journal,
+      journalExecutor = executor,
     )
+
+  private fun Connection.sequences() =
+    written.drop(1).map { it.getValue("sequence").jsonPrimitive.long }
+
+  @Test
+  fun `journal writes leave the caller thread and cost at most one rewrite per event`() = runTest {
+    val journal = MemoryJournal()
+    val executor = ManualExecutor()
+    val process = process(journal, "test-instance", executor)
+    assertEquals(0, journal.writes)
+    executor.runAll()
+    assertEquals(1, journal.writes)
+
+    process.agent.emit(event(process.nextSequence()))
+    assertEquals(1, journal.writes)
+    assertEquals(1, executor.tasks.size)
+    executor.runAll()
+    assertEquals(2, journal.writes)
+
+    repeat(3) { process.agent.emit(event(process.nextSequence())) }
+    assertEquals(1, executor.tasks.size)
+    executor.runAll()
+    assertEquals(3, journal.writes)
+    assertEquals(4L, journal.state?.lastSequence)
+    assertEquals(listOf(1L, 2L, 3L, 4L), journal.state?.pending?.map { it.sequence })
+  }
+
+  @Test
+  fun `an event reaches the host only after the journal holding its sequence is saved`() = runTest {
+    val journal = MemoryJournal()
+    val executor = ManualExecutor()
+    val process = process(journal, "test-instance", executor)
+    executor.runAll()
+    val connection = Connection().also { it.hello() }
+    backgroundScope.launch { process.agent.serve(connection) }
+    runCurrent()
+    assertEquals(1, connection.written.size)
+
+    process.agent.emit(event(process.nextSequence()))
+    runCurrent()
+    assertEquals(1, connection.written.size)
+    executor.runAll()
+    runCurrent()
+    assertEquals(listOf(1L), connection.sequences())
+    assertEquals(1L, journal.state?.lastSequence)
+  }
+
+  @Test
+  fun `status exposing an unsaved sequence flushes the journal before it is sent`() = runTest {
+    val journal = MemoryJournal()
+    val executor = ManualExecutor()
+    val process = process(journal, "test-instance", executor)
+    executor.runAll()
+    val connection = Connection().also { it.hello() }
+    backgroundScope.launch { process.agent.serve(connection) }
+    runCurrent()
+
+    assertEquals(1L, process.nextSequence())
+    assertTrue(executor.tasks.isEmpty())
+    connection.send("""{"type":"get_prototype_status","requestId":"status"}""")
+    runCurrent()
+    assertEquals(1, connection.written.size)
+    assertEquals(1, executor.tasks.size)
+    executor.runAll()
+    runCurrent()
+    assertEquals(1L, journal.state?.lastSequence)
+    val status = connection.written.last().getValue("status").jsonObject
+    assertEquals(1L, status.getValue("lastSequence").jsonPrimitive.long)
+  }
 
   @Test
   fun `restarted process replays only events newer than the hello acknowledgement`() = runTest {
     val journal = MemoryJournal()
     val original = process(journal, "test-instance")
     repeat(3) { original.agent.emit(event(original.nextSequence())) }
-    assertEquals(7, journal.writes)
+    assertEquals(4, journal.writes)
     assertEquals(listOf(1L, 2L, 3L), journal.state?.pending?.map { it.sequence })
 
     val restored = process(journal)
@@ -126,14 +214,14 @@ class AppAttachAgentTest {
       connection.written.drop(1).map { it.getValue("sequence").jsonPrimitive.long },
     )
     assertEquals(listOf(2L, 3L), journal.state?.pending?.map { it.sequence })
-    assertEquals(8, journal.writes)
+    assertEquals(5, journal.writes)
     connection.send("""{"type":"ack","sequence":3,"appInstanceId":"test-instance"}""")
     runCurrent()
     assertEquals(emptyList<PrototypeEvent>(), journal.state?.pending)
-    assertEquals(9, journal.writes)
+    assertEquals(6, journal.writes)
     connection.send("""{"type":"ack","sequence":3,"appInstanceId":"test-instance"}""")
     runCurrent()
-    assertEquals(9, journal.writes)
+    assertEquals(6, journal.writes)
   }
 
   @Test
@@ -143,7 +231,7 @@ class AppAttachAgentTest {
     repeat(205) { original.agent.emit(event(original.nextSequence())) }
     assertEquals((6L..205L).toList(), journal.state?.pending?.map { it.sequence })
     assertEquals(5L, journal.state?.dropped)
-    assertEquals(411, journal.writes)
+    assertEquals(206, journal.writes)
 
     val restored = process(journal)
     val connection = Connection().also { it.hello() }
@@ -167,12 +255,13 @@ class AppAttachAgentTest {
       assertEquals("test-instance:1", original.nextShowingId())
       assertEquals("test-instance:2", original.nextShowingId())
       original.agent.emit(event(original.nextSequence()))
-      assertEquals(2L, original.nextSequence()) // A kill can happen before this event is emitted.
+      // A kill before this event is emitted loses only a sequence the host never saw.
+      assertEquals(2L, original.nextSequence())
 
       val restored = process(journal)
       assertEquals(original.appInstanceId, restored.appInstanceId)
-      assertEquals(2L, restored.lastSequence)
-      assertEquals(3L, restored.nextSequence())
+      assertEquals(1L, restored.lastSequence)
+      assertEquals(2L, restored.nextSequence())
       assertNull(restored.showingId)
       assertFalse(restored.status().getValue("shown").jsonPrimitive.boolean)
       assertEquals("test-instance:3", restored.nextShowingId())

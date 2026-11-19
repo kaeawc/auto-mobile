@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.prototype.appshell
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import java.util.UUID
+import java.util.concurrent.Executor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.json.*
 
@@ -16,8 +17,12 @@ internal interface AttachEventLedger {
   fun nextShowingId(): String
 }
 
-/** Retains delivery independently of the UI; tests inject scope, identity and listener startup. */
-@Suppress("LongParameterList") // Independent test seams; the journal is the only new one.
+/**
+ * Retains delivery independently of the UI; tests inject scope, identity and listener startup.
+ * Journal writes run on [journalExecutor]; frames reach the host only after the state they expose
+ * is saved.
+ */
+@Suppress("LongParameterList") // Independent test seams for identity, journal and its writer.
 internal class AppAttachProcess(
   token: String?,
   scope: CoroutineScope,
@@ -25,13 +30,15 @@ internal class AppAttachProcess(
   clock: () -> Long = System::currentTimeMillis,
   log: (String) -> Unit,
   private val startListener: (AppAttachAgent) -> Unit = {},
-  private val journal: AttachJournal = NoAttachJournal,
+  journal: AttachJournal = NoAttachJournal,
+  journalExecutor: Executor = Executor(Runnable::run),
 ) : AttachEventLedger, AttachTarget {
   private val journalLock = Any()
+  private val writer = AttachJournalWriter(journal, journalExecutor)
   private var journalState =
     journal.load()
       ?: AttachJournalState(appInstanceId ?: UUID.randomUUID().toString(), 0, 0, 0, emptyList())
-        .also(journal::save)
+        .also { writer.record(it, flush = true) }
   override val appInstanceId = journalState.appInstanceId
   override val lastSequence: Long
     get() = synchronized(journalLock) { journalState.lastSequence }
@@ -46,21 +53,31 @@ internal class AppAttachProcess(
       clock = clock,
       log = log,
       restored = journalState,
-      persist = ::persistDelivery,
+      journal =
+        object : AttachDeliveryJournal {
+          override fun persist(pending: List<PrototypeEvent>, dropped: Long, lastSequence: Long) =
+            persistDelivery(pending, dropped, lastSequence)
+
+          override val version: Long
+            get() = writer.version
+
+          override suspend fun awaitSaved(version: Long) = writer.awaitSaved(version)
+        },
     )
 
   override val showingId: String?
     get() = target?.showingId
 
+  // The emit that follows carries the counter to disk, so issuing a sequence costs no write.
   override fun nextSequence(): Long =
     synchronized(journalLock) {
-      updateJournal(journalState.copy(lastSequence = journalState.lastSequence + 1))
+      updateJournal(journalState.copy(lastSequence = journalState.lastSequence + 1), flush = false)
       journalState.lastSequence
     }
 
   override fun nextShowingId(): String =
     synchronized(journalLock) {
-      updateJournal(journalState.copy(showing = journalState.showing + 1))
+      updateJournal(journalState.copy(showing = journalState.showing + 1), flush = true)
       "$appInstanceId:${journalState.showing}"
     }
 
@@ -72,13 +89,14 @@ internal class AppAttachProcess(
           dropped = dropped,
           lastSequence = maxOf(journalState.lastSequence, lastSequence),
         ),
+        flush = true,
       )
     }
 
-  // Call while holding journalLock to keep counters and delivery updates in the same snapshot.
-  private fun updateJournal(state: AttachJournalState) {
+  // Call while holding journalLock so snapshot versions follow state order.
+  private fun updateJournal(state: AttachJournalState, flush: Boolean) {
     journalState = state
-    journal.save(state)
+    writer.record(state, flush)
   }
 
   fun bind(target: AttachTarget): () -> Unit {

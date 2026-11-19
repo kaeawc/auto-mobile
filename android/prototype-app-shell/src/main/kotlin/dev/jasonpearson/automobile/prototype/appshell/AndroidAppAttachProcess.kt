@@ -1,9 +1,12 @@
 package dev.jasonpearson.automobile.prototype.appshell
 
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,11 +27,16 @@ internal object AndroidAppAttachProcess {
     val token = asset(application, "attach-token")
     val allowPhysicalDevice = asset(application, "attach-allow-physical-device") == "true"
     val log: (String) -> Unit = { Log.w("PrototypeAppShell", it) }
+    val journalFile = File(application.filesDir, "attach-journal.json")
     return AppAttachProcess(
         token,
         scope,
         log = log,
-        journal = FileAttachJournal(File(application.filesDir, "attach-journal.json"), log),
+        journal = FileAttachJournal(journalFile, installIdentity(application), log),
+        journalExecutor =
+          Executors.newSingleThreadExecutor {
+            Thread(it, "attach-journal").apply { isDaemon = true }
+          },
         startListener = { agent ->
           AppAttachServer.start(
             application.packageName,
@@ -39,6 +47,18 @@ internal object AndroidAppAttachProcess {
         },
       )
       .also { process = it }
+  }
+
+  // Every install, including an in-place `adb install -r`, sets a new last update time.
+  private fun installIdentity(context: Context): String {
+    val manager = context.packageManager
+    val info =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        manager.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0))
+      } else {
+        @Suppress("DEPRECATION") manager.getPackageInfo(context.packageName, 0)
+      }
+    return "lastUpdateTime:${info.lastUpdateTime}"
   }
 
   private fun asset(context: Context, name: String): String? =

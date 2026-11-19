@@ -43,16 +43,30 @@ class AttachJournalTest {
 
   @Test
   fun `journal round trips identity counters and wire events`() {
-    val journal = FileAttachJournal(file, logs::add)
+    val journal = FileAttachJournal(file, INSTALL, logs::add)
     assertNull(journal.load())
     journal.save(state)
-    assertEquals(state, FileAttachJournal(file, logs::add).load())
+    assertEquals(state, FileAttachJournal(file, INSTALL, logs::add).load())
     assertTrue(logs.isEmpty())
   }
 
   @Test
+  fun `journal written under an earlier install is discarded without logging its payload`() {
+    FileAttachJournal(file, INSTALL, logs::add).save(state)
+    // `adb install -r` keeps filesDir, so the file survives; only the install identity changes.
+    val reinstalled = FileAttachJournal(file, "lastUpdateTime:2", logs::add)
+    assertNull(reinstalled.load())
+    assertEquals(1, logs.size)
+    assertFalse(logs.single().contains("test-instance"))
+
+    reinstalled.save(state.copy(appInstanceId = "new-instance", pending = emptyList()))
+    assertEquals("new-instance", reinstalled.load()?.appInstanceId)
+    assertNull(FileAttachJournal(file, INSTALL, logs::add).load())
+  }
+
+  @Test
   fun `journal replaces the previous snapshot and ignores interrupted temporary writes`() {
-    val journal = FileAttachJournal(file, logs::add)
+    val journal = FileAttachJournal(file, INSTALL, logs::add)
     journal.save(state)
     val temp = folder.root.resolve("attach-journal.json.tmp")
     temp.writeText("partial write")
@@ -74,7 +88,7 @@ class AttachJournalTest {
   fun `corrupt journal logs no payload and the process starts fresh`() = runTest {
     val corrupt = "private-payload"
     file.writeText(corrupt)
-    val journal = FileAttachJournal(file, logs::add)
+    val journal = FileAttachJournal(file, INSTALL, logs::add)
     assertNull(journal.load())
     assertEquals(1, logs.size)
     assertFalse(logs.single().contains(corrupt))
@@ -90,8 +104,9 @@ class AttachJournalTest {
     assertEquals("fresh-instance", process.appInstanceId)
     assertEquals("fresh-instance:1", process.nextShowingId())
     assertEquals(1L, process.nextSequence())
+    // Issuing a sequence is not written: the emit that follows saves it before delivery.
     assertEquals(
-      AttachJournalState("fresh-instance", 1, 1, 0, emptyList()),
+      AttachJournalState("fresh-instance", 1, 0, 0, emptyList()),
       journal.load(),
     )
   }
@@ -99,13 +114,13 @@ class AttachJournalTest {
   @Test
   fun `journal refuses an oversized file`() {
     RandomAccessFile(file, "rw").use { it.setLength(FileAttachJournal.MAX_BYTES + 1L) }
-    assertNull(FileAttachJournal(file, logs::add).load())
+    assertNull(FileAttachJournal(file, INSTALL, logs::add).load())
     assertEquals(1, logs.size)
   }
 
   @Test
   fun `save failure is logged and preserves the previous snapshot`() {
-    val journal = FileAttachJournal(file, logs::add)
+    val journal = FileAttachJournal(file, INSTALL, logs::add)
     journal.save(state)
     val temp = folder.newFolder("attach-journal.json.tmp")
     temp.resolve("blocked").createNewFile()
@@ -114,5 +129,9 @@ class AttachJournalTest {
 
     assertEquals(state, journal.load())
     assertEquals(1, logs.size)
+  }
+
+  private companion object {
+    const val INSTALL = "lastUpdateTime:1"
   }
 }

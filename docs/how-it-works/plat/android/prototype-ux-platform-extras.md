@@ -198,7 +198,10 @@ replace an authenticated live peer. Status and patch conflicts redact `storage.s
 
 Events replay at least once. Activities rebind targets to a process-scoped attach listener.
 The `appInstanceId`, sequence ledger and unacknowledged events persist in app storage across
-process kills. Reinstalling the app or clearing its data resets the journal.
+process kills. The journal records the package's last update time, and the app discards a journal
+written under another one, so an in-place reinstall (`adb install -r`, which keeps app storage)
+starts a fresh identity and ledger; clearing app data deletes it. The journal is saved off the main
+thread, at most once per event, and a frame reaches the host only after the state it exposes is saved.
 `hello_result` reports identity and an optional
 `showingId`, which changes when the Activity mounts a new runtime. A same-process remount clears
 the dismissal and keeps pending events. Older apps without `showingId` keep process-only identity.

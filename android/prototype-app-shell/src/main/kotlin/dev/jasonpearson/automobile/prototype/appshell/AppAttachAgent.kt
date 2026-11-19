@@ -49,6 +49,25 @@ internal val attachJson = Json {
   classDiscriminator = "type"
 }
 
+/** Where the agent records delivery state; the default keeps it in memory only. */
+internal interface AttachDeliveryJournal {
+  fun persist(pending: List<PrototypeEvent>, dropped: Long, lastSequence: Long)
+
+  /** Version of the newest state a frame queued now can expose to the host. */
+  val version: Long
+
+  /** Suspends until the state at [version] is saved; frames wait here before reaching the host. */
+  suspend fun awaitSaved(version: Long)
+}
+
+internal object InMemoryAttachDelivery : AttachDeliveryJournal {
+  override fun persist(pending: List<PrototypeEvent>, dropped: Long, lastSequence: Long) = Unit
+
+  override val version = 0L
+
+  override suspend fun awaitSaved(version: Long) = Unit
+}
+
 /** No Android dependencies: the scope supplies scheduling (including virtual hello deadlines). */
 @Suppress("LongParameterList") // Independent test seams plus the restored journal and its writer.
 internal class AppAttachAgent(
@@ -59,9 +78,7 @@ internal class AppAttachAgent(
   private val clock: () -> Long = System::currentTimeMillis,
   private val log: (String) -> Unit,
   restored: AttachJournalState? = null,
-  private val persist: (pending: List<PrototypeEvent>, dropped: Long, lastSequence: Long) -> Unit =
-    { _, _, _ ->
-    },
+  private val journal: AttachDeliveryJournal = InMemoryAttachDelivery,
 ) {
   private val tokenBytes = token?.trim()?.takeIf { it.isNotEmpty() }?.toByteArray(Charsets.UTF_8)
   val enabled: Boolean
@@ -81,8 +98,11 @@ internal class AppAttachAgent(
   private var lastSequence = restored?.lastSequence ?: 0L
   private var active: Session? = null
 
+  // A frame may reveal sequences, so it carries the journal version that must be saved first.
+  private data class Outbound(val line: String, val journalVersion: Long)
+
   private class Session(val connection: AttachConnection) {
-    val outbound = Channel<String>(OUTBOUND_CAPACITY)
+    val outbound = Channel<Outbound>(OUTBOUND_CAPACITY)
     var writer: Job? = null
 
     fun close() {
@@ -225,7 +245,7 @@ internal class AppAttachAgent(
       dropped++
     }
     pending.addLast(event)
-    persist(pending.toList(), dropped, lastSequence)
+    journal.persist(pending.toList(), dropped, lastSequence)
     active?.let { enqueue(it, frame(event)) }
   }
 
@@ -233,12 +253,14 @@ internal class AppAttachAgent(
     require(sequence in 0..lastSequence) { "Invalid attach acknowledgement" }
     val previousSize = pending.size
     while (pending.firstOrNull()?.let { it.sequence <= sequence } == true) pending.removeFirst()
-    if (pending.size != previousSize) persist(pending.toList(), dropped, lastSequence)
+    if (pending.size != previousSize) journal.persist(pending.toList(), dropped, lastSequence)
   }
 
   // Call only under delivery; a full queue drops the peer, never blocks the producer.
   private fun enqueue(session: Session, frame: String) {
-    if (active === session && session.outbound.trySend(frame).isFailure) {
+    if (
+      active === session && session.outbound.trySend(Outbound(frame, journal.version)).isFailure
+    ) {
       active = null
       session.close()
     }
@@ -246,7 +268,8 @@ internal class AppAttachAgent(
 
   private suspend fun writeOutbound(session: Session) {
     try {
-      for (line in session.outbound) {
+      for ((line, journalVersion) in session.outbound) {
+        journal.awaitSaved(journalVersion)
         // Android stream writes block. Closing the socket from a separate coroutine unblocks I/O.
         val deadline = scope.launch {
           delay(WRITE_TIMEOUT_MS)

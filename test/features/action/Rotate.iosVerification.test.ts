@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { IosDisplayPixelProbe } from "../../../src/features/action/iosRotateDisplayProbe";
 import { Rotate } from "../../../src/features/action/Rotate";
+import { IOS_FOLDABLE_PANEL_SIMULATOR_ONLY_ERROR } from "../../../src/features/action/iosRotateRunnerRecovery";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import type { CtrlProxyRotateResult } from "../../../src/features/observe/ios";
 import type { BootedDevice, ObserveResult, RotateResult } from "../../../src/models";
@@ -203,6 +204,34 @@ describe("iOS observed rotation verification (#8778)", () => {
     pixelSizes = [{ width: 2622, height: 1206 }];
     expect((await rotate.execute("landscape")).success).toBe(true);
     expect(call.mock.calls.map((c) => c[3])).toEqual(["cover"]);
+  });
+
+  test("a panel rotate the runner refuses off the simulator is surfaced without a restore (#17047)", async () => {
+    const cover = {
+      ...createObserveResult(0),
+      display: {
+        key: "primary",
+        role: "cover" as const,
+        posture: "closed" as const,
+        generation: 0,
+      },
+    };
+    observe.setObserveSequence([cover, cover]);
+    const call = spyOn(runner, "requestRotate").mockResolvedValue(
+      runnerResult({
+        success: false,
+        rotationPerformed: false,
+        value: 0,
+        previousOrientation: "portrait",
+        currentOrientation: "portrait",
+        error: IOS_FOLDABLE_PANEL_SIMULATOR_ONLY_ERROR,
+      }),
+    );
+    const result = await rotate.execute("landscape");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(IOS_FOLDABLE_PANEL_SIMULATOR_ONLY_ERROR);
+    expect(result.warning).toBeUndefined();
+    expect(call.mock.calls.map((c) => [c[0], c[3]])).toEqual([["landscape", "cover"]]);
   });
 
   test("a non-foldable display omits the panel (#17047)", async () => {

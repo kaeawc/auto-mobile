@@ -74,13 +74,40 @@ final class FoldableRotateTests: XCTestCase {
         XCTAssertEqual(calls, [.portrait])
     }
 
-    func testMatchingAxisIsANoOpWithoutPosting() async throws {
+    func testMatchingAxisStillPostsThePoseWithoutReportingARotation() async throws {
         let setter = FakeSimulatedOrientationSetter()
         let response = try await rotate("landscape", panel: "inner", axes: [.landscape], setter: setter)
         XCTAssertTrue(response.success)
         XCTAssertFalse(response.rotationPerformed)
         let calls = await setter.calls()
-        XCTAssertEqual(calls, [])
+        XCTAssertEqual(calls, [.portrait])
+    }
+
+    func testRestoreAfterAFailedCoverRotatePostsThePortraitPoseBack() async throws {
+        // Settings on the cover stays portrait while the pose moves to landscape-left.
+        let setter = FakeSimulatedOrientationSetter()
+        let handler = CommandHandler(
+            elementLocator: ScriptedRotateElementLocator(axes: [.portrait]),
+            gesturePerformer: FakeGesturePerformer(),
+            perf: PerfProvider(),
+            simulatedOrientationSetter: setter,
+            rotationTimer: FakeProxyTimer(mode: .instant)
+        )
+        let rotateResponse = await handler.handle(.rotate(RequestRotate(
+            requestId: "rotate", orientation: "landscape", panel: "cover"
+        )))
+        let failed = try XCTUnwrap(rotateResponse as? RotateResponse)
+        XCTAssertFalse(failed.success)
+        XCTAssertEqual(failed.error, RotateDecision.unchangedAxisError)
+
+        let restoreResponse = await handler.handle(.rotate(RequestRotate(
+            requestId: "restore", orientation: "portrait", panel: "cover"
+        )))
+        let restored = try XCTUnwrap(restoreResponse as? RotateResponse)
+        XCTAssertTrue(restored.success)
+        XCTAssertFalse(restored.rotationPerformed)
+        let calls = await setter.calls()
+        XCTAssertEqual(calls, [.landscapeLeft, .portrait])
     }
 
     func testUnchangedAxisFailsAfterTheDeadlineWithTheRunnerRefusal() async throws {
@@ -95,15 +122,17 @@ final class FoldableRotateTests: XCTestCase {
         XCTAssertEqual(timer.now(), RotateDecision.timeoutMs)
     }
 
-    func testUnsupportedPlatformFallsBackToXCUIDevice() async throws {
+    func testUnsupportedPlatformRefusesWithoutFallingBackToXCUIDevice() async throws {
         let setter = FakeSimulatedOrientationSetter(failure: .unsupportedPlatform)
         let gestures = FakeGesturePerformer()
         let response = try await rotate(
             "landscape", panel: "cover", axes: [.portrait, .portrait, .landscape], setter: setter, gestures: gestures
         )
-        XCTAssertTrue(response.success)
-        XCTAssertEqual(gestures.setOrientationCalls, 1)
-        XCTAssertEqual(gestures.getOrientation(), "landscape_left")
+        XCTAssertFalse(response.success)
+        XCTAssertFalse(response.rotationPerformed)
+        XCTAssertEqual(response.error, FoldableRotateDecision.physicalDeviceError)
+        XCTAssertEqual(response.currentOrientation, "portrait")
+        XCTAssertEqual(gestures.setOrientationCalls, 0)
     }
 
     func testNoPanelKeepsTheXCUIDevicePath() async throws {

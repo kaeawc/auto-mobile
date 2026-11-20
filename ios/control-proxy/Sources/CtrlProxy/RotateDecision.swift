@@ -154,13 +154,19 @@ enum FoldablePanel: String, Equatable, Sendable {
 
 /// Pure decisions for a foldable rotation, verified only by the app's axis: the pose
 /// orientation does not move XCUIDevice.orientation, so it cannot confirm a direction.
+/// There is no initial no-op: an app that keeps one axis (Settings on the cover) leaves the app
+/// axis unchanged while the pose moved, so a restore whose target already matches the app axis
+/// must still post the pose to put it back.
 struct FoldableRotateDecision: Sendable {
+    /// The pose path exists only in the simulator; a physical foldable is not verified.
+    static let physicalDeviceError =
+        "Rotating an iPhone Duo panel is only supported on the iOS Simulator; it has not been verified on a physical device."
+
     let target: RotateTarget
     let appAxisBefore: AppAxis?
 
-    func initial() -> RotateOutcome {
-        guard target.isCoarse, appAxisBefore == target.axis else { return .pending }
-        return .noOp(result(appAxis: appAxisBefore, performed: false))
+    func physicalDeviceRefusal() -> RotateResult {
+        result(appAxis: appAxisBefore, performed: false, error: Self.physicalDeviceError)
     }
 
     func poll(appAxis: AppAxis?, deadlineReached: Bool) -> RotateOutcome {

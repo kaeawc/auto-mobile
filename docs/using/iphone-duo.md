@@ -135,6 +135,13 @@ The foreground app or screen does not rotate on the cover panel (the screen size
 
 After a failed rotate the previous orientation is put back, so the next app does not open rotated.
 
+Rotating a panel works only on the iOS Simulator. On a physical iPhone Duo, `rotate` changes
+nothing and fails with:
+
+```text
+Rotating an iPhone Duo panel is only supported on the iOS Simulator; it has not been verified on a physical device.
+```
+
 ## Home-screen icons after an unfold
 
 After an unfold, the home screen reports app icon positions that do not match what it draws. As a

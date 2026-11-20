@@ -15,6 +15,11 @@ export type IosRotateRunner = Pick<
   "requestRotate" | "ensureRecoveryStarted" | "awaitRecovery"
 >;
 
+// The runner's refusal (FoldableRotateDecision.physicalDeviceError) for a foldable panel off the
+// simulator: it sent nothing, so there is nothing to restore (#17047).
+export const IOS_FOLDABLE_PANEL_SIMULATOR_ONLY_ERROR =
+  "Rotating an iPhone Duo panel is only supported on the iOS Simulator; it has not been verified on a physical device.";
+
 export const unrestoredIosOrientationWarning = (prior: string): string =>
   `The device orientation could not be restored to ${prior} after the failed rotate; the next app may open rotated.`;
 
@@ -50,7 +55,12 @@ export async function restoreIosOrientationAfterFailure(
 ): Promise<RotateResult> {
   const { perf, signal } = call;
   const prior = restoreTargetIosOrientation(previousObservation);
-  if (!client || prior === "unknown" || prior === failed.orientation) {
+  if (
+    !client ||
+    prior === "unknown" ||
+    prior === failed.orientation ||
+    failed.error === IOS_FOLDABLE_PANEL_SIMULATOR_ONLY_ERROR
+  ) {
     return failed;
   }
   try {

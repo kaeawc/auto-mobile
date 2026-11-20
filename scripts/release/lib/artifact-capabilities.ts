@@ -64,6 +64,8 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
   },
   "ios-runner": {},
   "prototype-agent-dylib": {
+    prototype_event_ack_v1:
+      "Event acknowledgements are implemented only by the Android disposable app; the iOS agent does not acknowledge or replay events",
     prototype_platform_share_v1:
       "Share has a validated contract only; the iOS agent does not implement the system share sheet yet",
     prototype_chat_scroll_v1:
@@ -77,8 +79,6 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
     prototype_window_motion_v1: "Android window and repeat motion; iOS does not implement it",
     prototype_motion_v2:
       "iOS agent does not advertise it; the host refuses motion v2 features against it",
-    prototype_network_upload_v1:
-      "Upload bodies have a validated contract only; no transport builds multipart or file bodies yet, so the host refuses them (#14272)",
     prototype_platform_media_items_v1:
       "imageAsset {data} has a validated contract only; no device media store yet, so the host refuses it (#14192)",
     prototype_platform_realtime_v1:

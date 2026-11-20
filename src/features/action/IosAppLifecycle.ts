@@ -1,5 +1,11 @@
 import os from "node:os";
-import type { AppLifecycleAction, AppLifecycleResult, BootedDevice } from "../../models";
+import {
+  IOS_MEMORY_WARNING_LEVEL,
+  type AppLifecycleAction,
+  type AppLifecycleResult,
+  type AppLifecycleTrimLevel,
+  type BootedDevice,
+} from "../../models";
 import { fixedBackoff } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
@@ -7,14 +13,26 @@ import {
   SimulatorIosCrashBackend,
   type SimulatorCrashCommandRunner,
 } from "../../utils/ios-cmdline-tools/IosCrashBackend";
-import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
+import {
+  resolveIosDeviceKind,
+  type IosDeviceKind,
+} from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { PhysicalIosAppCrasher } from "../../utils/ios-cmdline-tools/PhysicalIosAppCrasher";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
+import { observeForegroundApp } from "../accessibility/IosForegroundApp";
 import type { AppLifecycleExecutionOptions, AppLifecycleHome } from "./AppLifecycle";
 import { findIosSimulatorAppProcess } from "./CrashApp";
+import {
+  isMissingFileError,
+  nodeMemoryWarningFileSystem,
+  simulatorMemoryWarningPath,
+  touchSimulatorMemoryWarning,
+  type MemoryWarningFileSystem,
+  type SimulatorMemoryWarningPathOptions,
+} from "./IosSimulatorMemoryWarning";
 import type { DeviceWindowCacheInvalidator } from "./TerminateApp";
 
 const COMMAND_TIMEOUT_MS = 5_000;
@@ -96,7 +114,23 @@ export interface IosAppLifecycleDependencies {
   control?: IosAppProcessControl;
   simctl?: SimulatorCrashCommandRunner;
   uid?: () => number;
+  memoryWarning?: IosMemoryWarningDependencies;
 }
+
+/** Simulated memory warning seams (#18754); each defaults to the real host. */
+export interface IosMemoryWarningDependencies {
+  fileSystem?: MemoryWarningFileSystem;
+  /** Where the CoreSimulator device set lives. */
+  path?: SimulatorMemoryWarningPathOptions;
+  /** The app on screen, undefined when the read cannot name one. */
+  foregroundApp?: (signal?: AbortSignal) => Promise<string | undefined>;
+}
+
+const MECHANISMS = {
+  background: "home",
+  killBackgrounded: "ios-sigkill",
+  trimMemory: "simulator-memory-warning-file",
+} as const;
 
 /**
  * State-preserving background and kill for an iOS app (#14098). iOS keeps restoration state when
@@ -104,19 +138,23 @@ export interface IosAppLifecycleDependencies {
  * Xcode reproduces system termination by backgrounding then sending SIGKILL, which is what
  * `killBackgrounded` does. There is no cheap iOS foreground read, so `killBackgrounded` presses
  * Home first (verified by HomeScreen, a no-op when already on Home) instead of refusing.
+ * `trimMemory` on a simulator updates the device's `memory_warning_simulation` file, which UIKit
+ * delivers to the foreground app only (#18754); physical devices have no equivalent.
  */
 export class IosAppLifecycle {
   private readonly control: IosAppProcessControl;
   private readonly timer: Timer;
+  private readonly kind: IosDeviceKind;
 
   constructor(
     private readonly device: BootedDevice,
     private readonly dependencies: IosAppLifecycleDependencies,
   ) {
     this.timer = dependencies.timer ?? defaultTimer;
+    this.kind = resolveIosDeviceKind({ deviceId: device.deviceId });
     this.control =
       dependencies.control ??
-      (resolveIosDeviceKind({ deviceId: device.deviceId }) === "simulator"
+      (this.kind === "simulator"
         ? simulatorAppProcessControl(
             device.deviceId,
             dependencies.simctl ?? new SimCtlClient(device),
@@ -140,22 +178,11 @@ export class IosAppLifecycle {
       action,
       platform: "ios",
       appId,
-      mechanism: action === "background" ? "home" : "ios-sigkill",
+      mechanism: MECHANISMS[action],
     };
-    if (action === "trimMemory") {
-      return {
-        ...base,
-        supported: false,
-        mechanism: "unsupported",
-        error: "iOS has no onTrimMemory equivalent to send",
-      };
-    }
-    if (!BUNDLE_ID_PATTERN.test(appId)) {
-      return {
-        ...base,
-        errorCode: "invalid_app_id",
-        error: `${appId} is not a valid iOS bundle identifier`,
-      };
+    const refused = this.preflightRefusal(base, options.trimLevel);
+    if (refused) {
+      return refused;
     }
     const found = await this.control.find(appId, signal);
     signal?.throwIfAborted();
@@ -169,11 +196,115 @@ export class IosAppLifecycle {
             : `${appId} is not running`,
       };
     }
+    if (action === "trimMemory") {
+      return this.memoryWarning(base, found.pid, options);
+    }
     const backgrounded = await this.pressHome(base, found.pid, options);
     if (backgrounded || action === "background") {
       return backgrounded ?? { ...base, success: true, pid: found.pid };
     }
     return this.killBackgrounded(base, appId, options);
+  }
+
+  /** Refusals that need no device command: device kind, bundle id and trim level. */
+  private preflightRefusal(
+    base: AppLifecycleResult,
+    level: AppLifecycleTrimLevel | undefined,
+  ): AppLifecycleResult | null {
+    if (base.action === "trimMemory" && this.kind === "physical") {
+      return {
+        ...base,
+        supported: false,
+        mechanism: "unsupported",
+        error:
+          "Physical iOS devices have no memory warning to send; level memoryWarning works on simulators only",
+      };
+    }
+    if (!BUNDLE_ID_PATTERN.test(base.appId)) {
+      return {
+        ...base,
+        errorCode: "invalid_app_id",
+        error: `${base.appId} is not a valid iOS bundle identifier`,
+      };
+    }
+    return trimLevelRefusal(base, base.action, level);
+  }
+
+  /**
+   * The warning goes to whichever app is in front, so a different foreground app is refused. An
+   * unreadable foreground still sends it, with a message that delivery was not verified.
+   */
+  private async memoryWarning(
+    base: AppLifecycleResult,
+    pid: number,
+    options: AppLifecycleExecutionOptions,
+  ): Promise<AppLifecycleResult> {
+    const { signal } = options;
+    const { appId } = base;
+    const attempt: AppLifecycleResult = {
+      ...base,
+      pidBefore: pid,
+      trimLevel: IOS_MEMORY_WARNING_LEVEL,
+    };
+    const foreground = await this.readForeground(appId, signal);
+    signal?.throwIfAborted();
+    if (foreground !== undefined && foreground !== appId) {
+      return {
+        ...attempt,
+        errorCode: "app_not_foreground",
+        error:
+          `${appId} is not the foreground app (${foreground} is). A simulated memory warning ` +
+          "reaches only the foreground app; bring it to the front with launchApp, then retry.",
+      };
+    }
+    const path = simulatorMemoryWarningPath(
+      this.device.deviceId,
+      this.dependencies.memoryWarning?.path,
+    );
+    options.onMutation?.();
+    try {
+      await touchSimulatorMemoryWarning(
+        path,
+        this.dependencies.memoryWarning?.fileSystem ?? nodeMemoryWarningFileSystem,
+        new Date(this.timer.now()),
+      );
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(`[IosAppLifecycle] Memory warning file update failed for ${appId}`, error);
+      return {
+        ...attempt,
+        errorCode: "trim_failed",
+        error: isMissingFileError(error)
+          ? `${path} does not exist; boot simulator ${this.device.deviceId} and retry`
+          : `Could not update ${path}: ${errorMessage(error)}`,
+      };
+    }
+    return {
+      ...attempt,
+      success: true,
+      pid,
+      message:
+        foreground === undefined
+          ? `Simulated a memory warning on ${this.device.deviceId}, but the foreground app could not be read; ` +
+            `${appId} (pid ${pid}) receives it only if it is in front. Read its logs to see how it reacted`
+          : `Simulated a memory warning for ${appId} (pid ${pid}); read its logs to see how it reacted`,
+    };
+  }
+
+  private async readForeground(appId: string, signal?: AbortSignal): Promise<string | undefined> {
+    const read =
+      this.dependencies.memoryWarning?.foregroundApp ??
+      ((readSignal?: AbortSignal) => observeForegroundApp(this.device, readSignal));
+    try {
+      return await read(signal);
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(
+        `[IosAppLifecycle] Foreground read failed before a memory warning for ${appId}`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   /** Verified Home press; returns a failure result, or `null` once the app is backgrounded. */
@@ -281,4 +412,35 @@ export class IosAppLifecycle {
       error: `${appId} (pid ${pidBefore}) was still running ${RECLAIM_POLL_BUDGET_MS}ms after SIGKILL`,
     };
   }
+}
+
+/** trimMemory needs memoryWarning on a simulator and no other action takes a level. */
+function trimLevelRefusal(
+  base: AppLifecycleResult,
+  action: AppLifecycleAction,
+  level: AppLifecycleTrimLevel | undefined,
+): AppLifecycleResult | null {
+  if (action !== "trimMemory") {
+    return level === undefined
+      ? null
+      : {
+          ...base,
+          errorCode: "trim_level_not_applicable",
+          error: `level only applies to the trimMemory action, not ${action}`,
+        };
+  }
+  if (level === IOS_MEMORY_WARNING_LEVEL) {
+    return null;
+  }
+  return level === undefined
+    ? {
+        ...base,
+        errorCode: "trim_level_required",
+        error: "trimMemory on an iOS simulator needs level memoryWarning",
+      }
+    : {
+        ...base,
+        errorCode: "trim_level_not_applicable",
+        error: `${level} is an Android onTrimMemory level; iOS simulators take level memoryWarning`,
+      };
 }

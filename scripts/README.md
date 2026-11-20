@@ -693,6 +693,7 @@ labelled `run-aaos`; it is not a required check. `scripts/ci/aaos-smoke/run-aaos
 installs the non-Play `android-automotive` API 34 ext9 image, enables the `device-condition`
 flag in a run-private database (`scripts/ci/aaos-smoke/enableFeatureFlags.ts`), and runs
 `scripts/ci/aaos-smoke/aaosSmoke.ts`, which creates the AVD with `startDevice` `createIfMissing`
+(with `ANDROID_AVD_HOME` pinned by `scripts/ci/emulator-smoke/avd-home.sh`, as for Wear)
 and drives observe, launch, tap, scroll, back, home, an `observe` of the `cluster` display, driving
 and parked. After each vehicle state an `observe` asserts `automotive.drivingState` (`moving`, or
 `parked`/`idling`) and whether `automotive.uxRestrictions.requiresDistractionOptimization` is set

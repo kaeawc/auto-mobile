@@ -7,6 +7,8 @@
 set -euo pipefail
 # One row tap plus one bounded fallback after any covering alert is dismissed.
 readonly ROW_TAP_MAX_ATTEMPTS=2
+# The alert animates out after its button tap; a hierarchy read right away can still show it.
+readonly ALERT_CLEAR_MAX_OBSERVES=5
 
 if [[ $# -ne 1 || ! ${1:-} =~ ^(latest|[0-9]+(\.[0-9]+)*)$ ]]; then
   echo 'usage: watch-smoke-lane.sh <watchos-version|latest>' >&2
@@ -34,6 +36,13 @@ log_dir="$(cd "${log_dir}" && pwd)"
 exec > >(tee -a "${log_dir}/smoke.log") 2>&1
 # shellcheck source=scripts/ios/run_with_timeout.sh
 source "${script_dir}/run_with_timeout.sh"
+# Build with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+# Shell-test fixtures that copy this script without the helper keep the active Xcode.
+if [[ -f "${script_dir}/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${script_dir}/xcode_version.sh"
+  select_pinned_xcode
+fi
 export AUTO_MOBILE_CMD="${AUTO_MOBILE_CMD:-bun run src/index.ts --debug --embedded-sdk --cli}"
 # shellcheck source=scripts/lib/session-release.sh
 source "${script_dir}/../lib/session-release.sh"
@@ -322,8 +331,15 @@ dismiss_alert() {
   echo "watch-smoke-lane: notification permission alert covers the app; tapping \"${label}\""
   call_tool tapOn --selector "$(jq -nc --arg text "${label}" '{text: $text}')"
   log_tap_effect "alert \"${label}\""
-  observe
-  # An absent label is the expected outcome, not a shell error.
+  local attempt
+  for ((attempt = 1; attempt <= ALERT_CLEAR_MAX_OBSERVES; attempt++)); do
+    observe
+    # An absent label is the expected outcome, not a shell error.
+    # shellcheck disable=SC2310
+    alert_dismiss_label "${log_dir}/hierarchy.json" > /dev/null || break
+    ((attempt == ALERT_CLEAR_MAX_OBSERVES)) || echo "watch-smoke-lane: alert still drawn on read ${attempt}; re-observing"
+    ((attempt == ALERT_CLEAR_MAX_OBSERVES)) || sleep "${ALERT_CLEAR_POLL_SECONDS:-2}"
+  done
   # shellcheck disable=SC2310
   if still_covered="$(alert_dismiss_label "${log_dir}/hierarchy.json")"; then
     fail "system alert still covers the app after tapping \"${label}\" (now showing \"${still_covered}\")"

@@ -221,6 +221,10 @@ class PrototypeController(
   private val uploadAssets: PrototypeAssetSource? = null,
   private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
     dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
+  /** Explicit reset/removal may purge Activity storage without exposing it to overlay shows. */
+  private val purgeSecureStorage: suspend (String) -> Int = { 0 },
+  private val storageSessions: PrototypeStorageSessionRegistry =
+    PrototypeStorageSessionRegistry.Shared,
 ) {
   // Asset cleanup must outlive service cancellation while retaining the injected worker dispatcher.
   private val assetCleanupScope = CoroutineScope(requestScope.coroutineContext + SupervisorJob())
@@ -432,7 +436,7 @@ class PrototypeController(
           hiddenReason = shownHiddenReason(shown),
           pages = shown.runtime.current.pages,
           stacks = shown.runtime.current.stacks,
-          backdrop = shown.request.backdrop?.mode?.wire,
+          backdrop = shown.host.appliedBackdrop?.wire,
           displayId = shown.request.displayId,
           degradedEffects =
             prototypeEffectReport(
@@ -514,6 +518,12 @@ class PrototypeController(
     }
 
   private fun validate(spec: PrototypeSpec): PrototypeSpec {
+    require(
+      "secureStorage" !in spec.requires?.platform.orEmpty() ||
+        PrototypeSecureStorageModule.CAPABILITY in platform.registry.capabilities,
+    ) {
+      "The secureStorage module requires an app-owned Activity host"
+    }
     require(
       "permissions" !in spec.requires?.platform.orEmpty() ||
         PrototypePermissionsModule.CAPABILITY in platform.registry.capabilities,
@@ -703,16 +713,18 @@ class PrototypeController(
         isSuspended = { scope.suspended },
         bringToFront = reused != null && request.transition != "none" && request.motion != "none",
         theme = theme,
+        backdropShape =
+          if (request.backdrop != null && request.placement is PrototypePlacement.Floating)
+            prototypeRootBackdropShape(mappedSpec)
+          else request.backdropShape,
         motionActivity = runtime.motionActivity,
         exitResources = exitResources,
         exitMetadata = { surfaceMetadata(runtime, request, theme.value) },
         onHostDismiss = { interact(runtime, PrototypeInteraction.HostDismiss) },
         onHostBack = { interact(runtime, PrototypeInteraction.Back) },
         content = {
-          PrototypeBackdropLayer(request.backdrop) {
-            PrototypeRuntimeContent(runtime, images, fonts) { interaction ->
-              interact(runtime, interaction)
-            }
+          PrototypeRuntimeContent(runtime, images, fonts) { interaction ->
+            interact(runtime, interaction)
           }
         },
       )
@@ -1177,11 +1189,25 @@ class PrototypeController(
     }
   }
 
-  /** The stored keys removed for [id]; callers hold no controller state of their own. */
-  suspend fun clearStoredValues(id: String): Int {
-    val persistence = storage ?: return 0
-    val live = surfaces[id]?.runtime?.storage
-    return live?.clear() ?: persistence.clear(id)
+  /**
+   * The stored keys removed for [id]; callers hold no controller state of their own. With
+   * [keepSessionValues] (a saved-prototype delete that has yet to remove its entry) open sessions
+   * keep what they hold, so the caller's resume can write it back if the entry delete fails.
+   */
+  suspend fun clearStoredValues(id: String, keepSessionValues: Boolean = false): Int {
+    val held = storageSessions.quiesce(id)
+    val removed =
+      try {
+        held.awaitWrites()
+        val secureRemoved = purgeSecureStorage(id)
+        val live = surfaces[id]?.runtime?.storage
+        secureRemoved + (live?.clear() ?: storage?.clear(id) ?: 0)
+      } catch (error: Throwable) {
+        held.resume()
+        throw error
+      }
+    if (keepSessionValues) held.releaseKeepingValues() else held.reset()
+    return removed
   }
 
   private suspend fun statusOf(surface: Surface): PrototypeStatusEntry {
@@ -1190,7 +1216,7 @@ class PrototypeController(
     return PrototypeStatusEntry(
       id = id,
       persistent = runtime.persistent,
-      state = runtime.current.state.toMap(),
+      state = runtime.publicState,
       data = runtime.current.spec.data,
       pages = runtime.current.pages.toMap(),
       stacks = runtime.current.stacks.toMap(),

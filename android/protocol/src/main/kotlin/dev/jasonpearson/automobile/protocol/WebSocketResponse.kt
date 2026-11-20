@@ -916,6 +916,8 @@ data class PrototypeResult(
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER)
   val degradedEffects: List<PrototypeDegradedEffect>? = null,
+  /** Single-runtime status returned by a disposable app's attach agent. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val status: JsonObject? = null,
 ) : WebSocketResponse(), CorrelatedResponse
 
 /**

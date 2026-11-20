@@ -1,8 +1,8 @@
 # Performance traces
 
-| Tool                             | What it does                      | Requires                             |
-| -------------------------------- | --------------------------------- | ------------------------------------ |
-| 📈 <code>performanceTrace</code> | Record a native performance trace | <span class="tool-requires">—</span> |
+| Tool                             | What it does                      | Platforms                                                                                                                                                   | Needs                             |
+| -------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| 📈 <code>performanceTrace</code> | Record a native performance trace | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span></span> | <span class="tool-needs">—</span> |
 
 `performanceTrace` records an Instruments trace (`xctrace`) on iOS or a Perfetto trace on Android.
 Call it with `action: "start"` and a `template` to begin recording. It returns a `traceId`. Call

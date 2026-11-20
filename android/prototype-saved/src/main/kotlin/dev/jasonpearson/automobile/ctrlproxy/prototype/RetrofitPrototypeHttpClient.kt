@@ -13,6 +13,7 @@ import java.net.Proxy
 import java.net.UnknownServiceException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -210,7 +211,9 @@ class RetrofitPrototypeHttpClient(
     initialUrl: HttpUrl,
     started: Long,
   ): PrototypeRequestResponse {
-    var request = initial
+    // A 307/308 re-sends the whole body, and each send counts up from 0 again: one shared,
+    // non-decreasing reporter keeps the upload percent from going backwards across hops.
+    var request = initial.copy(onUploadProgress = initial.onUploadProgress?.let(::nonDecreasing))
     var url = initialUrl
     for (hop in 0..MAX_REDIRECTS) {
       validate(request, url)
@@ -459,6 +462,15 @@ class RetrofitPrototypeHttpClient(
     val EMPTY_BODY: RequestBody = ByteArray(0).toRequestBody(null)
     val TEXT: MediaType = "text/plain; charset=utf-8".toMediaType()
     val JSON: MediaType = "application/json; charset=utf-8".toMediaType()
+  }
+}
+
+/** Forwards only percents above the highest one already reported, across every send. */
+internal fun nonDecreasing(progress: (Int) -> Unit): (Int) -> Unit {
+  val highest = AtomicInteger(-1)
+  return { percent ->
+    val value = percent.coerceIn(0, 100)
+    if (highest.getAndAccumulate(value, ::maxOf) < value) progress(value)
   }
 }
 

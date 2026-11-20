@@ -1,8 +1,8 @@
 # In-app purchase testing
 
-| Tool                         | What it does                                                    | Requires                             |
-| ---------------------------- | --------------------------------------------------------------- | ------------------------------------ |
-| 🛒 <code>storeKitTest</code> | Test in-app purchases with StoreKit Testing on an iOS simulator | <span class="tool-requires">—</span> |
+| Tool                         | What it does                                                    | Platforms                                                                                                                                                   | Needs                             |
+| ---------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| 🛒 <code>storeKitTest</code> | Test in-app purchases with StoreKit Testing on an iOS simulator | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span></span> | <span class="tool-needs">—</span> |
 
 `storeKitTest` drives StoreKit Testing on an iOS simulator: load a `.storekit` configuration,
 then buy, refund, expire and list transactions without the App Store sandbox. It is off by
@@ -29,16 +29,22 @@ fails the call before anything reaches the device.
 
 1. `load` starts the session: it resets StoreKit to its default state, clears transactions and
    disables purchase dialogs. Every other action needs a loaded session for that `appId`.
+   Only one `appId` can be loaded at a time on a simulator. Loading another `appId` while one is
+   loaded fails with `storekit environment active for bundleId <appId>; send clear for it before
+   loading another bundle` and changes nothing; `clear` the named `appId`, then `load` again.
+   Loading the already-loaded `appId` again starts it over.
 2. `buy`, `refund`, `expire`, `list` and `clear` return `transactions`, each with `identifier`,
    `productId`, `state` (`purchased`, `purchasing`, `failed`, `restored`, `deferred` or
    `unknown`) and `originalIdentifier` for renewals.
 3. `setSimulatedError` makes the next `buy` fail with that error, and is cleared after it.
-   Purchases the app starts itself keep failing until `clear` or another `load`.
+   Purchases the app starts itself keep failing until the next `buy`, `clear` or another `load`.
+   On an iOS 26 or newer simulator `buy` and `expire` return `unsupported_device` (the system
+   rejects the runner's bundle), so use an iOS 18 simulator for them.
 4. `clear` resets the session, returns the final transactions and ends the session.
 
 The session lasts as long as the runner, until `clear` or until your device session is released.
-Release clears the StoreKit session of every `appId` you used. The next session on the same
-simulator then starts with no purchases and no simulated error. When release cannot confirm that,
+Release clears the loaded StoreKit session and any `appId` you used earlier. The next session on the
+same simulator then starts with no purchases and no simulated error. When release cannot confirm that,
 it erases the simulator instead. StoreKit Testing applies the session to the runner's own target
 app, so your app sees the purchases only when it runs as that target.
 
@@ -58,8 +64,8 @@ still apply. A timed-out `buy` can still complete. Call `list` before you retry 
 
 `unsupported` is set, with nothing changed on the device, when StoreKit Testing cannot run:
 
-| `unsupported`            | When                                               | What to do                      |
-| ------------------------ | -------------------------------------------------- | ------------------------------- |
-| `unsupported_platform`   | Android, Apple TV, Apple Watch or Apple Vision Pro | Use an iOS simulator            |
-| `unsupported_device`     | A physical iPhone                                  | Use an iOS simulator            |
-| `unsupported_capability` | The connected iOS runner predates StoreKit Testing | Restart the daemon to update it |
+| `unsupported`            | When                                                                     | What to do                                                          |
+| ------------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| `unsupported_platform`   | Android, Apple TV, Apple Watch or Apple Vision Pro                       | Use an iOS simulator                                                |
+| `unsupported_device`     | A physical iPhone, or `buy` and `expire` on an iOS 26 or newer simulator | Use an iOS simulator, or an iOS 18 simulator for `buy` and `expire` |
+| `unsupported_capability` | The connected iOS runner predates StoreKit Testing                       | Restart the daemon to update it                                     |

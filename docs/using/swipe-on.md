@@ -1,8 +1,8 @@
 # `swipeOn`
 
-| Tool                    | What it does                       | Requires                                                                                                                                                                                                                   |
-| ----------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 👉 <code>swipeOn</code> | Swipe/scroll on screen or elements | <span class="tool-requires"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span> <span role="img" aria-label="watchOS" title="watchOS">⌚</span></span> |
+| Tool                    | What it does                       | Platforms                                                                                                                                                                                                                   | Needs                             |
+| ----------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| 👉 <code>swipeOn</code> | Swipe/scroll on screen or elements | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span> <span role="img" aria-label="watchOS" title="watchOS">⌚</span></span> | <span class="tool-needs">—</span> |
 
 `swipeOn` swipes in a `direction` on the screen or a selected `container`.
 When the selected range control changes its numeric state, `effect.value`
@@ -13,6 +13,9 @@ On iOS, a container thinner than 48 pt along the swipe axis (such as a sheet
 grabber) starts the drag at its centre and travels 240 pt in that direction.
 AutoMobile clamps the drag to the screen bounds. The result includes a `warning` explaining the
 extended drag, and warns if clamping leaves less than 120 pt of travel.
+
+On iOS, a horizontal swipe on a list row swipes the row itself, which reveals its
+swipe actions. It does not scroll the enclosing list.
 
 ## Scrolling until an element appears
 

@@ -1,0 +1,3137 @@
+{
+  "observationId": "9972015e-1a83-4e7d-b21e-3af95281a080",
+  "deviceId": "emulator-5684",
+  "display": {
+    "key": "0",
+    "role": "unknown",
+    "posture": "unknown",
+    "generation": 0
+  },
+  "updatedAt": 1795048868711,
+  "screenSize": {
+    "width": 1080,
+    "height": 2424,
+    "units": "physical-pixels"
+  },
+  "systemInsets": {
+    "top": 174,
+    "bottom": 84,
+    "left": 78,
+    "right": 78
+  },
+  "insets": {
+    "available": true,
+    "source": "android-window-metrics",
+    "units": "physical-pixels",
+    "systemBars": {
+      "visible": {
+        "top": 137,
+        "bottom": 63,
+        "left": 0,
+        "right": 0
+      },
+      "stable": {
+        "top": 137,
+        "bottom": 63,
+        "left": 0,
+        "right": 0
+      }
+    },
+    "displayCutout": {
+      "top": 142,
+      "bottom": 0,
+      "left": 0,
+      "right": 0
+    },
+    "displayCutoutInfo": {
+      "classification": "unknown",
+      "bounds": [
+        [
+          485,
+          0,
+          595,
+          142
+        ]
+      ]
+    },
+    "systemGestures": {
+      "top": 174,
+      "bottom": 84,
+      "left": 78,
+      "right": 78
+    },
+    "mandatorySystemGestures": {
+      "top": 174,
+      "bottom": 84,
+      "left": 0,
+      "right": 0
+    },
+    "tappableElement": {
+      "top": 137,
+      "bottom": 0,
+      "left": 0,
+      "right": 0
+    },
+    "systemChrome": {
+      "visibility": "visible",
+      "statusBar": "visible",
+      "navigationBar": "visible",
+      "homeIndicatorAutoHideRequested": null,
+      "source": "android-window-insets"
+    }
+  },
+  "viewHierarchy": {
+    "displayId": 0,
+    "hierarchy": {
+      "node": [
+        {
+          "windowId": 19,
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "visible-to-user": true,
+          "view-id": "s2-3f7527335cdf30fb",
+          "occlusionState": "partial",
+          "occludedBy": "unlabeled view",
+          "occludedByViewId": "s2-6abe6c88fbb6eee5",
+          "bounds": [
+            0,
+            0,
+            1080,
+            2424
+          ],
+          "node": {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "com.google.android.contacts:id/action_bar_root",
+            "visible-to-user": true,
+            "occlusionState": "partial",
+            "occludedBy": "unlabeled view",
+            "occludedByViewId": "s2-6abe6c88fbb6eee5",
+            "bounds": [
+              0,
+              0,
+              1080,
+              2424
+            ],
+            "node": {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "android:id/content",
+              "visible-to-user": true,
+              "occlusionState": "partial",
+              "occludedBy": "unlabeled view",
+              "occludedByViewId": "s2-6abe6c88fbb6eee5",
+              "bounds": [
+                0,
+                0,
+                1080,
+                2424
+              ],
+              "node": [
+                {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                  ],
+                  "resource-id": "com.google.android.contacts:id/root",
+                  "visible-to-user": true,
+                  "class": "android.view.ViewGroup",
+                  "className": "android.view.ViewGroup",
+                  "occlusionState": "partial",
+                  "occludedBy": "unlabeled view",
+                  "occludedByViewId": "s2-6abe6c88fbb6eee5",
+                  "bounds": [
+                    0,
+                    0,
+                    1080,
+                    2150
+                  ],
+                  "node": [
+                    {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.google.android.contacts:id/contacts_list_container",
+                      "visible-to-user": true,
+                      "occlusionState": "partial",
+                      "occludedBy": "unlabeled view",
+                      "occludedByViewId": "s2-6abe6c88fbb6eee5",
+                      "bounds": [
+                        0,
+                        0,
+                        1080,
+                        2150
+                      ],
+                      "node": {
+                        "actions": [
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "com.google.android.contacts:id/nav_host_container",
+                        "visible-to-user": true,
+                        "occlusionState": "partial",
+                        "occludedBy": "unlabeled view",
+                        "occludedByViewId": "s2-6abe6c88fbb6eee5",
+                        "bounds": [
+                          0,
+                          0,
+                          1080,
+                          2150
+                        ],
+                        "node": {
+                          "actions": [
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "resource-id": "com.google.android.contacts:id/nav_host_container",
+                          "visible-to-user": true,
+                          "occlusionState": "partial",
+                          "occludedBy": "unlabeled view",
+                          "occludedByViewId": "s2-6abe6c88fbb6eee5",
+                          "bounds": [
+                            0,
+                            0,
+                            1080,
+                            2150
+                          ],
+                          "node": {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "resource-id": "com.google.android.contacts:id/contact_list_fragment",
+                            "visible-to-user": true,
+                            "occlusionState": "partial",
+                            "occludedBy": "unlabeled view",
+                            "occludedByViewId": "s2-6abe6c88fbb6eee5",
+                            "bounds": [
+                              0,
+                              0,
+                              1080,
+                              2150
+                            ],
+                            "node": {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus",
+                                "scroll_forward"
+                              ],
+                              "resource-id": "com.google.android.contacts:id/contact_list",
+                              "visible-to-user": true,
+                              "pane-title": "Contacts list",
+                              "scrollable": "true",
+                              "occlusionState": "partial",
+                              "occludedBy": "unlabeled view",
+                              "occludedByViewId": "s2-6abe6c88fbb6eee5",
+                              "bounds": [
+                                0,
+                                0,
+                                1080,
+                                2150
+                              ],
+                              "node": [
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.contacts:id/app_bar_layout",
+                                  "visible-to-user": true,
+                                  "class": "android.widget.LinearLayout",
+                                  "className": "android.widget.LinearLayout",
+                                  "occlusionState": "partial",
+                                  "occludedBy": "unlabeled view",
+                                  "occludedByViewId": "s2-6abe6c88fbb6eee5",
+                                  "bounds": [
+                                    0,
+                                    0,
+                                    1080,
+                                    478
+                                  ],
+                                  "node": [
+                                    {
+                                      "actions": [
+                                        "focus",
+                                        "select",
+                                        "clear_selection",
+                                        "click",
+                                        "accessibility_focus"
+                                      ],
+                                      "text": "Search contacts",
+                                      "resource-id": "com.google.android.contacts:id/open_search_bar",
+                                      "visible-to-user": true,
+                                      "hint-text": "Search contacts",
+                                      "class": "android.widget.EditText",
+                                      "className": "android.widget.EditText",
+                                      "clickable": "true",
+                                      "focusable": "true",
+                                      "bounds": [
+                                        42,
+                                        163,
+                                        1038,
+                                        289
+                                      ],
+                                      "node": [
+                                        {
+                                          "actions": [
+                                            "focus",
+                                            "select",
+                                            "clear_selection",
+                                            "click",
+                                            "accessibility_focus",
+                                            "next_at_movement_granularity",
+                                            "previous_at_movement_granularity",
+                                            "set_selection"
+                                          ],
+                                          "content-desc": "Search",
+                                          "visible-to-user": true,
+                                          "tooltip-text": "Search",
+                                          "view-id": "s2-3296a858bd118c59",
+                                          "class": "android.widget.ImageButton",
+                                          "className": "android.widget.ImageButton",
+                                          "clickable": "true",
+                                          "focusable": "true",
+                                          "bounds": [
+                                            53,
+                                            163,
+                                            179,
+                                            289
+                                          ]
+                                        },
+                                        {
+                                          "actions": [
+                                            "select",
+                                            "clear_selection",
+                                            "accessibility_focus"
+                                          ],
+                                          "text": "Search contacts",
+                                          "resource-id": "com.google.android.contacts:id/open_search_bar_text_view",
+                                          "visible-to-user": true,
+                                          "hint-text": "Search contacts",
+                                          "bounds": [
+                                            179,
+                                            195,
+                                            485,
+                                            257
+                                          ]
+                                        },
+                                        {
+                                          "actions": [
+                                            "focus",
+                                            "select",
+                                            "clear_selection",
+                                            "click",
+                                            "accessibility_focus",
+                                            "next_at_movement_granularity",
+                                            "previous_at_movement_granularity",
+                                            "set_selection"
+                                          ],
+                                          "content-desc": "Sign in",
+                                          "resource-id": "com.google.android.contacts:id/selected_account_disc",
+                                          "visible-to-user": true,
+                                          "clickable": "true",
+                                          "focusable": "true",
+                                          "bounds": [
+                                            904,
+                                            163,
+                                            1038,
+                                            289
+                                          ],
+                                          "node": {
+                                            "actions": [
+                                              "select",
+                                              "clear_selection",
+                                              "accessibility_focus"
+                                            ],
+                                            "resource-id": "com.google.android.contacts:id/og_selected_account_disc_apd",
+                                            "visible-to-user": true,
+                                            "bounds": [
+                                              904,
+                                              163,
+                                              1030,
+                                              289
+                                            ],
+                                            "node": {
+                                              "actions": [
+                                                "select",
+                                                "clear_selection",
+                                                "accessibility_focus"
+                                              ],
+                                              "resource-id": "com.google.android.contacts:id/og_apd_internal_image_view",
+                                              "visible-to-user": true,
+                                              "class": "android.widget.ImageView",
+                                              "className": "android.widget.ImageView",
+                                              "bounds": [
+                                                912,
+                                                171,
+                                                1022,
+                                                281
+                                              ]
+                                            }
+                                          }
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "com.google.android.contacts:id/app_bar_compose_view",
+                                      "visible-to-user": true,
+                                      "class": "androidx.compose.ui.platform.ComposeView",
+                                      "className": "androidx.compose.ui.platform.ComposeView",
+                                      "bounds": [
+                                        0,
+                                        310,
+                                        1080,
+                                        478
+                                      ],
+                                      "node": [
+                                        {
+                                          "actions": [
+                                            "focus",
+                                            "accessibility_focus",
+                                            "click"
+                                          ],
+                                          "visible-to-user": true,
+                                          "view-id": "s2-54a37556722ca76a",
+                                          "clickable": "true",
+                                          "focusable": "true",
+                                          "bounds": [
+                                            42,
+                                            331,
+                                            442,
+                                            457
+                                          ],
+                                          "node": {
+                                            "actions": [
+                                              "next_at_movement_granularity",
+                                              "previous_at_movement_granularity",
+                                              "accessibility_focus",
+                                              "set_selection"
+                                            ],
+                                            "text": "All contacts",
+                                            "visible-to-user": true,
+                                            "view-id": "s2-5f02cbf35036e90a",
+                                            "bounds": [
+                                              142,
+                                              368,
+                                              342,
+                                              421
+                                            ]
+                                          }
+                                        },
+                                        {
+                                          "actions": [
+                                            "focus",
+                                            "accessibility_focus",
+                                            "click"
+                                          ],
+                                          "visible-to-user": true,
+                                          "view-id": "s2-89633532c570defa",
+                                          "clickable": "true",
+                                          "focusable": "true",
+                                          "bounds": [
+                                            787,
+                                            332,
+                                            913,
+                                            458
+                                          ],
+                                          "node": {
+                                            "actions": [
+                                              "next_at_movement_granularity",
+                                              "previous_at_movement_granularity",
+                                              "accessibility_focus",
+                                              "set_selection"
+                                            ],
+                                            "content-desc": "View labels",
+                                            "visible-to-user": true,
+                                            "view-id": "s2-da51a3dbd190147a",
+                                            "bounds": [
+                                              818,
+                                              363,
+                                              881,
+                                              426
+                                            ]
+                                          }
+                                        },
+                                        {
+                                          "actions": [
+                                            "focus",
+                                            "accessibility_focus",
+                                            "click"
+                                          ],
+                                          "visible-to-user": true,
+                                          "view-id": "s2-7174bb139a878456",
+                                          "clickable": "true",
+                                          "focusable": "true",
+                                          "checkable": "true",
+                                          "bounds": [
+                                            913,
+                                            332,
+                                            1039,
+                                            458
+                                          ],
+                                          "node": {
+                                            "actions": [
+                                              "next_at_movement_granularity",
+                                              "previous_at_movement_granularity",
+                                              "accessibility_focus",
+                                              "set_selection"
+                                            ],
+                                            "content-desc": "Show list filters",
+                                            "visible-to-user": true,
+                                            "view-id": "s2-25e7a7ee1ae3a566",
+                                            "bounds": [
+                                              944,
+                                              363,
+                                              1007,
+                                              426
+                                            ]
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.contacts:id/contact_list_compose_view",
+                                  "visible-to-user": true,
+                                  "class": "androidx.compose.ui.platform.ComposeView",
+                                  "className": "androidx.compose.ui.platform.ComposeView",
+                                  "bounds": [
+                                    0,
+                                    478,
+                                    1080,
+                                    2150
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "accessibility_focus",
+                                      "set_selection"
+                                    ],
+                                    "text": "No contacts yet",
+                                    "visible-to-user": true,
+                                    "view-id": "s2-7fb7e8b8d3f9cf5f",
+                                    "bounds": [
+                                      317,
+                                      1440,
+                                      763,
+                                      1524
+                                    ]
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "actions": [
+                        "focus",
+                        "select",
+                        "clear_selection",
+                        "click",
+                        "accessibility_focus",
+                        "next_at_movement_granularity",
+                        "previous_at_movement_granularity",
+                        "set_selection"
+                      ],
+                      "content-desc": "Create contact",
+                      "resource-id": "com.google.android.contacts:id/floating_action_button",
+                      "visible-to-user": true,
+                      "class": "com.google.android.material.floatingactionbutton.FloatingActionButton",
+                      "className": "com.google.android.material.floatingactionbutton.FloatingActionButton",
+                      "clickable": "true",
+                      "focusable": "true",
+                      "bounds": [
+                        870,
+                        1961,
+                        1017,
+                        2108
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                  ],
+                  "resource-id": "com.google.android.contacts:id/bottom_nav",
+                  "visible-to-user": true,
+                  "bounds": [
+                    0,
+                    2150,
+                    1080,
+                    2424
+                  ],
+                  "node": {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus"
+                    ],
+                    "visible-to-user": true,
+                    "collection-info": "rows:1,cols:2",
+                    "view-id": "s2-9d79b743b21d0546",
+                    "class": "android.view.ViewGroup",
+                    "className": "android.view.ViewGroup",
+                    "bounds": [
+                      98,
+                      2150,
+                      982,
+                      2361
+                    ],
+                    "node": [
+                      {
+                        "actions": [
+                          "focus",
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus",
+                          "next_at_movement_granularity",
+                          "previous_at_movement_granularity",
+                          "set_selection"
+                        ],
+                        "content-desc": "Contacts",
+                        "resource-id": "com.google.android.contacts:id/contacts",
+                        "collection-row-index": 0,
+                        "collection-column-index": 0,
+                        "visible-to-user": true,
+                        "tooltip-text": "Contacts",
+                        "collection-item-info": "row:0,col:0",
+                        "focusable": "true",
+                        "selected": "true",
+                        "bounds": [
+                          98,
+                          2150,
+                          540,
+                          2361
+                        ],
+                        "node": {
+                          "actions": [
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "resource-id": "com.google.android.contacts:id/navigation_bar_item_content_container",
+                          "visible-to-user": true,
+                          "class": "android.widget.LinearLayout",
+                          "className": "android.widget.LinearLayout",
+                          "selected": "true",
+                          "bounds": [
+                            235,
+                            2182,
+                            403,
+                            2361
+                          ],
+                          "node": [
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "resource-id": "com.google.android.contacts:id/navigation_bar_item_icon_container",
+                              "visible-to-user": true,
+                              "selected": "true",
+                              "bounds": [
+                                235,
+                                2182,
+                                403,
+                                2266
+                              ],
+                              "node": [
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.contacts:id/navigation_bar_item_active_indicator_view",
+                                  "visible-to-user": true,
+                                  "selected": "true",
+                                  "bounds": [
+                                    235,
+                                    2182,
+                                    403,
+                                    2266
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.contacts:id/navigation_bar_item_inner_content_container",
+                                  "visible-to-user": true,
+                                  "class": "android.widget.LinearLayout",
+                                  "className": "android.widget.LinearLayout",
+                                  "selected": "true",
+                                  "bounds": [
+                                    287,
+                                    2192,
+                                    350,
+                                    2255
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "com.google.android.contacts:id/navigation_bar_item_icon_view",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "selected": "true",
+                                    "bounds": [
+                                      287,
+                                      2192,
+                                      350,
+                                      2255
+                                    ]
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "resource-id": "com.google.android.contacts:id/navigation_bar_item_labels_group",
+                              "visible-to-user": true,
+                              "class": "android.view.ViewGroup",
+                              "className": "android.view.ViewGroup",
+                              "selected": "true",
+                              "bounds": [
+                                250,
+                                2277,
+                                388,
+                                2361
+                              ],
+                              "node": {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "Contacts",
+                                "resource-id": "com.google.android.contacts:id/navigation_bar_item_large_label_view",
+                                "visible-to-user": true,
+                                "selected": "true",
+                                "bounds": [
+                                  250,
+                                  2277,
+                                  388,
+                                  2319
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "actions": [
+                          "focus",
+                          "select",
+                          "clear_selection",
+                          "click",
+                          "accessibility_focus",
+                          "next_at_movement_granularity",
+                          "previous_at_movement_granularity",
+                          "set_selection"
+                        ],
+                        "content-desc": "Organize",
+                        "resource-id": "com.google.android.contacts:id/nav_organize",
+                        "collection-row-index": 0,
+                        "collection-column-index": 1,
+                        "visible-to-user": true,
+                        "tooltip-text": "Organize",
+                        "collection-item-info": "row:0,col:1",
+                        "clickable": "true",
+                        "focusable": "true",
+                        "bounds": [
+                          540,
+                          2150,
+                          982,
+                          2361
+                        ],
+                        "node": {
+                          "actions": [
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "resource-id": "com.google.android.contacts:id/navigation_bar_item_content_container",
+                          "visible-to-user": true,
+                          "class": "android.widget.LinearLayout",
+                          "className": "android.widget.LinearLayout",
+                          "bounds": [
+                            677,
+                            2182,
+                            845,
+                            2361
+                          ],
+                          "node": [
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "resource-id": "com.google.android.contacts:id/navigation_bar_item_icon_container",
+                              "visible-to-user": true,
+                              "bounds": [
+                                677,
+                                2182,
+                                845,
+                                2266
+                              ],
+                              "node": [
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.contacts:id/navigation_bar_item_active_indicator_view",
+                                  "visible-to-user": false,
+                                  "bounds": [
+                                    727,
+                                    2182,
+                                    795,
+                                    2266
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.contacts:id/navigation_bar_item_inner_content_container",
+                                  "visible-to-user": true,
+                                  "class": "android.widget.LinearLayout",
+                                  "className": "android.widget.LinearLayout",
+                                  "bounds": [
+                                    729,
+                                    2192,
+                                    792,
+                                    2255
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "com.google.android.contacts:id/navigation_bar_item_icon_view",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      729,
+                                      2192,
+                                      792,
+                                      2255
+                                    ]
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "resource-id": "com.google.android.contacts:id/navigation_bar_item_labels_group",
+                              "visible-to-user": true,
+                              "class": "android.view.ViewGroup",
+                              "className": "android.view.ViewGroup",
+                              "bounds": [
+                                692,
+                                2277,
+                                829,
+                                2361
+                              ],
+                              "node": {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "Organize",
+                                "resource-id": "com.google.android.contacts:id/navigation_bar_item_small_label_view",
+                                "visible-to-user": true,
+                                "bounds": [
+                                  692,
+                                  2277,
+                                  829,
+                                  2319
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "windowId": 8,
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "visible-to-user": true,
+          "view-id": "s2-6abe6c88fbb6eee5",
+          "bounds": [
+            0,
+            0,
+            1080,
+            137
+          ],
+          "node": [
+            {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "com.android.systemui:id/status_bar_launch_animation_container",
+              "visible-to-user": true,
+              "bounds": [
+                0,
+                0,
+                1080,
+                137
+              ]
+            },
+            {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "com.android.systemui:id/status_bar_container",
+              "visible-to-user": true,
+              "bounds": [
+                0,
+                0,
+                1080,
+                137
+              ],
+              "node": {
+                "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus"
+                ],
+                "resource-id": "com.android.systemui:id/status_bar",
+                "visible-to-user": true,
+                "pane-title": "Status bar",
+                "bounds": [
+                  0,
+                  0,
+                  1080,
+                  137
+                ],
+                "node": {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                  ],
+                  "resource-id": "com.android.systemui:id/status_bar_contents",
+                  "visible-to-user": true,
+                  "class": "android.widget.LinearLayout",
+                  "className": "android.widget.LinearLayout",
+                  "bounds": [
+                    0,
+                    0,
+                    1027,
+                    137
+                  ],
+                  "node": [
+                    {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.android.systemui:id/status_bar_start_side_container",
+                      "visible-to-user": true,
+                      "bounds": [
+                        11,
+                        0,
+                        458,
+                        137
+                      ],
+                      "node": {
+                        "actions": [
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "com.android.systemui:id/status_bar_start_side_content",
+                        "visible-to-user": true,
+                        "bounds": [
+                          11,
+                          0,
+                          115,
+                          137
+                        ],
+                        "node": {
+                          "actions": [
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "resource-id": "com.android.systemui:id/status_bar_start_side_except_heads_up",
+                          "visible-to-user": true,
+                          "class": "android.widget.LinearLayout",
+                          "className": "android.widget.LinearLayout",
+                          "bounds": [
+                            11,
+                            0,
+                            115,
+                            137
+                          ],
+                          "node": {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus",
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "set_selection"
+                            ],
+                            "text": "7:41",
+                            "content-desc": "7:41 PM",
+                            "resource-id": "com.android.systemui:id/clock",
+                            "visible-to-user": true,
+                            "bounds": [
+                              11,
+                              49,
+                              115,
+                              92
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.android.systemui:id/cutout_space_view",
+                      "visible-to-user": true,
+                      "bounds": [
+                        458,
+                        0,
+                        568,
+                        137
+                      ]
+                    },
+                    {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.android.systemui:id/status_bar_end_side_container",
+                      "visible-to-user": true,
+                      "bounds": [
+                        568,
+                        0,
+                        1016,
+                        137
+                      ],
+                      "node": {
+                        "actions": [
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "com.android.systemui:id/status_bar_end_side_content",
+                        "visible-to-user": true,
+                        "class": "android.widget.LinearLayout",
+                        "className": "android.widget.LinearLayout",
+                        "bounds": [
+                          876,
+                          0,
+                          1016,
+                          137
+                        ],
+                        "node": {
+                          "actions": [
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "resource-id": "com.android.systemui:id/system_icons",
+                          "visible-to-user": true,
+                          "class": "android.widget.LinearLayout",
+                          "className": "android.widget.LinearLayout",
+                          "bounds": [
+                            876,
+                            42,
+                            1016,
+                            100
+                          ],
+                          "node": [
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "resource-id": "com.android.systemui:id/statusIcons",
+                              "visible-to-user": true,
+                              "class": "android.widget.LinearLayout",
+                              "className": "android.widget.LinearLayout",
+                              "bounds": [
+                                884,
+                                42,
+                                985,
+                                100
+                              ],
+                              "node": [
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.android.systemui:id/wifi_combo",
+                                  "visible-to-user": true,
+                                  "bounds": [
+                                    884,
+                                    42,
+                                    930,
+                                    100
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "com.android.systemui:id/wifi_group",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.LinearLayout",
+                                    "className": "android.widget.LinearLayout",
+                                    "bounds": [
+                                      891,
+                                      42,
+                                      930,
+                                      100
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "com.android.systemui:id/wifi_combo",
+                                      "visible-to-user": true,
+                                      "bounds": [
+                                        891,
+                                        51,
+                                        930,
+                                        90
+                                      ],
+                                      "node": {
+                                        "actions": [
+                                          "select",
+                                          "clear_selection",
+                                          "accessibility_focus",
+                                          "next_at_movement_granularity",
+                                          "previous_at_movement_granularity",
+                                          "set_selection"
+                                        ],
+                                        "content-desc": "Wifi signal full.",
+                                        "resource-id": "com.android.systemui:id/wifi_signal",
+                                        "visible-to-user": true,
+                                        "class": "android.widget.ImageView",
+                                        "className": "android.widget.ImageView",
+                                        "bounds": [
+                                          891,
+                                          51,
+                                          930,
+                                          90
+                                        ]
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "T-Mobile, three bars.",
+                                  "resource-id": "com.android.systemui:id/mobile_combo",
+                                  "visible-to-user": true,
+                                  "bounds": [
+                                    930,
+                                    42,
+                                    969,
+                                    100
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "com.android.systemui:id/mobile_group",
+                                    "visible-to-user": true,
+                                    "class": "android.widget.LinearLayout",
+                                    "className": "android.widget.LinearLayout",
+                                    "bounds": [
+                                      930,
+                                      42,
+                                      969,
+                                      100
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "com.android.systemui:id/mobile_signal",
+                                      "visible-to-user": true,
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        930,
+                                        51,
+                                        969,
+                                        90
+                                      ]
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus",
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "set_selection"
+                              ],
+                              "content-desc": "Battery 100 percent.",
+                              "resource-id": "com.android.systemui:id/battery",
+                              "visible-to-user": true,
+                              "class": "android.widget.LinearLayout",
+                              "className": "android.widget.LinearLayout",
+                              "bounds": [
+                                985,
+                                54,
+                                1005,
+                                88
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "packageName": "com.google.android.contacts",
+    "windows": [
+      {
+        "id": 8,
+        "displayId": 0,
+        "type": 3,
+        "windowLayer": 1,
+        "isActive": false,
+        "isFocused": false,
+        "bounds": [
+          0,
+          0,
+          1080,
+          137
+        ],
+        "packageName": "com.android.systemui",
+        "hierarchy": {
+          "windowId": 8,
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "visible-to-user": true,
+          "view-id": "s2-6abe6c88fbb6eee5",
+          "bounds": [
+            0,
+            0,
+            1080,
+            137
+          ],
+          "node": [
+            {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "com.android.systemui:id/status_bar_launch_animation_container",
+              "visible-to-user": true,
+              "view-id": "com.android.systemui:id/status_bar_launch_animation_container",
+              "bounds": [
+                0,
+                0,
+                1080,
+                137
+              ]
+            },
+            {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "com.android.systemui:id/status_bar_container",
+              "visible-to-user": true,
+              "view-id": "com.android.systemui:id/status_bar_container",
+              "bounds": [
+                0,
+                0,
+                1080,
+                137
+              ],
+              "node": {
+                "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus"
+                ],
+                "resource-id": "com.android.systemui:id/status_bar",
+                "visible-to-user": true,
+                "pane-title": "Status bar",
+                "view-id": "com.android.systemui:id/status_bar",
+                "bounds": [
+                  0,
+                  0,
+                  1080,
+                  137
+                ],
+                "node": {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                  ],
+                  "resource-id": "com.android.systemui:id/status_bar_contents",
+                  "visible-to-user": true,
+                  "view-id": "com.android.systemui:id/status_bar_contents",
+                  "class": "android.widget.LinearLayout",
+                  "className": "android.widget.LinearLayout",
+                  "bounds": [
+                    0,
+                    0,
+                    1027,
+                    137
+                  ],
+                  "node": [
+                    {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.android.systemui:id/status_bar_start_side_container",
+                      "visible-to-user": true,
+                      "view-id": "com.android.systemui:id/status_bar_start_side_container",
+                      "bounds": [
+                        11,
+                        0,
+                        458,
+                        137
+                      ],
+                      "node": {
+                        "actions": [
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "com.android.systemui:id/status_bar_start_side_content",
+                        "visible-to-user": true,
+                        "view-id": "com.android.systemui:id/status_bar_start_side_content",
+                        "bounds": [
+                          11,
+                          0,
+                          115,
+                          137
+                        ],
+                        "node": {
+                          "actions": [
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "resource-id": "com.android.systemui:id/status_bar_start_side_except_heads_up",
+                          "visible-to-user": true,
+                          "view-id": "com.android.systemui:id/status_bar_start_side_except_heads_up",
+                          "class": "android.widget.LinearLayout",
+                          "className": "android.widget.LinearLayout",
+                          "bounds": [
+                            11,
+                            0,
+                            115,
+                            137
+                          ],
+                          "node": {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus",
+                              "next_at_movement_granularity",
+                              "previous_at_movement_granularity",
+                              "set_selection"
+                            ],
+                            "text": "7:41",
+                            "content-desc": "7:41 PM",
+                            "resource-id": "com.android.systemui:id/clock",
+                            "visible-to-user": true,
+                            "view-id": "com.android.systemui:id/clock",
+                            "bounds": [
+                              11,
+                              49,
+                              115,
+                              92
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.android.systemui:id/cutout_space_view",
+                      "visible-to-user": true,
+                      "view-id": "com.android.systemui:id/cutout_space_view",
+                      "bounds": [
+                        458,
+                        0,
+                        568,
+                        137
+                      ]
+                    },
+                    {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.android.systemui:id/status_bar_end_side_container",
+                      "visible-to-user": true,
+                      "view-id": "com.android.systemui:id/status_bar_end_side_container",
+                      "bounds": [
+                        568,
+                        0,
+                        1016,
+                        137
+                      ],
+                      "node": {
+                        "actions": [
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "com.android.systemui:id/status_bar_end_side_content",
+                        "visible-to-user": true,
+                        "view-id": "com.android.systemui:id/status_bar_end_side_content",
+                        "class": "android.widget.LinearLayout",
+                        "className": "android.widget.LinearLayout",
+                        "bounds": [
+                          876,
+                          0,
+                          1016,
+                          137
+                        ],
+                        "node": {
+                          "actions": [
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "resource-id": "com.android.systemui:id/system_icons",
+                          "visible-to-user": true,
+                          "view-id": "com.android.systemui:id/system_icons",
+                          "class": "android.widget.LinearLayout",
+                          "className": "android.widget.LinearLayout",
+                          "bounds": [
+                            876,
+                            42,
+                            1016,
+                            100
+                          ],
+                          "node": [
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "resource-id": "com.android.systemui:id/statusIcons",
+                              "visible-to-user": true,
+                              "view-id": "com.android.systemui:id/statusIcons",
+                              "class": "android.widget.LinearLayout",
+                              "className": "android.widget.LinearLayout",
+                              "bounds": [
+                                884,
+                                42,
+                                985,
+                                100
+                              ],
+                              "node": [
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.android.systemui:id/wifi_combo",
+                                  "visible-to-user": true,
+                                  "view-id": "com.android.systemui:id/wifi_combo",
+                                  "bounds": [
+                                    884,
+                                    42,
+                                    930,
+                                    100
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "com.android.systemui:id/wifi_group",
+                                    "visible-to-user": true,
+                                    "view-id": "com.android.systemui:id/wifi_group",
+                                    "class": "android.widget.LinearLayout",
+                                    "className": "android.widget.LinearLayout",
+                                    "bounds": [
+                                      891,
+                                      42,
+                                      930,
+                                      100
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "com.android.systemui:id/wifi_combo",
+                                      "visible-to-user": true,
+                                      "view-id": "com.android.systemui:id/wifi_combo",
+                                      "bounds": [
+                                        891,
+                                        51,
+                                        930,
+                                        90
+                                      ],
+                                      "node": {
+                                        "actions": [
+                                          "select",
+                                          "clear_selection",
+                                          "accessibility_focus",
+                                          "next_at_movement_granularity",
+                                          "previous_at_movement_granularity",
+                                          "set_selection"
+                                        ],
+                                        "content-desc": "Wifi signal full.",
+                                        "resource-id": "com.android.systemui:id/wifi_signal",
+                                        "visible-to-user": true,
+                                        "view-id": "com.android.systemui:id/wifi_signal",
+                                        "class": "android.widget.ImageView",
+                                        "className": "android.widget.ImageView",
+                                        "bounds": [
+                                          891,
+                                          51,
+                                          930,
+                                          90
+                                        ]
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus",
+                                    "next_at_movement_granularity",
+                                    "previous_at_movement_granularity",
+                                    "set_selection"
+                                  ],
+                                  "content-desc": "T-Mobile, three bars.",
+                                  "resource-id": "com.android.systemui:id/mobile_combo",
+                                  "visible-to-user": true,
+                                  "view-id": "com.android.systemui:id/mobile_combo",
+                                  "bounds": [
+                                    930,
+                                    42,
+                                    969,
+                                    100
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "com.android.systemui:id/mobile_group",
+                                    "visible-to-user": true,
+                                    "view-id": "com.android.systemui:id/mobile_group",
+                                    "class": "android.widget.LinearLayout",
+                                    "className": "android.widget.LinearLayout",
+                                    "bounds": [
+                                      930,
+                                      42,
+                                      969,
+                                      100
+                                    ],
+                                    "node": {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "com.android.systemui:id/mobile_signal",
+                                      "visible-to-user": true,
+                                      "view-id": "com.android.systemui:id/mobile_signal",
+                                      "class": "android.widget.ImageView",
+                                      "className": "android.widget.ImageView",
+                                      "bounds": [
+                                        930,
+                                        51,
+                                        969,
+                                        90
+                                      ]
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus",
+                                "next_at_movement_granularity",
+                                "previous_at_movement_granularity",
+                                "set_selection"
+                              ],
+                              "content-desc": "Battery 100 percent.",
+                              "resource-id": "com.android.systemui:id/battery",
+                              "visible-to-user": true,
+                              "view-id": "com.android.systemui:id/battery",
+                              "class": "android.widget.LinearLayout",
+                              "className": "android.widget.LinearLayout",
+                              "bounds": [
+                                985,
+                                54,
+                                1005,
+                                88
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": 19,
+        "displayId": 0,
+        "type": 1,
+        "windowLayer": 0,
+        "isActive": true,
+        "isFocused": true,
+        "bounds": [
+          0,
+          0,
+          1080,
+          2424
+        ],
+        "packageName": "com.google.android.contacts",
+        "hierarchy": {
+          "windowId": 19,
+          "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+          ],
+          "visible-to-user": true,
+          "view-id": "s2-3f7527335cdf30fb",
+          "occlusionState": "partial",
+          "occludedBy": "unlabeled view",
+          "occludedByViewId": "s2-6abe6c88fbb6eee5",
+          "bounds": [
+            0,
+            0,
+            1080,
+            2424
+          ],
+          "node": {
+            "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+            ],
+            "resource-id": "com.google.android.contacts:id/action_bar_root",
+            "visible-to-user": true,
+            "view-id": "com.google.android.contacts:id/action_bar_root",
+            "occlusionState": "partial",
+            "occludedBy": "unlabeled view",
+            "occludedByViewId": "s2-6abe6c88fbb6eee5",
+            "bounds": [
+              0,
+              0,
+              1080,
+              2424
+            ],
+            "node": {
+              "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+              ],
+              "resource-id": "android:id/content",
+              "visible-to-user": true,
+              "view-id": "android:id/content",
+              "occlusionState": "partial",
+              "occludedBy": "unlabeled view",
+              "occludedByViewId": "s2-6abe6c88fbb6eee5",
+              "bounds": [
+                0,
+                0,
+                1080,
+                2424
+              ],
+              "node": [
+                {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                  ],
+                  "resource-id": "com.google.android.contacts:id/root",
+                  "visible-to-user": true,
+                  "view-id": "com.google.android.contacts:id/root",
+                  "class": "android.view.ViewGroup",
+                  "className": "android.view.ViewGroup",
+                  "occlusionState": "partial",
+                  "occludedBy": "unlabeled view",
+                  "occludedByViewId": "s2-6abe6c88fbb6eee5",
+                  "bounds": [
+                    0,
+                    0,
+                    1080,
+                    2150
+                  ],
+                  "node": [
+                    {
+                      "actions": [
+                        "select",
+                        "clear_selection",
+                        "accessibility_focus"
+                      ],
+                      "resource-id": "com.google.android.contacts:id/contacts_list_container",
+                      "visible-to-user": true,
+                      "view-id": "com.google.android.contacts:id/contacts_list_container",
+                      "occlusionState": "partial",
+                      "occludedBy": "unlabeled view",
+                      "occludedByViewId": "s2-6abe6c88fbb6eee5",
+                      "bounds": [
+                        0,
+                        0,
+                        1080,
+                        2150
+                      ],
+                      "node": {
+                        "actions": [
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus"
+                        ],
+                        "resource-id": "com.google.android.contacts:id/nav_host_container",
+                        "visible-to-user": true,
+                        "view-id": "com.google.android.contacts:id/nav_host_container",
+                        "occlusionState": "partial",
+                        "occludedBy": "unlabeled view",
+                        "occludedByViewId": "s2-6abe6c88fbb6eee5",
+                        "bounds": [
+                          0,
+                          0,
+                          1080,
+                          2150
+                        ],
+                        "node": {
+                          "actions": [
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "resource-id": "com.google.android.contacts:id/nav_host_container",
+                          "visible-to-user": true,
+                          "view-id": "com.google.android.contacts:id/nav_host_container",
+                          "occlusionState": "partial",
+                          "occludedBy": "unlabeled view",
+                          "occludedByViewId": "s2-6abe6c88fbb6eee5",
+                          "bounds": [
+                            0,
+                            0,
+                            1080,
+                            2150
+                          ],
+                          "node": {
+                            "actions": [
+                              "select",
+                              "clear_selection",
+                              "accessibility_focus"
+                            ],
+                            "resource-id": "com.google.android.contacts:id/contact_list_fragment",
+                            "visible-to-user": true,
+                            "view-id": "com.google.android.contacts:id/contact_list_fragment",
+                            "occlusionState": "partial",
+                            "occludedBy": "unlabeled view",
+                            "occludedByViewId": "s2-6abe6c88fbb6eee5",
+                            "bounds": [
+                              0,
+                              0,
+                              1080,
+                              2150
+                            ],
+                            "node": {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus",
+                                "scroll_forward"
+                              ],
+                              "resource-id": "com.google.android.contacts:id/contact_list",
+                              "visible-to-user": true,
+                              "pane-title": "Contacts list",
+                              "view-id": "com.google.android.contacts:id/contact_list",
+                              "scrollable": "true",
+                              "occlusionState": "partial",
+                              "occludedBy": "unlabeled view",
+                              "occludedByViewId": "s2-6abe6c88fbb6eee5",
+                              "bounds": [
+                                0,
+                                0,
+                                1080,
+                                2150
+                              ],
+                              "node": [
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.contacts:id/app_bar_layout",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.contacts:id/app_bar_layout",
+                                  "class": "android.widget.LinearLayout",
+                                  "className": "android.widget.LinearLayout",
+                                  "occlusionState": "partial",
+                                  "occludedBy": "unlabeled view",
+                                  "occludedByViewId": "s2-6abe6c88fbb6eee5",
+                                  "bounds": [
+                                    0,
+                                    0,
+                                    1080,
+                                    478
+                                  ],
+                                  "node": [
+                                    {
+                                      "actions": [
+                                        "focus",
+                                        "select",
+                                        "clear_selection",
+                                        "click",
+                                        "accessibility_focus"
+                                      ],
+                                      "text": "Search contacts",
+                                      "resource-id": "com.google.android.contacts:id/open_search_bar",
+                                      "visible-to-user": true,
+                                      "hint-text": "Search contacts",
+                                      "view-id": "com.google.android.contacts:id/open_search_bar",
+                                      "class": "android.widget.EditText",
+                                      "className": "android.widget.EditText",
+                                      "clickable": "true",
+                                      "focusable": "true",
+                                      "bounds": [
+                                        42,
+                                        163,
+                                        1038,
+                                        289
+                                      ],
+                                      "node": [
+                                        {
+                                          "actions": [
+                                            "focus",
+                                            "select",
+                                            "clear_selection",
+                                            "click",
+                                            "accessibility_focus",
+                                            "next_at_movement_granularity",
+                                            "previous_at_movement_granularity",
+                                            "set_selection"
+                                          ],
+                                          "content-desc": "Search",
+                                          "visible-to-user": true,
+                                          "tooltip-text": "Search",
+                                          "view-id": "s2-3296a858bd118c59",
+                                          "class": "android.widget.ImageButton",
+                                          "className": "android.widget.ImageButton",
+                                          "clickable": "true",
+                                          "focusable": "true",
+                                          "bounds": [
+                                            53,
+                                            163,
+                                            179,
+                                            289
+                                          ]
+                                        },
+                                        {
+                                          "actions": [
+                                            "select",
+                                            "clear_selection",
+                                            "accessibility_focus"
+                                          ],
+                                          "text": "Search contacts",
+                                          "resource-id": "com.google.android.contacts:id/open_search_bar_text_view",
+                                          "visible-to-user": true,
+                                          "hint-text": "Search contacts",
+                                          "view-id": "com.google.android.contacts:id/open_search_bar_text_view",
+                                          "bounds": [
+                                            179,
+                                            195,
+                                            485,
+                                            257
+                                          ]
+                                        },
+                                        {
+                                          "actions": [
+                                            "focus",
+                                            "select",
+                                            "clear_selection",
+                                            "click",
+                                            "accessibility_focus",
+                                            "next_at_movement_granularity",
+                                            "previous_at_movement_granularity",
+                                            "set_selection"
+                                          ],
+                                          "content-desc": "Sign in",
+                                          "resource-id": "com.google.android.contacts:id/selected_account_disc",
+                                          "visible-to-user": true,
+                                          "view-id": "com.google.android.contacts:id/selected_account_disc",
+                                          "clickable": "true",
+                                          "focusable": "true",
+                                          "bounds": [
+                                            904,
+                                            163,
+                                            1038,
+                                            289
+                                          ],
+                                          "node": {
+                                            "actions": [
+                                              "select",
+                                              "clear_selection",
+                                              "accessibility_focus"
+                                            ],
+                                            "resource-id": "com.google.android.contacts:id/og_selected_account_disc_apd",
+                                            "visible-to-user": true,
+                                            "view-id": "com.google.android.contacts:id/og_selected_account_disc_apd",
+                                            "bounds": [
+                                              904,
+                                              163,
+                                              1030,
+                                              289
+                                            ],
+                                            "node": {
+                                              "actions": [
+                                                "select",
+                                                "clear_selection",
+                                                "accessibility_focus"
+                                              ],
+                                              "resource-id": "com.google.android.contacts:id/og_apd_internal_image_view",
+                                              "visible-to-user": true,
+                                              "view-id": "com.google.android.contacts:id/og_apd_internal_image_view",
+                                              "class": "android.widget.ImageView",
+                                              "className": "android.widget.ImageView",
+                                              "bounds": [
+                                                912,
+                                                171,
+                                                1022,
+                                                281
+                                              ]
+                                            }
+                                          }
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "actions": [
+                                        "select",
+                                        "clear_selection",
+                                        "accessibility_focus"
+                                      ],
+                                      "resource-id": "com.google.android.contacts:id/app_bar_compose_view",
+                                      "visible-to-user": true,
+                                      "view-id": "com.google.android.contacts:id/app_bar_compose_view",
+                                      "class": "androidx.compose.ui.platform.ComposeView",
+                                      "className": "androidx.compose.ui.platform.ComposeView",
+                                      "bounds": [
+                                        0,
+                                        310,
+                                        1080,
+                                        478
+                                      ],
+                                      "node": [
+                                        {
+                                          "actions": [
+                                            "focus",
+                                            "accessibility_focus",
+                                            "click"
+                                          ],
+                                          "visible-to-user": true,
+                                          "view-id": "s2-54a37556722ca76a",
+                                          "clickable": "true",
+                                          "focusable": "true",
+                                          "bounds": [
+                                            42,
+                                            331,
+                                            442,
+                                            457
+                                          ],
+                                          "node": {
+                                            "actions": [
+                                              "next_at_movement_granularity",
+                                              "previous_at_movement_granularity",
+                                              "accessibility_focus",
+                                              "set_selection"
+                                            ],
+                                            "text": "All contacts",
+                                            "visible-to-user": true,
+                                            "view-id": "s2-5f02cbf35036e90a",
+                                            "bounds": [
+                                              142,
+                                              368,
+                                              342,
+                                              421
+                                            ]
+                                          }
+                                        },
+                                        {
+                                          "actions": [
+                                            "focus",
+                                            "accessibility_focus",
+                                            "click"
+                                          ],
+                                          "visible-to-user": true,
+                                          "view-id": "s2-89633532c570defa",
+                                          "clickable": "true",
+                                          "focusable": "true",
+                                          "bounds": [
+                                            787,
+                                            332,
+                                            913,
+                                            458
+                                          ],
+                                          "node": {
+                                            "actions": [
+                                              "next_at_movement_granularity",
+                                              "previous_at_movement_granularity",
+                                              "accessibility_focus",
+                                              "set_selection"
+                                            ],
+                                            "content-desc": "View labels",
+                                            "visible-to-user": true,
+                                            "view-id": "s2-da51a3dbd190147a",
+                                            "bounds": [
+                                              818,
+                                              363,
+                                              881,
+                                              426
+                                            ]
+                                          }
+                                        },
+                                        {
+                                          "actions": [
+                                            "focus",
+                                            "accessibility_focus",
+                                            "click"
+                                          ],
+                                          "visible-to-user": true,
+                                          "view-id": "s2-7174bb139a878456",
+                                          "clickable": "true",
+                                          "focusable": "true",
+                                          "checkable": "true",
+                                          "bounds": [
+                                            913,
+                                            332,
+                                            1039,
+                                            458
+                                          ],
+                                          "node": {
+                                            "actions": [
+                                              "next_at_movement_granularity",
+                                              "previous_at_movement_granularity",
+                                              "accessibility_focus",
+                                              "set_selection"
+                                            ],
+                                            "content-desc": "Show list filters",
+                                            "visible-to-user": true,
+                                            "view-id": "s2-25e7a7ee1ae3a566",
+                                            "bounds": [
+                                              944,
+                                              363,
+                                              1007,
+                                              426
+                                            ]
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.contacts:id/contact_list_compose_view",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.contacts:id/contact_list_compose_view",
+                                  "class": "androidx.compose.ui.platform.ComposeView",
+                                  "className": "androidx.compose.ui.platform.ComposeView",
+                                  "bounds": [
+                                    0,
+                                    478,
+                                    1080,
+                                    2150
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "next_at_movement_granularity",
+                                      "previous_at_movement_granularity",
+                                      "accessibility_focus",
+                                      "set_selection"
+                                    ],
+                                    "text": "No contacts yet",
+                                    "visible-to-user": true,
+                                    "view-id": "s2-7fb7e8b8d3f9cf5f",
+                                    "bounds": [
+                                      317,
+                                      1440,
+                                      763,
+                                      1524
+                                    ]
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "actions": [
+                        "focus",
+                        "select",
+                        "clear_selection",
+                        "click",
+                        "accessibility_focus",
+                        "next_at_movement_granularity",
+                        "previous_at_movement_granularity",
+                        "set_selection"
+                      ],
+                      "content-desc": "Create contact",
+                      "resource-id": "com.google.android.contacts:id/floating_action_button",
+                      "visible-to-user": true,
+                      "view-id": "com.google.android.contacts:id/floating_action_button",
+                      "class": "com.google.android.material.floatingactionbutton.FloatingActionButton",
+                      "className": "com.google.android.material.floatingactionbutton.FloatingActionButton",
+                      "clickable": "true",
+                      "focusable": "true",
+                      "bounds": [
+                        870,
+                        1961,
+                        1017,
+                        2108
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                  ],
+                  "resource-id": "com.google.android.contacts:id/bottom_nav",
+                  "visible-to-user": true,
+                  "view-id": "com.google.android.contacts:id/bottom_nav",
+                  "bounds": [
+                    0,
+                    2150,
+                    1080,
+                    2424
+                  ],
+                  "node": {
+                    "actions": [
+                      "select",
+                      "clear_selection",
+                      "accessibility_focus"
+                    ],
+                    "visible-to-user": true,
+                    "collection-info": "rows:1,cols:2",
+                    "view-id": "s2-9d79b743b21d0546",
+                    "class": "android.view.ViewGroup",
+                    "className": "android.view.ViewGroup",
+                    "bounds": [
+                      98,
+                      2150,
+                      982,
+                      2361
+                    ],
+                    "node": [
+                      {
+                        "actions": [
+                          "focus",
+                          "select",
+                          "clear_selection",
+                          "accessibility_focus",
+                          "next_at_movement_granularity",
+                          "previous_at_movement_granularity",
+                          "set_selection"
+                        ],
+                        "content-desc": "Contacts",
+                        "resource-id": "com.google.android.contacts:id/contacts",
+                        "collection-row-index": 0,
+                        "collection-column-index": 0,
+                        "visible-to-user": true,
+                        "tooltip-text": "Contacts",
+                        "collection-item-info": "row:0,col:0",
+                        "view-id": "com.google.android.contacts:id/contacts",
+                        "focusable": "true",
+                        "selected": "true",
+                        "bounds": [
+                          98,
+                          2150,
+                          540,
+                          2361
+                        ],
+                        "node": {
+                          "actions": [
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "resource-id": "com.google.android.contacts:id/navigation_bar_item_content_container",
+                          "visible-to-user": true,
+                          "view-id": "com.google.android.contacts:id/navigation_bar_item_content_container",
+                          "class": "android.widget.LinearLayout",
+                          "className": "android.widget.LinearLayout",
+                          "selected": "true",
+                          "bounds": [
+                            235,
+                            2182,
+                            403,
+                            2361
+                          ],
+                          "node": [
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "resource-id": "com.google.android.contacts:id/navigation_bar_item_icon_container",
+                              "visible-to-user": true,
+                              "view-id": "com.google.android.contacts:id/navigation_bar_item_icon_container",
+                              "selected": "true",
+                              "bounds": [
+                                235,
+                                2182,
+                                403,
+                                2266
+                              ],
+                              "node": [
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.contacts:id/navigation_bar_item_active_indicator_view",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.contacts:id/navigation_bar_item_active_indicator_view",
+                                  "selected": "true",
+                                  "bounds": [
+                                    235,
+                                    2182,
+                                    403,
+                                    2266
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.contacts:id/navigation_bar_item_inner_content_container",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.contacts:id/navigation_bar_item_inner_content_container",
+                                  "class": "android.widget.LinearLayout",
+                                  "className": "android.widget.LinearLayout",
+                                  "selected": "true",
+                                  "bounds": [
+                                    287,
+                                    2192,
+                                    350,
+                                    2255
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "com.google.android.contacts:id/navigation_bar_item_icon_view",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.contacts:id/navigation_bar_item_icon_view",
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "selected": "true",
+                                    "bounds": [
+                                      287,
+                                      2192,
+                                      350,
+                                      2255
+                                    ]
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "resource-id": "com.google.android.contacts:id/navigation_bar_item_labels_group",
+                              "visible-to-user": true,
+                              "view-id": "com.google.android.contacts:id/navigation_bar_item_labels_group",
+                              "class": "android.view.ViewGroup",
+                              "className": "android.view.ViewGroup",
+                              "selected": "true",
+                              "bounds": [
+                                250,
+                                2277,
+                                388,
+                                2361
+                              ],
+                              "node": {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "Contacts",
+                                "resource-id": "com.google.android.contacts:id/navigation_bar_item_large_label_view",
+                                "visible-to-user": true,
+                                "view-id": "com.google.android.contacts:id/navigation_bar_item_large_label_view",
+                                "selected": "true",
+                                "bounds": [
+                                  250,
+                                  2277,
+                                  388,
+                                  2319
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "actions": [
+                          "focus",
+                          "select",
+                          "clear_selection",
+                          "click",
+                          "accessibility_focus",
+                          "next_at_movement_granularity",
+                          "previous_at_movement_granularity",
+                          "set_selection"
+                        ],
+                        "content-desc": "Organize",
+                        "resource-id": "com.google.android.contacts:id/nav_organize",
+                        "collection-row-index": 0,
+                        "collection-column-index": 1,
+                        "visible-to-user": true,
+                        "tooltip-text": "Organize",
+                        "collection-item-info": "row:0,col:1",
+                        "view-id": "com.google.android.contacts:id/nav_organize",
+                        "clickable": "true",
+                        "focusable": "true",
+                        "bounds": [
+                          540,
+                          2150,
+                          982,
+                          2361
+                        ],
+                        "node": {
+                          "actions": [
+                            "select",
+                            "clear_selection",
+                            "accessibility_focus"
+                          ],
+                          "resource-id": "com.google.android.contacts:id/navigation_bar_item_content_container",
+                          "visible-to-user": true,
+                          "view-id": "com.google.android.contacts:id/navigation_bar_item_content_container",
+                          "class": "android.widget.LinearLayout",
+                          "className": "android.widget.LinearLayout",
+                          "bounds": [
+                            677,
+                            2182,
+                            845,
+                            2361
+                          ],
+                          "node": [
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "resource-id": "com.google.android.contacts:id/navigation_bar_item_icon_container",
+                              "visible-to-user": true,
+                              "view-id": "com.google.android.contacts:id/navigation_bar_item_icon_container",
+                              "bounds": [
+                                677,
+                                2182,
+                                845,
+                                2266
+                              ],
+                              "node": [
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.contacts:id/navigation_bar_item_active_indicator_view",
+                                  "visible-to-user": false,
+                                  "view-id": "com.google.android.contacts:id/navigation_bar_item_active_indicator_view",
+                                  "bounds": [
+                                    727,
+                                    2182,
+                                    795,
+                                    2266
+                                  ]
+                                },
+                                {
+                                  "actions": [
+                                    "select",
+                                    "clear_selection",
+                                    "accessibility_focus"
+                                  ],
+                                  "resource-id": "com.google.android.contacts:id/navigation_bar_item_inner_content_container",
+                                  "visible-to-user": true,
+                                  "view-id": "com.google.android.contacts:id/navigation_bar_item_inner_content_container",
+                                  "class": "android.widget.LinearLayout",
+                                  "className": "android.widget.LinearLayout",
+                                  "bounds": [
+                                    729,
+                                    2192,
+                                    792,
+                                    2255
+                                  ],
+                                  "node": {
+                                    "actions": [
+                                      "select",
+                                      "clear_selection",
+                                      "accessibility_focus"
+                                    ],
+                                    "resource-id": "com.google.android.contacts:id/navigation_bar_item_icon_view",
+                                    "visible-to-user": true,
+                                    "view-id": "com.google.android.contacts:id/navigation_bar_item_icon_view",
+                                    "class": "android.widget.ImageView",
+                                    "className": "android.widget.ImageView",
+                                    "bounds": [
+                                      729,
+                                      2192,
+                                      792,
+                                      2255
+                                    ]
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "actions": [
+                                "select",
+                                "clear_selection",
+                                "accessibility_focus"
+                              ],
+                              "resource-id": "com.google.android.contacts:id/navigation_bar_item_labels_group",
+                              "visible-to-user": true,
+                              "view-id": "com.google.android.contacts:id/navigation_bar_item_labels_group",
+                              "class": "android.view.ViewGroup",
+                              "className": "android.view.ViewGroup",
+                              "bounds": [
+                                692,
+                                2277,
+                                829,
+                                2361
+                              ],
+                              "node": {
+                                "actions": [
+                                  "select",
+                                  "clear_selection",
+                                  "accessibility_focus",
+                                  "next_at_movement_granularity",
+                                  "previous_at_movement_granularity",
+                                  "set_selection"
+                                ],
+                                "text": "Organize",
+                                "resource-id": "com.google.android.contacts:id/navigation_bar_item_small_label_view",
+                                "visible-to-user": true,
+                                "view-id": "com.google.android.contacts:id/navigation_bar_item_small_label_view",
+                                "bounds": [
+                                  692,
+                                  2277,
+                                  829,
+                                  2319
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "contentHiddenRegions": [
+      {
+        "bounds": [
+          0,
+          478,
+          1080,
+          2486
+        ],
+        "reason": "compose-interop-no-hide-descendants",
+        "areaPercent": 82
+      }
+    ],
+    "intentChooserDetected": false,
+    "notificationPermissionDetected": false,
+    "ctrlProxyIncomplete": null,
+    "sources": [
+      "control-proxy"
+    ],
+    "screenWidth": 1080,
+    "screenHeight": 2424,
+    "rotation": 0,
+    "systemInsets": {
+      "top": 174,
+      "bottom": 84,
+      "left": 78,
+      "right": 78
+    },
+    "insets": {
+      "available": true,
+      "source": "android-window-metrics",
+      "units": "physical-pixels",
+      "systemBars": {
+        "visible": {
+          "top": 137,
+          "bottom": 63,
+          "left": 0,
+          "right": 0
+        },
+        "stable": {
+          "top": 137,
+          "bottom": 63,
+          "left": 0,
+          "right": 0
+        }
+      },
+      "displayCutout": {
+        "top": 142,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "displayCutoutInfo": {
+        "classification": "unknown",
+        "bounds": [
+          [
+            485,
+            0,
+            595,
+            142
+          ]
+        ]
+      },
+      "systemGestures": {
+        "top": 174,
+        "bottom": 84,
+        "left": 78,
+        "right": 78
+      },
+      "mandatorySystemGestures": {
+        "top": 174,
+        "bottom": 84,
+        "left": 0,
+        "right": 0
+      },
+      "tappableElement": {
+        "top": 137,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "systemChrome": {
+        "visibility": "visible",
+        "statusBar": "visible",
+        "navigationBar": "visible",
+        "homeIndicatorAutoHideRequested": null,
+        "source": "android-window-insets"
+      }
+    },
+    "wakefulness": "Awake",
+    "foregroundActivity": null,
+    "density": 420,
+    "sdkInt": 36,
+    "deviceModel": "sdk_gphone64_arm64",
+    "isEmulator": true,
+    "accessibilityTool": true,
+    "nativeScale": 1,
+    "pixelWidth": 1080,
+    "pixelHeight": 2424,
+    "updatedAt": 1795048868711,
+    "receivedAt": 1795048869014,
+    "frameContext": "7ab768c1-5aff-4b0c-8f47-ed834ccc7707:401",
+    "fresh": false
+  },
+  "intentChooserDetected": false,
+  "notificationPermissionDetected": false,
+  "rotation": 0,
+  "wakefulness": "Awake",
+  "wakefulnessSource": "hierarchy",
+  "deviceLock": {
+    "locked": false,
+    "keyguardShowing": false,
+    "secure": false
+  },
+  "backStack": {
+    "depth": 0,
+    "activities": [
+      {
+        "name": "com.android.contacts.activities.PeopleActivity",
+        "taskId": 11,
+        "userId": 0,
+        "isTaskRoot": true
+      },
+      {
+        "name": "dev.jasonpearson.automobile.playground.MainActivity",
+        "taskId": 8,
+        "userId": 0,
+        "taskAffinity": "10214:dev.jasonpearson.automobile.playground",
+        "isTaskRoot": true
+      },
+      {
+        "name": "com.google.android.apps.nexuslauncher.NexusLauncherActivity",
+        "taskId": 6,
+        "userId": 0,
+        "isTaskRoot": true
+      }
+    ],
+    "tasks": [
+      {
+        "id": 11,
+        "userId": 0,
+        "rootActivity": "com.google.android.contacts/com.android.contacts.activities.PeopleActivity",
+        "packageName": "com.google.android.contacts",
+        "numActivities": 1,
+        "launchedFromPackage": "com.android.shell",
+        "windowingMode": "fullscreen",
+        "bounds": [
+          0,
+          0,
+          1080,
+          2424
+        ]
+      },
+      {
+        "id": 8,
+        "userId": 0,
+        "affinity": "10214:dev.jasonpearson.automobile.playground",
+        "numActivities": 1,
+        "launchedFromPackage": "com.android.shell",
+        "rootActivity": "dev.jasonpearson.automobile.playground/.MainActivity",
+        "packageName": "dev.jasonpearson.automobile.playground",
+        "windowingMode": "fullscreen",
+        "bounds": [
+          0,
+          0,
+          1080,
+          2424
+        ]
+      },
+      {
+        "id": 6,
+        "userId": 0,
+        "rootActivity": "com.google.android.apps.nexuslauncher/.NexusLauncherActivity",
+        "packageName": "com.google.android.apps.nexuslauncher",
+        "numActivities": 1,
+        "windowingMode": "fullscreen",
+        "bounds": [
+          0,
+          0,
+          1080,
+          2424
+        ]
+      }
+    ],
+    "currentActivity": {
+      "name": "com.android.contacts.activities.PeopleActivity",
+      "taskId": 11,
+      "userId": 0
+    },
+    "displayCount": 1,
+    "currentTaskId": 11,
+    "capturedAt": 1795048885397,
+    "source": "adb"
+  },
+  "activeWindow": {
+    "appId": "com.google.android.contacts",
+    "activityName": "",
+    "layoutSeqSum": 1466
+  },
+  "screenIdentity": {
+    "platform": "android",
+    "source": "heuristic",
+    "confidence": "medium",
+    "key": "[[\"package\",\"com.google.android.contacts\"],[\"paneTitle\",\"Contacts list\"]]",
+    "components": {
+      "bundleId": "com.google.android.contacts",
+      "navigationTitle": "Contacts list"
+    }
+  },
+  "layoutWarnings": {
+    "scope": "full",
+    "warnings": [
+      {
+        "type": "important-content-under-inset",
+        "severity": "info",
+        "element": {
+          "viewId": "com.google.android.contacts:id/contact_list",
+          "resourceId": "com.google.android.contacts:id/contact_list",
+          "bounds": [
+            0,
+            0,
+            1080,
+            2150
+          ]
+        },
+        "categories": [
+          "interaction"
+        ],
+        "insetTypes": [
+          "systemBars",
+          "displayCutout"
+        ],
+        "sides": [
+          "top"
+        ],
+        "overflowPx": {
+          "top": 142
+        },
+        "insetPx": {
+          "top": 142
+        },
+        "overlapPercent": 7,
+        "confidence": "high"
+      },
+      {
+        "type": "interaction-in-system-gesture-region",
+        "severity": "info",
+        "element": {
+          "viewId": "com.google.android.contacts:id/open_search_bar",
+          "resourceId": "com.google.android.contacts:id/open_search_bar",
+          "text": "Search contacts",
+          "bounds": [
+            42,
+            163,
+            1038,
+            289
+          ]
+        },
+        "categories": [
+          "interaction"
+        ],
+        "insetTypes": [
+          "systemGestures",
+          "mandatorySystemGestures"
+        ],
+        "sides": [
+          "top",
+          "right",
+          "left"
+        ],
+        "overflowPx": {
+          "top": 11,
+          "right": 36,
+          "left": 36
+        },
+        "insetPx": {
+          "top": 174,
+          "right": 78,
+          "left": 78
+        },
+        "overlapPercent": 15,
+        "confidence": "medium"
+      },
+      {
+        "type": "interaction-in-system-gesture-region",
+        "severity": "info",
+        "element": {
+          "viewId": "s2-3296a858bd118c59",
+          "contentDesc": "Search",
+          "bounds": [
+            53,
+            163,
+            179,
+            289
+          ]
+        },
+        "categories": [
+          "interaction"
+        ],
+        "insetTypes": [
+          "systemGestures",
+          "mandatorySystemGestures"
+        ],
+        "sides": [
+          "top",
+          "left"
+        ],
+        "overflowPx": {
+          "top": 11,
+          "left": 25
+        },
+        "insetPx": {
+          "top": 174,
+          "left": 78
+        },
+        "overlapPercent": 27,
+        "confidence": "medium"
+      },
+      {
+        "type": "interaction-in-system-gesture-region",
+        "severity": "info",
+        "element": {
+          "viewId": "com.google.android.contacts:id/selected_account_disc",
+          "resourceId": "com.google.android.contacts:id/selected_account_disc",
+          "contentDesc": "Sign in",
+          "bounds": [
+            904,
+            163,
+            1038,
+            289
+          ]
+        },
+        "categories": [
+          "interaction"
+        ],
+        "insetTypes": [
+          "systemGestures",
+          "mandatorySystemGestures"
+        ],
+        "sides": [
+          "top",
+          "right"
+        ],
+        "overflowPx": {
+          "top": 11,
+          "right": 36
+        },
+        "insetPx": {
+          "top": 174,
+          "right": 78
+        },
+        "overlapPercent": 33,
+        "confidence": "medium"
+      },
+      {
+        "type": "interaction-in-system-gesture-region",
+        "severity": "info",
+        "element": {
+          "viewId": "s2-54a37556722ca76a",
+          "bounds": [
+            42,
+            331,
+            442,
+            457
+          ]
+        },
+        "categories": [
+          "interaction"
+        ],
+        "insetTypes": [
+          "systemGestures"
+        ],
+        "sides": [
+          "left"
+        ],
+        "overflowPx": {
+          "left": 36
+        },
+        "insetPx": {
+          "left": 78
+        },
+        "overlapPercent": 9,
+        "confidence": "medium"
+      },
+      {
+        "type": "interaction-in-system-gesture-region",
+        "severity": "info",
+        "element": {
+          "viewId": "s2-25e7a7ee1ae3a566",
+          "contentDesc": "Show list filters",
+          "bounds": [
+            944,
+            363,
+            1007,
+            426
+          ]
+        },
+        "categories": [
+          "interaction"
+        ],
+        "insetTypes": [
+          "systemGestures"
+        ],
+        "sides": [
+          "right"
+        ],
+        "overflowPx": {
+          "right": 5
+        },
+        "insetPx": {
+          "right": 78
+        },
+        "overlapPercent": 8,
+        "confidence": "medium"
+      },
+      {
+        "type": "interaction-in-system-gesture-region",
+        "severity": "info",
+        "element": {
+          "viewId": "com.google.android.contacts:id/floating_action_button",
+          "resourceId": "com.google.android.contacts:id/floating_action_button",
+          "contentDesc": "Create contact",
+          "bounds": [
+            870,
+            1961,
+            1017,
+            2108
+          ]
+        },
+        "categories": [
+          "interaction"
+        ],
+        "insetTypes": [
+          "systemGestures"
+        ],
+        "sides": [
+          "right"
+        ],
+        "overflowPx": {
+          "right": 15
+        },
+        "insetPx": {
+          "right": 78
+        },
+        "overlapPercent": 10,
+        "confidence": "medium"
+      },
+      {
+        "type": "interaction-in-system-gesture-region",
+        "severity": "info",
+        "element": {
+          "viewId": "com.google.android.contacts:id/contacts",
+          "resourceId": "com.google.android.contacts:id/contacts",
+          "contentDesc": "Contacts",
+          "bounds": [
+            98,
+            2150,
+            540,
+            2361
+          ]
+        },
+        "categories": [
+          "interaction"
+        ],
+        "insetTypes": [
+          "systemGestures",
+          "mandatorySystemGestures"
+        ],
+        "sides": [
+          "bottom"
+        ],
+        "overflowPx": {
+          "bottom": 21
+        },
+        "insetPx": {
+          "bottom": 84
+        },
+        "overlapPercent": 10,
+        "confidence": "medium"
+      },
+      {
+        "type": "interaction-in-system-gesture-region",
+        "severity": "info",
+        "element": {
+          "viewId": "com.google.android.contacts:id/nav_organize",
+          "resourceId": "com.google.android.contacts:id/nav_organize",
+          "contentDesc": "Organize",
+          "bounds": [
+            540,
+            2150,
+            982,
+            2361
+          ]
+        },
+        "categories": [
+          "interaction"
+        ],
+        "insetTypes": [
+          "systemGestures",
+          "mandatorySystemGestures"
+        ],
+        "sides": [
+          "bottom"
+        ],
+        "overflowPx": {
+          "bottom": 21
+        },
+        "insetPx": {
+          "bottom": 84
+        },
+        "overlapPercent": 10,
+        "confidence": "medium"
+      }
+    ]
+  },
+  "accessibilityState": {
+    "enabled": false,
+    "service": "unknown",
+    "detectionSkipped": false
+  },
+  "freshness": {
+    "actualTimestamp": 1795048868711,
+    "ageMs": 22924,
+    "verified": false,
+    "isFresh": false,
+    "warning": "CtrlProxy and adb disagree about the current activity, and a fresh hierarchy could not reconcile them. The observation was not verified against the current activity; call observe again.",
+    "category": "window_identity"
+  },
+  "snapshotReference": {
+    "snapshotId": "f784e0bc-bf54-482d-b46f-e769e8b1ba01",
+    "expiresAt": 1795049191941
+  },
+  "observationScreenshotResourceUri": "automobile:observation/emulator-5684/9972015e-1a83-4e7d-b21e-3af95281a080/screenshot"
+}

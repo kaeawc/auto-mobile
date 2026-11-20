@@ -560,6 +560,28 @@ export function compareVersions(a: string, b: string): number {
   return left && right ? compareSimctlVersions(left, right) : Number.NaN;
 }
 
+/**
+ * True for a device-specific runtime such as `com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4`,
+ * which Xcode installs next to the general `iOS-27-2` runtime for one device family (the iPhone Duo).
+ */
+export function isDeviceSpecificIosRuntimeId(identifier: string): boolean {
+  return /\.iOS-\d+(?:-\d+)*-[A-Za-z]/.test(identifier);
+}
+
+/**
+ * Orders runtimes of the same version: a general runtime sorts after a device-specific one, so
+ * "newest" picks the general runtime every device type can use.
+ */
+export function compareRuntimeGenerality(
+  a: Pick<AppleDeviceRuntime, "identifier">,
+  b: Pick<AppleDeviceRuntime, "identifier">,
+): number {
+  return (
+    Number(isDeviceSpecificIosRuntimeId(b.identifier)) -
+    Number(isDeviceSpecificIosRuntimeId(a.identifier))
+  );
+}
+
 export function pickHighestRuntime(
   runtimes: AppleDeviceRuntime[],
   prefix: string,
@@ -571,7 +593,7 @@ export function pickHighestRuntime(
         typeof runtime.version === "string" &&
         (runtime.version === componentPrefix || runtime.version.startsWith(`${componentPrefix}.`)),
     )
-    .sort((a, b) => compareVersions(a.version, b.version))
+    .sort((a, b) => compareVersions(a.version, b.version) || compareRuntimeGenerality(a, b))
     .pop();
 }
 

@@ -30,6 +30,9 @@
          a dev tool for simulators, so it opts out of App Transport Security entirely. -->
     <key>NSAppTransportSecurity</key>
     <dict><key>NSAllowsArbitraryLoads</key><true/></dict>
+    <!-- Kept by the installer only for a prototype declaring the biometric module (#14328). -->
+    <key>NSFaceIDUsageDescription</key>
+    <string>Confirm your identity when a prototype asks you to authenticate.</string>
     <key>UILaunchScreen</key><dict/>
     <key>UISupportedInterfaceOrientations</key>
     <array>

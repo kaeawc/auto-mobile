@@ -461,7 +461,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .min(1)
         .optional()
         .describe(
-          "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
+          "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; optional for status and inspect only to select an Android disposable app by its installed spec id; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
         ),
       assets: assetsInput
         .optional()
@@ -665,8 +665,8 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     clearBackend: ["backendId"],
     backendLog: ["backendId", "since"],
     publish: ["backendId", "room", "frame"],
-    status: [],
-    inspect: [],
+    status: ["id"],
+    inspect: ["id"],
     screenMap: ["spec", "specPath"],
     awaitEvent: ["id", "eventName", "kind", "afterSequence"],
     serve: ["id", "port", "remote", "idleTimeoutMs"],

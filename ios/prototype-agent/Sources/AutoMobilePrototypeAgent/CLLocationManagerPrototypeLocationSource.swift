@@ -36,6 +36,8 @@
             super.init()
         }
 
+        func makePresentationSource() -> any PrototypeLocationSource { CLLocationManagerPrototypeLocationSource() }
+
         func setAuthorizationChangeHandler(_ handler: (@MainActor @Sendable () -> Void)?) {
             authorizationChangeHandler = handler
             if handler != nil { _ = manager }

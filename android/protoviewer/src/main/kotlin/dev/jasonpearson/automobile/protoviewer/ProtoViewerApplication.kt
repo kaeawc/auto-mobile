@@ -11,8 +11,11 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEgressPolicy
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePermissionsModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureValueStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeDirectoryStore
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.protocol.PrototypeBundleDirectoryFileSystem
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.PrototypeStorage
@@ -30,7 +33,11 @@ import okhttp3.OkHttpClient
 /** Per-process shared ownership: all document tasks use the same repository/storage locks. */
 class ProtoViewerApplication : Application() {
   var servicesFactory: (ProtoViewerApplication) -> ProtoViewerServices = { app ->
-    val storage = LibraryStorage(PrototypeStorage.fileBacked(app))
+    val storage =
+      LibraryStorage(
+        PrototypeStorage.fileBacked(app),
+        PrototypeSecureValueStores.inDirectory(prototypeStorageRoot(app.filesDir)),
+      )
     val root = File(app.filesDir, "library")
     val ids = IdGenerator { UUID.randomUUID().toString() }
     val blocklist =
@@ -67,7 +74,9 @@ class ProtoViewerApplication : Application() {
             PrototypeBundleDirectoryFileSystem(stagingRoot),
             ids,
             blocklist,
-          )
+          ) {
+            app.getString(R.string.default_import_label)
+          }
         },
       )
     ProtoViewerServices(
@@ -189,4 +198,5 @@ internal val protoViewerCapabilities: Set<String>
     AutoMobilePrototype.capabilities +
       PrototypeLocationModule.CAPABILITY +
       PrototypeBiometricModule.CAPABILITY +
-      PrototypePermissionsModule.CAPABILITY
+      PrototypePermissionsModule.CAPABILITY +
+      PrototypeSecureStorageModule.CAPABILITY

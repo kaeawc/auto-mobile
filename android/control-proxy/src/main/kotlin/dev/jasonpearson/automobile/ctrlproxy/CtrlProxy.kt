@@ -14,14 +14,12 @@ import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import android.view.Display
-import android.view.View
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
-import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
@@ -51,6 +49,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHostLink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureValueStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeController
@@ -498,6 +497,14 @@ class CtrlProxy : AccessibilityService() {
       CoroutinePrototypeScheduler(serviceScope),
     )
   }
+
+  // Overlay shows only reconcile plain values. Secure storage belongs to Activity hosts and is
+  // touched here solely by explicit reset/removal.
+  internal suspend fun purgePrototypeSecureStorage(id: String): Int =
+    kotlinx.coroutines.withContext(Dispatchers.IO) {
+      PrototypeSecureValueStores.inDirectory(prototypeStorageRoot(filesDir)).delete(id)
+    }
+
   internal val savedPrototypeController by lazy {
     SavedPrototypeController(
       SavedPrototypeStores.inDirectory(File(filesDir, "saved-prototypes")),
@@ -507,8 +514,9 @@ class CtrlProxy : AccessibilityService() {
       pinner = PinnedPrototypeShortcuts(AndroidPinnedShortcutPlatform(this)),
       // Deleting a saved prototype also removes the values its storage block kept.
       clearStorage = { id ->
-        if (::prototypeController.isInitialized) prototypeController.clearStoredValues(id)
-        else prototypeStorage.clear(id)
+        if (::prototypeController.isInitialized)
+          prototypeController.clearStoredValues(id, keepSessionValues = true)
+        else purgePrototypeSecureStorage(id) + prototypeStorage.clear(id)
       },
     )
   }
@@ -619,6 +627,11 @@ class CtrlProxy : AccessibilityService() {
     )
   }
   private lateinit var overlayDrawer: OverlayDrawer
+
+  /** The highlight overlay drawer, or null before [onServiceConnected] creates it. */
+  internal val overlayDrawerOrNull: OverlayDrawer?
+    get() = if (::overlayDrawer.isInitialized) overlayDrawer else null
+
   private val clipboardManager by lazy {
     getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
   }
@@ -784,36 +797,7 @@ class CtrlProxy : AccessibilityService() {
   }
   internal val nodeActionController by lazy {
     NodeActionController(
-      host =
-        object : NodeActionController.Host {
-          override fun launchRequestScope(
-            requestId: String?,
-            block: suspend CoroutineScope.() -> Unit,
-          ) {
-            this@CtrlProxy.launchRequestScope(requestId, block)
-          }
-
-          override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
-
-          override fun findNodeInDisplayWindows(
-            find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
-          ) = this@CtrlProxy.findNodeInDisplayWindows(find)
-
-          override fun findNodesInDisplayWindows(
-            find: (AccessibilityNodeInfo) -> List<AccessibilityNodeInfo>,
-          ) = findNodesAcrossWindows(displayWindowsOrEmpty(), { rootInActiveWindow }, find)
-
-          override fun screenDimensions(displayId: Int) =
-            displayController.getScreenDimensions(displayId)
-
-          override fun createView() = View(this@CtrlProxy)
-
-          override suspend fun publishSettledHierarchy() {
-            hierarchyController.publishSettledHierarchy()
-          }
-
-          override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
-        },
+      host = CtrlProxyNodeActionHost(this),
       perfProvider = perfProvider,
       timeProvider = timeProvider,
       resultSender = resultSender,
@@ -821,44 +805,7 @@ class CtrlProxy : AccessibilityService() {
   }
   internal val focusController by lazy {
     FocusController(
-      host =
-        object : FocusController.Host {
-          override fun launchRequestScope(
-            requestId: String?,
-            block: suspend CoroutineScope.() -> Unit,
-          ) {
-            this@CtrlProxy.launchRequestScope(requestId, block)
-          }
-
-          override fun findAccessibilityFocusedNode() = findNodeInDisplayWindows {
-            it.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-          }
-
-          override fun extractFocusedElementInfo(node: AccessibilityNodeInfo) =
-            viewHierarchyExtractor.extractFocusedElementInfo(node)
-
-          override fun extractTraversalOrder(): TraversalOrderResult? {
-            val allWindows = windows
-            val rootNode = rootInActiveWindow
-            val screenDimensions = displayController.getScreenDimensions()
-            if (allWindows.isNullOrEmpty() && rootNode == null) return null
-            return if (!allWindows.isNullOrEmpty()) {
-              viewHierarchyExtractor.extractTraversalOrderFromAllWindows(
-                allWindows,
-                rootNode,
-                screenDimensions,
-              )
-            } else {
-              viewHierarchyExtractor.extractTraversalOrderFromActiveWindow(
-                rootNode,
-                screenDimensions,
-              )
-            }
-          }
-
-          override fun currentOverlayDrawer() =
-            if (::overlayDrawer.isInitialized) overlayDrawer else null
-        },
+      host = CtrlProxyFocusHost(this),
       perfProvider = perfProvider,
       timeProvider = timeProvider,
       jsonCompact = jsonCompact,
@@ -931,67 +878,7 @@ class CtrlProxy : AccessibilityService() {
   internal val staleFrames =
     StaleFrameRejector(
       isStale = frameContextGate::isStale,
-      host =
-        object : StaleFrameRejector.Host {
-          override fun launchRequestScope(
-            requestId: String?,
-            block: suspend CoroutineScope.() -> Unit,
-          ) {
-            this@CtrlProxy.launchRequestScope(requestId, block)
-          }
-
-          override suspend fun broadcastTapCoordinatesResult(
-            requestId: String?,
-            success: Boolean,
-            error: String?,
-            totalTimeMs: Long,
-          ) =
-            gestureController.broadcastTapCoordinatesResult(requestId, success, error, totalTimeMs)
-
-          override suspend fun broadcastSwipeResult(
-            requestId: String?,
-            success: Boolean,
-            error: String?,
-            totalTimeMs: Long,
-            gestureTimeMs: Long?,
-          ) =
-            gestureController.broadcastSwipeResult(
-              requestId,
-              success,
-              error,
-              totalTimeMs,
-              gestureTimeMs,
-            )
-
-          override suspend fun broadcastDragResult(
-            requestId: String?,
-            success: Boolean,
-            error: String?,
-            totalTimeMs: Long,
-            gestureTimeMs: Long?,
-          ) =
-            gestureController.broadcastDragResult(
-              requestId,
-              success,
-              error,
-              totalTimeMs,
-              gestureTimeMs,
-            )
-
-          override suspend fun broadcastSetTextResult(
-            requestId: String?,
-            success: Boolean,
-            error: String?,
-            totalTimeMs: Long,
-          ) = textInputController.broadcastSetTextResult(requestId, success, error, totalTimeMs)
-
-          override suspend fun broadcastImeActionResult(outcome: ImeActionFrameResult) =
-            textInputController.broadcastImeActionResult(outcome)
-
-          override suspend fun broadcastGlobalActionResult(
-            result: GlobalActionResult,
-          ) = webSocketServer.broadcast(result)
-        },
+      host = CtrlProxyStaleFrameHost(this),
       timeProvider = timeProvider,
     )
 
@@ -1458,12 +1345,12 @@ class CtrlProxy : AccessibilityService() {
    * window enumeration is reused so node actions and focus read-back cannot disagree with
    * `observe`; the active window goes first so a bare id prefers the app over an IME/system window.
    */
-  private fun findNodeInDisplayWindows(
+  internal fun findNodeInDisplayWindows(
     find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
   ): AccessibilityNodeInfo? =
     findNodeAcrossWindows(displayWindowsOrEmpty(), { rootInActiveWindow }, find)
 
-  private fun displayWindowsOrEmpty(): List<AccessibilityWindowInfo> =
+  internal fun displayWindowsOrEmpty(): List<AccessibilityWindowInfo> =
     try {
       viewHierarchyExtractor.selectDisplayWindows(this).windows
     } catch (e: Exception) {

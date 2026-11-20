@@ -14,17 +14,23 @@ import { prototypeDataError } from "./prototypeValidation";
  * `path` is `/data/<pointer>` exactly as authored in the action (repeat `{index}` segments already
  * bound), and a patch op on `/data` uses the same spelling.
  */
+export interface PrototypeDataMatch {
+  field: string;
+  equals: unknown;
+}
+
 export type PrototypeDataWrite =
-  | { op: "set"; path: string; value: unknown }
+  | { op: "set"; path: string; value: unknown; where?: PrototypeDataMatch; member?: string }
   | { op: "upsert"; path: string; key: string; value: unknown; maxItems?: number }
   | { op: "append"; path: string; value: unknown; maxItems?: number }
   | { op: "prepend"; path: string; value: unknown[]; maxItems?: number }
   | { op: "extend"; path: string; value: unknown[]; maxItems?: number }
-  | { op: "remove"; path: string };
+  | { op: "remove"; path: string; where?: PrototypeDataMatch };
 
 export type PrototypeDataWriteErrorCode =
   | "invalid_path"
   | "invalid_value"
+  | "ambiguous_match"
   | "not_found"
   | "not_array"
   | "limit_exceeded";
@@ -213,6 +219,66 @@ function windowedWrite(
   };
 }
 
+function isKeyedWrite(
+  write: PrototypeDataWrite,
+): write is Extract<PrototypeDataWrite, { op: "set" | "remove" }> {
+  return (
+    (write.op === "set" || write.op === "remove") &&
+    (write.where !== undefined || (write.op === "set" && write.member !== undefined))
+  );
+}
+
+function keyedWrite(
+  data: PrototypeData,
+  pointer: string,
+  write: Extract<PrototypeDataWrite, { op: "set" | "remove" }>,
+): PrototypeDataWriteResult {
+  const { where } = write;
+  const member = write.op === "set" ? write.member : undefined;
+  const validName = (name: string) =>
+    name.length > 0 &&
+    name.length <= contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH &&
+    !name.includes("/") &&
+    !name.includes("~");
+  if (!where || !validName(where.field) || (member !== undefined && !validName(member))) {
+    return refused(
+      "invalid_path",
+      "Keyed writes need safe field and member names and a where selector",
+    );
+  }
+  const target = resolvePrototypeDataPointer(data, pointer);
+  if (target === undefined) {
+    return refused("not_found", `Keyed target ${write.path} does not exist`);
+  }
+  if (!Array.isArray(target)) {
+    return refused("not_array", `Keyed target ${write.path} is not an array`);
+  }
+  const matches = target.flatMap((row, index) => {
+    const object = record(row);
+    return object &&
+      Object.hasOwn(object, where.field) &&
+      sameKey(object[where.field], where.equals)
+      ? [index]
+      : [];
+  });
+  if (matches.length === 0) {
+    return refused("not_found", "No element matches where");
+  }
+  if (matches.length > 1) {
+    return refused("ambiguous_match", "More than one element matches where");
+  }
+  const index = matches[0];
+  const changed = target.slice();
+  if (write.op === "remove") {
+    changed.splice(index, 1);
+  } else if (member === undefined) {
+    changed[index] = write.value;
+  } else {
+    changed[index] = { ...record(target[index]), [member]: write.value };
+  }
+  return applyPrototypeDataWrite(data, { op: "set", path: write.path, value: changed });
+}
+
 /**
  * Applies one write to `data` (absent data is an empty object) and returns the new data without
  * touching the input. `set` creates or replaces an object member and replaces an existing array
@@ -235,6 +301,9 @@ export function applyPrototypeDataWrite(
     return invalidValue;
   }
   const current = (record(data) ?? {}) as PrototypeData;
+  if (isKeyedWrite(write)) {
+    return keyedWrite(current, pointer, write);
+  }
   const target = targetRefusal(current, pointer, write);
   if (target) {
     return target;

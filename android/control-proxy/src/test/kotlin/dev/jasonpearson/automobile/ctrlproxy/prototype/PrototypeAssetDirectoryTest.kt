@@ -73,6 +73,7 @@ class PrototypeAssetDirectoryTest {
       assertThrows(IllegalArgumentException::class.java) { assets.write(name, byteArrayOf(1)) }
       assertThrows(IllegalArgumentException::class.java) { assets.read(name) }
       assertThrows(IllegalArgumentException::class.java) { assets.delete(name) }
+      assertThrows(IllegalArgumentException::class.java) { assets.file(name) }
     }
     assertFalse(File(temp.root, "escape").exists())
   }

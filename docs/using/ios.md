@@ -33,10 +33,11 @@ drives.
 ## Limits
 
 - `dragPath` and `dragAndDrop` cannot move home screen or dock icons. Synthesized
-  touches open the icon's context menu but never lift it. A drag that starts on
-  one of these icons fails with `unsupported: "springboard_icon_drag"`, and no
-  input is sent. Drags inside apps work as usual. To rearrange icons or open
-  Split View, do it by hand.
+  touches open the icon's context menu but never lift it. A drag that holds at its
+  start on one of these icons fails with `unsupported: "springboard_icon_drag"`,
+  and no input is sent. Swipes that move right away, such as paging the home
+  screen, and drags inside apps work as usual. To rearrange icons or open Split
+  View, do it by hand.
 
 ## Running on a Mac host or CI
 

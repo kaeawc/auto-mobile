@@ -160,7 +160,8 @@ import os
             guard let app = gestureApplication(for: target) else {
                 throw GestureError.noApplication
             }
-            if let first = points.first {
+            // Only a stroke that holds at its start long-presses an icon; a flick pages as usual.
+            if let first = points.first, SpringBoardIconHit.pathHoldsAtStart(points) {
                 try refuseSpringBoardIconDragStart(x: first.x, y: first.y)
             }
             let cgPoints = points.map { CGPoint(x: $0.x, y: $0.y) }
@@ -217,7 +218,10 @@ import os
         {
             GesturePhaseDiagnostics.current?.begin("targetResolution")
             let target = gestureApplicationTarget()
-            try refuseSpringBoardIconDragStart(x: startX, y: startY)
+            // A zero-press swipe (input/swipe) pages the home screen; only a held press lifts icons.
+            if SpringBoardIconHit.dragHoldsAtStart(pressDuration: pressDuration) {
+                try refuseSpringBoardIconDragStart(x: startX, y: startY)
+            }
             if try deliverDragToUnpinnedForegroundApp(
                 target: target, start: GesturePoint(x: startX, y: startY), end: GesturePoint(x: endX, y: endY),
                 press: pressDuration, move: dragDuration, hold: holdDuration

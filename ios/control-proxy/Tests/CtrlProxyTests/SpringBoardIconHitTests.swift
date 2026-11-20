@@ -38,4 +38,45 @@ final class SpringBoardIconHitTests: XCTestCase {
         XCTAssertEqual(error.wireCode, "springboard_icon_drag")
         XCTAssertTrue(error.localizedDescription.contains("no input was sent"))
     }
+
+    private func point(_ x: Double, _ y: Double, _ offsetMs: Int) -> PathGesturePoint {
+        PathGesturePoint(x: x, y: y, offsetMs: offsetMs)
+    }
+
+    func testAZeroPressSwipeDoesNotHoldAtItsStart() {
+        // input/swipe sends pressDurationMs 0: a home-screen page flick must not be refused.
+        XCTAssertFalse(SpringBoardIconHit.dragHoldsAtStart(pressDuration: 0))
+        XCTAssertFalse(SpringBoardIconHit.dragHoldsAtStart(pressDuration: 0.39))
+    }
+
+    func testAHeldDragHoldsAtItsStart() {
+        // dragAndDrop presses for at least 600 ms, so it is still refused on an icon.
+        XCTAssertTrue(SpringBoardIconHit.dragHoldsAtStart(pressDuration: 0.4))
+        XCTAssertTrue(SpringBoardIconHit.dragHoldsAtStart(pressDuration: 0.6))
+    }
+
+    func testAPathThatMovesImmediatelyDoesNotHold() {
+        XCTAssertFalse(SpringBoardIconHit.pathHoldsAtStart([point(300, 800, 0), point(50, 800, 300)]))
+    }
+
+    func testASparsePathIsInterpolatedAtTheSlopBoundary() {
+        // 1000 pt over 1000 ms leaves the 10 pt slop after 10 ms, not at the second point's 1000 ms.
+        XCTAssertFalse(SpringBoardIconHit.pathHoldsAtStart([point(0, 0, 0), point(1000, 0, 1000)]))
+    }
+
+    func testAPathThatDwellsAtItsStartHolds() {
+        let held = [point(300, 800, 0), point(300, 800, 500), point(50, 800, 800)]
+        XCTAssertTrue(SpringBoardIconHit.pathHoldsAtStart(held))
+    }
+
+    func testJitterWithinTheSlopStillCountsAsHolding() {
+        let jitter = [point(300, 800, 0), point(304, 803, 200), point(306, 801, 450), point(80, 800, 700)]
+        XCTAssertTrue(SpringBoardIconHit.pathHoldsAtStart(jitter))
+    }
+
+    func testAStationaryPathHoldsForItsWholeDuration() {
+        XCTAssertTrue(SpringBoardIconHit.pathHoldsAtStart([point(300, 800, 0), point(300, 800, 400)]))
+        XCTAssertFalse(SpringBoardIconHit.pathHoldsAtStart([point(300, 800, 0), point(300, 800, 100)]))
+        XCTAssertFalse(SpringBoardIconHit.pathHoldsAtStart([]))
+    }
 }

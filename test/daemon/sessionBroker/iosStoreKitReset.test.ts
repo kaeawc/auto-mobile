@@ -13,7 +13,7 @@ import type {
   StoreKitRequestOptions,
   StoreKitRunnerRequest,
 } from "../../../src/features/observe/ios/CtrlProxyStoreKit";
-import type { StoreKitSender } from "../../../src/features/storekit/StoreKitTest";
+import { StoreKitTest, type StoreKitSender } from "../../../src/features/storekit/StoreKitTest";
 import type { BootedDevice } from "../../../src/models";
 import { deviceToolMutations } from "../../../src/server/deviceMutationAdapters";
 import { StoreKitMutationPriorReader } from "../../../src/server/deviceMutationStoreKitPriorReader";
@@ -183,6 +183,19 @@ describe("runner StoreKit session reset", () => {
     expect(rig.cleared.isCleared(UDID, "com.example.shop")).toBe(true);
   });
 
+  test("a confirmed clear that answers after an overlapping touch leaves the bundle unclean", async () => {
+    const cleared = new InMemoryStoreKitClearedSessions();
+    const sender: StoreKitSender = {
+      requestStoreKit: async () => {
+        cleared.markTouched(UDID, "com.example.shop");
+        return { success: true, totalTimeMs: 1, transactions: [] };
+      },
+    };
+    const reset = new RunnerStoreKitSessionReset(() => sender, cleared);
+    await reset.clear(UDID, "com.example.shop", new AbortController().signal);
+    expect(cleared.isCleared(UDID, "com.example.shop")).toBe(false);
+  });
+
   test("no runner session after a confirmed clear with no change since is already clean", async () => {
     const rig = clear(NO_SESSION);
     rig.cleared.markCleared(UDID, "com.example.shop");
@@ -202,5 +215,27 @@ describe("runner StoreKit session reset", () => {
     { success: false, totalTimeMs: 0, error: "Timeout waiting for storekit_result" },
   ])("an unconfirmed clear throws ($error)", async (result) => {
     await expect(clear(result).run()).rejects.toThrow("could not be cleared");
+  });
+
+  test("a bundle whose only load was refused for another active bundle releases without an erase", async () => {
+    const cleared = new InMemoryStoreKitClearedSessions();
+    const refusing = new FakeStoreKitSender({
+      success: false,
+      totalTimeMs: 0,
+      error:
+        "storekit environment active for bundleId com.example.first; send clear for it before loading another bundle",
+    });
+    const tool = new StoreKitTest(
+      () => refusing,
+      () => "simulator",
+      cleared,
+    );
+    await tool.run(IOS, {
+      action: "load",
+      appId: "com.example.shop",
+      configPath: "/tmp/shop.storekit",
+    });
+    const reset = new RunnerStoreKitSessionReset(() => new FakeStoreKitSender(NO_SESSION), cleared);
+    await reset.clear(UDID, "com.example.shop", new AbortController().signal);
   });
 });

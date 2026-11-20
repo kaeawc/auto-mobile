@@ -30,6 +30,7 @@ export class RunnerStoreKitSessionReset implements IosStoreKitSessionReset {
 
   async clear(deviceId: string, bundleId: string, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted();
+    const generation = this.clearedSessions.generation(deviceId, bundleId);
     const result = await this.senderFor({
       name: deviceId,
       platform: "ios",
@@ -40,7 +41,8 @@ export class RunnerStoreKitSessionReset implements IosStoreKitSessionReset {
     );
     signal.throwIfAborted();
     if (result.success) {
-      this.clearedSessions.markCleared(deviceId, bundleId);
+      // A touch that overlapped the clear may have changed state after it, so it stays unclean.
+      this.clearedSessions.markCleared(deviceId, bundleId, generation);
       return;
     }
     if (

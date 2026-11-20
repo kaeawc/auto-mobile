@@ -148,14 +148,17 @@ class RuntimeAttachTargetTest {
     assertEquals(JsonNull, target.status()["id"])
     val first = runtime(backgroundScope)
     target.runtime = first
+    assertEquals(1L, target.showingStartSequence)
     assertEquals(1L, target.nextSequence())
     val showingId = target.showingId
     assertNotNull(showingId)
     assertEquals(showingId, target.showingId)
     target.runtime = first
     assertEquals(showingId, target.showingId)
+    assertEquals(1L, target.showingStartSequence)
     val shown = target.status()
     assertEquals(JsonPrimitive(showingId), shown["showingId"])
+    assertEquals(JsonPrimitive(1L), shown["showingStartSequence"])
     assertEquals(JsonPrimitive(true), shown["shown"])
     assertEquals(JsonPrimitive("panel"), shown["id"])
     assertEquals(JsonPrimitive(false), shown["persistent"])
@@ -166,10 +169,13 @@ class RuntimeAttachTargetTest {
     first.close()
     assertEquals(showingId, target.showingId)
     assertEquals(JsonPrimitive(false), target.status()["shown"])
+    assertEquals(JsonPrimitive(1L), target.status()["showingStartSequence"])
     val next = runtime(backgroundScope, "replacement", persistence = "device")
     target.runtime = next
     assertNotEquals(showingId, target.showingId)
     assertEquals(JsonPrimitive(target.showingId), target.status()["showingId"])
+    // The remount's first event follows the previous showing's last one on the shared ledger.
+    assertEquals(JsonPrimitive(2L), target.status()["showingStartSequence"])
     assertEquals(2L, target.nextSequence())
     assertEquals(JsonPrimitive("replacement"), target.status()["id"])
     assertEquals(JsonPrimitive(true), target.status()["persistent"])

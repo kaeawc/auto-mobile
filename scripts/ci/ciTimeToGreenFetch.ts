@@ -28,20 +28,47 @@ export class FetchStoppedError extends Error {
   }
 }
 
+/** Endpoint family of a GET path, for the per-kind call breakdown (numeric ids and SHAs collapse). */
+export function callKind(path: string): string {
+  return path
+    .split("?")[0]
+    .replace(/^repos\/[^/]+\/[^/]+\//, "")
+    .split("/")
+    .map((segment) => (/^(\d+|[0-9a-f]{40})$/.test(segment) ? ":id" : segment))
+    .join("/");
+}
+
 export class BudgetedGhApi implements GhApi {
   calls = 0;
+  readonly callsByKind = new Map<string, number>();
 
   constructor(
     private readonly inner: GhApi,
     private readonly maxCalls: number,
   ) {}
 
+  /** The first stop; once set, every later call is refused without reaching the API. */
+  stopped: FetchStoppedError | null = null;
+
   async get(path: string): Promise<unknown> {
+    if (this.stopped) {
+      throw this.stopped;
+    }
     if (this.calls >= this.maxCalls) {
-      throw new FetchStoppedError("budget", `API call budget of ${this.maxCalls} reached`);
+      this.stopped = new FetchStoppedError("budget", `API call budget of ${this.maxCalls} reached`);
+      throw this.stopped;
     }
     this.calls += 1;
-    return this.inner.get(path);
+    const kind = callKind(path);
+    this.callsByKind.set(kind, (this.callsByKind.get(kind) ?? 0) + 1);
+    try {
+      return await this.inner.get(path);
+    } catch (error) {
+      if (error instanceof FetchStoppedError) {
+        this.stopped ??= error;
+      }
+      throw error;
+    }
   }
 }
 
@@ -250,6 +277,33 @@ export interface FetchOptions {
   circleci?: boolean;
   circleciMainPushes?: boolean;
   circleciMacosMatcher: (name: string) => boolean;
+  /**
+   * On a budget or rate-limit stop, return the head SHAs fetched in full (meta.partial set)
+   * instead of throwing. The run listing itself must complete.
+   */
+  partialOnStop?: boolean;
+}
+
+/**
+ * Runs one fetch task; under `partialOnStop` a stop resolves to null and is recorded, so the
+ * caller leaves that item out. Any other error, or a stop without `partialOnStop`, propagates.
+ */
+class StopCollector {
+  first: FetchStoppedError | null = null;
+
+  constructor(private readonly partialOnStop: boolean) {}
+
+  async settle<T>(task: () => Promise<T>): Promise<T | null> {
+    try {
+      return await task();
+    } catch (error) {
+      if (!this.partialOnStop || !(error instanceof FetchStoppedError)) {
+        throw error;
+      }
+      this.first ??= error;
+      return null;
+    }
+  }
 }
 
 async function jobsForRun(
@@ -308,6 +362,11 @@ async function prFact(
   return normalizePr(pull, files, options.classify);
 }
 
+interface CommitPull {
+  number: number;
+  head?: { sha: string };
+}
+
 /**
  * A run's `pull_requests` is empty when the PR merged or closed before the run was recorded, and
  * for fork PRs. Those head SHAs are resolved through the commit's associated pull requests.
@@ -318,7 +377,8 @@ async function attachPrNumbersFromCommits(
   options: FetchOptions,
   runs: RunFact[],
   listed: readonly RawPull[],
-): Promise<void> {
+  stops: StopCollector,
+): Promise<Set<string>> {
   const prRuns = runs.filter((run) => run.event === "pull_request");
   const withNumbers = new Set(
     prRuns.filter((run) => run.prNumbers.length > 0).map((run) => run.headSha),
@@ -329,18 +389,21 @@ async function attachPrNumbersFromCommits(
   const resolved = await mapLimit(
     orphanShas,
     options.concurrency,
-    async (sha): Promise<[string, number[]]> => {
+    async (sha): Promise<[string, number[]] | null> => {
       const key = `commit-pulls-${sha}`;
-      let pulls = cache.read(key) as { number: number; head?: { sha: string } }[] | undefined;
+      let pulls = cache.read(key) as CommitPull[] | undefined;
       const matches = listedPullsForSha(sha, listed);
       if (!pulls && matches.length > 0) {
         return [sha, matches.map((pull) => pull.number)];
       }
       if (!pulls) {
-        pulls = (await api.get(`repos/${options.repo}/commits/${sha}/pulls`)) as {
-          number: number;
-          head?: { sha: string };
-        }[];
+        const fetched = (await stops.settle(() =>
+          api.get(`repos/${options.repo}/commits/${sha}/pulls`),
+        )) as CommitPull[] | null;
+        if (fetched === null) {
+          return null;
+        }
+        pulls = fetched;
         if (pulls.length > 0) {
           cache.write(key, pulls);
         }
@@ -352,13 +415,14 @@ async function attachPrNumbersFromCommits(
     ...prRuns
       .filter((run) => run.prNumbers.length > 0)
       .map((run): [string, number[]] => [run.headSha, run.prNumbers]),
-    ...resolved,
+    ...resolved.filter((entry) => entry !== null),
   ]);
   for (const run of prRuns) {
     if (run.prNumbers.length === 0) {
       run.prNumbers = numbersBySha.get(run.headSha) ?? [];
     }
   }
+  return new Set(orphanShas.filter((_sha, index) => resolved[index] === null));
 }
 
 export async function listRecentPulls(
@@ -478,9 +542,10 @@ async function fetchExternalJobs(
   runs: readonly RawRun[],
   prs: readonly PrFact[],
   normalized: readonly RunFact[],
-): Promise<{ jobs: ExternalJobFact[]; fetched: boolean }> {
+  stops: StopCollector,
+): Promise<{ jobs: ExternalJobFact[]; fetched: boolean; unfetchedShas: Set<string> }> {
   if (options.circleci === false) {
-    return { jobs: [], fetched: false };
+    return { jobs: [], fetched: false, unfetchedShas: new Set() };
   }
   const types = new Map(prs.map((pr) => [pr.number, pr.prType]));
   const shas = new Set(
@@ -500,20 +565,131 @@ async function fetchExternalJobs(
       .filter((run) => run.event === "push" && run.head_branch === "main")
       .forEach((run) => shas.add(run.head_sha));
   }
+  const unfetchedShas = new Set<string>();
   const jobs = await mapLimit([...shas], options.concurrency, async (sha) => {
     const key = `statuses-${sha}`;
-    let statuses = cache.read(key) as CommitStatus[] | undefined;
+    let statuses = cache.read(key) as CommitStatus[] | null | undefined;
     if (!statuses) {
-      statuses = (await api.get(
-        `repos/${options.repo}/commits/${sha}/statuses?per_page=100`,
-      )) as CommitStatus[];
+      statuses = (await stops.settle(() =>
+        api.get(`repos/${options.repo}/commits/${sha}/statuses?per_page=100`),
+      )) as CommitStatus[] | null;
+      if (statuses === null) {
+        unfetchedShas.add(sha);
+        return [];
+      }
       if (circleciStatusesCacheable(statuses)) {
         cache.write(key, statuses);
       }
     }
     return normalizeCircleciStatuses(statuses, sha, options.circleciMacosMatcher);
   });
-  return { jobs: jobs.flat(), fetched: shas.size > 0 };
+  return { jobs: jobs.flat(), fetched: shas.size > 0, unfetchedShas };
+}
+
+interface RunJobsResult {
+  runs: RunFact[];
+  unfetchedShas: Set<string>;
+  skippedRunsWithoutJobs: number;
+}
+
+function isSkippedPrRun(run: RawRun): boolean {
+  return run.event === "pull_request" && run.status === "completed" && run.conclusion === "skipped";
+}
+
+/**
+ * Jobs of every run, one listing call per run. A skipped pull_request run lists only skipped
+ * jobs, which matter solely as skipped required checks. So the first skipped run of each workflow
+ * is fetched as a sample, and the other skipped runs of a workflow whose sample has no required
+ * check keep no jobs, without an API call. This assumes a workflow's job names do not change within
+ * the window; a head whose edit of that workflow adds a required job that is then skipped reads as
+ * missing that check (not-green) instead of green.
+ */
+async function fetchRunJobs(
+  api: GhApi,
+  cache: CacheStore,
+  options: FetchOptions,
+  rawRuns: readonly RawRun[],
+  requiredChecks: readonly string[],
+  stops: StopCollector,
+): Promise<RunJobsResult> {
+  const required = new Set(requiredChecks);
+  const samples = new Map<string, number>();
+  rawRuns.forEach((run) => {
+    if (isSkippedPrRun(run) && !samples.has(run.path)) {
+      samples.set(run.path, run.id);
+    }
+  });
+  const isDeferred = (run: RawRun) => isSkippedPrRun(run) && samples.get(run.path) !== run.id;
+  const fetchOne = (run: RawRun) => stops.settle(() => jobsForRun(api, cache, options.repo, run));
+
+  const firstPass = await mapLimit(rawRuns, options.concurrency, (run) =>
+    isDeferred(run) ? Promise.resolve(undefined) : fetchOne(run),
+  );
+  // Per workflow, the sample's jobs, or null when the stop left the sample unfetched.
+  const sampleJobs = new Map(
+    rawRuns.flatMap((run, index) =>
+      samples.get(run.path) === run.id && isSkippedPrRun(run)
+        ? [[run.path, firstPass[index] ?? null] as const]
+        : [],
+    ),
+  );
+  let skippedRunsWithoutJobs = 0;
+  const indexes = rawRuns.map((_run, index) => index);
+  const jobs = await mapLimit(indexes, options.concurrency, async (index) => {
+    const run = rawRuns[index];
+    if (!isDeferred(run)) {
+      return firstPass[index] ?? null;
+    }
+    const sample = sampleJobs.get(run.path) ?? null;
+    if (sample === null) {
+      // An unfetched sample cannot rule required checks out, so this run stays unfetched.
+      return null;
+    }
+    if (sample.some((job) => required.has(job.name))) {
+      return fetchOne(run);
+    }
+    skippedRunsWithoutJobs += 1;
+    return [];
+  });
+  const unfetchedShas = new Set(
+    rawRuns.filter((_run, index) => jobs[index] === null).map((run) => run.head_sha),
+  );
+  return {
+    runs: rawRuns.map((run, index) => normalizeRun(run, jobs[index] ?? [])),
+    unfetchedShas,
+    skippedRunsWithoutJobs,
+  };
+}
+
+/**
+ * Supersession and per-PR figures compare a PR's heads, so one incomplete head drops every head it
+ * may share a PR with: heads linked by a PR number, and heads on the same branch (an unresolved
+ * head has no PR number, so its branch stands in). Repeats until no head is added, since a head
+ * can link several PRs. An omitted head with no link at all (null `head_branch`) drops every head.
+ */
+export function omitRelatedHeads(
+  runs: readonly RunFact[],
+  rawRuns: readonly RawRun[],
+  omitted: Set<string>,
+): void {
+  const branchById = new Map(rawRuns.map((run) => [run.id, run.head_branch]));
+  const links = (run: RunFact) => [
+    ...run.prNumbers.map((number) => `pr:${number}`),
+    ...(branchById.get(run.id) ? [`branch:${branchById.get(run.id)}`] : []),
+  ];
+  // An omitted head with neither a PR number nor a branch could belong to any PR, so every head goes.
+  if (runs.some((run) => omitted.has(run.headSha) && links(run).length === 0)) {
+    runs.forEach((run) => omitted.add(run.headSha));
+    return;
+  }
+  for (let grew = omitted.size > 0; grew;) {
+    const dropped = new Set(runs.filter((run) => omitted.has(run.headSha)).flatMap(links));
+    const added = runs.filter(
+      (run) => !omitted.has(run.headSha) && links(run).some((link) => dropped.has(link)),
+    );
+    added.forEach((run) => omitted.add(run.headSha));
+    grew = added.length > 0;
+  }
 }
 
 export async function fetchBundle(
@@ -522,6 +698,7 @@ export async function fetchBundle(
   options: FetchOptions,
   requiredChecks: string[],
 ): Promise<Bundle> {
+  const stops = new StopCollector(options.partialOnStop === true);
   const rawRuns = await listRunsInWindow(
     api,
     options.repo,
@@ -529,22 +706,34 @@ export async function fetchBundle(
     options.untilMs,
     options.prRunsOnly,
   );
-  const runs = await mapLimit(rawRuns, options.concurrency, async (run) =>
-    normalizeRun(run, await jobsForRun(api, cache, options.repo, run)),
-  );
+  const fetched = await fetchRunJobs(api, cache, options, rawRuns, requiredChecks, stops);
+  const runs = fetched.runs;
+  const omitted = new Set(fetched.unfetchedShas);
   const listed = needsBulkPulls(runs, cache)
-    ? await listRecentPulls(api, options.repo, options.sinceMs)
+    ? ((await stops.settle(() => listRecentPulls(api, options.repo, options.sinceMs))) ?? [])
     : [];
-  await attachPrNumbersFromCommits(api, cache, options, runs, listed);
+  (await attachPrNumbersFromCommits(api, cache, options, runs, listed, stops)).forEach((sha) =>
+    omitted.add(sha),
+  );
   const prNumbers = [
     ...new Set(runs.filter((run) => run.event === "pull_request").flatMap((run) => run.prNumbers)),
   ].sort((a, b) => a - b);
-  const prs = await mapLimit(prNumbers, options.concurrency, (number) =>
-    prFact(api, cache, options, number, listed),
+  const fetchedPrs = await mapLimit(prNumbers, options.concurrency, (number) =>
+    stops.settle(() => prFact(api, cache, options, number, listed)),
   );
-  const external = await fetchExternalJobs(api, cache, options, rawRuns, prs, runs);
+  const unfetchedPrs = new Set(prNumbers.filter((_number, index) => fetchedPrs[index] === null));
+  runs
+    .filter((run) => run.prNumbers.some((number) => unfetchedPrs.has(number)))
+    .forEach((run) => omitted.add(run.headSha));
+  const prs = fetchedPrs.filter((pr): pr is PrFact => pr !== null);
+  const external = await fetchExternalJobs(api, cache, options, rawRuns, prs, runs, stops);
+  external.unfetchedShas.forEach((sha) => omitted.add(sha));
+  omitRelatedHeads(runs, rawRuns, omitted);
+
+  const keptRuns = runs.filter((run) => !omitted.has(run.headSha));
+  const keptPrNumbers = new Set(keptRuns.flatMap((run) => run.prNumbers));
   return {
-    externalJobs: external.jobs,
+    externalJobs: external.jobs.filter((job) => !omitted.has(job.sha)),
     meta: {
       repo: options.repo,
       since: new Date(options.sinceMs).toISOString(),
@@ -554,8 +743,19 @@ export async function fetchBundle(
       circleci: external.fetched,
       circleciScope:
         options.circleciMainPushes && !options.prRunsOnly ? "pr-heads+main-pushes" : "pr-heads",
+      skippedRunsWithoutJobs: fetched.skippedRunsWithoutJobs,
+      ...(stops.first
+        ? {
+            partial: {
+              reason: stops.first.reason,
+              message: stops.first.message,
+              omittedHeadShas: omitted.size,
+              omittedRuns: runs.length - keptRuns.length,
+            },
+          }
+        : {}),
     },
-    runs,
-    prs,
+    runs: keptRuns,
+    prs: prs.filter((pr) => keptPrNumbers.has(pr.number)),
   };
 }

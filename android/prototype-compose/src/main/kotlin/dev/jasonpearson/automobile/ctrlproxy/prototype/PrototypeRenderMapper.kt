@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeSheetPlacement
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStrings
+import dev.jasonpearson.automobile.protocol.PrototypeTextShield
 import java.util.IdentityHashMap
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -143,6 +144,7 @@ internal class PrototypeRenderMapper(
             derive = resolved.derive.orEmpty(),
             derivedValues = derived.evaluate(resolved),
             formatter = derivedFormatter,
+            shieldedInputs = if (PrototypeTextShield.hasBrace(platform)) true else null,
             fillWindowRoot =
               resolved.window.placement is PrototypeFullscreenPlacement ||
                 resolved.window.placement is PrototypeSheetPlacement,
@@ -204,14 +206,19 @@ internal class PrototypeRenderMapper(
     val root =
       if (resolvedFromSameSources(spec, platform, locales)) checkNotNull(resolvedRoot)
       else {
-        PrototypeStrings.resolve(PrototypeDataResolver.resolve(spec, platform), locales).root.also {
-          sourceLocales = locales.toList()
-          sourceStrings = spec.strings
-          sourcePlatform = platform
-          sourceRoot = spec.root
-          sourceData = spec.data
-          resolvedRoot = it
-        }
+        PrototypeStrings.resolve(
+            PrototypeDataResolver.resolve(spec, platform, shield = true),
+            locales,
+          )
+          .root
+          .also {
+            sourceLocales = locales.toList()
+            sourceStrings = spec.strings
+            sourcePlatform = platform
+            sourceRoot = spec.root
+            sourceData = spec.data
+            resolvedRoot = it
+          }
       }
     val resolved = if (root === spec.root) spec else spec.copy(root = root)
     authoredSpec = spec

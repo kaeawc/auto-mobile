@@ -52,7 +52,7 @@ class ImportActivity : ComponentActivity() {
       }
     }
     if (savedInstanceState != null) {
-      rejection = LibraryImportResult.Rejected("content", getString(R.string.import_interrupted))
+      rejection = LibraryImportResult.Rejected("content", IMPORT_REASON_INTERRUPTED)
       return
     }
     val action =
@@ -111,8 +111,7 @@ class ImportActivity : ComponentActivity() {
         finish()
       }
       is LibraryImportResult.Rejected -> rejection = result
-      null ->
-        rejection = LibraryImportResult.Rejected("library", getString(R.string.import_unavailable))
+      null -> rejection = LibraryImportResult.Rejected("library", IMPORT_REASON_UNAVAILABLE)
     }
   }
 }
@@ -146,7 +145,12 @@ internal fun importStatusText(shareFailure: Int?, failed: LibraryImportResult.Re
           R.string.import_requires_capabilities,
           failed.missingCapabilities.joinToString(", "),
         )
-    failed != null -> stringResource(R.string.import_rejected, failed.path, failed.reason)
+    failed != null ->
+      stringResource(
+        R.string.import_rejected,
+        failed.path,
+        stringResource(importRejectionReason(failed)),
+      )
     else -> stringResource(R.string.loading)
   }
 

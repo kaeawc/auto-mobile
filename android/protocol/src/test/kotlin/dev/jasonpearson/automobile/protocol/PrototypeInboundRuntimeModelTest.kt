@@ -45,7 +45,7 @@ class PrototypeInboundRuntimeModelTest {
     assertTrue(result is PrototypeSpecValidation.Success, result.toString())
     val spec = (result as PrototypeSpecValidation.Success).spec
     assertEquals(listOf("prototype_links_v1"), spec.requires!!.capabilities)
-    assertEquals(listOf("location"), spec.requires!!.platform)
+    assertEquals(listOf("location"), spec.requires.platform)
     val encoded = json.encodeToString(PrototypeSpec.serializer(), spec)
     val block = Json.parseToJsonElement(encoded).jsonObject["requires"]!!.jsonObject
     assertEquals(JsonArray(listOf(JsonPrimitive("prototype_links_v1"))), block["capabilities"])

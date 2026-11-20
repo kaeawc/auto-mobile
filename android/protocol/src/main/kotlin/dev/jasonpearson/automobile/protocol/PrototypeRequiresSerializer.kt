@@ -26,14 +26,12 @@ object PrototypeRequiresSerializer : KSerializer<PrototypeRequires> {
   override fun serialize(encoder: Encoder, value: PrototypeRequires) {
     val output = encoder as JsonEncoder
     output.encodeJsonElement(
-      if (
-        value.capabilities.isNotEmpty() &&
-          value.platform == null &&
-          value.permissions == null &&
-          value.background == null
-      )
+      if (value.capabilities.isNotEmpty() && value.hasNoPlatformBlock())
         JsonArray(value.capabilities.map(::JsonPrimitive))
       else output.json.encodeToJsonElement(value),
     )
   }
+
+  private fun PrototypeRequires.hasNoPlatformBlock(): Boolean =
+    listOf(platform, permissions, background).all { it == null }
 }

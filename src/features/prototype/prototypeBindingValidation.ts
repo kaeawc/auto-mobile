@@ -1,3 +1,4 @@
+import { prototypeGeneratedForm } from "./prototypeGeneratedBindings";
 import { prototypeAdaptiveError } from "./prototypeAdaptive";
 import { z } from "zod/v3";
 import { type KeyInstance } from "./prototypeRepeat";
@@ -35,6 +36,7 @@ export interface Rule {
 }
 
 export interface PrototypeValidationError {
+  code?: "lastGenerated_unset";
   path: string;
   message: string;
 }
@@ -513,7 +515,8 @@ function setStateBindingErrors(
     typeof key !== "string" ||
     action.operandTemplated ||
     value === undefined ||
-    dynamicStateValue(value)
+    dynamicStateValue(value) ||
+    prototypeGeneratedForm(value) !== undefined
   ) {
     return undefined;
   }

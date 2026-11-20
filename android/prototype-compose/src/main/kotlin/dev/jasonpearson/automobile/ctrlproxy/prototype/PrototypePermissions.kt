@@ -24,7 +24,17 @@ sealed interface PrototypePermissionOutcome {
   data object Cancelled : PrototypePermissionOutcome
 }
 
-/** Notification authorization only. One collection owns one permission-result registration. */
+/**
+ * The runtime permissions an Android host can request for a spec, by contract name. Camera and
+ * microphone are requested only by a spec that names them, never when a module registers.
+ */
+enum class PrototypeRuntimePermission(val wire: String, val manifest: String) {
+  NOTIFICATIONS("notifications", "android.permission.POST_NOTIFICATIONS"),
+  CAMERA("camera", "android.permission.CAMERA"),
+  MICROPHONE("microphone", "android.permission.RECORD_AUDIO"),
+}
+
+/** One permission's authorization. One collection owns one permission-result registration. */
 interface PrototypePermissionsSource {
   val changes: Flow<PrototypePermissionState>
 
@@ -73,12 +83,27 @@ class FakePrototypePermissionsSource : PrototypePermissionsSource {
   }
 }
 
-/** Each surface owns its state, events and denial history; the Activity coordinates prompts. */
-class PrototypePermissionsModule(
-  private val source: PrototypePermissionsSource,
-  scope: CoroutineScope? = null,
-  private val ownsSession: Boolean = false,
+/**
+ * Each surface owns its state, events and denial history; the Activity coordinates prompts. Names
+ * without a source report `unavailable` and never prompt.
+ */
+class PrototypePermissionsModule
+private constructor(
+  private val sources: Map<String, PrototypePermissionsSource>,
+  scope: CoroutineScope?,
+  private val owned: Set<PrototypePermissionsSource>,
 ) : PrototypePlatformModule {
+  /** Notifications only, the shape every host registered before camera and microphone. */
+  constructor(
+    source: PrototypePermissionsSource,
+    scope: CoroutineScope? = null,
+  ) : this(mapOf(PrototypeRuntimePermission.NOTIFICATIONS.wire to source), scope, emptySet())
+
+  constructor(
+    sources: Map<PrototypeRuntimePermission, PrototypePermissionsSource>,
+    scope: CoroutineScope? = null,
+  ) : this(sources.mapKeys { it.key.wire }, scope, emptySet())
+
   companion object {
     const val CAPABILITY = "prototype_platform_permissions_v1"
   }
@@ -89,7 +114,9 @@ class PrototypePermissionsModule(
   override val name = "permissions"
   override val capability = CAPABILITY
   private val mutableState =
-    MutableStateFlow(buildJsonObject { put("notifications", source.status().wire) })
+    MutableStateFlow(
+      buildJsonObject { sources.forEach { (name, source) -> put(name, source.status().wire) } },
+    )
   private val mutableEvents = MutableSharedFlow<PlatformEvent>()
   private var changesJob: Job? = null
   private var closed = false
@@ -100,7 +127,11 @@ class PrototypePermissionsModule(
       if (!closed && changesJob == null) {
         changesJob =
           moduleScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            source.changes.collect { publish("notifications", it) }
+            sources.forEach { (name, source) ->
+              launch(start = CoroutineStart.UNDISPATCHED) {
+                source.changes.collect { publish(name, it) }
+              }
+            }
           }
       }
       return mutableState.asStateFlow()
@@ -119,15 +150,16 @@ class PrototypePermissionsModule(
       val results = linkedMapOf<String, JsonElement>()
       for (entry in call.args.getValue("names").jsonArray) {
         val name = entry.jsonPrimitive.content
+        val source = sources[name]
         val state =
-          if (name == "notifications") {
+          if (source == null) PrototypePermissionState.UNAVAILABLE
+          else
             when (val outcome = source.request().first()) {
               is PrototypePermissionOutcome.Status -> outcome.state
               PrototypePermissionOutcome.Busy ->
                 return failure(PlatformErrorCode.TOO_MANY_IN_FLIGHT)
               PrototypePermissionOutcome.Cancelled -> return failure(PlatformErrorCode.CANCELLED)
             }
-          } else PrototypePermissionState.UNAVAILABLE
         publish(name, state)
         results[name] = JsonPrimitive(state.wire)
       }
@@ -153,19 +185,20 @@ class PrototypePermissionsModule(
   }
 
   internal fun session(scope: CoroutineScope): PrototypePermissionsModule {
-    val session = source.session()
-    return PrototypePermissionsModule(session, scope, ownsSession = session !== source)
+    val sessions = sources.mapValues { it.value.session() }
+    val forked = sessions.filter { (name, session) -> session !== sources[name] }.values.toSet()
+    return PrototypePermissionsModule(sessions, scope, forked)
   }
 
   internal fun detach() {
     closed = true
     changesJob?.cancel()
-    if (ownsSession) source.close()
+    owned.forEach { it.close() }
   }
 
   override fun close() {
     detach()
-    source.close()
+    sources.values.forEach { it.close() }
   }
 
   private fun failure(code: PlatformErrorCode) =

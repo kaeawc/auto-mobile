@@ -25,6 +25,7 @@ export interface CliOptions {
   json: boolean;
   cacheDir: string | null;
   maxApiCalls: number;
+  partialOnStop: boolean;
   concurrency: number;
   prRunsOnly: boolean;
   fromBundle: string | null;
@@ -54,6 +55,8 @@ Read-only: GET requests through \`gh api\` only.
   --allow-large-api-budget
                        Permit --max-api-calls above ${LARGE_API_BUDGET}. The 5,000 req/h GitHub quota is
                        shared by every agent and the merge queue; spending it starves them
+  --partial-on-stop    On a budget or rate-limit stop, report the head SHAs fetched in full,
+                       marked partial, and still exit 4
   --concurrency N      Parallel API calls (default: 6)
   --pr-runs-only       Skip non-pull_request runs; concurrency then covers PR runs only
   --from-bundle PATH   Aggregate a saved bundle; no network access
@@ -66,7 +69,8 @@ Read-only: GET requests through \`gh api\` only.
   -h, --help           Show this help
 
 Exit codes: 0 ok, 1 unexpected failure, 2 usage error, 3 GitHub API failure,
-            4 stopped on the call budget or a rate limit (cache kept; rerun to resume)
+            4 stopped on the call budget or a rate limit (cache kept; rerun to resume;
+              with --partial-on-stop the partial report is still written)
 `;
 
 const DURATION = /^(\d+)([dh])$/;
@@ -144,6 +148,7 @@ export function parseCliArgs(
         "cache-dir": { type: "string" },
         "max-api-calls": { type: "string" },
         "allow-large-api-budget": { type: "boolean" },
+        "partial-on-stop": { type: "boolean" },
         concurrency: { type: "string" },
         "pr-runs-only": { type: "boolean" },
         "from-bundle": { type: "string" },
@@ -188,6 +193,7 @@ export function parseCliArgs(
     json: values.json === true,
     cacheDir: cacheDir === undefined ? null : assertSafeOutputPath(cacheDir, repoRoot, tmpDir),
     maxApiCalls,
+    partialOnStop: values["partial-on-stop"] === true,
     concurrency: positiveInt("--concurrency", values.concurrency ?? "6"),
     prRunsOnly: values["pr-runs-only"] === true,
     fromBundle: values["from-bundle"] ?? null,

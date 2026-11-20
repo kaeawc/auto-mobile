@@ -10,6 +10,12 @@ import { WatchRunnerArtifacts } from "./WatchRunnerArtifacts";
 import { WatchRunnerReleaseProvider } from "./WatchRunnerReleaseProvider";
 import { XcodebuildWatchRunnerLauncher, type WatchRunnerLauncher } from "./WatchRunnerLauncher";
 import { watchRunners } from "./WatchRunnerRegistry";
+import { SingleFlight } from "../../utils/cache/SingleFlight";
+
+/** The refusal for a dead runner AutoMobile did not launch, so it cannot restart it. */
+export function unownedWatchRunnerMessage(deviceId: string): string {
+  return `The watch runner for ${deviceId} is disconnected and was not started by AutoMobile; restart it before trying again.`;
+}
 
 type WatchRunnerSessions = Pick<
   SessionManager,
@@ -27,6 +33,7 @@ interface OwnedRunner {
 export class WatchRunnerLifecycle {
   private readonly runners = new Map<string, OwnedRunner>();
   private readonly observedSessions = new WeakSet<WatchRunnerSessions>();
+  private readonly restarts = new SingleFlight<string, string | undefined>();
   constructor(
     private readonly dependencies: {
       artifacts: Pick<WatchRunnerArtifacts, "resolve">;
@@ -75,9 +82,7 @@ export class WatchRunnerLifecycle {
     }
     this.stop(deviceId);
     if (watchRunners.get(deviceId)) {
-      return {
-        runnerUnavailable: `The watch runner for ${deviceId} is disconnected and was not started by AutoMobile; restart it before trying again.`,
-      };
+      return { runnerUnavailable: unownedWatchRunnerMessage(deviceId) };
     }
     const entry: OwnedRunner = {
       controller: new AbortController(),
@@ -153,6 +158,41 @@ export class WatchRunnerLifecycle {
       );
       return reason;
     }
+  }
+
+  /** Whether this lifecycle launched the device's runner, even if its client has since dropped. */
+  ownsRunner(deviceId: string): boolean {
+    return this.runners.has(deviceId);
+  }
+
+  /**
+   * Restart a disconnected lifecycle-owned runner for its last bundle and owner session; a usable
+   * runner is kept. Concurrent callers share one restart. Returns the failure reason, if any.
+   */
+  async restartOwned(deviceId: string, signal?: AbortSignal): Promise<string | undefined> {
+    return this.restarts.run(
+      deviceId,
+      async (flightSignal) => {
+        if (watchRunners.get(deviceId)?.isUsable()) {
+          return undefined;
+        }
+        const entry = this.runners.get(deviceId);
+        if (!entry) {
+          return unownedWatchRunnerMessage(deviceId);
+        }
+        const { bundleId, ownerSession } = entry;
+        this.stop(deviceId);
+        const started = await this.launchEntry({
+          deviceId,
+          bundleId,
+          ownerSession,
+          signal: flightSignal,
+        });
+        return started.runnerUnavailable;
+      },
+      signal,
+      { cancelWhenAllWaitersAbort: true },
+    );
   }
 
   /** Transfer only lifecycle-owned runners to the newly bound session. */

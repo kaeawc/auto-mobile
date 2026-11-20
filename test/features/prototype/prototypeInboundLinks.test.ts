@@ -146,7 +146,9 @@ test("the advertised JSON schema includes object-form capabilities", () => {
 });
 
 test("links refuse an omitted requires declaration", () => {
-  const { requires: _requires, ...withoutRequires } = spec;
+  const withoutRequires = Object.fromEntries(
+    Object.entries(spec).filter(([key]) => key !== "requires"),
+  );
   expect(validatePrototypeSpec(withoutRequires)).toMatchObject({
     success: false,
     error: { path: "requires", message: "links requires prototype_links_v1" },

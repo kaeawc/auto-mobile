@@ -46,7 +46,7 @@ final class PrototypeOpenLinkTests: XCTestCase {
         let decoded = try JSONDecoder().decode(PrototypeSpec.self, from: data)
         XCTAssertEqual(decoded.requiredCapabilities, ["prototype_links_v1"])
         var session = PrototypeSession(clock: PrototypeLibraryFakeClock())
-        try session.show(decoded)
+        session.show(decoded)
         let events = session.openLink("amp-demo://nearby", registeredSchemes: ["amp-demo"])
         XCTAssertEqual(events.first?.wireKind, "link_opened")
         XCTAssertEqual(session.state["located"], .bool(true))
@@ -257,10 +257,13 @@ final class PrototypeViewerLinkDeliveryTests: XCTestCase {
         if PrototypeInboundLinkSchemes.accepts(url, schemes: ["amp-demo"]) { inbox.receive(url.absoluteString) }
         if PrototypeViewerURLRoute.route(url) != .delegateOwned { inbox.receive(url.absoluteString) }
         XCTAssertEqual(target.urls, ["amp-demo://post/41"])
-        XCTAssertEqual(PrototypeViewerURLRoute.route(try XCTUnwrap(URL(string: "https://host/post/41"))), .delegateOwned)
+        XCTAssertEqual(
+            try PrototypeViewerURLRoute.route(XCTUnwrap(URL(string: "https://host/post/41"))),
+            .delegateOwned
+        )
         XCTAssertEqual(PrototypeViewerURLRoute.route(URL(fileURLWithPath: "/tmp/spec.json")), .share)
         for mcp in ["automobile-proto://open?id=1", "AutoMobile-Proto://open"] {
-            XCTAssertEqual(PrototypeViewerURLRoute.route(try XCTUnwrap(URL(string: mcp))), .mcp)
+            XCTAssertEqual(try PrototypeViewerURLRoute.route(XCTUnwrap(URL(string: mcp))), .mcp)
         }
     }
 
@@ -281,7 +284,10 @@ final class PrototypeViewerLinkDeliveryTests: XCTestCase {
         XCTAssertThrowsError(try PrototypeEmbeddedSpec.load(
             data: data, supported: PrototypeInboundLinkSchemes.rendererCapabilities(registry: [], delivery: undelivered)
         )) { error in
-            XCTAssertEqual(error as? PrototypeLoadError, .unsupportedCapabilities([PrototypeAgentProtocol.linksCapability]))
+            XCTAssertEqual(
+                error as? PrototypeLoadError,
+                .unsupportedCapabilities([PrototypeAgentProtocol.linksCapability])
+            )
         }
     }
 }

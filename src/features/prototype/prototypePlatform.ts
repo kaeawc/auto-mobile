@@ -387,28 +387,32 @@ function placeholderUses(spec: unknown, uses: PrototypePlatformUse[]) {
   });
 }
 
+/** A requires block holding only explicit capabilities declares no platform module use. */
+function requiresUses(requires: Raw | undefined): PrototypePlatformUse[] {
+  if (!requires) {
+    return [];
+  }
+  const capabilitiesOnly =
+    Object.hasOwn(requires, "capabilities") &&
+    Object.keys(requires).every((key) => key === "capabilities");
+  const declared = Array.isArray(requires.platform) ? requires.platform : [];
+  return [
+    ...(capabilitiesOnly ? [] : [{ kind: "requires" as const, path: "requires" }]),
+    ...declared.flatMap((name, index) =>
+      typeof name === "string"
+        ? [{ kind: "declared" as const, path: `requires.platform[${index}]`, module: name }]
+        : [],
+    ),
+  ];
+}
+
 /** Every platform construct in `spec`, at the paths of `spec` itself (no component expansion). */
 export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
   const root = record(spec);
   if (!root) {
     return [];
   }
-  const uses: PrototypePlatformUse[] = [];
-  const requires = record(root.requires);
-  if (requires) {
-    if (
-      Object.keys(requires).some((key) => key !== "capabilities") ||
-      !Object.hasOwn(requires, "capabilities")
-    ) {
-      uses.push({ kind: "requires", path: "requires" });
-    }
-    const declared = Array.isArray(requires.platform) ? requires.platform : [];
-    declared.forEach((name, index) => {
-      if (typeof name === "string") {
-        uses.push({ kind: "declared", path: `requires.platform[${index}]`, module: name });
-      }
-    });
-  }
+  const uses: PrototypePlatformUse[] = requiresUses(record(root.requires));
   const handlers = record(record(root.platform)?.on);
   if (record(root.platform)) {
     uses.push({ kind: "handlers", path: "platform" });

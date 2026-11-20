@@ -7,6 +7,7 @@ import {
   readIosTypedTextField,
   readIosTypedTextFocus,
   verifyIosTypedText,
+  type IosTypedTextFocusRead,
   type IosTypedTextRead,
   type IosTypedTextVerificationOptions,
 } from "../iosTypedTextVerification";
@@ -48,7 +49,15 @@ export interface IosTyperDeps {
   insert: SendKeysTextClient["insert"];
   withTextWarnings(result: TextActionResult, warnings: Array<string | undefined>): TextActionResult;
   markPartialAfterMutation(result: TextActionResult): TextActionResult;
+  /** Taps a screen point on the default display; resolves false when the tap was not sent. */
+  tapPoint?(point: { x: number; y: number }, signal?: AbortSignal): Promise<boolean>;
 }
+
+/** Stable `errorCode` when the keyboard's first-run introduction blocks typing (#18910). */
+export const IOS_KEYBOARD_INTRODUCTION_ERROR_CODE = "KEYBOARD_INTRODUCTION";
+/** How long to wait for the keyboard after dismissing the introduction, and how often to look. */
+export const IOS_KEYBOARD_INTRODUCTION_SETTLE_MS = 2000;
+export const IOS_KEYBOARD_INTRODUCTION_POLL_MS = 250;
 
 /**
  * The iOS typing path: bounded XCUITest appends with one optional replace-clear and
@@ -317,9 +326,15 @@ export class IosTyper {
         clearWarning,
       };
     }
-    const focus = await readIosTypedTextFocus(read, { includeIdentity });
+    let focus = await readIosTypedTextFocus(read, { includeIdentity });
+    if (focus.kind === "read" && isBlockedFocus(focus) && focus.keyboardIntroduction) {
+      focus = await this.dismissKeyboardIntroduction(focus, read, includeIdentity);
+      if (isBlockedFocus(focus)) {
+        return { kind: "refused", result: keyboardIntroductionRefusal() };
+      }
+    }
     // Unavailable reads retain their existing best-effort dispatch behavior.
-    if (focus.kind === "read" && !focus.hasFocusedTextInput && !focus.keyboardVisible) {
+    if (isBlockedFocus(focus)) {
       return {
         kind: "refused",
         result: {
@@ -332,4 +347,49 @@ export class IosTyper {
     }
     return { kind: "ready", before: focus.kind === "read" ? focus.field : undefined, clearWarning };
   }
+
+  /**
+   * Taps the introduction's Continue button once, then waits (bounded) for the keyboard or a
+   * focused field. Returns the last read; it is still blocked when the tap could not be sent,
+   * an explicit display was requested, or the keyboard did not appear in time.
+   */
+  private async dismissKeyboardIntroduction(
+    blocked: IosTypedTextFocusRead & { kind: "read" },
+    read: IosTypedTextRead,
+    includeIdentity: boolean,
+  ): Promise<IosTypedTextFocusRead> {
+    const point = blocked.keyboardIntroduction;
+    if (!point || !this.deps.tapPoint || read.display !== undefined) {
+      return blocked;
+    }
+    if (!(await this.deps.tapPoint(point, read.signal))) {
+      logger.warn("[iOS sendKeys] Keyboard introduction tap was not sent");
+      return blocked;
+    }
+    let focus: IosTypedTextFocusRead = blocked;
+    const polls = IOS_KEYBOARD_INTRODUCTION_SETTLE_MS / IOS_KEYBOARD_INTRODUCTION_POLL_MS;
+    for (let poll = 0; poll < polls && isBlockedFocus(focus); poll++) {
+      read.signal?.throwIfAborted();
+      await this.deps.timer.sleep(IOS_KEYBOARD_INTRODUCTION_POLL_MS);
+      focus = await readIosTypedTextFocus(read, { includeIdentity });
+    }
+    return focus;
+  }
+}
+
+/** A readable screen with neither a focused field nor a visible keyboard. */
+function isBlockedFocus(focus: IosTypedTextFocusRead): boolean {
+  return focus.kind === "read" && !focus.hasFocusedTextInput && !focus.keyboardVisible;
+}
+
+function keyboardIntroductionRefusal(): TextActionResult & {
+  resolvedMode: ResolvedSendKeysTypingMode;
+} {
+  return {
+    success: false,
+    error:
+      'iOS nothing was typed: the keyboard\'s one-time "slide to type" introduction is covering the keyboard and could not be dismissed. Tap its Continue button (e.g. tapOn {"selector":{"text":"Continue"}}), then retry.',
+    errorCode: IOS_KEYBOARD_INTRODUCTION_ERROR_CODE,
+    resolvedMode: "xcuiTypeText",
+  };
 }

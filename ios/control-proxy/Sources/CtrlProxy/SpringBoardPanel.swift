@@ -136,14 +136,17 @@ extension ElementLocator {
         mappingBounds(element, rootBounds: nil) { portraitSpringBoard.landscapeBounds($0) }
     }
 
-    private nonisolated static func mappingBounds(
+    /// `skipSubtree` keeps a matching node and its descendants exactly as captured.
+    nonisolated static func mappingBounds(
         _ element: UIElementInfo,
         rootBounds: ElementBounds?,
+        skipSubtree: (UIElementInfo) -> Bool = { _ in false },
         _ transform: (ElementBounds) -> ElementBounds
     )
         -> UIElementInfo
     {
-        UIElementInfo(
+        if skipSubtree(element) { return element }
+        return UIElementInfo(
             text: element.text,
             value: element.value,
             textSize: element.textSize,
@@ -171,7 +174,7 @@ extension ElementLocator {
             viewId: element.viewId,
             extras: element.extras,
             actions: element.actions,
-            node: element.node?.map { mappingBounds($0, rootBounds: nil, transform) }
+            node: element.node?.map { mappingBounds($0, rootBounds: nil, skipSubtree: skipSubtree, transform) }
         )
     }
 }

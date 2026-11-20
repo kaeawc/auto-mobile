@@ -54,15 +54,17 @@ IOS_SIM_PICK_RUNTIME_JQ="${IOS_SIM_JQ_DEFS}"'
 
 # --argjson runtimes RUNTIMES_JSON --arg v SDK_MAJOR.MINOR --arg min DEPLOYMENT_TARGET
 # --arg runtime RUNTIME_ID, input DEVICES_JSON -> "udid<TAB>name".
-# Prefers a booted iPhone on any usable runtime in [min, SDK], then an available
-# iPhone on RUNTIME_ID. Default-named simulators ("iPhone ...") win over custom
+# Prefers a booted iPhone on any usable runtime in [min, SDK] or matching the
+# SDK's major.minor (so a 26.6.1 runtime counts for SDK 26.6, as in
+# IOS_SIM_PICK_RUNTIME_JQ), then an available iPhone on RUNTIME_ID. Default-named simulators ("iPhone ...") win over custom
 # names (which on a shared host may belong to another tool), then the newest
 # device generation.
 IOS_SIM_PICK_SIMULATOR_JQ="${IOS_SIM_JQ_DEFS}"'
 def gen: [(.deviceTypeIdentifier // "") | match("iPhone-([0-9]+)") | .captures[0].string | tonumber][0] // 0;
 def rank: [(if (.name | startswith("iPhone")) then 1 else 0 end), gen, .name];
 [$runtimes.runtimes[] | usable_ios_runtime
-  | select((.version | ver) >= ($min | ver) and (.version | ver) <= ($v | ver))
+  | select((.version | ver) >= ($min | ver)
+      and ((.version | ver) <= ($v | ver) or matches_major_minor($v)))
   | .identifier] as $in_range
 | [.devices | to_entries[] | .key as $rt | .value[]
     | select(.isAvailable != false)

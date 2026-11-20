@@ -169,6 +169,19 @@ device() {
   [ ! -e "${work}/create.log" ]
 }
 
+@test "locally, a booted iPhone on an SDK patch runtime wins over an idle newer patch runtime" {
+  write_json "{\"runtimes\": [$(runtime 26.6.1 26-6-1 '["arm64"]'), $(runtime 26.6.2 26-6-2 '["arm64"]')]}" \
+    "{\"devices\": {
+      \"com.apple.CoreSimulator.SimRuntime.iOS-26-6-1\": [$(device BOOTED-2661 'iPhone 16' iPhone-16 Booted)],
+      \"com.apple.CoreSimulator.SimRuntime.iOS-26-6-2\": []}}"
+
+  run_xcode_test -u CI
+
+  [ "$status" -eq 0 ]
+  [ "$(cat "${work}/destination")" = "platform=iOS Simulator,id=BOOTED-2661" ]
+  [ ! -e "${work}/create.log" ]
+}
+
 @test "locally, no simulator on the chosen runtime skips without creating one" {
   write_json "{\"runtimes\": [$(runtime 26.6 26-6 '["arm64"]')]}" \
     "{\"devices\": {\"com.apple.CoreSimulator.SimRuntime.iOS-26-6\": []}}"

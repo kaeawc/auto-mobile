@@ -76,6 +76,14 @@ export const startDeviceOutputSchema = z
     readiness: z.union([startDeviceReadinessSchema, watchStartDeviceReadinessSchema]).optional(),
     disabledResources: disabledResourcesSchema.optional(),
     androidAuto: startDeviceAndroidAutoOutputSchema.optional(),
+    carPlay: z
+      .object({
+        display: z.string().describe("The car display's identity, e.g. Car[2]."),
+        displayId: z.number().int().describe("The simulator screen id of the car display."),
+      })
+      .passthrough()
+      .optional()
+      .describe("startDevice carPlay: the simulator's CarPlay screen is the car display."),
     // PerformanceTracker emits nested arrays/records rather than a flat numeric map.
     timing: z.unknown().optional(),
   })

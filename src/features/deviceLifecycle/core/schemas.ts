@@ -106,6 +106,11 @@ const startDeviceAndroidAutoSchema = z
 
 export type StartDeviceAndroidAutoOptions = z.output<typeof startDeviceAndroidAutoSchema>;
 
+/** startDevice's CarPlay display request for an iOS 26.x iPhone simulator (#18820). */
+const startDeviceCarPlaySchema = z.object({}).strict();
+
+export type StartDeviceCarPlayOptions = z.output<typeof startDeviceCarPlaySchema>;
+
 export const startDeviceParametersSchema = z.object({
   platform: platformSchema,
   minOsVersion: z
@@ -234,6 +239,11 @@ export const startDeviceParametersSchema = z.object({
     .describe(
       "Android only. After the phone emulator is ready, start a headless Desktop Head Unit projecting it. The phone must already be provisioned for Android Auto (provisionDevice androidAuto); one projecting emulator per host.",
     ),
+  carPlay: startDeviceCarPlaySchema
+    .optional()
+    .describe(
+      "iOS Simulator only. Pass {} to turn on the CarPlay screen after the simulator is ready and confirm it is the car display. Needs an iOS 26.x simulator from Xcode 26.x; iOS 27 and later fail with unsupported-runtime. Request it again after every reboot.",
+    ),
 });
 
 /**
@@ -259,10 +269,17 @@ export function mergeLegacyStartDevicePayload(input: unknown): unknown {
 function refineStartDeviceParameters(
   value: Pick<
     z.output<typeof startDeviceParametersSchema>,
-    "cameraPosterQr" | "cameraPosterPath" | "avdName" | "name" | "androidAuto"
+    "cameraPosterQr" | "cameraPosterPath" | "avdName" | "name" | "androidAuto" | "carPlay"
   > & { platform: string },
   context: z.RefinementCtx,
 ): void {
+  if (value.carPlay !== undefined && value.platform !== "ios") {
+    context.addIssue({
+      code: "custom",
+      path: ["carPlay"],
+      message: "carPlay needs an iOS iPhone simulator",
+    });
+  }
   if (value.androidAuto !== undefined && value.platform !== "android") {
     context.addIssue({
       code: "custom",

@@ -11,6 +11,10 @@ import {
 } from "../../../../src/features/utility/screenLock/AndroidLockSettings";
 import { createExecResult } from "../../../../src/utils/execResult";
 import { logger } from "../../../../src/utils/logger";
+import { runExecSeam } from "../../../../src/utils/ExecSeam";
+import type { ToolCallCapture } from "../../../../src/utils/fixtureCapture/fixtureCaptureFormat";
+import { runWithFixtureCapture } from "../../../../src/utils/fixtureCapture/fixtureCaptureScope";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const fixture = (name: string): string =>
   readFileSync(join(import.meta.dir, "../../../fixtures/android-lock-settings", name), "utf8");
@@ -175,5 +179,37 @@ describe("AdbLockSettingsClient", () => {
     const adb = new FakeLockSettingsAdb();
     adb.responses.push(execResult(""));
     expect((await new AdbLockSettingsClient(adb).clearCredential("1357")).outcome).toBe("failed");
+  });
+});
+
+describe("AdbLockSettingsClient fixture capture", () => {
+  test("a refused change records the scrubbed output and marks the command redacted", async () => {
+    const captures: ToolCallCapture[] = [];
+    // Runs the command through the real exec seam, so the capture sees what locksettings echoed.
+    const adb = new FakeLockSettingsAdb();
+    adb.execute = (args) =>
+      runExecSeam(
+        async () => ({
+          stdout: `${fixture("locksettings-old-mismatch.txt")}${EXIT(1)}`,
+          stderr: "",
+        }),
+        {},
+        { command: "adb", args },
+      );
+
+    await runWithFixtureCapture(
+      "setScreenLock",
+      {
+        writer: { write: async (capture) => void captures.push(capture) },
+        timer: new FakeTimer(),
+        sourceIdentity: async () => ({ automobileVersion: "0", sourceTreeState: "clean" }),
+      },
+      () => new AdbLockSettingsClient(adb).clearCredential("2468"),
+    );
+
+    const [command] = captures[0]?.commands ?? [];
+    expect(command?.stdout).toContain("Old password '<redacted>' didn't match");
+    expect(command?.redacted).toBe(true);
+    expect(JSON.stringify(captures)).not.toContain("2468");
   });
 });

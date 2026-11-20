@@ -16,6 +16,7 @@ import kotlinx.serialization.json.Json
 
 internal const val FIRST = "00000000-0000-4000-8000-000000000001"
 internal const val SECOND = "00000000-0000-4000-8000-000000000002"
+internal const val TEST_LABEL = "Default label"
 internal const val SPEC =
   """{"id":"same-spec-id","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","id":"fixture","text":"Prototype content"}}"""
 

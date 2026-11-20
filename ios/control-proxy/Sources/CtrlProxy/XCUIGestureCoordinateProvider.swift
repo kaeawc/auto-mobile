@@ -26,7 +26,7 @@ import os
         private static let referenceScreenCache = ReferenceScreenCache {
             do {
                 return try catchingObjCException {
-                    let frame = XCUIApplication(bundleIdentifier: "com.apple.springboard").frame
+                    let frame = XCUIApplication.withoutUIInterruptions(bundleIdentifier: "com.apple.springboard").frame
                     return GestureSize(width: Double(frame.width), height: Double(frame.height))
                 }
             } catch {
@@ -47,7 +47,8 @@ import os
         }
 
         var observedApplication: XCUIApplication {
-            relativeApp ?? locator.foregroundBundleId.map { XCUIApplication(bundleIdentifier: $0) } ?? app
+            relativeApp ?? locator.foregroundBundleId
+                .map { XCUIApplication.withoutUIInterruptions(bundleIdentifier: $0) } ?? app
         }
 
         func displayInventory() -> GestureDisplayInventory {
@@ -125,7 +126,8 @@ import os
             if let corrected = cached.resolvingSinglePanel(reference: reference) { return corrected }
             do {
                 return try catchingObjCException {
-                    let target = locator.foregroundBundleId.map { XCUIApplication(bundleIdentifier: $0) } ?? app
+                    let target = locator.foregroundBundleId
+                        .map { XCUIApplication.withoutUIInterruptions(bundleIdentifier: $0) } ?? app
                     relativeApp = target
                     let frame = target.frame
                     let screen = reference ?? GestureSize(
@@ -186,7 +188,7 @@ import os
                     target = app
                 } else {
                     target = relativeApp ?? locator.foregroundBundleId
-                        .map { XCUIApplication(bundleIdentifier: $0) } ?? app
+                        .map { XCUIApplication.withoutUIInterruptions(bundleIdentifier: $0) } ?? app
                 }
                 let anchor = target.coordinate(withNormalizedOffset: CGVector(
                     dx: selection.normalized.x, dy: selection.normalized.y

@@ -1,0 +1,8 @@
+Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=dev.l18722.dbg/dev.l18722.Main }
+Warning: Activity not started, intent has been delivered to currently running top-most instance.
+Status: ok
+LaunchState: UNKNOWN (0)
+Activity: dev.l18722.dbg/dev.l18722.Main
+TotalTime: 0
+WaitTime: 2
+Complete

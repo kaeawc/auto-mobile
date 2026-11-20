@@ -329,6 +329,36 @@ class PrototypePermissionsModuleTest {
     runtime.close()
   }
 
+  @Test
+  fun `camera and microphone requests route to their own sources`() = runTest {
+    val notifications = FakePrototypePermissionsSource()
+    val camera =
+      FakePrototypePermissionsSource().apply { current = PrototypePermissionState.GRANTED }
+    val microphone =
+      FakePrototypePermissionsSource().apply { current = PrototypePermissionState.DENIED }
+    val module =
+      PrototypePermissionsModule(
+        mapOf(
+          PrototypeRuntimePermission.NOTIFICATIONS to notifications,
+          PrototypeRuntimePermission.CAMERA to camera,
+          PrototypeRuntimePermission.MICROPHONE to microphone,
+        ),
+        backgroundScope,
+      )
+    assertEquals(JsonPrimitive("denied"), module.state.value["microphone"])
+    val result = module.call(call("camera", "microphone")) as PlatformCallResult.Success
+    assertEquals(
+      Json.parseToJsonElement("""{"results":{"camera":"granted","microphone":"denied"}}"""),
+      result.value,
+    )
+    assertEquals(listOf(0, 1, 1), listOf(notifications, camera, microphone).map { it.requests })
+    camera.changes.emit(PrototypePermissionState.BLOCKED)
+    runCurrent()
+    assertEquals(JsonPrimitive("blocked"), module.state.value["camera"])
+    module.close()
+    assertTrue(listOf(notifications, camera, microphone).all { it.closed })
+  }
+
   private fun TestScope.runtime(source: PrototypePermissionsSource) =
     PrototypeRuntime(
         spec,

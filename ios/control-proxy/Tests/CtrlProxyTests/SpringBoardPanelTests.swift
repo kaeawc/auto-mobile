@@ -282,7 +282,9 @@ final class PortraitSpringBoardWindowsTests: XCTestCase {
     func testWindowsAlreadyInTheRootSpaceAreLeftAlone() {
         // After a windowed app parks, SpringBoard can report landscape windows (#18828's capture).
         let icon = UIElementInfo(
-            text: "Contacts", className: "SBIconView", bounds: ElementBounds(left: 157, top: 122, right: 230, bottom: 218)
+            text: "Contacts",
+            className: "SBIconView",
+            bounds: ElementBounds(left: 157, top: 122, right: 230, bottom: 218)
         )
         let root = UIElementInfo(
             className: "XCUIApplication",

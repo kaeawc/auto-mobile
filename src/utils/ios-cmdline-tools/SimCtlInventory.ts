@@ -86,6 +86,9 @@ interface CatalogState {
   generation: number;
 }
 
+/** Default budget for the `simctl io enumerate` behind a single-device display inventory read. */
+export const SIMULATOR_DISPLAY_ENUMERATE_TIMEOUT_MS = 2_000;
+
 export class SimCtlInventory {
   // Production clients share defaultTimer; fake timers keep independent hosts isolated.
   private static readonly catalogs = new WeakMap<Timer, CatalogState>();
@@ -937,6 +940,7 @@ export class SimCtlInventory {
   async readDeviceDisplays(
     udid: string,
     signal?: AbortSignal,
+    enumerateTimeoutMs: number = SIMULATOR_DISPLAY_ENUMERATE_TIMEOUT_MS,
   ): Promise<DeviceDisplays | undefined> {
     signal?.throwIfAborted();
     const device = await this.context.getDeviceInfo(udid);
@@ -947,7 +951,7 @@ export class SimCtlInventory {
     if (device.state !== "Booted") {
       return undefined;
     }
-    const displays = await this.context.enumerateDisplays(udid, 2_000, signal);
+    const displays = await this.context.enumerateDisplays(udid, enumerateTimeoutMs, signal);
     return simulatorDeviceDisplays(displays, device.deviceTypeIdentifier);
   }
 

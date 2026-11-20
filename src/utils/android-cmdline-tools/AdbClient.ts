@@ -38,6 +38,7 @@ import { AdbCommandTimeoutError } from "./AdbCommandTimeoutError";
 import { AdbDeviceDiscovery, resetAdbDeviceDiscoveryCache } from "./AdbDeviceDiscovery";
 import { isAdbMissingDeviceError, notifyAdbMissingDevice } from "./AdbDeviceHealth";
 import { AdbDeviceReadings } from "./AdbDeviceReadings";
+import { withFixtureCaptureRedaction } from "../fixtureCapture/fixtureCaptureScope";
 import { AdbDeviceTransportUnavailableError } from "./AdbDeviceTransportUnavailableError";
 import { AdbPathDiscovery } from "./AdbPathDiscovery";
 import { AdbSignalExecutor, type AdbSignalExecOptions } from "./AdbSignalExecutor";
@@ -817,14 +818,17 @@ export class AdbClient implements AdbExecutor {
     const fullArgs = [...baseArgs, ...commandArgs];
     const command = logLabel ?? commandArgs.join(" ");
     const rawExec = async (remainingMs?: number): Promise<ExecResult> => {
-      try {
-        return await this.execWithSignal(adbPath, fullArgs, {
+      const dispatch = () =>
+        this.execWithSignal(adbPath, fullArgs, {
           maxBuffer,
           timeoutMs: remainingMs,
           signal: resolvedSignal,
           waitForProcessSettlementAfterAbort,
           onStdout,
         });
+      try {
+        // A command kept out of logs is kept out of fixture captures too (#18770).
+        return await (logLabel ? withFixtureCaptureRedaction(logLabel, dispatch) : dispatch());
       } catch (error) {
         throw logLabel ? redactCommandFromError(error, fullArgs, commandArgs, logLabel) : error;
       }

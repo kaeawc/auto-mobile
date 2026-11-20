@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   allIconTargets,
   androidTargets,
+  FEATURE_GRAPHIC,
   iosContentsJson,
   iosTargets,
   type IconTarget,
@@ -40,6 +41,11 @@ describe("icon targets", () => {
       ["dark", 1024, true],
       ["tinted", 1024, true],
     ]);
+  });
+
+  test("the Play feature graphic is the required 1024 x 500 banner and not an icon target", () => {
+    expect([FEATURE_GRAPHIC.width, FEATURE_GRAPHIC.height]).toEqual([1024, 500]);
+    expect(allIconTargets().map((target) => target.path)).not.toContain(FEATURE_GRAPHIC.path);
   });
 
   test("target paths are unique", () => {

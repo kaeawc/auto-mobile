@@ -41,6 +41,13 @@ If capture is refused, enable and power on CarPlay, open its window in Simulator
 that one CarPlay screen is connected. If the probe is unavailable, set
 [`AUTOMOBILE_CARPLAY_PROJECTION_PROBE_PATH`](environment-variables.md) to its executable's absolute path.
 
+## Apps with several scenes on iOS
+
+When an iOS app has more than one connected scene, `observe` and the element-based
+action tools such as `tapOn` fail with a `multi_scene` error that lists the scenes.
+Close all but one scene, then retry. The tools do not fall back to a different
+observation source.
+
 ## Toggle labels
 
 A toggle or range row may have no label of its own or from its enclosing row. It then

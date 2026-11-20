@@ -650,8 +650,12 @@ export class SimCtlClient implements SimCtl {
     return this.simCtlInventory.getDeviceInfo(udid);
   }
 
-  readDeviceDisplays(udid: string, signal?: AbortSignal): Promise<DeviceDisplays | undefined> {
-    return this.simCtlInventory.readDeviceDisplays(udid, signal);
+  readDeviceDisplays(
+    udid: string,
+    signal?: AbortSignal,
+    enumerateTimeoutMs?: number,
+  ): Promise<DeviceDisplays | undefined> {
+    return this.simCtlInventory.readDeviceDisplays(udid, signal, enumerateTimeoutMs);
   }
 
   bootSimulator(udid: string): Promise<BootedDevice> {
@@ -906,12 +910,8 @@ export class SimCtlClient implements SimCtl {
     throw new ActionableError("Unable to determine screen size from provided data.");
   }
 
-  async enumerateDisplays(
-    deviceId: string,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-  ): Promise<SimulatorScreens["integrated"]> {
-    return (await this.enumerateScreens(deviceId, timeoutMs, signal)).integrated;
+  async enumerateDisplays(...args: Parameters<SimCtlClient["enumerateScreens"]>) {
+    return (await this.enumerateScreens(...args)).integrated;
   }
 
   async enumerateScreens(

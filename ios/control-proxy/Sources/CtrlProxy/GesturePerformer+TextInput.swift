@@ -31,14 +31,14 @@ import os
 
         func resolveTextInputApp() -> XCUIApplication? {
             if let bundleId = elementLocator.foregroundBundleId, !bundleId.isEmpty {
-                return XCUIApplication(bundleIdentifier: bundleId)
+                return XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId)
             }
             return application
         }
 
         func resolveNavigationApp() -> XCUIApplication? {
             if let bundleId = elementLocator.foregroundBundleId, !bundleId.isEmpty {
-                return XCUIApplication(bundleIdentifier: bundleId)
+                return XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId)
             }
             return application
         }

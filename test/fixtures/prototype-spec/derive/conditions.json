@@ -58,6 +58,39 @@
     { "state": { "query": "apple" }, "visible": [true, false, false, true] },
     { "state": { "query": "hide" }, "visible": [false, true, false, false] }
   ],
+  "lazyRow": {
+    "spec": {
+      "id": "cart-lazy-row-conditions",
+      "window": { "placement": { "type": "fullscreen" } },
+      "state": { "query": "" },
+      "data": { "rows": [{ "name": "Apple" }, { "name": "Apricot" }] },
+      "derive": {
+        "cartCount": {
+          "collection": {
+            "of": { "data": "/rows" },
+            "where": [{ "field": "name", "op": "contains", "value": { "state": "query" } }]
+          },
+          "reduce": { "op": "count" }
+        }
+      },
+      "root": {
+        "type": "list",
+        "repeat": { "items": { "path": "/rows" }, "as": "row", "key": "name" },
+        "children": [
+          {
+            "type": "text",
+            "text": "{row.name}",
+            "visibleWhen": { "derived": "cartCount", "gt": 0 }
+          }
+        ]
+      }
+    },
+    "changes": [
+      { "state": { "query": "" }, "visible": [true, true] },
+      { "state": { "query": "pear" }, "visible": [false, false] },
+      { "state": { "query": "Apple" }, "visible": [true, true] }
+    ]
+  },
   "unknownCondition": { "not": { "all": [{ "derived": "missing", "gt": 0 }] } },
   "error": {
     "path": "root.children[0].visibleWhen.not.all[0].derived",

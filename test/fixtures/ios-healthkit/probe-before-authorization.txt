@@ -1,0 +1,2 @@
+HKPROBE save ok=false err=Optional(Error Domain=com.apple.healthkit Code=5 "Authorization is not determined" UserInfo={NSLocalizedDescription=Authorization is not determined})
+HKPROBE read HKQuantityTypeIdentifierStepCount n=-1 err=Optional(Error Domain=com.apple.healthkit Code=5 "Authorization not determined" UserInfo={NSLocalizedDescription=Authorization not determined})

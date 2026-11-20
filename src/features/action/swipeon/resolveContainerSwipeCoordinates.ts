@@ -52,6 +52,21 @@ function iosDragHandleSwipe({
   };
 }
 
+/** Warn when system insets hide most of the container across the swipe axis (#18646). */
+function clippedByInsetsWarning(
+  direction: SwipeOnResolvedOptions["direction"],
+  container: ElementBounds,
+  visible: ElementBounds,
+): string | undefined {
+  const vertical = direction === "up" || direction === "down";
+  const full = vertical ? container.right - container.left : container.bottom - container.top;
+  const shown = vertical ? visible.right - visible.left : visible.bottom - visible.top;
+  if (full <= 0 || shown * 2 >= full) {
+    return undefined;
+  }
+  return `System insets cover most of the container (${shown} of ${full} px visible across the swipe axis); the swipe uses the visible part. Retry with includeSystemInsets: true to swipe under the system bars.`;
+}
+
 export function resolveContainerSwipeCoordinates({
   geometry,
   overlayDetector,
@@ -75,6 +90,11 @@ export function resolveContainerSwipeCoordinates({
     includeSystemInsets: options.includeSystemInsets,
   };
   const effectiveBounds = insetSwipeBounds({ ...insetOptions, bounds: containerElement.bounds });
+  const insetWarning = clippedByInsetsWarning(
+    options.direction,
+    containerElement.bounds,
+    effectiveBounds,
+  );
   const withChromeWarning = (swipe: {
     startX: number;
     startY: number;
@@ -83,9 +103,8 @@ export function resolveContainerSwipeCoordinates({
     warning?: string;
   }) => {
     const warning = iosSwipeStartWarning({ ...insetOptions, ...swipe });
-    return warning
-      ? { ...swipe, warning: [swipe.warning, warning].filter(Boolean).join(" ") }
-      : swipe;
+    const merged = [swipe.warning, insetWarning, warning].filter(Boolean).join(" ");
+    return merged ? { ...swipe, warning: merged } : swipe;
   };
 
   if ((platform ?? getHierarchySnapshot(observeResult.viewHierarchy)?.platform) === "ios") {

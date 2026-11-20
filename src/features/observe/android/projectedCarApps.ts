@@ -16,9 +16,10 @@ export interface ProjectedCarAppServices extends ProjectedCarApp {
 /** What one `dumpsys activity services` read says about an Android Auto projection (#17841). */
 export interface AndroidAutoProjectionServices {
   /**
-   * Android Auto's own Car App Library template hosts (`.apphost.Template*Service`, one per app
-   * category) that one of its processes holds bound, sorted. A bound host means a head unit session
-   * is hosting car app templates; it says nothing about which app the head unit shows.
+   * Android Auto's own car app hosts (`.apphost.Template*Service`, one per Car App Library
+   * category, and the media host `MediaCarAppService`) that one of its processes holds bound,
+   * sorted. A bound host means a head unit session is hosting car apps; it says nothing about
+   * which app the head unit shows.
    */
   templateHosts: string[];
   /** Every app outside Android Auto with a live Android Auto binding, as {@link parseProjectedCarApps}. */
@@ -32,6 +33,21 @@ const SERVICE_RECORD_HEADER =
 const escapedHost = ANDROID_AUTO_PACKAGE.replace(/\./g, "\\.");
 /** Android Auto's template host classes, short (`.apphost.X`) or fully qualified. */
 const TEMPLATE_HOST_CLASS = new RegExp(`^(?:${escapedHost})?\\.apphost\\.Template\\w*Service$`);
+/**
+ * Android Auto's media car app host (#18672), in whichever of its packages the class lives: the
+ * API 36 DHU binds `MediaCarAppService`, which is not a `Template*Service`.
+ */
+const MEDIA_HOST_CLASS = /^(?:[\w$]*\.)*MediaCarAppService$/;
+
+/**
+ * Whether a class of a service in Android Auto's own package is one of its car app hosts: a
+ * Car App Library template host or the media host. The class is the dump's form, short
+ * (`.`-prefixed) or fully qualified.
+ */
+export function isAndroidAutoCarAppHostClass(className: string): boolean {
+  return TEMPLATE_HOST_CLASS.test(className) || MEDIA_HOST_CLASS.test(className);
+}
+
 /**
  * A live binding client in Android Auto's process (`gearhead` or one of its `:suffix` processes).
  * The header's `c:<package>` is only the last start/bind caller, so it never counts on its own.
@@ -100,7 +116,7 @@ export function parseProjectedCarApps(dump: string): ProjectedCarApp[] {
   }));
 }
 
-/** The bound apps (with their bound components) and Android Auto's bound template hosts. */
+/** The bound apps (with their bound components) and Android Auto's bound car app hosts. */
 export function parseAndroidAutoProjectionServices(dump: string): AndroidAutoProjectionServices {
   const found = new Map<string, ProjectedCarAppServices>();
   const templateHosts = new Set<string>();
@@ -110,7 +126,7 @@ export function parseAndroidAutoProjectionServices(dump: string): AndroidAutoPro
     }
     const component = `${block.packageName}/${block.className}`;
     if (block.packageName === ANDROID_AUTO_PACKAGE) {
-      if (TEMPLATE_HOST_CLASS.test(block.className)) {
+      if (isAndroidAutoCarAppHostClass(block.className)) {
         templateHosts.add(component);
       }
       continue;

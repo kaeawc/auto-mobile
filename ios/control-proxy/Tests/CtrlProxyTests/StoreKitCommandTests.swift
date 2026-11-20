@@ -176,34 +176,47 @@ final class StoreKitCommandTests: XCTestCase {
         XCTAssertEqual(expire.transactions, buy.transactions)
     }
 
-    func testClearResetsAndDropsOnlyTheRequestedBundle() async throws {
+    func testSecondBundleLoadIsRefusedWhileFirstIsActive() async throws {
         let firstBundle = FakeStoreKitTestSession()
         let secondBundle = FakeStoreKitTestSession()
         let handler = handler(StoreKitSessionStore(supported: true) { path in
-            path == "/tmp/a.storekit" ? firstBundle : secondBundle
+            path.hasSuffix("/a.storekit") ? firstBundle : secondBundle
         })
-        for bundle in ["a", "b"] {
-            let response = try await run(
-                handler,
-                "load",
-                bundle: bundle,
-                fields: ["configPath": "/tmp/\(bundle).storekit"]
-            )
-            XCTAssertTrue(response.success)
-        }
+        let loaded = try await run(handler, "load", bundle: "a", fields: ["configPath": "/tmp/a.storekit"])
+        XCTAssertTrue(loaded.success)
         _ = try await run(handler, "buy", bundle: "a", fields: ["productId": "only-a"])
-        XCTAssertEqual(firstBundle.transactions.count, 1)
-        XCTAssertTrue(secondBundle.transactions.isEmpty)
-        _ = try await run(handler, "buy", bundle: "b", fields: ["productId": "only-b"])
+        let refused = try await run(handler, "load", bundle: "b", fields: ["configPath": "/tmp/b.storekit"])
+        XCTAssertFalse(refused.success)
+        XCTAssertEqual(
+            refused.error,
+            "storekit environment active for bundleId a; send clear for it before loading another bundle"
+        )
+        XCTAssertEqual(secondBundle.resetCount, 0)
+        XCTAssertEqual(firstBundle.resetCount, 1)
+        let unloaded = try await run(handler, "list", bundle: "b")
+        XCTAssertEqual(unloaded.error, "no storekit session for bundleId; call load first")
+        let kept = try await run(handler, "list", bundle: "a")
+        XCTAssertEqual(kept.transactions?.map(\.productId), ["only-a"])
+    }
+
+    func testReloadingTheActiveBundleAndLoadingAfterClearAreAllowed() async throws {
+        let firstBundle = FakeStoreKitTestSession()
+        let secondBundle = FakeStoreKitTestSession()
+        let handler = handler(StoreKitSessionStore(supported: true) { path in
+            path.hasSuffix("/a.storekit") ? firstBundle : secondBundle
+        })
+        let loaded = try await run(handler, "load", bundle: "a", fields: ["configPath": "/tmp/a.storekit"])
+        XCTAssertTrue(loaded.success)
+        let reload = try await run(handler, "load", bundle: "a", fields: ["configPath": "/tmp/a.storekit"])
+        XCTAssertTrue(reload.success)
         let clear = try await run(handler, "clear", bundle: "a")
         XCTAssertTrue(clear.success)
         XCTAssertEqual(clear.transactions, [])
-        XCTAssertEqual(firstBundle.resetCount, 2)
-        XCTAssertEqual(firstBundle.clearCount, 2)
         let missing = try await run(handler, "list", bundle: "a")
         XCTAssertFalse(missing.success)
-        let remaining = try await run(handler, "list", bundle: "b")
-        XCTAssertEqual(remaining.transactions?.map(\.productId), ["only-b"])
+        let second = try await run(handler, "load", bundle: "b", fields: ["configPath": "/tmp/b.storekit"])
+        XCTAssertTrue(second.success)
+        XCTAssertEqual(secondBundle.resetCount, 1)
     }
 
     func testEveryOperationWithoutLoadFails() async throws {

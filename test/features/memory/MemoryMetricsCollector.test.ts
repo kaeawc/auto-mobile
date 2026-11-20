@@ -14,6 +14,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
     collector = new MemoryMetricsCollector(
       { deviceId: "test-device", name: "test", platform: "android" },
       fakeAdb,
+      new FakeTimer(),
     );
   });
 
@@ -410,6 +411,23 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
     });
   });
 
+  test("runs the action exactly once when there is no process to sample", async function () {
+    const pidofCommand = "shell pidof 'com.example.app'";
+    fakeAdb.setCommandError(
+      pidofCommand,
+      Object.assign(new Error("pidof exited with status 1"), { code: 1, stdout: "", stderr: "" }),
+    );
+    let actionCalls = 0;
+
+    const metrics = await collector.collectMetrics("com.example.app", async () => {
+      actionCalls++;
+    });
+
+    expect(metrics).toBeUndefined();
+    expect(actionCalls).toBe(1);
+    expect(fakeAdb.getExecutedCommands()).toEqual([pidofCommand]);
+  });
+
   describe("collectMetrics pid retention and device-clock boundary capture", function () {
     test("scopes GC capture to the pid resolved before the action, and reads the GC window directly from device-clock boundary reads", async function () {
       const fakeTimer = new FakeTimer();
@@ -446,8 +464,8 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
 
       const metrics = await restartCollector.collectMetrics("com.example.app", async () => {});
 
-      expect(metrics.gcCount).toBe(1);
-      expect(metrics.gcEvents[0].freedKb).toBe(10);
+      expect(metrics?.gcCount).toBe(1);
+      expect(metrics?.gcEvents[0].freedKb).toBe(10);
 
       const executed = fakeAdb.getExecutedCommands();
       const gcCommand = executed.find((cmd) => cmd.includes("logcat -d -v epoch"));
@@ -489,8 +507,8 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
 
       const metrics = await coarseClockCollector.collectMetrics("com.example.app", async () => {});
 
-      expect(metrics.gcCount).toBe(1);
-      expect(metrics.gcEvents[0].freedKb).toBe(10);
+      expect(metrics?.gcCount).toBe(1);
+      expect(metrics?.gcEvents[0].freedKb).toBe(10);
     });
 
     test("still drops a GC event outside the widened boundary-second window", async function () {
@@ -524,7 +542,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
 
       const metrics = await coarseClockCollector.collectMetrics("com.example.app", async () => {});
 
-      expect(metrics.gcCount).toBe(0);
+      expect(metrics?.gcCount).toBe(0);
     });
 
     test("captures the GC-window logcat dump before triggering the collector's own explicit GC, so an induced GC cannot leak into the boundary-second window", async function () {
@@ -573,8 +591,8 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       const metrics = await coarseClockCollector.collectMetrics("com.example.app", async () => {});
 
       // Genuine app GC on the boundary second IS counted.
-      expect(metrics.gcCount).toBe(1);
-      expect(metrics.gcEvents[0].freedKb).toBe(10);
+      expect(metrics?.gcCount).toBe(1);
+      expect(metrics?.gcEvents[0].freedKb).toBe(10);
 
       // The logcat window capture must happen strictly before the
       // collector's own SIGUSR1 trigger — a collector-induced GC cannot be

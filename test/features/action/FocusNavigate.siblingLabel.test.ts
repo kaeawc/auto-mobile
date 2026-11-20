@@ -185,12 +185,12 @@ test.each(["own text", "own description", "child label", "different parent"] as 
 );
 
 test.each(["selector", "hierarchy", "bounds"] as const)(
-  "%s declines the sibling fallback when two unlabelled controls share the row",
+  "%s declines the sibling fallback when two unlabelled controls follow the label",
   (path) => {
     const later = { ...control, bounds: { left: 70, top: 10, right: 90, bottom: 30 } };
-    const hierarchy = tree({ ...row, node: [control, title, later] });
+    const hierarchy = tree({ ...row, node: [title, control, later] });
     const screen = {
-      ...flat(row, control, title, later),
+      ...flat(row, title, control, later),
       ...(path === "bounds" ? {} : { hierarchy }),
     };
     expect(
@@ -236,6 +236,65 @@ test.each(["hierarchy", "bounds"] as const)(
       ...(path === "hierarchy" ? { hierarchy } : {}),
     };
     expect(firstMatchTarget(screen, { label: "Play" }).atBounds).toEqual(title.bounds);
+  },
+);
+
+test.each(["hierarchy", "bounds"] as const)(
+  "%s treats a focusable sibling's descendant label as an ownership boundary",
+  (path) => {
+    const parent: Element = { bounds: { left: 0, top: 0, right: 300, bottom: 250 } };
+    const wifi: Element = {
+      text: "WiFi",
+      bounds: { left: 10, top: 10, right: 100, bottom: 30 },
+    };
+    const enabled: Element = {
+      text: "Enabled",
+      bounds: { left: 130, top: 55, right: 190, bottom: 65 },
+    };
+    const wifiControl: Element = {
+      focusable: true,
+      bounds: { left: 120, top: 50, right: 200, bottom: 70 },
+      node: [enabled],
+    };
+    const bluetoothControl: Element = {
+      focusable: true,
+      bounds: { left: 120, top: 90, right: 200, bottom: 110 },
+    };
+    const bluetooth: Element = {
+      text: "Bluetooth",
+      bounds: { left: 10, top: 130, right: 100, bottom: 150 },
+    };
+    const airplaneControl: Element = {
+      focusable: true,
+      bounds: { left: 120, top: 170, right: 200, bottom: 190 },
+    };
+    const airplane: Element = {
+      text: "Airplane",
+      bounds: { left: 10, top: 210, right: 100, bottom: 230 },
+    };
+    const siblings = [wifi, wifiControl, bluetoothControl, bluetooth, airplaneControl, airplane];
+    const hierarchy = tree({ ...parent, node: siblings });
+    const screen: FocusScreen = {
+      ...flat(
+        parent,
+        wifi,
+        wifiControl,
+        enabled,
+        bluetoothControl,
+        bluetooth,
+        airplaneControl,
+        airplane,
+      ),
+      ...(path === "hierarchy" ? { hierarchy } : {}),
+    };
+    const nodes = new SearchableHierarchy().project(hierarchy);
+    for (const label of [wifi, bluetooth, airplane]) {
+      const target = { label: label.text };
+      const chosen = nodes.find((node) => node.element?.text === label.text)!;
+      expect(focusLabelSibling(nodes, chosen, target)).toBeUndefined();
+      // No sibling pin: firstMatchTarget retains the inert label's own bounds and text.
+      expect(firstMatchTarget(screen, target)).toEqual({ ...target, atBounds: label.bounds });
+    }
   },
 );
 

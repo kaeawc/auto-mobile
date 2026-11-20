@@ -411,3 +411,83 @@ test.each(["status", "inspect"])("app relaunch resets sequence epoch before %s",
     event: { sequence: 1 },
   });
 });
+
+const remount = (showingId: string, showingStartSequence: number) => {
+  agent = new FakePrototypeAgentClient({
+    ...agent.handshake,
+    showingId,
+    showingStartSequence,
+  });
+  buffered = new BufferedViewerClient(agent, true);
+};
+
+test("an earlier showing's replayed dismissal does not end the remounted showing", async () => {
+  remount("A", 1);
+  agent.emit({ ...event(1) });
+  expect(await call({ action: "awaitEvent", id: "panel" })).toMatchObject({
+    event: { sequence: 1 },
+  });
+  // Showing A ended at 2 while no host was attached; showing B starts at 3.
+  remount("B", 3);
+  agent.emit({ ...event(2, "panel", "dismissed") });
+  agent.emit({ ...event(3) });
+  expect(await call({ action: "awaitEvent", id: "panel" })).toMatchObject({
+    success: true,
+    event: { sequence: 3, kind: "emit" },
+  });
+  const waiting = call({ action: "awaitEvent", id: "panel" });
+  agent.emit({ ...event(4) });
+  expect(await waiting).toMatchObject({ event: { sequence: 4 } });
+});
+
+test("two remounts before inspect deliver the current showing's event before acknowledging it", async () => {
+  remount("A", 1);
+  agent.emit({ ...event(1) });
+  agent.emit({ ...event(2) });
+  expect(await call({ action: "awaitEvent", id: "panel" })).toMatchObject({
+    event: { sequence: 1 },
+  });
+  expect(await call({ action: "awaitEvent", id: "panel" })).toMatchObject({
+    event: { sequence: 2 },
+  });
+  // B emits 3 and is dismissed at 4; C starts at 5. None of it reached a host.
+  remount("C", 5);
+  agent.emit({ ...event(3) });
+  agent.emit({ ...event(4, "panel", "dismissed") });
+  agent.emit({ ...event(5) });
+  agent.queueReplies({
+    status: {
+      shown: true,
+      id: "panel",
+      showingId: "C",
+      showingStartSequence: 5,
+      state: {},
+      pages: {},
+      lastSequence: 5,
+    },
+  });
+  expect(await call({ action: "inspect", id: "panel" })).toMatchObject({ success: true });
+  expect(await call({ action: "awaitEvent", id: "panel" })).toMatchObject({
+    event: { sequence: 3 },
+  });
+  expect(await call({ action: "awaitEvent", id: "panel" })).toMatchObject({
+    event: { sequence: 5, kind: "emit" },
+  });
+  expect(agent.acknowledged).toEqual([3, 4, 5]);
+});
+
+test("replay the host rejects after the current showing's dismissal is not acknowledged", async () => {
+  remount("A", 1);
+  agent.emit({ ...event(1) });
+  expect(await call({ action: "awaitEvent", id: "panel" })).toMatchObject({
+    event: { sequence: 1 },
+  });
+  // A reconnect within the same showing replays its dismissal and a later stray event.
+  remount("A", 1);
+  agent.emit({ ...event(2, "panel", "dismissed") });
+  agent.emit({ ...event(3) });
+  expect(await call({ action: "awaitEvent", id: "panel" })).toMatchObject({
+    event: { sequence: 2, kind: "dismissed" },
+  });
+  expect(agent.acknowledged).toEqual([2]);
+});

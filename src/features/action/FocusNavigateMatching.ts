@@ -192,14 +192,23 @@ function siblingLabelQualifies(
   if (siblingMatchRank(node, target)) {
     return true;
   }
-  if (hasLabel(node.element)) {
-    return false;
-  }
-  return !nodes.some(
-    (child) =>
-      hasLabel(child.element) &&
-      isDescendant(nodes, child, node) &&
-      !isRangeValueDescription(node.element, child.element),
+  return !isIndependentlyLabelledSibling(nodes, node);
+}
+
+/** A focusable sibling owns descendant labels as well as its own text or description. */
+function isIndependentlyLabelledSibling(
+  nodes: readonly FocusSiblingNode[],
+  node: FocusSiblingNode,
+): boolean {
+  return (
+    hasLabel(node.element) ||
+    (isTruthyFlag(node.element?.focusable) &&
+      nodes.some(
+        (child) =>
+          hasLabel(child.element) &&
+          isDescendant(nodes, child, node) &&
+          !isRangeValueDescription(node.element, child.element),
+      ))
   );
 }
 
@@ -218,9 +227,84 @@ function isRangeValueDescription(
   );
 }
 
+interface FocusSiblingToken {
+  node: FocusSiblingNode;
+  kind: "control" | "label" | "barrier";
+}
+
+function siblingLayoutTokens(
+  nodes: readonly FocusSiblingNode[],
+  label: FocusSiblingNode,
+  candidates: readonly FocusSiblingNode[],
+): FocusSiblingToken[] {
+  const candidateIndices = new Set(candidates.map((node) => node.index));
+  return nodes
+    .filter((node) => node.parentIndex === label.parentIndex)
+    .sort((a, b) => a.index - b.index)
+    .flatMap((node): FocusSiblingToken[] => {
+      if (candidateIndices.has(node.index)) {
+        return [{ node, kind: "control" }];
+      }
+      if (isTruthyFlag(node.element?.clickable) && !isTruthyFlag(node.element?.focusable)) {
+        return [{ node, kind: "barrier" }];
+      }
+      if (
+        nodes.some(
+          (child) =>
+            isDescendant(nodes, child, node) &&
+            (child.element ? isActionable(child.element) : false),
+        )
+      ) {
+        return [{ node, kind: "barrier" }];
+      }
+      if (!isIndependentlyLabelledSibling(nodes, node)) {
+        return [];
+      }
+      return [{ node, kind: isTruthyFlag(node.element?.focusable) ? "barrier" : "label" }];
+    });
+}
+
+/**
+ * Every barrier-delimited segment must match (L+ C)* L*, and a label run between two controls
+ * longer than the first row's leading run is ambiguous (a trailing summary or the next title).
+ */
+function isLabelFirstSiblingLayout(tokens: readonly FocusSiblingToken[]): boolean {
+  let previous: FocusSiblingToken["kind"] = "barrier";
+  let run = 0;
+  let firstRun: number | undefined;
+  for (const { kind } of tokens) {
+    if (kind === "control") {
+      if (previous !== "label" || (firstRun !== undefined && run > firstRun)) {
+        return false;
+      }
+      firstRun ??= run;
+    }
+    run = kind === "label" ? run + 1 : 0;
+    previous = kind;
+  }
+  return true;
+}
+
+/** All labels in a run own its following control only when the whole parent is label-first. */
+function followingLabelSibling(
+  nodes: readonly FocusSiblingNode[],
+  label: FocusSiblingNode,
+  candidates: readonly FocusSiblingNode[],
+): Element | undefined {
+  if (isTruthyFlag(label.element?.focusable)) {
+    return undefined;
+  }
+  const tokens = siblingLayoutTokens(nodes, label, candidates);
+  if (!isLabelFirstSiblingLayout(tokens)) {
+    return undefined;
+  }
+  const following = tokens.find(({ node, kind }) => node.index > label.index && kind !== "label");
+  return following?.kind === "control" ? following.node.element : undefined;
+}
+
 /**
  * A matching focusable in this same parent row (best match, nearest in hierarchy order), else
- * the row's only unlabelled focusable. Several unlabelled candidates are ambiguous: none is pinned.
+ * its only unlabelled focusable, or the control after its label run in a label-first parent.
  */
 export function focusLabelSibling(
   nodes: readonly FocusSiblingNode[],
@@ -247,7 +331,9 @@ export function focusLabelSibling(
   );
   const matching = candidates.filter((node) => siblingMatchRank(node, target) > 0);
   if (matching.length === 0) {
-    return candidates.length === 1 ? candidates[0].element : undefined;
+    return candidates.length === 1
+      ? candidates[0].element
+      : followingLabelSibling(nodes, label, candidates);
   }
   return matching.sort(
     (a, b) =>

@@ -61,6 +61,7 @@
     "doc-example-1.json",
     "doc-example-2.json",
     "doc-example-3.json",
+    "effects-vignette-radius-boundary.json",
     "elevation-gradient-aspect-ratio.json",
     "emit-context-16-entries.json",
     "emit-context-arbitrary-names.json",
@@ -486,6 +487,7 @@
     "z-effects-all-types.json",
     "z-effects-animated-phase.json",
     "z-effects-at-limits.json",
+    "z-effects-expanded-at-limits.json",
     "z-effects-style-when.json"
   ],
   "invalid": [
@@ -854,6 +856,7 @@
     "effects-source-key.json",
     "effects-type-shader.json",
     "effects-unknown-type.json",
+    "effects-vignette-radius-too-large.json",
     "elevation-over-max.json",
     "emit-context-17-entries.json",
     "emit-context-empty-name.json",
@@ -2721,6 +2724,7 @@
     "doc-example-1.json": [],
     "doc-example-2.json": [],
     "doc-example-3.json": [],
+    "effects-vignette-radius-boundary.json": ["prototype_effects_v1"],
     "elevation-gradient-aspect-ratio.json": [],
     "emit-context-16-entries.json": ["prototype_emit_context_v1"],
     "emit-context-arbitrary-names.json": ["prototype_emit_context_v1"],
@@ -2894,6 +2898,20 @@
       "prototype_linkify_v1",
       "prototype_stack_v1"
     ],
+    "links-bindings.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_emit_context_v1",
+      "prototype_links_v1"
+    ],
+    "links-platform.json": [
+      "prototype_data_model_v1",
+      "prototype_links_v1",
+      "prototype_platform_location_v1",
+      "prototype_platform_v1"
+    ],
+    "links-routes.json": ["prototype_links_v1", "prototype_routes_v1", "prototype_stack_v1"],
+    "links-secret-query.json": ["prototype_links_v1", "prototype_routes_v1", "prototype_stack_v1"],
     "list-basic.json": ["prototype_data_model_v1", "prototype_lazy_list_v1"],
     "list-empty.json": ["prototype_data_model_v1", "prototype_lazy_list_v1"],
     "list-header-footer.json": ["prototype_data_model_v1", "prototype_lazy_list_v1"],
@@ -3650,20 +3668,7 @@
     "z-effects-all-types.json": ["prototype_effects_v1"],
     "z-effects-animated-phase.json": ["prototype_effects_v1"],
     "z-effects-at-limits.json": ["prototype_effects_v1"],
-    "z-effects-style-when.json": ["prototype_effects_v1"],
-    "links-routes.json": ["prototype_links_v1", "prototype_routes_v1", "prototype_stack_v1"],
-    "links-secret-query.json": ["prototype_links_v1", "prototype_routes_v1", "prototype_stack_v1"],
-    "links-bindings.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_emit_context_v1",
-      "prototype_links_v1"
-    ],
-    "links-platform.json": [
-      "prototype_data_model_v1",
-      "prototype_links_v1",
-      "prototype_platform_location_v1",
-      "prototype_platform_v1"
-    ]
+    "z-effects-expanded-at-limits.json": ["prototype_effects_v1"],
+    "z-effects-style-when.json": ["prototype_effects_v1"]
   }
 }

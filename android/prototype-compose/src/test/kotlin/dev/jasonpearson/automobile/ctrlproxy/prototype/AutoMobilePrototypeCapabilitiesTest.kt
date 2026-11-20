@@ -39,7 +39,6 @@ class AutoMobilePrototypeCapabilitiesTest {
   private val exclusions =
     setOf(
       "prototype_links_v1", // Only the stamped app shell delivers inbound URLs.
-      "prototype_glass_v1", // Real backdrop blur is deferred to PR 2; never simulate glass.
       "prototype_scroll_edge_effect_v1", // Contract only until Android edge rendering in PR 2.
       // Realtime transport, routing and lifecycle remain owed by the runtime slices.
       "prototype_platform_realtime_v1",
@@ -148,6 +147,12 @@ class AutoMobilePrototypeCapabilitiesTest {
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilitiesForSdk(32))
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilitiesForSdk(33))
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilities)
+  }
+
+  @Test
+  fun `glass is advertised for both the tonal scrim and blur`() {
+    assertTrue("prototype_glass_v1" in AutoMobilePrototype.capabilitiesForSdk(30))
+    assertTrue("prototype_glass_v1" in AutoMobilePrototype.capabilitiesForSdk(33))
   }
 
   @Test

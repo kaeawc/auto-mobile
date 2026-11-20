@@ -21,10 +21,12 @@ no interactive runtime. The planned release is in the devlog entries under Backg
 - The same build bundles the page entry `packages/prototype-web/src/page.ts` into the committed
   `src/features/prototype/web/prototypeWebPageBundle.generated.ts`. The entry holds `mount` and a
   boot that mounts the options in the page's `script[type="application/json"][data-prototype-page]`
-  on its `[data-prototype-host]`. The server reads that file through `prototypeWebPageBundle()` and
-  never bundles at request time.
-- The file carries a version mark where the bundle names the root `package.json` version. The
-  server replaces the mark with the release's version, so a version bump does not change the file.
+  on its `[data-prototype-host]`. `prototypeWebPageBundle()` reads that file and never bundles at
+  request time, but nothing serves it yet: the prototype web resource still returns the static
+  page from `buildPrototypeWebPage`, with no script.
+- The file carries a version mark where the bundle names the root `package.json` version.
+  `prototypeWebPageBundle()` replaces the mark with the release's version, so a version bump does
+  not change the file.
 - The test `prototypeWebPageBundle.test.ts` rebuilds the file and fails when the committed one
   differs. Regenerate it with `bun run build` in `packages/prototype-web/`, or compare with
   `bun build.ts --check`.

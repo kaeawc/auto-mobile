@@ -560,3 +560,31 @@ test("show snapshots expose initial stacks until a device snapshot supersedes th
   store.recordEvent(scope, event(1));
   expect(store.status(scope).prototypes[0]).not.toHaveProperty("stacks");
 });
+
+test("device-generated ids and timestamps reach both host mirrors without regeneration", () => {
+  const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+  const scope = { deviceId: "generated-device" };
+  const data = { rows: [] };
+  const ticket = store.shownSpecs.beginShow(scope.deviceId);
+  store.shownSpecs.endShow(scope.deviceId, ticket, { id: "panel", spec: { data } });
+  store.record(scope, "show", { id: "panel" }, { result: ok, details: { data } });
+  const row = { id: "device-generated-uuid", at: 1700000000000, status: "sending" };
+  store.recordEvent(scope, {
+    ...event(1, "panel", "change", "/data/rows"),
+    payload: { op: "append", value: row, revision: 2 },
+  });
+  store.recordEvent(scope, {
+    ...event(2, "panel", "change", "/data/rows"),
+    payload: {
+      op: "set",
+      value: "sent",
+      where: { field: "id", equals: row.id },
+      member: "status",
+      revision: 3,
+    },
+  });
+  const expected = { rows: [{ ...row, status: "sent" }] };
+  expect(store.status(scope).prototypes[0].data).toEqual(expected);
+  const tracked = store.shownSpecs.read(scope.deviceId, "panel");
+  expect(tracked.kind === "known" && tracked.spec.data).toEqual(expected);
+});

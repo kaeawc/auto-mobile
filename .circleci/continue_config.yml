@@ -186,6 +186,17 @@ commands:
               circleci-agent step halt
             fi
 
+  # Pin DEVELOPER_DIR to the image's own Xcode, so scripts that call select_pinned_xcode
+  # keep it. Without this a 26.6 sweep image that also ships the 27.2 pin would switch
+  # to 27.2 and stop verifying the Swift 6.3 floor; on the 27.2 image it is a no-op.
+  keep_image_xcode:
+    steps:
+      - run:
+          name: "Keep the image's Xcode"
+          command: |
+            echo "export DEVELOPER_DIR=\"$(xcode-select -p)\"" >> "${BASH_ENV}"
+            xcodebuild -version
+
   install_xcodegen:
     steps:
       - run:
@@ -250,6 +261,7 @@ jobs:
           steps:
             - halt_if_superseded_on_main:
                 path-group: << parameters.superseded-path-group >>
+      - keep_image_xcode
       - restore_spm_cache
       - install_xcodegen
       - run:
@@ -331,6 +343,7 @@ jobs:
       xcode: << parameters.xcode >>
     steps:
       - checkout_without_lfs
+      - keep_image_xcode
       - restore_spm_cache
       - run:
           name: "Report toolchain"
@@ -341,6 +354,11 @@ jobs:
             for package in ios/screen-capture ios/network-filter ios/audio-loopback ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
               (cd "${package}" && swift package resolve)
             done
+      # swift-build.sh builds ProtoViewer, whose icon generator needs Bun and sharp.
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: bash scripts/ci/install-bun-deps.sh
       - run:
           name: "Build Swift packages"
           command: ./scripts/ios/swift-build.sh

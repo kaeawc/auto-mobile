@@ -68,6 +68,8 @@ export interface DisposableAppStamper {
   /** Digest of the host's disposable-app signing key; installed apps must match it. */
   signer(): Promise<string>;
   stamp(input: DisposableAppStampInput): Promise<DisposableAppStamped>;
+  /** Frees a stamped artifact once the install attempt ends; omitted when it is a shared cache. */
+  release?(artifactPath: string): Promise<void>;
 }
 
 export interface DisposableAppInstallation {
@@ -213,6 +215,18 @@ export class DisposableAppManager {
     return this.withAppLock(input.deviceId, appId, () => this.installLocked(input, appId));
   }
 
+  private async installAndRelease(
+    { stamper, installer }: { stamper: DisposableAppStamper; installer: DisposableAppInstaller },
+    [deviceId, appId]: readonly [string, string],
+    artifactPath: string,
+  ): Promise<void> {
+    try {
+      await installer.install(deviceId, appId, artifactPath);
+    } finally {
+      await stamper.release?.(artifactPath);
+    }
+  }
+
   private async installLocked(
     input: DisposableAppInstallInput,
     appId: string,
@@ -241,7 +255,11 @@ export class DisposableAppManager {
       template,
       declarations,
     });
-    await installer.install(input.deviceId, appId, stamped.artifactPath);
+    await this.installAndRelease(
+      { stamper, installer },
+      [input.deviceId, appId],
+      stamped.artifactPath,
+    );
     // Record the app as soon as it is on the device, so a reset or permission failure below cannot
     // leave it untracked or keep a previous install's expiry for the sweep to act on (#16506).
     const installedAt = this.deps.timer.now();

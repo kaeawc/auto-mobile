@@ -27,7 +27,11 @@ import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 const HOUR = 60 * 60 * 1000;
 const android: BootedDevice = { deviceId: "apps-android", platform: "android", name: "Fake" };
-const ios: BootedDevice = { deviceId: "apps-ios", platform: "ios", name: "Fake" };
+const iphone: BootedDevice = {
+  deviceId: "00008030-001C195E0A91802E",
+  platform: "ios",
+  name: "Fake iPhone",
+};
 const specText = fs.readFileSync(
   path.join(import.meta.dir, "../fixtures/prototype-spec/valid/platform-requires.json"),
   "utf8",
@@ -200,10 +204,10 @@ describe("prototype disposable app actions (#14184)", () => {
     expect(forgotten).toEqual([]);
   });
 
-  test("iOS refuses with an actionable message until its stamper lands", async () => {
-    const output = await call({ action: "listApps" }, ios);
+  test("installApp directs physical iPhones to ProtoViewer before stamping", async () => {
+    const output = await call({ action: "installApp", spec, app }, iphone);
     expect(output.success).toBe(false);
-    expect(output.error).toContain("not available on ios yet");
+    expect(output.error).toContain("Use ProtoViewer on a physical iPhone");
   });
 
   test("schema requires app and a spec source, and exactly one uninstall target", () => {

@@ -15,6 +15,8 @@ import type { MemoryAudit } from "../memory/MemoryAudit";
 import { MAX_ACCESSIBILITY_VIOLATIONS } from "../accessibility/WcagAudit";
 import { auditForegroundRefusal } from "../accessibility/AuditForegroundRefusal";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
+import type { IosMemoryAuditResult } from "./iosPerformanceJudgement";
 
 export const AUDIT_KINDS = ["accessibility", "performance", "memory"] as const;
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -30,6 +32,13 @@ export const AUDIT_FAIL_ON = ["error", "warning", "never"] as const;
 export type AuditFailOn = (typeof AUDIT_FAIL_ON)[number];
 
 export type MemoryAuditResult = NonNullable<Awaited<ReturnType<MemoryAudit["runAudit"]>>>;
+export type OnDemandPerformanceResult = Pick<
+  PerformanceAuditResult,
+  "passed" | "metrics" | "violations" | "diagnostics"
+>;
+export interface UnsupportedAudit {
+  unsupported: string;
+}
 
 /** Limits the accessibility audit to the subtree of one element. */
 export interface AuditContainer {
@@ -65,9 +74,13 @@ export interface OnDemandAuditEngines {
     config: AccessibilityAuditConfig,
   ): Promise<AccessibilityAuditResult>;
   /** The UI performance audit of the observed foreground app. */
-  performance(result: ObserveResult): Promise<PerformanceAuditResult | undefined>;
+  performance(
+    result: ObserveResult,
+  ): Promise<OnDemandPerformanceResult | UnsupportedAudit | undefined>;
   /** A memory snapshot of the app. */
-  memory(appId: string): Promise<MemoryAuditResult | undefined>;
+  memory(
+    appId: string,
+  ): Promise<MemoryAuditResult | IosMemoryAuditResult | UnsupportedAudit | undefined>;
   /** The audit elements of the observation, for container scoping. */
   elements(result: ObserveResult): Element[];
   baselines: AuditBaselineStore;
@@ -87,8 +100,8 @@ export interface OnDemandAuditResult {
     summary: AccessibilityAuditResult["summary"];
     screenId: string;
   };
-  performance?: Pick<PerformanceAuditResult, "passed" | "metrics" | "violations" | "diagnostics">;
-  memory?: MemoryAuditResult;
+  performance?: OnDemandPerformanceResult;
+  memory?: MemoryAuditResult | IosMemoryAuditResult;
   baselineDiff?: { new: WcagViolation[]; fixed: string[]; unchanged: number };
   baselineRecorded?: string;
   /** Kinds this target could not run, and why. */
@@ -109,6 +122,35 @@ const ANDROID_ONLY: Record<AuditKind, string> = {
   performance: "The performance audit runs on Android only.",
   memory: "The memory audit runs on Android only.",
 };
+
+const PHYSICAL_IOS_REFUSAL =
+  "performanceAudit on a physical iOS device is not supported; use an iOS Simulator.";
+
+function platformRefusal(
+  device: BootedDevice,
+  kinds: ReadonlySet<AuditKind>,
+): OnDemandAuditResult | undefined {
+  if (device.platform === "android") {
+    return undefined;
+  }
+  if (device.platform !== "ios" || kinds.has("accessibility")) {
+    return {
+      success: false,
+      failed: false,
+      unsupported: Object.fromEntries([...kinds].map((kind) => [kind, ANDROID_ONLY[kind]])),
+      error: "On-demand audits run on Android only.",
+    };
+  }
+  if (resolveIosDeviceKind(device) === "physical") {
+    return {
+      success: false,
+      failed: false,
+      unsupported: Object.fromEntries([...kinds].map((kind) => [kind, PHYSICAL_IOS_REFUSAL])),
+      error: PHYSICAL_IOS_REFUSAL,
+    };
+  }
+  return undefined;
+}
 
 function within(inner: Element["bounds"], outer: Element["bounds"]): boolean {
   return (
@@ -178,13 +220,9 @@ export class OnDemandAudit {
 
   async run(input: OnDemandAuditInput = {}): Promise<OnDemandAuditResult> {
     const kinds = new Set<AuditKind>(input.kinds?.length ? input.kinds : ["accessibility"]);
-    if (this.device.platform !== "android") {
-      return {
-        success: false,
-        failed: false,
-        unsupported: Object.fromEntries([...kinds].map((kind) => [kind, ANDROID_ONLY[kind]])),
-        error: "On-demand audits run on Android only.",
-      };
+    const refusal = platformRefusal(this.device, kinds);
+    if (refusal) {
+      return refusal;
     }
     const { result: observation, screenshotPath } = await this.engines.observe();
     const appId = auditTarget(kinds, input.appId, observation);
@@ -220,6 +258,10 @@ export class OnDemandAudit {
 
   private async runMemory(appId: string, output: OnDemandAuditResult): Promise<void> {
     const result = await this.engines.memory(appId);
+    if (result && "unsupported" in result) {
+      output.unsupported = { ...output.unsupported, memory: result.unsupported };
+      return;
+    }
     if (result) {
       output.memory = result;
       return;
@@ -307,7 +349,9 @@ export class OnDemandAudit {
       return;
     }
     const result = await this.engines.performance(observation);
-    if (result) {
+    if (result && "unsupported" in result) {
+      output.unsupported = { ...output.unsupported, performance: result.unsupported };
+    } else if (result) {
       const { passed, metrics, violations, diagnostics } = result;
       output.performance = { passed, metrics, violations, diagnostics };
     }

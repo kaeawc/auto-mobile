@@ -121,3 +121,85 @@ final class SpringBoardPanelTests: XCTestCase {
         XCTAssertEqual(moved?.bounds?.bottom, 139)
     }
 }
+
+/// Frames captured on an iPhone 18 Pro Max simulator (iOS 27.2) with Maps rotated to landscape
+/// (`rotation` 1) and its location alert up (#18858). SpringBoard's root frame was 956x440, but the
+/// window hosting the alert stayed 440x956 and framed the alert in portrait space.
+final class PortraitSpringBoardRotationTests: XCTestCase {
+    private let alertWindow = CGRect(x: 0, y: 0, width: 440, height: 956)
+    private let landscapeApp = CGRect(x: 0, y: 0, width: 956, height: 440)
+
+    private func resolve(window: CGRect, app: CGRect, rotation: Int?) -> PortraitSpringBoardRotation? {
+        PortraitSpringBoardRotation.resolve(alertWindowFrame: window, appFrame: app, deviceRotation: rotation)
+    }
+
+    private func box(_ bounds: ElementBounds?) -> [Int?] {
+        [bounds?.left, bounds?.top, bounds?.right, bounds?.bottom]
+    }
+
+    func testCapturedLandscapeAlertIsRotatedOntoTheButtonsTheScreenshotShows() throws {
+        let rotation = try XCTUnwrap(
+            resolve(window: alertWindow, app: landscapeApp, rotation: 1)
+        )
+        let buttons = [
+            UIElementInfo(text: "Allow Once", bounds: ElementBounds(left: 175, top: 334, right: 223, bottom: 622)),
+            UIElementInfo(
+                text: "Allow While Using App", bounds: ElementBounds(left: 119, top: 334, right: 167, bottom: 622)
+            ),
+            UIElementInfo(text: "Don’t Allow", bounds: ElementBounds(left: 63, top: 334, right: 111, bottom: 622)),
+        ]
+        let alert = UIElementInfo(
+            text: "Allow “Maps” to use your location?",
+            className: "UIAlertController",
+            bounds: ElementBounds(left: 47, top: 318, right: 413, bottom: 638),
+            node: buttons
+        )
+
+        let rotated = ElementLocator.rotatedIntoLandscape(alert, portraitSpringBoard: rotation)
+
+        // The bounds the fixed runner reported on the same device; "Don’t Allow" is drawn at
+        // x 334-622, y 329-375 in the landscape screenshot, below the other two buttons.
+        XCTAssertEqual(box(rotated.bounds), [318, 27, 638, 393])
+        XCTAssertEqual(rotated.node?.map { box($0.bounds) }, [
+            [334, 217, 622, 265],
+            [334, 273, 622, 321],
+            [334, 329, 622, 377],
+        ])
+        XCTAssertEqual(rotated.node?.map(\.text), ["Allow Once", "Allow While Using App", "Don’t Allow"])
+    }
+
+    func testLandscapeRightIsTheOppositeQuarterTurn() throws {
+        let rotation = try XCTUnwrap(
+            resolve(window: alertWindow, app: landscapeApp, rotation: 3)
+        )
+        let moved = rotation.landscapeBounds(ElementBounds(left: 63, top: 334, right: 111, bottom: 622))
+        XCTAssertEqual(box(moved), [956 - 622, 63, 956 - 334, 111])
+    }
+
+    func testWindowsThatAlreadyMatchTheAppAreLeftAlone() {
+        // Portrait app over a portrait window, and SpringBoard's own (landscape) root frame.
+        XCTAssertNil(
+            PortraitSpringBoardRotation.resolve(alertWindowFrame: alertWindow, appFrame: alertWindow, deviceRotation: 0)
+        )
+        XCTAssertNil(
+            resolve(window: landscapeApp, app: landscapeApp, rotation: 1)
+        )
+        // A transposed window without landscape evidence, or with an unsupported rotation.
+        for rotation in [nil, 0, 2] {
+            XCTAssertNil(
+                PortraitSpringBoardRotation.resolve(
+                    alertWindowFrame: alertWindow, appFrame: landscapeApp, deviceRotation: rotation
+                )
+            )
+        }
+        // Different sizes (an inset iPad window) and empty frames.
+        XCTAssertNil(
+            PortraitSpringBoardRotation.resolve(
+                alertWindowFrame: alertWindow, appFrame: CGRect(x: 0, y: 0, width: 800, height: 440), deviceRotation: 1
+            )
+        )
+        XCTAssertNil(
+            PortraitSpringBoardRotation.resolve(alertWindowFrame: .zero, appFrame: landscapeApp, deviceRotation: 1)
+        )
+    }
+}

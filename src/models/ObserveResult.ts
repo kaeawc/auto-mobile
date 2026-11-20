@@ -371,8 +371,9 @@ export type ObserveResult = {
    * Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise,
    * iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right
    * (iOS landscapeRight / Android ROTATION_270).
-   * iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped
-   * panels, but reconciles runner landscape on a fixed portrait display to 0. Without valid
+   * iOS prefers runner interface orientation unless the screen shape contradicts it: runner
+   * landscape on a portrait-shaped screen reports 0, and runner portrait on a landscape-shaped
+   * screen (a stale rotation after an unfold) reports 1. Without valid
    * runner orientation, settled screen shape supplies only 0 (width < height) or 1 (width >= height).
    * The size fallback cannot distinguish landscape direction or upside-down portrait.
    */

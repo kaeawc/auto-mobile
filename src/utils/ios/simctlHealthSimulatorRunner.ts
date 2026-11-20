@@ -1,6 +1,8 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../models/describeUnknownError";
+import { isProcessAlreadyGoneError } from "../ios-cmdline-tools/iosProcessErrors";
 import { logger } from "../logger";
 import type { ExecFileAsync } from "../HostCommandExecutor";
 import type { Timer } from "../SystemTimer";
@@ -27,8 +29,12 @@ export class SimctlHealthSimulatorRunner implements HealthSimulatorRunner {
     try {
       await this.exec("xcrun", ["simctl", "terminate", udid, bundleId]);
     } catch (error) {
+      const message = errorMessage(error);
+      if (!isProcessAlreadyGoneError(message)) {
+        throw toActionableError(error, `Failed to terminate ${bundleId} before seeding`);
+      }
       // Not running is the expected state before a fresh launch.
-      logger.debug(`simctl terminate ${bundleId} skipped: ${errorMessage(error)}`);
+      logger.debug(`simctl terminate ${bundleId} skipped, not running: ${message}`);
     }
   }
 

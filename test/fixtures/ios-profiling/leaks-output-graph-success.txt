@@ -1,0 +1,1 @@
+Output graph successfully written to 'scratch/heap/prefs.memgraph' [4.07 MB]

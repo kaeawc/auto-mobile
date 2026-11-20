@@ -31,6 +31,13 @@ fi
 requested="$1"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
+# Build and create simulators with the repository-pinned Xcode unless DEVELOPER_DIR
+# already names one. Shell-test fixtures without the helper keep the active Xcode.
+if [[ -f "${script_dir}/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${script_dir}/xcode_version.sh"
+  select_pinned_xcode
+fi
 cd "${repo_root}"
 export XCRUN_BIN="${XCRUN_BIN:-xcrun}"
 xcodebuild_bin="${XCODEBUILD_BIN:-xcodebuild}"

@@ -23,7 +23,23 @@ export function taskEligibleByName(names: ReadonlySet<string>): TaskEligibility 
   return ({ name }) => (names.has(name) ? { onCancel: "abort" } : undefined);
 }
 
-const abortEligible = taskEligibleByName(new Set(["startDevice", "executePlan", "installApp"]));
+/** explore checks its signal between interactions; killDevice handles an aborted shutdown (#13944). */
+const abortEligible = taskEligibleByName(
+  new Set(["startDevice", "executePlan", "installApp", "explore", "killDevice"]),
+);
+
+/**
+ * Snapshot capture and restore do not take a signal, and stopping one partway leaves a partial
+ * snapshot or a half-restored device, so a cancelled task lets it finish (#13944).
+ */
+const DETACHED_SNAPSHOT_ACTIONS: ReadonlySet<unknown> = new Set(["capture", "restore"]);
+
+function isDetachedCall(call: Parameters<TaskEligibility>[0]): boolean {
+  if (call.name === "videoRecording") {
+    return call.args.action === "stop";
+  }
+  return call.name === "deviceSnapshot" && DETACHED_SNAPSHOT_ACTIONS.has(call.args.action);
+}
 
 /**
  * setUIState stops between fields on cancel, and as a task it runs under its own whole-call
@@ -31,14 +47,15 @@ const abortEligible = taskEligibleByName(new Set(["startDevice", "executePlan", 
  */
 const SET_UI_STATE_POLICY: TaskPolicy = { onCancel: "abort", outlivesRequestDeadline: true };
 
-/** Recording stop must finish finalization even after the client stops polling (#13090). */
+/**
+ * Recording stop must finish finalization even after the client stops polling (#13090).
+ * Additions follow the measured durations in #13944: only calls that routinely exceed about 2 s.
+ */
 export const TASK_ELIGIBILITY: TaskEligibility = (call) => {
   if (call.name === "setUIState") {
     return SET_UI_STATE_POLICY;
   }
-  return call.name === "videoRecording" && call.args.action === "stop"
-    ? { onCancel: "detach" }
-    : abortEligible(call);
+  return isDetachedCall(call) ? { onCancel: "detach" } : abortEligible(call);
 };
 
 /** The execution scope a task's call registers under instead of its request's scope. */

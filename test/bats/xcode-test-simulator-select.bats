@@ -182,6 +182,33 @@ device() {
   [ ! -e "${work}/create.log" ]
 }
 
+@test "locally, a booted iPhone on an SDK patch runtime is in range" {
+  sdk_version="27.2"
+  write_json "{\"runtimes\": [$(runtime 27.2.1 27-2-1 '["arm64"]'), $(runtime 27.2.2 27-2-2 '["arm64"]')]}" \
+    "{\"devices\": {
+      \"com.apple.CoreSimulator.SimRuntime.iOS-27-2-1\": [$(device BOOTED-2721 'iPhone 17 Pro' iPhone-17-Pro Booted)],
+      \"com.apple.CoreSimulator.SimRuntime.iOS-27-2-2\": []}}"
+
+  run_xcode_test -u CI
+
+  [ "$status" -eq 0 ]
+  [ "$(cat "${work}/destination")" = "platform=iOS Simulator,id=BOOTED-2721" ]
+  [ ! -e "${work}/create.log" ]
+}
+
+@test "locally, a booted iPhone on a runtime newer than the SDK is not preferred" {
+  sdk_version="27.2"
+  write_json "{\"runtimes\": [$(runtime 27.2 27-2 '["arm64"]'), $(runtime 27.3 27-3 '["arm64"]')]}" \
+    "{\"devices\": {
+      \"com.apple.CoreSimulator.SimRuntime.iOS-27-3\": [$(device BOOTED-273 'iPhone 17 Pro' iPhone-17-Pro Booted)],
+      \"com.apple.CoreSimulator.SimRuntime.iOS-27-2\": [$(device IDLE-272 'iPhone 16' iPhone-16 Shutdown)]}}"
+
+  run_xcode_test -u CI
+
+  [ "$status" -eq 0 ]
+  [ "$(cat "${work}/destination")" = "platform=iOS Simulator,id=IDLE-272" ]
+}
+
 @test "locally, no simulator on the chosen runtime skips without creating one" {
   write_json "{\"runtimes\": [$(runtime 26.6 26-6 '["arm64"]')]}" \
     "{\"devices\": {\"com.apple.CoreSimulator.SimRuntime.iOS-26-6\": []}}"

@@ -128,7 +128,7 @@ iOS 17–25 reuse the scrollability-aware `fadeEdges` mask, 24 dp for soft and
 8 dp for hard. Authored `fadeEdges` lengths override those defaults; `none`
 disables only the default fallback mask or native effect. Explicit `fadeEdges`
 remain applied on every supported iOS version. Android accepts the contract but does not advertise or
-render edgeEffect; Android below API 31 refuses glass.
+render edgeEffect.
 
 In `ios`, `glassGroup: {spacing}` accepts finite 0–200 dp on column, row, box,
 flow, grid, list and listItem containers. Descendant glass nodes with `shared`
@@ -145,9 +145,11 @@ require only the glass capability on iOS; Android ignores them with field paths
 in platformNotes.
 
 The system's Liquid Glass implementation handles Reduce Transparency and
-Increase Contrast. On iOS 17–25 and Android below API 31 the device does not advertise
+Increase Contrast. On iOS 17–25 the device does not advertise
 `prototype_glass_v1`, so the host refuses glass there: there is no simulated
-translucent fill, material substitute or fallback capability. An Android
+translucent fill or material substitute. Android advertises the capability on every API level:
+API 31 and later blur earlier sibling layers (Haze) and older devices draw a tonal scrim instead.
+A glass node without `cornerRadius` is a capsule on Android as on iOS. An Android
 renderer advertising glass must report any approximation (clear variant,
 ignored `interactive`) in `platformNotes`.
 
@@ -196,9 +198,13 @@ The listener requires a nonblank `assets/prototype/attach-token` and an emulator
 to permit physical devices. This applies to debug and release templates alike, independently of APK debuggability. The token-in-APK model is development-only: anyone who can read the APK can recover the token. Reinstalling a slug in place reuses the token. A second connection cannot
 replace an authenticated live peer. Status and patch conflicts redact `storage.secure` state keys.
 
-Events replay at least once. A process-scoped agent keeps its listener, buffer, sequence ledger
-and `appInstanceId` across reconnects and Activity recreation. Activities rebind targets. A
-new process resets identity and epoch. `hello_result` reports identity and an optional
+Events replay at least once. Activities rebind targets to a process-scoped attach listener.
+The `appInstanceId`, sequence ledger and unacknowledged events persist in app storage across
+process kills. The journal records the package's last update time, and the app discards a journal
+written under another one, so an in-place reinstall (`adb install -r`, which keeps app storage)
+starts a fresh identity and ledger; clearing app data deletes it. The journal is saved off the main
+thread, at most once per event, and a frame reaches the host only after the state it exposes is saved.
+`hello_result` reports identity and an optional
 `showingId`, which changes when the Activity mounts a new runtime. A same-process remount clears
 the dismissal and keeps pending events. Older apps without `showingId` keep process-only identity.
 One daemon-host attacher serves every MCP registration and keeps app/device cursors. `hello` sends
@@ -208,9 +214,9 @@ replay. Status reconciles only its app. The 256-event buffer closes on overflow 
 cleanup and host disposal close sockets, remove adb forwards and forget device cursors. Uninstall
 and reinstall each forget only that app's cursors.
 
-Events stay buffered until acknowledged and replay on the next hello; the host de-duplicates
-replays by sequence, within the connection and coordinator. The app retains 200 events, drops the
-oldest on overflow, and reports cumulative `droppedEvents` in hello and status; sequence gaps expose
+The app stores up to 200 unacknowledged events and replays them on the next hello. The host
+de-duplicates replays by sequence within the connection and coordinator. The app drops the oldest
+event on overflow and reports cumulative `droppedEvents` in hello and status. Sequence gaps expose
 missing events. A separate writer uses a 256-frame queue and five-second write deadline. Queue
 overflow or blocked writes close the peer, and events and requests continue with replay retained.
 

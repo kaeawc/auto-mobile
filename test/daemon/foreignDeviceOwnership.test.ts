@@ -43,6 +43,8 @@ import {
   type DeviceClaim,
 } from "../../src/daemon/deviceClaims";
 import { ConnectionOwnership } from "../../src/daemon/connectionOwnership";
+import { localClaimRegistryExpectation } from "../../src/daemon/deviceClaimRegistryExpectation";
+import { BindingDiscoveryIncompleteError } from "../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
 import { createExecResult } from "../../src/utils/execResult";
 
 const SELF_PID = 100;
@@ -1085,6 +1087,54 @@ describe("the host-wide claims mirror (#11811 b)", () => {
       expect(await ownership.claim(DEVICE)).toBe(true);
       expect(ownership.claimDeferred(DEVICE)).toBe(false);
       expect((await store.get("android", DEVICE))?.pid).toBe(SELF_PID);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("before bind, a claim the existing registry cannot decide is deferred with no claim file, then decided once the table opens (#11811, E1)", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const files = new FakeOwnershipFiles();
+      const timer = new FakeTimer();
+      const registry: { opened?: FakeDeviceClaims } = {};
+      const ownership = new ForwardLeaseForeignDeviceOwnership(
+        SELF_PID,
+        files,
+        new FakeOwnerProbe(),
+        { ownerSocketPath: () => undefined, timer },
+      );
+      ownership.attachClaimMirror(
+        new StoreDeviceClaimMirror({
+          platform: "android",
+          store: () => registry.opened,
+          whenOpen: async () => {
+            if (registry.opened) {
+              return registry.opened;
+            }
+            throw new BindingDiscoveryIncompleteError("SQLITE_BUSY: database is locked");
+          },
+          timer,
+          generationOf: () => undefined,
+          registryExpected: localClaimRegistryExpectation({
+            socketBound: () => false,
+            registryFileExists: () => true,
+            lastOpenFailure: () => undefined,
+          }),
+        }),
+      );
+
+      expect(await ownership.claim(DEVICE)).toBe(false);
+      expect(ownership.claimDeferred(DEVICE)).toBe(true);
+      // Fail closed: no claim file a table-only peer could be shadowed by.
+      expect(fileOwner(files)).toBe("none");
+      expect(ownership.foreignOwnerPid(DEVICE)).toBeUndefined();
+
+      registry.opened = new FakeDeviceClaims();
+      expect(await ownership.claim(DEVICE)).toBe(true);
+      expect(ownership.claimDeferred(DEVICE)).toBe(false);
+      expect((await registry.opened.get("android", DEVICE))?.pid).toBe(SELF_PID);
+      expect(fileOwner(files)).toStartWith(`${SELF_PID}/`);
     } finally {
       warn.mockRestore();
     }

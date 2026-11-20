@@ -21,6 +21,17 @@ import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "./observationRes
 import { WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS } from "../features/observe/waitForTimeout";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../features/prototype/protoViewer/protoViewerDevice";
 import {
+  INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS,
+  resolvePrototypeAppBudgetMs,
+} from "./prototypeAppMcpTimeout";
+export {
+  DISPOSABLE_APP_STAMP_MCP_ALLOWANCE_MS,
+  INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS,
+  MIN_PROTOTYPE_BULK_UNINSTALL_APP_MCP_TIMEOUT_MS,
+  MIN_PROTOTYPE_INSTALL_APP_MCP_TIMEOUT_MS,
+  MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS,
+} from "./prototypeAppMcpTimeout";
+import {
   APP_FILE_PUSH_TIMEOUT_MS,
   FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
 } from "../features/storage/fileTransferTimeout";
@@ -187,9 +198,6 @@ export const MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS = 90_000;
  */
 export const MIN_UNINSTALL_APP_MCP_TIMEOUT_MS = 60_000;
 
-/** Headroom for install inventory, force-stop, user restoration and verification. */
-export const INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS = 30_000;
-
 /**
  * Floor for `installApp` — Android downgrade recovery can consume three full
  * transfer budgets: the initial install, package-wide uninstall, and reinstall.
@@ -201,26 +209,6 @@ export const INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS = 30_000;
  */
 export const MIN_INSTALL_APP_MCP_TIMEOUT_MS =
   3 * ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS + INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS;
-
-/** Allowance for stamping and signing a disposable prototype APK before it is transferred. */
-export const DISPOSABLE_APP_STAMP_MCP_ALLOWANCE_MS = 60_000;
-
-/**
- * Floor for `prototype installApp` (#14184): stamp the APK, then one `adb install -r` transfer,
- * plus the install headroom for reset and permission commands.
- */
-export const MIN_PROTOTYPE_INSTALL_APP_MCP_TIMEOUT_MS =
-  DISPOSABLE_APP_STAMP_MCP_ALLOWANCE_MS +
-  ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS +
-  INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS;
-
-/**
- * Floor for `prototype uninstallApp` (#14184): the disposable installer gives `adb uninstall` the
- * package transfer timeout, plus headroom for the signing inspection and registry update. A bulk
- * removal (`all`, `expired`) runs its apps one after another under this one floor.
- */
-export const MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS =
-  ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS + INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS;
 
 /**
  * Floor for preference tools — iOS `setPreference` has a 30s write/read-back
@@ -456,11 +444,8 @@ function resolvePrototypeAwaitBudgetMs(args: Record<string, unknown>): number {
   if (args.action === "show") {
     return resolvePrototypeAssetUploadBudgetMs(args);
   }
-  if (args.action === "installApp") {
-    return MIN_PROTOTYPE_INSTALL_APP_MCP_TIMEOUT_MS;
-  }
-  if (args.action === "uninstallApp") {
-    return MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS;
+  if (args.action === "installApp" || args.action === "uninstallApp") {
+    return resolvePrototypeAppBudgetMs(args);
   }
   if (args.action === "save" || args.action === "open") {
     // On Android with ProtoViewer installed these wait for the app's result file (#13621).

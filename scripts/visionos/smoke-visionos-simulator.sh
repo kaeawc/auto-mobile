@@ -24,6 +24,13 @@ BOOT_TIMEOUT_S="${SMOKE_BOOT_TIMEOUT_S:-300}"
 # Sourced helper: defines run_with_timeout (portable bound; 124 on expiry).
 # shellcheck source=scripts/ios/run_with_timeout.sh
 source "${SCRIPT_DIR}/../ios/run_with_timeout.sh"
+# Build with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+# Shell-test fixtures that copy this script without the helper keep the active Xcode.
+if [[ -f "${SCRIPT_DIR}/../ios/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${SCRIPT_DIR}/../ios/xcode_version.sh"
+  select_pinned_xcode
+fi
 
 log() { echo "[visionos-smoke] $*" >&2; }
 die() { log "FAIL: $*"; exit 1; }

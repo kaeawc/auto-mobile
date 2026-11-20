@@ -96,6 +96,16 @@ describe("markInitialFocus (#16446)", () => {
     expect(parts(marked)).toEqual(["second"]);
   });
 
+  test("an open drawer layer takes focus over the screen behind its scrim (#18451)", () => {
+    const drawer = el("div", { attrs: { "data-part": "drawerLayer" } }, [
+      el("div", { attrs: { "data-part": "drawer", "data-node": "drawer" } }, [
+        node("item", "button"),
+      ]),
+    ]);
+    const marked = markInitialFocus(el("div", {}, [node("button", "button"), drawer]));
+    expect(ringed(marked)).toEqual(["item"]);
+  });
+
   test("a disabled wrapper's focusable parts are skipped", () => {
     const field = el("div", { attrs: { "data-node": "textField", "aria-disabled": "true" } }, [
       el("input", { attrs: { role: "textbox" } }),

@@ -650,8 +650,12 @@ export class SimCtlClient implements SimCtl {
     return this.simCtlInventory.getDeviceInfo(udid);
   }
 
-  readDeviceDisplays(udid: string, signal?: AbortSignal): Promise<DeviceDisplays | undefined> {
-    return this.simCtlInventory.readDeviceDisplays(udid, signal);
+  readDeviceDisplays(
+    udid: string,
+    signal?: AbortSignal,
+    enumerateTimeoutMs?: number,
+  ): Promise<DeviceDisplays | undefined> {
+    return this.simCtlInventory.readDeviceDisplays(udid, signal, enumerateTimeoutMs);
   }
 
   bootSimulator(udid: string): Promise<BootedDevice> {

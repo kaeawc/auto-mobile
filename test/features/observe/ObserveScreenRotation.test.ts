@@ -13,7 +13,7 @@ import {
 import { cropSnapshot } from "../../../src/features/observe/screenshot/snapshotCrop";
 import { FakeImageBackend } from "../../fakes/FakeImageBackend";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
-import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
+import type { BootedDevice, DeviceDisplays, ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
@@ -48,7 +48,19 @@ function portraitHierarchy(): ViewHierarchyResult {
   };
 }
 
-function setup(hierarchy: ViewHierarchyResult, platform: "ios" | "android" = "ios") {
+const duoDisplays: DeviceDisplays = {
+  panels: [
+    { key: "cover", role: "cover", sizePx: { width: 402, height: 874 } },
+    { key: "inner", role: "inner", sizePx: { width: 951, height: 669 } },
+  ],
+  postures: ["closed", "opened"],
+};
+
+function setup(
+  hierarchy: ViewHierarchyResult,
+  platform: "ios" | "android" = "ios",
+  displays?: DeviceDisplays,
+) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const viewHierarchy = new FakeViewHierarchy();
@@ -56,7 +68,7 @@ function setup(hierarchy: ViewHierarchyResult, platform: "ios" | "android" = "io
   const cacheStore = new FakeObserveCacheStore(timer);
   const adb = new FakeAdbExecutor();
   const screen = new RealObserveScreen(
-    { ...device, platform },
+    { ...device, platform, ...(displays ? { displays } : {}) },
     new FakeAdbClientFactory(adb),
     {
       viewHierarchy,
@@ -82,7 +94,8 @@ test.each([
   ["old runner portrait", portraitHierarchy(), 0, 402, 874],
   ["Duo pixel-settled landscape", issue8379Hierarchy(), 1, 951, 669],
   ["runner landscape right", { ...issue8379Hierarchy(), rotation: 3 }, 3, 951, 669],
-  ["Duo interface portrait", { ...issue8379Hierarchy(), rotation: 0 }, 0, 951, 669],
+  // A single-panel device (iPad floating window) keeps a landscape-shaped runner portrait.
+  ["iPad portrait floating window", { ...issue8379Hierarchy(), rotation: 0 }, 0, 951, 669],
   ["fixed portrait display", { ...portraitHierarchy(), rotation: 1 }, 0, 402, 874],
 ] as const)(
   "collects %s and preserves it through execute/cache/device reads",
@@ -107,6 +120,22 @@ test.each([
     const screenshotRead = await screen.executeDeviceRead();
     expect(screenshotRead.rotation).toBe(rotation);
     expect(screenshotRead.screenshotPath).toBe("/fake/screen.png");
+  },
+);
+
+test.each([
+  // A stale runner portrait on the landscape-shaped inner panel resolves from the shape (#18831).
+  ["Duo stale interface portrait", { ...issue8379Hierarchy(), rotation: 0 }, 1],
+  ["Duo cover panel", portraitHierarchy(), 0],
+] as const)(
+  "a multi-panel device collects %s as rotation %s",
+  async (_name, hierarchy, rotation) => {
+    const { screen } = setup(hierarchy, "ios", duoDisplays);
+    const collected = screen.createBaseResult();
+    await screen.collectAllData(collected);
+    expect(collected.rotation).toBe(rotation);
+    const executed = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+    expect(executed.rotation).toBe(rotation);
   },
 );
 

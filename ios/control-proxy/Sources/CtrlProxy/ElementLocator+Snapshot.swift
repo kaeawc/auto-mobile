@@ -193,10 +193,10 @@ extension ElementLocator {
             throws -> (alerts: [UIElementInfo], rotation: Int?)
         {
             let capture: (
-                alertSnapshots: [(snapshot: XCUIElementSnapshot, portraitHeight: Int?)],
+                alertSnapshots: [(snapshot: XCUIElementSnapshot, portraitHeight: Int?, windowFrame: CGRect)],
                 springboardFrame: CGRect, rotation: Int?
             ) = try catchingObjCException {
-                let capture = DeviceRotation.capture { () -> ([(XCUIElementSnapshot, Int?)], CGRect) in
+                let capture = DeviceRotation.capture { () -> ([(XCUIElementSnapshot, Int?, CGRect)], CGRect) in
                     guard runSnapshot else { return ([], .zero) }
                     let freshSpringboard = XCUIApplication
                         .withoutUIInterruptions(bundleIdentifier: "com.apple.springboard")
@@ -208,7 +208,7 @@ extension ElementLocator {
                             windowDisplayId: Self.displayId(of: window), mainDisplayId: mainDisplayId,
                             windowPortraitHeight: ElementBounds.clampedInt(window.frame.height)
                         )
-                        return self.collectAlertElements(from: window).map { ($0, height) }
+                        return self.collectAlertElements(from: window).map { ($0, height, window.frame) }
                     }
                     return (alerts, snapshot.frame)
                 }
@@ -233,6 +233,14 @@ extension ElementLocator {
                     keyboardFocus: keyboardFocus,
                     coordinateOffset: alertOffset
                 )
+                // An iPhone's SpringBoard alert window stays portrait over a landscape app (#18858).
+                if entry.portraitHeight == nil,
+                   let portraitWindow = PortraitSpringBoardRotation.resolve(
+                       alertWindowFrame: entry.windowFrame, appFrame: appFrame, deviceRotation: capture.rotation
+                   )
+                {
+                    return Self.rotatedIntoLandscape(alert, portraitSpringBoard: portraitWindow)
+                }
                 return Self.alertsInObservedSpace([alert], innerPanelPortraitHeight: entry.portraitHeight)[0]
             }
             return (alerts, capture.rotation)

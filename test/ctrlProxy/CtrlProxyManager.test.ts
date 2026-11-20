@@ -35,6 +35,7 @@ import { NoOpPerformanceTracker } from "../../src/utils/PerformanceTracker";
 import type { SavedPrototypeRestoreReport } from "../../src/models/SavedPrototypeRestoreReport";
 import { settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { createExecResult } from "../../src/utils/execResult";
+import { ActionableError } from "../../src/models/ActionableError";
 
 // Captured on a bound API 36 / Android 16 google_apis arm64 emulator. No older
 // API-level dumpsys captures exist in this repository; variants below are
@@ -3224,6 +3225,25 @@ describe("CtrlProxyManager", function () {
       const apkPath = await accessibilityServiceClient.downloadApk();
       const stats = await fs.stat(apkPath);
       expect(stats.size).toBeGreaterThan(10000);
+    });
+
+    test("a missing local APK override is an actionable error naming the env var (#18823)", async function () {
+      const missingApkPath = path.join(
+        scratch.next(),
+        "deleted-worktree",
+        "control-proxy-debug.apk",
+      );
+      process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = missingApkPath;
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+
+      const error = await accessibilityServiceClient.downloadApk().then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(ActionableError);
+      const message = (error as Error).message;
+      expect(message).toContain(`AUTOMOBILE_CTRL_PROXY_APK_PATH points to ${missingApkPath}`);
+      expect(message).not.toContain("Failed to download APK");
     });
 
     test("should resolve relative local APK override from daemon launch cwd", async function () {

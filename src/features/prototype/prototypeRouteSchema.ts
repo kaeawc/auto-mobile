@@ -5,14 +5,13 @@ import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import {
   keySchema,
   buildPrototypeActionListSchema,
-  prototypeDataActionValueSchema,
-  type PrototypeDataActionValue,
+  prototypeReadBindingSchema,
 } from "./prototypeActionValues";
 
 // Reuse the neighbouring value bindings; routes accept flat scalar literals, never {value: JSON}.
 type RouteParams = Record<
   string,
-  string | number | boolean | PrototypeDataActionValue | { link: string }
+  string | number | boolean | z.infer<typeof prototypeReadBindingSchema> | { link: string }
 >;
 
 // Preserve the parsed union without copying every binding schema into navigation actions.
@@ -23,7 +22,7 @@ export const routeParamsSchema: z.ZodType<RouteParams, z.ZodTypeDef, unknown> =
       z.string(),
       z.number().finite(),
       z.boolean(),
-      ...prototypeDataActionValueSchema.options.slice(0, 4),
+      ...prototypeReadBindingSchema.options,
       z.object({ link: keySchema }).strict(),
     ]),
   ).refine((value) => Object.keys(value).length <= 16);

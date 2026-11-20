@@ -421,6 +421,13 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 
 ## iOS/Swift CI
 
+- Xcode 27.2 (`AUTOMOBILE_XCODE_VERSION` in `scripts/ios/xcode_version.sh`) and its
+  general simulator runtimes (iOS `SimRuntime.iOS-27-2`, never the iPhone Duo-only
+  `iOS-27-2-iPhone19-4`) are the default for every CI job, local script and simulator.
+  Local scripts call `select_pinned_xcode`, which exports `DEVELOPER_DIR`, so never
+  switch `xcode-select`. Xcode 26.6 / iOS 26.x is the exception: the nightly Swift 6.3
+  floor sweeps, the root SPM 26.6 matrix entry, headless Simulator CarPlay (dropped in
+  Xcode 27), and reproducing a bug reported on 26.x.
 - Before pushing a Swift change, run `scripts/prepush-ios.sh` (pinned
   SwiftFormat at the version pinned in `scripts/swiftformat/swiftformat_version.sh`, SwiftLint error rules, XCTestRunner build, and pure unit
   tests).

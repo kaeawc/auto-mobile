@@ -1,3 +1,4 @@
+import { prototypeGeneratedValuesError } from "./prototypeGeneratedBindings";
 import { prototypeInboundLinksError } from "./prototypeInboundLinks";
 import { prototypeGlassObjectError } from "./prototypeGlass";
 import { iconNames, prototypeIconNameError } from "./prototypeIconNames";
@@ -853,6 +854,7 @@ function behaviourErrors(
   { repeats, componentTimers }: { repeats: PrototypeRepeatData; componentTimers: Located[] },
 ): PrototypeValidationError | undefined {
   return (
+    prototypeGeneratedValuesError(context.actions) ??
     prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
     prototypeRequestsError(context.actions, data.data) ??
     hostVocabularyError(value, context) ??
@@ -939,7 +941,7 @@ function validateExpanded(
     ? result
     : {
         success: false,
-        error: { path: expansion.locate(result.error.path), message: result.error.message },
+        error: { ...result.error, path: expansion.locate(result.error.path) },
       };
 }
 /** Raw JSON strings measure transmitted UTF-8 bytes; object input measures compact JSON bytes. */

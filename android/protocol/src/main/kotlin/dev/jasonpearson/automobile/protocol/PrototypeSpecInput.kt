@@ -134,8 +134,7 @@ internal object PrototypeSpecInput {
         ?: PrototypeKeyframesRules.validate(context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: PrototypeStorageValidation.error(value.jsonObject)
-        ?: dataActionErrors(context, value)
-        ?: requestActionErrors(context)
+        ?: actionErrors(value, context)
         ?: nodeVocabularyErrors(value, context)
         ?: swipeActionsErrors(context)
         ?: PrototypeBarScrollRules.error(context)
@@ -158,6 +157,12 @@ internal object PrototypeSpecInput {
       PrototypeSpecValidation.Failure(fail("", "Internal model/contract mismatch"))
     }
   }
+
+  private fun actionErrors(value: JsonElement, context: Context): PrototypeSpecError? =
+    PrototypeGeneratedValues.error(context.actions)
+      ?: PrototypeStorageValidation.keyedBindingError(value.jsonObject, context)
+      ?: dataActionErrors(context, value)
+      ?: requestActionErrors(context)
 
   private fun structuralError(value: JsonElement, context: Context): PrototypeSpecError? =
     PrototypeLazyListRules.limitError(value)

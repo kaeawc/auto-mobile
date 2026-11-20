@@ -100,6 +100,21 @@ describe("CarPlay projection", () => {
     ]);
   });
 
+  test("caps the exec timeout at the caller's budget and forwards its signal", async () => {
+    const seen: unknown[] = [];
+    const probe = new DefaultCarPlayProjectionProbe(async (_file, _args, options) => {
+      seen.push(options);
+      return { stdout: Buffer.from(carJson), stderr: "" };
+    }, env);
+    const signal = new AbortController().signal;
+    await probe.probe("udid", { signal, timeoutMs: 4000 });
+    await probe.probe("udid", { timeoutMs: 60_000 });
+    expect(seen).toEqual([
+      { timeout: 4000, maxBuffer: 1024 * 1024, signal },
+      { timeout: 15000, maxBuffer: 1024 * 1024 },
+    ]);
+  });
+
   test("rejects unset/blank paths without executing", async () => {
     for (const path of [undefined, "", "  "]) {
       const probe = new DefaultCarPlayProjectionProbe(

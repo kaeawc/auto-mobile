@@ -44,8 +44,9 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeLimits.guardSubstitutedText(collections, data: modelData)
             try repeats.expanded(root.objectFields ?? [:], path: "root")
             try PrototypeStrictSemantics.storage(fields, context: context)
+            try PrototypeGeneratedValues.validate(context.actions)
             try PrototypeDataWrite.validate(actions: context.actions, data: modelData)
-            try PrototypeRequestValidator.validateActions(context.actions, state: state)
+            try PrototypeRequestValidator.validateActions(context.actions, state: state, data: modelData)
             try PrototypePlatformValidator.validateTestTags(nodes: context.locatedNodes)
             try PrototypePlatformValidator.validate(
                 requires: fields["requires"],

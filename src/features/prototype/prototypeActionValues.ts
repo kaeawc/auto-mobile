@@ -19,13 +19,26 @@ export const pointerSchema = z
   .max(contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH)
   .regex(prototypeContractPatterns.pointer);
 /** The emit.context binding forms except `page`; `{value: literal}` is the literal form. */
-export const prototypeDataActionValueSchema = z.union([
+export const prototypeGeneratedValueSchema = z.union([
+  z.object({ generate: z.literal("id") }).strict(),
+  z.object({ now: z.enum(["epochMs", "iso"]) }).strict(),
+  z.object({ lastGenerated: z.literal(true) }).strict(),
+]);
+/** Read bindings shared by data actions and route params; excludes generated and literal values. */
+export const prototypeReadBindingSchema = z.union([
   z.object({ state: stateKeySchema }).strict(),
   z.object({ item: keySchema }).strict(),
   z.object({ index: z.literal(true) }).strict(),
   z.object({ data: pointerSchema }).strict(),
+]);
+const prototypeExistingDataValueSchema = z.union([
+  ...prototypeReadBindingSchema.options,
   z.object({ value: prototypeJsonSchema }).strict(),
   z.object({ link: keySchema }).strict(),
+]);
+export const prototypeDataActionValueSchema = z.union([
+  ...prototypeGeneratedValueSchema.options,
+  ...prototypeExistingDataValueSchema.options,
 ]);
 /** A single unescaped object member; never interpreted as a pointer. */
 export const dataMemberSchema = z
@@ -112,11 +125,11 @@ export const upsertDataActionSchema = z
   .strict();
 
 export type PrototypeEmitContextBinding =
-  | PrototypeDataActionValue
+  | z.infer<typeof prototypeExistingDataValueSchema>
   | { page: string }
   | z.infer<typeof prototypeMatchBindingSchema>;
 export const prototypeEmitContextBindingSchema: z.ZodType<PrototypeEmitContextBinding> = z.union([
-  ...prototypeDataActionValueSchema.options,
+  ...prototypeExistingDataValueSchema.options,
   z.object({ page: z.string().min(1) }).strict(),
   prototypeMatchBindingSchema,
 ]);
@@ -135,6 +148,7 @@ export function buildPrototypeActionListSchema<Action extends z.ZodTypeAny>(
 
 /** A `setState` value: a scalar, a match binding, or (with the realtime gate) an event or platform read. */
 export const setStateValueSchema = z.union([
+  ...prototypeGeneratedValueSchema.options,
   z.string(),
   z.number().finite(),
   z.boolean(),

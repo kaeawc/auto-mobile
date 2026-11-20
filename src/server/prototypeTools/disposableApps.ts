@@ -7,6 +7,7 @@ import {
   type DisposableAppUninstallTarget,
 } from "../../features/prototype/disposableApp/DisposableAppManager";
 import type { DisposableAppPlatform } from "../../features/prototype/disposableApp/disposableAppId";
+import { requireDisposableAppSimulator } from "../../features/prototype/disposableApp/ios/iosDisposableAppIdentity";
 import type { PrototypeJson } from "../../features/prototype/prototypeJson";
 import type { BootedDevice } from "../../models";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
@@ -30,7 +31,7 @@ export type PrototypeDisposableApps = Pick<DisposableAppManager, "install" | "li
 
 /**
  * The injected manager, or the daemon's built on the first disposable-app call, so other actions
- * never construct the Android stamper.
+ * never construct the disposable app stampers.
  */
 export function lazyDisposableApps(
   dependencies: { disposableApps?: PrototypeDisposableApps; adbFactory?: AdbClientFactory },
@@ -53,8 +54,11 @@ function uninstallTarget(args: PrototypeArgs): DisposableAppUninstallTarget {
 function appPlatform(device: BootedDevice): DisposableAppPlatform {
   if (device.platform !== "android" && device.platform !== "ios") {
     throw new ActionableError(
-      `Disposable prototype apps need an Android device; ${device.deviceId} is ${device.platform}.`,
+      `Disposable prototype apps need an Android device or iOS simulator; ${device.deviceId} is ${device.platform}.`,
     );
+  }
+  if (device.platform === "ios") {
+    requireDisposableAppSimulator(device.deviceId);
   }
   return device.platform;
 }

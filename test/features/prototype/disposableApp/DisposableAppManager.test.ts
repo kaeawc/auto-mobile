@@ -170,6 +170,20 @@ describe("DisposableAppManager.install", () => {
     expect((await registry.list(DEVICE)).map((entry) => entry.label)).toEqual(["Feedly 2"]);
   });
 
+  test("releases the stamped artifact after a successful install", async () => {
+    await manager.install(input());
+    expect(stamper.released).toEqual(installer.installs.map(({ artifactPath }) => artifactPath));
+    expect(stamper.released).toHaveLength(1);
+  });
+
+  test("releases the stamped artifact when the install fails", async () => {
+    installer.install = async () => {
+      throw new Error("simctl install failed");
+    };
+    await expect(manager.install(input())).rejects.toThrow("simctl install failed");
+    expect(stamper.released).toHaveLength(1);
+  });
+
   test("a first install whose permissions fail is still recorded with its TTL", async () => {
     installer.permissionFailure = new Error("pm grant failed");
     const appId = disposableAppId("android", "feedly");

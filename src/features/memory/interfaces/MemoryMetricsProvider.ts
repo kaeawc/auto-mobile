@@ -65,11 +65,12 @@ export interface MemoryMetricsProvider {
    * @param packageName - Target app package name
    * @param beforeAction - Action to execute between pre and post snapshots
    * @param perf - Optional performance tracker
-   * @returns Promise with complete memory metrics
+   * @returns Complete memory metrics, or undefined when the app has no process before the action.
+   * The action still runs in that case.
    */
   collectMetrics(
     packageName: string,
     beforeAction: () => Promise<void>,
     perf?: PerformanceTracker,
-  ): Promise<MemoryMetrics>;
+  ): Promise<MemoryMetrics | undefined>;
 }

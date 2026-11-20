@@ -465,7 +465,7 @@ export class SessionBroker {
           ? ((await this.options.store.getRequest(config.requestId)) ?? request)
           : request,
       );
-      return result.outcome === "ready" ? await this.rereadIfSuperseded(result, config) : result;
+      return await this.preparedReceipt(result, config, prepared.expiredDisposableAppsRemoved);
     } catch (error) {
       // Only the reply is uncertain (#12771): the committed grant is not a preparation failure.
       throw new CommittedReceiptReadError(config.requestId, error);
@@ -476,12 +476,20 @@ export class SessionBroker {
    * An abandonment can commit while the ready receipt is being assembled (#12762). Reread the
    * durable receipt so a ready reply never outlives the grant it describes.
    */
-  private async rereadIfSuperseded(
+  private async preparedReceipt(
     result: SessionBrokerResult,
     config: SessionConfig,
+    expiredDisposableAppsRemoved: string[] | undefined,
   ): Promise<SessionBrokerResult> {
-    const latest = await this.options.store.getRequest(config.requestId);
-    return latest && latest.state !== "active" ? this.result(latest) : result;
+    if (result.outcome === "ready") {
+      const latest = await this.options.store.getRequest(config.requestId);
+      if (latest && latest.state !== "active") {
+        result = await this.result(latest);
+      }
+    }
+    return expiredDisposableAppsRemoved?.length
+      ? { ...result, expiredDisposableAppsRemoved }
+      : result;
   }
 
   async status(requestId: string): Promise<SessionBrokerResult | undefined> {

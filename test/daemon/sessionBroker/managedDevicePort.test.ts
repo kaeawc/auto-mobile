@@ -9,6 +9,7 @@ import {
 } from "../../../src/daemon/sessionBroker/provisioning/reconciler";
 import { ProvisionDeviceError } from "../../../src/devices/exactDeviceProvisioning";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { getAbortSignal } from "../../../src/utils/AbortContext";
 import { logger } from "../../../src/utils/logger";
 import type { BrokerExecutionReleaseResult } from "../../../src/daemon/sessionBroker/provisioning/executionRelease";
 import { BrokerDeviceAcquisition } from "../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
@@ -189,6 +190,67 @@ class RecordingLeaseKeepalive implements TaskLeaseKeepalive {
 }
 
 describe("ManagedDevicePort preparation and release", () => {
+  test.each(["removed", "ios", "failure", "deadline"] as const)(
+    "handles the disposable app sweep during preparation (%s)",
+    async (outcome) => {
+      const timer = new FakeTimer();
+      const calls: string[] = [];
+      const failure = new Error("sweep failed");
+      let sweepSignal: AbortSignal | undefined;
+      const port = new ManagedDevicePort({
+        scope: SCOPE,
+        timer,
+        brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+        brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+        registry: new FakeBindingRegistry(timer),
+        bindingJournal: {
+          owner: OWNER,
+          redriveBinding: async () => ({ kind: "clear", redriven: [] }),
+        },
+        disposableAppExpirySweeper: {
+          sweepExpired: async (deviceId: string, reportRemoval: (appId: string) => void) => {
+            calls.push(deviceId);
+            if (outcome === "deadline") {
+              sweepSignal = getAbortSignal();
+              timer.advanceTime(1000);
+              return new Promise<void>(() => {});
+            }
+            reportRemoval("expired-app");
+            if (outcome === "failure") {
+              throw failure;
+            }
+          },
+        },
+      });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const preparation = await port.prepare(resource(outcome === "ios" ? IOS : ANDROID), {
+          livenessOwnerToken: "token",
+          preparationTimeoutMs: 1000,
+        });
+        expect(preparation.sessionId).toBe("session-1");
+        expect(calls).toEqual(outcome === "ios" ? [] : ["transport-1"]);
+        if (outcome === "removed" || outcome === "failure") {
+          expect(preparation).toMatchObject({ expiredDisposableAppsRemoved: ["expired-app"] });
+          expect(warn).toHaveBeenCalledWith(expect.stringContaining("expired-app"));
+        }
+        if (outcome === "failure") {
+          expect(warn).toHaveBeenCalledWith(expect.stringContaining(failure.message), failure);
+        }
+        if (outcome === "deadline") {
+          expect(sweepSignal?.aborted).toBe(true);
+          expect(timer.getPendingTimeoutCount()).toBe(0);
+          expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining("timed out"),
+            expect.any(Error),
+          );
+        }
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
   test("does not hold a lease when acquisition throws before the session is ready", async () => {
     const leaseKeepalive = new RecordingLeaseKeepalive();
     const dependencies: ManagedDevicePortDependencies = {

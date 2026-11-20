@@ -494,6 +494,10 @@ export class IosPrototypeTransport implements PrototypeTransport {
     }
   }
 
+  get eventShowingId(): string | undefined {
+    return this.agent.handshake.showingId;
+  }
+
   get eventInstanceId(): string | undefined {
     return this.agent.handshake.appInstanceId;
   }

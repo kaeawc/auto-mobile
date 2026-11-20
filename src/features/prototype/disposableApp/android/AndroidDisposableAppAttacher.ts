@@ -67,14 +67,39 @@ export class AndroidDisposableAppAttacher {
   }
 
   async release(deviceId: string): Promise<void> {
+    try {
+      await this.releaseMatching(deviceId);
+    } finally {
+      for (const key of this.resumeStates.keys()) {
+        const [knownDeviceId] = JSON.parse(key) as [string, string];
+        if (knownDeviceId === deviceId) {
+          this.resumeStates.delete(key);
+        }
+      }
+    }
+  }
+
+  /** An uninstall/reinstall invalidates this app's socket and retained delivery cursor. */
+  async forget(deviceId: string, appId: string): Promise<void> {
+    try {
+      await this.releaseMatching(deviceId, appId);
+    } finally {
+      this.resumeStates.delete(JSON.stringify([deviceId, appId]));
+    }
+  }
+
+  private async releaseMatching(deviceId: string, appId?: string): Promise<void> {
+    const matches = (key: string, entry: { deviceId: string }) =>
+      entry.deviceId === deviceId &&
+      (appId === undefined || key === JSON.stringify([deviceId, appId]));
     await Promise.allSettled(
-      [...this.pending.values()]
-        .filter((entry) => entry.deviceId === deviceId)
-        .map((entry) => entry.promise),
+      [...this.pending.entries()]
+        .filter(([key, entry]) => matches(key, entry))
+        .map(([, entry]) => entry.promise),
     );
     await Promise.all(
       [...this.clients.entries()]
-        .filter(([, entry]) => entry.deviceId === deviceId)
+        .filter(([key, entry]) => matches(key, entry))
         .map(async ([key, entry]) => {
           this.clients.delete(key);
           entry.client.close();

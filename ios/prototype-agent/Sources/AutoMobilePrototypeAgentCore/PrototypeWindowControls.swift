@@ -44,7 +44,8 @@ protocol PrototypeWindowScreen: AnyObject {
 
 @MainActor
 protocol PrototypeWindowChrome: AnyObject {
-    /// Nil restores the host's original mask. UIKit reports request acceptance separately from errors.
+    /// Nil releases this owner's lock, restoring the scene baseline when the last owner releases.
+    /// UIKit reports request acceptance separately from errors.
     func requestOrientation(_ orientation: PrototypeWindowOrientation?) -> String
     func setStatusBar(_ style: PrototypeWindowStatusBar?)
     func restore()

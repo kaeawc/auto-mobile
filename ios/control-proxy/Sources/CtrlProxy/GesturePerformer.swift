@@ -40,7 +40,7 @@ public final class GesturePerformer: GesturePerforming {
         let elementLocator: ElementLocating
         let tapDiagnosticsSampler: any TapDiagnosticsSampling
 
-        lazy var springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        lazy var springboard = XCUIApplication.withoutUIInterruptions(bundleIdentifier: "com.apple.springboard")
 
         public init(
             application: XCUIApplication? = nil,
@@ -48,6 +48,7 @@ public final class GesturePerformer: GesturePerforming {
             keyboardClock: any Clock<Duration> = ContinuousClock()
         ) {
             DeviceRotation.startMonitoring()
+            application?.skipUIInterruptions()
             self.application = application
             self.elementLocator = elementLocator
             self.keyboardClock = keyboardClock
@@ -59,6 +60,7 @@ public final class GesturePerformer: GesturePerforming {
             keyboardClock: any Clock<Duration>, tapDiagnosticsSampler: any TapDiagnosticsSampling
         ) {
             DeviceRotation.startMonitoring()
+            application?.skipUIInterruptions()
             self.application = application
             self.elementLocator = elementLocator
             self.keyboardClock = keyboardClock
@@ -68,6 +70,7 @@ public final class GesturePerformer: GesturePerforming {
         /// Injects the application under test. A known `bundleId` pins it, so gestures on it keep
         /// the pinned `XCUIApplication`; without one the pin is cleared (#10995).
         public func setApplication(_ app: XCUIApplication, bundleId: String? = nil) {
+            app.skipUIInterruptions()
             ownedApplication = nil
             pinnedApplication.inject(bundleId: bundleId)
             application = app
@@ -95,7 +98,10 @@ public final class GesturePerformer: GesturePerforming {
             case let .rebind(bundleId):
                 // A fresh instance for this gesture only: storing it as the pinned app would send
                 // every later gesture on this externally launched app down `.keepPinned` (#10858).
-                return catchingObjCExceptionNonThrowing({ XCUIApplication(bundleIdentifier: bundleId) }, fallback: nil)
+                return catchingObjCExceptionNonThrowing(
+                    { XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId) },
+                    fallback: nil
+                )
             }
         }
 
@@ -215,7 +221,7 @@ public final class GesturePerformer: GesturePerforming {
 
         public func updateApplication(bundleId: String) {
             catchingObjCExceptionNonThrowing({
-                let app = XCUIApplication(bundleIdentifier: bundleId)
+                let app = XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId)
                 self.ownedApplication = app
                 self.pinnedApplication.pin(bundleId)
                 self.application = app

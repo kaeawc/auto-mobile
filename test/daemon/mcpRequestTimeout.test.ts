@@ -23,6 +23,10 @@ import {
 } from "../../src/features/prototype/prototypeEventTimeout";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../../src/features/prototype/protoViewer/protoViewerDevice";
 import {
+  DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS,
+  DISPOSABLE_APP_UNINSTALL_STEP_MS,
+} from "../../src/features/prototype/disposableApp/disposableAppUninstallBudget";
+import {
   DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS,
   MAX_PROTOTYPE_ASSET_COUNT,
 } from "../../src/features/prototype/prototypeAssets";
@@ -50,6 +54,7 @@ import {
   MIN_INSTALL_APP_MCP_TIMEOUT_MS,
   MIN_PROTOTYPE_INSTALL_APP_MCP_TIMEOUT_MS,
   MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS,
+  MIN_PROTOTYPE_BULK_UNINSTALL_APP_MCP_TIMEOUT_MS,
   INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS,
   MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS,
   OBSERVE_MCP_TIMEOUT_ENV_VAR,
@@ -1681,13 +1686,28 @@ describe("argument budget deadline gaps", () => {
       expect(MIN_PROTOTYPE_INSTALL_APP_MCP_TIMEOUT_MS).toBeGreaterThan(
         ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
       );
-      expect(resolve({ action: "uninstallApp", all: true })).toBe(
+      expect(resolve({ action: "uninstallApp", appId: "dev.jasonpearson.automobile.app.a" })).toBe(
         MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS,
       );
       expect(MIN_PROTOTYPE_UNINSTALL_APP_MCP_TIMEOUT_MS).toBeGreaterThan(
         ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
       );
       expect(resolve({ action: "listApps" })).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+    });
+    test("bulk uninstallApp budgets the manager's bulk deadline plus headroom", () => {
+      for (const target of [{ all: true }, { expired: true }, {}]) {
+        expect(resolve({ action: "uninstallApp", ...target })).toBe(
+          MIN_PROTOTYPE_BULK_UNINSTALL_APP_MCP_TIMEOUT_MS,
+        );
+      }
+      expect(MIN_PROTOTYPE_BULK_UNINSTALL_APP_MCP_TIMEOUT_MS).toBe(
+        DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS + INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS,
+      );
+      // The deadline fits several worst-case removals, so the bulk path is not one-app-only.
+      expect(DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS).toBeGreaterThanOrEqual(
+        2 * DISPOSABLE_APP_UNINSTALL_STEP_MS,
+      );
+      expect(DISPOSABLE_APP_UNINSTALL_STEP_MS).toBeGreaterThan(ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS);
     });
     test("other prototype actions and a larger request timeout are unchanged", () => {
       for (const action of [

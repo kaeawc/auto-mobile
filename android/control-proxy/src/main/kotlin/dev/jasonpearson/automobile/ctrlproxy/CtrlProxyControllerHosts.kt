@@ -11,6 +11,7 @@ import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Handler
+import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
 import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
@@ -18,8 +19,10 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitRequest
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
+import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.protocol.ErrorResponse
+import dev.jasonpearson.automobile.protocol.GlobalActionResult
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import java.io.File
 import java.io.OutputStream
@@ -236,4 +239,129 @@ internal class CtrlProxyInteractionEventHost(private val service: CtrlProxy) :
   override fun launchInServiceScope(block: suspend CoroutineScope.() -> Unit) {
     service.serviceScope.launch(block = block)
   }
+}
+
+/** Wires [NodeActionController] to the display windows, hierarchy publishing and text input. */
+internal class CtrlProxyNodeActionHost(private val service: CtrlProxy) : NodeActionController.Host {
+  override fun launchRequestScope(requestId: String?, block: suspend CoroutineScope.() -> Unit) {
+    service.launchRequestScope(requestId, block)
+  }
+
+  override fun activeWindowRoot(): AccessibilityNodeInfo? = service.rootInActiveWindow
+
+  override fun findNodeInDisplayWindows(find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?) =
+    service.findNodeInDisplayWindows(find)
+
+  override fun findNodesInDisplayWindows(
+    find: (AccessibilityNodeInfo) -> List<AccessibilityNodeInfo>,
+  ) = findNodesAcrossWindows(service.displayWindowsOrEmpty(), { service.rootInActiveWindow }, find)
+
+  override fun screenDimensions(displayId: Int) =
+    service.displayController.getScreenDimensions(displayId)
+
+  override fun createView() = View(service)
+
+  override suspend fun publishSettledHierarchy() {
+    service.hierarchyController.publishSettledHierarchy()
+  }
+
+  override fun forgetRememberedInsert() = service.textInputController.forgetRememberedInsert()
+}
+
+/** Wires [FocusController] to the focused node, traversal order extraction and the overlay. */
+internal class CtrlProxyFocusHost(private val service: CtrlProxy) : FocusController.Host {
+  override fun launchRequestScope(requestId: String?, block: suspend CoroutineScope.() -> Unit) {
+    service.launchRequestScope(requestId, block)
+  }
+
+  override fun findAccessibilityFocusedNode() = service.findNodeInDisplayWindows {
+    it.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+  }
+
+  override fun extractFocusedElementInfo(node: AccessibilityNodeInfo) =
+    service.viewHierarchyExtractor.extractFocusedElementInfo(node)
+
+  override fun extractTraversalOrder(): TraversalOrderResult? {
+    val allWindows = service.windows
+    val rootNode = service.rootInActiveWindow
+    val screenDimensions = service.displayController.getScreenDimensions()
+    if (allWindows.isNullOrEmpty() && rootNode == null) return null
+    return if (!allWindows.isNullOrEmpty()) {
+      service.viewHierarchyExtractor.extractTraversalOrderFromAllWindows(
+        allWindows,
+        rootNode,
+        screenDimensions,
+      )
+    } else {
+      service.viewHierarchyExtractor.extractTraversalOrderFromActiveWindow(
+        rootNode,
+        screenDimensions,
+      )
+    }
+  }
+
+  override fun currentOverlayDrawer() = service.overlayDrawerOrNull
+}
+
+/** Wires [StaleFrameRejector] to the gesture, text input and global action result frames. */
+internal class CtrlProxyStaleFrameHost(private val service: CtrlProxy) : StaleFrameRejector.Host {
+  override fun launchRequestScope(requestId: String?, block: suspend CoroutineScope.() -> Unit) {
+    service.launchRequestScope(requestId, block)
+  }
+
+  override suspend fun broadcastTapCoordinatesResult(
+    requestId: String?,
+    success: Boolean,
+    error: String?,
+    totalTimeMs: Long,
+  ) =
+    service.gestureController.broadcastTapCoordinatesResult(
+      requestId,
+      success,
+      error,
+      totalTimeMs,
+    )
+
+  override suspend fun broadcastSwipeResult(
+    requestId: String?,
+    success: Boolean,
+    error: String?,
+    totalTimeMs: Long,
+    gestureTimeMs: Long?,
+  ) =
+    service.gestureController.broadcastSwipeResult(
+      requestId,
+      success,
+      error,
+      totalTimeMs,
+      gestureTimeMs,
+    )
+
+  override suspend fun broadcastDragResult(
+    requestId: String?,
+    success: Boolean,
+    error: String?,
+    totalTimeMs: Long,
+    gestureTimeMs: Long?,
+  ) =
+    service.gestureController.broadcastDragResult(
+      requestId,
+      success,
+      error,
+      totalTimeMs,
+      gestureTimeMs,
+    )
+
+  override suspend fun broadcastSetTextResult(
+    requestId: String?,
+    success: Boolean,
+    error: String?,
+    totalTimeMs: Long,
+  ) = service.textInputController.broadcastSetTextResult(requestId, success, error, totalTimeMs)
+
+  override suspend fun broadcastImeActionResult(outcome: ImeActionFrameResult) =
+    service.textInputController.broadcastImeActionResult(outcome)
+
+  override suspend fun broadcastGlobalActionResult(result: GlobalActionResult) =
+    service.webSocketServer.broadcast(result)
 }

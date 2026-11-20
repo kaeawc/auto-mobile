@@ -75,6 +75,7 @@ beforeEach(async () => {
     },
     disposableAppRegistry: registry,
     disposableAppAttacher: {
+      forget: async () => {},
       release: async () => {},
       dispose: async () => {},
       attach: async (_device, appId) => {

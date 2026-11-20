@@ -133,3 +133,54 @@ test.each(["removeDevice", "unbindDevice", "releaseSession"] as const)(
     }
   },
 );
+
+test("inspect adopts a same-socket remount after a filtered dismissed wait", async () => {
+  const h = await setup();
+  h.socket.showingId = "first-show";
+  h.socket.replay = [
+    { ...event(1, "panel", "page_changed", "pending") },
+    { ...event(2, "panel", "dismissed") },
+  ];
+  const runtime = createPrototypeToolRuntime({
+    disposableAppRegistry: h.registry,
+    disposableAppAttacher: h.attacher,
+    timer: new FakeTimer(),
+  });
+  const call = async (args: Record<string, unknown>) =>
+    toolStructured(await runtime.handler(device, args));
+  try {
+    expect(await call({ action: "awaitEvent", id: "panel", eventName: "next" })).toMatchObject({
+      reason: "dismissed",
+    });
+    h.socket.push({ ...event(3, "panel", "emit", "next") });
+    const inspecting = call({ action: "inspect", id: "panel" });
+    await drainUntil(
+      () => h.socket.frames().some((frame) => frame.type === "get_prototype_status"),
+      { description: "remount status request" },
+    );
+    const request = h.socket.frames().find((frame) => frame.type === "get_prototype_status")!;
+    h.socket.push({
+      type: "prototype_result",
+      requestId: request.requestId,
+      success: true,
+      status: {
+        showingId: "second-show",
+        shown: true,
+        id: "panel",
+        pages: {},
+        state: {},
+        lastSequence: 3,
+      },
+    });
+    expect(await inspecting).toMatchObject({ success: true, prototypes: [{ id: "panel" }] });
+    expect(await call({ action: "awaitEvent", id: "panel", eventName: "next" })).toMatchObject({
+      event: { sequence: 3 },
+    });
+    expect(await call({ action: "awaitEvent", id: "panel", eventName: "pending" })).toMatchObject({
+      event: { sequence: 1 },
+    });
+  } finally {
+    runtime.dispose();
+    await h.attacher.release(device.deviceId);
+  }
+});

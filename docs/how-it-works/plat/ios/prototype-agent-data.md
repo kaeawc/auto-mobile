@@ -95,18 +95,21 @@ The iOS saved prototype is its own app, so `deleteSaved` uninstalls it and its s
 
 ## Request action capability
 
-Advertises `prototype_network_v1` and `prototype_network_device_v1` for `request`
+Advertises `prototype_network_v1`, `prototype_network_device_v1` and `prototype_network_upload_v1` for `request`
 ([contract](../android/prototype-ux-request.md#request-action-12523)). The `PrototypeSession` type twins the host's
 `applyPrototypeRequestOutcome`. A tap resolves bindings against committed state/data
 (`PrototypeRequestResolver`, twin of `resolvePrototypeRequest`). It binds `{key}` and `{data:/pointer}` in
 one pass, so it never rescans substituted values. The tap then moves `statusKey` to `loading` and issues a start
 command. Later, `completeRequest` writes `into`, then `<into>__meta` (dropping `headers` if over the data
 write limit), moves the status key, emits the `prototype_request` event and runs `onSuccess`/`onError`
-in that order. An unbuildable request (unresolvable binding, invalid URL) or a refused one
+in that order.
+
+An unbuildable request (unresolvable binding, invalid URL) or a refused one
 (`too_many_in_flight` at 4) completes at once as an error. A newer request to the same `into` cancels
 the older: it writes nothing, leaves the status key, runs no follow-up and reports `cancelled`
 (`durationMs` 0, the session has no clock). Dismissal, a replacing show of another prototype and `reset`
-cancel all; a same-id replace keeps them.
+cancel all; a same-id replace keeps them. Upload `progressKey` values use 0–100. Controls bound directly
+to that key must accept the full range; set `max: 100` on a bound progress control.
 
 `PrototypeRequestValidator` repeats the host's static rules at show: URL scheme, method, bodies on
 GET/HEAD, and `into` naming an object member. It also checks `statusKey` naming a declared string state key, header names,
@@ -186,7 +189,8 @@ To reach a Mac service, bind it to a non-loopback interface and use the LAN addr
 **App Transport Security.** Device requests (`via: "device"`) are subject to the app's ATS. IP-literal `http://` hosts are
 exempt (as is `localhost`, which the policy refuses first). ATS blocks any other cleartext host
 (`NSURLErrorAppTransportSecurityRequiresSecureConnection`). The request then completes as a typed `network` error
-telling the author to use `via: "host"` (which runs without ATS) or `https://`. The viewer template sets
+telling the author to use `via: "host"` (which runs without ATS) or `https://` for ordinary requests.
+Uploads require an HTTPS URL and must keep `via: "device"`. The viewer template sets
 `NSAllowsArbitraryLoads` in `Viewer/Info.plist`, so a viewer runs any URL.
 
 **Storage precedence** as Android: a changed `version` discards stored values, stored values replace

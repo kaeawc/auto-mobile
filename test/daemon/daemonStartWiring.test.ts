@@ -1,4 +1,5 @@
 import { BindingRegistrySchemaUnsupportedError } from "../../src/daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
+import { BindingRegistryUpgradePendingError } from "../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DaemonBroker } from "../../src/daemon/daemonCore/DaemonBroker";
 import { DeviceClaimMirrorHub } from "../../src/daemon/deviceClaimMirrorHub";
@@ -556,6 +557,44 @@ describe("Daemon.start() tool-call-end wiring", () => {
     } finally {
       open.mockRestore();
       skip.mockRestore();
+      daemon.testHooks.stopSessionTimers();
+      timer.reset();
+    }
+  });
+
+  test("before bind, a forgotten failed open fails claims closed unless the schema only awaits migration (#11811, E1)", async () => {
+    const registered = spyOn(DeviceClaimMirrorHub.prototype, "register");
+    const exists = spyOn(bindingRegistryModule, "bindingRegistryFileExists").mockReturnValue(true);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const { daemon, timer } = await makeDaemon({ port: 3161 });
+    const open = spyOn(bindingRegistryModule, "openSqliteBindingRegistry");
+    const android = registered.mock.calls[0]![0];
+    const owner = { pid: 100, ownerToken: "android" };
+    const live = async () => true;
+    try {
+      open.mockRejectedValueOnce(new BindingRegistryUpgradePendingError("upgrade pending"));
+      await expect(daemon.testHooks.openBindingRegistry()).rejects.toThrow("upgrade pending");
+      expect(daemon.testHooks.runtime.bindingRegistry).toBeUndefined();
+      // The registry still needs this release's migrations: no table-only claim can exist yet.
+      expect(await android.acquire!("emulator-5610", owner, live)).toEqual({
+        outcome: "unavailable",
+      });
+
+      open.mockRejectedValueOnce(new Error("disk I/O error"));
+      await expect(daemon.testHooks.openBindingRegistry()).rejects.toThrow("disk I/O error");
+      expect(await android.acquire!("emulator-5610", owner, live)).toEqual({
+        outcome: "unusable",
+      });
+
+      exists.mockReturnValue(false);
+      expect(await android.acquire!("emulator-5610", owner, live)).toEqual({
+        outcome: "unavailable",
+      });
+    } finally {
+      open.mockRestore();
+      registered.mockRestore();
+      exists.mockRestore();
+      warn.mockRestore();
       daemon.testHooks.stopSessionTimers();
       timer.reset();
     }

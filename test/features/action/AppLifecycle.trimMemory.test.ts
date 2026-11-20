@@ -97,6 +97,18 @@ describe("AppLifecycle trimMemory (#14090)", () => {
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 
+  test("the iOS memoryWarning level is refused on Android before any device command", async () => {
+    const { adb, action } = harness();
+    const response = await action.execute(appId, "trimMemory", { trimLevel: "memoryWarning" });
+    expect(response).toMatchObject({
+      success: false,
+      mechanism: "am-send-trim-memory",
+      errorCode: "trim_level_not_applicable",
+    });
+    expect(response.error).toContain("iOS simulators");
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
   test("a level on another action is refused before any device command", async () => {
     const { adb, action } = harness();
     const response = await action.execute(appId, "background", { trimLevel: "COMPLETE" });
@@ -175,7 +187,7 @@ describe("AppLifecycle trimMemory (#14090)", () => {
     );
   });
 
-  test("iOS is unsupported", async () => {
+  test("a physical iOS device is unsupported", async () => {
     const { action } = harness(running, "ios");
     const response = await action.execute(appId, "trimMemory", { trimLevel: "COMPLETE" });
     expect(response).toMatchObject({ success: false, supported: false, mechanism: "unsupported" });

@@ -1,0 +1,150 @@
+{
+  "spec": {
+    "id": "cart-conditions",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": { "query": "" },
+    "data": { "rows": [{ "name": "Apple" }] },
+    "derive": {
+      "cartCount": {
+        "collection": {
+          "of": { "data": "/rows" },
+          "where": [{ "field": "name", "op": "contains", "value": { "state": "query" } }]
+        },
+        "reduce": { "op": "count" },
+        "format": { "number": { "minFraction": 2 } }
+      },
+      "queryText": { "of": { "state": "query" }, "format": { "number": {} } },
+      "cartRows": { "collection": { "of": { "data": "/rows" } } }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        { "type": "text", "text": "Checkout", "visibleWhen": { "derived": "cartCount", "gt": 0 } },
+        {
+          "type": "text",
+          "text": "Empty cart",
+          "visibleWhen": {
+            "all": [
+              { "derived": "cartCount", "equals": 0 },
+              { "derived": "cartCount", "lt": 1 },
+              { "not": { "derived": "cartCount", "notEquals": 0 } }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "text": "No matching item",
+          "visibleWhen": {
+            "any": [
+              {
+                "all": [
+                  { "derived": "queryText", "contains": "pear" },
+                  { "derived": "queryText", "startsWith": "pe" },
+                  { "derived": "queryText", "lengthGt": 3 },
+                  { "derived": "queryText", "lengthLt": 5 }
+                ]
+              },
+              { "derived": "cartRows", "empty": true }
+            ]
+          }
+        },
+        { "type": "text", "text": "Browse", "visibleWhen": { "key": "query", "notEquals": "hide" } }
+      ]
+    }
+  },
+  "changes": [
+    { "state": { "query": "" }, "visible": [true, false, false, true] },
+    { "state": { "query": "pear" }, "visible": [false, true, true, true] },
+    { "state": { "query": "apple" }, "visible": [true, false, false, true] },
+    { "state": { "query": "hide" }, "visible": [false, true, false, false] }
+  ],
+  "lazyRow": {
+    "spec": {
+      "id": "cart-lazy-row-conditions",
+      "window": { "placement": { "type": "fullscreen" } },
+      "state": { "query": "" },
+      "data": { "rows": [{ "name": "Apple" }, { "name": "Apricot" }] },
+      "derive": {
+        "cartCount": {
+          "collection": {
+            "of": { "data": "/rows" },
+            "where": [{ "field": "name", "op": "contains", "value": { "state": "query" } }]
+          },
+          "reduce": { "op": "count" }
+        }
+      },
+      "root": {
+        "type": "list",
+        "repeat": { "items": { "path": "/rows" }, "as": "row", "key": "name" },
+        "children": [
+          {
+            "type": "text",
+            "text": "{row.name}",
+            "visibleWhen": { "derived": "cartCount", "gt": 0 }
+          }
+        ]
+      }
+    },
+    "changes": [
+      { "state": { "query": "" }, "visible": [true, true] },
+      { "state": { "query": "pear" }, "visible": [false, false] },
+      { "state": { "query": "Apple" }, "visible": [true, true] }
+    ]
+  },
+  "lazyRowModal": {
+    "spec": {
+      "id": "cart-lazy-row-modal-conditions",
+      "window": { "placement": { "type": "fullscreen" } },
+      "state": { "query": "", "open_Apple": true, "open_Apricot": true },
+      "data": { "rows": [{ "name": "Apple" }, { "name": "Apricot" }] },
+      "derive": {
+        "cartCount": {
+          "collection": {
+            "of": { "data": "/rows" },
+            "where": [{ "field": "name", "op": "contains", "value": { "state": "query" } }]
+          },
+          "reduce": { "op": "count" }
+        }
+      },
+      "root": {
+        "type": "list",
+        "repeat": { "items": { "path": "/rows" }, "as": "row", "key": "name" },
+        "children": [
+          {
+            "type": "bottomSheet",
+            "detents": ["half"],
+            "openWhen": { "key": "open_{row.name}", "equals": true },
+            "visibleWhen": { "derived": "cartCount", "gt": 0 },
+            "child": {
+              "type": "button",
+              "label": "{row.name}",
+              "enabledWhen": { "derived": "cartCount", "gt": 1 }
+            }
+          }
+        ]
+      }
+    },
+    "changes": [
+      {
+        "state": { "query": "", "open_Apple": true, "open_Apricot": true },
+        "sheets": 2,
+        "enabled": [true, true]
+      },
+      {
+        "state": { "query": "Apple", "open_Apple": true, "open_Apricot": true },
+        "sheets": 2,
+        "enabled": [false, false]
+      },
+      {
+        "state": { "query": "pear", "open_Apple": true, "open_Apricot": true },
+        "sheets": 0,
+        "enabled": []
+      }
+    ]
+  },
+  "unknownCondition": { "not": { "all": [{ "derived": "missing", "gt": 0 }] } },
+  "error": {
+    "path": "root.children[0].visibleWhen.not.all[0].derived",
+    "message": "Unknown derived value \"missing\""
+  }
+}

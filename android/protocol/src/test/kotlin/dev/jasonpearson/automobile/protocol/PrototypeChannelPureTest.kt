@@ -12,6 +12,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.DynamicTest
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 
 /** Replays the shared realtime vectors the TypeScript suite also pins. */
@@ -61,4 +62,37 @@ class PrototypeChannelPureTest {
         assertEquals(expected, PrototypeChannelCoalescer.coalesce(frames))
       }
     }
+
+  private fun actions(json: String) = Json.parseToJsonElement(json).jsonArray
+
+  @Test
+  fun `kept indices point at the frames coalesce keeps`() {
+    val write = actions("""[{"type":"setState","key":"k","value":1}]""")
+    val append = actions("""[{"type":"appendData","path":"/data/l","value":1}]""")
+    assertEquals(listOf(1, 2), PrototypeChannelCoalescer.keptIndices(listOf(write, write, append)))
+  }
+
+  @Test
+  fun `only a scalar event-bound setData coalesces as itself`() {
+    val scalar = actions("""[{"type":"setData","path":"/data/d","value":{"event":"/at"}}]""")
+    assertEquals(
+      scalar,
+      PrototypeChannelCoalescer.coalescingActions(scalar, Json.parseToJsonElement("""{"at":2}""")),
+    )
+    val barrier = JsonArray(emptyList())
+    assertEquals(
+      barrier,
+      PrototypeChannelCoalescer.coalescingActions(scalar, Json.parseToJsonElement("""{"at":{}}""")),
+    )
+    val state = actions("""[{"type":"setState","key":"k","value":{"event":""}}]""")
+    assertEquals(
+      barrier,
+      PrototypeChannelCoalescer.coalescingActions(state, Json.parseToJsonElement("2")),
+    )
+    val literal = actions("""[{"type":"setState","key":"k","value":{"a":1}}]""")
+    assertEquals(
+      literal,
+      PrototypeChannelCoalescer.coalescingActions(literal, Json.parseToJsonElement("2")),
+    )
+  }
 }

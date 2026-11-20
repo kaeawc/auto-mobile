@@ -72,7 +72,15 @@ never requests them itself. The normal `USE_BIOMETRIC` permission supports frame
 prompts. `POST_NOTIFICATIONS` supports explicit `permissions.request` calls for notification
 authorization on API 33+; see [Runtime permissions](plat/android/prototype-ux-platform-services.md).
 
-It declares no accessibility, input method, overlay, device-admin or camera permissions. The app
+ProtoViewer and CtrlProxy's SavedPrototypeActivity also register `camera` (`CAMERA`) and
+`microphone` (`RECORD_AUDIO`), requested only when the open prototype calls `permissions.request`.
+Each reads `unavailable` while the Activity is not resumed, when the manifest lacks the permission,
+or when the device has no camera id or audio input. Otherwise it maps like API 33+ notifications on
+every API level. One Activity shows one dialog at a time across all names. A `camera` or
+`audioRecorder` module, and so its capability, registers only under the same manifest and hardware
+conditions. Both apps declare the camera and microphone features `required="false"`.
+
+It declares no accessibility, input method, overlay or device-admin permissions. The app
 requests `ACCESS_LOCAL_NETWORK` only when the user turns on "Allow network for imported prototypes"
 (section 6), never at install or first launch. If the user denies it, the switch turns off and the
 library explains that network access is disabled until permission is granted. The validator rejects

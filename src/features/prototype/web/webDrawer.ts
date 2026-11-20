@@ -1,9 +1,11 @@
 import {
   ABSOLUTE,
+  ALIGN_ITEMS,
   BACKGROUND_COLOR,
   BOX_SHADOW,
   BOX_SIZING,
   BORDER_BOX,
+  CENTER,
   COLUMN,
   DATA_PART,
   DATA_TESTID,
@@ -25,20 +27,24 @@ import {
   scrimCss,
   type WebLayerRenderer,
 } from "./webSheet";
+import { iosRole } from "./webSkinIos";
 import { rgbaCss } from "./webStyle";
 import { withOverContentLayers } from "./webStylePolish";
 
 /** The drawer surface's tonal and shadow elevation, as Android's drawer `Surface` sets both. */
 const DRAWER_ELEVATION_DP = 3;
 
+/** The safe-drawing edges the drawer layer pads by, consumed for the drawer and its content. */
+const DRAWER_INSETS: readonly string[] = ["top", "bottom", "start", "end"];
+
 /**
- * Material 3's `surfaceColorAtElevation`: `surface` under the `primary` tint at
+ * Material 3's `surfaceColorAtElevation`: `surface` under the `surfaceTint` at
  * `(4.5 ln(elevation + 1) + 2) / 100`, which a `surface`-coloured `Surface` paints at a tonal
  * elevation.
  */
 export function tonalSurface(scope: WebRenderScope, elevationDp: number): string {
   const surface = roleColor("surface", scope.style);
-  const tint = roleColor("primary", scope.style);
+  const tint = roleColor("surfaceTint", scope.style);
   const alpha = (4.5 * Math.log(elevationDp + 1) + 2) / 100;
   const mix = (base: number, over: number) => Math.round(base + (over - base) * alpha);
   const blended: Rgba = {
@@ -56,16 +62,31 @@ function partTag(node: Raw, part: string): Record<string, string> {
 }
 
 /**
- * Android's drawer: inside the safe-drawing insets, a scrim (the `scrim` slot, else the default
- * sheet scrim) and, at the `edge` (`end` unless `start`, mirrored in RTL), a full-height surface
- * `min(320px, 100% - 56px)` wide in `surface` at tonal elevation 3 with a 3 dp shadow, holding
- * its child in a column. Authored style applies to the surface and wins.
+ * The surface's own colour per skin: Android's `surface` at tonal elevation 3, the iOS renderer's
+ * `surfaceContainerHigh` (else the secondary system background).
+ */
+function drawerSurface(scope: WebRenderScope): string {
+  if (scope.skin === "ios") {
+    const fallback = scope.style.mode === "dark" ? "rgba(28,28,30,1)" : "rgba(242,242,247,1)";
+    return iosRole("surfaceContainerHigh", fallback, scope);
+  }
+  return tonalSurface(scope, DRAWER_ELEVATION_DP);
+}
+
+/**
+ * Android's drawer: inside the safe-drawing insets, which it consumes, a scrim (the `scrim` slot,
+ * else the default sheet scrim) and, at the `edge` (`end` unless `start`, mirrored in RTL) and
+ * centred vertically, a full-height surface `min(320px, 100% - 56px)` wide in `surface` at tonal
+ * elevation 3 with a 3 dp shadow, holding its child in a column from the leading edge. Authored
+ * style applies to the surface, sized against the row it sits in, and wins.
  */
 function drawerLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRenderKit) {
-  const hoisted = hoistedScope(scope);
-  const { attrs, style: base } = kit.base(node, hoisted, {
+  const hoisted = { ...hoistedScope(scope), consumedInsets: DRAWER_INSETS };
+  const inRow = { ...hoisted, style: { ...hoisted.style, parentAxis: "row" as const } };
+  const { attrs, style: base } = kit.base(node, inRow, {
     display: FLEX,
     [FLEX_DIRECTION]: COLUMN,
+    [ALIGN_ITEMS]: "flex-start",
     position: RELATIVE,
     [BOX_SIZING]: BORDER_BOX,
     width: "max(0px, min(320px, calc(100% - 56px)))",
@@ -75,7 +96,7 @@ function drawerLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRen
   });
   const style = base[BACKGROUND_COLOR]
     ? base
-    : { ...base, [BACKGROUND_COLOR]: tonalSurface(scope, DRAWER_ELEVATION_DP) };
+    : { ...base, [BACKGROUND_COLOR]: drawerSurface(scope) };
   const inner = kit.child(hoisted, {
     style: { ...hoisted.style, parentAxis: COLUMN, weightsChildren: false },
   });
@@ -97,6 +118,7 @@ function drawerLayer(node: Raw, scope: WebRenderScope, path: string, kit: WebRen
   const frame = {
     display: FLEX,
     [FLEX_DIRECTION]: "row",
+    [ALIGN_ITEMS]: CENTER,
     [JUSTIFY_CONTENT]: node.edge === "start" ? "flex-start" : "flex-end",
   };
   return el(

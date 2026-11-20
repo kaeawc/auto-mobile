@@ -1,5 +1,5 @@
 /**
- * Where profiling tools put the binary files they pull (`.perfetto-trace`, `.hprof`). Injectable
+ * Where profiling tools put binary artifacts (`.perfetto-trace`, `.hprof`, `.memgraph`). Injectable
  * so tests never touch the host file system.
  */
 export interface ProfilingArtifactStore {

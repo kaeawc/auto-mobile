@@ -20,13 +20,18 @@ const val MAX_LIBRARY_PROTOTYPES = 200
 const val MAX_LIBRARY_BYTES = 100L * 1024 * 1024
 val libraryLimits = SavedPrototypeLimits(maxSavedPrototypes = MAX_LIBRARY_PROTOTYPES)
 
-/** The library's backing store, validating with ProtoViewer's runtime budget (#18804). */
-internal fun librarySavedStore(root: File): SavedPrototypeDirectoryStore =
-  SavedPrototypeDirectoryStore(
+/**
+ * The library's backing store, validating with ProtoViewer's runtime budget (#18804); its spec byte
+ * cap is that budget's, so a spec the budget admits also fits on disk.
+ */
+internal fun librarySavedStore(root: File): SavedPrototypeDirectoryStore {
+  val budget = PrototypeRuntimeBudget.forCapabilities(protoViewerCapabilities)
+  return SavedPrototypeDirectoryStore(
     root,
-    limits = libraryLimits,
-    budget = PrototypeRuntimeBudget.forCapabilities(protoViewerCapabilities),
+    limits = libraryLimits.copy(maxSpecBytes = budget.maxSpecBytes),
+    budget = budget,
   )
+}
 
 fun interface IdGenerator {
   fun newId(): String

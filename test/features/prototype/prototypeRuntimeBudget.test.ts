@@ -134,6 +134,16 @@ describe("prototype runtime budgets (#18804)", () => {
     expect(prototypeLargeBudgetFields(setFeed([{ id: 1 }]))).toEqual([]);
     // A literal shaped like an action is data, not an action to scan.
     expect(prototypeLargeBudgetFields(setFeed({ type: "appendData", maxItems: 2001 }))).toEqual([]);
+    const emitFeed = feed(1, {
+      onEndReached: [
+        {
+          type: "emit",
+          name: "audit",
+          context: { audit: { value: { type: "appendData", maxItems: 2001 } } },
+        },
+      ],
+    });
+    expect(prototypeLargeBudgetFields(emitFeed)).toEqual([]);
   });
 
   test("spec and data bytes over the base budget validate only against the large budget", () => {

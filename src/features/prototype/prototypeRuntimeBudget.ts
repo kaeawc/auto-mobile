@@ -89,8 +89,12 @@ function oversizedLists(spec: unknown, fields: string[]): void {
 }
 
 const WINDOWED_DATA_ACTIONS = new Set(["appendData", "upsertData"]);
-/** Opaque JSON a data action never sits in: the data model, state and emit payloads. */
-const OPAQUE_FIELDS = new Set(["data", "state", "payload"]);
+/**
+ * Opaque JSON no action sits in: the data model, state, emit payloads and any `value` (a literal or
+ * binding on a data action, setState or emit context; a data action's literal is size-checked by
+ * `oversizedDataAction`).
+ */
+const OPAQUE_FIELDS = new Set(["data", "state", "payload", "value"]);
 
 function oversizedActionWindows(value: unknown, path: string, fields: string[]): void {
   if (Array.isArray(value)) {
@@ -104,11 +108,8 @@ function oversizedActionWindows(value: unknown, path: string, fields: string[]):
     return;
   }
   oversizedDataAction(object, path, fields);
-  // A data action's `value` is a literal or binding, never more actions: its size is checked
-  // above, and its contents are not read as actions.
-  const dataAction = PROTOTYPE_DATA_ACTION_TYPES.some((name) => name === object.type);
   for (const key of Object.keys(object).sort()) {
-    if (!OPAQUE_FIELDS.has(key) && !(dataAction && key === "value")) {
+    if (!OPAQUE_FIELDS.has(key)) {
       oversizedActionWindows(object[key], path ? `${path}.${key}` : key, fields);
     }
   }

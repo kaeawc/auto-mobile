@@ -233,4 +233,21 @@ class PrototypeRuntimeBudgetTest {
     assertEquals(listOf("data:/flag"), restored.applied)
     assertEquals(JsonPrimitive(true), restored.spec.data?.get("flag"))
   }
+
+  @Test
+  fun `a menu item valid only under the large budget decodes`() {
+    // The menu item is a choice (item or divider); its probe must use the spec's budget.
+    val spec =
+      """{"id":"menus","window":{"placement":{"type":"fullscreen"}},""" +
+        """"state":{"open":false},"data":{"rows":[]},"root":{"type":"menu",""" +
+        """"openWhen":{"key":"open","equals":true},"items":[{"label":"More","onTap":[""" +
+        """{"type":"appendData","path":"/data/rows","value":{"value":1},"maxItems":2001}]}]}}"""
+    assertEquals(
+      "root.items[0].onTap[0].maxItems",
+      failure(PrototypeSpecValidator.validate(spec)).path,
+    )
+    assertTrue(
+      PrototypeSpecValidator.validate(spec, budget = large) is PrototypeSpecValidation.Success,
+    )
+  }
 }

@@ -245,3 +245,13 @@ test.each(budgetCases)(
     expect(specs.read("d", "feed").kind).toBe(kind === "mirrored" ? "known" : "unknown");
   },
 );
+
+test("a replacing show forgets the budgets of the prototypes it removed (#18804)", () => {
+  const specs = new PrototypeShownSpecs();
+  const first = specs.beginShow("d", "feed", true, "android");
+  specs.endShow("d", first, { id: "feed", spec: { data: {} }, budget: PROTOTYPE_LARGE_BUDGET });
+  expect(specs.budgetOf("d", "feed")).toBe(PROTOTYPE_LARGE_BUDGET);
+  const second = specs.beginShow("d", "other", true, "android");
+  specs.endShow("d", second, { id: "other", spec: { data: {} } });
+  expect(specs.budgetOf("d", "feed")).toBe(PROTOTYPE_BASE_BUDGET);
+});

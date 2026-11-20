@@ -32,6 +32,25 @@ class LibraryLargeBudgetStoreTest {
   }
 
   @Test
+  fun specOverTheBaseByteCapSavesAndReloads() {
+    val root = File(temp.root, "prototypes")
+    val repository =
+      DirectoryLibraryRepository(
+        librarySavedStore(root),
+        FakeLibraryFiles(),
+        LibraryStorage(FakePrototypeStorage()),
+        IdGenerator { FIRST },
+        LibraryClock { 42L },
+      )
+    // Over the base 1 MiB spec cap, within the large budget's 4 MiB.
+    val spec = feedSpec(1, blob = "x".repeat(1024 * 1024 + 4096))
+    val added =
+      repository.add(SavedPrototypeSaveRequest("big", "Big", spec, emptyList()), LibrarySource.file)
+    assertTrue("$added", added is LibraryResult.Success)
+    assertTrue(librarySavedStore(root).load(FIRST) is SavedPrototypeLoadResult.Loaded)
+  }
+
+  @Test
   fun overTheLargeBudgetIsStillRefused() {
     val repository =
       DirectoryLibraryRepository(
@@ -48,10 +67,11 @@ class LibraryLargeBudgetStoreTest {
     )
   }
 
-  private fun feedSpec(rows: Int): String {
+  private fun feedSpec(rows: Int, blob: String? = null): String {
     val items = (0 until rows).joinToString(",") { """{"id":$it}""" }
+    val extra = blob?.let { ""","blob":"$it"""" }.orEmpty()
     return """{"id":"feed","window":{"placement":{"type":"fullscreen"}},""" +
       """"root":{"type":"list","repeat":{"items":{"path":"/feed/items"},"as":"post","key":"id"},""" +
-      """"children":[{"type":"text","text":"{post.id}"}]},"data":{"feed":{"items":[$items]}}}"""
+      """"children":[{"type":"text","text":"{post.id}"}]},"data":{"feed":{"items":[$items]}$extra}}"""
   }
 }

@@ -149,6 +149,7 @@ export class PrototypeShownSpecs {
       // indeterminate outcome (the device may have replaced it) forgets it.
       if (refusal === "indeterminate" && pending.id !== undefined) {
         state.entries.delete(pending.id);
+        state.budgets.delete(pending.id);
         state.dataWrites.delete(pending.id);
       }
       return;
@@ -157,6 +158,7 @@ export class PrototypeShownSpecs {
       this.storeShown(state, shown);
     } else {
       state.entries.clear();
+      state.budgets.clear();
       state.dataWrites.clear();
     }
   }
@@ -164,6 +166,7 @@ export class PrototypeShownSpecs {
   private storeShown(state: DeviceSpecs, shown: AcceptedShow): void {
     if (shown.replaceOthers !== false) {
       state.entries.clear();
+      state.budgets.clear();
       state.dataWrites.clear();
     }
     // No spec means the device may have restored stored `/data` the host cannot see: untracked
@@ -179,6 +182,7 @@ export class PrototypeShownSpecs {
       });
     } else {
       state.entries.delete(shown.id);
+      state.budgets.delete(shown.id);
     }
     // A show makes its spec's data authoritative again, so earlier device writes are void.
     state.dataWrites.delete(shown.id);
@@ -326,6 +330,7 @@ export class PrototypeShownSpecs {
       return;
     }
     state.entries.clear();
+    state.budgets.clear();
     state.dataWrites.clear();
     state.poisonedThrough = state.issued;
     state.epoch = ++this.sequence;
@@ -336,6 +341,7 @@ export class PrototypeShownSpecs {
     if (state && (id === undefined || state.entries.has(id))) {
       if (id === undefined) {
         state.entries.clear();
+        state.budgets.clear();
         state.dataWrites.clear();
       } else {
         state.entries.delete(id);

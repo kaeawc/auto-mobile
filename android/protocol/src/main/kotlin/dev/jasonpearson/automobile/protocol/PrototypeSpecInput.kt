@@ -145,7 +145,7 @@ internal object PrototypeSpecInput {
       PrototypeSpecValidation.Success(
         json.decodeFromJsonElement<PrototypeSpec>(
           stripPlatformNamespaces(
-            normalizeIntegers(value, definitions.getValue("spec").jsonObject),
+            normalizeIntegers(value, definitions.getValue("spec").jsonObject, context.budget),
           ),
         ),
       )
@@ -189,10 +189,20 @@ internal object PrototypeSpecInput {
 
   // JSON integers include exponent/decimal spellings (1e2, 100.0). Kotlin's Int decoder
   // accepts only integer lexical tokens, so normalize validated integer fields structurally.
-  fun normalizeIntegers(value: JsonElement, rule: JsonObject): JsonElement =
+  // A choice probe uses the validated spec's budget, so an option valid only under a larger
+  // runtime budget (#18804) is still the one chosen.
+  fun normalizeIntegers(
+    value: JsonElement,
+    rule: JsonObject,
+    budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
+  ): JsonElement =
     when (rule.text("kind")) {
       "ref" ->
-        normalizeIntegers(value, definitions.getValue(checkNotNull(rule.text("name"))).jsonObject)
+        normalizeIntegers(
+          value,
+          definitions.getValue(checkNotNull(rule.text("name"))).jsonObject,
+          budget,
+        )
       "tagged" ->
         normalizeIntegers(
           value,
@@ -201,12 +211,17 @@ internal object PrototypeSpecInput {
             .jsonObject
             .getValue(checkNotNull((value as JsonObject).text("type")))
             .jsonObject,
+          budget,
         )
       "object" -> {
         val fields = rule.getValue("fields").jsonObject
         JsonObject(
           (value as JsonObject).mapValues { (key, child) ->
-            normalizeIntegers(child, fields.getValue(key).jsonObject.getValue("rule").jsonObject)
+            normalizeIntegers(
+              child,
+              fields.getValue(key).jsonObject.getValue("rule").jsonObject,
+              budget,
+            )
           },
         )
       }
@@ -215,19 +230,21 @@ internal object PrototypeSpecInput {
       "screenMap" ->
         JsonObject(
           (value as JsonObject).mapValues { (_, child) ->
-            normalizeIntegers(child, rule.getValue("item").jsonObject)
+            normalizeIntegers(child, rule.getValue("item").jsonObject, budget)
           },
         )
       "array" ->
         JsonArray(
-          (value as JsonArray).map { normalizeIntegers(it, rule.getValue("item").jsonObject) },
+          (value as JsonArray).map {
+            normalizeIntegers(it, rule.getValue("item").jsonObject, budget)
+          },
         )
       "choice" -> {
         val option =
           rule.getValue("options").jsonArray.first {
-            walk(value, it.jsonObject, "", Context(), 0) == null
+            walk(value, it.jsonObject, "", Context(budget), 0) == null
           }
-        normalizeIntegers(value, option.jsonObject)
+        normalizeIntegers(value, option.jsonObject, budget)
       }
       "number" ->
         if (rule.flag("integer")) JsonPrimitive(value.jsonPrimitive.double.toInt()) else value

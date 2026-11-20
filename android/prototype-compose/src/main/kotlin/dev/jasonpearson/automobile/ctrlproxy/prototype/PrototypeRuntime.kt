@@ -35,8 +35,8 @@ data class PrototypeRuntimeSnapshot(
   val active: Boolean = true,
   /**
    * Bumped per key each time the controller's text for that key is replaced from outside the field:
-   * an authoritative patch that changes it, or a rejected edit that must be reverted. The field
-   * adopts the value whenever the epoch moves; see [TextChange].
+   * an authoritative patch or an action that changes it, or a rejected edit that must be reverted.
+   * The field adopts the value whenever the epoch moves; see [TextChange].
    */
   val textEpochs: Map<String, Int> = emptyMap(),
   val revision: Long = 0L,
@@ -681,8 +681,13 @@ class PrototypeRuntime(
 
   private var interactionRevision: Long? = null
 
-  /** Every accepted state write in one interaction shares a revision, even if a key is restored. */
-  private fun writeInteractionSpec(spec: PrototypeSpec) {
+  /**
+   * Every accepted state write in one interaction shares a revision, even if a key is restored.
+   *
+   * A text key changed by anything but its own field's edit ([fieldEdits]) moves its epoch, so a
+   * focused field bound to it adopts the written value instead of keeping what was typed (#18825).
+   */
+  private fun writeInteractionSpec(spec: PrototypeSpec, fieldEdits: Set<String> = emptySet()) {
     val spec = normalizePagerState(spec)
     val changed =
       (current.state.keys + spec.state.orEmpty().keys).filter {
@@ -690,6 +695,11 @@ class PrototypeRuntime(
       }
     if (changed.isEmpty()) return
     val revision = interactionRevision ?: allocateRevision().also { interactionRevision = it }
+    val replacedText = changed.filter { key ->
+      key !in fieldEdits &&
+        (current.state[key] is PrototypeScalar.Text ||
+          spec.state.orEmpty()[key] is PrototypeScalar.Text)
+    }
     // Only state differs from the spec the write was planned against. Taking the planned spec whole
     // would roll back a data write made earlier in the same action list.
     mutableSnapshot.value =
@@ -698,6 +708,8 @@ class PrototypeRuntime(
         pages = boundPages(spec, current.pages),
         revision = revision,
         stateRevisions = current.stateRevisions + changed.associateWith { revision },
+        textEpochs =
+          current.textEpochs + replacedText.associateWith { (current.textEpochs[it] ?: 0) + 1 },
       )
   }
 
@@ -795,7 +807,7 @@ class PrototypeRuntime(
     val written = if (moved.isEmpty()) current.spec else validated(current.spec, moved)
     val writes = plannedWrites(actions, written)
     if (moved.isNotEmpty()) {
-      writeInteractionSpec(written)
+      writeInteractionSpec(written, fieldEdits = moved.keys)
       emitStateChange(moved.keys.toList())
     }
     run(actions, writes)

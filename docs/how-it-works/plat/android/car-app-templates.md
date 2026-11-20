@@ -109,8 +109,9 @@ first-record order, so it can change after `disable()` and `enable()`.
 - The reader resolves the `androidAuto` block (#17841) after `carAppTemplates`, from the services
   snapshot that read took for the same observation (kept past the dump's TTL). It costs no extra
   device read. The block appears only while gearhead is the foreground package and one of
-  gearhead's `.apphost.Template*Service` hosts has a live gearhead binding. There is one host per
-  car app category; the captured dump shows `TemplateNavigationService` bound by `gearhead:car`.
+  gearhead's car app hosts has a live gearhead binding: a `.apphost.Template*Service` (one per car
+  app category) or the media host `MediaCarAppService` (#18672). The captured dump shows
+  `TemplateNavigationService` bound by `gearhead:car`.
   That binding is positive evidence that a head unit session hosts car app templates.
 - The `apps[]` list keeps only bound apps (package and user) whose route answered. Android Auto binds
   Maps, media, Play and Assistant services the same way. Without a captured

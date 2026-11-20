@@ -1,0 +1,28 @@
+{
+  "display": {
+    "key": "primary-1",
+    "role": "inner",
+    "posture": "opened",
+    "generation": 20
+  },
+  "screenSize": {
+    "width": 951,
+    "height": 669,
+    "units": "points"
+  },
+  "focusedElement": {
+    "class": "UIView",
+    "focused": true,
+    "view-id": "s2-c99cc170201c9970",
+    "bounds": [0, 84, 951, 669]
+  },
+  "runnerRotation": 0,
+  "screenshotPixels": {
+    "width": 2853,
+    "height": 2007
+  },
+  "devicectl": {
+    "currentOrientation": "rot90",
+    "mainDisplayOrientation": "portrait"
+  }
+}

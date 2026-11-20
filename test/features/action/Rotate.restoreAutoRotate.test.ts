@@ -128,7 +128,9 @@ describe("Android rotation restores prior auto-rotate", () => {
           expect(result.success).toBe(true);
           expect(result.currentOrientation).toBe("landscape");
           // Explicit false is the documented unlock: it enables auto-rotate even from a locked prior.
-          const expected = lockOrientation === true ? "0" : lockOrientation === false ? "1" : prior;
+          // A session's omission keeps auto-rotate off until release (#18833).
+          const holds = lockOrientation === true || (session && lockOrientation === undefined);
+          const expected = holds ? "0" : lockOrientation === false ? "1" : prior;
           expect(accelerometer).toBe(expected);
           expect(writes).toEqual([
             `${accelerometerPut}0`,

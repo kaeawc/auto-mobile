@@ -346,7 +346,15 @@ internal object PrototypeDataText {
  */
 object PrototypeDataResolver {
   fun resolveRoot(root: JsonObject, data: JsonObject?, platform: JsonObject? = null): JsonObject =
-    resolveRoot(root, data, PrototypeRepeatData(data), platform, Pass.ALL, shield = false)
+    resolveRoot(
+      root,
+      data,
+      PrototypeRepeatData(data),
+      platform,
+      ResolveMode(Pass.ALL, shield = false),
+    )
+
+  private data class ResolveMode(val pass: Pass, val shield: Boolean)
 
   private enum class Pass {
     ALL,
@@ -362,11 +370,16 @@ object PrototypeDataResolver {
     data: JsonObject?,
     repeats: PrototypeRepeatData,
     platform: JsonObject?,
-    pass: Pass,
-    shield: Boolean,
+    mode: ResolveMode,
   ): JsonObject {
     val own =
-      textFields(root, data, platform, deferData = pass == Pass.DEFER_DATA_TEXT, shield = shield)
+      textFields(
+        root,
+        data,
+        platform,
+        deferData = mode.pass == Pass.DEFER_DATA_TEXT,
+        shield = mode.shield,
+      )
     val resolved =
       JsonObject(
         own.mapValues { (key, value) ->
@@ -385,8 +398,8 @@ object PrototypeDataResolver {
     // Only row-template children defer data text; headers and footers resolve at the root.
     val lazy = root["type"] == JsonPrimitive("list")
     return mapChildren(resolved) { child, rowTemplate ->
-      val childPass = if (lazy && rowTemplate) Pass.DEFER_DATA_TEXT else pass
-      resolveRoot(child, data, repeats, platform, childPass, shield)
+      val childMode = if (lazy && rowTemplate) mode.copy(pass = Pass.DEFER_DATA_TEXT) else mode
+      resolveRoot(child, data, repeats, platform, childMode)
     }
   }
 
@@ -400,7 +413,13 @@ object PrototypeDataResolver {
     if (!PrototypeBindingScan.hasBindings(root)) return spec
     val resolved =
       json.decodeFromJsonElement<PrototypeNode>(
-        resolveRoot(root, spec.data, PrototypeRepeatData(spec.data), platform, Pass.ALL, shield),
+        resolveRoot(
+          root,
+          spec.data,
+          PrototypeRepeatData(spec.data),
+          platform,
+          ResolveMode(Pass.ALL, shield),
+        ),
       )
     return spec.copy(root = resolved)
   }

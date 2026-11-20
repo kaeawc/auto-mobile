@@ -9,6 +9,7 @@ import {
   layerGestureRefusal,
   focusedFieldLayerRefusal,
   hasOwnPrototype,
+  inputFocusedPrototypeLayer,
   ownPrototypeCoversPoint,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
@@ -31,6 +32,7 @@ import {
   PROTOTYPE_CAPTURE,
   capturedAppLayerPrototypeHierarchy,
   capturedFloatingCoverHierarchy,
+  capturedFocusedFieldsUnderPrototype,
   capturedPrototypeHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
@@ -468,4 +470,38 @@ test("hidden refusals pin both reason sentences and advice", () => {
   expect(new PrototypeHiddenError("device_blocked").message).toBe(
     'layer "prototype" was requested, but the AutoMobile prototype is hidden: the device is locked or its screen is off. Wake and unlock the device (the prototype returns with its state), or omit layer.',
   );
+});
+
+describe("inputFocusedPrototypeLayer (#18895)", () => {
+  test("names the prototype when its window holds input focus and a focused field", () => {
+    const hierarchy = capturedFocusedFieldsUnderPrototype({
+      appText: "display",
+      prototypeText: "Buy milk",
+      prototypeWindowFocused: true,
+    });
+    expect(inputFocusedPrototypeLayer(hierarchy)).toBe("prototype");
+  });
+
+  test("leaves the capture unscoped while the app's window holds input focus", () => {
+    const hierarchy = capturedFocusedFieldsUnderPrototype({
+      appText: "display",
+      prototypeText: "Buy milk",
+      prototypeWindowFocused: false,
+    });
+    expect(inputFocusedPrototypeLayer(hierarchy)).toBeUndefined();
+  });
+
+  test("a focused prototype window without a focused node is not the input target", () => {
+    const hierarchy = capturedFloatingCoverHierarchy();
+    hierarchy.windows = hierarchy.windows!.map((window) => ({
+      ...window,
+      isFocused: window.id === PROTOTYPE_CAPTURE.floatingPrototypeWindowId,
+    }));
+    expect(inputFocusedPrototypeLayer(hierarchy)).toBeUndefined();
+  });
+
+  test("no prototype or no capture is undefined", () => {
+    expect(inputFocusedPrototypeLayer(capturedTwoWindowHierarchy())).toBeUndefined();
+    expect(inputFocusedPrototypeLayer(undefined)).toBeUndefined();
+  });
 });

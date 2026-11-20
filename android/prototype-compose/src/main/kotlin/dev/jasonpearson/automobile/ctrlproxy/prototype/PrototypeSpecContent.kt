@@ -1121,7 +1121,7 @@ private fun RenderPrototypeTextField(
       if (prototypeTextFieldSecure(source.secure, source.keyboardType))
         PasswordVisualTransformation()
       else VisualTransformation.None
-    val multiline = source.multiline
+    val multiline = prototypeTextFieldMultiline(source.multiline, ime)
     // Omit line options for legacy fields: Compose's default is a growing field.
     if (source.variant == "outlined") {
       if (multiline == null) {

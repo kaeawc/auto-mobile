@@ -58,7 +58,7 @@ export const APPLE_PROVISION_SPEC_GUIDANCE = {
     platform: "ios",
     catalog: "automobile:devices/images/ios",
     example: {
-      runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+      runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-2",
       deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
     },
   },
@@ -66,7 +66,7 @@ export const APPLE_PROVISION_SPEC_GUIDANCE = {
     platform: "watchos",
     catalog: "automobile:devices/images/watchos",
     example: {
-      runtime: "com.apple.CoreSimulator.SimRuntime.watchOS-11-0",
+      runtime: "com.apple.CoreSimulator.SimRuntime.watchOS-27-2",
       deviceType: "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Series-10-46mm",
     },
   },
@@ -74,7 +74,7 @@ export const APPLE_PROVISION_SPEC_GUIDANCE = {
     platform: "tvos",
     catalog: "automobile:devices/images/tvos",
     example: {
-      runtime: "com.apple.CoreSimulator.SimRuntime.tvOS-26-5",
+      runtime: "com.apple.CoreSimulator.SimRuntime.tvOS-27-2",
       deviceType: "com.apple.CoreSimulator.SimDeviceType.Apple-TV-4K-3rd-generation-4K",
     },
   },
@@ -82,7 +82,7 @@ export const APPLE_PROVISION_SPEC_GUIDANCE = {
     platform: "visionos",
     catalog: "automobile:devices/images/visionos",
     example: {
-      runtime: "com.apple.CoreSimulator.SimRuntime.xrOS-26-5",
+      runtime: "com.apple.CoreSimulator.SimRuntime.xrOS-27-2",
       deviceType: "com.apple.CoreSimulator.SimDeviceType.Apple-Vision-Pro-4K",
     },
   },

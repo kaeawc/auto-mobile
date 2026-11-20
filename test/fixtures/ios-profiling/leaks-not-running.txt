@@ -1,0 +1,2 @@
+leaks[11781]: leaks cannot examine process 99999 (with name like '99999') because it no longer appears to be running.
+leaks[11781]: [fatal] mach port for process 0 not valid

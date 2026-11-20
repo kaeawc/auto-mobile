@@ -17,6 +17,8 @@ AutoMobile drives Android devices and emulators through the Android SDK and
 
 - [Manufacturer profiles](oem-personas.md) approximate a device maker's build
   on a stock emulator.
+- [App lifecycle](app-lifecycle.md) backgrounds or kills one running app, or
+  sends it `onTrimMemory`.
 - [Kill profiles](kill-profiles.md) simulate a device maker's background-kill
   policy for one app.
 - [Seed content](seed-content.md) adds contacts, calendar events, call history

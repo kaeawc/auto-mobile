@@ -60,6 +60,11 @@ prove that voice is healthy. Host-mic passthrough (`-allow-host-audio`) is not u
   endpoint PID incarnation with `audio_repeat_injection_unsafe`. Both host safety errors carry
   `retryable: false` and a remedy to grant macOS Microphone permission to the emulator's host app
   (System Settings > Privacy and Security > Microphone) or restart the emulator.
+- Opening `injectAudio` while the guest has no open recorder crashes the emulator (#18687), so
+  every client of the RPC must hold this lease. After authorization, immediately before the stream
+  opens, one more status broadcast must answer `running`. Otherwise injection is refused with
+  `audio_guest_capture_unavailable` and no stream opens. This refusal does not count as an
+  injection start for the repeat rule.
 - Permission alone
   does not clear repeat history: a serial with a new PID starts with no repeat history. The host-voice
   check also runs after authorization, immediately before the stream opens. No reliable

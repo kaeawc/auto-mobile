@@ -1,0 +1,11 @@
+HKPROBE available=true args=[]
+HKPROBE status steps=0 hr=0
+HKPROBE requestAuthorization ok=true err=nil
+HKPROBE status steps=2 hr=2
+HKPROBE save ok=true err=nil
+HKPROBE read HKQuantityTypeIdentifierStepCount n=1 err=nil
+HKPROBE   value=4242 count
+HKPROBE read HKCategoryTypeIdentifierSleepAnalysis n=1 err=nil
+HKPROBE read HKQuantityTypeIdentifierHeartRate n=1 err=nil
+HKPROBE   value=72 count/min
+HKPROBE done

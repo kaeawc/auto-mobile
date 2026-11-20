@@ -18,6 +18,17 @@ export type SimctlFailure =
   | { kind: "device-data-missing" }
   /** simctl does not know the device id or name. */
   | { kind: "unknown-device" }
+  /**
+   * CoreSimulator refused to boot another simulator because the host ran out of a
+   * system resource (typically the `maxfiles` limit). Host-wide: other simulators
+   * are affected too, so recovery is never automatic.
+   */
+  | { kind: "resource-exhaustion" }
+  /**
+   * The runtime's `launchd_sim` could not bind to its session, a runtime-version-dependent
+   * boot timeout with no reliable trigger. Detected and reported, never induced.
+   */
+  | { kind: "launchd-sim-bind-failure" }
   | { kind: "unclassified" };
 
 const TARGET_STATE: Partial<Record<SimctlLifecycleVerb, string>> = {
@@ -28,11 +39,19 @@ const TARGET_STATE: Partial<Record<SimctlLifecycleVerb, string>> = {
 const CURRENT_STATE_PATTERN = /Unable to .+? in current state: (\w+)/;
 const DATA_MISSING_PATTERN = /cannot be located on disk/;
 const UNKNOWN_DEVICE_PATTERN = /^Invalid device or device pair: /m;
+const RESOURCE_EXHAUSTION_PATTERN = /not sufficient to allow booting additional simulators/;
+const LAUNCHD_SIM_BIND_PATTERN = /could not bind to session/;
 
 /** Classify the text (stderr and/or message) of a failed simctl lifecycle command. */
 export function classifySimctlFailure(verb: SimctlLifecycleVerb, output: string): SimctlFailure {
   if (DATA_MISSING_PATTERN.test(output)) {
     return { kind: "device-data-missing" };
+  }
+  if (RESOURCE_EXHAUSTION_PATTERN.test(output)) {
+    return { kind: "resource-exhaustion" };
+  }
+  if (LAUNCHD_SIM_BIND_PATTERN.test(output)) {
+    return { kind: "launchd-sim-bind-failure" };
   }
   const state = CURRENT_STATE_PATTERN.exec(output)?.[1];
   if (state) {
@@ -83,6 +102,19 @@ export function planSimctlRecovery(
       };
     case "unknown-device":
       return { action: "fail", reason: "simctl does not know this simulator" };
+    case "resource-exhaustion":
+      return {
+        action: "fail",
+        reason:
+          "the host does not have enough resources (maxfiles) to boot another simulator; " +
+          "relaunching CoreSimulatorService is host-wide and is never done automatically",
+      };
+    case "launchd-sim-bind-failure":
+      return {
+        action: "fail",
+        reason:
+          "launchd_sim could not bind to its session (a known simulator runtime boot timeout)",
+      };
     case "unclassified":
       return { action: "fail", reason: "unrecognized simctl failure" };
   }
@@ -108,21 +140,38 @@ export function simctlFailureText(error: unknown): string {
   return stderrText ? `${stderrText}\n${message}` : message;
 }
 
-/**
- * An actionable error for a boot whose data is missing on disk, or undefined for any other
- * failure. Boot paths never erase on their own (erase destroys the device's apps and data), so
- * this names the recovery instead of the generic wedge or readiness message.
- */
-export function bootDataMissingError(udid: string, error: unknown): ActionableError | undefined {
-  if (classifySimctlFailure("boot", simctlFailureText(error)).kind !== "device-data-missing") {
-    return undefined;
-  }
-  return new ActionableError(
+const BOOT_FAILURE_GUIDANCE: Partial<Record<SimctlFailure["kind"], (udid: string) => string>> = {
+  "device-data-missing": (udid) =>
     `Simulator ${udid} cannot boot because its data is missing on disk. ` +
-      `Run 'xcrun simctl erase ${udid}' to recreate it (this deletes the simulator's apps and data), ` +
-      "or delete the simulator and create a new one.",
-    { cause: error },
-  );
+    `Run 'xcrun simctl erase ${udid}' to recreate it (this deletes the simulator's apps and data), ` +
+    "or delete the simulator and create a new one.",
+  "resource-exhaustion": (udid) =>
+    `Simulator ${udid} cannot boot because the host does not have enough resources to boot ` +
+    "another simulator (CoreSimulator reported the maxfiles limit). Shut down simulators you are " +
+    "not using ('xcrun simctl shutdown <udid>'), or raise the limit ('launchctl limit maxfiles'). " +
+    "If the limit is already raised, relaunch the service with " +
+    "'killall -9 com.apple.CoreSimulator.CoreSimulatorService'; this interrupts every simulator on the host.",
+  "launchd-sim-bind-failure": (udid) =>
+    `Simulator ${udid} failed to boot because launchd_sim could not bind to its session. ` +
+    "This is a known simulator runtime boot timeout, not a problem with the device's data. " +
+    `Shut it down ('xcrun simctl shutdown ${udid}') and boot it again; if it keeps failing, ` +
+    "restart the host or try a different simulator runtime.",
+};
+
+/**
+ * An actionable error naming the recovery for a boot failure this classifier recognizes
+ * (missing on-disk data, host resource exhaustion, a `launchd_sim` bind failure), or
+ * undefined for any other failure. Boot paths never apply these recoveries on their own:
+ * erase destroys the device's apps and data, and relaunching CoreSimulatorService breaks
+ * every simulator on the host, so the message tells the caller what to run instead.
+ */
+export function bootFailureGuidanceError(
+  udid: string,
+  error: unknown,
+): ActionableError | undefined {
+  const guidance =
+    BOOT_FAILURE_GUIDANCE[classifySimctlFailure("boot", simctlFailureText(error)).kind];
+  return guidance ? new ActionableError(guidance(udid), { cause: error }) : undefined;
 }
 
 /**

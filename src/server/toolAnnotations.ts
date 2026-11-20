@@ -58,7 +58,6 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   getDataStore: entry("Read Data Store", readDevice),
   getDeepLinks: entry("Get Deep Links", readDevice),
   getDeviceState: entry("Get Device State", readDevice),
-  getIosSimulatorCapabilities: entry("Get iOS Simulator Capabilities", readDevice),
   getSessionRequirementCapability: entry("Get Session Requirement Capability", readHost),
   getNotificationPolicy: entry("Get Notification Policy", readDevice),
   getLogs: entry("Read Device Logs", readDevice),

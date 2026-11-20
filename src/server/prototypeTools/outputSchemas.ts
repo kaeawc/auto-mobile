@@ -403,12 +403,7 @@ export const prototypeOutputSchema = z.object({
     .optional()
     .describe("Android: whether the shortcut was seen on the home screen after a pin or update."),
   errorCode: z
-    .enum([
-      ...SAVED_PROTOTYPE_ERROR_CODES,
-      "unsupported_capability",
-      "unsupported_platform",
-      "invalid_url",
-    ])
+    .enum([...SAVED_PROTOTYPE_ERROR_CODES, "unsupported_platform", "invalid_url"])
     .optional(),
   revision: z
     .number()

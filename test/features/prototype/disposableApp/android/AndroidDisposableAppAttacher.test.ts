@@ -159,9 +159,11 @@ test("reconnect hello resumes the delivered epoch and resets after a process cha
   fourth.appInstanceId = "new-process";
   h.connector.connect = async () => fourth;
   await h.attacher.attach(device, appId);
-  expect(fourth.frames()[0]).toMatchObject({
-    appInstanceId: "new-process",
-    lastAcknowledgedSequence: 1,
+  expect(fourth.frames()[0]).toEqual({
+    type: "hello",
+    token,
+    protocolVersion: 1,
+    lastAcknowledgedSequence: 0,
   });
   await h.attacher.release("d");
 });
@@ -333,4 +335,157 @@ test("disposal waits for a pending attachment, releases it once and refuses late
     ["forward", "--remove", "tcp:12345"],
   ]);
   await expect(h.attacher.attach(device, appId)).rejects.toThrow("disposed");
+});
+
+test("forgetting an uninstalled app prunes its cursor after the socket has closed", async () => {
+  const h = await setup();
+  h.socket.appInstanceId = "process";
+  h.socket.replay = [{ type: "prototype_event", sequence: 9 }];
+  const client = await h.attacher.attach(device, appId);
+  client.onEvent(() => {});
+  h.socket.closeFromAgent();
+  await h.attacher.forget(device.deviceId, appId);
+  const socket = new FakeDisposableAppSocket();
+  h.connector.connect = async () => socket;
+  await h.attacher.attach(device, appId);
+  expect(socket.frames()[0]).toEqual({
+    type: "hello",
+    token,
+    protocolVersion: 1,
+    lastAcknowledgedSequence: 0,
+  });
+  await h.attacher.release(device.deviceId);
+});
+
+test("showing identity survives handshake and refreshes on the same socket without resetting delivery", async () => {
+  const h = await setup();
+  h.socket.appInstanceId = "process";
+  h.socket.showingId = "first-show";
+  h.socket.showingStartSequence = 4;
+  h.socket.replay = [{ ...event(9) }];
+  const client = await h.attacher.attach(device, appId);
+  const transport = new IosPrototypeTransport(client, undefined, "android");
+  const source = prototypeEventSource(transport);
+  expect(source.instanceId).toBe("process");
+  expect(source.showingId).toBe("first-show");
+  expect(source.showingStartSequence).toBe(4);
+  const seen: unknown[] = [];
+  client.onEvent((message) => seen.push(message.sequence));
+  const pending = transport.status();
+  const request = h.socket.frames().at(-1)!;
+  h.socket.push({
+    type: "prototype_result",
+    requestId: request.requestId,
+    success: true,
+    status: { showingId: "second-show", showingStartSequence: 9 },
+  });
+  await pending;
+  expect(source.showingId).toBe("second-show");
+  expect(source.showingStartSequence).toBe(9);
+  h.socket.push({ ...event(9) });
+  h.socket.push({ ...event(10) });
+  expect(seen).toEqual([9, 10]);
+  expect(h.socket.frames().at(-1)).toMatchObject({
+    type: "ack",
+    sequence: 10,
+    appInstanceId: "process",
+  });
+  await h.attacher.release(device.deviceId);
+});
+
+test("per-app forget closes only that attachment and preserves another app's cursor", async () => {
+  const h = await setup();
+  const record = (await h.registry.list(device.deviceId))[0]!;
+  const otherAppId = disposableAppId("android", "other");
+  await h.registry.put(device.deviceId, { ...record, appId: otherAppId, slug: "other" });
+  h.socket.appInstanceId = "first";
+  h.socket.replay = [{ ...event(9) }];
+  (await h.attacher.attach(device, appId)).onEvent(() => {});
+  const other = new FakeDisposableAppSocket();
+  other.appInstanceId = "other";
+  other.replay = [{ ...event(4) }];
+  h.connector.connect = async () => other;
+  (await h.attacher.attach(device, otherAppId)).onEvent(() => {});
+  await h.attacher.forget(device.deviceId, appId);
+  expect(h.socket.ended).toBe(true);
+  expect(other.ended).toBe(false);
+  other.closeFromAgent();
+  const reconnect = new FakeDisposableAppSocket();
+  reconnect.appInstanceId = "other";
+  h.connector.connect = async () => reconnect;
+  await h.attacher.attach(device, otherAppId);
+  expect(reconnect.frames()[0]).toMatchObject({
+    appInstanceId: "other",
+    lastAcknowledgedSequence: 4,
+  });
+  await h.attacher.release(device.deviceId);
+});
+
+test("device release forgets all app cursors with closed sockets and preserves other devices", async () => {
+  const h = await setup();
+  const record = (await h.registry.list(device.deviceId))[0]!;
+  const otherAppId = disposableAppId("android", "other");
+  const otherDevice = { ...device, deviceId: "other-device" };
+  await h.registry.put(device.deviceId, { ...record, appId: otherAppId, slug: "other" });
+  await h.registry.put(otherDevice.deviceId, record);
+  const attachments = [
+    [device, appId],
+    [device, otherAppId],
+    [otherDevice, appId],
+  ] as const;
+  for (const [target, targetAppId] of attachments) {
+    const socket = new FakeDisposableAppSocket();
+    socket.appInstanceId = "process";
+    socket.replay = [{ ...event(9) }];
+    h.connector.connect = async () => socket;
+    (await h.attacher.attach(target, targetAppId)).onEvent(() => {});
+    socket.closeFromAgent();
+  }
+  await h.attacher.release(device.deviceId);
+  for (const [target, targetAppId] of attachments) {
+    const socket = new FakeDisposableAppSocket();
+    h.connector.connect = async () => socket;
+    await h.attacher.attach(target, targetAppId);
+    expect(socket.frames()[0]).toEqual({
+      type: "hello",
+      token,
+      protocolVersion: 1,
+      ...(target === otherDevice ? { appInstanceId: "process" } : {}),
+      lastAcknowledgedSequence: target === otherDevice ? 9 : 0,
+    });
+  }
+  await h.attacher.dispose();
+});
+
+test("disposal clears retained cursors even when all sockets already closed", async () => {
+  const h = await setup();
+  h.socket.appInstanceId = "process";
+  h.socket.replay = [{ ...event(9) }];
+  (await h.attacher.attach(device, appId)).onEvent(() => {});
+  h.socket.closeFromAgent();
+  // Disposed attachers cannot reconnect, so inspect the retained cache to verify memory cleanup.
+  expect(h.attacher["resumeStates"].size).toBe(1);
+  await h.attacher.dispose();
+  expect(h.attacher["resumeStates"].size).toBe(0);
+});
+
+test("a showing refresh from an app that omits its start sequence forgets the previous one", async () => {
+  const h = await setup();
+  h.socket.showingId = "first-show";
+  h.socket.showingStartSequence = 4;
+  const client = await h.attacher.attach(device, appId);
+  const transport = new IosPrototypeTransport(client, undefined, "android");
+  const source = prototypeEventSource(transport);
+  const pending = transport.status();
+  const request = h.socket.frames().at(-1)!;
+  h.socket.push({
+    type: "prototype_result",
+    requestId: request.requestId,
+    success: true,
+    status: { showingId: "second-show", showingStartSequence: 0 },
+  });
+  await pending;
+  expect(source.showingId).toBe("second-show");
+  expect(source.showingStartSequence).toBeUndefined();
+  await h.attacher.release(device.deviceId);
 });

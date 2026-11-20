@@ -663,6 +663,7 @@ async function hostOnlyOutput(
 }
 
 interface EarlyRoutes {
+  disposableAgent: ReturnType<typeof lazyDisposableAppAttach>;
   disposableApps: () => PrototypeDisposableApps;
   hostOnly: { mocks: PrototypeMockBackendRegistry; preview: () => PrototypePreviewBinding };
   assetReaders: AssetReaders;
@@ -681,7 +682,7 @@ function earlyOutput(
   args: z.infer<typeof prototypeSchema>,
 ): Promise<PrototypeOutput> {
   return isDisposableAppAction(args.action)
-    ? disposableAppOutput(routes.disposableApps(), device, args)
+    ? disposableAppOutput(routes.disposableApps(), device, args, routes.disposableAgent)
     : hostOnlyOutput(routes.hostOnly, args, routes.assetReaders, routes.shareFiles);
 }
 
@@ -769,6 +770,7 @@ export function createPrototypeToolRuntime(
   // Resolved on first use: building the daemon's (unbound) server is deferred until a call needs it.
   const preview = () => dependencies.preview ?? daemonPrototypePreviewBinding();
   const earlyRoutes: EarlyRoutes = {
+    disposableAgent,
     disposableApps: lazyDisposableApps(dependencies, clock),
     hostOnly: { mocks: host.mocks, preview },
     assetReaders,

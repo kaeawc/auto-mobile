@@ -78,7 +78,9 @@ class ProtoViewerApplication : Application() {
             PrototypeBundleDirectoryFileSystem(stagingRoot),
             ids,
             blocklist,
-          )
+          ) {
+            app.getString(R.string.default_import_label)
+          }
         },
       )
     ProtoViewerServices(

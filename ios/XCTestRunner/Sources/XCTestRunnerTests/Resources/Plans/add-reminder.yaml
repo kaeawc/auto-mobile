@@ -21,6 +21,22 @@ steps:
       timeout: 20000
     label: Wait for Reminders UI
 
+  # On first launch on a fresh iOS 26.5 simulator, the "Welcome to Reminders" sheet satisfies
+  # the initial Reminders wait but blocks the create control until Continue is tapped.
+  - tool: observe
+    waitFor:
+      text: "Continue"
+      timeout: 5000
+    optional: true
+    label: Wait for the first-run Welcome sheet (if shown)
+
+  - tool: tapOn
+    selector:
+      text: "Continue"
+    action: "tap"
+    optional: true
+    label: Dismiss the first-run Welcome sheet (if shown)
+
   # A prior local run can leave Reminders restored inside a smart list such as Today. Return to the
   # accounts/list home first so the next hop can choose the default Reminders list deterministically.
   - tool: observe
@@ -118,6 +134,22 @@ steps:
       text: "Title"
       timeout: 10000
     label: Wait for title field
+
+  # On a fresh iOS 26.5 simulator, the one-time Slide to Type sheet can cover the keyboard
+  # after the Title field appears. Dismiss it before typing the reminder title.
+  - tool: observe
+    waitFor:
+      text: "Continue"
+      timeout: 3000
+    optional: true
+    label: Wait for the Slide to Type sheet (if shown)
+
+  - tool: tapOn
+    selector:
+      text: "Continue"
+    action: "tap"
+    optional: true
+    label: Dismiss the Slide to Type sheet (if shown)
 
   - tool: inputText
     text: "${REMINDER_TITLE}"

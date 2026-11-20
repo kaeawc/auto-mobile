@@ -19,7 +19,11 @@ import { DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS } from "./prototypeEventTimeout";
 export { DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS };
 export interface PrototypeEventSource {
   readonly instanceId?: string;
-  onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void;
+  readonly showingId?: string;
+  /** First event sequence of the current showing; undefined when the device does not say. */
+  readonly showingStartSequence?: number;
+  /** A listener returns false when it rejected the event, so it is not acknowledged. */
+  onPrototypeEvent(listener: (event: PrototypeEvent) => boolean | void): () => void;
 }
 export interface PrototypeEventTelemetry {
   recordPrototypeEvent(scope: PrototypeScope, event: PrototypeEvent): void;
@@ -34,10 +38,17 @@ interface Entry {
   id: string;
   source: PrototypeEventSource;
   instanceId?: string;
+  showingId?: string;
   buffer: PrototypeEventBuffer;
   shown: boolean;
   terminal: boolean;
+  terminalSequence?: number;
   waiters: Set<() => void>;
+}
+/** A replayed dismissal below the source's showing start ended an earlier showing of the process. */
+function endedEarlierShowing(entry: Entry, event: PrototypeEvent): boolean {
+  const showingStart = entry.source.showingStartSequence;
+  return event.kind === "dismissed" && showingStart !== undefined && event.sequence < showingStart;
 }
 const scopeKey = (scope: PrototypeScope, id: string) =>
   JSON.stringify([scope.sessionUuid ?? null, scope.deviceId, id]);
@@ -96,6 +107,7 @@ export class PrototypeEventCoordinator {
     entry.buffer.startEpoch();
     entry.shown = true;
     entry.terminal = false;
+    entry.terminalSequence = undefined;
     this.subscribe(scope.deviceId, client);
   }
 
@@ -244,14 +256,23 @@ export class PrototypeEventCoordinator {
       };
       this.entries.set(key, entry);
     }
-    if (
-      client.instanceId !== undefined &&
-      entry.instanceId !== undefined &&
-      client.instanceId !== entry.instanceId
-    ) {
+    // A different process identity is a different sequence ledger, including a switch between
+    // a source with no identity (CtrlProxy) and one with an identity (disposable app) (#18667).
+    if (client.instanceId !== entry.instanceId) {
       entry.buffer.startEpoch();
       entry.terminal = false;
+      entry.terminalSequence = undefined;
     }
+    if (
+      client.showingId !== undefined &&
+      entry.showingId !== undefined &&
+      client.showingId !== entry.showingId
+    ) {
+      // Remounts share the process ledger: retain pending events and its high-water mark.
+      entry.terminal = false;
+      entry.terminalSequence = undefined;
+    }
+    entry.showingId = client.showingId;
     entry.source = client;
     entry.instanceId = client.instanceId;
     if (subscribe && !entry.terminal) {
@@ -282,17 +303,27 @@ export class PrototypeEventCoordinator {
     this.pruneSources();
   }
 
-  private receive(deviceId: string, event: PrototypeEvent, source?: PrototypeEventSource): void {
+  /** Returns false when the event was discarded unseen, so the source must not acknowledge it. */
+  private receive(deviceId: string, event: PrototypeEvent, source?: PrototypeEventSource): boolean {
     const entry = Array.from(this.entries.values()).find(
       (known) =>
         known.scope.deviceId === deviceId &&
         known.id === event.id &&
         (source === undefined || known.source === source),
     );
+    if (!entry || entry.terminal) {
+      return false;
+    }
+    if (endedEarlierShowing(entry, event)) {
+      // The current showing is still up. Consume the event so it is acknowledged, without ending
+      // the entry or handing it to a waiter.
+      entry.buffer.advanceTo(event.sequence);
+      return true;
+    }
     // A duplicate is not buffered, and neither is a kind this host does not know: the buffer only
     // advances its sequence for that one, so it is not recorded, counted or handed to a waiter.
-    if (!entry || entry.terminal || !entry.buffer.push(event)) {
-      return;
+    if (!entry.buffer.push(event)) {
+      return true;
     }
     try {
       this.recorder?.recordEvent(entry.scope, event);
@@ -303,6 +334,7 @@ export class PrototypeEventCoordinator {
     if (event.kind === "dismissed") {
       entry.shown = false;
       entry.terminal = true;
+      entry.terminalSequence = event.sequence;
       this.requests?.cancelPrototype(entry.scope.deviceId, entry.id);
       this.store.dismissed(entry.scope, entry.id);
     }
@@ -315,6 +347,7 @@ export class PrototypeEventCoordinator {
     } catch (error) {
       logger.warn(`[PrototypeEventCoordinator] Telemetry recording failed: ${errorMessage(error)}`);
     }
+    return true;
   }
 
   private take(entry: Entry, filter: PrototypeEventFilter): PrototypeAwaitResult | undefined {
@@ -322,7 +355,7 @@ export class PrototypeEventCoordinator {
     if (!event) {
       return entry.terminal ? { ...entry.buffer.status(), reason: "dismissed" } : undefined;
     }
-    if (event.kind === "dismissed") {
+    if (event.kind === "dismissed" && event.sequence === entry.terminalSequence) {
       entry.buffer.clear();
     }
     const delivered = {

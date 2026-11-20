@@ -2,13 +2,17 @@
 <!-- STAMP POINTS after copying this .app:
      Rewrite CFBundleIdentifier and CFBundleDisplayName + CFBundleName.
      The plist is the only name source: no InfoPlist.strings.
+     Disposable apps replace inherited NS*UsageDescription keys with declared usage
+     descriptions and replace UIBackgroundModes, omitting it when no modes are declared.
+     With a custom icon background, omit UILaunchScreen.UIColorName (a named asset).
      Overwrite loose PrototypeViewerIcon60x60@2x.png (120x120) and
      PrototypeViewerIcon60x60@3x.png (180x180) in place.
      Write the saved layout to Documents/prototype/ in the data container:
      manifest.json, spec.json, assets/<sha256>.<ext>, fonts/<sha256>.<ext> (formatVersion 1).
-     The bundled prototype.json is only the template demo fallback. Obtain the container with
-     simctl get_app_container <udid> <bundle-id> data.
-     Then codesign --force --sign - the .app and simctl install.
+     Disposable apps replace the bundled prototype.json demo with the spec before signing.
+     The Viewer can load it as a fallback, and a storage reset uses it to restore the saved layout.
+     After updating the bundle, ad-hoc codesign and verify it, then simctl install.
+     Obtain its data container with simctl get_app_container <udid> <bundle-id> data.
      Executable name and bundle layout must not change.
      CFBundleInfoDictionaryVersion and LSRequiresIPhoneOS are fixed metadata, not stamp points.
 -->
@@ -30,6 +34,9 @@
          a dev tool for simulators, so it opts out of App Transport Security entirely. -->
     <key>NSAppTransportSecurity</key>
     <dict><key>NSAllowsArbitraryLoads</key><true/></dict>
+    <!-- Kept by the installer only for a prototype declaring the biometric module (#14328). -->
+    <key>NSFaceIDUsageDescription</key>
+    <string>Confirm your identity when a prototype asks you to authenticate.</string>
     <key>UILaunchScreen</key><dict/>
     <key>UISupportedInterfaceOrientations</key>
     <array>

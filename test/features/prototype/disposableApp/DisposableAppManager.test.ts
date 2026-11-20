@@ -10,12 +10,18 @@ import { FakeDisposableAppStamper } from "../../../fakes/FakeDisposableAppStampe
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { InMemoryDisposableAppRegistryStore } from "../../../fakes/InMemoryDisposableAppRegistryStore";
 import fixture from "../../../fixtures/prototype-spec/valid/platform-requires.json";
+import { ActionableError } from "../../../../src/models/ActionableError";
+import type { PrototypeJson } from "../../../../src/features/prototype/prototypeJson";
 
 const HOUR = 60 * 60 * 1000;
 const DEVICE = "emulator-5554";
 const media = {
   name: "media",
-  capabilities: ["prototype_platform_v1", "prototype_platform_test_v1"],
+  capabilities: [
+    "prototype_platform_v1",
+    "prototype_platform_test_v1",
+    "prototype_platform_location_v1",
+  ],
   size: 2,
 };
 
@@ -47,6 +53,87 @@ beforeEach(() => {
 });
 
 describe("DisposableAppManager.install", () => {
+  test("refuses an undeclared call permission before stamping or installing", async () => {
+    const requires = {
+      platform: fixture.requires.platform,
+      background: fixture.requires.background,
+    };
+    const spec = { ...fixture, requires };
+    const installation = manager.install({ ...input(), spec });
+    await expect(installation).rejects.toBeInstanceOf(ActionableError);
+    await expect(installation).rejects.toThrow(
+      /root\.onTap\[0\]\.call: .*camera.*declare it in requires.permissions/,
+    );
+    expect(stamper.stamped).toEqual([]);
+    expect(installer.installs).toEqual([]);
+  });
+
+  const cameraNodes: Record<string, PrototypeJson>[] = [
+    { root: { type: "cameraPreview", id: "preview" } },
+    {
+      components: { preview: { root: { type: "cameraPreview", id: "preview" } } },
+      root: { type: "use", component: "preview" },
+    },
+  ];
+  test.each(cameraNodes)(
+    "refuses undeclared camera permission in a node before installation: %j",
+    async (nodes) => {
+      const spec = { ...fixture, ...nodes, requires: { platform: ["camera"] } };
+      await expect(manager.install({ ...input(), spec })).rejects.toThrow(
+        /camera.*declare it in requires.permissions/,
+      );
+      expect(stamper.stamped).toEqual([]);
+      expect(installer.installs).toEqual([]);
+    },
+  );
+
+  test("stamps exactly the declared call permission's manifest entries plus INTERNET", async () => {
+    await manager.install({
+      ...input(),
+      spec: {
+        ...fixture,
+        requires: {
+          platform: ["location"],
+          permissions: [{ name: "location", purpose: "Show the current position" }],
+        },
+        root: {
+          type: "button",
+          label: "Locate",
+          onTap: [{ type: "platform", call: "location.request" }],
+        },
+      },
+    });
+    expect(stamper.stamped[0]?.declarations).toEqual({
+      permissions: ["location"],
+      background: [],
+      android: {
+        permissions: [
+          "android.permission.ACCESS_COARSE_LOCATION",
+          "android.permission.ACCESS_FINE_LOCATION",
+          "android.permission.INTERNET",
+        ],
+      },
+      ios: {
+        usageDescriptions: { NSLocationWhenInUseUsageDescription: "Show the current position" },
+        backgroundModes: [],
+      },
+    });
+    expect(installer.installs).toHaveLength(1);
+  });
+
+  test("a spec declaring nothing stamps only INTERNET and no iOS usage descriptions", async () => {
+    await manager.install({
+      ...input(),
+      spec: { id: "plain", window: fixture.window, root: { type: "column" } },
+    });
+    expect(stamper.stamped[0]?.declarations).toEqual({
+      permissions: [],
+      background: [],
+      android: { permissions: ["android.permission.INTERNET"] },
+      ios: { usageDescriptions: {}, backgroundModes: [] },
+    });
+  });
+
   test("stamps the smallest covering template with the spec's declared permissions", async () => {
     const result = await manager.install(input({ permissions: "grantDeclared" }));
     const appId = disposableAppId("android", "feedly");
@@ -81,6 +168,20 @@ describe("DisposableAppManager.install", () => {
     expect(installer.installs).toHaveLength(2);
     expect(installer.resets).toEqual([disposableAppId("android", "feedly")]);
     expect((await registry.list(DEVICE)).map((entry) => entry.label)).toEqual(["Feedly 2"]);
+  });
+
+  test("releases the stamped artifact after a successful install", async () => {
+    await manager.install(input());
+    expect(stamper.released).toEqual(installer.installs.map(({ artifactPath }) => artifactPath));
+    expect(stamper.released).toHaveLength(1);
+  });
+
+  test("releases the stamped artifact when the install fails", async () => {
+    installer.install = async () => {
+      throw new Error("simctl install failed");
+    };
+    await expect(manager.install(input())).rejects.toThrow("simctl install failed");
+    expect(stamper.released).toHaveLength(1);
   });
 
   test("a first install whose permissions fail is still recorded with its TTL", async () => {
@@ -183,6 +284,74 @@ describe("DisposableAppManager TTL and uninstall", () => {
     expect(all.removed.map((entry) => entry.appId)).toEqual([disposableAppId("android", "feedly")]);
     expect(all.skipped.map((entry) => entry.appId)).toEqual([foreign]);
     expect(installer.uninstalls).toEqual([disposableAppId("android", "feedly")]);
+  });
+
+  test("bulk removal stops at its deadline and returns the rest as pending", async () => {
+    const bounded = new DisposableAppManager({
+      platforms: { android: { stamper, installer } },
+      registry,
+      timer,
+      bulkUninstallBudgetMs: 3_000,
+      uninstallStepMs: 1_000,
+    });
+    for (const slug of ["a", "b", "c", "d", "e"]) {
+      await bounded.install(input({ slug }));
+    }
+    const ids = ["a", "b", "c", "d", "e"].map((slug) => disposableAppId("android", slug)).sort();
+    installer.onUninstall = () => timer.advanceTime(1_000);
+    const first = await bounded.uninstall(DEVICE, "android", { all: true });
+    expect(first.removed.map((entry) => entry.appId)).toEqual(ids.slice(0, 3));
+    expect(first.pending).toEqual(ids.slice(3));
+    const rest = await bounded.uninstall(DEVICE, "android", { all: true });
+    expect(rest).toEqual({
+      removed: ids.slice(3).map((appId) => ({ appId, reason: "all" })),
+      skipped: [],
+    });
+  });
+
+  test("a bulk retry tries apps it skipped last, so it reaches the pending ones", async () => {
+    const bounded = new DisposableAppManager({
+      platforms: { android: { stamper, installer } },
+      registry,
+      timer,
+      bulkUninstallBudgetMs: 2_000,
+      uninstallStepMs: 1_000,
+    });
+    const foreign = ["a", "b"].map((slug) => disposableAppId("android", slug)).sort();
+    for (const appId of foreign) {
+      installer.seed(DEVICE, appId, "someone-else");
+    }
+    await bounded.install(input({ slug: "z" }));
+    const owned = disposableAppId("android", "z");
+    installer.onInspect = () => timer.advanceTime(1_000);
+    const first = await bounded.uninstall(DEVICE, "android", { all: true });
+    expect(first.skipped.map((entry) => entry.appId)).toEqual(foreign);
+    expect(first.pending).toEqual([owned]);
+    const retry = await bounded.uninstall(DEVICE, "android", { all: true });
+    expect(retry.removed).toEqual([{ appId: owned, reason: "all" }]);
+    expect(retry.pending).toEqual([foreign[1]]);
+    expect(installer.uninstalls).toEqual([owned]);
+  });
+
+  test("bulk removal always starts one app, and fast removals all fit", async () => {
+    const tight = new DisposableAppManager({
+      platforms: { android: { stamper, installer } },
+      registry,
+      timer,
+      bulkUninstallBudgetMs: 10,
+      uninstallStepMs: 1_000,
+    });
+    await tight.install(input({ slug: "a", ttlHours: 1 }));
+    await tight.install(input({ slug: "b", ttlHours: 1 }));
+    timer.advanceTime(HOUR);
+    installer.onUninstall = () => timer.advanceTime(1);
+    const swept = await tight.uninstall(DEVICE, "android", { expired: true });
+    expect(swept.removed).toHaveLength(1);
+    expect(swept.pending).toEqual([disposableAppId("android", "b")]);
+    installer.onUninstall = undefined;
+    const fast = await manager.uninstall(DEVICE, "android", { expired: true });
+    expect(fast.removed.map((entry) => entry.appId)).toEqual([disposableAppId("android", "b")]);
+    expect(fast.pending).toBeUndefined();
   });
 
   test("uninstalling an app that is gone from the device still clears its registry entry", async () => {

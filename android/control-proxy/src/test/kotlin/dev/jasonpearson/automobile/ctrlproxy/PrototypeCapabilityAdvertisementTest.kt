@@ -44,7 +44,7 @@ class PrototypeCapabilityAdvertisementTest {
   }
 
   @Test
-  fun `advertisement adds exactly the registered capabilities and overlay needs no permission`() {
+  fun `advertisement adds exactly the registered capabilities`() {
     fun commands(platform: PrototypePlatform) =
       WebSocketServer(
           port = 0,

@@ -362,6 +362,7 @@ class WebSocketServer(
     // it expects a string and fails the whole show, and draws a role-named stop transparent, so
     // hosts refuse such a spec for a device lacking this flag.
     add("prototype_theme_modes_v1")
+    add("prototype_glass_v1")
     add("prototype_flow_grid_v1")
     // Prototype specs honour pager axis, spacing, peek padding and fixed page sizes. Hosts refuse
     // these options on older APKs, which otherwise silently render a horizontal full-page pager.
@@ -455,8 +456,7 @@ class WebSocketServer(
     // APK ignores the request field and follows the device silently, so a
     // host sends it, and expects the report, only when this flag is present.
     add("prototype_appearance_v1")
-    // show_prototype honours window.backdrop (#15126): API 31+ blur-behind, else a tonal fill; the
-    // show result reports backdrop blur or fallback.
+    // show_prototype honours window.backdrop (#15126) and reports the applied blur or tonal fill.
     add("prototype_backdrop_v1")
     add("prototype_platform_window_controls_v1")
     add("prototype_hide_keyboard_v1")

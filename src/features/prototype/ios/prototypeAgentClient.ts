@@ -82,6 +82,13 @@ export function parsePrototypeAgentStatus(value: unknown): PrototypeAgentStatus 
 export interface PrototypeAgentHandshake {
   /** Stable across socket reconnects, fresh for each disposable-app process. */
   appInstanceId?: string;
+  /** Current UI showing; remounts retain the process sequence ledger. */
+  showingId?: string;
+  /**
+   * First event sequence of the current showing. A replayed dismissal below it ended an earlier
+   * showing, so it must not end this one. Older apps omit it.
+   */
+  showingStartSequence?: number;
   agentVersion: string;
   protocolVersion: number;
   capabilities: string[];
@@ -94,8 +101,11 @@ export interface PrototypeAgentClient {
     body?: PrototypeAgentMessage,
     options?: { timeoutMs?: number },
   ): Promise<PrototypeAgentResult>;
-  /** Subscribes to `prototype_event` pushes; returns an unsubscribe function. */
-  onEvent(listener: (event: PrototypeAgentMessage) => void): () => void;
+  /**
+   * Subscribes to `prototype_event` pushes; returns an unsubscribe function. A listener returns
+   * false when it rejected the event, so a buffered subscriber does not acknowledge it.
+   */
+  onEvent(listener: (event: PrototypeAgentMessage) => unknown): () => void;
   /** A buffered subscriber accepted these events; disposable-app transports may trim replay. */
   acknowledgeEventsThrough?(sequence: number): void;
   /** Called once when the connection ends; returns an unsubscribe function. */

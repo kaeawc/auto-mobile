@@ -51,7 +51,7 @@ compilation.
 ```yaml
 automobile-tests:
   name: "AutoMobile XCTestRunner Tests"
-  runs-on: macos-26
+  runs-on: xcode-27
   needs: [build-for-testing]
   timeout-minutes: 30
   env:
@@ -60,10 +60,10 @@ automobile-tests:
   steps:
     - uses: actions/checkout@v6
 
-    - name: Select Xcode 26.2
+    - name: Select Xcode 27.2
       uses: maxim-lobanov/setup-xcode@v1
       with:
-        xcode-version: "26.2"
+        xcode-version: "27.2"
 
     - name: Setup Bun
       uses: oven-sh/setup-bun@v2
@@ -173,10 +173,10 @@ change still fetches any newly introduced dependency before the cached DerivedDa
 
 | Cache                     | Key                                                              | What it stores                                                                                                                                                                                                                                                                                              |
 | ------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SPM packages              | `macOS-spm-xctestrunner-26.6-<hash(Package.swift files)>`        | `~/Library/Caches/org.swift.swiftpm` and `~/.swiftpm/cache` (SwiftPM's global package/artifact cache); `~/.swiftpm` itself, including machine-specific `configuration/` and `security/` state, is deliberately excluded so a self-hosted runner's SwiftPM tree can never leak onto a hosted-runner fallback |
-| DerivedData intermediates | `macOS-derived-xctestrunner-26.6-<hash(CtrlProxy build inputs)>` | `/tmp/automobile-ctrl-proxy/Build` and `/tmp/automobile-ctrl-proxy/ModuleCache.noindex` build products/module cache; not `SourcePackages`                                                                                                                                                                   |
+| SPM packages              | `macOS-spm-xctestrunner-27.2-<hash(Package.swift files)>`        | `~/Library/Caches/org.swift.swiftpm` and `~/.swiftpm/cache` (SwiftPM's global package/artifact cache); `~/.swiftpm` itself, including machine-specific `configuration/` and `security/` state, is deliberately excluded so a self-hosted runner's SwiftPM tree can never leak onto a hosted-runner fallback |
+| DerivedData intermediates | `macOS-derived-xctestrunner-27.2-<hash(CtrlProxy build inputs)>` | `/tmp/automobile-ctrl-proxy/Build` and `/tmp/automobile-ctrl-proxy/ModuleCache.noindex` build products/module cache; not `SourcePackages`                                                                                                                                                                   |
 
-The restore-key prefixes retain the `26.6` toolchain segment, so a different Xcode version never
+The restore-key prefixes retain the `27.2` toolchain segment, so a different Xcode version never
 restores compiled artifacts from this lane. Source changes fall back to the prior matching-toolchain
 entry for incremental compilation.
 

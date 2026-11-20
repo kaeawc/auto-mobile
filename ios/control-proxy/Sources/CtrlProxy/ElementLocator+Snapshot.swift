@@ -40,7 +40,7 @@ extension ElementLocator {
         /// Snapshot once and tap captured screen coordinates; never query live system dialogs.
         func answerProtoViewerConfirmation(cleaningUp: Bool = false) throws {
             try catchingObjCException {
-                let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+                let springboard = XCUIApplication.withoutUIInterruptions(bundleIdentifier: "com.apple.springboard")
                 let snapshot = try springboard.snapshot()
                 for alert in self.collectAlertElements(from: snapshot) {
                     let descendants = self.protoViewerDialogNodes(alert)
@@ -193,12 +193,13 @@ extension ElementLocator {
             throws -> (alerts: [UIElementInfo], rotation: Int?)
         {
             let capture: (
-                alertSnapshots: [(snapshot: XCUIElementSnapshot, portraitHeight: Int?)],
+                alertSnapshots: [(snapshot: XCUIElementSnapshot, portraitHeight: Int?, windowFrame: CGRect)],
                 springboardFrame: CGRect, rotation: Int?
             ) = try catchingObjCException {
-                let capture = DeviceRotation.capture { () -> ([(XCUIElementSnapshot, Int?)], CGRect) in
+                let capture = DeviceRotation.capture { () -> ([(XCUIElementSnapshot, Int?, CGRect)], CGRect) in
                     guard runSnapshot else { return ([], .zero) }
-                    let freshSpringboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+                    let freshSpringboard = XCUIApplication
+                        .withoutUIInterruptions(bundleIdentifier: "com.apple.springboard")
                     guard let snapshot = try? freshSpringboard.snapshot() else { return ([], .zero) }
                     let mainDisplayId = (ObjCExceptionCatcher_displayInventory() ?? [])
                         .first { $0["isMain"]?.boolValue == true }?["displayId"]?.uint64Value
@@ -207,7 +208,7 @@ extension ElementLocator {
                             windowDisplayId: Self.displayId(of: window), mainDisplayId: mainDisplayId,
                             windowPortraitHeight: ElementBounds.clampedInt(window.frame.height)
                         )
-                        return self.collectAlertElements(from: window).map { ($0, height) }
+                        return self.collectAlertElements(from: window).map { ($0, height, window.frame) }
                     }
                     return (alerts, snapshot.frame)
                 }
@@ -232,6 +233,14 @@ extension ElementLocator {
                     keyboardFocus: keyboardFocus,
                     coordinateOffset: alertOffset
                 )
+                // An iPhone's SpringBoard alert window stays portrait over a landscape app (#18858).
+                if entry.portraitHeight == nil,
+                   let portraitWindow = PortraitSpringBoardRotation.resolve(
+                       alertWindowFrame: entry.windowFrame, appFrame: appFrame, deviceRotation: capture.rotation
+                   )
+                {
+                    return Self.rotatedIntoLandscape(alert, portraitSpringBoard: portraitWindow)
+                }
                 return Self.alertsInObservedSpace([alert], innerPanelPortraitHeight: entry.portraitHeight)[0]
             }
             return (alerts, capture.rotation)
@@ -245,7 +254,7 @@ extension ElementLocator {
             guard let bundleId = foregroundBundleId else { return nil }
             do {
                 return try catchingObjCException {
-                    XCUIApplication(bundleIdentifier: bundleId).windows.firstMatch.frame
+                    XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId).windows.firstMatch.frame
                 }
             } catch {
                 Logger(subsystem: "dev.jasonpearson.automobile", category: "ElementLocator")

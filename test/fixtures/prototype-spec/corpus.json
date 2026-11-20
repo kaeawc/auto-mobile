@@ -61,6 +61,7 @@
     "doc-example-1.json",
     "doc-example-2.json",
     "doc-example-3.json",
+    "effects-vignette-radius-boundary.json",
     "elevation-gradient-aspect-ratio.json",
     "emit-context-16-entries.json",
     "emit-context-arbitrary-names.json",
@@ -483,6 +484,7 @@
     "z-effects-all-types.json",
     "z-effects-animated-phase.json",
     "z-effects-at-limits.json",
+    "z-effects-expanded-at-limits.json",
     "z-effects-style-when.json"
   ],
   "invalid": [
@@ -851,6 +853,7 @@
     "effects-source-key.json",
     "effects-type-shader.json",
     "effects-unknown-type.json",
+    "effects-vignette-radius-too-large.json",
     "elevation-over-max.json",
     "emit-context-17-entries.json",
     "emit-context-empty-name.json",
@@ -2708,6 +2711,7 @@
     "doc-example-1.json": [],
     "doc-example-2.json": [],
     "doc-example-3.json": [],
+    "effects-vignette-radius-boundary.json": ["prototype_effects_v1"],
     "elevation-gradient-aspect-ratio.json": [],
     "emit-context-16-entries.json": ["prototype_emit_context_v1"],
     "emit-context-arbitrary-names.json": ["prototype_emit_context_v1"],
@@ -3638,6 +3642,7 @@
     "z-effects-all-types.json": ["prototype_effects_v1"],
     "z-effects-animated-phase.json": ["prototype_effects_v1"],
     "z-effects-at-limits.json": ["prototype_effects_v1"],
+    "z-effects-expanded-at-limits.json": ["prototype_effects_v1"],
     "z-effects-style-when.json": ["prototype_effects_v1"]
   }
 }

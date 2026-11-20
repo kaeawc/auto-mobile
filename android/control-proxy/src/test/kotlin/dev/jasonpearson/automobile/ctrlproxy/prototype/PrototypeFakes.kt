@@ -144,6 +144,8 @@ internal class FakePrototypeHost : PrototypeHost {
   override var isShowing = false
   override var currentPlacement: PrototypePlacement? = null
   override val isTouchThroughActive = false
+  override val appliedBackdrop: PrototypeBackdropMode?
+    get() = requests.lastOrNull()?.backdrop?.mode.takeIf { isShowing }
 
   private fun display(operation: String, request: PrototypeRequest): Boolean {
     calls += operation

@@ -747,7 +747,8 @@ struct PrototypeRepeatInstance {
             bindString("key", in: &fields)
         case .string("emit")?:
             bindEmit(&fields)
-        case .string("setData")?, .string("appendData")?, .string("prependData")?, .string("removeData")?:
+        case .string("setData")?, .string("appendData")?, .string("prependData")?, .string("upsertData")?,
+             .string("removeData")?:
             bindDataAction(&fields)
         case .string("startTimer")?:
             if case let .array(actions)? = fields["actions"] {
@@ -780,6 +781,10 @@ struct PrototypeRepeatInstance {
     /// text placeholders, `into` binds like a data path, binding objects bind like a data value,
     /// and the follow-up lists bind recursively.
     private func bindRequest(_ fields: inout [String: JSONValue]) {
+        if var selector = fields["where"]?.objectFields, let binding = selector["equals"]?.objectFields {
+            selector["equals"] = bindDataValue(binding)
+            fields["where"] = .object(selector)
+        }
         bindString("url", in: &fields)
         bindString("statusKey", in: &fields)
         if case let .string(path)? = fields["into"] { fields["into"] = .string(bindDataPath(path)) }
@@ -797,7 +802,23 @@ struct PrototypeRepeatInstance {
                 }
             })
         }
-        if case let .object(binding)? = fields["body"] { fields["body"] = bindDataValue(binding) }
+        if case var .object(binding)? = fields["body"] {
+            if let entries = binding["form"]?.objectFields {
+                binding["form"] = .object(entries.mapValues { value in
+                    value.objectFields.map(bindDataValue) ?? value
+                })
+                fields["body"] = .object(binding)
+            } else if case let .array(parts)? = binding["multipart"] {
+                binding["multipart"] = .array(parts.map { raw in
+                    guard var part = raw.objectFields else { return raw }
+                    if let value = part["value"]?.objectFields { part["value"] = bindDataValue(value) }
+                    return .object(part)
+                })
+                fields["body"] = .object(binding)
+            } else {
+                fields["body"] = bindDataValue(binding)
+            }
+        }
         for list in ["onSuccess", "onError"] {
             if case let .array(actions)? = fields[list] { fields[list] = .array(actions.map(bindAction)) }
         }

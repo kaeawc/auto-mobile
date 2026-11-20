@@ -524,3 +524,23 @@ test("CircleCI notes describe the requested scope", () => {
     "from commit statuses of iOS/mixed/unknown PR heads and main pushes; nightly pipeline not visible",
   );
 });
+
+test("a partial bundle carries its stop into the report and a banner above the tables (#18691)", () => {
+  const complete = buildReport(bundle([], []));
+  expect(complete.partial).toBeNull();
+  expect(renderMarkdown(complete)).not.toContain("Partial report");
+  const partial = {
+    reason: "budget" as const,
+    message: "API call budget of 600 reached",
+    omittedHeadShas: 4,
+    omittedRuns: 9,
+  };
+  const stopped = bundle([], []);
+  stopped.meta.partial = partial;
+  const report = buildReport(stopped);
+  expect(report.partial).toEqual(partial);
+  const text = renderMarkdown(report);
+  expect(text).toContain("> **Partial report:** the fetch stopped on the API call budget");
+  expect(text).toContain("4 head SHAs (9 runs)");
+  expect(text.indexOf("Partial report")).toBeLessThan(text.indexOf("## PR head SHAs"));
+});

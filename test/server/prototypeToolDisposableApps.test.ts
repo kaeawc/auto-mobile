@@ -13,6 +13,7 @@ import {
   registerPrototypeTools,
 } from "../../src/server/prototypeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { FakePrototypeAgentClient } from "../fakes/FakePrototypeAgentClient";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 import { FakeDisposableAppInstaller } from "../fakes/FakeDisposableAppInstaller";
@@ -25,7 +26,11 @@ import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 const HOUR = 60 * 60 * 1000;
 const android: BootedDevice = { deviceId: "apps-android", platform: "android", name: "Fake" };
-const ios: BootedDevice = { deviceId: "apps-ios", platform: "ios", name: "Fake" };
+const iphone: BootedDevice = {
+  deviceId: "00008030-001C195E0A91802E",
+  platform: "ios",
+  name: "Fake iPhone",
+};
 const specText = fs.readFileSync(
   path.join(import.meta.dir, "../fixtures/prototype-spec/valid/platform-requires.json"),
   "utf8",
@@ -45,10 +50,12 @@ describe("prototype disposable app actions (#14184)", () => {
   let restore: () => void;
   let dispose: () => void;
   let timer: FakeTimer;
+  let forgotten: [string, string][];
   let installer: FakeDisposableAppInstaller;
   let stamper: FakeDisposableAppStamper;
   beforeEach(() => {
     restore = preserveToolRegistry();
+    forgotten = [];
     timer = new FakeTimer();
     installer = new FakeDisposableAppInstaller();
     stamper = new FakeDisposableAppStamper([
@@ -61,6 +68,14 @@ describe("prototype disposable app actions (#14184)", () => {
     const proxy = new FakeCtrlProxy(timer);
     dispose = registerPrototypeTools({
       clientFactory: () => proxy,
+      disposableAppAttacher: {
+        attach: async () => new FakePrototypeAgentClient(),
+        release: async () => {},
+        dispose: async () => {},
+        forget: async (deviceId, id) => {
+          forgotten.push([deviceId, id]);
+        },
+      },
       store: new InMemoryPrototypeStatusStore(timer),
       timer,
       clock: timer,
@@ -118,6 +133,25 @@ describe("prototype disposable app actions (#14184)", () => {
     expect(installer.installs).toHaveLength(2);
   });
 
+  test("successful reinstall and uninstall forget the app attachment", async () => {
+    await call({ action: "installApp", spec, app });
+    forgotten.length = 0;
+    await call({ action: "installApp", spec, app });
+    expect(forgotten).toEqual([[android.deviceId, appId]]);
+    forgotten.length = 0;
+    await call({ action: "uninstallApp", appId });
+    expect(forgotten).toEqual([[android.deviceId, appId]]);
+  });
+
+  test("bulk expiry forgets removed apps while retaining skipped apps", async () => {
+    await call({ action: "installApp", spec, app: { ...app, ttlHours: 1 } });
+    await call({ action: "installApp", spec, app: { slug: "keep", label: "Keep", ttlHours: 0 } });
+    forgotten.length = 0;
+    timer.advanceTime(2 * HOUR);
+    await call({ action: "uninstallApp", expired: true });
+    expect(forgotten).toEqual([[android.deviceId, appId]]);
+  });
+
   test("listApps joins the registry with unregistered device packages under the prefix", async () => {
     await call({ action: "installApp", spec, app: { ...app, ttlHours: 1 } });
     const stray = disposableAppId("android", "stray");
@@ -151,12 +185,13 @@ describe("prototype disposable app actions (#14184)", () => {
     expect(outside.success).toBe(false);
     expect(outside.error).toContain("is not a disposable prototype app");
     expect(installer.uninstalls).toEqual([]);
+    expect(forgotten).toEqual([]);
   });
 
-  test("iOS refuses with an actionable message until its stamper lands", async () => {
-    const output = await call({ action: "listApps" }, ios);
+  test("installApp directs physical iPhones to ProtoViewer before stamping", async () => {
+    const output = await call({ action: "installApp", spec, app }, iphone);
     expect(output.success).toBe(false);
-    expect(output.error).toContain("not available on ios yet");
+    expect(output.error).toContain("Use ProtoViewer on a physical iPhone");
   });
 
   test("schema requires app and a spec source, and exactly one uninstall target", () => {

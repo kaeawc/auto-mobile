@@ -129,6 +129,22 @@ AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public protoco
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public static let key = "allowImportedPrototypeNetwork"
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public struct PrototypeLibraryUserDefaultsSettingStore: PrototypeLibraryNetworkSettingStore
 AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public var enabled: Bool
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public enum PrototypeLinkMatcher
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public init(path: String, query: [String: String] = [:], usedCaptures: Set<String>? = nil)
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let captures: [String: String]
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let code: String
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let entryIndex: Int
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let index: Int
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let message: String
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let path: String
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let query: [String: JSONValue]
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let query: [String: String]
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public let usedCaptures: Set<String>?
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public static func match(_ url: String, entries: [Entry]) -> Match?
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public static func validateLinkTable(_ entries: [Entry]) -> [TableError]
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public struct Entry: Sendable
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public struct Match: Codable, Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeLinkMatcher.swift: public struct TableError: Equatable, Sendable
 AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public enum PrototypePlatformPermissions
 AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public let android: PrototypeAndroidPermissionMapping
 AutoMobilePrototypeAgentCore/PrototypePlatformPermissions.swift: public let grant: String

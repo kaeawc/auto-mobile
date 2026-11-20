@@ -49,6 +49,7 @@ enum PrototypeAgentProtocol {
         dataActionsV2Capability,
         networkCapability,
         networkDeviceCapability,
+        networkUploadCapability,
         textFieldOptionsCapability,
         gesturesCapability,
         swipeActionsCapability,
@@ -201,6 +202,7 @@ enum PrototypeAgentProtocol {
     /// `via: "device"`: the agent makes the call itself through its own HTTP client. Same name as the
     /// CtrlProxy capability.
     static let networkDeviceCapability = "prototype_network_device_v1"
+    static let networkUploadCapability = "prototype_network_upload_v1"
     /// Text field options (#12066): keyboard, secure and multiline input, drawn labels and chrome,
     /// supporting text and a UTF-16 length limit with counter. Same name as the CtrlProxy capability.
     static let textFieldOptionsCapability = "prototype_text_field_options_v1"

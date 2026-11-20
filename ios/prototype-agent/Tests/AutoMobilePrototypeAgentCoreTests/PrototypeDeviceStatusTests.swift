@@ -3,29 +3,43 @@ import XCTest
 
 private final class DeviceStatusTimer: PrototypeTimerHandle {
     let fire: () -> Void
+    let due: Int
     var cancelled = false
-    init(_ fire: @escaping () -> Void) { self.fire = fire }
+    init(due: Int, _ fire: @escaping () -> Void) {
+        self.due = due
+        self.fire = fire
+    }
+
     func cancel() { cancelled = true }
 }
 
-private final class DeviceStatusClock: PrototypeClock {
+final class DeviceStatusClock: PrototypeClock {
     var nowMilliseconds = 0
     private(set) var delays: [Int] = []
+    private(set) var firedAt: [Int] = []
     private var timers: [DeviceStatusTimer] = []
     var live: Int { timers.filter { !$0.cancelled }.count }
 
     func schedule(afterMilliseconds delay: Int, _ fire: @escaping () -> Void) -> any PrototypeTimerHandle {
-        let timer = DeviceStatusTimer(fire)
+        let timer = DeviceStatusTimer(due: nowMilliseconds + delay, fire)
         delays.append(delay)
         timers.append(timer)
         return timer
     }
 
-    func elapse() {
-        for timer in timers where !timer.cancelled {
+    func advance(to target: Int) {
+        precondition(target >= nowMilliseconds)
+        while let timer = timers.filter({ !$0.cancelled && $0.due <= target }).min(by: { $0.due < $1.due }) {
+            nowMilliseconds = timer.due
             timer.cancel()
             timer.fire()
+            firedAt.append(nowMilliseconds)
         }
+        nowMilliseconds = target
+    }
+
+    func elapse() {
+        advance(to: timers.filter { !$0.cancelled }.map(\.due).max() ?? nowMilliseconds)
     }
 }
 
@@ -35,12 +49,16 @@ final class FakeDeviceStatusSource: PrototypeDeviceStatusSource {
     private(set) var stops = 0
     private(set) var update: (@MainActor @Sendable ([String: JSONValue]) -> Void)?
     let initial: [String: JSONValue]
-    init(_ initial: [String: JSONValue]) { self.initial = initial }
+    private let suppliesBaseline: Bool
+    init(_ initial: [String: JSONValue], suppliesBaseline: Bool = true) {
+        self.initial = initial
+        self.suppliesBaseline = suppliesBaseline
+    }
 
     func start(_ update: @escaping @MainActor @Sendable ([String: JSONValue]) -> Void) {
         starts += 1
         self.update = update
-        update(initial)
+        if suppliesBaseline { update(initial) }
     }
 
     func stop() {

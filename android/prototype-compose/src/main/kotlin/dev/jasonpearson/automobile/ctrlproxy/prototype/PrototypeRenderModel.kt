@@ -166,6 +166,7 @@ fun mapPrototypeSpec(
       dev.jasonpearson.automobile.protocol.PrototypeStrings.resolve(
         PrototypeDataResolver.resolve(
           spec.copy(root = PrototypeRouteRuntime.bindRoot(spec.root, stacks)),
+          shield = true,
         ),
         locales,
       )
@@ -242,7 +243,20 @@ internal class PrototypeNodeMapping(
       data,
       state.mapValues { EmitContextResolver.scalar(it.value) },
     ),
+  /** Whether inserted values may carry a shield; null computes it from data, state and derived. */
+  private val shieldedInputs: Boolean? = null,
 ) {
+  private val inputsHaveBrace by lazy {
+    shieldedInputs
+      ?: (PrototypeTextShield.hasBrace(data) ||
+        derivedValues.values.any(PrototypeTextShield::hasBrace) ||
+        state.values.any { (it as? PrototypeScalar.Text)?.value?.contains('{') == true })
+  }
+  private var repeatItemsHaveBrace = false
+  /** Only then can a node hold a shield (#18628); other specs skip the unshield pass. */
+  private val mayShield: Boolean
+    get() = repeatItemsHaveBrace || inputsHaveBrace
+
   private val derivedState by lazy {
     derive
       .map { (name, entry) ->
@@ -265,6 +279,7 @@ internal class PrototypeNodeMapping(
     pagerState: Map<String, PrototypeScalar>? = null,
     staggerDelayMs: Int = 0,
   ): PrototypeRenderNode {
+    if (!repeatItemsHaveBrace && prototypeRepeatItemsHaveBrace(node)) repeatItemsHaveBrace = true
     val localState =
       derivedState +
         (if (node is PrototypePagerNode)
@@ -353,19 +368,23 @@ internal class PrototypeNodeMapping(
         node.safeAreaPadding,
         prototypeNodeIconName(node),
         children,
-        if (node is PrototypeImageNode && node.url != null) node.copy(url = remoteUrl)
-        else if (derive.isEmpty()) node
-        else
-          PrototypeDerivedText.bindNode(node) {
-            interpolatePrototypeText(it, derivedState)
-          },
+        (if (node is PrototypeImageNode && node.url != null) node.copy(url = remoteUrl)
+          else if (derive.isEmpty()) node
+          else
+            PrototypeDerivedText.bindNode(node) {
+              interpolatePrototypeText(it, derivedState, readLater = true)
+            })
+          .let { if (mayShield) PrototypeTextShield.unshieldNode(it) else it },
         path,
         (node as? PrototypePagerNode)?.let { pages[it.id] } ?: 0,
         selected.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
         prototypeOpenWhen(node)?.let { state[it.key] == PrototypeScalar.BooleanValue(it.equals) }
           ?: false,
         enabled = node.enabledCondition()?.holds(localState, validity) ?: true,
-        errorMessage = prototypeShownError(node, localState, shownErrors, validity),
+        // A shown error is read as is, so an inserted value in it loses its shield here.
+        errorMessage =
+          prototypeShownError(node, localState, shownErrors, validity)
+            ?.let(PrototypeTextShield::unshield),
         isError = prototypeIsError(node, localState, shownErrors, validity),
         checked =
           (prototypeToggleKey(node)
@@ -443,6 +462,7 @@ internal class PrototypeNodeMapping(
                   derive = derive,
                   derivedValues = derivedValues,
                   formatter = formatter,
+                  shieldedInputs = mayShield,
                 )
                 .map(
                   bindPrototypeListRow(list, item, index),
@@ -638,22 +658,32 @@ private fun prototypeStateInt(state: Map<String, PrototypeScalar>, key: String?)
  * Tokens (`{key}` with an ASCII identifier key) are found by a plain string scan rather than a
  * regex: Android's ICU regex engine rejects a lone `}` that the desktop JVM accepts, which broke
  * every prototype `show` on a device (#9947) while the JVM unit tests stayed green.
+ *
+ * Values inserted by earlier passes (data, rows, derived) are shielded and stay literal; this pass
+ * removes the shield (#18628). Pass [readLater] when another pass will scan the result: inserted
+ * values are then shielded and earlier shields are kept.
  */
 internal fun interpolatePrototypeText(
   text: String,
   state: Map<String, PrototypeScalar>,
   inPager: Boolean = false,
   derivedOnly: Boolean = false,
+  readLater: Boolean = false,
 ): String {
   val out = StringBuilder(text.length)
   var substitutedLength = 0
+  var literalStart = 0
   var index = 0
+  fun appendLiteral(until: Int) {
+    val literal = text.substring(literalStart, until)
+    out.append(if (readLater) literal else PrototypeTextShield.unshield(literal))
+  }
   while (index < text.length) {
     val end = interpolationTokenEnd(text, index)
     if (end < 0) {
-      out.append(text[index])
       index++
     } else {
+      appendLiteral(index)
       val token = text.substring(index, end)
       val value =
         if (derivedOnly && !token.startsWith("{derived:")) null
@@ -663,14 +693,16 @@ internal fun interpolatePrototypeText(
           value.length <=
             PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH - substitutedLength
       ) {
-        out.append(value)
+        out.append(if (readLater) PrototypeTextShield.shield(value) else value)
         substitutedLength += value.length
       } else {
         out.append(token)
       }
       index = end
+      literalStart = end
     }
   }
+  appendLiteral(text.length)
   return out.toString()
 }
 

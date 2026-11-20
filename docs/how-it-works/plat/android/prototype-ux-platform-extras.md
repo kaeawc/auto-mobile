@@ -61,7 +61,7 @@ zero for JPY). Number grouping true/default respects the locale's minimum groupi
 digits; false disables grouping. Compact, currency, and percent do too. Locale defaults to the device locale; timeZone defaults to the
 device zone. Overrides accept a simple BCP 47 tag of at most 35 characters and an
 IANA zone identifier of at most 128 characters. Shape validation does not prove
-that the current engine supports a locale or zone.
+engine support for a locale or zone.
 
 Epoch milliseconds must be finite integers within the Date range. Strings are
 `YYYY-MM-DD` (midnight UTC) or `YYYY-MM-DDTHH:mm:ss[.fraction]Z` / a signed
@@ -70,24 +70,19 @@ leap second 60 are rejected. Invalid calendar dates, unzoned date-times, wrong t
 missing pointers display as the empty string. The host's pure formatter returns
 undefined for invalid inputs; its resolver converts that to an empty string.
 
-Relative formatting takes an injected nowMs snapshot; it never reads the real
-clock. Choose the largest elapsed threshold not exceeding abs(input-nowMs):
+Relative formatting reads an injected nowMs snapshot, never the clock. Choose the largest elapsed threshold not exceeding abs(input-nowMs):
 year=365 days, month=30 days, day=24 hours, hour=60 minutes, minute=60 seconds,
 second=1000 ms. Truncate toward zero. Under one second uses localized "now".
-There are no weeks or calendar-month arithmetic. Callers resolve entry locale
-and zone overrides before formatting, and keep the clock snapshot fixed when
-reproducible output is required.
+There are no weeks or calendar-month arithmetic.
 
 `prototype_format_v1` gates either derive map, including empty maps, before show
-or the complete patch result. Renderers advertise it only once implemented. Shared `derive/formatters.json` cases define parity: normalize
+or the complete patch result. Shared `derive/formatters.json` cases define parity: normalize
 U+202F and U+00A0 to plain space before comparisons. Exact cases pin supported
 English output; structural cases allow documented CLDR differences in foreign
 currency symbols, narrow relative abbreviations, zero-relative wording and
-non-English data. Add engine overrides only for a measured platform
-difference; the fixture note records the divergence policy and unit thresholds.
+non-English data. The fixture note records the divergence policy and unit thresholds.
 
-`dateTime`, `duration`, `plural` and `fileSize` are not format kinds (invalid). No dependencies are needed: the host uses Intl.NumberFormat,
-Intl.DateTimeFormat and Intl.RelativeTimeFormat.
+`dateTime`, `duration`, `plural` and `fileSize` are not format kinds (invalid).
 
 ## Platform namespaces (#15257)
 
@@ -149,7 +144,7 @@ Increase Contrast. On iOS 17–25 the device does not advertise
 `prototype_glass_v1`, so the host refuses glass there: there is no simulated
 translucent fill or material substitute. Android advertises the capability on every API level:
 API 31 and later blur earlier sibling layers (Haze) and older devices draw a tonal scrim instead.
-A glass node without `cornerRadius` is a capsule on Android as on iOS. An Android
+An Android
 renderer advertising glass must report any approximation (clear variant,
 ignored `interactive`) in `platformNotes`.
 
@@ -172,10 +167,8 @@ color and border color use critically damped effects springs.
 Compose uses `spring(dampingRatio, stiffness)`. SwiftUI uses
 `interpolatingSpring(mass: 1, stiffness: k, damping: 2 * dampingRatio * sqrt(k))`,
 so both renderers use the same physical spring. Reduced motion snaps spatial
-changes and retains effects; motion off snaps everything. Existing motion v2/v3
-capability requirements still apply; iOS advertises the token capability but
-continues to refuse those broader features until its corresponding capabilities
-are available.
+changes and retains effects; motion off snaps everything. iOS advertises the token capability
+but still refuses the motion v2/v3 features it lacks.
 
 ## Disposable apps
 
@@ -200,19 +193,21 @@ replace an authenticated live peer. Status and patch conflicts redact `storage.s
 
 Events replay at least once. Activities rebind targets to a process-scoped attach listener.
 The `appInstanceId`, sequence ledger and unacknowledged events persist in app storage across
-process kills. The journal records the package's last update time, and the app discards a journal
-written under another one, so an in-place reinstall (`adb install -r`, which keeps app storage)
-starts a fresh identity and ledger; clearing app data deletes it. The journal is saved off the main
-thread, at most once per event, and a frame reaches the host only after the state it exposes is saved.
-`hello_result` reports identity and an optional
-`showingId`, which changes when the Activity mounts a new runtime. A same-process remount clears
-the dismissal and keeps pending events. Older apps without `showingId` keep process-only identity.
-One daemon-host attacher serves every MCP registration and keeps app/device cursors. `hello` sends
-`appInstanceId` and `lastAcknowledgedSequence` (initially zero), and `{type: "ack", sequence,
-appInstanceId}` acknowledges matching instances after subscriber delivery. Epochs initialize before
-replay. Status reconciles only its app. The 256-event buffer closes on overflow for replay. Device
-cleanup and host disposal close sockets, remove adb forwards and forget device cursors. Uninstall
-and reinstall each forget only that app's cursors.
+process kills. The journal records the package's last update time and is discarded under another
+one, so `adb install -r` (which keeps app storage) starts a fresh identity and ledger. Clearing app
+data deletes it. Saves run off the main thread, at most once per event; a frame reaches the host
+only after the write of the state it exposes completes. A snapshot over the 4 MiB journal limit
+evicts its oldest pending events as dropped, so the ledger always saves.
+
+`hello_result` reports identity and an optional `showingId`, which changes when the Activity
+mounts a new runtime. A same-process remount clears the dismissal and keeps pending events. Older
+apps without `showingId` keep process-only identity. One daemon-host attacher serves every MCP
+registration and keeps app/device cursors. `hello` sends `appInstanceId` and
+`lastAcknowledgedSequence` (initially zero); `{type: "ack", sequence, appInstanceId}` acknowledges
+matching instances after subscriber delivery. Epochs initialize before replay. Status reconciles
+only its app. The 256-event buffer closes on overflow for replay. Device cleanup and host disposal
+close sockets, remove adb forwards and forget device cursors. Uninstall and reinstall each forget
+only that app's cursors.
 
 The app stores up to 200 unacknowledged events and replays them on the next hello. The host
 de-duplicates replays by sequence within the connection and coordinator. The app drops the oldest
@@ -235,18 +230,18 @@ overflow or blocked writes close the peer, and events and requests continue with
 - **Template.** The host picks the smallest flavor whose capabilities cover
   `requiredPrototypeCapabilities(spec)`. If none does, it refuses and names the missing capabilities
   and the closest flavor.
-- **Registry.** The registry file `disposable-apps.json` under the AutoMobile data dir keys records
+- **Registry.** `disposable-apps.json` under the AutoMobile data dir keys records
   by device id. Each record holds appId, slug, platform, label, spec sha256, template, signer,
-  installedAt and expiresAt. The host serializes writes and makes them atomic. It skips a corrupt
-  file or record with a warning. An install writes its record, with the new expiresAt, as soon as
-  the package is on the device and before the host applies permissions. A permission failure then surfaces as an error saying the app is
-  installed without its permissions, and the sweep still sees the current TTL.
+  installedAt and expiresAt. Writes are serialized and atomic. A corrupt file or
+  record is skipped with a warning. An install writes its record and new expiresAt once the package
+  is on the device, before permissions apply. A permission failure then reports the app installed
+  without its permissions, and the sweep still sees the current TTL.
 - **Lifecycle.** `ttlHours` defaults to 72, accepts 0 to 720, and 0 means no expiry. Re-installing
   a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
   uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs
   from the host's disposable-app key: one requested id is refused with an error, and in a bulk
-  removal the package is reported under `skipped`. Each removal is logged at `warn`. An app that
-  is already gone from the device still has its registry record cleared.
+  removal the package is reported under `skipped`. A record whose app is already gone from the
+  device is still cleared.
 - **Device commands.** The Android installer runs `adb install -r` (then `pm clear` for `reset`),
   `pm grant` per granted manifest permission, and `pm revoke` plus the `user-set user-fixed` flags
   per denied one, so a denial reads as blocked with no dialog. It refuses a grant and a deny that

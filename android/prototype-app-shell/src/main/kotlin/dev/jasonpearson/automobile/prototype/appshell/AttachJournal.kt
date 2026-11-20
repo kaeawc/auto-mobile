@@ -41,12 +41,13 @@ internal object NoAttachJournal : AttachJournal {
 /**
  * Saves journal snapshots on [executor], never on the recording thread. A write always saves the
  * newest snapshot, so saves stay in order and a burst costs one rewrite. Each snapshot gets a
- * version; [awaitSaved] lets delivery hold a frame until the state it exposes is on disk, so a
- * restored process never reissues a sequence the host has seen.
+ * version; [awaitSaved] lets delivery hold a frame until the write of the state it exposes
+ * completes, so a restored process never reissues a sequence the host has seen.
  */
 internal class AttachJournalWriter(
   private val journal: AttachJournal,
   private val executor: Executor,
+  private val log: (String) -> Unit = {},
 ) {
   private val lock = Any()
   private var unsaved: AttachJournalState? = null
@@ -104,8 +105,19 @@ internal class AttachJournalWriter(
           next to recorded
         }
       // FileAttachJournal logs a failed save; delivery continues rather than stalling forever.
-      journal.save(state)
+      saveLogged(state)
       saved.update { maxOf(it, through) }
+    }
+  }
+
+  // An unexpected failure must not leave draining set, which would hold every later frame.
+  @Suppress("TooGenericExceptionCaught") // Any journal failure shares this recovery boundary.
+  private fun saveLogged(state: AttachJournalState) {
+    try {
+      journal.save(state)
+    } catch (error: RuntimeException) {
+      // Name only the type: the message may carry event payload.
+      log("Could not save attach journal: ${error.javaClass.simpleName}")
     }
   }
 }
@@ -118,6 +130,7 @@ internal class FileAttachJournal(
   file: File,
   private val install: String,
   private val log: (String) -> Unit,
+  private val maxBytes: Int = MAX_BYTES,
 ) : AttachJournal {
   private val target = file.absoluteFile
   private val temp = target.resolveSibling("${target.name}.tmp")
@@ -147,7 +160,7 @@ internal class FileAttachJournal(
   private fun readDocument(): String =
     Files.newByteChannel(target.toPath()).use { channel ->
       val size = channel.size()
-      if (size > MAX_BYTES) throw IOException("Attach journal exceeds its size limit")
+      if (size > maxBytes) throw IOException("Attach journal exceeds its size limit")
       val bytes = ByteArray(size.toInt())
       DataInputStream(Channels.newInputStream(channel)).readFully(bytes)
       Charsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString()
@@ -156,23 +169,7 @@ internal class FileAttachJournal(
   @Synchronized
   override fun save(state: AttachJournalState) {
     try {
-      val document =
-        JournalDocument(
-          install,
-          state.appInstanceId,
-          state.showing,
-          state.lastSequence,
-          state.dropped,
-          state.pending,
-        )
-      val bytes =
-        attachJson
-          .encodeToString(JournalDocument.serializer(), document)
-          .toByteArray(Charsets.UTF_8)
-      if (bytes.size > MAX_BYTES || state.pending.size > AppAttachAgent.MAX_PENDING_EVENTS) {
-        throw IOException("Attach journal exceeds its size limit")
-      }
-      replace(bytes)
+      replace(encodeFitting(state))
     } catch (_: IOException) {
       log("Could not save attach journal")
     } catch (_: IllegalArgumentException) {
@@ -181,6 +178,51 @@ internal class FileAttachJournal(
       log("Could not write attach journal")
     }
   }
+
+  /**
+   * Evicts the oldest pending events, counted as dropped, until the snapshot fits, so the sequence
+   * counter is always saved: a restored counter below the host cursor would fail its hello ack.
+   */
+  private fun encodeFitting(state: AttachJournalState): ByteArray {
+    var pending = state.pending.takeLast(AppAttachAgent.MAX_PENDING_EVENTS)
+    var bytes = encode(state, pending, state.pending.size - pending.size)
+    if (bytes.size > maxBytes && pending.isNotEmpty()) {
+      // Estimate from per-event sizes so a large queue costs a few encodes, not one per event.
+      val excess = bytes.size - maxBytes
+      // Each event also frees its separating comma.
+      val freed = pending.map { encodeEvent(it).size + 1 }.runningReduce(Int::plus)
+      val evict = freed.indexOfFirst { it >= excess } + 1
+      pending = pending.drop(if (evict == 0) pending.size else evict)
+      bytes = encode(state, pending, state.pending.size - pending.size)
+      while (bytes.size > maxBytes && pending.isNotEmpty()) {
+        pending = pending.drop(1)
+        bytes = encode(state, pending, state.pending.size - pending.size)
+      }
+    }
+    if (bytes.size > maxBytes) throw IOException("Attach journal exceeds its size limit")
+    if (pending.size < state.pending.size) {
+      log("Attach journal dropped ${state.pending.size - pending.size} oldest pending events to fit")
+    }
+    return bytes
+  }
+
+  private fun encode(state: AttachJournalState, pending: List<PrototypeEvent>, evicted: Int) =
+    attachJson
+      .encodeToString(
+        JournalDocument.serializer(),
+        JournalDocument(
+          install,
+          state.appInstanceId,
+          state.showing,
+          state.lastSequence,
+          state.dropped + evicted,
+          pending,
+        ),
+      )
+      .toByteArray(Charsets.UTF_8)
+
+  private fun encodeEvent(event: PrototypeEvent) =
+    attachJson.encodeToString(WebSocketResponse.serializer(), event).toByteArray(Charsets.UTF_8)
 
   private fun replace(bytes: ByteArray) {
     try {

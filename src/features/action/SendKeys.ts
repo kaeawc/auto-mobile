@@ -397,6 +397,8 @@ export interface SendKeysTextClient {
     },
   ): Promise<TextActionResult>;
   clear(signal?: AbortSignal): Promise<TextActionResult>;
+  /** iOS only: taps a default-display point, e.g. to dismiss the keyboard introduction. */
+  tapPoint?(point: { x: number; y: number }, signal?: AbortSignal): Promise<boolean>;
   ime(action: ImeAction, signal?: AbortSignal, onDispatch?: () => void): Promise<TextActionResult>;
   supportsImeCommit(): Promise<boolean>;
   supportsImeKeyEvents(): Promise<boolean>;

@@ -12,6 +12,7 @@ To add one, copy the [template](template.md).
 
 | Date       | Kind     | Entry                                                                                                                              |
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-11-20 | decision | [Fixture capture mode](2026-11-20-fixture-capture-mode.md)                                                                         |
 | 2026-11-19 | decision | [Committed page bundle and one export budget](2026-11-19-prototype-web-page-bundle.md)                                             |
 | 2026-11-19 | decision | [Headless CarPlay on TVOut with a StarkConfig](2026-11-19-headless-carplay-tvout-stark.md)                                         |
 | 2026-11-18 | decision | [Tasks eligibility from measured tool durations](2026-11-18-tasks-eligibility-from-measured-durations.md)                          |

@@ -65,6 +65,7 @@ portable test/features/action/sendkeys/IosSdkTextRouting.test.ts        # sendKe
 portable test/features/action/SendKeys.iosSdkBridge.test.ts              # sendKeys executor over a fake router
 portable test/features/observe/collectors/IosObservationCollector.sdkBridge.test.ts # collector merge over fakes
 portable test/features/observe/collectors/IosObservationCollector.sdkWeb.test.ts # collector web merge over fakes
+portable test/features/observe/iosObserveRotation.test.ts # pure rotation resolver over a captured Duo fixture; no iOS host
 portable test/features/prototype/prototypeIosSpecContract.test.ts        # generator output equals the embedded Swift contract file
 portable test/features/prototype/prototypeIosIconSymbols.test.ts         # schema table equals generated Swift symbols
 portable test/features/storage/iosStorageDiscovery.test.ts           # pure parsing of the SDK storage capability payload

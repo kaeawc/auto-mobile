@@ -13,6 +13,7 @@ import type { BootedDevice } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { AwaitIdle } from "../../../src/features/observe/AwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -43,7 +44,7 @@ function setup() {
   timer.enableAutoAdvance();
   // An empty display list skips the existence check; display 3 is naturally portrait.
   adb.setCommandResponse("shell wm size -d 3", createExecResult("Physical size: 1080x1920", ""));
-  return { adb, timer, rotate: new Rotate(device, { adb, timer }) };
+  return { adb, timer, rotate: new Rotate(device, { adb, timer, xrDetector: new FakeAndroidXrDetector() }) };
 }
 
 const dumpsysCalls = (adb: FakeAdbExecutor) =>
@@ -164,7 +165,7 @@ describe("Rotate on a default display that ignores user_rotation (am-flip-6p7 O1
       "shell settings get system accelerometer_rotation",
       createExecResult("1", ""),
     );
-    const rotate = new Rotate(device, { adb, timer });
+    const rotate = new Rotate(device, { adb, timer, xrDetector: new FakeAndroidXrDetector() });
     const observe = new FakeObserveScreen();
     observe.enableAutoVaryHierarchy();
     observe.setObserveResult(() =>

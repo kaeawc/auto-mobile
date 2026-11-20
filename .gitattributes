@@ -351,3 +351,4 @@ test/fixtures/android-xr-sendkeys/*.txt text eol=lf
 test/fixtures/observe-output/compose-control-shapes-17955/*.json text eol=lf
 test/fixtures/observe-output/compose-interop-3183/*.json text eol=lf
 test/fixtures/observe-output/swipeon-container-floating-bar-18338/*.json text eol=lf
+test/fixtures/prototype-spec/data/generated-values.json text eol=lf

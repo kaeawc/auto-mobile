@@ -2523,6 +2523,7 @@ data class PrototypeCondition(
   val startsWith: PrototypeScalar? = null,
   val lengthGt: Int? = null,
   val lengthLt: Int? = null,
+  val derived: String? = null,
 )
 
 @Serializable

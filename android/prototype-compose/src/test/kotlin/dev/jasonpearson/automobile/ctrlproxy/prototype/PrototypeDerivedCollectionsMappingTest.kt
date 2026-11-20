@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
+import java.io.File
 import kotlinx.serialization.json.*
 import kotlinx.serialization.json.Json
 import org.junit.Assert.*
@@ -16,6 +17,68 @@ class PrototypeDerivedCollectionsMappingTest {
     fun warm() {
       PrototypeDerivedCollectionsMappingTest()
         .`filter keeps keyed identities and unrelated render nodes`()
+    }
+  }
+
+  @Test
+  fun `shared derived conditions follow recomputed raw values`() {
+    val file =
+      generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
+        .map { File(it, "test/fixtures/prototype-spec/derive/conditions.json") }
+        .first { it.isFile }
+    val fixture = specJson.parseToJsonElement(file.readText()).jsonObject
+    val spec = specJson.decodeFromJsonElement<PrototypeSpec>(fixture.getValue("spec"))
+    val mapper = PrototypeRenderMapper(FakePrototypeValueFormatter())
+    for (entry in fixture.getValue("changes").jsonArray) {
+      val change = entry.jsonObject
+      val state =
+        specJson.decodeFromJsonElement<Map<String, PrototypeScalar>>(change.getValue("state"))
+      val expected = change.getValue("visible").jsonArray.map { it.jsonPrimitive.boolean }
+      val root = mapper.map(spec.copy(state = state), emptyMap()).root
+      assertEquals(expected, root.children.map { it.visible })
+    }
+  }
+
+  @Test
+  fun `shared derived condition inside a lazy row follows derived values`() {
+    val file =
+      generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
+        .map { File(it, "test/fixtures/prototype-spec/derive/conditions.json") }
+        .first { it.isFile }
+    val fixture =
+      specJson.parseToJsonElement(file.readText()).jsonObject.getValue("lazyRow").jsonObject
+    val spec = specJson.decodeFromJsonElement<PrototypeSpec>(fixture.getValue("spec"))
+    val mapper = PrototypeRenderMapper(FakePrototypeValueFormatter())
+    for (entry in fixture.getValue("changes").jsonArray) {
+      val change = entry.jsonObject
+      val state =
+        specJson.decodeFromJsonElement<Map<String, PrototypeScalar>>(change.getValue("state"))
+      val expected = change.getValue("visible").jsonArray.map { it.jsonPrimitive.boolean }
+      val list = mapper.map(spec.copy(state = state), emptyMap()).root.list!!
+      assertEquals(expected, list.rows.mapIndexed { index, row -> list.render(row, index).visible })
+    }
+  }
+
+  @Test
+  fun `shared derived conditions on a lazy row sheet and its button follow derived values`() {
+    val file =
+      generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
+        .map { File(it, "test/fixtures/prototype-spec/derive/conditions.json") }
+        .first { it.isFile }
+    val fixture =
+      specJson.parseToJsonElement(file.readText()).jsonObject.getValue("lazyRowModal").jsonObject
+    val spec = specJson.decodeFromJsonElement<PrototypeSpec>(fixture.getValue("spec"))
+    val mapper = PrototypeRenderMapper(FakePrototypeValueFormatter())
+    for (entry in fixture.getValue("changes").jsonArray) {
+      val change = entry.jsonObject
+      val state =
+        specJson.decodeFromJsonElement<Map<String, PrototypeScalar>>(change.getValue("state"))
+      val sheets = modalPrototypeSheets(mapper.map(spec.copy(state = state), emptyMap()).root)
+      assertEquals(change.getValue("sheets").jsonPrimitive.int, sheets.size)
+      assertEquals(
+        change.getValue("enabled").jsonArray.map { it.jsonPrimitive.boolean },
+        sheets.map { it.children.single().enabled },
+      )
     }
   }
 

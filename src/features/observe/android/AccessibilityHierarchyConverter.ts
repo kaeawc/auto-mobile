@@ -6,6 +6,7 @@ import { logger } from "../../../utils/logger";
 import { parsePrototypeHiddenReason } from "../../prototype/prototypeHidden";
 import { linkWindowRoots } from "../linkWindowRoots";
 import { normalizeHierarchyOptionalFields } from "../truncationReasons";
+import { clipContentHiddenRegions } from "./clipContentHiddenRegions";
 import { applyStableViewIdRewrites, assignStableViewIds } from "./StableNodeIdentity";
 import type { AccessibilityHierarchy, AccessibilityNode, HierarchyDelegateContext } from "./types";
 
@@ -64,7 +65,10 @@ export class AccessibilityHierarchyConverter {
                 ),
               }
             : {}),
-          contentHiddenRegions: accessibilityHierarchy.contentHiddenRegions,
+          contentHiddenRegions: clipContentHiddenRegions(
+            accessibilityHierarchy.contentHiddenRegions,
+            accessibilityHierarchy,
+          ),
           intentChooserDetected: accessibilityHierarchy.intentChooserDetected,
           notificationPermissionDetected: accessibilityHierarchy.notificationPermissionDetected,
           ctrlProxyIncomplete: accessibilityHierarchy.ctrlProxyIncomplete,
@@ -125,7 +129,10 @@ export class AccessibilityHierarchyConverter {
               ),
             }
           : {}),
-        contentHiddenRegions: accessibilityHierarchy.contentHiddenRegions,
+        contentHiddenRegions: clipContentHiddenRegions(
+          accessibilityHierarchy.contentHiddenRegions,
+          { ...accessibilityHierarchy, hierarchy: convertedHierarchy },
+        ),
         intentChooserDetected: accessibilityHierarchy.intentChooserDetected,
         notificationPermissionDetected: accessibilityHierarchy.notificationPermissionDetected,
         "accessibility-focused-element": accessibilityFocusedElement,

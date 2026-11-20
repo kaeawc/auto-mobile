@@ -233,27 +233,34 @@ final class CarPlayTapTests: XCTestCase {
         XCTAssertEqual(Set(tapped.keys), ["x", "y", "screenID", "screenType", "target", "width", "height"])
     }
 
+    private func assertRefused(
+        _ name: String,
+        _ code: CarPlayErrorCode,
+        point: CGPoint = CGPoint(x: 1, y: 1),
+        configure: (FakeScreenBackend) -> Void = { _ in }
+    ) {
+        let screens = poweredScreens()
+        configure(screens)
+        let hid = FakeHIDBackend()
+        XCTAssertThrowsError(try controller(screens, hid).tap(udid: "d", x: point.x, y: point.y), name) {
+            XCTAssertEqual(($0 as? CarPlayPowerError)?.code, code, name)
+        }
+        XCTAssertEqual(hid.calls, [], name)
+    }
+
     func testRefusesWithoutSendingAnything() {
-        let cases: [(String, (FakeScreenBackend) -> Void, Double, Double, CarPlayErrorCode)] = [
-            ("iOS 27", { $0.device = SimulatorDevice(runtimeVersion: "27.0", dataPath: "/d") }, 1, 1, .unsupportedRuntime),
-            ("iOS 18", { $0.device = SimulatorDevice(runtimeVersion: "18.6", dataPath: "/d") }, 1, 1, .unsupportedRuntime),
-            ("no TVOut", { $0.before = [FakeScreenBackend.lcd, FakeScreenBackend.wireless] }, 1, 1, .noCarPlayScreen),
-            ("powered off", { $0.before = [FakeScreenBackend.tvOut(power: 0)] }, 1, 1, .carPlayNotPowered),
-            ("external display type", {
-                $0.before = [SimulatorScreen(id: 2, name: "TVOut", screenType: 3, powerState: 1, width: 800, height: 480)]
-            }, 1, 1, .unsupportedScreenType),
-            ("x at width", { _ in }, 800, 1, .usage),
-            ("negative y", { _ in }, 1, -1, .usage),
-            ("NaN", { _ in }, .nan, 1, .usage),
-        ]
-        for (name, configure, x, y, code) in cases {
-            let screens = poweredScreens()
-            configure(screens)
-            let hid = FakeHIDBackend()
-            XCTAssertThrowsError(try controller(screens, hid).tap(udid: "d", x: x, y: y), name) {
-                XCTAssertEqual(($0 as? CarPlayPowerError)?.code, code, name)
+        for version in ["27.0", "18.6"] {
+            assertRefused("iOS \(version)", .unsupportedRuntime) {
+                $0.device = SimulatorDevice(runtimeVersion: version, dataPath: "/d")
             }
-            XCTAssertEqual(hid.calls, [], name)
+        }
+        assertRefused("no TVOut", .noCarPlayScreen) { $0.before = [FakeScreenBackend.lcd, FakeScreenBackend.wireless] }
+        assertRefused("powered off", .carPlayNotPowered) { $0.before = [FakeScreenBackend.tvOut(power: 0)] }
+        assertRefused("external display type", .unsupportedScreenType) {
+            $0.before = [SimulatorScreen(id: 2, name: "TVOut", screenType: 3, powerState: 1, width: 800, height: 480)]
+        }
+        for point in [CGPoint(x: 800, y: 1), CGPoint(x: 1, y: -1), CGPoint(x: Double.nan, y: 1)] {
+            assertRefused("point \(point)", .usage, point: point)
         }
     }
 

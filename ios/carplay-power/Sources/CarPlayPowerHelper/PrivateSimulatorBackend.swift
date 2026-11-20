@@ -254,7 +254,8 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend, CarPlayHIDBackend {
         typealias AllocCall = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>?
         typealias InitCall = @convention(c) (
             AnyObject, Selector, AnyObject, AutoreleasingUnsafeMutablePointer<NSError?>
-        ) -> Unmanaged<AnyObject>?
+        )
+            -> Unmanaged<AnyObject>?
         let alloc = unsafeBitCast(method_getImplementation(allocMethod), to: AllocCall.self)
         guard let allocated = alloc(hidClass as AnyObject, NSSelectorFromString(allocName)) else {
             throw unavailable("\(className).\(allocName)")

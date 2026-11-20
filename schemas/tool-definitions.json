@@ -191,7 +191,7 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -823,7 +823,7 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -1340,7 +1340,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -2170,7 +2170,7 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -4117,7 +4117,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -10185,7 +10185,7 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios", "platform:tvos"]
+      "automobile/requires": ["platform:android", "platform:tvos"]
     }
   },
   {
@@ -10794,7 +10794,7 @@
     "_meta": {
       "automobile/embeddedSdkOnly": true,
       "automobile/deviceReadOnly": true,
-      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
+      "automobile/requires": ["sdkEmbed", "platform:android"]
     }
   },
   {
@@ -13123,7 +13123,7 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -13215,7 +13215,7 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -19647,7 +19647,7 @@
     "_meta": {
       "automobile/embeddedSdkOnly": true,
       "automobile/deviceReadOnly": true,
-      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
+      "automobile/requires": ["sdkEmbed", "platform:android"]
     }
   },
   {
@@ -21687,7 +21687,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -22099,7 +22099,7 @@
           "values": ["get"]
         }
       ],
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -27598,7 +27598,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -40540,7 +40540,7 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -42959,7 +42959,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -45293,7 +45293,7 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -46216,7 +46216,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -65971,7 +65971,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -66404,7 +66404,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   }
 ]

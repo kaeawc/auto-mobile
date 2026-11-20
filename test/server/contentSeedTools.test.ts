@@ -29,14 +29,6 @@ describe("seedContent tool", () => {
       }).success,
     ).toBe(true);
   });
-  test("iOS fails actionably before creating adb dependencies", async () => {
-    const handler = createSeedContentHandler(() => {
-      throw new Error("Must not create adb");
-    });
-    await expect(
-      handler({ name: "fake", deviceId: "fake", platform: "ios" }, { namespace: "demo" }),
-    ).rejects.toThrow("Select an Android device");
-  });
   test("returns structured counts with the advertised output shape", async () => {
     const handler = createSeedContentHandler(() => ({
       adb: {

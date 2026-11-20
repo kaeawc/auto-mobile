@@ -7,7 +7,7 @@ import {
   type MeasureStartupResult,
   type StartupDeviceShell,
 } from "../features/performance/AndroidStartupMeasurement";
-import { ActionableError, type BootedDevice } from "../models";
+import type { BootedDevice } from "../models";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
@@ -114,9 +114,6 @@ export const createMeasureStartupHandler =
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
-    if (device.platform !== "android") {
-      throw new ActionableError("measureStartup is only supported on Android.");
-    }
     // The epoch that produces the samples, read before the launches: a removal or
     // reincarnation during the settle delays must not re-attribute this run.
     const deviceSessionUuid = deps.resolveDeviceSessionUuid(device.deviceId);
@@ -151,7 +148,12 @@ const measureStartupTool = defineDeviceTool({
   description:
     "Android: measure cold/warm/hot app startup over N launches; TTID/TTFD percentiles, stored in performance results.",
   input: measureStartupInput,
-  options: { defaultEnabled: false, stopsApp: true, outputSchema: measureStartupResultSchema },
+  options: {
+    platforms: ["android"],
+    defaultEnabled: false,
+    stopsApp: true,
+    outputSchema: measureStartupResultSchema,
+  },
 });
 
 export const measureStartupSchema = measureStartupTool.schema;

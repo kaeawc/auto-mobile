@@ -92,12 +92,6 @@ const defaultDependencies = (): ProfilingDependencies => ({
   sessionHost: () => defaultDaemonContext.sessionManager(),
 });
 
-function assertAndroid(device: BootedDevice, tool: string): void {
-  if (device.platform !== "android") {
-    throw new ActionableError(`${tool} is only supported on Android.`);
-  }
-}
-
 export const createCaptureTraceHandler =
   (deps: ProfilingDependencies = defaultDependencies()) =>
   async (
@@ -106,7 +100,6 @@ export const createCaptureTraceHandler =
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
-    assertAndroid(device, "captureTrace");
     const capture = new AndroidTraceCapture({ ...deps, adb: deps.adbFor(device) });
     if (args.action === "stop") {
       if (!args.traceId) {
@@ -152,7 +145,6 @@ export const createCaptureTraceHandler =
 export const createHeapDumpHandler =
   (deps: ProfilingDependencies = defaultDependencies()) =>
   async (device: BootedDevice, args: HeapDumpArgs, _progress?: unknown, signal?: AbortSignal) => {
-    assertAndroid(device, "heapDump");
     const dump = new AndroidHeapDump({ ...deps, adb: deps.adbFor(device) });
     const result = await dump.dump({
       appId: args.appId,
@@ -175,7 +167,11 @@ const captureTraceTool = defineDeviceTool({
     "Android: record a Perfetto trace from typed categories (sched, gfx, view, am, wm, binder_driver, memory, app). " +
     "start returns a traceId; drive the flow; stop pulls the .perfetto-trace to the host. Released sessions stop their trace.",
   input: captureTraceInput,
-  options: { defaultEnabled: false, outputSchema: captureTraceResultSchema },
+  options: {
+    platforms: ["android"],
+    defaultEnabled: false,
+    outputSchema: captureTraceResultSchema,
+  },
 });
 
 const heapDumpTool = defineDeviceTool({
@@ -184,7 +180,7 @@ const heapDumpTool = defineDeviceTool({
     "Android: dump a running debuggable or profileable app's heap (am dumpheap) to a host .hprof; " +
     "refuses other apps with heap_dump_not_debuggable.",
   input: heapDumpInput,
-  options: { defaultEnabled: false, outputSchema: heapDumpResultSchema },
+  options: { platforms: ["android"], defaultEnabled: false, outputSchema: heapDumpResultSchema },
 });
 
 export const captureTraceSchema = captureTraceTool.schema;

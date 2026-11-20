@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { ActionableError, type BootedDevice } from "../models";
+import type { BootedDevice } from "../models";
 import { formFactorFrom } from "../models/formFactor";
 import {
   AdbGlassesInputInjector,
@@ -123,11 +123,6 @@ export const createGlassesInputHandler =
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
-    if (device.platform !== "android") {
-      throw new ActionableError(
-        "glassesInput is Android-only: it sends glasses focus input over adb.",
-      );
-    }
     const warning = glassesWarning(await checkGlasses(device));
     const result = await makeInjector(device).inject({ ...args, signal });
     return withIsErrorOnFailure(
@@ -143,6 +138,7 @@ const glassesInputTool = defineDeviceTool({
   input: glassesInput,
   handler: createGlassesInputHandler(),
   options: {
+    platforms: ["android"],
     ...PLAN_RELEVANT,
     // `tap` can open another screen, so record the call like tapOn and sendKeys for navigateTo to replay.
     recordsNavigation: true,

@@ -37,7 +37,9 @@ fails the call before anything reaches the device.
    `productId`, `state` (`purchased`, `purchasing`, `failed`, `restored`, `deferred` or
    `unknown`) and `originalIdentifier` for renewals.
 3. `setSimulatedError` makes the next `buy` fail with that error, and is cleared after it.
-   Purchases the app starts itself keep failing until `clear` or another `load`.
+   Purchases the app starts itself keep failing until the next `buy`, `clear` or another `load`.
+   On an iOS 26 or newer simulator `buy` and `expire` return `unsupported_device` (the system
+   rejects the runner's bundle), so use an iOS 18 simulator for them.
 4. `clear` resets the session, returns the final transactions and ends the session.
 
 The session lasts as long as the runner, until `clear` or until your device session is released.
@@ -62,8 +64,8 @@ still apply. A timed-out `buy` can still complete. Call `list` before you retry 
 
 `unsupported` is set, with nothing changed on the device, when StoreKit Testing cannot run:
 
-| `unsupported`            | When                                               | What to do                      |
-| ------------------------ | -------------------------------------------------- | ------------------------------- |
-| `unsupported_platform`   | Android, Apple TV, Apple Watch or Apple Vision Pro | Use an iOS simulator            |
-| `unsupported_device`     | A physical iPhone                                  | Use an iOS simulator            |
-| `unsupported_capability` | The connected iOS runner predates StoreKit Testing | Restart the daemon to update it |
+| `unsupported`            | When                                                                     | What to do                                                          |
+| ------------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| `unsupported_platform`   | Android, Apple TV, Apple Watch or Apple Vision Pro                       | Use an iOS simulator                                                |
+| `unsupported_device`     | A physical iPhone, or `buy` and `expire` on an iOS 26 or newer simulator | Use an iOS simulator, or an iOS 18 simulator for `buy` and `expire` |
+| `unsupported_capability` | The connected iOS runner predates StoreKit Testing                       | Restart the daemon to update it                                     |

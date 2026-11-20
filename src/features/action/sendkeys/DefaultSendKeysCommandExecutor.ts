@@ -59,7 +59,10 @@ import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interface
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
-import { scopeObserveResultToLayer } from "../../observe/hierarchyLayer";
+import {
+  inputFocusedPrototypeLayer,
+  scopeObserveResultToLayer,
+} from "../../observe/hierarchyLayer";
 import { imeCommitUnitFields } from "../../observe/android/CtrlProxyText";
 import { getFocusedTextLength } from "../ClearText";
 import { InputKey } from "../InputKey";
@@ -174,6 +177,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         if (this.device.platform === "android" && span && !span.snapshot && !span.editorState) {
           // Reuse the auto/password pre-check, before the first IME activation.
           span.editorState = readImeEditorState(observation);
+        }
+        if (this.targetLayer === undefined && this.device.platform === "android") {
+          // Without a layer, read the window that holds input focus: a focused prototype
+          // receives the text while the app's field keeps its own focus underneath (#18895).
+          return inputFocusedPrototypeLayer(observation.viewHierarchy) === undefined
+            ? observation
+            : scopeObserveResultToLayer(observation, "prototype", "android");
         }
         if (this.targetLayer !== "prototype") {
           return observation;

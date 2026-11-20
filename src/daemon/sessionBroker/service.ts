@@ -1,3 +1,4 @@
+import { defaultDisposableAppManager } from "../../features/prototype/disposableApp/defaultDisposableAppManager";
 import { sessionBrokerHostLock, type SessionBrokerHostLock } from "./serviceHostLock";
 export { type SessionBrokerHostLock } from "./serviceHostLock";
 import { nativeCatalogReader } from "./serviceCatalog";
@@ -203,6 +204,15 @@ export async function openSessionBrokerService(
       scope: SESSION_BROKER_SCOPE,
       timer: options.timer,
       leaseKeepalive: preparationLeaseKeepalive(options),
+      disposableAppExpirySweeper: {
+        async sweepExpired(deviceId, reportRemoval) {
+          await defaultDisposableAppManager({ timer: options.timer }).sweepExpired(
+            deviceId,
+            "android",
+            reportRemoval,
+          );
+        },
+      },
       brokerDeviceAcquisition: options.acquisition,
       brokerExecutionRelease: options.release,
       registry: options.registry,

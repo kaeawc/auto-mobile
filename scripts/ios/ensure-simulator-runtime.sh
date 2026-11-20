@@ -32,6 +32,11 @@ done
 
 # shellcheck source=scripts/ios/simulator-select.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/simulator-select.sh"
+# Check against the repository-pinned Xcode's SDK unless DEVELOPER_DIR already
+# names one (CI steps set it; a local host may still xcode-select an older Xcode).
+# shellcheck source=scripts/ios/xcode_version.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/xcode_version.sh"
+select_pinned_xcode
 
 sdk_version=$(xcrun --sdk iphonesimulator --show-sdk-version)
 # Major.minor of the SDK: "26.6" and "26.6.1" both need an iOS 26.6 runtime.

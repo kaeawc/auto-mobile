@@ -15,6 +15,7 @@ class AndroidPermissionsLifecycleTest {
   private class Registry : ActivityResultRegistry() {
     var requestCode = 0
     var fail = false
+    var input: Any? = null
 
     override fun <I, O> onLaunch(
       requestCode: Int,
@@ -23,6 +24,7 @@ class AndroidPermissionsLifecycleTest {
       options: ActivityOptionsCompat?,
     ) {
       this.requestCode = requestCode
+      this.input = input
       check(!fail) { "Cannot launch permission dialog" }
     }
   }
@@ -59,6 +61,67 @@ class AndroidPermissionsLifecycleTest {
     registry.dispatchResult(registry.requestCode, true)
     assertEquals(listOf(true), results)
     unregister()
+    controller.pause().stop().destroy()
+  }
+
+  @Test
+  fun `capture gateways share the Activity prompt and request their own permission`() {
+    val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+    val registry = Registry()
+    val slot = PrototypePromptSlot()
+    val camera =
+      FrameworkPermissionsGateway(
+        controller.get(),
+        registry,
+        PrototypeRuntimePermission.CAMERA,
+        slot,
+      )
+    val microphone =
+      FrameworkPermissionsGateway(
+        controller.get(),
+        registry,
+        PrototypeRuntimePermission.MICROPHONE,
+        slot,
+      )
+    val unregister = camera.request({}, {})!!
+    assertEquals("android.permission.CAMERA", registry.input)
+    assertNull(microphone.request({ error("Second dialog opened") }, {}))
+    unregister()
+    microphone.request({}, {})!!()
+    assertEquals("android.permission.RECORD_AUDIO", registry.input)
+    controller.pause().stop().destroy()
+  }
+
+  @Test
+  fun `a delivered result settles the Activity prompt until the next resume`() {
+    val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+    val registry = Registry()
+    val slot = PrototypePromptSlot()
+    val camera =
+      FrameworkPermissionsGateway(
+        controller.get(),
+        registry,
+        PrototypeRuntimePermission.CAMERA,
+        slot,
+      )
+    val microphone =
+      FrameworkPermissionsGateway(
+        controller.get(),
+        registry,
+        PrototypeRuntimePermission.MICROPHONE,
+        slot,
+      )
+    controller.pause()
+    val unregister = camera.request({}, {})!!
+    assertTrue(microphone.prompting)
+    registry.dispatchResult(registry.requestCode, true)
+    unregister()
+    assertFalse(microphone.prompting)
+    assertTrue(microphone.settling)
+    // Only the resume observer can clear it: nothing reads settling between resume and pause.
+    controller.resume()
+    controller.pause()
+    assertFalse(microphone.settling)
     controller.pause().stop().destroy()
   }
 }

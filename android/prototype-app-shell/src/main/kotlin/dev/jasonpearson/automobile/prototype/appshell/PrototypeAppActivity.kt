@@ -18,20 +18,12 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidBiometricSource
-import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidLocationSource
-import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPermissionsSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi
 import dev.jasonpearson.automobile.ctrlproxy.prototype.LocalPrototypeRootBack
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBiometricModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePermissionsModule
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost
 import dev.jasonpearson.automobile.prototype.PrototypeAssets
-import dev.jasonpearson.automobile.prototype.PrototypePlatform
 import dev.jasonpearson.automobile.prototype.PrototypeStorage
 import dev.jasonpearson.automobile.prototype.ProvideEmbeddedPrototypeHost
 import java.io.IOException
@@ -125,17 +117,7 @@ class PrototypeAppActivity : ComponentActivity() {
             }
           }
       }
-    val platform =
-      remember(this) {
-        PrototypePlatform(
-          listOf(
-            PrototypeLocationModule(AndroidLocationSource(this)),
-            PrototypeBiometricModule(AndroidBiometricSource(this)),
-            PrototypePermissionsModule(AndroidPermissionsSource(this)),
-            PrototypeSecureStorageModule.fileBacked(this),
-          ),
-        )
-      }
+    val platform = remember(this) { appShellPlatform(this) }
     DisposableEffect(platform) {
       onDispose { platform.registry.modules.forEach { it.close() } }
     }

@@ -115,7 +115,7 @@ describe("advisory watchOS simulator smoke", () => {
       "labeled",
     ]);
     const job = loadWorkflow(watchWorkflow).jobs?.["watchos-sim-smoke"];
-    expect(job?.["runs-on"]).toBe("macos-26");
+    expect(job?.["runs-on"]).toBe("xcode-27");
     expect(job?.if).toBe(
       "github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-watchos-sim')",
     );
@@ -126,8 +126,8 @@ describe("advisory watchOS simulator smoke", () => {
 
   test("pins Xcode and preserves private namespace and failure artifacts", () => {
     const steps = loadJobSteps(watchWorkflow, "watchos-sim-smoke");
-    expect(steps.find((step) => step.name === "Select Xcode 26.6")?.with?.["xcode-version"]).toBe(
-      "26.6",
+    expect(steps.find((step) => step.name === "Select Xcode 27.2")?.with?.["xcode-version"]).toBe(
+      "27.2",
     );
     expect(steps.find((step) => step.name === "Ensure watchOS runtime")?.run).toContain(
       "xcodebuild -downloadPlatform watchOS",

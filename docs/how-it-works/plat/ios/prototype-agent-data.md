@@ -102,7 +102,9 @@ Advertises `prototype_network_v1`, `prototype_network_device_v1` and `prototype_
 one pass, so it never rescans substituted values. The tap then moves `statusKey` to `loading` and issues a start
 command. Later, `completeRequest` writes `into`, then `<into>__meta` (dropping `headers` if over the data
 write limit), moves the status key, emits the `prototype_request` event and runs `onSuccess`/`onError`
-in that order. An unbuildable request (unresolvable binding, invalid URL) or a refused one
+in that order.
+
+An unbuildable request (unresolvable binding, invalid URL) or a refused one
 (`too_many_in_flight` at 4) completes at once as an error. A newer request to the same `into` cancels
 the older: it writes nothing, leaves the status key, runs no follow-up and reports `cancelled`
 (`durationMs` 0, the session has no clock). Dismissal, a replacing show of another prototype and `reset`

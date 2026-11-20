@@ -37,11 +37,7 @@ import {
 } from "./RotationOrientationReader";
 import { RotationOutcomes, type AutoRotatePlan } from "./RotationOutcomes";
 import { RotationEndConfirmation } from "./RotationEndConfirmation";
-import { androidXrRotateUnsupportedError } from "./RotateUnsupportedError";
-import {
-  defaultAndroidXrDetector,
-  type AndroidXrDetector,
-} from "../../utils/android-cmdline-tools/androidXrDevice";
+import { refuseRotateOnAndroidXr, type AndroidXrDetector } from "./RotateUnsupportedError";
 import {
   DEVICE_STATE_ROTATION_LOCK,
   ROTATION_RETURN_CONFIRMATION_TIMEOUT_MS,
@@ -65,6 +61,7 @@ export interface RotateOptions {
   iosDisplayPixelProbe?: IosDisplayPixelProbe;
   deadlineMs?: number;
   sessionRotation?: <T>(mutation: (slot?: RotationRestoreSlot) => Promise<T>) => Promise<T>;
+  xrDetector?: AndroidXrDetector;
 }
 
 /** Bound on `cmd display get-displays` when enumerating displays. */
@@ -98,7 +95,6 @@ export class Rotate extends BaseVisualChange {
   private readonly endConfirmation: RotationEndConfirmation;
 
   private readonly options: RotateOptions;
-  private readonly xrDetector: AndroidXrDetector;
 
   constructor(
     device: BootedDevice,
@@ -107,19 +103,15 @@ export class Rotate extends BaseVisualChange {
       timer = defaultTimer,
       options = {},
       collaborators = {},
-      xrDetector = defaultAndroidXrDetector,
     }: {
       adb?: AdbExecutor | null;
       timer?: Timer;
       options?: RotateOptions;
       collaborators?: DisplayFenceDependencies;
-      /** The shared XR predicate; XR displays ignore `user_rotation`, so rotate refuses there. */
-      xrDetector?: AndroidXrDetector;
     } = {},
   ) {
     super(device, { adb, timer, displayFence: collaborators });
     this.options = options;
-    this.xrDetector = xrDetector;
     const ctx = (): RotationContext => ({
       device: this.device,
       adb: this.adb,
@@ -217,7 +209,7 @@ export class Rotate extends BaseVisualChange {
           }
           return await this.executeIosRotation(orientation, progress, perf, signal);
         case "android":
-          await this.refuseAndroidXr(signal);
+          await refuseRotateOnAndroidXr(this.device, this.adb, this.options.xrDetector, signal);
           if (display !== 0) {
             return await this.rotateNonDefaultDisplay(
               orientation,
@@ -240,18 +232,6 @@ export class Rotate extends BaseVisualChange {
           ? "Rotation cancelled; device may still complete the change"
           : "Failed to rotate device",
       );
-    }
-  }
-
-  /**
-   * An Android XR display runs apps as freeform panels and never applies `user_rotation` (#18909):
-   * refuse before any rotation setting is written or a rotation wait starts.
-   */
-  private async refuseAndroidXr(signal?: AbortSignal): Promise<void> {
-    const xr = await this.xrDetector.isAndroidXr({ device: this.device, adb: this.adb, signal });
-    throwIfAborted(signal);
-    if (xr) {
-      throw androidXrRotateUnsupportedError(this.device.deviceId);
     }
   }
 

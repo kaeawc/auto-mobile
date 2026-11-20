@@ -47,7 +47,11 @@ function setup() {
   return {
     adb,
     timer,
-    rotate: new Rotate(device, { adb, timer, xrDetector: new FakeAndroidXrDetector() }),
+    rotate: new Rotate(device, {
+      adb,
+      timer,
+      options: { xrDetector: new FakeAndroidXrDetector() },
+    }),
   };
 }
 
@@ -169,7 +173,11 @@ describe("Rotate on a default display that ignores user_rotation (am-flip-6p7 O1
       "shell settings get system accelerometer_rotation",
       createExecResult("1", ""),
     );
-    const rotate = new Rotate(device, { adb, timer, xrDetector: new FakeAndroidXrDetector() });
+    const rotate = new Rotate(device, {
+      adb,
+      timer,
+      options: { xrDetector: new FakeAndroidXrDetector() },
+    });
     const observe = new FakeObserveScreen();
     observe.enableAutoVaryHierarchy();
     observe.setObserveResult(() =>

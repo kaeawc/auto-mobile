@@ -33,7 +33,7 @@ function setup(xrDetector: AndroidXrDetector, device: BootedDevice = headset) {
   const rotate = new Rotate(device, {
     adb,
     timer,
-    xrDetector,
+    options: { xrDetector },
     collaborators: { awaitIdle, observeScreen, window: new FakeWindow() },
   });
   return { adb, timer, awaitIdle, observeScreen, rotate };

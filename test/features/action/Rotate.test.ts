@@ -103,7 +103,7 @@ describe("Rotate", () => {
     rotate = new Rotate(mockDevice, {
       adb: fakeAdb,
       timer: fakeTimer,
-      xrDetector: new FakeAndroidXrDetector(),
+      options: { xrDetector: new FakeAndroidXrDetector() },
       collaborators: {
         awaitIdle: fakeAwaitIdle,
         observeScreen: fakeObserveScreen,

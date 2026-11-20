@@ -43,8 +43,8 @@ fails the call before anything reaches the device.
 4. `clear` resets the session, returns the final transactions and ends the session.
 
 The session lasts as long as the runner, until `clear` or until your device session is released.
-Release clears the StoreKit session of every `appId` you used. The next session on the same
-simulator then starts with no purchases and no simulated error. When release cannot confirm that,
+Release clears the loaded StoreKit session and any `appId` you used earlier. The next session on the
+same simulator then starts with no purchases and no simulated error. When release cannot confirm that,
 it erases the simulator instead. StoreKit Testing applies the session to the runner's own target
 app, so your app sees the purchases only when it runs as that target.
 

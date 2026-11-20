@@ -29,7 +29,25 @@ function fakes() {
   const probe = new FakeCarPlayProjectionProbe(car);
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  return { powerer, probe, deps: () => ({ powerer, probe, timer }) };
+  const sessionWork = new AbortController();
+  const holds: Array<{ sessionUuid: string; deadlineMs: number; released: boolean }> = [];
+  const holdAcquiringSession = (sessionUuid: string, deadlineMs: number) => {
+    const hold = { sessionUuid, deadlineMs, released: false };
+    holds.push(hold);
+    return {
+      signal: sessionWork.signal,
+      release: () => {
+        hold.released = true;
+      },
+    };
+  };
+  return {
+    powerer,
+    probe,
+    holds,
+    sessionWork,
+    deps: () => ({ powerer, probe, timer, holdAcquiringSession }),
+  };
 }
 
 describe("startDevice carPlay", () => {
@@ -47,6 +65,33 @@ describe("startDevice carPlay", () => {
       carPlay: { display: "Car[2]", displayId: 2 },
     });
     expect(powerer.calls).toEqual([{ udid: "SIM-UDID", action: "power-on" }]);
+  });
+
+  test("holds the bound session while CarPlay activates, then releases it", async () => {
+    const { holds, powerer, deps } = fakes();
+    let heldDuringPowerOn = false;
+    const powerOn = powerer.powerOn.bind(powerer);
+    powerer.powerOn = async (udid, options) => {
+      heldDuringPowerOn = holds.length === 1 && !holds[0].released;
+      return await powerOn(udid, options);
+    };
+    await withRequestedCarPlay({}, ready, bounds, deps);
+    expect(heldDuringPowerOn).toBe(true);
+    expect(holds).toEqual([{ sessionUuid: "session-1", deadlineMs: 60_000, released: true }]);
+  });
+
+  test("a cancel of the held session's work stops a wedged power-on", async () => {
+    const { holds, powerer, probe, sessionWork, deps } = fakes();
+    powerer.hangPowerOn = true;
+    const run = withRequestedCarPlay({}, ready, bounds, deps);
+    expect(powerer.calls).toHaveLength(1);
+    sessionWork.abort(new Error("device lost"));
+    await expect(run).rejects.toThrow(
+      "SIM-UDID is ready and bound to session session-1, but its CarPlay display is not available: device lost",
+    );
+    expect(powerer.powerOnOptions[0]?.signal?.aborted).toBe(true);
+    expect(probe.calls).toEqual([]);
+    expect(holds[0].released).toBe(true);
   });
 
   test("returns unsupported-runtime unchanged", async () => {

@@ -89,6 +89,59 @@ describe("activateCarPlayDisplay", () => {
     expect(probe.calls).toEqual([]);
   });
 
+  test("gives power-on and each probe the signal and the remaining budget", async () => {
+    const { powerer, probe, timer, deps } = setup();
+    probe.queued.push(untagged);
+    const controller = new AbortController();
+    await activateCarPlayDisplay(udid, deps, {
+      deadlineMs: timer.now() + 60_000,
+      signal: controller.signal,
+    });
+    expect(powerer.powerOnOptions).toEqual([{ signal: controller.signal, timeoutMs: 60_000 }]);
+    expect(probe.options).toEqual([
+      { signal: controller.signal, timeoutMs: 60_000 },
+      { signal: controller.signal, timeoutMs: 60_000 - CAR_DISPLAY_PROBE_INTERVAL_MS },
+    ]);
+  });
+
+  test("a wedged power-on stops at the request deadline", async () => {
+    const { powerer, probe, timer, deps } = setup();
+    powerer.hangPowerOn = true;
+    await expect(
+      activateCarPlayDisplay(udid, deps, { deadlineMs: timer.now() + 5_000 }),
+    ).rejects.toThrow(`CarPlay power-on on ${udid} timed out after 5000ms`);
+    expect(timer.now()).toBe(5_000);
+    expect(probe.calls).toEqual([]);
+  });
+
+  test("a wedged probe stops at the request deadline", async () => {
+    const { probe, timer, deps } = setup();
+    probe.hang = true;
+    await expect(
+      activateCarPlayDisplay(udid, deps, { deadlineMs: timer.now() + 5_000 }),
+    ).rejects.toThrow(`CarPlay probe on ${udid} timed out after 5000ms`);
+    expect(probe.calls).toHaveLength(1);
+  });
+
+  test("a cancel during a wedged power-on returns at once", async () => {
+    const { powerer, probe } = setup();
+    powerer.hangPowerOn = true;
+    // A manual clock: nothing advances, so only the cancel can end the call.
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const reason = new Error("device lost");
+    const run = activateCarPlayDisplay(
+      udid,
+      { powerer, probe, timer },
+      { deadlineMs: 60_000, signal: controller.signal },
+    );
+    await Promise.resolve();
+    expect(powerer.calls).toEqual([{ udid, action: "power-on" }]);
+    controller.abort(reason);
+    await expect(run).rejects.toBe(reason);
+    expect(probe.calls).toEqual([]);
+  });
+
   test("does nothing once the request is cancelled", async () => {
     const { powerer, deps } = setup();
     const controller = new AbortController();

@@ -1,5 +1,8 @@
 import { readBootedSessionIdentity } from "../daemon/deviceDescription";
-import type { StartDeviceCarPlayOptions } from "../features/deviceLifecycle/deviceLifecycleCore";
+import type {
+  DeviceToolsDependencies,
+  StartDeviceCarPlayOptions,
+} from "../features/deviceLifecycle/deviceLifecycleCore";
 import { getDeviceToolsDependencies } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { ActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -14,14 +17,20 @@ import {
   getStructuredPayload,
   type StructuredToolResponse,
 } from "../utils/toolUtils";
+import { whileHoldingProvisionedSession } from "./provisioning/provisioningSession";
 
 const UNSUPPORTED_RUNTIME = "[unsupported-runtime]";
 
-function defaultCarPlayDisplayDependencies(): CarPlayDisplayDependencies {
+export type StartDeviceCarPlayDependencies = CarPlayDisplayDependencies &
+  Pick<DeviceToolsDependencies, "holdAcquiringSession">;
+
+function defaultCarPlayDisplayDependencies(): StartDeviceCarPlayDependencies {
+  const deps = getDeviceToolsDependencies();
   return {
     powerer: new DefaultCarPlayScreenPowerer(),
     probe: new DefaultCarPlayProjectionProbe(),
-    timer: getDeviceToolsDependencies().timer,
+    timer: deps.timer,
+    holdAcquiringSession: deps.holdAcquiringSession,
   };
 }
 
@@ -37,18 +46,32 @@ export async function withRequestedCarPlay(
   options: StartDeviceCarPlayOptions | undefined,
   ready: StructuredToolResponse,
   bounds: { signal: AbortSignal | undefined; totalDeadlineMs: number },
-  dependencies: () => CarPlayDisplayDependencies = defaultCarPlayDisplayDependencies,
+  dependencies: () => StartDeviceCarPlayDependencies = defaultCarPlayDisplayDependencies,
 ): Promise<StructuredToolResponse> {
   if (!options) {
     return ready;
   }
   const payload = getStructuredPayload(ready);
   const { device, sessionId } = readBootedSessionIdentity(payload);
-  try {
-    const carPlay = await activateCarPlayDisplay(device.deviceId, dependencies(), {
-      signal: bounds.signal,
+  const deps = dependencies();
+  const activate = async (holdSignal?: AbortSignal) => {
+    const signals = [bounds.signal, holdSignal].filter((signal) => signal !== undefined);
+    return await activateCarPlayDisplay(device.deviceId, deps, {
+      signal: signals.length > 0 ? AbortSignal.any(signals) : undefined,
       deadlineMs: bounds.totalDeadlineMs,
     });
+  };
+  try {
+    // Held like startDevice's head unit: the client has no session id to heartbeat until this
+    // returns, so the hold keeps the session from the first-heartbeat reap, and its signal stops
+    // the helpers when the daemon cancels the session's work (a lost or killed device).
+    const carPlay = sessionId
+      ? await whileHoldingProvisionedSession(
+          deps,
+          { sessionUuid: sessionId, deadlineMs: bounds.totalDeadlineMs, toolName: "startDevice" },
+          activate,
+        )
+      : await activate();
     return createStructuredToolResponse({ ...payload, carPlay });
   } catch (error) {
     // iOS 27+ has no Simulator CarPlay: the helper's own error is the whole answer.

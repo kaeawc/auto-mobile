@@ -37,7 +37,7 @@ import {
 } from "./RotationOrientationReader";
 import { RotationOutcomes, type AutoRotatePlan } from "./RotationOutcomes";
 import { RotationEndConfirmation } from "./RotationEndConfirmation";
-import { refuseRotateOnAndroidXr, type AndroidXrDetector } from "./RotateUnsupportedError";
+import { refuseRotateOnAndroidXr, type RotateXrOptions } from "./RotateUnsupportedError";
 import {
   DEVICE_STATE_ROTATION_LOCK,
   ROTATION_RETURN_CONFIRMATION_TIMEOUT_MS,
@@ -57,11 +57,10 @@ interface AndroidRotationWrites {
   restoreOnFailure: (result: RotateResult) => Promise<RotateResult>;
 }
 
-export interface RotateOptions {
+export interface RotateOptions extends RotateXrOptions {
   iosDisplayPixelProbe?: IosDisplayPixelProbe;
   deadlineMs?: number;
   sessionRotation?: <T>(mutation: (slot?: RotationRestoreSlot) => Promise<T>) => Promise<T>;
-  xrDetector?: AndroidXrDetector;
 }
 
 /** Bound on `cmd display get-displays` when enumerating displays. */

@@ -6,7 +6,10 @@ import {
   type AndroidXrDetector,
 } from "../../utils/android-cmdline-tools/androidXrDevice";
 
-export type { AndroidXrDetector };
+/** The rotate option that injects the shared XR predicate (tests pass a fake). */
+export interface RotateXrOptions {
+  xrDetector?: AndroidXrDetector;
+}
 
 /**
  * `rotate` targeted an Android XR headset or glasses display (#18909). The XR display runs apps

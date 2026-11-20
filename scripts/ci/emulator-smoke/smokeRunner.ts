@@ -86,12 +86,17 @@ export function expectNotForeground(appId: string) {
 
 /**
  * An observe payload must carry a hierarchy. The default `skeleton` projection replaces
- * `viewHierarchy`/`elements` with a `skeleton` list.
+ * `viewHierarchy`/`elements` with a `skeleton` list of actionable nodes and a `context` list of
+ * the rest. A screen with only non-actionable nodes (a Wear charging screen or clock) is still
+ * observable, so either list counts.
  */
 export function assertHasHierarchy(payload: Payload): string | undefined {
   const skeleton = payload.skeleton;
   if (Array.isArray(skeleton)) {
-    return skeleton.length === 0 ? "observe returned an empty skeleton" : undefined;
+    const context = Array.isArray(payload.context) ? payload.context : [];
+    return skeleton.length === 0 && context.length === 0
+      ? "observe returned an empty skeleton and context"
+      : undefined;
   }
   return payload.viewHierarchy === undefined && payload.elements === undefined
     ? "observe returned no skeleton or view hierarchy"

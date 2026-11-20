@@ -4,7 +4,7 @@ import {
   KEYSTORE_FAULT_MIN_DELAY_MS,
 } from "../features/storage/keystoreFault";
 import { z } from "zod/v4";
-import { APP_TRIM_MEMORY_LEVELS } from "../models/AppLifecycleResult";
+import { APP_LIFECYCLE_TRIM_LEVELS } from "../models/AppLifecycleResult";
 import {
   addDeviceTargetingToSchema,
   responseShapeControlFields,
@@ -67,9 +67,11 @@ export const appLifecycleSchema = withAppIdAliases(
         appId: z.string().trim().min(1),
         action: z.enum(["background", "killBackgrounded", "trimMemory"]),
         level: z
-          .enum(APP_TRIM_MEMORY_LEVELS)
+          .enum(APP_LIFECYCLE_TRIM_LEVELS)
           .optional()
-          .describe("onTrimMemory level to send; required for trimMemory, rejected otherwise"),
+          .describe(
+            "Trim level; required for trimMemory, rejected otherwise. Android: an onTrimMemory level. iOS simulator: memoryWarning",
+          ),
       })
       .strict(),
   ),

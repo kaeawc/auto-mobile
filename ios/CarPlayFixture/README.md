@@ -21,7 +21,7 @@ xcrun simctl launch booted dev.jasonpearson.automobile.CarPlayFixture
 In Simulator, select **I/O > External Displays > CarPlay**, then open the fixture on the CarPlay display. The headless alternative is the `ios/carplay-power` helper:
 
 ```bash
-swift run --package-path ios/carplay-power carplay-power-helper <udid> power-on --enable
+swift run --package-path ios/carplay-power carplay-power-helper <udid> power-on
 ```
 
-This powers the display without opening Simulator.app. Device distribution requires Apple's charging entitlement approval and a signing profile; simulator builds disable signing. No image assets or app icon catalog are required.
+This makes TVOut the CarPlay display without opening Simulator.app, on iOS 26.x runtimes only; run it after every boot. Device distribution requires Apple's charging entitlement approval and a signing profile; simulator builds disable signing. No image assets or app icon catalog are required.

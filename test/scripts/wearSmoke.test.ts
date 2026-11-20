@@ -29,6 +29,18 @@ function envelope(payload: Payload, isError = false): unknown {
 
 const APP = WEAR_FIXTURE.appId;
 
+/** The Wear charging screen a plugged-in emulator shows: a clock with no actionable nodes. */
+const CHARGING_SCREEN: Payload = {
+  skeleton: [],
+  context: [
+    { elementId: "s2-battery", label: "100%", affordances: [] },
+    { elementId: "DefaultTextClock", label: "01", affordances: [] },
+  ],
+  activeWindow: { appId: "com.google.android.clockwork.sysui" },
+  isScreenRound: true,
+  screenSize: { width: 384, height: 384 },
+};
+
 function screen(appId: string, ...labels: string[]): Payload {
   return {
     skeleton: [
@@ -205,6 +217,13 @@ describe("assertions", () => {
     expect(assertRoundObservation({ isScreenRound: true })).toContain("no skeleton");
   });
 
+  test("a screen with only non-actionable context nodes is observable (#16829)", () => {
+    expect(assertRoundObservation(CHARGING_SCREEN)).toBeUndefined();
+    expect(assertRoundObservation({ ...CHARGING_SCREEN, context: [] })).toContain(
+      "empty skeleton and context",
+    );
+  });
+
   test("text checks require the fixture in the foreground", () => {
     expect(expectText(APP, "Hello")(screen(APP, "Hello"))).toBeUndefined();
     expect(expectText(APP, "Hello")(screen(APP, "Bye"))).toContain('"Hello" is not on screen');
@@ -309,6 +328,22 @@ describe("runSmoke with the Wear plan", () => {
     expect(sleeps).toEqual([WEAR_SETUP_RETRY.delayMs, WEAR_SETUP_RETRY.delayMs]);
   });
 
+  test("the first observe passes on the charging screen without retrying (#16829)", async () => {
+    const [, ...afterInitial] = fixtureObserves();
+    const client = new FakeClient({ startDevice: START }, [CHARGING_SCREEN, ...afterInitial]);
+    const sleeps: number[] = [];
+    const result = await runSmoke(buildWearSmokePlan({ fixtureApkPath: "/f.apk", avdName: "w" }), {
+      ...deps(client),
+      sleep: (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.steps.find((step) => step.id === "observe-initial")?.status).toBe("passed");
+    expect(sleeps).toEqual([]);
+  });
+
   test("a setup screen that never clears fails observe-initial after every attempt (#16829)", async () => {
     const setup = { ...screen("com.android.systemui"), skeleton: [] };
     const observes = Array.from({ length: WEAR_SETUP_RETRY.attempts }, () => setup);
@@ -316,7 +351,7 @@ describe("runSmoke with the Wear plan", () => {
     const result = await runSmoke(buildWearSmokePlan({ avdName: "w" }), deps(client));
     const failed = result.steps.find((step) => step.status === "failed");
     expect(failed).toMatchObject({ id: "observe-initial" });
-    expect(failed?.detail).toContain("observe returned an empty skeleton");
+    expect(failed?.detail).toContain("observe returned an empty skeleton and context");
     expect(client.calls.filter((call) => call.tool === "observe")).toHaveLength(
       WEAR_SETUP_RETRY.attempts,
     );

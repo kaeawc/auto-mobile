@@ -2,7 +2,8 @@
 # Publish PR time-to-green as a job summary and a 90-day artifact (#11582).
 # PR runs only: an all-workflow day is ~700-1,100 runs with a jobs call each,
 # against GITHUB_TOKEN's 1,000 requests/hour per repository; an 18-hour PR-only
-# window measured 189 calls. Read-only, not a required check; one ubuntu job daily.
+# window measured 189 calls; a 1,308-run window on 2026-11-18 needed 1,630, and 719 once skipped
+# runs are sampled once per workflow (#18691). Read-only, not a required check; one ubuntu job daily.
 name: CI time-to-green report
 
 "on":
@@ -51,11 +52,29 @@ jobs:
         shell: bash
         run: scripts/ci/install-bun-deps.sh
 
+      # Re-running this run resumes from the calls its earlier attempts made (#18691).
+      - name: "Restore time-to-green fetch cache"
+        uses: actions/cache/restore@v5
+        with:
+          path: scratch/ci-time-to-green-cache
+          key: ci-time-to-green-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ci-time-to-green-${{ github.run_id }}-
+
       - name: "Publish time-to-green report"
         env:
           GH_TOKEN: ${{ github.token }}
           TTG_SINCE: ${{ inputs.since || '24h' }}
+          TTG_CACHE_DIR: scratch/ci-time-to-green-cache
+          # Scheduled only: a 1,308-run day needed 719 calls; the rest of GITHUB_TOKEN's 1,000/h stays free.
+          TTG_MAX_API_CALLS: ${{ github.event_name == 'schedule' && '900' || '600' }}
         run: bash scripts/ci/publish-time-to-green.sh
+
+      - name: "Save time-to-green fetch cache"
+        uses: actions/cache/save@v5
+        if: always()
+        with:
+          path: scratch/ci-time-to-green-cache
+          key: ci-time-to-green-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: "Upload time-to-green report"
         uses: actions/upload-artifact@v6

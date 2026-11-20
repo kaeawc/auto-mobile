@@ -37,6 +37,9 @@ const failureSchema = z
           "unsupported-runtime",
           "no-carplay-screen",
           "power-on-failed",
+          "unsupported-screen-type",
+          "carplay-not-powered",
+          "hid-failed",
           "usage",
         ]),
         message: z.string().min(1),
@@ -95,48 +98,62 @@ export class DefaultCarPlayScreenPowerer implements CarPlayScreenPowerer {
     action: string,
     options?: CarPlayHelperCallOptions,
   ): Promise<CarPlayPowerState> {
-    const path = readEnvRaw(ENV.CARPLAY_POWER_HELPER_PATH, this.env);
-    if (!path?.trim()) {
-      throw new ActionableError(
-        "Build ios/carplay-power and set AUTOMOBILE_CARPLAY_POWER_HELPER_PATH to its carplay-power-helper executable.",
-      );
-    }
-    const args = [udid, action];
-    try {
-      const result = await runExecSeam(
-        (options) => this.exec(path, args, options),
-        {
-          timeoutMs: boundedHelperTimeoutMs(POWER_HELPER_TIMEOUT_MS, options),
-          maxBuffer: 1024 * 1024,
-          signal: options?.signal,
-        },
-        { command: path, args },
-        { preserveError: true },
-      );
-      return parseCarPlayPowerState(result.stdout);
-    } catch (error) {
-      if (typeof error === "object" && error !== null && "stderr" in error) {
-        const stderr = Buffer.isBuffer(error.stderr) ? error.stderr.toString() : error.stderr;
-        if (typeof stderr === "string" && stderr.trim()) {
-          throw this.helperFailure(stderr);
-        }
-      }
-      throw toActionableError(
-        error,
-        `Cannot run carplay-power-helper at ${path}; build ios/carplay-power and check AUTOMOBILE_CARPLAY_POWER_HELPER_PATH`,
-      );
-    }
+    const stdout = await runCarPlayPowerHelper(
+      { exec: this.exec, env: this.env },
+      [udid, action],
+      boundedHelperTimeoutMs(POWER_HELPER_TIMEOUT_MS, options),
+      options?.signal,
+    );
+    return parseCarPlayPowerState(stdout);
   }
+}
 
-  private helperFailure(stderr: string): ActionableError {
-    try {
-      const { error } = failureSchema.parse(JSON.parse(stderr));
-      return new ActionableError(`[${error.code}] ${error.message}`);
-    } catch (error) {
-      throw toActionableError(
-        error,
-        "Invalid carplay-power-helper error JSON; rebuild ios/carplay-power",
-      );
+/**
+ * Runs carplay-power-helper with argv and returns its stdout. A helper failure becomes
+ * `[code] message` from its stderr JSON.
+ */
+export async function runCarPlayPowerHelper(
+  seam: { exec: ExecFileAsync; env: NodeJS.ProcessEnv },
+  args: string[],
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<string> {
+  const path = readEnvRaw(ENV.CARPLAY_POWER_HELPER_PATH, seam.env);
+  if (!path?.trim()) {
+    throw new ActionableError(
+      "Build ios/carplay-power and set AUTOMOBILE_CARPLAY_POWER_HELPER_PATH to its carplay-power-helper executable.",
+    );
+  }
+  try {
+    const result = await runExecSeam(
+      (options) => seam.exec(path, args, options),
+      { timeoutMs, maxBuffer: 1024 * 1024, signal },
+      { command: path, args },
+      { preserveError: true },
+    );
+    return result.stdout;
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "stderr" in error) {
+      const stderr = Buffer.isBuffer(error.stderr) ? error.stderr.toString() : error.stderr;
+      if (typeof stderr === "string" && stderr.trim()) {
+        throw helperFailure(stderr);
+      }
     }
+    throw toActionableError(
+      error,
+      `Cannot run carplay-power-helper at ${path}; build ios/carplay-power and check AUTOMOBILE_CARPLAY_POWER_HELPER_PATH`,
+    );
+  }
+}
+
+function helperFailure(stderr: string): ActionableError {
+  try {
+    const { error } = failureSchema.parse(JSON.parse(stderr));
+    return new ActionableError(`[${error.code}] ${error.message}`);
+  } catch (error) {
+    throw toActionableError(
+      error,
+      "Invalid carplay-power-helper error JSON; rebuild ios/carplay-power",
+    );
   }
 }

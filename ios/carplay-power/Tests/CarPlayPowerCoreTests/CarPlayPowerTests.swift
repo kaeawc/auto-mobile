@@ -174,3 +174,100 @@ final class CarPlayPowerTests: XCTestCase {
         )
     }
 }
+
+private final class FakeHIDBackend: CarPlayHIDBackend {
+    var calls: [String] = []
+    var failure: CarPlayPowerError?
+    var failureStep: String?
+
+    private func record(_ call: String) throws {
+        calls.append(call)
+        if let failure, failureStep == call { throw failure }
+    }
+
+    func createCarPlayService() throws {
+        try record("create")
+    }
+
+    func sendTouch(_ phase: CarPlayTouchPhase, target: UInt32, x: Double, y: Double, width: Double, height: Double)
+        throws
+    {
+        try record("\(phase):\(target):\(Int(x)),\(Int(y)):\(Int(width))x\(Int(height))")
+    }
+
+    func hold(milliseconds: Int) {
+        calls.append("hold:\(milliseconds)")
+    }
+}
+
+final class CarPlayTapTests: XCTestCase {
+    private func controller(_ screens: FakeScreenBackend, _ hid: FakeHIDBackend) -> CarPlayTapController {
+        CarPlayTapController(screens: screens, hid: hid)
+    }
+
+    private func poweredScreens() -> FakeScreenBackend {
+        let screens = FakeScreenBackend()
+        screens.before = [FakeScreenBackend.lcd, FakeScreenBackend.wireless, FakeScreenBackend.tvOut(power: 1)]
+        return screens
+    }
+
+    func testCarScreenTypesUseTheCarPlayServiceTargetAndOthersHaveNone() {
+        XCTAssertEqual(CarPlayHID.target(screenType: 1), 1)
+        XCTAssertEqual(CarPlayHID.target(screenType: 2), 1)
+        for screenType: UInt64 in [0, 3, 4, 5] {
+            XCTAssertNil(CarPlayHID.target(screenType: screenType), "screenType \(screenType)")
+        }
+    }
+
+    func testTapCreatesTheServiceThenSendsDownAndUpToTargetOneInCarPixels() throws {
+        let screens = poweredScreens()
+        let hid = FakeHIDBackend()
+        let result = try controller(screens, hid).tap(udid: "d", x: 558, y: 80)
+        XCTAssertEqual(screens.calls, ["select:d", "enumerate"])
+        XCTAssertEqual(hid.calls, ["create", "down:1:558,80:800x480", "hold:80", "up:1:558,80:800x480"])
+        XCTAssertEqual(result.tapped, CarPlayTap(
+            x: 558, y: 80, screenID: 2, screenType: 1, target: 1, width: 800, height: 480
+        ))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(result)) as? [String: Any])
+        let tapped = try XCTUnwrap(json["tapped"] as? [String: Any])
+        XCTAssertEqual(Set(tapped.keys), ["x", "y", "screenID", "screenType", "target", "width", "height"])
+    }
+
+    func testRefusesWithoutSendingAnything() {
+        let cases: [(String, (FakeScreenBackend) -> Void, Double, Double, CarPlayErrorCode)] = [
+            ("iOS 27", { $0.device = SimulatorDevice(runtimeVersion: "27.0", dataPath: "/d") }, 1, 1, .unsupportedRuntime),
+            ("iOS 18", { $0.device = SimulatorDevice(runtimeVersion: "18.6", dataPath: "/d") }, 1, 1, .unsupportedRuntime),
+            ("no TVOut", { $0.before = [FakeScreenBackend.lcd, FakeScreenBackend.wireless] }, 1, 1, .noCarPlayScreen),
+            ("powered off", { $0.before = [FakeScreenBackend.tvOut(power: 0)] }, 1, 1, .carPlayNotPowered),
+            ("external display type", {
+                $0.before = [SimulatorScreen(id: 2, name: "TVOut", screenType: 3, powerState: 1, width: 800, height: 480)]
+            }, 1, 1, .unsupportedScreenType),
+            ("x at width", { _ in }, 800, 1, .usage),
+            ("negative y", { _ in }, 1, -1, .usage),
+            ("NaN", { _ in }, .nan, 1, .usage),
+        ]
+        for (name, configure, x, y, code) in cases {
+            let screens = poweredScreens()
+            configure(screens)
+            let hid = FakeHIDBackend()
+            XCTAssertThrowsError(try controller(screens, hid).tap(udid: "d", x: x, y: y), name) {
+                XCTAssertEqual(($0 as? CarPlayPowerError)?.code, code, name)
+            }
+            XCTAssertEqual(hid.calls, [], name)
+        }
+    }
+
+    func testStopsAtTheFailedHIDStep() {
+        let steps = ["create", "down:1:10,10:800x480", "up:1:10,10:800x480"]
+        for step in steps {
+            let hid = FakeHIDBackend()
+            let failure = CarPlayPowerError(.hidFailed, "simulator refused")
+            hid.failure = failure
+            hid.failureStep = step
+            XCTAssertThrowsError(try controller(poweredScreens(), hid).tap(udid: "d", x: 10, y: 10)) {
+                XCTAssertEqual($0 as? CarPlayPowerError, failure)
+            }
+            XCTAssertEqual(hid.calls.last, step)
+        }
+    }
+}

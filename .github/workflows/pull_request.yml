@@ -389,6 +389,12 @@ jobs:
               # it, so an edit to it must exercise them rather than be skipped.
               - '.github/actions/gradle-task-run/**'
               - 'scripts/local-dev/hot-reload.sh'
+              # The emulator job's performance-tool smoke (#18725) exercises these
+              # daemon-side sources, so a change to them must run it.
+              - 'src/features/performance/**'
+              - 'src/features/performanceTrace/**'
+              - 'src/features/profiling/**'
+              - 'src/server/*performance*'
               - '.github/workflows/android*.yml'
               # This workflow controls Android-job gating, so changes to it
               # must exercise the gate rather than being silently skipped.

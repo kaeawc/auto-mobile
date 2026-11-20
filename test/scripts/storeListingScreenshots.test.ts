@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { validateListing } from "../../scripts/store-listing/storeListing";
 import {
   buildScreenshotPlan,
+  FEATURED,
   PROFILES,
   SAMPLE_LIBRARY,
   toDrivePlan,
@@ -77,6 +78,26 @@ describe("screenshot plan", () => {
         args: { screenshot: "settled" },
       });
     });
+  });
+
+  test("iOS opens the featured prototype's context menu with a long press before tapping Share", () => {
+    const shot = plan.find((entry) => entry.id === "ios-iphone-69-light-share");
+    expect(shot?.steps.filter((step) => step.kind === "mcp" && step.tool === "tapOn")).toEqual([
+      {
+        kind: "mcp",
+        tool: "tapOn",
+        args: { selector: { text: FEATURED.label }, action: "longPress" },
+      },
+      { kind: "mcp", tool: "tapOn", args: { selector: { text: "Share" } } },
+    ]);
+  });
+
+  test("Android opens More options for chat-scroll before tapping Share", () => {
+    const shot = plan.find((entry) => entry.id === "android-phone-light-share");
+    expect(shot?.steps.filter((step) => step.kind === "mcp" && step.tool === "tapOn")).toEqual([
+      { kind: "mcp", tool: "tapOn", args: { selector: { text: "More options for chat-scroll" } } },
+      { kind: "mcp", tool: "tapOn", args: { selector: { text: "Share" } } },
+    ]);
   });
 
   test("every sample prototype in the library exists in the shared valid corpus", () => {

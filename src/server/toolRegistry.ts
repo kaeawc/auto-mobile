@@ -96,6 +96,7 @@ import {
 import { nonBlankSessionUuid } from "./planCallerIdentity";
 import { holdSessionForCurrentTask } from "./tasks/runAsTask";
 import { runRecordedToolCall, toolCallOutcome } from "./toolCallRecording";
+import { withToolCallCapture } from "../utils/fixtureCapture/fixtureCaptureFromEnv";
 
 export {
   AUTOMATIC_TOOL_OUTPUT_RETENTION,
@@ -307,7 +308,7 @@ export class ToolRegistryClass {
       name,
       description,
       schema,
-      handler: async (args, progress, signal) => {
+      handler: withToolCallCapture(name, async (args, progress, signal) => {
         await assertSessionBrokerToolCall(name, false, args);
         const response = await handler(args, progress, signal);
         if (isDeviceBindingTool(name)) {
@@ -329,7 +330,7 @@ export class ToolRegistryClass {
           timer: this.timer,
           omitsAcquisitionTiming: options.omitsAcquisitionTiming,
         });
-      },
+      }),
       defaultEnabled: options.defaultEnabled ?? true,
       defaultDeclared: options.defaultEnabled !== undefined,
       ...(options.defaultEnabledOnTv ? { defaultEnabledOnTv: true } : {}),
@@ -537,7 +538,7 @@ export class ToolRegistryClass {
       name,
       description,
       schema,
-      handler: this.withAutolockPolicy(wrappedHandler),
+      handler: withToolCallCapture(name, this.withAutolockPolicy(wrappedHandler)),
       defaultEnabled: options.defaultEnabled ?? true,
       defaultDeclared: options.defaultEnabled !== undefined,
       ...(options.defaultEnabledOnTv ? { defaultEnabledOnTv: true } : {}),

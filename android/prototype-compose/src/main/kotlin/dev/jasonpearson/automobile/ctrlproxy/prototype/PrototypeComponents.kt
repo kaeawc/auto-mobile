@@ -346,7 +346,9 @@ internal fun RenderPrototypeCard(
   modifier: Modifier,
   content: @Composable ColumnScope.() -> Unit,
 ) {
-  val container = prototypeThemedColor(node.style.background, node.style.source.background)
+  val container =
+    if (node.style.source.glassMaterial() != null) Color.Transparent
+    else prototypeThemedColor(node.style.background, node.style.source.background)
   when ((node.source as? PrototypeCardNode)?.variant) {
     "elevated" ->
       ElevatedCard(

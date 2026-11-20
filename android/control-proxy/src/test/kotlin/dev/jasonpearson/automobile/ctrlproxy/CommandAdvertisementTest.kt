@@ -111,6 +111,7 @@ class CommandAdvertisementTest {
       "prototype_custom_shaders_v1",
       "prototype_appearance_v1",
       "prototype_backdrop_v1",
+      "prototype_glass_v1",
       "prototype_platform_window_controls_v1",
       "prototype_hide_keyboard_v1",
       "prototype_persistence_replay_v1",

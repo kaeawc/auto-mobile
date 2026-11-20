@@ -176,5 +176,7 @@ function cameraPosterDependencyOverrides(
     iosCameraPosterDylibProvider:
       deps.iosCameraPosterDylibProvider ?? currentDeps.iosCameraPosterDylibProvider,
     cameraPosterFileExists: deps.cameraPosterFileExists ?? currentDeps.cameraPosterFileExists,
+    ctrlProxyApkOverrideProbe:
+      deps.ctrlProxyApkOverrideProbe ?? currentDeps.ctrlProxyApkOverrideProbe,
   };
 }

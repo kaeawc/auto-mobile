@@ -331,10 +331,13 @@ export function insetSwipeBounds(
     right: Math.min(options.bounds.right, safe.right),
     bottom: Math.min(options.bounds.bottom, safe.bottom),
   };
-  if (
-    swipePlatform(options) === "ios" &&
-    (bounds.right <= bounds.left || bounds.bottom <= bounds.top)
-  ) {
+  if (bounds.right <= bounds.left || bounds.bottom <= bounds.top) {
+    if (swipePlatform(options) !== "ios") {
+      // An inverted intersection's midpoint lies outside the element (#18646).
+      throw new ActionableError(
+        `Swipe container [${options.bounds.left},${options.bounds.top}][${options.bounds.right},${options.bounds.bottom}] lies entirely inside the system insets; retry with includeSystemInsets: true to swipe it under the system bars.`,
+      );
+    }
     if (options.includeFloatingBars !== false) {
       return insetSwipeBounds({ ...options, includeFloatingBars: false });
     }

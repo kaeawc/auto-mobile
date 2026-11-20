@@ -18,6 +18,12 @@ import {
 import { parseAndroidRuntimePermissions } from "../action/parseAndroidRuntimePermissions";
 
 export interface GuestAudioCaptureHandle {
+  /**
+   * Rechecks that this lease's guest recording is still running. Throws
+   * `audio_guest_capture_unavailable` otherwise: opening `injectAudio` with no open guest
+   * recorder crashes the emulator (#18687).
+   */
+  assertRunning(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -204,6 +210,15 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
         throw toActionableError(error, `Failed to close guest audio capture on ${deviceId}`);
       }
     };
+    const assertRunning = async (): Promise<void> => {
+      if (closed) {
+        throw unavailable(deviceId, "the capture was already closed");
+      }
+      // A recheck has its own bounded budget; open's verification deadline has passed by now.
+      await this.recheckRunning(deviceId, () =>
+        broadcast("status", this.now() + BROADCAST_TIMEOUT_MS),
+      );
+    };
     try {
       emulatorPid = await this.emulatorPidFor(deviceId);
       await this.ensureRecordAudioPermission(adb, deviceId, deadline);
@@ -220,7 +235,7 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       while (this.now() < deadline) {
         const now = this.now();
         if (now - runningSince >= this.settleMs) {
-          return { close };
+          return { assertRunning, close };
         }
         await this.timer.sleep(Math.min(this.pollMs, deadline - now));
         const status = await broadcast("status", deadline);
@@ -239,6 +254,21 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       throw error instanceof EmulatorAudioError
         ? error
         : unavailable(deviceId, errorMessage(error));
+    }
+  }
+
+  /** One status reply must be `running`; any other reply or failure refuses injection. */
+  private async recheckRunning(deviceId: string, status: () => Promise<string>): Promise<void> {
+    let reply: string;
+    try {
+      reply = await status();
+    } catch (error) {
+      throw error instanceof EmulatorAudioError
+        ? error
+        : unavailable(deviceId, errorMessage(error));
+    }
+    if (reply.split(" ", 1)[0] !== "running") {
+      throw unavailable(deviceId, `the capture stopped before injection: ${reply}`);
     }
   }
 

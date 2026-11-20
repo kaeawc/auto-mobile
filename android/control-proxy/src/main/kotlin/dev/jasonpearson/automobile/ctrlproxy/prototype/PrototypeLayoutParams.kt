@@ -108,9 +108,26 @@ fun prototypeLayoutParams(
       OverlayManager.resolveCutoutMode(sdkInt)?.let { layoutInDisplayCutoutMode = it }
       // Explicitly opt out of system-bar fitting where supported, including focusable windows.
       if (sdkInt >= 30) setFitInsetsTypes(0)
-      if (sdkInt >= PrototypeBackdrops.MIN_BLUR_SDK && blurBehindRadiusPx > 0) {
-        flags = flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
-        blurBehindRadius = blurBehindRadiusPx
-      }
+      applyBlurBehind(placement, sdkInt, blurBehindRadiusPx)
     }
+}
+
+/**
+ * Display-wide blur-behind (API 31+) for sheets and fullscreen windows. A floating card blurs only
+ * its own area through [PrototypeCardBlurHost] instead.
+ */
+@SuppressLint("NewApi")
+private fun WindowManager.LayoutParams.applyBlurBehind(
+  placement: PrototypePlacement,
+  sdkInt: Int,
+  radiusPx: Int,
+) {
+  if (
+    placement !is PrototypePlacement.Floating &&
+      sdkInt >= PrototypeBackdrops.MIN_BLUR_SDK &&
+      radiusPx > 0
+  ) {
+    flags = flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
+    blurBehindRadius = radiusPx
+  }
 }

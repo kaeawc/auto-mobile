@@ -1,2 +1,2 @@
-priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=true
-dev.jasonpearson.automobile.playground/.MainActivity
+priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=false
+dev.l18722.dbg/dev.l18722.Main

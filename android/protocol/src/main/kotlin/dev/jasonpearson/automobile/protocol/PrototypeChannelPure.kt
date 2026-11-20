@@ -61,16 +61,50 @@ object PrototypeChannelCoalescer {
    * One flush window's frames with each run of same-target `setData` / `setState` frames reduced to
    * its last frame; appends and every other action are never coalesced.
    */
-  fun coalesce(frames: List<JsonArray>): List<JsonArray> {
-    val kept = ArrayList<JsonArray>()
+  fun coalesce(frames: List<JsonArray>): List<JsonArray> = keptIndices(frames).map { frames[it] }
+
+  /** The indices [coalesce] keeps, so callers can keep each frame's event beside its actions. */
+  fun keptIndices(frames: List<JsonArray>): List<Int> {
+    val kept = ArrayList<Int>()
     var previous: List<String>? = null
-    for (frame in frames) {
+    for ((index, frame) in frames.withIndex()) {
       val signature = signature(frame)
-      if (signature != null && signature == previous) kept[kept.size - 1] = frame
-      else kept.add(frame)
+      if (signature != null && signature == previous) kept[kept.size - 1] = index
+      else kept.add(index)
       previous = signature
     }
     return kept
+  }
+
+  /**
+   * The actions a routed frame coalesces as: [actions] itself, or an empty barrier when a write
+   * binds a value the runtime may still refuse. Only a `setData` bound to one `event` pointer that
+   * resolves to a scalar of [event] is known to apply, so a later frame cannot replace an earlier
+   * valid write with one that is then refused. The original actions are still what runs.
+   */
+  fun coalescingActions(actions: JsonArray, event: JsonElement): JsonArray {
+    for (action in actions) {
+      val fields = action as? JsonObject ?: continue
+      val binding = fields["value"] as? JsonObject ?: continue
+      if ("event" !in binding && "platform" !in binding) continue
+      if (!appliesAsScalar(fields, binding, event)) return JsonArray(emptyList())
+    }
+    return actions
+  }
+
+  private fun appliesAsScalar(
+    fields: JsonObject,
+    binding: JsonObject,
+    event: JsonElement,
+  ): Boolean {
+    val type = (fields["type"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    val pointer = (binding["event"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    if (type != "setData" || binding.size != 1 || pointer == null) return false
+    val value =
+      if (pointer.isEmpty()) event
+      else if (PrototypeDataPointer.isValid(pointer)) PrototypeDataPointer.resolve(event, pointer)
+      else null
+    return PrototypeDataValues.isScalar(value)
   }
 }
 

@@ -14,6 +14,7 @@ import {
 } from "../observe/ios/CtrlProxyStoreKit";
 import {
   defaultStoreKitClearedSessions,
+  isStoreKitOtherBundleActiveError,
   type StoreKitClearedSessions,
 } from "./StoreKitClearedSessions";
 import {
@@ -30,7 +31,7 @@ import {
 
 export interface StoreKitTestInput {
   action: StoreKitAction;
-  /** Keys the runner's session; one session per appId for the runner's lifetime. */
+  /** Keys the runner's session; the runner holds one loaded appId at a time. */
   appId: string;
   configPath?: string;
   productId?: string;
@@ -178,16 +179,24 @@ export class StoreKitTest {
     device: BootedDevice,
     input: StoreKitTestInput,
   ): Promise<CtrlProxyStoreKitResult> {
+    const untouched = !this.clearedSessions.isTouched(device.deviceId, input.appId);
     // list changes nothing and clear only ever cleans; every other action may leave state behind.
-    if (input.action !== "list" && input.action !== "clear") {
-      this.clearedSessions.markTouched(device.deviceId, input.appId);
-    }
+    // The generation taken here lets a late reply skip marking clean after an overlapping touch.
+    const generation =
+      input.action !== "list" && input.action !== "clear"
+        ? this.clearedSessions.markTouched(device.deviceId, input.appId)
+        : this.clearedSessions.generation(device.deviceId, input.appId);
     const result = await this.senderFactory(device).requestStoreKit(toRunnerRequest(input), {
       ...(input.signal ? { signal: input.signal } : {}),
       ...(input.connectOnly ? { requireExistingConnection: true } : {}),
     });
-    if (input.action === "clear" && result.success) {
-      this.clearedSessions.markCleared(device.deviceId, input.appId);
+    const clearedNow = input.action === "clear" && result.success;
+    // A load refused because another bundle is active changed nothing, so a bundle this daemon
+    // had not touched since its last clear stays clean and its release clear is not an erase.
+    const refusedUntouched =
+      input.action === "load" && untouched && isStoreKitOtherBundleActiveError(result.error);
+    if (clearedNow || refusedUntouched) {
+      this.clearedSessions.markCleared(device.deviceId, input.appId, generation);
     }
     return result;
   }

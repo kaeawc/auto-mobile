@@ -2,6 +2,7 @@ import { expect, describe, test, beforeEach } from "bun:test";
 import { DatabaseInspector } from "../../../src/features/database/DatabaseInspector";
 import type { BootedDevice } from "../../../src/models";
 import { shellQuote } from "../../../src/utils/shellQuote";
+import { wrapCommandError } from "../../../src/utils/CommandError";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { ActionableError } from "../../../src/models";
 import { SdkTooOldError } from "../../../src/models/SdkTooOldError";
@@ -251,18 +252,21 @@ describe("DatabaseInspector", () => {
     const pidofFailure = (props: Record<string, unknown>) =>
       Object.assign(new Error("Command failed: adb shell pidof"), props);
 
-    test("a clean pidof miss (exit 1, no output) is app_not_running", async () => {
-      fakeAdb.setCommandError(
-        `shell pidof ${shellQuote(appId)}`,
-        pidofFailure({ code: 1, stdout: "", stderr: "" }),
-      );
-      const watcher = new DatabaseInspector(device, fakeAdb, fakeTimer, () => true);
+    test.each([false, true])(
+      "a clean pidof miss is app_not_running (wrapped: %s)",
+      async (wrapped) => {
+        const command = `shell pidof ${shellQuote(appId)}`;
+        const raw = pidofFailure({ code: 1, stdout: "", stderr: "" });
+        const error = wrapped ? wrapCommandError(raw, { command: "adb", args: [command] }) : raw;
+        fakeAdb.setCommandError(command, error);
+        const watcher = new DatabaseInspector(device, fakeAdb, fakeTimer, () => true);
 
-      const error = await watcher.executeSQL(appId, databasePath, "select 1").catch((e) => e);
-
-      expect(error).toBeInstanceOf(AppNotRunningError);
-      expect(providerCalls()).toEqual([]);
-    });
+        await expect(watcher.executeSQL(appId, databasePath, "select 1")).rejects.toBeInstanceOf(
+          AppNotRunningError,
+        );
+        expect(providerCalls()).toEqual([]);
+      },
+    );
 
     test("a probe failure surfaces as the real error, not app_not_running, and skips the provider", async () => {
       fakeAdb.setCommandError(

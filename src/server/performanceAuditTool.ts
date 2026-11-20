@@ -41,7 +41,7 @@ export function createPerformanceAuditTool(
   return defineDeviceTool({
     name: "performanceAudit",
     description:
-      "Pass/fail performance checks of an app on the current screen, against the configured thresholds. kinds: performance (UI jank, frame time and touch latency of the foreground app; appId must be in the foreground) and memory (a memory snapshot of appId); default both. Each reports passed with its metrics and violations. failOn error|warning makes the call fail when a check does not pass or cannot run (performance of an appId not in the foreground is listed under unsupported), for plan assertions; default never. For raw captures use performanceTrace, measureStartup or heapDump. Android only.",
+      "Pass/fail performance checks of an app on the current screen, against the configured thresholds. kinds: performance (UI jank, frame time and Android-only touch latency of the foreground app; appId must be in the foreground) and memory (memory usage of appId); default both. Each reports passed with its metrics and violations. failOn error|warning makes the call fail when a check does not pass or cannot run (performance of an appId not in the foreground is listed under unsupported), for plan assertions; default never. For raw captures use performanceTrace, measureStartup or heapDump. Android and iOS Simulator. On iOS Simulator, performance requires an app instrumented with auto-mobile-sdk.",
     input: performanceAuditInput,
     handler: async (device, args) => {
       const result = await new OnDemandAudit(device, enginesFor(device)).run({

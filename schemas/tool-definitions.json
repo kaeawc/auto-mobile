@@ -5489,7 +5489,7 @@
           }
         },
         "__schema28": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -8921,7 +8921,7 @@
           }
         },
         "__schema28": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -14766,7 +14766,7 @@
           }
         },
         "__schema28": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -18504,7 +18504,7 @@
           }
         },
         "__schema28": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -24457,7 +24457,7 @@
           }
         },
         "rotation": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -27391,7 +27391,7 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Pass/fail performance checks of an app on the current screen, against the configured thresholds. kinds: performance (UI jank, frame time and touch latency of the foreground app; appId must be in the foreground) and memory (a memory snapshot of appId); default both. Each reports passed with its metrics and violations. failOn error|warning makes the call fail when a check does not pass or cannot run (performance of an appId not in the foreground is listed under unsupported), for plan assertions; default never. For raw captures use performanceTrace, measureStartup or heapDump. Android only.",
+    "description": "Pass/fail performance checks of an app on the current screen, against the configured thresholds. kinds: performance (UI jank, frame time and Android-only touch latency of the foreground app; appId must be in the foreground) and memory (memory usage of appId); default both. Each reports passed with its metrics and violations. failOn error|warning makes the call fail when a check does not pass or cannot run (performance of an appId not in the foreground is listed under unsupported), for plan assertions; default never. For raw captures use performanceTrace, measureStartup or heapDump. Android and iOS Simulator. On iOS Simulator, performance requires an app instrumented with auto-mobile-sdk.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -29311,7 +29311,7 @@
           }
         },
         "__schema28": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -31929,7 +31929,7 @@
           }
         },
         "__schema28": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -38328,7 +38328,7 @@
           }
         },
         "__schema28": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -40468,7 +40468,7 @@
           "enum": ["portrait", "landscape"]
         },
         "lockOrientation": {
-          "description": "Android only. true keeps automatic rotation off to hold the requested orientation. Omission restores the prior automatic-rotation setting after orientation confirmation, including in a device session; an unreadable initial setting is left unchanged. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
+          "description": "Android only. true keeps automatic rotation off to hold the requested orientation. Omission in a device session does the same, and releasing the session restores the original automatic-rotation setting; a direct call without a session restores it before returning. An unreadable initial setting is left unchanged by omission. false enables automatic rotation right after rotating, even if originally locked, so the sensor may revert the orientation; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
           "type": "boolean"
         },
         "display": {
@@ -41789,7 +41789,7 @@
           }
         },
         "__schema28": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -44172,7 +44172,7 @@
           }
         },
         "__schema28": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -51176,7 +51176,7 @@
           }
         },
         "__schema31": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -53244,7 +53244,7 @@
           }
         },
         "__schema28": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -55209,7 +55209,7 @@
           }
         },
         "__schema28": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -59177,7 +59177,7 @@
           }
         },
         "__schema28": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -62209,7 +62209,7 @@
           }
         },
         "__schema38": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3
@@ -64200,7 +64200,7 @@
           }
         },
         "__schema28": {
-          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation, preserving portrait on unfolded landscape-shaped panels and reconciling landscape on fixed portrait displays to 0. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
+          "description": "Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise, iOS landscapeLeft / Android ROTATION_90); 2 portrait upside down; 3 landscape right (iOS landscapeRight / Android ROTATION_270). iOS prefers runner interface orientation unless the screen shape contradicts it: runner landscape on a portrait-shaped screen reports 0 and runner portrait on a landscape-shaped screen reports 1. Without runner orientation, settled screen shape distinguishes only 0 (width < height) or 1 (width >= height, including square screens).",
           "type": "integer",
           "minimum": 0,
           "maximum": 3

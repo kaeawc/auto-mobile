@@ -9,7 +9,23 @@ export interface CtrlProxyApkOverrideProbe {
   stat(filePath: string): Promise<{ isFile(): boolean }>;
 }
 
-const defaultProbe: CtrlProxyApkOverrideProbe = { stat: (filePath) => fs.stat(filePath) };
+/**
+ * Opens the override for reading and stats the open handle: a bare `stat` needs no read
+ * permission, so an existing file the daemon cannot read (mode 000) would pass and fail later
+ * at install.
+ */
+export const readableFileProbe: CtrlProxyApkOverrideProbe = {
+  stat: async (filePath) => {
+    const handle = await fs.open(filePath, "r");
+    try {
+      return await handle.stat();
+    } finally {
+      await handle.close();
+    }
+  },
+};
+
+const defaultProbe = readableFileProbe;
 
 /** Absolute `AUTOMOBILE_CTRL_PROXY_APK_PATH`, resolved from the daemon launch cwd; null when unset or blank. */
 export function resolveCtrlProxyApkPathOverride(

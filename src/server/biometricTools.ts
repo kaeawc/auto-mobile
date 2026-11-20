@@ -5,16 +5,8 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { BiometricAuth } from "../features/action/BiometricAuth";
 import { ActionableError, BootedDevice } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
-import {
-  addDeviceTargetingToSchema,
-  addSessionUuidToSchema,
-  responseShapeControlFields,
-} from "../utils/schemaHelpers";
-import {
-  biometricAuthResultSchema,
-  getIosSimulatorCapabilitiesResultSchema,
-} from "./biometricToolOutputSchemas";
-import { computeIosSimulatorCapabilities } from "../features/utility/iosSimulatorCapabilities";
+import { addDeviceTargetingToSchema, responseShapeControlFields } from "../utils/schemaHelpers";
+import { biometricAuthResultSchema } from "./biometricToolOutputSchemas";
 import { DeviceState, type BiometricEnrollment } from "../features/utility/DeviceState";
 import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import type { SessionManager } from "../daemon/sessionManager";
@@ -60,21 +52,6 @@ export const biometricAuthSchema = addDeviceTargetingToSchema(
   path: ["errorCode"],
 });
 
-export const getIosSimulatorCapabilitiesSchema = addSessionUuidToSchema(
-  z
-    .object({
-      deviceType: z
-        .string()
-        .min(1)
-        .describe("CoreSimulator device-type identifier selected from automobile:devices/images."),
-      runtime: z
-        .string()
-        .min(1)
-        .describe("CoreSimulator runtime identifier selected from automobile:devices/images."),
-    })
-    .strict(),
-);
-
 interface BiometricEnrollmentCapture {
   sessionManager?: SessionManager;
   initialEnrollment?: BiometricEnrollment;
@@ -104,19 +81,7 @@ async function captureBiometricEnrollment(
 }
 
 /**
- * Register biometric authentication tools
- */
-export const getIosSimulatorCapabilitiesHandler = async (
-  args: Pick<z.infer<typeof getIosSimulatorCapabilitiesSchema>, "deviceType" | "runtime">,
-) =>
-  createStructuredToolResponse(
-    computeIosSimulatorCapabilities({
-      deviceType: args.deviceType,
-      runtime: args.runtime,
-    }),
-  );
-
-/**
+ * Register biometric authentication tools.
  * `daemon` is the session source the enrollment capture reads; tests inject one without a daemon.
  * `prototype` routes cancel/error to a shown prototype (#14328); no runtime accepts an override
  * yet, so the server supplies none and those actions keep the in-app SDK path.
@@ -171,18 +136,6 @@ export function registerBiometricTools(
       throw toActionableError(error, `Failed to execute biometric authentication`);
     }
   };
-
-  ToolRegistry.register(
-    "getIosSimulatorCapabilities",
-    "Discover biometric capabilities for a selected iOS Simulator device type and runtime.",
-    getIosSimulatorCapabilitiesSchema,
-    {
-      handler: getIosSimulatorCapabilitiesHandler,
-      defaultEnabled: false,
-      readOnly: true,
-      outputSchema: getIosSimulatorCapabilitiesResultSchema,
-    },
-  );
 
   // Register the tool
   ToolRegistry.registerDeviceAware(

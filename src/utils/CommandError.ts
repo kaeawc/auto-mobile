@@ -9,6 +9,7 @@ export interface CommandErrorFormatOptions {
 
 const MAX_COMMAND_OUTPUT_CHARS = 300;
 const TRUNCATED_MARKER = "...[truncated]";
+const MAX_COMMAND_CAUSE_DEPTH = 5;
 
 function textFrom(value: unknown): string {
   if (typeof value === "string") {
@@ -18,6 +19,28 @@ function textFrom(value: unknown): string {
     return value.toString();
   }
   return "";
+}
+
+/** Read raw streams and exit status through wrappers without matching their command-line messages. */
+export function commandFailureDetails(error: unknown): {
+  stdout: string;
+  stderr: string;
+  exitCode: number | undefined;
+} {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  let exitCode: number | undefined;
+  let current = error;
+  for (let depth = 0; depth < MAX_COMMAND_CAUSE_DEPTH && current instanceof Error; depth += 1) {
+    const failure = current as Error & { stdout?: unknown; stderr?: unknown; code?: unknown };
+    stdout.push(textFrom(failure.stdout));
+    stderr.push(textFrom(failure.stderr));
+    if (typeof failure.code === "number") {
+      exitCode ??= failure.code;
+    }
+    current = current.cause;
+  }
+  return { stdout: stdout.join("\n"), stderr: stderr.join("\n"), exitCode };
 }
 
 function outputExcerpt(value: string): string {

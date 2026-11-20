@@ -1,8 +1,7 @@
 import { verifyIosRotationDisplayRead, type IosDisplayPixelProbe } from "./iosRotateDisplayProbe";
 import {
   awaitIosRunnerRecovery,
-  unrestoredIosOrientationWarning,
-  type IosRotateRunner,
+  restoreIosOrientationAfterFailure,
 } from "./iosRotateRunnerRecovery";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
@@ -20,7 +19,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { restoreTargetIosOrientation, verifyIosRotation } from "./iosRotateVerification";
+import { iosRotatePanel, requestIosRotate, verifyIosRotation } from "./iosRotateVerification";
 import { ROTATION_READ_FLOOR_MS } from "../observe/Idle";
 import {
   orientationFromRotation,
@@ -368,7 +367,10 @@ export class Rotate extends BaseVisualChange {
           const client = IOSCtrlProxyClient.getInstance(this.device);
           runner = client;
           const result = await perf.track("iOSRotation", () =>
-            awaitWhileRequestIsLive(client.requestRotate(orientation, 5000, perf), signal),
+            awaitWhileRequestIsLive(
+              requestIosRotate(client, orientation, perf, iosRotatePanel(observation)),
+              signal,
+            ),
           );
 
           timedOut = result.timedOut === true;
@@ -431,49 +433,10 @@ export class Rotate extends BaseVisualChange {
     });
     return verified.success
       ? verified
-      : await this.restoreIosOrientationAfterFailure(verified, runner, previousObservation, {
+      : await restoreIosOrientationAfterFailure(verified, runner, previousObservation, {
           perf,
           signal,
         });
-  }
-
-  /**
-   * A rotate the display could not honor (SpringBoard ignores landscape) still leaves the device
-   * orientation changed, so the next app launches rotated. Put the prior orientation back.
-   */
-  private async restoreIosOrientationAfterFailure(
-    failed: RotateResult,
-    client: IosRotateRunner | undefined,
-    previousObservation: ObserveResult | undefined,
-    call: { perf: RotationPerf; signal?: AbortSignal },
-  ): Promise<RotateResult> {
-    const { perf, signal } = call;
-    const prior = restoreTargetIosOrientation(previousObservation);
-    if (!client || prior === "unknown" || prior === failed.orientation) {
-      return failed;
-    }
-    try {
-      throwIfAborted(signal);
-      const restored = await perf.track("iOSRotationRestore", () =>
-        awaitWhileRequestIsLive(client.requestRotate(prior, 5000, perf), signal),
-      );
-      if (restored.timedOut) {
-        client.ensureRecoveryStarted();
-        const recovery = await awaitIosRunnerRecovery(client, "rotate restore", signal);
-        return { ...failed, warning: `${unrestoredIosOrientationWarning(prior)} ${recovery}` };
-      }
-      if (!restored.success) {
-        throw new Error(restored.error ?? "runner reported failure");
-      }
-      return failed;
-    } catch (error) {
-      throwIfAborted(signal);
-      logger.warn(`iOS rotation restore to ${prior} failed: ${errorMessage(error)}`, error);
-      return {
-        ...failed,
-        warning: unrestoredIosOrientationWarning(prior),
-      };
-    }
   }
 
   private async executeAndroidRotation(

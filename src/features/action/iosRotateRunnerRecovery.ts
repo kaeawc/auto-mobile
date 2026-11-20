@@ -1,7 +1,14 @@
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
+import type { ObserveResult, RotateResult } from "../../models";
+import type { PerformanceTracker } from "../../utils/PerformanceTracker";
+import {
+  iosRotatePanel,
+  requestIosRotate,
+  restoreTargetIosOrientation,
+} from "./iosRotateVerification";
 
 export type IosRotateRunner = Pick<
   IOSCtrlProxyClient,
@@ -29,4 +36,43 @@ export async function awaitIosRunnerRecovery(
   // awaitRecovery reports an aborted wait as "timed_out"; surface the cancellation instead.
   throwIfAborted(signal);
   return warning;
+}
+
+/**
+ * A rotate the display could not honor (SpringBoard ignores landscape) still leaves the device
+ * orientation changed, so the next app launches rotated. Put the prior orientation back.
+ */
+export async function restoreIosOrientationAfterFailure(
+  failed: RotateResult,
+  client: IosRotateRunner | undefined,
+  previousObservation: ObserveResult | undefined,
+  call: { perf: PerformanceTracker; signal?: AbortSignal },
+): Promise<RotateResult> {
+  const { perf, signal } = call;
+  const prior = restoreTargetIosOrientation(previousObservation);
+  if (!client || prior === "unknown" || prior === failed.orientation) {
+    return failed;
+  }
+  try {
+    throwIfAborted(signal);
+    const restored = await perf.track("iOSRotationRestore", () =>
+      awaitWhileRequestIsLive(
+        requestIosRotate(client, prior, perf, iosRotatePanel(previousObservation)),
+        signal,
+      ),
+    );
+    if (restored.timedOut) {
+      client.ensureRecoveryStarted();
+      const recovery = await awaitIosRunnerRecovery(client, "rotate restore", signal);
+      return { ...failed, warning: `${unrestoredIosOrientationWarning(prior)} ${recovery}` };
+    }
+    if (!restored.success) {
+      throw new Error(restored.error ?? "runner reported failure");
+    }
+    return failed;
+  } catch (error) {
+    throwIfAborted(signal);
+    logger.warn(`iOS rotation restore to ${prior} failed: ${errorMessage(error)}`, error);
+    return { ...failed, warning: unrestoredIosOrientationWarning(prior) };
+  }
 }

@@ -92,11 +92,41 @@ extension CommandHandler {
         }
     }
 
+    /// Returns nil when the pose path is unavailable (not a simulator), so the caller falls back
+    /// to XCUIDevice. A foldable ignores XCUIDevice for its panels on iOS 27 (#17047).
+    private func performFoldableRotation(_ target: RotateTarget, panel: FoldablePanel) async throws -> RotateResult? {
+        let appAxisBefore = await readAppAxis()
+        let decision = FoldableRotateDecision(target: target, appAxisBefore: appAxisBefore)
+        if let result = decision.initial().result { return result }
+        do {
+            try await simulatedOrientationSetter.setDeviceOrientation(panel.deviceOrientation(for: target))
+        } catch HingeAngleError.unsupportedPlatform {
+            return nil
+        }
+        let deadline = rotationTimer.now() + RotateDecision.timeoutMs
+        while true {
+            let appAxis = await readAppAxis()
+            let now = rotationTimer.now()
+            let outcome = decision.poll(appAxis: appAxis, deadlineReached: now >= deadline)
+            if let result = outcome.result { return result }
+            await rotationTimer.wait(milliseconds: min(RotateDecision.pollIntervalMs, deadline - now))
+        }
+    }
+
     func handleRotate(_ request: RequestRotate, startTime: Date) async throws -> RotateResponse {
         guard let target = RotateTarget(request.orientation) else {
             throw CommandError.invalidParameter("orientation", request.orientation)
         }
-        let result = try await performRotation(target)
+        var foldableResult: RotateResult?
+        if let panel = request.panel.flatMap(FoldablePanel.init(rawValue:)) {
+            foldableResult = try await performFoldableRotation(target, panel: panel)
+        }
+        let result: RotateResult
+        if let foldableResult {
+            result = foldableResult
+        } else {
+            result = try await performRotation(target)
+        }
         return RotateResponse(
             requestId: request.requestId,
             success: result.error == nil,

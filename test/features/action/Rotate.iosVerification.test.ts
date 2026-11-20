@@ -178,8 +178,42 @@ describe("iOS observed rotation verification (#8778)", () => {
         expect(result.error).toContain("inner panel");
         expect(result.observation).toBeUndefined();
       }
+      // The rotate and its restore both name the foldable panel, so the runner turns the pose (#17047).
+      expect(call.mock.calls.map((c) => c[3])).toEqual(agrees ? ["inner"] : ["inner", "inner"]);
     },
   );
+
+  test("a cover-panel rotate names the panel (#17047)", async () => {
+    const cover = {
+      ...createObserveResult(0),
+      display: {
+        key: "primary",
+        role: "cover" as const,
+        posture: "closed" as const,
+        generation: 0,
+      },
+    };
+    observe.setObserveSequence([
+      cover,
+      { ...cover, rotation: 1, screenSize: { width: 874, height: 402 } },
+    ]);
+    const call = spyOn(runner, "requestRotate").mockResolvedValue(
+      runnerResult({ previousOrientation: "portrait" }),
+    );
+    pixelSizes = [{ width: 2622, height: 1206 }];
+    expect((await rotate.execute("landscape")).success).toBe(true);
+    expect(call.mock.calls.map((c) => c[3])).toEqual(["cover"]);
+  });
+
+  test("a non-foldable display omits the panel (#17047)", async () => {
+    observe.setObserveSequence([createObserveResult(0), createObserveResult(1)]);
+    const call = spyOn(runner, "requestRotate").mockResolvedValue(
+      runnerResult({ previousOrientation: "portrait" }),
+    );
+    pixelSizes = [{ width: 2622, height: 1206 }];
+    expect((await rotate.execute("landscape")).success).toBe(true);
+    expect(call.mock.calls.map((c) => c[3])).toEqual([undefined]);
+  });
 
   const timedOutRotate = () =>
     runnerResult({
@@ -497,7 +531,9 @@ describe("iOS observed rotation verification (#8778)", () => {
       const result = await rotate.execute("landscape");
       expect(result.success).toBe(false);
       expect(result.rotationPerformed).toBe(false);
-      expect(result.error).toBe(error);
+      expect(result.error).toBe(
+        error.replace("Rotation is not supported", "The foreground app or screen does not rotate"),
+      );
       expect(result.warning).toBeUndefined();
       expect(result.previousOrientation).toBe(previous);
       expect(result.currentOrientation).toBe(current);

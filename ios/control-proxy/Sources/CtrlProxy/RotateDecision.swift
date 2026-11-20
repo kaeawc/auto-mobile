@@ -132,3 +132,55 @@ struct RotateDecision: Sendable {
         )
     }
 }
+
+/// The active panel of a foldable, as the daemon's observation names it.
+enum FoldablePanel: String, Equatable, Sendable {
+    case cover
+    case inner
+
+    /// The device orientation that shows `target` on this panel. The inner panel's interface is
+    /// landscape while the device is upright, so it is a quarter turn from the cover's mapping.
+    func deviceOrientation(for target: RotateTarget) -> SimulatedDeviceOrientation {
+        switch (self, target.orientation) {
+        case (.cover, "landscape_left"): .landscapeLeft
+        case (.cover, "landscape_right"): .landscapeRight
+        case (.cover, _): .portrait
+        case (.inner, "portrait_upside_down"): .landscapeRight
+        case (.inner, "portrait"): .landscapeLeft
+        case (.inner, _): .portrait
+        }
+    }
+}
+
+/// Pure decisions for a foldable rotation, verified only by the app's axis: the pose
+/// orientation does not move XCUIDevice.orientation, so it cannot confirm a direction.
+struct FoldableRotateDecision: Sendable {
+    let target: RotateTarget
+    let appAxisBefore: AppAxis?
+
+    func initial() -> RotateOutcome {
+        guard target.isCoarse, appAxisBefore == target.axis else { return .pending }
+        return .noOp(result(appAxis: appAxisBefore, performed: false))
+    }
+
+    func poll(appAxis: AppAxis?, deadlineReached: Bool) -> RotateOutcome {
+        if appAxis == target.axis {
+            return .success(result(appAxis: appAxis, performed: appAxisBefore != target.axis || !target.isCoarse))
+        }
+        guard deadlineReached else { return .pending }
+        let error = appAxis == nil
+            ? "Rotation to \(target.axis.rawValue) could not be confirmed: the view hierarchy was unavailable"
+            : RotateDecision.unchangedAxisError
+        return .failure(result(appAxis: appAxis ?? appAxisBefore, performed: false, error: error))
+    }
+
+    private func result(appAxis: AppAxis?, performed: Bool, error: String? = nil) -> RotateResult {
+        RotateResult(
+            previousOrientation: appAxisBefore?.rawValue ?? "unknown",
+            currentOrientation: error == nil ? target.orientation : (appAxis?.rawValue ?? "unknown"),
+            value: error == nil ? target.axis.value : (appAxis?.value ?? 0),
+            rotationPerformed: performed,
+            error: error
+        )
+    }
+}

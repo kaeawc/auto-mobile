@@ -1,21 +1,55 @@
 import type { ObserveResult, RotateResult } from "../../models";
+import type { PerformanceTracker } from "../../utils/PerformanceTracker";
+import type { CtrlProxyRotateResult, IosRotatePanel } from "../observe/ios/types";
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
+
+const IOS_ROTATE_TIMEOUT_MS = 5000;
+
+/** A foldable's active panel; the runner rotates it through the simulator device pose (#17047). */
+export function iosRotatePanel(observation: ObserveResult | undefined): IosRotatePanel | undefined {
+  const role = observation?.display?.role;
+  return role === "cover" || role === "inner" ? role : undefined;
+}
+
+/** Sends the panel only for a foldable, so other devices keep the runner's XCUIDevice path. */
+export function requestIosRotate(
+  runner: {
+    requestRotate(
+      orientation: string,
+      timeoutMs?: number,
+      perf?: PerformanceTracker,
+      panel?: IosRotatePanel,
+    ): Promise<CtrlProxyRotateResult>;
+  },
+  orientation: string,
+  perf: PerformanceTracker | undefined,
+  panel: IosRotatePanel | undefined,
+): Promise<CtrlProxyRotateResult> {
+  return panel
+    ? runner.requestRotate(orientation, IOS_ROTATE_TIMEOUT_MS, perf, panel)
+    : runner.requestRotate(orientation, IOS_ROTATE_TIMEOUT_MS, perf);
+}
 
 type Orientation = "portrait" | "landscape" | "unknown";
 
 const IOS_ROTATION_UNSUPPORTED_ERROR =
   "Rotation is not supported on this display (the screen size did not change)";
+// Both foldable panels rotate through the device pose (#17047); what stays put is a foreground app
+// or screen that supports one axis there, such as Settings or the home screen on the cover.
 const IOS_COVER_ROTATION_UNSUPPORTED_ERROR =
-  "Rotation is not supported on the cover panel (the screen size did not change). Open the device to its inner panel (unfold the hinge) and retry there, or keep the current orientation.";
+  "The foreground app or screen does not rotate on the cover panel (the screen size did not change). Open the device to its inner panel (unfold the hinge) and retry there, or keep the current orientation.";
 
 // Name the panel the way the cover refusal does, so an inner-panel refusal on a foldable
-// does not read as an unnamed display (#17385). Other roles keep the generic wording.
-function rotationTargetName(previousObservation: ObserveResult | undefined): string {
-  return previousObservation?.display.role === "inner" ? "the inner panel" : "this display";
+// does not read as an unnamed display (#17385). A refusal is the foreground app's or screen's
+// limit (Settings and the home screen stay portrait on a phone), not the display's (#15003).
+function refusalSubject(previousObservation: ObserveResult | undefined): string {
+  return previousObservation?.display.role === "inner"
+    ? "The foreground app or screen does not rotate on the inner panel"
+    : "The foreground app or screen does not rotate on this display";
 }
 
 function unsupportedRotationError(previousObservation: ObserveResult | undefined): string {
-  return `Rotation is not supported on ${rotationTargetName(previousObservation)} (the screen size did not change)`;
+  return `${refusalSubject(previousObservation)} (the screen size did not change)`;
 }
 
 function unchangedSizeError(previousObservation: ObserveResult | undefined): string {
@@ -36,18 +70,22 @@ function coverPanelRefusalError(
 
 // Applied only after an observed rotation has been reconciled, so a refusal the display
 // contradicts still counts as a rotation on the inner panel.
-function innerPanelRefusal(
+function runnerRefusal(
   normalized: RotateResult,
   previousObservation: ObserveResult | undefined,
   runnerError: string | undefined,
 ): RotateResult {
-  return previousObservation?.display.role === "inner" &&
-    runnerError === IOS_ROTATION_UNSUPPORTED_ERROR
-    ? {
-        ...normalized,
-        error: `${unsupportedRotationError(previousObservation)}. Keep the current orientation.`,
-      }
-    : normalized;
+  if (runnerError !== IOS_ROTATION_UNSUPPORTED_ERROR) {
+    return normalized;
+  }
+  const error = unsupportedRotationError(previousObservation);
+  return {
+    ...normalized,
+    error:
+      previousObservation?.display.role === "inner"
+        ? `${error}. Keep the current orientation.`
+        : error,
+  };
 }
 
 function verifyIosRunnerFailure(
@@ -80,7 +118,7 @@ function verifyIosRunnerFailure(
       message: `Successfully rotated from ${previous} to ${current}`,
     };
   }
-  return innerPanelRefusal(normalized, previousObservation, result.error);
+  return runnerRefusal(normalized, previousObservation, result.error);
 }
 
 export function normalizeIosOrientation(orientation: string | undefined): Orientation {
@@ -303,7 +341,7 @@ export function reconcileIosRotationWithDisplayRead(
     success: false,
     rotationPerformed: false,
     currentOrientation: current,
-    error: `Rotation is not supported on ${rotationTargetName(previousObservation)} (the display is still ${current} after the runner reported ${claim}). Keep the current orientation.`,
+    error: `${refusalSubject(previousObservation)} (the display is still ${current} after the runner reported ${claim}). Keep the current orientation.`,
     message: `Failed to rotate to ${requested}; the display is still ${current}.`,
   };
 }

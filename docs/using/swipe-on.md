@@ -14,6 +14,9 @@ grabber) starts the drag at its centre and travels 240 pt in that direction.
 AutoMobile clamps the drag to the screen bounds. The result includes a `warning` explaining the
 extended drag, and warns if clamping leaves less than 120 pt of travel.
 
+On iOS, a horizontal swipe on a list row swipes the row itself, which reveals its
+swipe actions. It does not scroll the enclosing list.
+
 ## Scrolling until an element appears
 
 Use `lookFor` to scroll until an element appears. The search stops going forward

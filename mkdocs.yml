@@ -315,6 +315,7 @@ nav:
           - "Apple Watch": using/apple-watch.md
           - "Apple Watch tool behavior": using/apple-watch-tools.md
           - "Apple Vision Pro simulator": using/visionos-simulator.md
+          - "CarPlay on iOS simulators": using/carplay.md
       - "Prototyping":
           - "Embedding prototypes in an app": using/prototype-embedding.md
           - "Prototype web preview": using/prototype-web-preview.md
@@ -408,6 +409,7 @@ nav:
           - "tvOS tool support matrix": how-it-works/plat/tvos/tool-matrix.md
           - "watchOS XCUITest spike": how-it-works/plat/watchos/xcuitest-spike.md
           - "watchOS Smart Stack cells": how-it-works/plat/watchos/smart-stack.md
+          - "Apple Watch prototypes": how-it-works/plat/ios/watch-prototypes.md
           - "visionOS XCUITest capability boundary": how-it-works/plat/visionos/xcuitest-capabilities.md
       - "Prototyping platform":
           - "Android prototype specification":
@@ -531,6 +533,7 @@ nav:
       - "2026-11-10: Android Auto projection: no Google account": devlog/2026-11-10-android-auto-projection-provisioning-no-account.md
       - "2026-11-08: Android Auto stub and DHU 2.1 on a Play emulator": devlog/2026-11-08-form-factors-android-auto-dhu-stub.md
       - "2026-11-08: AndroidX baseline profile tooling for CtrlProxy": devlog/2026-11-08-androidx-baseline-profile-generator.md
+      - "2026-11-07: Defer Apple Watch prototypes": devlog/2026-11-07-watch-prototypes-deferred.md
       - "2026-11-07: Defer car-specific prototypes on AAOS": devlog/2026-11-07-automotive-prototypes-deferred.md
       - "2026-11-06: Keystore StrongBox fault: pre-generation check": devlog/2026-11-06-keystore-strongbox-fault-pre-generation-check.md
       - "2026-11-06: AndroidX TV libraries for the Android TV fixture apps": devlog/2026-11-06-androidx-tv-fixture-libraries.md

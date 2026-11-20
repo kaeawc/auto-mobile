@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  isAndroidAutoCarAppHostClass,
   parseAndroidAutoProjectionServices,
   parseProjectedCarApps,
 } from "../../../../src/features/observe/android/projectedCarApps";
@@ -119,5 +120,53 @@ describe("parseAndroidAutoProjectionServices (#17841)", () => {
     expect(
       parsed.apps.some((app) => app.packageName === "com.google.android.projection.gearhead"),
     ).toBe(false);
+  });
+});
+
+describe("isAndroidAutoCarAppHostClass (#18672)", () => {
+  test("every host class the captured dump binds is a car app host", () => {
+    const hosts = parseAndroidAutoProjectionServices(projectionServicesDump("one")).templateHosts;
+    expect(hosts.length).toBeGreaterThan(0);
+    expect(hosts.every((host) => isAndroidAutoCarAppHostClass(host.split("/")[1]))).toBe(true);
+  });
+
+  test("the media car app host counts, short or fully qualified", () => {
+    expect(isAndroidAutoCarAppHostClass(".apphost.MediaCarAppService")).toBe(true);
+    expect(isAndroidAutoCarAppHostClass(".MediaCarAppService")).toBe(true);
+    expect(isAndroidAutoCarAppHostClass("MediaCarAppService")).toBe(true);
+    expect(
+      isAndroidAutoCarAppHostClass(
+        "com.google.android.projection.gearhead.apphost.MediaCarAppService",
+      ),
+    ).toBe(true);
+    expect(
+      isAndroidAutoCarAppHostClass("com.google.android.apps.auto.media.MediaCarAppService"),
+    ).toBe(true);
+  });
+
+  test("template hosts still count by category", () => {
+    expect(isAndroidAutoCarAppHostClass(".apphost.TemplateNavigationService")).toBe(true);
+    expect(
+      isAndroidAutoCarAppHostClass(
+        "com.google.android.projection.gearhead.apphost.TemplatePoiService",
+      ),
+    ).toBe(true);
+  });
+
+  test("Android Auto's other services from the captured dump are not hosts", () => {
+    const others = [
+      ".companion.DeveloperHeadUnitNetworkService",
+      ".service.GearheadService",
+      ".system.GhLifecycleService",
+      "com.google.android.apps.auto.components.projectionstate.ProjectionStateService",
+      "com.google.android.gearhead.appdecor.AppDecorService",
+      "com.google.android.gearhead.service.SharedService",
+    ];
+    expect(others.filter(isAndroidAutoCarAppHostClass)).toEqual([]);
+  });
+
+  test("a near-miss media class name is not a host", () => {
+    expect(isAndroidAutoCarAppHostClass(".apphost.MediaCarAppServiceProxy")).toBe(false);
+    expect(isAndroidAutoCarAppHostClass(".apphost.MediaBrowserService")).toBe(false);
   });
 });

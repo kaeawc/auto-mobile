@@ -60,6 +60,7 @@ test/fixtures/killProfile/api35/*.txt text eol=lf
 test/fixtures/android-car-service/*.txt text eol=lf
 test/fixtures/android-pointer-probe/*.txt text eol=lf
 test/fixtures/android-startup/*.txt text eol=lf
+test/fixtures/ios-startup/** text eol=lf
 test/fixtures/android-profiling/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/ios-duo/*.json text eol=lf

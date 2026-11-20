@@ -72,4 +72,20 @@ Frame-time percentiles and jank counts both cover only the frames rendered durin
 frames from app launch or earlier screens. When the app rendered no frames during the check (an idle screen), the frame-time percentiles
 `p50Ms`–`p99Ms` are null and `metrics.frameTimeUnmeasured` says why. AutoMobile then skips the
 frame-time check, so it does not fail the call. For raw captures use `performanceTrace`,
-`captureTrace`, `measureStartup` or `heapDump`.
+`captureTrace`, [`measureStartup`](#measurestartup) or `heapDump`.
+
+## `measureStartup`
+
+Set `appId` to the package name or bundle ID and choose a startup `mode`. The tool is off by
+default. Enable it with `setToolEnabled`. It measures five launches by default and saves TTID
+percentiles in performance results. Set `iterations` to measure 1–50 launches.
+
+On iOS Simulator, time to initial display (TTID) runs from FrontBoard's open request to the
+default scene's first frame. In `cold` mode the app process is terminated before each launch
+and the host page cache stays in place. In `warm` mode the app returns from Home with the same
+process. The result warns if a warm launch changed processes or if a launch logged no
+scene-ready event. The tool fails if every measured launch misses that event.
+
+iOS Simulator accepts `cold` and `warm`. Use `warm` if you requested `hot`. The `activity`,
+`dropCaches`, and `waitForFullyDrawn` options and compilation modes other than `asIs` are
+Android-only. For a physical iOS device, use `performanceTrace` with `template: "appLaunch"`.

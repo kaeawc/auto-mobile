@@ -25,6 +25,10 @@ import { CTRL_PROXY_PACKAGE } from "./constants";
 import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
 import { CtrlProxyForwardOwnershipUnreadableError } from "../models/CtrlProxyForwardOwnershipUnreadableError";
 import { CtrlProxyApkStageError } from "./CtrlProxyApkStageError";
+import {
+  assertCtrlProxyApkOverrideUsable,
+  CtrlProxyApkOverrideUnusableError,
+} from "./ctrlProxyApkOverride";
 import type { InstalledApkSha256Result } from "./AndroidCtrlProxyManagerTypes";
 import { adbFailureOutput } from "../utils/android-cmdline-tools/adbFailureOutput";
 import { sequenceBackoff, type BackoffPolicy } from "../utils/Backoff";
@@ -102,10 +106,11 @@ export class AndroidCtrlProxyApkInstaller {
       perf.startOperation("httpDownload");
       if (overridePath) {
         logger.info("Using local accessibility service APK", { path: overridePath });
-        const stats = await fs.stat(overridePath);
-        if (!stats.isFile()) {
-          throw new Error(`Accessibility APK override is not a file: ${overridePath}`);
-        }
+        await assertCtrlProxyApkOverrideUsable(
+          overridePath,
+          fs.stat,
+          "The CtrlProxy APK was not installed.",
+        );
         await fs.copyFile(overridePath, apkPath);
       } else {
         // Try to use prefetched APK first (already downloaded and validated at server startup)
@@ -148,6 +153,9 @@ export class AndroidCtrlProxyApkInstaller {
         );
       }
 
+      if (error instanceof CtrlProxyApkOverrideUnusableError) {
+        throw error;
+      }
       throw new Error(`Failed to download APK: ${errorMessage(error)}`);
     }
   }

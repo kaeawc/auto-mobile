@@ -1,3 +1,4 @@
+import { preflightAndroidCtrlProxyApkOverride } from "./deviceToolsCtrlProxyApkPreflight";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { ActionableError, toActionableError } from "../models";
 import type { DeviceInfo } from "../models";
@@ -467,9 +468,12 @@ async function prepareDevice(
   budgets: DevicePreparationBudgets,
   { progress, signal }: { progress?: ProgressCallback; signal?: AbortSignal } = {},
 ) {
+  const deps = getDeviceToolsDependencies();
+  // Before any reservation or boot: a stale override would otherwise fail only at runner
+  // readiness, after the emulator was started (#18823).
+  await preflightAndroidCtrlProxyApkOverride(args.platform, deps);
   const perf = createPerformanceTracker(true);
   perf.serial(budgets.operationName);
-  const deps = getDeviceToolsDependencies();
   const autolockEnabled = captureAutolockPolicy(deps.env);
   admitRestartReservedStart(args);
   const deviceUtils = deps.deviceManagerFactory();

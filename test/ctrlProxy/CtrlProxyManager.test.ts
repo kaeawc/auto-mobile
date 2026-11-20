@@ -26,6 +26,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
+import { CtrlProxyApkOverrideUnusableError } from "../../src/ctrlProxy/ctrlProxyApkOverride";
 import { logger } from "../../src/utils/logger";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
@@ -3224,6 +3225,20 @@ describe("CtrlProxyManager", function () {
       const apkPath = await accessibilityServiceClient.downloadApk();
       const stats = await fs.stat(apkPath);
       expect(stats.size).toBeGreaterThan(10000);
+    });
+
+    test("a missing local APK override is an actionable error naming the variable (#18823)", async function () {
+      const missing = path.join(scratch.next(), "deleted-worktree", "control-proxy-debug.apk");
+      process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = missing;
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+
+      const error = await accessibilityServiceClient.downloadApk().catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(CtrlProxyApkOverrideUnusableError);
+      expect((error as Error).message).toContain(
+        `AUTOMOBILE_CTRL_PROXY_APK_PATH points at ${missing}, which does not exist.`,
+      );
+      expect((error as Error).message).not.toContain("Failed to download APK");
     });
 
     test("should resolve relative local APK override from daemon launch cwd", async function () {

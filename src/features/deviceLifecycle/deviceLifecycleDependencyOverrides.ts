@@ -158,11 +158,21 @@ export function mergeDeviceToolsDependencies(
     ...discoveryDependencyOverrides(deps, currentDeps),
     ...readinessDependencyOverrides(deps, currentDeps),
     ...executionDependencyOverrides(deps, currentDeps),
+    ...ctrlProxyDependencyOverrides(deps, currentDeps),
     get androidEmulatorProcessStopper() {
       return deps.androidEmulatorProcessStopper ?? currentDeps.androidEmulatorProcessStopper;
     },
     resolveRunningAndroidAvdName:
       deps.resolveRunningAndroidAvdName ?? currentDeps.resolveRunningAndroidAvdName,
+  };
+}
+
+function ctrlProxyDependencyOverrides(
+  deps: Partial<DeviceToolsDependencies>,
+  currentDeps: DeviceToolsDependencies,
+) {
+  return {
+    ctrlProxyApkOverrideStat: deps.ctrlProxyApkOverrideStat ?? currentDeps.ctrlProxyApkOverrideStat,
   };
 }
 

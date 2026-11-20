@@ -297,6 +297,25 @@ describe("startDevice handler", () => {
     return response.structuredContent;
   }
 
+  it("refuses a missing AUTOMOBILE_CTRL_PROXY_APK_PATH before booting anything (#18823)", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setImageResult(androidImage);
+    const statted: string[] = [];
+    setDeviceToolsDependencies({
+      env: { AUTOMOBILE_CTRL_PROXY_APK_PATH: "/gone/control-proxy-debug.apk" },
+      ctrlProxyApkOverrideStat: async (path) => {
+        statted.push(path);
+        throw Object.assign(new Error(`ENOENT: stat '${path}'`), { code: "ENOENT" });
+      },
+    });
+
+    await expect(callStartDevice({ platform: "android" })).rejects.toThrow(
+      "AUTOMOBILE_CTRL_PROXY_APK_PATH points at /gone/control-proxy-debug.apk, which does not exist. No device was booted.",
+    );
+    expect(statted).toEqual(["/gone/control-proxy-debug.apk"]);
+    expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
   it("passes cameraPosterPath through the boot service on a cold Android launch", async () => {
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
     fakeMatcher.setImageResult(androidImage);

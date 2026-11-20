@@ -1,5 +1,6 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { parseResumedActivityForDisplay } from "../../utils/android-cmdline-tools/parseResumedActivity";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import type { Timer } from "../../utils/SystemTimer";
@@ -49,6 +50,10 @@ export type StartupDeviceShell = Pick<AdbExecutor, "executeCommand" | "getDevice
 
 /** Waits between launch steps; injectable so tests run on a FakeTimer without real delays. */
 export interface StartupMeasurementTiming {
+  /** Longest wait for the target app to leave the foreground after HOME. */
+  homeSettleTimeoutMs: number;
+  /** Interval between foreground reads after HOME. */
+  homePollMs: number;
   /** Idle after stopping or backgrounding the app, before the measured launch. */
   preLaunchIdleMs: number;
   /** Idle after a launch so the app finishes its startup work before the next iteration. */
@@ -60,6 +65,8 @@ export interface StartupMeasurementTiming {
 }
 
 export const DEFAULT_STARTUP_MEASUREMENT_TIMING: StartupMeasurementTiming = {
+  homeSettleTimeoutMs: 5000,
+  homePollMs: 250,
   preLaunchIdleMs: 500,
   postLaunchSettleMs: 1500,
   fullyDrawnTimeoutMs: 10_000,
@@ -231,8 +238,37 @@ export class AndroidStartupMeasurement {
       }
     } else {
       await this.exec("shell input keyevent KEYCODE_HOME", signal);
+      await this.waitForHome(request.appId, signal);
     }
     await this.timer.sleep(this.timing.preLaunchIdleMs);
+  }
+
+  private async waitForHome(appId: string, signal?: AbortSignal): Promise<void> {
+    const deadline = this.timer.now() + this.timing.homeSettleTimeoutMs;
+    let remainingMs = deadline - this.timer.now();
+    while (remainingMs > 0) {
+      try {
+        const { stdout } = await this.exec(
+          "shell dumpsys activity activities",
+          signal,
+          remainingMs,
+        );
+        if (parseResumedActivityForDisplay(stdout).activity?.packageName !== appId) {
+          return;
+        }
+      } catch (error) {
+        signal?.throwIfAborted();
+        // A slow or unavailable dumpsys should still leave the idle and launch steps in place.
+        logger.debug(`[measureStartup] Could not read foreground activity after HOME: ${error}`);
+        return;
+      }
+
+      const sleepMs = Math.min(this.timing.homePollMs, deadline - this.timer.now());
+      if (sleepMs > 0) {
+        await this.timer.sleep(sleepMs);
+      }
+      remainingMs = deadline - this.timer.now();
+    }
   }
 
   private async launch(component: string, clearTask: boolean, signal?: AbortSignal) {
@@ -304,8 +340,13 @@ export class AndroidStartupMeasurement {
     samples: IterationSample[],
   ): MeasureStartupResult {
     const warnings: string[] = [];
+    // An "already on top" launch prints `LaunchState: UNKNOWN` with `TotalTime: 0`
+    // (nothing was started), so it counts as having no TotalTime.
     const ttidSamples = samples.flatMap((sample) =>
-      sample.totalTimeMs === null ? [] : [sample.totalTimeMs],
+      sample.totalTimeMs === null ||
+      (sample.totalTimeMs === 0 && sample.launchState.startsWith("UNKNOWN"))
+        ? []
+        : [sample.totalTimeMs],
     );
     const ttid = summarizeStartupSamples(ttidSamples);
     if (!ttid) {

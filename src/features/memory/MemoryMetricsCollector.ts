@@ -1,4 +1,5 @@
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
+import { isPidofNoMatch } from "../../utils/android-cmdline-tools/adbFailureOutput";
 import type {
   AdbExecutor,
   DeviceTimestampResult,
@@ -191,10 +192,19 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
     packageName: string,
     perf: PerformanceTracker,
   ): Promise<string | undefined> {
-    const { stdout } = await perf.track("adbGetGcPid", () =>
-      this.adb.executeCommand(`shell pidof ${shellQuote(packageName)}`),
-    );
-    return stdout.trim().split(/\s+/)[0] || undefined;
+    try {
+      const { stdout } = await perf.track("adbGetGcPid", () =>
+        this.adb.executeCommand(`shell pidof ${shellQuote(packageName)}`),
+      );
+      return stdout.trim().split(/\s+/)[0] || undefined;
+    } catch (error) {
+      if (!isPidofNoMatch(error)) {
+        throw error;
+      }
+      // pidof exits with an empty status-1 result when the package has no process.
+      logger.debug(`[MemoryMetricsCollector] No running process for ${packageName}`, error);
+      return undefined;
+    }
   }
 
   /**
@@ -548,18 +558,15 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
   }
 
   /**
-   * Collect complete memory metrics around an action
-   * This is the main entry point that orchestrates all metric collection
+   * Collect complete memory metrics around an action. If the app has no process before the
+   * action, run the action without collecting metrics and return undefined.
    */
   async collectMetrics(
     packageName: string,
     beforeAction: () => Promise<void>,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-  ): Promise<MemoryMetrics> {
+  ): Promise<MemoryMetrics | undefined> {
     logger.info(`[MemoryMetricsCollector] Collecting memory metrics for ${packageName}`);
-
-    // Clear logcat to prepare for GC event capture
-    await this.clearLogcat(perf);
 
     // Resolve the audited pid BEFORE running the action. If the action kills
     // or restarts the app, a pidof lookup done afterward would return a new
@@ -568,6 +575,13 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
     // process staying up through the action — is what this pid scopes
     // correctly; a legitimate mid-audit restart is a known limitation.
     const auditedPid = await this.resolvePid(packageName, perf);
+    if (!auditedPid) {
+      await beforeAction();
+      return undefined;
+    }
+
+    // Clear logcat to prepare for GC event capture
+    await this.clearLogcat(perf);
 
     // Take pre-action snapshot
     const preSnapshot = await this.takeSnapshot(packageName, perf);

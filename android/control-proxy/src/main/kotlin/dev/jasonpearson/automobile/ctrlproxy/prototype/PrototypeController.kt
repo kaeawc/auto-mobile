@@ -438,7 +438,7 @@ class PrototypeController(
           hiddenReason = shownHiddenReason(shown),
           pages = shown.runtime.current.pages,
           stacks = shown.runtime.current.stacks,
-          backdrop = shown.request.backdrop?.mode?.wire,
+          backdrop = shown.host.appliedBackdrop?.wire,
           displayId = shown.request.displayId,
           platformRuntime =
             shown.runtime.platformRuntimeReport(PrototypePlatformReport.Runtime.CTRL_PROXY),
@@ -718,16 +718,18 @@ class PrototypeController(
         isSuspended = { scope.suspended },
         bringToFront = reused != null && request.transition != "none" && request.motion != "none",
         theme = theme,
+        backdropShape =
+          if (request.backdrop != null && request.placement is PrototypePlacement.Floating)
+            prototypeRootBackdropShape(mappedSpec)
+          else request.backdropShape,
         motionActivity = runtime.motionActivity,
         exitResources = exitResources,
         exitMetadata = { surfaceMetadata(runtime, request, theme.value) },
         onHostDismiss = { interact(runtime, PrototypeInteraction.HostDismiss) },
         onHostBack = { interact(runtime, PrototypeInteraction.Back) },
         content = {
-          PrototypeBackdropLayer(request.backdrop) {
-            PrototypeRuntimeContent(runtime, images, fonts) { interaction ->
-              interact(runtime, interaction)
-            }
+          PrototypeRuntimeContent(runtime, images, fonts) { interaction ->
+            interact(runtime, interaction)
           }
         },
       )

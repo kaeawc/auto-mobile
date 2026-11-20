@@ -47,7 +47,7 @@ import { DefaultFileDownloader, type FileDownloader } from "../utils/FileDownloa
 import { logger } from "../utils/logger";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
+import { resolveCtrlProxyApkPathOverride } from "./ctrlProxyApkOverride";
 import { accessibilityDetector } from "./accessibility/AccessibilityDetector";
 import type { AccessibilityDetector } from "./accessibility/interfaces/AccessibilityDetector";
 import { AndroidCtrlProxyAccessibility } from "./AndroidCtrlProxyAccessibility";
@@ -1004,12 +1004,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private getApkPathOverride(): string | null {
-    const override = readEnvRaw(ENV.CTRL_PROXY_APK_PATH);
-    if (!override) {
-      return null;
-    }
-    const trimmed = override.trim();
-    return trimmed.length > 0 ? resolvePathFromDaemonLaunchWorkingDirectory(trimmed) : null;
+    return resolveCtrlProxyApkPathOverride();
   }
 
   private shouldSkipChecksum(): boolean {

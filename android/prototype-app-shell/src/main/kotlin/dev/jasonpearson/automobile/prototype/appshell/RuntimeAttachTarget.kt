@@ -19,9 +19,16 @@ internal class RuntimeAttachTarget(
   override var showingId: String? = null
     private set
 
+  override var showingStartSequence: Long? = null
+    private set
+
   var runtime: PrototypeRuntime? = null
     set(value) {
-      if (value != null && value !== field) showingId = ledger.nextShowingId()
+      if (value != null && value !== field) {
+        showingId = ledger.nextShowingId()
+        // Set before the runtime emits: every sequence from here on belongs to this showing.
+        showingStartSequence = ledger.lastSequence + 1
+      }
       field = value
     }
 
@@ -64,6 +71,7 @@ internal class RuntimeAttachTarget(
       if (current == null)
         buildJsonObject {
           showingId?.let { put("showingId", it) }
+          showingStartSequence?.let { put("showingStartSequence", it) }
           put("shown", false)
           put("id", JsonNull)
           put("pages", JsonObject(emptyMap()))
@@ -94,7 +102,8 @@ internal class RuntimeAttachTarget(
         JsonObject(
           attachJson.encodeToJsonElement(PrototypeStatusEntry.serializer(), entry).jsonObject +
             ("shown" to JsonPrimitive(true)) +
-            ("showingId" to JsonPrimitive(showingId)),
+            ("showingId" to JsonPrimitive(showingId)) +
+            ("showingStartSequence" to JsonPrimitive(showingStartSequence)),
         )
       }
     }

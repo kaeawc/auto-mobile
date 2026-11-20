@@ -16,6 +16,13 @@ NC='\033[0m' # No Color
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# Build with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+# Shell-test fixtures that copy this script without the helper keep the active Xcode.
+if [[ -f "${PROJECT_ROOT}/scripts/ios/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${PROJECT_ROOT}/scripts/ios/xcode_version.sh"
+  select_pinned_xcode
+fi
 IOS_DIR="${PROJECT_ROOT}/ios"
 
 echo -e "${CYAN}========================================${NC}"
@@ -128,11 +135,11 @@ elif ! "${SCRIPT_DIR}/swift-build-prototype-apps.sh" all; then
     FAILED_PACKAGES+=("prototype apps")
 fi
 
-# The CarPlay projection probe targets the iOS 27.0 simulator; build it whenever that SDK exists so
+# The CarPlay projection probe targets iOS 26.0+ simulators; build it whenever that SDK exists so
 # probe.m cannot rot unseen. Its JSON keys are checked against the TypeScript schema by unit tests.
 echo -e "${BLUE}Building CarPlay projection probe...${NC}"
 SIM_SDK_VERSION="$(xcrun --sdk iphonesimulator --show-sdk-version 2> /dev/null || true)"
-if [[ "${SIM_SDK_VERSION%%.*}" =~ ^[0-9]+$ ]] && (( ${SIM_SDK_VERSION%%.*} >= 27 )); then
+if [[ "${SIM_SDK_VERSION%%.*}" =~ ^[0-9]+$ ]] && (( ${SIM_SDK_VERSION%%.*} >= 26 )); then
     if bash "${IOS_DIR}/carplay-projection-probe/build.sh" \
         "${PROJECT_ROOT}/scratch/carplay-projection-probe-ci/carplay-projection-probe" 2>&1; then
         print_status 0 "carplay-projection-probe built successfully"
@@ -141,7 +148,7 @@ if [[ "${SIM_SDK_VERSION%%.*}" =~ ^[0-9]+$ ]] && (( ${SIM_SDK_VERSION%%.*} >= 27
         FAILED_PACKAGES+=("carplay-projection-probe")
     fi
 else
-    print_info "Skipping carplay-projection-probe (needs iphonesimulator SDK 27+, found '${SIM_SDK_VERSION:-none}')"
+    print_info "Skipping carplay-projection-probe (needs iphonesimulator SDK 26+, found '${SIM_SDK_VERSION:-none}')"
 fi
 echo ""
 

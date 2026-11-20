@@ -489,6 +489,24 @@ describe("HeadUnitInteraction Android Auto bindings", () => {
     expect(headUnitProjectionChanged(undefined, BOUND)).toBe(false);
   });
 
+  test("a media host binding alone changes the bindings (#18672)", async () => {
+    // TODO(#18672): build this from a captured dump with MediaCarAppService bound once one exists.
+    const withMedia: HeadUnitProjection = {
+      ...BOUND,
+      templateHosts: [
+        ...BOUND.templateHosts,
+        "com.google.android.projection.gearhead/.apphost.MediaCarAppService",
+      ].sort(),
+    };
+    expect(headUnitProjectionChanged(BOUND, withMedia)).toBe(true);
+    const { interaction } = projectionSetup({
+      projection: [BOUND, withMedia],
+      hashes: ["launcher", "launcher"],
+    });
+    const result = await interaction.run(["tap 400 110"]);
+    expect(result.effect).toEqual({ screenChanged: true, basis: "projectedApps changed" });
+  });
+
   test("an app without the route opening reads as changed even when its pixels cannot be read", async () => {
     const { interaction, projectionReads } = projectionSetup({
       projection: [BEFORE_FIXTURE, BOUND],

@@ -483,6 +483,7 @@ nav:
           - "Manual-test harness: sessions": how-it-works/manual-test-harness-sessions.md
           - "Manual-test harness: broker scenarios": how-it-works/manual-test-harness-broker.md
           - "Live device acceptance": how-it-works/live-device-acceptance.md
+          - "Fixture capture mode": how-it-works/fixture-capture.md
           - "Device-description audit": how-it-works/device-description-audit.md
           - "Agent benchmarks": how-it-works/agent-benchmarks.md
           - "iOS Simulator fleet cost measurement": how-it-works/ios-simulator-fleet-cost.md
@@ -506,6 +507,7 @@ nav:
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
       - "2026-11-19: Headless CarPlay on TVOut with a StarkConfig": devlog/2026-11-19-headless-carplay-tvout-stark.md
+      - "2026-11-18: Tasks eligibility from measured tool durations": devlog/2026-11-18-tasks-eligibility-from-measured-durations.md
       - "2026-11-17: Docs navigation grouped by task and platform": devlog/2026-11-17-docs-navigation-by-task.md
       - "2026-11-17: Material 3 Expressive component availability at the pinned Compose BOM": devlog/2026-11-17-m3-expressive-component-availability.md
       - "2026-11-16: Android Auto provisioning accepts the welcome screen": devlog/2026-11-16-android-auto-terms-accepted-by-provisioning.md

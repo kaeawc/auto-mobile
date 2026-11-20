@@ -128,7 +128,7 @@ iOS 17–25 reuse the scrollability-aware `fadeEdges` mask, 24 dp for soft and
 8 dp for hard. Authored `fadeEdges` lengths override those defaults; `none`
 disables only the default fallback mask or native effect. Explicit `fadeEdges`
 remain applied on every supported iOS version. Android accepts the contract but does not advertise or
-render edgeEffect; Android below API 31 refuses glass.
+render edgeEffect.
 
 In `ios`, `glassGroup: {spacing}` accepts finite 0–200 dp on column, row, box,
 flow, grid, list and listItem containers. Descendant glass nodes with `shared`
@@ -145,9 +145,11 @@ require only the glass capability on iOS; Android ignores them with field paths
 in platformNotes.
 
 The system's Liquid Glass implementation handles Reduce Transparency and
-Increase Contrast. On iOS 17–25 and Android below API 31 the device does not advertise
+Increase Contrast. On iOS 17–25 the device does not advertise
 `prototype_glass_v1`, so the host refuses glass there: there is no simulated
-translucent fill, material substitute or fallback capability. An Android
+translucent fill or material substitute. Android advertises the capability on every API level:
+API 31 and later blur earlier sibling layers (Haze) and older devices draw a tonal scrim instead.
+A glass node without `cornerRadius` is a capsule on Android as on iOS. An Android
 renderer advertising glass must report any approximation (clear variant,
 ignored `interactive`) in `platformNotes`.
 

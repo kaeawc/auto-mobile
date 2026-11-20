@@ -361,12 +361,14 @@ test("showing identity survives handshake and refreshes on the same socket witho
   const h = await setup();
   h.socket.appInstanceId = "process";
   h.socket.showingId = "first-show";
+  h.socket.showingStartSequence = 4;
   h.socket.replay = [{ ...event(9) }];
   const client = await h.attacher.attach(device, appId);
   const transport = new IosPrototypeTransport(client, undefined, "android");
   const source = prototypeEventSource(transport);
   expect(source.instanceId).toBe("process");
   expect(source.showingId).toBe("first-show");
+  expect(source.showingStartSequence).toBe(4);
   const seen: unknown[] = [];
   client.onEvent((message) => seen.push(message.sequence));
   const pending = transport.status();
@@ -375,10 +377,11 @@ test("showing identity survives handshake and refreshes on the same socket witho
     type: "prototype_result",
     requestId: request.requestId,
     success: true,
-    status: { showingId: "second-show" },
+    status: { showingId: "second-show", showingStartSequence: 9 },
   });
   await pending;
   expect(source.showingId).toBe("second-show");
+  expect(source.showingStartSequence).toBe(9);
   h.socket.push({ ...event(9) });
   h.socket.push({ ...event(10) });
   expect(seen).toEqual([9, 10]);
@@ -464,4 +467,25 @@ test("disposal clears retained cursors even when all sockets already closed", as
   expect(h.attacher["resumeStates"].size).toBe(1);
   await h.attacher.dispose();
   expect(h.attacher["resumeStates"].size).toBe(0);
+});
+
+test("a showing refresh from an app that omits its start sequence forgets the previous one", async () => {
+  const h = await setup();
+  h.socket.showingId = "first-show";
+  h.socket.showingStartSequence = 4;
+  const client = await h.attacher.attach(device, appId);
+  const transport = new IosPrototypeTransport(client, undefined, "android");
+  const source = prototypeEventSource(transport);
+  const pending = transport.status();
+  const request = h.socket.frames().at(-1)!;
+  h.socket.push({
+    type: "prototype_result",
+    requestId: request.requestId,
+    success: true,
+    status: { showingId: "second-show", showingStartSequence: 0 },
+  });
+  await pending;
+  expect(source.showingId).toBe("second-show");
+  expect(source.showingStartSequence).toBeUndefined();
+  await h.attacher.release(device.deviceId);
 });

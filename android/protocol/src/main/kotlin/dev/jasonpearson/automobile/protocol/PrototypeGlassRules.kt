@@ -4,7 +4,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.fail
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
 import kotlinx.serialization.json.JsonObject
 
-/** Contract only on Android: no imitation glass is rendered or advertised. */
+/** Validates the shared glass fields and the iOS glass namespace. */
 internal object PrototypeGlassRules {
   private val namespaceFields =
     setOf("glassGroup", "glassUnion", "glassTransition", "backgroundExtension")

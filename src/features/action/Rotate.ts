@@ -728,7 +728,11 @@ export class Rotate extends BaseVisualChange {
       {
         autoRotateState,
         plan: {
-          preserveLock,
+          // A session's omitted lock holds an already-matching orientation like `true` (#18833);
+          // an unreadable auto-rotate setting keeps the no-write fallback.
+          preserveLock:
+            preserveLock ||
+            (slot !== undefined && lockOrientation === undefined && autoRotateState === "enabled"),
           restoreAutomaticRotation,
           beforeWrite: settings.beforeWrite,
           cleanup,

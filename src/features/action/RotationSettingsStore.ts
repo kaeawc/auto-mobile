@@ -6,7 +6,7 @@
  */
 
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
-import { ActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import {
   parseAndroidCommittedStateIdentifier,
   parseAndroidDeviceStates,
@@ -111,28 +111,8 @@ export class RotationSettingsStore {
       // The per-state lock goes back first: while it still records the session's lock, the
       // window manager reverts an accelerometer_rotation=1 write to 0 (mt-0083 D1). It is not
       // read back itself; the accelerometer_rotation read-back below verifies its effect.
-      if (lock !== undefined) {
-        try {
-          await this.writeSetting(
-            {
-              namespace: "secure",
-              key: DEVICE_STATE_ROTATION_LOCK,
-              value: lock,
-              valueType: "string",
-            },
-            signal,
-            cleanup,
-          );
-        } catch (error) {
-          throwIfAborted(signal);
-          // A failed lock write must not leave user_rotation and accelerometer_rotation
-          // unrestored; the accelerometer_rotation read-back below decides the outcome.
-          logger.warn(
-            `[Rotate] Failed to restore device_state_rotation_lock=${lock}; restoring the rotation settings anyway: ${errorMessage(error)}`,
-            error,
-          );
-        }
-      }
+      const lockWriteError =
+        lock === undefined ? undefined : await this.restoreDeviceStateLock(lock, signal, cleanup);
       if (state.userRotation !== null) {
         await this.writeSystemSetting("user_rotation", String(state.userRotation), signal, cleanup);
       }
@@ -150,7 +130,39 @@ export class RotationSettingsStore {
           throw await this.readBackMismatch(key, expected, actual, signal);
         }
       }
+      // Without an accelerometer_rotation read-back nothing verifies the map; surface its failure.
+      if (lockWriteError !== undefined && accelerometerRotation === null) {
+        throw toActionableError(
+          lockWriteError,
+          `Failed to restore device_state_rotation_lock=${lock}`,
+        );
+      }
     });
+  }
+
+  /** Writes the captured per-state lock map; returns the write error instead of throwing. */
+  private async restoreDeviceStateLock(
+    lock: string,
+    signal: AbortSignal | undefined,
+    cleanup: RotationSettingCleanup,
+  ): Promise<unknown> {
+    try {
+      await this.writeSetting(
+        { namespace: "secure", key: DEVICE_STATE_ROTATION_LOCK, value: lock, valueType: "string" },
+        signal,
+        cleanup,
+      );
+      return undefined;
+    } catch (error) {
+      throwIfAborted(signal);
+      // A failed lock write must not leave user_rotation and accelerometer_rotation
+      // unrestored; the caller's read-back (or its explicit check) decides the outcome.
+      logger.warn(
+        `[Rotate] Failed to restore device_state_rotation_lock=${lock}; restoring the rotation settings anyway: ${errorMessage(error)}`,
+        error,
+      );
+      return error;
+    }
   }
 
   /**

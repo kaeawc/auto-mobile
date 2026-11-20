@@ -373,6 +373,43 @@ describe("session rotation restoration", () => {
     );
   });
 
+  test("omitted lock on an already-matching orientation holds it until release (#18833)", async () => {
+    const h = harness();
+    try {
+      await h.manager.createSession("rotation-session", device.deviceId, "android");
+      const result = await h.rotate.execute("portrait");
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(false);
+      expect(result.orientationLockState).toBe("locked");
+      expect(h.adb.auto).toBe(0);
+      await h.manager.releaseSession("rotation-session");
+      expect(h.adb.auto).toBe(1);
+      expect(h.adb.user).toBe(2);
+    } finally {
+      h.manager.stopCleanupTimer();
+    }
+  });
+
+  test("a failed map restore in a changed posture is not reported as restored", async () => {
+    const h = harness();
+    h.adb.lock = "0:1:1:2:2:0";
+    h.adb.lockBaseline = "0:1:1:2:2:0";
+    h.adb.printStatesOutput = FOLD_STATES;
+    h.adb.committedStateOutput = foldState("open");
+    try {
+      await h.manager.createSession("rotation-session", device.deviceId, "android");
+      await h.rotate.execute("landscape");
+      h.adb.committedStateOutput = foldState("closed");
+      h.adb.failLockWrite = true;
+      await h.manager.releaseSession("rotation-session");
+      expect(h.adb.user).toBe(2);
+      expect(h.adb.lock).not.toBe("0:1:1:2:2:0");
+      expect(h.manager.getPendingDeviceCleanup(device.deviceId)).not.toBeNull();
+    } finally {
+      h.manager.stopCleanupTimer();
+    }
+  });
+
   test("release read-back mismatch quarantines and retries on FakeTimer", async () => {
     const h = harness();
     try {

@@ -4,26 +4,14 @@ import { ActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
-/** Reads the override's file type; it throws when the path cannot be opened for reading. */
-export type ApkOverrideStat = (path: string) => Promise<{ isFile(): boolean }>;
+/** The `stat` a CtrlProxy APK override check needs; tests inject a fake. */
+export interface CtrlProxyApkOverrideProbe {
+  stat(filePath: string): Promise<{ isFile(): boolean }>;
+}
 
-/**
- * Opens the override for reading and stats the open handle, so an existing file the daemon cannot
- * read (mode 000) is refused like a missing one; a bare `stat` needs no read permission.
- */
-export const statReadableFile: ApkOverrideStat = async (path) => {
-  const handle = await fs.open(path, "r");
-  try {
-    return await handle.stat();
-  } finally {
-    await handle.close();
-  }
-};
+const defaultProbe: CtrlProxyApkOverrideProbe = { stat: (filePath) => fs.stat(filePath) };
 
-/**
- * The `AUTOMOBILE_CTRL_PROXY_APK_PATH` override as an absolute path (relative values resolve
- * against the daemon launch directory), or null when unset or blank.
- */
+/** Absolute `AUTOMOBILE_CTRL_PROXY_APK_PATH`, resolved from the daemon launch cwd; null when unset or blank. */
 export function resolveCtrlProxyApkPathOverride(
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
@@ -31,58 +19,29 @@ export function resolveCtrlProxyApkPathOverride(
   return trimmed ? resolvePathFromDaemonLaunchWorkingDirectory(trimmed, env) : null;
 }
 
-/** The override names a path that is missing, unreadable or not a regular file (#18823). */
-export class CtrlProxyApkOverrideUnusableError extends ActionableError {
-  constructor(
-    readonly overridePath: string,
-    reason: string,
-    consequence: string,
-    options?: ErrorOptions,
-  ) {
-    super(
-      `${ENV.CTRL_PROXY_APK_PATH.name} points at ${overridePath}, which ${reason}. ${consequence} ` +
-        `Build the CtrlProxy APK at that path, point ${ENV.CTRL_PROXY_APK_PATH.name} at an existing ` +
-        "APK, or unset it and restart the daemon to use the release APK.",
-      options,
-    );
-    this.name = "CtrlProxyApkOverrideUnusableError";
-  }
-}
-
 /**
- * Throws {@link CtrlProxyApkOverrideUnusableError} when `overridePath` cannot be installed from.
- * `consequence` tells the caller what did not happen (e.g. that no device was booted).
+ * Fail with an actionable error naming the env var and path when the override
+ * is missing or not a regular file (#18823), instead of a raw ENOENT.
  */
 export async function assertCtrlProxyApkOverrideUsable(
   overridePath: string,
-  stat: ApkOverrideStat,
-  consequence: string,
+  probe: CtrlProxyApkOverrideProbe = defaultProbe,
 ): Promise<void> {
+  const name = ENV.CTRL_PROXY_APK_PATH.name;
   let isFile: boolean;
   try {
-    isFile = (await stat(overridePath)).isFile();
+    isFile = (await probe.stat(overridePath)).isFile();
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException | undefined)?.code;
-    const reason = code === "ENOENT" ? "does not exist" : `cannot be read (${errorMessage(error)})`;
-    throw new CtrlProxyApkOverrideUnusableError(overridePath, reason, consequence, {
-      cause: error,
-    });
+    throw new ActionableError(
+      `${name} points to ${overridePath}, which cannot be read (${errorMessage(error)}). ` +
+        `Build the CtrlProxy APK at that path, point ${name} at an existing APK, ` +
+        `or unset ${name} and restart the daemon to use the release APK.`,
+    );
   }
   if (!isFile) {
-    throw new CtrlProxyApkOverrideUnusableError(overridePath, "is not a file", consequence);
-  }
-}
-
-/**
- * Before an Android acquisition boots or adopts a device: refuse a set override whose file is
- * unusable, so a stale path fails with nothing booted instead of at runner readiness (#18823).
- */
-export async function preflightCtrlProxyApkOverride(
-  env: NodeJS.ProcessEnv,
-  stat: ApkOverrideStat,
-): Promise<void> {
-  const overridePath = resolveCtrlProxyApkPathOverride(env);
-  if (overridePath !== null) {
-    await assertCtrlProxyApkOverrideUsable(overridePath, stat, "No device was booted.");
+    throw new ActionableError(
+      `${name} points to ${overridePath}, which is not a file. ` +
+        `Point ${name} at a CtrlProxy APK, or unset it and restart the daemon to use the release APK.`,
+    );
   }
 }

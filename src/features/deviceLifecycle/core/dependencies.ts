@@ -115,6 +115,8 @@ export interface DeviceToolsDependencies {
   /** Preflighted when startDevice records a poster; defaults to the on-demand simulator build. */
   iosCameraPosterDylibProvider?: IosCameraPosterDylibProvider;
   cameraPosterFileExists?: (path: string) => boolean;
+  /** Pre-boot check of an AUTOMOBILE_CTRL_PROXY_APK_PATH override; defaults to `fs.stat`. */
+  ctrlProxyApkOverrideProbe?: { stat(path: string): Promise<{ isFile(): boolean }> };
   androidAdbFactory: AdbClientFactory;
   env?: Environment;
   deviceResourceControllerFactory: () => DeviceResourceController;

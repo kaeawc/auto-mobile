@@ -4,6 +4,10 @@ import { ActionableError, toActionableError } from "../models";
 import type { DeviceInfo } from "../models";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
+import {
+  assertCtrlProxyApkOverrideUsable,
+  resolveCtrlProxyApkPathOverride,
+} from "../ctrlProxy/ctrlProxyApkOverride";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
 import { deleteInternalToolParams } from "../daemon/wire/constants";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
@@ -462,16 +466,27 @@ async function reserveStartDeviceLifecycleReservations(
   }
 }
 
+async function assertAndroidCtrlProxyApkOverrideBeforeBoot(
+  args: StartDeviceArgs,
+  deps: Pick<DeviceToolsDependencies, "env" | "ctrlProxyApkOverrideProbe">,
+): Promise<void> {
+  if (args.platform !== "android") {
+    return;
+  }
+  const overridePath = resolveCtrlProxyApkPathOverride(deps.env ?? process.env);
+  if (overridePath) {
+    await assertCtrlProxyApkOverrideUsable(overridePath, deps.ctrlProxyApkOverrideProbe);
+  }
+}
+
 async function prepareDevice(
   bootAndPrepareDevice: AcquisitionHooks["bootAndPrepareDevice"],
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
   { progress, signal }: { progress?: ProgressCallback; signal?: AbortSignal } = {},
 ) {
-  const deps = getDeviceToolsDependencies();
-  // Before any reservation or boot: a stale override would otherwise fail only at runner
-  // readiness, after the emulator was started (#18823).
-  await preflightAndroidCtrlProxyApkOverride(args.platform, deps);
+  // A missing CtrlProxy APK override fails readiness only after a boot; refuse before booting (#18823).
+  await assertAndroidCtrlProxyApkOverrideBeforeBoot(args, getDeviceToolsDependencies());
   const perf = createPerformanceTracker(true);
   perf.serial(budgets.operationName);
   const autolockEnabled = captureAutolockPolicy(deps.env);

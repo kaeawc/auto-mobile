@@ -283,6 +283,9 @@ final class StoreKitCommandTests: XCTestCase {
                 XCTAssertEqual(result.error?.hasPrefix("unsupported:"), expectUnsupported, "\(domain) iOS \(os)")
                 if expectUnsupported {
                     XCTAssertTrue(result.error?.contains("\(domain) \(code)") == true, result.error ?? "")
+                    XCTAssertTrue(result.error?.contains("runner host app") == true, result.error ?? "")
+                    XCTAssertTrue(result.error?.contains("Restart the daemon") == true, result.error ?? "")
+                    XCTAssertFalse(result.error?.contains("iOS 18 simulator") == true, result.error ?? "")
                 }
             }
         }

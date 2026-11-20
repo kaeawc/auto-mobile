@@ -124,9 +124,9 @@ final class StoreKitSessionStore: StoreKitSessionProviding {
               Self.iosTwentySixRejections.contains(shape)
         else { return error }
         return VerbatimLocalizedError(
-            message: "unsupported: StoreKit Testing cannot \(action) on iOS \(osMajorVersion) simulators: "
-                + "the system rejects the runner's StoreKit request "
-                + "(\(shape.domain) \(shape.code)). Use an iOS 18 simulator."
+            message: "unsupported: StoreKit Testing cannot \(action) on this iOS \(osMajorVersion) simulator: "
+                + "the system rejected the runner's StoreKit request (\(shape.domain) \(shape.code)) "
+                + "because the runner host app (AutoMobileTest) is missing. Restart the daemon to reinstall it."
         )
     }
 

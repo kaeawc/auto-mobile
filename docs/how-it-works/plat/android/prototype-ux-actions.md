@@ -63,12 +63,13 @@ the complete result of `show`, `patch` and `replaceNode`).
   to the current row; `{index}` elsewhere, outside a repeat, or `{alias.field}`, is a validation error.
 - `value` takes the `emit.context` binding forms except `page`: `{value: json}` (the literal form),
   `{state: key}`, `{data: pointer}` and, in a repeat, `{item: field}` and `{index: true}`. A written
-  value is data: no null. On these four writes only (#18826), `{object: {name: binding}}` writes an
-  object of 1 to `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` members named like path keys, each one of those
-  five flat forms; members do not nest, repeats bind `{item}`/`{index}` members per row, and a missing
-  member source fails the write like a top-level one. An `upsertData` `key` must start with a member
-  name, and must resolve non-null when that member is a `{value}` literal. The secure-storage and
-  library copy-taint checks read each member.
+  value is data: no null.
+- On these four writes only (#18826), `{object: {name: binding}}` writes an object. It has 1 to
+  `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` members named like path keys, and each member is one of the
+  five flat forms above. Members do not nest. A repeat binds `{item}`/`{index}` members per row. A
+  missing member source fails the write like a top-level one. An `upsertData` `key` must start with
+  a member name, and must resolve non-null when that member is a `{value}` literal. The
+  secure-storage and library copy-taint checks read each member.
 - `where: {field, equals: binding}` selects one object in the array at `path`, using JSON identity.
   No match returns `not_found`; duplicate matches return `ambiguous_match`. `equals` uses
   `{value}`, `{state}`, `{data}` or repeat `{item}`/`{index}` bindings. On `setData`, optional

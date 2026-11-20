@@ -84,7 +84,14 @@ class BitmapPrototypeImageDecoder(private val maxPixels: Long = DEFAULT_MAX_DECO
       Log.w(TAG, "Prototype image bytes are not decodable (${bytes.size} bytes)")
       return null
     }
-    val sampleSize = prototypeImageSampleSize(bounds.outWidth, bounds.outHeight, target, maxPixels)
+    val orientation = readOrientation(bytes)
+    val sampleSize =
+      prototypeImageSampleSize(
+        bounds.outWidth,
+        bounds.outHeight,
+        orientation.sourceTarget(target),
+        maxPixels,
+      )
     if (!prototypeImageFitsBudget(bounds.outWidth, bounds.outHeight, sampleSize, maxPixels)) {
       // The sample size is capped, so a header claiming absurd dimensions stays over budget.
       Log.w(TAG, "Prototype image ${bounds.outWidth}x${bounds.outHeight} exceeds the decode budget")
@@ -94,7 +101,7 @@ class BitmapPrototypeImageDecoder(private val maxPixels: Long = DEFAULT_MAX_DECO
     val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
     var oriented: Bitmap? = null
     try {
-      oriented = orient(bitmap, readOrientation(bytes))
+      oriented = orient(bitmap, orientation)
       return BitmapPrototypeImage(oriented)
     } finally {
       if (oriented !== bitmap) bitmap.recycle()

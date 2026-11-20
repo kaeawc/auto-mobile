@@ -134,7 +134,7 @@ class PrototypeMediaStoreTest {
     assertEquals("clip.mp4", video.name)
     assertEquals(
       Json.parseToJsonElement(
-        """{"asset":"${video.id}","kind":"video","mimeType":"video/mp4","width":80,"height":100,"bytes":1,"source":"library","createdAt":"$CREATED_AT","thumbnail":"${video.id}/thumb"}""",
+        """{"asset":"${video.id}","kind":"video","mimeType":"video/mp4","width":80,"height":100,"bytes":1,"durationMs":12,"name":"clip.mp4","source":"library","createdAt":"$CREATED_AT","thumbnail":"${video.id}/thumb"}""",
       ),
       video.toJson(),
     )

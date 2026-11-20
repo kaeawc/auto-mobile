@@ -7,6 +7,10 @@ internal data class PrototypeExifOrientation(
 ) {
   val swapsAxes: Boolean
     get() = rotationDegrees == 90 || rotationDegrees == 270
+
+  /** [target] in the source image's axes, so sampling compares like with like before rotating. */
+  fun sourceTarget(target: PrototypeImageTarget): PrototypeImageTarget =
+    if (swapsAxes) PrototypeImageTarget(target.heightPx, target.widthPx) else target
 }
 
 internal fun prototypeExifOrientation(tag: Int): PrototypeExifOrientation =

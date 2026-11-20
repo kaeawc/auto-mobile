@@ -45,6 +45,8 @@ data class PrototypeMediaItem(
     width?.let { put("width", it) }
     height?.let { put("height", it) }
     put("bytes", bytes)
+    durationMs?.let { put("durationMs", it) }
+    name?.let { put("name", it) }
     put("source", source.name.lowercase())
     put("createdAt", createdAt)
     thumbnail?.let { put("thumbnail", it) }

@@ -32,4 +32,17 @@ class PrototypeExifOrientationTest {
     assertEquals(identity, prototypeExifOrientation(9))
     assertEquals(identity, prototypeExifOrientation(-1))
   }
+
+  @Test
+  fun `quarter turns sample against the target in source axes`() {
+    val target = PrototypeImageTarget(1024, 512)
+    val quarterTurn = prototypeExifOrientation(6)
+    assertEquals(PrototypeImageTarget(512, 1024), quarterTurn.sourceTarget(target))
+    assertEquals(target, prototypeExifOrientation(3).sourceTarget(target))
+    val maxPixels = 4L * 1024 * 1024
+    assertEquals(
+      2,
+      prototypeImageSampleSize(4096, 2048, quarterTurn.sourceTarget(target), maxPixels),
+    )
+  }
 }

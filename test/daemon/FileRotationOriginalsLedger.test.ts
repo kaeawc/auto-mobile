@@ -63,3 +63,13 @@ test("an unreadable record is logged and dropped", async () => {
   expect(String(warn.mock.calls[0]?.[0])).toContain("Dropping unreadable rotation originals");
   expect(readdirSync(directory)).toEqual(["d1.json"]);
 });
+
+test("remove deletes the record whatever it holds, and tolerates a missing one", async () => {
+  await ledger().save("emulator-5554", ORIGINALS);
+  await ledger().remove("emulator-5554");
+  expect((await ledger().loadAll()).size).toBe(0);
+  await ledger().remove("emulator-5554");
+  expect(await ledger().save("emulator-5554", { accelerometerRotation: 0, userRotation: 1 })).toBe(
+    true,
+  );
+});

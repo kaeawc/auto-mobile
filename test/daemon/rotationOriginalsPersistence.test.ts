@@ -73,3 +73,37 @@ test("ledger failures are logged with the error and never reject", async () => {
   await persistence.record("d1", ORIGINALS);
   expect(ledger.records.get("d1")).toEqual(ORIGINALS);
 });
+
+test("retire deletes the record whatever it holds, so the next occupant's save is durable", async () => {
+  const ledger = new FakeRotationOriginalsLedger();
+  const persistence = new RotationOriginalsPersistence(ledger);
+  await persistence.record("emulator-5554", ORIGINALS);
+  await persistence.retire("emulator-5554");
+  expect(ledger.records.has("emulator-5554")).toBe(false);
+  // A different device later boots on the same serial: its originals are saved, not refused.
+  await persistence.record("emulator-5554", OTHER);
+  expect(ledger.records.get("emulator-5554")).toEqual(OTHER);
+});
+
+test("a retired device's earlier-daemon record is dropped and never adopted", async () => {
+  const ledger = new FakeRotationOriginalsLedger();
+  ledger.records.set("emulator-5554", ORIGINALS);
+  const persistence = new RotationOriginalsPersistence(ledger);
+  const preloading = persistence.preload();
+  // Removal lands while the preload is still reading.
+  const retiring = persistence.retire("emulator-5554");
+  await Promise.all([preloading, retiring]);
+  expect(persistence.takeOrphan("emulator-5554")).toBeUndefined();
+  expect(ledger.records.has("emulator-5554")).toBe(false);
+});
+
+test("a failed remove is logged and never rejects", async () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  const ledger = new FakeRotationOriginalsLedger();
+  const persistence = new RotationOriginalsPersistence(ledger);
+  ledger.failNext = "remove";
+  await persistence.retire("d1");
+  expect(warn.mock.calls.map(([message]) => String(message))).toEqual([
+    expect.stringContaining("Failed to remove saved rotation originals for d1"),
+  ]);
+});

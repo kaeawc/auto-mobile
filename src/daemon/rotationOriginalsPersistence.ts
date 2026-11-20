@@ -15,6 +15,8 @@ export class RotationOriginalsPersistence {
   private readonly chains = new Map<string, Promise<void>>();
   /** Devices whose stored record this daemon wrote; never orphans, even if preload reads them. */
   private readonly savedHere = new Set<string>();
+  /** Devices retired in this process; a preload still in flight must not resurrect them. */
+  private readonly retired = new Set<string>();
   private preloading: Promise<void> | undefined;
 
   constructor(private readonly ledger: RotationOriginalsLedger) {}
@@ -24,7 +26,7 @@ export class RotationOriginalsPersistence {
     this.preloading ??= this.ledger.loadAll().then(
       (records) => {
         for (const [deviceId, state] of records) {
-          if (!this.savedHere.has(deviceId)) {
+          if (!this.savedHere.has(deviceId) && !this.retired.has(deviceId)) {
             this.orphans.set(deviceId, state);
           }
         }
@@ -58,6 +60,17 @@ export class RotationOriginalsPersistence {
   /** Drop the record once its settings are restored or definitively unrecoverable. */
   forget(deviceId: string, state: RotationRestoreState): Promise<void> {
     return this.enqueue(deviceId, "clear", () => this.ledger.clear(deviceId, state));
+  }
+
+  /**
+   * The device was removed or its serial replaced: its record belongs to a device that is gone,
+   * so it is deleted whatever it holds and is never restored onto the serial's next occupant.
+   */
+  retire(deviceId: string): Promise<void> {
+    this.orphans.delete(deviceId);
+    this.savedHere.delete(deviceId);
+    this.retired.add(deviceId);
+    return this.enqueue(deviceId, "remove", () => this.ledger.remove(deviceId));
   }
 
   private enqueue(deviceId: string, label: string, run: () => Promise<void>): Promise<void> {

@@ -169,6 +169,9 @@ export class QueuedDeviceStateRestore {
     rotationRestorePolicy,
     (deviceId) => {
       this.abandonedRotations.delete(deviceId);
+      // Removal only (rotation survives an incarnation bump): the durable record belongs to the
+      // removed device, never the next device on its serial (#18847).
+      void this.rotationOriginals?.retire(deviceId);
     },
   );
 

@@ -86,6 +86,10 @@ export class FileRotationOriginalsLedger implements RotationOriginalsLedger {
     }
   }
 
+  async remove(deviceId: string): Promise<void> {
+    await fs.rm(this.fileFor(deviceId), { force: true });
+  }
+
   private fileFor(deviceId: string): string {
     return path.join(this.directory(), `${encodeURIComponent(deviceId)}.json`);
   }

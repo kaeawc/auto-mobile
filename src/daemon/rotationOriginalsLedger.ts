@@ -13,6 +13,8 @@ export interface RotationOriginalsLedger {
   save(deviceId: string, state: RotationRestoreState): Promise<boolean>;
   /** Removes the device's record only when it equals `state`. */
   clear(deviceId: string, state: RotationRestoreState): Promise<void>;
+  /** Removes the device's record whatever it holds; the device was removed or replaced. */
+  remove(deviceId: string): Promise<void>;
 }
 
 /** Field-order independent identity of a restore state, for {@link RotationOriginalsLedger.clear}. */

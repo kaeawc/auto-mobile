@@ -1494,6 +1494,37 @@ describe("rotation originals survive a daemon restart (#18847)", () => {
       h.manager.stopCleanupTimer();
     }
   });
+
+  test("removal deletes the saved originals; a replacement on the serial is never restored from them", async () => {
+    const ledger = new FakeRotationOriginalsLedger();
+    const first = harness({ ledger });
+    try {
+      await flush();
+      await first.manager.createSession("rotation-session", device.deviceId, "android");
+      await first.rotate.execute("landscape");
+      expect(ledger.records.has(device.deviceId)).toBe(true);
+      // The AVD is removed with the session unreleased; the daemon then dies.
+      first.manager.retireRestorations(device.deviceId, "removal");
+      await flush();
+      expect(ledger.records.has(device.deviceId)).toBe(false);
+    } finally {
+      first.manager.stopCleanupTimer();
+    }
+    // A different AVD boots on the same serial under the next daemon.
+    const restarted = harness({ ledger, adb: first.adb });
+    try {
+      await flush();
+      first.adb.auto = 0;
+      first.adb.user = 3;
+      await restarted.manager.createSession("replacement", device.deviceId, "android");
+      await flush();
+      expect(restarted.restored).toEqual([]);
+      expect(first.adb.auto).toBe(0);
+      expect(first.adb.user).toBe(3);
+    } finally {
+      restarted.manager.stopCleanupTimer();
+    }
+  });
 });
 
 describe("device_state_rotation_lock verification and posture snapshots (#18847)", () => {

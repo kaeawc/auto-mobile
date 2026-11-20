@@ -100,9 +100,14 @@ export function prototypeSecureStorageActionError(
   root: Raw,
 ): PrototypePlatformError | undefined {
   if (DATA_WRITE_TYPES.has(action.type)) {
-    return dataWriteError(action.value, `${path}.value`, root);
+    return (
+      dataWriteError(action.value, `${path}.value`, root) ??
+      bindingMapError(action.where, `${path}.where`, root, "data actions")
+    );
   }
   switch (action.type) {
+    case "removeData":
+      return bindingMapError(action.where, `${path}.where`, root, "data actions");
     case "emit":
       return prototypeSecureStorageEmitError(action, path, root);
     case "request":
@@ -205,6 +210,7 @@ export function prototypeSecureStorageRequestError(
       .map((name) => [record(value)![name], memberPath(at, name)] as const);
   const candidates: (readonly [unknown, string])[] = [
     [action.url, `${path}.url`],
+    [record(action.where)?.equals, `${path}.where.equals`],
     ...members(action.headers, `${path}.headers`),
     ...members(action.query, `${path}.query`),
     [action.body, `${path}.body`],

@@ -7,6 +7,9 @@ typealias EmitContextBinding = JsonObject
 
 /** Lookups are performed at the emit action, after preceding writes in the atomic action list. */
 interface EmitContextInputs {
+  val actionContext: PrototypeActionContext?
+    get() = null
+
   fun state(key: String): JsonElement?
 
   fun page(id: String): Int?

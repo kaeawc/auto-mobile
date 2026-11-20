@@ -30,6 +30,13 @@ When the screenshot is gone, the read returns JSON with code `OBSERVATION_NOT_RE
 
 With no `evictedBecause`, the id is unknown. In every case, call `observe` again.
 
+## Apps with several scenes on iOS
+
+When an iOS app has more than one connected scene, `observe` and the element-based
+action tools such as `tapOn` fail with a `multi_scene` error that lists the scenes.
+Close all but one scene, then retry. The tools do not fall back to a different
+observation source.
+
 ## Toggle labels
 
 A toggle or range row may have no label of its own or from its enclosing row. It then

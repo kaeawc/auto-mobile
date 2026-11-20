@@ -12,6 +12,15 @@
 
 set -euo pipefail
 
+# Build with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+# Shell-test fixtures that copy this script without the helper keep the active Xcode.
+_pinned_xcode_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/xcode_version.sh"
+if [[ -f "${_pinned_xcode_helper}" ]]; then
+    # shellcheck source=scripts/ios/xcode_version.sh
+    source "${_pinned_xcode_helper}"
+    select_pinned_xcode
+fi
+
 if [[ -z "${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-}" ]] ||
     [[ "${AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD:-}" != true && ! (
         "${AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD:-}" == true &&

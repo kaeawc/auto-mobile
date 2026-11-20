@@ -1,3 +1,4 @@
+import { prototypeGeneratedValuesError } from "./prototypeGeneratedBindings";
 import { prototypeGlassObjectError } from "./prototypeGlass";
 import { iconNames, prototypeIconNameError } from "./prototypeIconNames";
 import { excludeAccessoryReferences } from "./prototypeBindingValidation";
@@ -36,6 +37,8 @@ import { chargeMotionNode } from "./prototypeMotionBudget";
 import { prototypeKeyframesError } from "./prototypeKeyframes";
 import { effectUses } from "./prototypeEffects";
 import { jsonCost } from "./prototypeJsonCost";
+import { isPrototypeDataScalar, keyPath, prototypeDataError } from "./prototypeDataValueValidation";
+export { prototypeDataError } from "./prototypeDataValueValidation";
 import { prototypeSpecSchema, type PrototypeSpec } from "./prototypeSpec";
 import {
   Rule,
@@ -82,12 +85,6 @@ interface Context {
   limits: PrototypeRuntimeBudget;
 }
 const definitions: Record<string, Rule> = contract.definitions;
-function keyPath(path: string, key: string): string {
-  if (prototypeContractPatterns.pathKey.test(key)) {
-    return path ? `${path}.${key}` : key;
-  }
-  return `${path || "$"}[${JSON.stringify(key)}]`;
-}
 function bytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
@@ -514,10 +511,7 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
   number: numberValid,
   true: (value) => value === true,
   boolean: (value) => typeof value === "boolean",
-  scalar: (value) =>
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value)),
+  scalar: isPrototypeDataScalar,
   enum: (value, rule) =>
     (typeof value === "string" || typeof value === "boolean") &&
     (rule.values ?? []).includes(value),
@@ -526,53 +520,6 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
     return Number.isFinite(cost) && cost <= (rule.maxBytes ?? Infinity);
   },
 };
-/** Data uses the emit payload cost after its own stricter depth-first walk. */
-export function prototypeDataError(
-  value: unknown,
-  maxBytes: number = contract.limits.MAX_PROTOTYPE_DATA_BYTES,
-  maxArrayItems: number = contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
-): PrototypeValidationError | undefined {
-  if (!object(value)) {
-    return fail("data", "Expected object");
-  }
-  return (
-    walkDataValue(value, "data", { depth: 1, maxArrayItems }) ??
-    (jsonCost(value) > maxBytes ? fail("data", "Data byte limit exceeded") : undefined)
-  );
-}
-function dataChildren(value: unknown, path: string): { value: unknown; path: string }[] {
-  if (Array.isArray(value)) {
-    return value.map((child, index) => ({ value: child, path: `${path}[${index}]` }));
-  }
-  const data = object(value) ?? {};
-  return Object.keys(data)
-    .sort()
-    .map((key) => ({ value: data[key], path: keyPath(path, key) }));
-}
-function walkDataValue(
-  value: unknown,
-  path: string,
-  { depth, maxArrayItems }: { depth: number; maxArrayItems: number },
-): PrototypeValidationError | undefined {
-  if (!Array.isArray(value) && !object(value)) {
-    return primitiveChecks.scalar(value, { kind: "scalar" })
-      ? undefined
-      : fail(path, "Invalid data value");
-  }
-  if (depth > contract.limits.MAX_PROTOTYPE_DATA_DEPTH) {
-    return fail(path, "Data depth limit exceeded");
-  }
-  if (Array.isArray(value) && value.length > maxArrayItems) {
-    return fail(path, "Data array limit exceeded");
-  }
-  for (const child of dataChildren(value, path)) {
-    const error = walkDataValue(child.value, child.path, { depth: depth + 1, maxArrayItems });
-    if (error) {
-      return error;
-    }
-  }
-  return undefined;
-}
 function visitData(
   value: unknown,
   _rule: Rule,
@@ -865,6 +812,7 @@ function behaviourErrors(
   { repeats, componentTimers }: { repeats: PrototypeRepeatData; componentTimers: Located[] },
 ): PrototypeValidationError | undefined {
   return (
+    prototypeGeneratedValuesError(context.actions) ??
     prototypeDataActionsError(context.actions, data.data, (value) =>
       budgetDataError(value, context.limits),
     ) ??
@@ -961,7 +909,7 @@ function validateExpanded(
     ? result
     : {
         success: false,
-        error: { path: expansion.locate(result.error.path), message: result.error.message },
+        error: { ...result.error, path: expansion.locate(result.error.path) },
       };
 }
 /** Raw JSON strings measure transmitted UTF-8 bytes; object input measures compact JSON bytes. */

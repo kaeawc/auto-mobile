@@ -124,10 +124,32 @@ describe("automobile:prototype resource", () => {
     const blocks = [...renderPrototypeGuide().matchAll(/```json\n([\s\S]*?)```/g)].map((m) =>
       JSON.parse(m[1]),
     );
-    // The seventh and eighth blocks are the platform and media actions examples, validated in
+    // The ninth and tenth blocks are the platform and media actions examples, validated in
     // prototypeGuidePlatform.test.ts.
-    expect(blocks).toHaveLength(8);
-    const [minimal, list, data, components, appearanceCall, mockCall] = blocks;
+    expect(blocks).toHaveLength(10);
+    const [minimal, list, data, sendActions, retryActions, components, appearanceCall, mockCall] =
+      blocks;
+    // Blocks four and five are action lists. Validate them in the documented send/repeat contexts.
+    expect(
+      validatePrototypeSpec({
+        id: "send",
+        window: { placement: { type: "fullscreen" } },
+        data: { messages: [] },
+        root: { type: "button", label: "Send", onTap: sendActions },
+      }),
+    ).toMatchObject({ success: true });
+    expect(
+      validatePrototypeSpec({
+        id: "retry",
+        window: { placement: { type: "fullscreen" } },
+        data: { messages: [{ id: "message-1", status: "failed" }] },
+        root: {
+          type: "column",
+          repeat: { items: { path: "/messages" }, as: "item", key: "id" },
+          children: [{ type: "button", label: "Retry", onTap: retryActions }],
+        },
+      }),
+    ).toMatchObject({ success: true });
     expect(validatePrototypeSpec(data)).toMatchObject({ success: true });
     expect(validatePrototypeSpec(minimal).success).toBe(true);
     // The light/dark section's example is a whole tool call, not a bare spec.

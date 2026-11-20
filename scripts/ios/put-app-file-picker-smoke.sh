@@ -3,6 +3,12 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Build with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+if [[ -f "${repo_root}/scripts/ios/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${repo_root}/scripts/ios/xcode_version.sh"
+  select_pinned_xcode
+fi
 device_id="${1:-}"
 app_id="dev.jasonpearson.automobile.Playground"
 fixture_namespace="automobile-issue-5806"

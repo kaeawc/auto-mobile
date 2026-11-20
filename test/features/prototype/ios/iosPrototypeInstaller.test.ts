@@ -100,6 +100,7 @@ describe("IosPrototypeInstaller", () => {
     ["contacts", "NSContactsUsageDescription"],
     ["calendar", "NSCalendarsFullAccessUsageDescription"],
     ["bluetooth", "NSBluetoothAlwaysUsageDescription"],
+    ["nearbyWifi", "NSLocalNetworkUsageDescription"],
     ["motion", "NSMotionUsageDescription"],
     ["speech", "NSSpeechRecognitionUsageDescription"],
   ]) {
@@ -160,10 +161,7 @@ describe("IosPrototypeInstaller", () => {
       ...input,
       spec: {
         requires: {
-          permissions: [
-            { name: "notifications", purpose: "Notify me" },
-            { name: "nearbyWifi", purpose: "Find peers" },
-          ],
+          permissions: [{ name: "notifications", purpose: "Notify me" }],
           background: ["audio", "connectedDevice"],
         },
       },
@@ -172,6 +170,16 @@ describe("IosPrototypeInstaller", () => {
       Object.keys(h.plist.written?.value ?? {}).filter((key) => /^NS.*UsageDescription$/.test(key)),
     ).toEqual([]);
     expect(h.plist.written?.value).not.toHaveProperty("UIBackgroundModes");
+  });
+
+  test("declared nearbyWifi purpose replaces the template local network string", async () => {
+    const h = harness();
+    h.plist.value = { NSLocalNetworkUsageDescription: "Template network" };
+    await h.installer.install({
+      ...input,
+      spec: { requires: { permissions: [{ name: "nearbyWifi", purpose: "Find peers" }] } },
+    });
+    expect(h.plist.written?.value.NSLocalNetworkUsageDescription).toBe("Find peers");
   });
 
   test("update removes a permission omitted from the replacement spec", async () => {

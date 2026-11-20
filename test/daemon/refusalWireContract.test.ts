@@ -275,6 +275,8 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "Emulator gRPC audio failures (#13628, #13629) are thrown as ActionableError through the generic tool-error path, which serializes only the message; the code reaches clients as the message's leading [code] text, not a structured wire field.",
   "features/deviceLifecycle/teardown/stuckEmulatorEscalation":
     "Emulator teardown failure (#14018) is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code is a property on the error, not a structured wire field.",
+  "utils/ios/healthSeedError":
+    "iOS HealthKit seeder (#18801) is an internal utility with no tool wiring yet; when a tool wraps it, the code reaches clients as the message's leading `code:` text, not a structured wire field.",
   "models/ResetCapacityWaitExceededError":
     "Broker-internal iOS reset failure (#15107): drainFailureOutcome turns it into a device destroy and the reset timing receipt records its message; it never reaches an MCP/tool or daemon refusal as a structured code.",
   "features/prototype/ios/installerErrors/PrototypeInstallPhysicalDeviceError":

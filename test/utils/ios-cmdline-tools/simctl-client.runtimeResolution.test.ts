@@ -142,6 +142,32 @@ describe("SimCtlClient runtime resolution", () => {
     expect(calls).not.toContain("xcrun --sdk iphonesimulator --show-sdk-version");
   });
 
+  // Xcode 27.2 installs iOS-27-2-iPhone19-4 (iPhone Duo only) next to the general iOS-27-2.
+  const duoRuntimes: RuntimeFixture[] = [
+    { version: "27.2", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4" },
+    { version: "27.2", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-27-2" },
+    { version: "27.2", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4" },
+  ];
+
+  test("SDK-default selection prefers the general runtime over a device-specific one", async () => {
+    for (const order of [duoRuntimes.slice(0, 2), duoRuntimes.slice(1)]) {
+      const { simctl } = createClient("27.2", order);
+      expect(await simctl.resolveRuntimeIdentifier()).toBe(
+        "com.apple.CoreSimulator.SimRuntime.iOS-27-2",
+      );
+    }
+  });
+
+  test("bounded selection lists the general runtime before a device-specific one", async () => {
+    for (const order of [duoRuntimes.slice(0, 2), duoRuntimes.slice(1)]) {
+      const { simctl } = createClient("27.2", order);
+      expect(await simctl.resolveRuntimeIdentifiersForBounds("27.2", "27.2")).toEqual([
+        "com.apple.CoreSimulator.SimRuntime.iOS-27-2",
+        "com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4",
+      ]);
+    }
+  });
+
   test("selects the newest available runtime at or above a minimum", async () => {
     const { simctl, calls } = createClient("26.3", [
       { version: "18.2.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-18-2" },

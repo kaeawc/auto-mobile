@@ -49,6 +49,7 @@ portable test/features/observe/ios/IosSdkBridgeReader.test.ts           # bridge
 portable test/features/observe/ios/iosSdkWebMerge.test.ts               # pure web-view hierarchy merge over fixtures
 portable test/features/observe/ios/IosSdkWebReader.test.ts              # web snapshot reader over a fake client
 portable test/features/observe/ios/iosSdkBridgeSnapshotRefresh.test.ts  # merge + snapshot/hash helpers over fixtures
+portable test/features/action/IosAppLifecycle.memoryWarning.test.ts     # injected filesystem, process control and foreground read; no simulator
 portable test/features/action/IosSdkBridgeTapRouter.test.ts             # tap routing over a fake client
 portable test/features/action/IosSdkWebActionRouter.test.ts          # web tap routing over a fake client
 portable test/features/action/TapOnElement.iosSdkBridge.test.ts          # tapOn routing over FakeIOSCtrlProxy

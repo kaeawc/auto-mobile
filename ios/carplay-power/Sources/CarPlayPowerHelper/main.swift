@@ -10,9 +10,7 @@ func writeJSON(_ value: some Encodable, to handle: FileHandle) throws {
 
 do {
     let arguments = Array(CommandLine.arguments.dropFirst())
-    guard arguments.count == 2,
-          arguments[1] == "status" || arguments[1] == "power-on"
-    else {
+    guard arguments.count == 2, arguments[1] == "status" || arguments[1] == "power-on" else {
         throw CarPlayPowerError(.usage, "Usage: carplay-power-helper <udid> status|power-on")
     }
     let controller = CarPlayPowerController(backend: PrivateSimulatorBackend())

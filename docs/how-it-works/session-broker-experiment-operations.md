@@ -11,7 +11,7 @@ Part of [the session-only provider experiment](session-broker-experiment.md).
   "defaults": {
     "ios": {
       "platform": "ios",
-      "policyVersion": "local-ios-26.5-v1",
+      "policyVersion": "local-ios-27.2-v1",
       "hardware": {
         "omitted": "phone",
         "archetypes": [
@@ -24,7 +24,7 @@ Part of [the session-only provider experiment](session-broker-experiment.md).
           }
         ]
       },
-      "os": { "selector": { "kind": "exact", "version": "26.5" }, "preferredVersion": "26.5" }
+      "os": { "selector": { "kind": "exact", "version": "27.2" }, "preferredVersion": "27.2" }
     }
   },
   "reuseCleanDevices": false,
@@ -44,7 +44,7 @@ an exact Duo model needs neither.
 The optional `defaults.ios.os.archetypes` list holds at most one
 entry per archetype, each `{ archetype, selector, preferredVersion }`. An entry replaces `os` for
 that hardware archetype only when the request omits the OS. A host can therefore pin phones and
-tablets to exact 26.5 while `duo` defaults to 27.1. Explicit request selectors stay as
+tablets to exact 27.2 while `duo` defaults to 27.1. Explicit request selectors stay as
 requested, and provenance records the entry used as `osDefaultArchetype`. Android `os` selectors use the release version (`16`),
 not the API level (`36`); at equal versions the resolver prefers `google_apis`
 over `google_apis_playstore`.
@@ -237,8 +237,15 @@ The same compare-and-set records a claim the files decided, and it never
 replaces a row a live foreign owner holds. Every local daemon creates and migrates the registry
 after its control socket binds. From then on the daemon refuses, retryably, a claim the table cannot decide instead of
 falling back to the files (#11811, owner decision E1). That covers no registry open yet, and a
-write still busy after four attempts 50, 100 and 200 ms apart. The claim files decide before
-bind (startup recovery), for watch and TV, and in files-only mode.
+write still busy after four attempts 50, 100 and 200 ms apart.
+
+Before bind (startup recovery) the same refusal applies whenever a registry file exists and its
+open or claim failed. The one exception is a schema that still needs this release's migrations.
+Every current daemon migrates once bound, so an unmigrated registry holds no table-only claim
+yet. The daemon remembers the last failed open's error until an open succeeds. A claim that
+finds no open to join is judged by that error. Recovery treats the refusal as deferred: it gives
+the device back, keeps the session pending and retries. Before bind the claim files decide with no
+registry file or when no open was attempted, for watch and TV, and in files-only mode.
 
 The device-claims mirror skips
 reads, writes, opens and retries until daemon restart. Writers and ownership readers

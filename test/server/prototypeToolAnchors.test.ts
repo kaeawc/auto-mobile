@@ -68,8 +68,7 @@ describe("prototype show with anchors (#9316)", () => {
   let restore: () => void;
   let unsubscribe: () => void;
 
-  beforeEach(() => {
-    restore = preserveToolRegistry();
+  function install() {
     const timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
     client.setSupportedCommands([PROTOTYPE_ANCHOR_CAPABILITY]);
@@ -81,6 +80,25 @@ describe("prototype show with anchors (#9316)", () => {
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
       anchorHierarchyCaptureFactory: () => hierarchy,
     });
+  }
+
+  // The first anchored show pays one-off warm-up (parsing and converting the captured wire JSON,
+  // the show path's lazy initialization). Run it once here so no single test is charged for it;
+  // the 100 ms budget excludes beforeAll.
+  beforeAll(async () => {
+    const restoreRegistry = preserveToolRegistry();
+    try {
+      install();
+      await call({ action: "show", spec: anchoredSpec({ elementId: "button_elevated" }) });
+    } finally {
+      unsubscribe?.();
+      restoreRegistry();
+    }
+  });
+
+  beforeEach(() => {
+    restore = preserveToolRegistry();
+    install();
   });
   afterEach(() => {
     unsubscribe();

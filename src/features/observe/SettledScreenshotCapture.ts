@@ -184,7 +184,11 @@ export class SettledScreenshotCapture {
         this.device.platform,
         "Deriving the screenshot raster scale",
       );
-      if (!this.orientHierarchylessPanelToRaster(observation, imageSize)) {
+      const oriented = this.orientHierarchylessPanelToRaster(observation, imageSize);
+      // Device reads preset iOS "native"; a shape-matching multi-panel raster is display-aligned,
+      // so screenshot-relative points must not quarter-turn it by observe's rotation (#18831).
+      this.refineIosPanelOrientation(observation);
+      if (!oriented) {
         return;
       }
       const scale = snapshotRasterGeometry(

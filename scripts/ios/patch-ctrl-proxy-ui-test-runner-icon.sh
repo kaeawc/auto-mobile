@@ -81,6 +81,17 @@ done
 "${PLUTIL}" -replace CFBundleDisplayName -string CtrlProxy "${RUNNER_INFO_PLIST}"
 "${PLUTIL}" -replace CFBundleName -string CtrlProxy "${RUNNER_INFO_PLIST}"
 
+# Xcode's prebuilt runner carries no simulated entitlements, and storekitd then
+# rejects every StoreKit Testing request on iOS 26 (#18644). Embed them as a
+# __TEXT,__entitlements section (what Xcode links into simulator apps); signing
+# the entitlement into the signature instead makes the kernel kill the runner.
+# The signature has to go first because it takes the header room the section needs.
+RUNNER_EXECUTABLE="${RUNNER_APP}/CtrlProxyUITests-Runner"
+if [[ -f "${RUNNER_EXECUTABLE}" ]]; then
+    codesign --remove-signature "${RUNNER_EXECUTABLE}" >/dev/null
+    "${BUN:-bun}" "${SCRIPT_DIR}/embedSimulatedEntitlements.ts" "${RUNNER_EXECUTABLE}"
+fi
+
 # The simulator accepts an ad-hoc signature, while a stale signature rejects
 # the copied asset catalog during installation.
 codesign --force --sign - "${RUNNER_APP}" >/dev/null

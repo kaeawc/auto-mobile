@@ -266,6 +266,18 @@ gone. `boot-gate --min-interval-ms` is best-effort with more than one concurrent
 permit. A killed gate leaves its `permit-N.lock` until its PID is gone. Grant
 JSON uses `permit`; wait JSON uses `waitingFor: permit` (or `load`/`interval`).
 
+## Xcode and simulator runtimes
+
+Every Apple simulator lane defaults to the pinned Xcode (`AUTOMOBILE_XCODE_VERSION` in
+`scripts/ios/xcode_version.sh`, 27.2) and its general runtimes: iOS `SimRuntime.iOS-27-2`
+(never the iPhone Duo-only `iOS-27-2-iPhone19-4`), tvOS, watchOS and visionOS 27.2. The host's
+`xcode-select` may still name an older Xcode; never switch it. Resolve the pinned Xcode with
+`bash scripts/ci/select-self-hosted-xcode.sh --exact --print` and pass it as
+`--env DEVELOPER_DIR=<that path>` to `private-daemon.ts init`, so the daemon creates and boots
+simulators on that Xcode's runtime; repository build scripts select it themselves. Use Xcode
+26.6 or a 26.x runtime only when the item is about that version: headless Simulator CarPlay
+(Xcode 27 dropped it) or a bug reported on 26.x. Record the Xcode and runtime of every lane.
+
 ## Default method: multi-device, multi-client
 
 A full iteration runs **2 Android + 2 iOS devices at once** (the device budget;
@@ -339,9 +351,10 @@ tool's `success`.
     setUIState, sendKeys, launch/terminate, install/uninstall, screenshot,
     systemTray, keyboard, pressButton), light/dark, cold boot vs quickboot.
 
-## Form-factor lanes: XR headset, glasses, Android TV
+## Form-factor lanes: XR headset, glasses, Android TV, Apple TV
 
-Every round adds these Android lanes on top of the phone lanes. Broker clients
+Every round adds these lanes on top of the phone lanes (the Apple TV and
+Vision Pro lanes use an iOS slot and run on macOS only). Broker clients
 refuse `startDevice` and `killDevice`, so run the lanes in a separate plain
 batch (`private-daemon.ts init --batch-dir B2` without `--broker-batch`, its own
 `--base-port`), not through the broker batch. They count against the 2 Android
@@ -396,7 +409,7 @@ pass when both are.
 **Apple Vision Pro simulator (every round, macOS only).** Takes an iOS slot
 (`device-slot.sh acquire ios`). Create your own simulator through the private
 daemon: `provisionDevice --readiness none` with `platform: "visionos"`, runtime
-`com.apple.CoreSimulator.SimRuntime.xrOS-26-5` and device type
+`com.apple.CoreSimulator.SimRuntime.xrOS-27-2` and device type
 `com.apple.CoreSimulator.SimDeviceType.Apple-Vision-Pro-4K` (the plain
 `Apple-Vision-Pro` type is rejected). Never `simctl delete` anything but your own UDID.
 
@@ -415,6 +428,90 @@ daemon: `provisionDevice --readiness none` with `platform: "visionos"`, runtime
   no toggle value; `terminateApp`, `uninstallApp`; delete the simulator and verify absence.
 - Record the visionOS gaps that remain (getLogs, executePlan, pressButton, homeScreen,
   swipeOn, tapAt are refused) as SKIPPED with their issue, not as PASS.
+
+**Apple TV simulator (every round, macOS only).** Takes an iOS slot
+(`device-slot.sh acquire ios <tag> <name>`) and counts against the 2-iOS budget:
+boot it after the iPhone lanes are down, never beside them. Run it in a plain
+private batch (no `--broker-batch`), and create your own simulator through the
+private daemon: `provisionDevice` with `device.platform: "tvos"`, the tvOS 27.2
+runtime from the `automobile:devices/images/tvos` resource (26.5 and 27.0 are also
+supported) and device type
+`com.apple.CoreSimulator.SimDeviceType.Apple-TV-4K-3rd-generation-4K`. A missing
+runtime is reported SKIPPED with `xcodebuild -downloadPlatform tvOS`; AutoMobile
+never downloads one. Never `simctl delete` anything but your own UDID.
+
+- Init the private daemon with `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA` under your
+  worktree's `scratch/`. The tvOS runner is the released prebuilt download by
+  default; to test a runner change set `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` to the
+  `.xctestrun` you built (through `heavy-build-slot.sh xcodebuild build-for-testing
+  -scheme AutoMobileTVTest -destination "id=<your UDID>"`, never into the shared
+  `/tmp/automobile-ctrl-proxy`), and record which runner served the round.
+- Name `platform: "tvos"` (or the Apple TV `sessionUuid`) on every call, plus your
+  device by exact UDID: a call that names no platform never lands on an Apple TV,
+  and one that does must still not fall to the CI iPhone. Pass `--protect` as for
+  any iOS batch.
+- Test app: the `AutoMobileTVTest` scheme in `ios/control-proxy/CtrlProxy.xcodeproj`
+  (bundle `dev.jasonpearson.automobile.ctrlproxy.tv`) shows a `last: <name>` label,
+  a 3x3 button grid `B00`..`B22` and text fields `am-text-field`, `am-labeled-field`,
+  `am-secure-field`. Build it with the `buildApp` tool (`platform: "tvos"`,
+  `projectPath`, `scheme`, `simulatorUdid`) and pass the returned `.app` to
+  `installApp`. This is the smoke flow of `scripts/ios/tvos-smoke-advisory.sh`
+  (provision, boot, install, launch, select a tile, delete).
+- Tool list to exercise, each with an observed effect, not `success`:
+  - Lifecycle: `provisionDevice` (record cold-boot seconds), `listDevices` and
+    `listDeviceImages` with `platform: "tvos"`, `killDevice`, `startDevice
+    { platform: "tvos", name }` (restarts the runner, never creates), `deleteDevice`
+    with `mode: "destroy"` and `verifyAbsence: true`; check absence with `simctl list`.
+  - `installApp`, `launchApp` (returns `verificationSkipped: "platform"`; follow it with
+    `observe`), `terminateApp`, `uninstallApp`.
+  - `observe`: screenshot plus hierarchy and `focusedElement`; `focusedElement.checked`
+    on toggles; `waitFor {for: "focused"}`. Without a runner it returns
+    `hierarchyUnavailable`; that is not a pass.
+  - `focusNavigate` to a named tile without `select`, then with `select: true`; confirm
+    `last: B..` changed only for the second. Check `path` and `status`
+    (`focused`, `max_steps`, `stuck`).
+  - `pressButton` for `up down left right select menu home playPause`, and a
+    `durationMs` long press.
+  - `tapOn` by `text` and by `elementId`, and with `index`.
+  - `sendKeys` type into `am-text-field` after `pressButton select` opens the keyboard;
+    `operation: "replace"` is refused.
+  - `openLink` and `getDeepLinks` against an app that declares a scheme. The test app
+    declares none, so expect a clean not-handled error and record the pair as
+    PARTIAL unless you installed an app with a scheme.
+  - `homeScreen`, `videoRecording`, `compareScreenshot`, `getLogs` (needs `appId`),
+    and `explore` (daemon with `--embedded-sdk`) when the round touches them.
+  - Refusals: `tapAt`, `swipeOn`, `pinchOn`, `displayConfig`, `statusBar`, `clipboard`
+    must refuse with an error that names the tool; a success is a bug.
+- tvOS gotchas, all seen in earlier rounds:
+  - Starting the runner brings its own host app to the front; AutoMobile restores
+    your launched app within 5 s. If `message` says the app may not be in front,
+    `observe` again before judging anything.
+  - Focus enlarges the focused control and the engine remembers the last focused item
+    per row, so never predict focus from layout; observe, then act. A `tapOn`
+    that "switched targets" is checked against the observed `focusedElement`.
+  - While the keyboard is open the hierarchy shows labels, not field values, for about
+    one second after typing; wait, then read the typed value. Secure and unnamed
+    fields never show a value, so confirm those in the screenshot.
+  - `tapOn` on Settings rows can need up to 60 sweep moves and fails with
+    `maxMoves`/ambiguity when rows repeat text; use `index`, or `focusNavigate`.
+  - A runner that stops answering within 5 s is disconnected and restarted by the
+    next call; a persistent failure needs `startDevice` again, and a stale
+    runner shows up in `message`, not as a failed tool.
+  - Bare `launchApp` does not observe; a hierarchy that describes the runner host app
+    instead of your app means the foreground restore failed.
+  - The simulator can sit in `Shutdown` after a daemon restart for the same
+    environmental reasons as iOS (see the failure table); re-boot via the daemon.
+  - `homeScreen` leaves the app in the background: the hierarchy then describes the tvOS
+    home screen and `tapOn` fails with "No tvOS element matched". `launchApp` again first.
+  - Call shapes: `tapOn --selector '{"text":"B00"}'` (selectors are never top-level),
+    `focusNavigate --until '{"elementId":"B11"}'`, `sendKeys --commands
+    '[{"action":"type","text":"hello"}]'` after `tapOn` opens the keyboard on a field.
+  - The test app has no URL scheme, so `openLink` fails with `LSApplicationWorkspaceErrorDomain`
+    code 115: the expected not-handled result.
+  - `postNotification`, `getLogs` and `setAppPermissions` need an `appId`; permission
+    grants are not read back on tvOS, so verify them in the app.
+- Record gaps that remain (physical Apple TV, prototypes, touch gestures,
+  `getAppPermissions`) as SKIPPED with their issue, not as PASS.
 
 ## Device failure modes and repair
 

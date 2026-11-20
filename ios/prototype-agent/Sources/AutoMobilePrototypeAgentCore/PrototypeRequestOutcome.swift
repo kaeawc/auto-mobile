@@ -17,7 +17,7 @@ extension PrototypeRequestOutcome {
 
     static func apply(
         _ data: [String: JSONValue], into: String?, response: PrototypeRequestResponse,
-        append: PrototypeRequestAppend? = nil
+        append: PrototypeRequestAppend? = nil, where match: PrototypeDataWrite.Match? = nil, member: String? = nil
     )
         -> Applied
     {
@@ -26,7 +26,7 @@ extension PrototypeRequestOutcome {
         var wroteInto = false
         var appended = 0
         if case let .received(_, _, body, _) = response, meta.error == nil {
-            switch writeResponse(data, into: into, body: body, append: append) {
+            switch writeResponse(data, into: into, body: body, append: append, where: match, member: member) {
             case let .success(written):
                 next = written.data
                 appended = written.appended
@@ -60,7 +60,8 @@ extension PrototypeRequestOutcome {
     }
 
     private static func writeResponse(
-        _ data: [String: JSONValue], into: String?, body: JSONValue, append: PrototypeRequestAppend?
+        _ data: [String: JSONValue], into: String?, body: JSONValue, append: PrototypeRequestAppend?,
+        where match: PrototypeDataWrite.Match?, member: String?
     )
         -> Result<Written, PrototypeRequestError>
     {
@@ -93,16 +94,26 @@ extension PrototypeRequestOutcome {
             appended = items.count
         }
         if let into {
-            switch PrototypeDataWrite.apply(next, op: .set, path: into, value: rest == .null ? .string("") : rest) {
+            switch PrototypeDataWrite.apply(
+                next,
+                op: .set,
+                path: into,
+                value: rest == .null ? .string("") : rest,
+                where: match,
+                member: member
+            ) {
             case let .success(written): next = written
-            case let .failure(error): return .failure(.init(.invalidResponse, error.message))
+            case let .failure(error): return .failure(.init(
+                    match == nil ? .invalidResponse : PrototypeRequestErrorCode(rawValue: error.code.rawValue) ??
+                        .invalidResponse, error.message
+                ))
             }
         }
         return .success(Written(data: next, appended: appended))
     }
 
     /// Value-semantic removal also supports an object member reached through an intermediate array.
-    private static func removing(_ value: JSONValue, tokens: ArraySlice<String>) -> JSONValue? {
+    static func removing(_ value: JSONValue, tokens: ArraySlice<String>) -> JSONValue? {
         guard let token = tokens.first else { return nil }
         switch value {
         case var .object(fields):

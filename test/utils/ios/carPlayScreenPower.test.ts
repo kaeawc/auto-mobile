@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
   DefaultCarPlayScreenPowerer,
@@ -8,54 +7,62 @@ import {
 } from "../../../src/utils/ios/carPlayScreenPower";
 import { FakeCarPlayScreenPowerer } from "../../fakes/FakeCarPlayScreenPowerer";
 
-const fixtureDir = join(import.meta.dir, "../../fixtures/ios-carplay");
-const statusJson = readFileSync(join(fixtureDir, "power-status-ios26.5-fresh.json"), "utf8");
-const powerOnJson = readFileSync(join(fixtureDir, "power-on-ios26.5.json"), "utf8");
+// carplay-power-helper power-on output captured on a fresh iOS 26.5 iPhone 17 Pro simulator.
+const state = {
+  carPlay: { powerState: 1, found: true, screenID: 2 },
+  screens: [
+    { width: 720, id: 3, name: "Wireless", screenType: 2, powerState: 0, height: 480 },
+    { width: 800, id: 2, name: "TVOut", screenType: 1, powerState: 1, height: 480 },
+    { width: 1206, id: 1, name: "LCD", screenType: 0, powerState: 1, height: 2622 },
+  ],
+};
+const encoded = JSON.stringify(state);
 
 describe("CarPlay screen power", () => {
-  test("parses captured status and power-on JSON for TVOut", () => {
-    const status = parseCarPlayPowerState(statusJson);
-    const powered = parseCarPlayPowerState(powerOnJson);
-    expect(status.carPlay).toEqual({ found: true, powerState: 0 });
-    expect(powered.carPlay).toEqual({ found: true, powerState: 1 });
-    expect(powered.screens).toContainEqual({
-      id: 2,
-      name: "TVOut",
-      screenType: 1,
-      powerState: 1,
-      width: 800,
-      height: 480,
-    });
-  });
-
-  test("rejects malformed contracts and the obsolete enabled key", () => {
-    const state = parseCarPlayPowerState(powerOnJson);
+  test("parses the Swift state and rejects malformed contracts", () => {
+    expect(parseCarPlayPowerState(encoded)).toEqual(state);
     for (const value of [
       "not json",
       "{}",
-      powerOnJson + powerOnJson,
+      encoded + encoded,
       JSON.stringify({ ...state, extra: true }),
-      JSON.stringify({ ...state, carPlay: { ...state.carPlay, enabled: null } }),
-      powerOnJson.replace('"width":800', '"width":"800"'),
+      encoded.replace('"width":720', '"width":"720"'),
+      encoded.replace('"screenID":2', '"screenID":-1'),
     ]) {
       expect(() => parseCarPlayPowerState(value)).toThrow(ActionableError);
     }
   });
-  test("runs status and power-on argv with the existing timeout", async () => {
+  test("runs status and power-on argv through the seam", async () => {
     const calls: string[][] = [];
     const powerer = new DefaultCarPlayScreenPowerer(
-      async (file, args, options) => {
+      async (file, args) => {
         calls.push([file, ...args]);
-        expect(options?.timeout).toBe(135000);
-        return { stdout: args[1] === "status" ? statusJson : powerOnJson, stderr: "" };
+        return { stdout: encoded, stderr: "" };
       },
       { AUTOMOBILE_CARPLAY_POWER_HELPER_PATH: "/helper with spaces" },
     );
-    expect(await powerer.status("udid")).toEqual(parseCarPlayPowerState(statusJson));
-    expect(await powerer.powerOn("udid")).toEqual(parseCarPlayPowerState(powerOnJson));
+    expect(await powerer.status("udid")).toEqual(state);
+    await powerer.powerOn("udid");
     expect(calls).toEqual([
       ["/helper with spaces", "udid", "status"],
       ["/helper with spaces", "udid", "power-on"],
+    ]);
+  });
+  test("caps power-on's exec timeout at the caller's budget and forwards its signal", async () => {
+    const seen: unknown[] = [];
+    const powerer = new DefaultCarPlayScreenPowerer(
+      async (_file, _args, options) => {
+        seen.push(options);
+        return { stdout: encoded, stderr: "" };
+      },
+      { AUTOMOBILE_CARPLAY_POWER_HELPER_PATH: "/helper" },
+    );
+    const signal = new AbortController().signal;
+    await powerer.powerOn("udid", { signal, timeoutMs: 7000 });
+    await powerer.powerOn("udid");
+    expect(seen).toEqual([
+      { timeout: 7000, maxBuffer: 1024 * 1024, signal },
+      { timeout: 135000, maxBuffer: 1024 * 1024 },
     ]);
   });
   test("maps every stable helper error from stderr", async () => {
@@ -63,9 +70,9 @@ describe("CarPlay screen power", () => {
       "device-not-found",
       "device-not-booted",
       "private-api-unavailable",
+      "unsupported-runtime",
       "no-carplay-screen",
       "power-on-failed",
-      "usage",
     ]) {
       const powerer = new DefaultCarPlayScreenPowerer(
         async () => {
@@ -77,18 +84,6 @@ describe("CarPlay screen power", () => {
       );
       await expect(powerer.status("id")).rejects.toThrow(`[${code}] remedy`);
     }
-  });
-  test("maps the captured iOS 27.0 refusal from stderr", async () => {
-    const stderr = readFileSync(join(fixtureDir, "power-on-ios27.0-refusal.json"));
-    const powerer = new DefaultCarPlayScreenPowerer(
-      async () => {
-        throw Object.assign(new Error("exit 1"), { stderr });
-      },
-      { AUTOMOBILE_CARPLAY_POWER_HELPER_PATH: "/helper" },
-    );
-    await expect(powerer.powerOn("id")).rejects.toThrow(
-      "[unsupported-runtime] CarPlay power-on supports iOS 26.x simulators only.",
-    );
   });
   test("reports unset, missing executable and invalid stderr actionably", async () => {
     const unset = new DefaultCarPlayScreenPowerer(async () => {
@@ -109,10 +104,9 @@ describe("CarPlay screen power", () => {
     }
   });
   test("fake records calls and returns configured state", async () => {
-    const state = parseCarPlayPowerState(powerOnJson);
     const fake = new FakeCarPlayScreenPowerer(state);
     expect(await fake.status("one")).toEqual(state);
-    expect(await fake.powerOn("two")).toEqual(state);
+    await fake.powerOn("two");
     expect(fake.calls).toEqual([
       { udid: "one", action: "status" },
       { udid: "two", action: "power-on" },

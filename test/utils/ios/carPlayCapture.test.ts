@@ -1,6 +1,4 @@
 import { describe, expect, mock, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { carPlayCaptureDisplay, captureCarPlayScreen } from "../../../src/utils/ios/carPlayCapture";
 import {
@@ -9,25 +7,30 @@ import {
 } from "../../../src/utils/ios/carPlayProjection";
 import { FakeCarPlayProjectionProbe } from "../../fakes/FakeCarPlayProjectionProbe";
 
-function readProjectionFixture(state: "car" | "airplay" | "not-found") {
-  const path = join(
-    import.meta.dir,
-    "../../fixtures/ios-carplay",
-    `projection-probe-ios26.5-${state}.json`,
-  );
-  return parseCarPlayProjectionState(readFileSync(path, "utf8"));
-}
+// Real projection probe captures from fresh iPhone 17 Pro simulators (#18728), the same lines
+// test/utils/ios/carPlayProjection.test.ts parses.
+// iOS 26.5 after carplay-power-helper power-on: TVOut is the car display.
+const carJson =
+  '{"deviceName":"PurpleTVOut","displayId":2,"displayType":1,"found":true,"identity":"Car[2]","isCarDisplay":true,"isCarInstrumentsDisplay":false,"name":"TVOut","tag":32}';
+// iOS 26.5 after boot, before power-on: TVOut attached, untagged.
+const untaggedJson =
+  '{"deviceName":"PurpleTVOut","displayId":2,"displayType":1,"found":true,"identity":"Untagged[2]","isCarDisplay":false,"isCarInstrumentsDisplay":false,"name":"TVOut","tag":0}';
+// iOS 27.0 wireless0 AirPlay capture.
+const airPlayJson =
+  '{"deviceName":"wireless0","displayId":3,"displayType":2,"found":true,"identity":"AirPlay[3]","isCarDisplay":false,"isCarInstrumentsDisplay":false,"name":"Wireless","tag":4}';
+const absentJson =
+  '{"deviceName":null,"displayId":null,"displayType":null,"found":false,"identity":null,"isCarDisplay":false,"isCarInstrumentsDisplay":false,"name":null,"tag":null}';
 
 describe("CarPlay capture", () => {
   test("uses the projecting display's numeric ID", () => {
-    const state = readProjectionFixture("car");
+    const state = parseCarPlayProjectionState(carJson);
     assertCarPlayProjecting(state);
     expect(carPlayCaptureDisplay(state)).toBe("2");
     expect(carPlayCaptureDisplay({ ...state, displayId: 7 })).toBe("7");
   });
 
   test("probes first and captures TVOut with the caller's signal", async () => {
-    const probe = new FakeCarPlayProjectionProbe(readProjectionFixture("car"));
+    const probe = new FakeCarPlayProjectionProbe(parseCarPlayProjectionState(carJson));
     const image = Buffer.from("screenshot");
     const screenshot = mock(async () => {
       expect(probe.calls).toEqual(["udid"]);
@@ -41,18 +44,24 @@ describe("CarPlay capture", () => {
   });
 
   test.each([
-    ["airplay", "not projecting (AirPlay[2])"],
-    ["not-found", "No CarPlay display was found"],
-  ] as const)("refuses %s before taking a screenshot", async (fixture, message) => {
-    const probe = new FakeCarPlayProjectionProbe(readProjectionFixture(fixture));
-    const screenshot = mock(async () => Buffer.from("screenshot"));
+    [untaggedJson, "not projecting (Untagged[2])"],
+    [airPlayJson, "not projecting (AirPlay[3])"],
+    [absentJson, "No CarPlay screen (TVOut or AirPlay"],
+  ] as const)(
+    "refuses %s with the power-on remedy before taking a screenshot",
+    async (json, message) => {
+      const probe = new FakeCarPlayProjectionProbe(parseCarPlayProjectionState(json));
+      const screenshot = mock(async () => Buffer.from("screenshot"));
 
-    await expect(captureCarPlayScreen("udid", { probe, screenshot })).rejects.toThrow(message);
-    expect(screenshot).not.toHaveBeenCalled();
-  });
+      const result = captureCarPlayScreen("udid", { probe, screenshot });
+      await expect(result).rejects.toThrow(message);
+      await expect(result).rejects.toThrow("carplay-power-helper power-on");
+      expect(screenshot).not.toHaveBeenCalled();
+    },
+  );
 
   test("propagates a probe failure without taking a screenshot", async () => {
-    const probe = new FakeCarPlayProjectionProbe(readProjectionFixture("car"));
+    const probe = new FakeCarPlayProjectionProbe(parseCarPlayProjectionState(carJson));
     const failure = new ActionableError("probe failed");
     probe.error = failure;
     const screenshot = mock(async () => Buffer.from("screenshot"));

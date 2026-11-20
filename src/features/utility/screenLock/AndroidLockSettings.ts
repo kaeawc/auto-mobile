@@ -6,6 +6,7 @@ import {
 } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
 import { errorMessage } from "../../../utils/describeUnknownError";
+import { withFixtureCaptureScrub } from "../../../utils/fixtureCapture/fixtureCaptureScope";
 import { logger } from "../../../utils/logger";
 import { TOOL_SECRET_PLACEHOLDER } from "../../../utils/redactToolSecrets";
 import { shellQuoteUnlessSafe } from "../../../utils/shellQuote";
@@ -181,12 +182,18 @@ export class AdbLockSettingsClient implements LockSettingsClient {
   private async run(args: string[], secrets: string[]): Promise<LockSettingsCommandResult> {
     const argv = ["shell", "locksettings", ...args.map(shellQuoteUnlessSafe), ";"];
     try {
-      const result = await this.adb.execute([...argv, "echo", `${EXIT_MARKER}$?`], {
-        // A retried set would be refused for the credential its first attempt already set.
-        noRetry: true,
-        timeoutMs: LOCK_SETTINGS_COMMAND_TIMEOUT_MS,
-        logLabel: LOCK_SETTINGS_LOG_LABEL,
-      });
+      // A refused change echoes the old credential; fixture capture applies the same scrub as
+      // the logs, so a capture never holds the device PIN.
+      const result = await withFixtureCaptureScrub(
+        (text) => scrubLockCredentials(text, secrets),
+        () =>
+          this.adb.execute([...argv, "echo", `${EXIT_MARKER}$?`], {
+            // A retried set would be refused for the credential its first attempt already set.
+            noRetry: true,
+            timeoutMs: LOCK_SETTINGS_COMMAND_TIMEOUT_MS,
+            logLabel: LOCK_SETTINGS_LOG_LABEL,
+          }),
+      );
       const exitLine = new RegExp(`${EXIT_MARKER}(\\d+)`).exec(result.stdout);
       const raw =
         `${result.stdout.replace(exitLine?.[0] ?? EXIT_MARKER, "")}\n${result.stderr}`.trim();

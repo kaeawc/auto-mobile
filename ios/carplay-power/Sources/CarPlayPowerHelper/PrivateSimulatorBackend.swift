@@ -63,7 +63,7 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend {
         return result
     }
 
-    func selectBootedDevice(udid: String) throws {
+    func selectBootedDevice(udid: String) throws -> SimulatorDevice {
         guard dlopen("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator", RTLD_NOW) != nil,
               let contextClass = NSClassFromString("SimServiceContext")
         else { throw unavailable("SimServiceContext") }
@@ -105,6 +105,10 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend {
             )
         }
         device = selected
+        guard let dataPath = try object(selected, "dataPath") as? NSString,
+              let version = try object(object(selected, "runtime"), "versionString") as? NSString
+        else { throw unavailable("SimDevice.dataPath or runtime.versionString") }
+        return SimulatorDevice(runtimeVersion: version as String, dataPath: dataPath as String)
     }
 
     private func developerDirectory() throws -> String {
@@ -126,49 +130,6 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend {
     private func selectedDevice() throws -> NSObject {
         guard let device else { throw CarPlayPowerError(.deviceNotFound, "Select a booted simulator first.") }
         return device
-    }
-
-    func iOSRuntimeMajorVersion() throws -> Int {
-        let value = try object(selectedDevice(), "runtimeIdentifier")
-        let prefix = "com.apple.CoreSimulator.SimRuntime.iOS-"
-        guard let identifier = value as? String, identifier.hasPrefix(prefix),
-              let major = identifier.dropFirst(prefix.count).split(separator: "-", omittingEmptySubsequences: false)
-              .first.flatMap({ Int($0) }), major > 0
-        else {
-            throw unavailable("SimDevice.runtimeIdentifier (expected an iOS runtime identifier, got \(value))")
-        }
-        return major
-    }
-
-    func writeStarkConfig(width: Int, height: Int) throws {
-        guard let dataPath = try object(selectedDevice(), "dataPath") as? String, !dataPath.isEmpty else {
-            throw unavailable("SimDevice.dataPath")
-        }
-        let url = URL(fileURLWithPath: dataPath, isDirectory: true)
-            .appendingPathComponent("Library/Application Support/Simulator/extended_display.plist")
-        // CoreSimulator resets this plist on boot.
-        let config: [String: Any] = [
-            "width": width,
-            "height": height,
-            "scale": 2,
-            "stark": true,
-            "hasTouchScreen": true,
-            "hasBackButton": false,
-            "hasHomeButton": false,
-            "hasWheel": false,
-            "hasWheelBump": false,
-            "hasTouchScreenLofi": false,
-            "protocols": [String](),
-        ]
-        do {
-            let data = try PropertyListSerialization.data(fromPropertyList: config, format: .xml, options: 0)
-            try data.write(to: url, options: .atomic)
-        } catch {
-            throw CarPlayPowerError(
-                .powerOnFailed,
-                "Could not write \(url.path). Check that the booted simulator's data directory is writable and retry. \(error.localizedDescription)"
-            )
-        }
     }
 
     func screens() throws -> [SimulatorScreen] {
@@ -224,19 +185,32 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend {
         )
     }
 
-    private func screenObject(id: UInt32) throws -> NSObject {
-        guard let screen = screenObjects[id] else {
-            throw CarPlayPowerError(.noCarPlayScreen, "TVOut screen \(id) disappeared. Retry power-on.")
+    func writeFile(_ data: Data, path: String) throws {
+        do {
+            try FileManager.default.createDirectory(
+                atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true
+            )
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        } catch {
+            throw CarPlayPowerError(.powerOnFailed, "Cannot write \(path): \(error.localizedDescription)")
         }
-        return screen
     }
 
-    func configureCarPlay(screenID: UInt32, width: Int, height: Int) throws {
-        let screen = try screenObject(id: screenID)
+    private func carPlayPropertyKey(_ symbol: String) throws -> NSString {
+        guard let pointer = dlsym(UnsafeMutableRawPointer(bitPattern: -2), symbol) else { throw unavailable(symbol) }
+        return pointer.assumingMemoryBound(to: NSString.self).pointee
+    }
+
+    /// Switching TVOut's mode with CarPlay properties powers it on; backboardd then re-reads
+    /// the StarkConfig plist and makes TVOut the car display.
+    func setCarPlayMode(screenID: UInt32, width: Double, height: Double) throws {
+        guard let screen = screenObjects[screenID] else {
+            throw CarPlayPowerError(.noCarPlayScreen, "TVOut screen disappeared; enumerate and retry.")
+        }
         let mode = try object(object(screen, "screenProperties"), "currentMode")
-        let properties: NSDictionary = [
-            "SimCarPlayPropertyKeyHasTouchScreen": NSNumber(value: 1),
-            "SimCarPlayPropertyKeyStark": NSNumber(value: 1),
+        let properties: NSDictionary = try [
+            carPlayPropertyKey("SimCarPlayPropertyKeyHasTouchScreen"): true,
+            carPlayPropertyKey("SimCarPlayPropertyKeyStark"): true,
         ]
         let name = "setCurrentMode:pixelSize:carPlayProperties:completionQueue:completionHandler:"
         let result = CallbackResult()
@@ -245,27 +219,9 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend {
             -> Void
         let call = try unsafeBitCast(implementation(screen, name), to: Call.self)
         call(
-            screen, NSSelectorFromString(name), mode, CGSize(width: Double(width), height: Double(height)), properties,
+            screen, NSSelectorFromString(name), mode, CGSize(width: width, height: height), properties,
             queue as AnyObject, completion as AnyObject
         )
-        do {
-            _ = try result.wait(code: .powerOnFailed)
-        } catch let error as CarPlayPowerError {
-            throw CarPlayPowerError(
-                error.code,
-                "Could not configure TVOut screen \(screenID). Retry power-on. \(error.message)"
-            )
-        }
-    }
-
-    func powerOn(screenID: UInt32) throws {
-        let screen = try screenObject(id: screenID)
-        let name = "setPowerState:completionQueue:completionHandler:"
-        let result = CallbackResult()
-        let completion: @convention(block) (NSError?) -> Void = { error in result.finish(error: error) }
-        typealias Call = @convention(c) (AnyObject, Selector, Int32, AnyObject, AnyObject) -> Void
-        let call = try unsafeBitCast(implementation(screen, name), to: Call.self)
-        call(screen, NSSelectorFromString(name), 1, queue as AnyObject, completion as AnyObject)
-        _ = try result.wait(code: .powerOnFailed)
+        _ = try result.wait(code: .powerOnFailed, timeout: 20)
     }
 }

@@ -1,1 +1,0 @@
-{"error":{"code":"unsupported-runtime","message":"CarPlay power-on supports iOS 26.x simulators only. Use an iOS 26.x runtime because CarPlay is unsupported in iOS 27 simulators and can crash in CARSession (Apple known issue 179494052)."}}

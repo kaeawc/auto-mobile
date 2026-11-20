@@ -667,6 +667,7 @@ export class Daemon {
       lifecycle,
       bindingExclusionFactory: () => daemon.injected.bindingExclusionFactory,
       startBackgroundRegistryUpgrade: () => this.broker.startBackgroundRegistryUpgrade(),
+      lastBindingRegistryOpenFailure: () => this.broker.lastBindingRegistryOpenFailure(),
       bindingRegistry: () => daemon.runtime.bindingRegistry,
       deviceClaimMirrors: () => daemon.runtime.deviceClaimMirrors,
       foreignCtrlProxyForwardEvidence: () => daemon.injected.foreignCtrlProxyForwardEvidence,

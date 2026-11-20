@@ -6,7 +6,7 @@
  */
 
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
-import { ActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import {
   parseAndroidCommittedStateIdentifier,
   parseAndroidDeviceStates,
@@ -84,12 +84,15 @@ export class RotationSettingsStore {
   }): Promise<void> {
     const { state, signal, assertCurrentDevice, skipIfCurrent } = options;
     const cleanup: RotationSettingCleanup = { needed: false, assertCurrentDevice };
+    const accelerometerRotation = skipIfCurrent
+      ? await this.accelerometerRestoreTarget(state, signal)
+      : state.accelerometerRotation;
     const targets: Array<readonly [RotationSettingKey, number]> = [];
     if (state.userRotation !== null) {
       targets.push(["user_rotation", state.userRotation]);
     }
-    if (state.accelerometerRotation !== null) {
-      targets.push(["accelerometer_rotation", state.accelerometerRotation]);
+    if (accelerometerRotation !== null) {
+      targets.push(["accelerometer_rotation", accelerometerRotation]);
     }
     // No observation or device discovery is needed for a settings-only restoration.
     // Teardown drains admitted mutations before restoring; late setup hands off after writes settle.
@@ -108,35 +111,15 @@ export class RotationSettingsStore {
       // The per-state lock goes back first: while it still records the session's lock, the
       // window manager reverts an accelerometer_rotation=1 write to 0 (mt-0083 D1). It is not
       // read back itself; the accelerometer_rotation read-back below verifies its effect.
-      if (lock !== undefined) {
-        try {
-          await this.writeSetting(
-            {
-              namespace: "secure",
-              key: DEVICE_STATE_ROTATION_LOCK,
-              value: lock,
-              valueType: "string",
-            },
-            signal,
-            cleanup,
-          );
-        } catch (error) {
-          throwIfAborted(signal);
-          // A failed lock write must not leave user_rotation and accelerometer_rotation
-          // unrestored; the accelerometer_rotation read-back below decides the outcome.
-          logger.warn(
-            `[Rotate] Failed to restore device_state_rotation_lock=${lock}; restoring the rotation settings anyway: ${errorMessage(error)}`,
-            error,
-          );
-        }
-      }
+      const lockWriteError =
+        lock === undefined ? undefined : await this.restoreDeviceStateLock(lock, signal, cleanup);
       if (state.userRotation !== null) {
         await this.writeSystemSetting("user_rotation", String(state.userRotation), signal, cleanup);
       }
-      if (state.accelerometerRotation !== null) {
+      if (accelerometerRotation !== null) {
         await this.writeSystemSetting(
           "accelerometer_rotation",
-          String(state.accelerometerRotation),
+          String(accelerometerRotation),
           signal,
           cleanup,
         );
@@ -147,7 +130,69 @@ export class RotationSettingsStore {
           throw await this.readBackMismatch(key, expected, actual, signal);
         }
       }
+      // Without an accelerometer_rotation read-back nothing verifies the map; surface its failure.
+      if (lockWriteError !== undefined && accelerometerRotation === null) {
+        throw toActionableError(
+          lockWriteError,
+          `Failed to restore device_state_rotation_lock=${lock}`,
+        );
+      }
     });
+  }
+
+  /** Writes the captured per-state lock map; returns the write error instead of throwing. */
+  private async restoreDeviceStateLock(
+    lock: string,
+    signal: AbortSignal | undefined,
+    cleanup: RotationSettingCleanup,
+  ): Promise<unknown> {
+    try {
+      await this.writeSetting(
+        { namespace: "secure", key: DEVICE_STATE_ROTATION_LOCK, value: lock, valueType: "string" },
+        signal,
+        cleanup,
+      );
+      return undefined;
+    } catch (error) {
+      throwIfAborted(signal);
+      // A failed lock write must not leave user_rotation and accelerometer_rotation
+      // unrestored; the caller's read-back (or its explicit check) decides the outcome.
+      logger.warn(
+        `[Rotate] Failed to restore device_state_rotation_lock=${lock}; restoring the rotation settings anyway: ${errorMessage(error)}`,
+        error,
+      );
+      return error;
+    }
+  }
+
+  /**
+   * The `accelerometer_rotation` value a session release writes. Android keeps auto-rotate per
+   * device state: restoring `device_state_rotation_lock` re-applies the current posture's own
+   * setting, so when the device left the posture the original was captured in, the captured
+   * value belongs to another posture and writing it would overwrite the current posture's entry.
+   * An unreadable current posture keeps the captured value (the pre-#18833 behaviour).
+   */
+  private async accelerometerRestoreTarget(
+    state: RotationRestoreState,
+    signal?: AbortSignal,
+  ): Promise<0 | 1 | null> {
+    const captured = state.deviceStateRotationLockState;
+    if (
+      state.accelerometerRotation === null ||
+      state.deviceStateRotationLock === undefined ||
+      captured === undefined
+    ) {
+      return state.accelerometerRotation;
+    }
+    const current = await this.readCommittedDeviceState();
+    throwIfAborted(signal);
+    if (current < 0 || current === captured) {
+      return state.accelerometerRotation;
+    }
+    logger.info(
+      `[Rotate] Device state changed from ${captured} to ${current} since auto-rotate was captured; device_state_rotation_lock decides accelerometer_rotation for this posture.`,
+    );
+    return null;
   }
 
   private async settingsAlreadyMatch(
@@ -367,7 +412,8 @@ export class RotationSettingsStore {
     return true;
   }
 
-  private async readCommittedDeviceState(): Promise<number> {
+  /** The committed device state identifier, or -1 when it cannot be read. */
+  async readCommittedDeviceState(): Promise<number> {
     try {
       const { stdout } = await this.ctx().adb.executeCommand("shell cmd device_state state", {
         timeoutMs: ROTATION_SETTING_CLEANUP_TIMEOUT_MS,

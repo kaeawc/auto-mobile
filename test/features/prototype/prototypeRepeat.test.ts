@@ -491,11 +491,11 @@ describe("substituted text length", () => {
       ),
     ).toEqual(error("root.children[0].text"));
   });
-  test("data cascades into repeat and path items use the same bound", () => {
+  test("data values stay literal and path items use the same bound", () => {
     const root = list([text("{data:/t}")], [{ b: "x".repeat(8193) }]);
-    expect<unknown>(
-      validatePrototypeSpec({ ...spec(root), data: { t: "{item.b}{item.b}" } }),
-    ).toEqual(error("root.children[0].text"));
+    expect(validatePrototypeSpec({ ...spec(root), data: { t: "{item.b}{item.b}" } })).toMatchObject(
+      { success: true },
+    );
     expect<unknown>(
       validatePrototypeSpec({
         ...spec({

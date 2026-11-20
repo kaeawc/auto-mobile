@@ -176,6 +176,121 @@ class PrototypeLazyListTest {
     assertNull(visiblePrototypeSelect(root, "root.children[0]"))
   }
 
+  private fun dataList(text: String, data: String): PrototypeSpec {
+    val base = spec(0)
+    return base.copy(
+      root =
+        (base.root as PrototypeListNode).copy(
+          repeat = PrototypeRepeat(emptyList(), "row", "/rows", "id"),
+          children = listOf(PrototypeTextNode(text = text)),
+        ),
+      data = Json.parseToJsonElement(data).jsonObject,
+    )
+  }
+
+  @Test
+  fun `lazy data pointers bind the row index before resolving`() {
+    val input =
+      dataList(
+        "{data:/rows/{index}/name}",
+        """{"rows":[{"id":"a","name":"First"},{"id":"b","name":"Second"}]}""",
+      )
+    val model = checkNotNull(mapPrototypeSpec(PrototypeDataResolver.resolve(input)).root.list)
+    assertEquals("First", model.render(model.rows[0], 0).text)
+    assertEquals("Second", model.render(model.rows[1], 1).text)
+  }
+
+  @Test
+  fun `lazy data pointers bind row fields before resolving`() {
+    val input =
+      dataList(
+        "{data:/posts/{row.id}/title}",
+        """{"rows":[{"id":"a"},{"id":"b"}],"posts":{"a":{"title":"Alpha"},"b":{"title":"Beta"}}}""",
+      )
+    val model = checkNotNull(mapPrototypeSpec(input).root.list)
+    assertEquals("Alpha", model.render(model.rows[0], 0).text)
+    assertEquals("Beta", model.render(model.rows[1], 1).text)
+  }
+
+  @Test
+  fun `lazy row values containing tokens stay literal`() {
+    val input =
+      dataList(
+        "{row.name} {data:/rows/{index}/title}",
+        """{"rows":[{"id":"a","name":"unused","title":"First"},{"id":"b","name":"{data:/secret}","title":"Second"}],"secret":"LEAK"}""",
+      )
+    val model = checkNotNull(mapPrototypeSpec(PrototypeDataResolver.resolve(input)).root.list)
+    assertEquals("{data:/secret} Second", model.render(model.rows[1], 1).text)
+    val literal =
+      input.copy(
+        root =
+          (input.root as PrototypeListNode).copy(
+            children = listOf(PrototypeTextNode(text = "{row.name}")),
+          ),
+      )
+    val literalModel = checkNotNull(mapPrototypeSpec(literal).root.list)
+    assertEquals("{data:/secret}", literalModel.render(literalModel.rows[1], 1).text)
+  }
+
+  @Test
+  fun `lazy row values containing platform and row tokens stay literal`() {
+    val input =
+      dataList(
+        "{row.name}",
+        """{"rows":[{"id":"a","name":"{platform:/name} {row.id} {index}"}]}""",
+      )
+    val model = checkNotNull(mapPrototypeSpec(input).root.list)
+    assertEquals("{platform:/name} {row.id} {index}", model.render(model.rows.single(), 0).text)
+  }
+
+  @Test
+  fun `lazy data values containing row and data tokens stay literal`() {
+    val input =
+      dataList(
+        "{data:/literal}",
+        """{"rows":[{"id":"a","x":"Expanded"}],"literal":"{row.x} {index} {data:/other}","other":"Expanded"}""",
+      )
+    val model = checkNotNull(mapPrototypeSpec(input).root.list)
+    assertEquals("{row.x} {index} {data:/other}", model.render(model.rows.single(), 0).text)
+  }
+
+  @Test
+  fun `lazy platform values containing row and data tokens stay literal`() {
+    val input =
+      dataList(
+        "{platform:/name} {row.id} {data:/other}",
+        """{"rows":[{"id":"a","x":"Expanded"}],"other":"Resolved"}""",
+      )
+    val literal = "{row.x} {index} {data:/other}"
+    val platform = JsonObject(mapOf("name" to JsonPrimitive(literal)))
+    val resolved = PrototypeDataResolver.resolve(input, platform)
+    val model = checkNotNull(mapPrototypeSpec(resolved).root.list)
+    assertEquals("$literal a Resolved", model.render(model.rows.single(), 0).text)
+    val again = PrototypeDataResolver.resolve(resolved)
+    assertEquals(platform, (again.root as PrototypeListNode).repeat.platformSnapshot)
+  }
+
+  @Test
+  fun `nested repeat binds inner row data last and retains its outer alias`() {
+    val base =
+      dataList(
+        "unused",
+        """{"rows":[{"id":"a","cells":[{"id":"c","name":"{data:/secret}"}]}],"secret":"LEAK","label":"Cell","titles":{"c":"{cell.id} {row.id}"}}""",
+      )
+    val template =
+      PrototypeColumnNode(
+        semantics = PrototypeSemantics(label = "{data:/label}"),
+        repeat = PrototypeRepeat(emptyList(), "cell", itemsField = "cells"),
+        children =
+          listOf(PrototypeTextNode(text = "{cell.name} {row.id}: {data:/titles/{cell.id}}")),
+      )
+    val input = base.copy(root = (base.root as PrototypeListNode).copy(children = listOf(template)))
+    val model = checkNotNull(mapPrototypeSpec(input).root.list)
+    val row = model.render(model.rows.single(), 0)
+    assertEquals("Cell", row.contentDescription)
+    assertEquals("{data:/secret} a: {cell.id} {row.id}", row.children.single().text)
+  }
+
   @Test
   fun `empty lists retain their header and footer and have no rows`() {
     val model = mapPrototypeSpec(spec(0)).root

@@ -30,6 +30,8 @@ export type Segment =
 export interface Binding {
   alias: string;
   index: boolean;
+  /** The enclosing repeat alias, when binding an inner row. */
+  outerAlias?: string;
 }
 
 export function record(value: unknown): Raw | undefined {
@@ -41,6 +43,13 @@ export function record(value: unknown): Raw | undefined {
 function token(inner: string, binding: Binding): Segment | undefined {
   if (binding.index && inner === "index") {
     return { kind: "index" };
+  }
+  if (binding.outerAlias && inner === "outerIndex") {
+    return { kind: "field", name: "$outerIndex" };
+  }
+  if (binding.outerAlias && inner.startsWith(`${binding.outerAlias}.`)) {
+    const name = inner.slice(binding.outerAlias.length + 1);
+    return STATE_KEY.test(name) ? { kind: "field", name: `outer.${name}` } : undefined;
   }
   const prefix = `${binding.alias}.`;
   const name = inner.slice(prefix.length);

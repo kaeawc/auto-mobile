@@ -105,6 +105,9 @@ private data class RepeatInstance(
   val alias: String,
   val item: Map<String, PrototypeScalar>,
   val index: Int,
+  val source: JsonObject = JsonObject(emptyMap()),
+  val outerAlias: String? = null,
+  val textSources: PrototypeListTextSources? = null,
 )
 
 private fun PrototypeNode.repeatSpec(): PrototypeRepeat? =
@@ -160,6 +163,7 @@ internal fun prototypeChildEntries(
   path: String,
   bind: Boolean = true,
   formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
+  textSources: PrototypeListTextSources? = null,
 ): List<PrototypeChildEntry> {
   if (node is PrototypeAdaptiveNode) return adaptiveChildEntries(node, path)
   if (node is PrototypeListNode)
@@ -181,14 +185,34 @@ internal fun prototypeChildEntries(
     }
   }
   val rows = projectedRepeatRows(node, repeat, path, bind, formatter)
+  return repeat.repeatedChildEntries(children, rows, path, bind, textSources)
+}
+
+private fun PrototypeRepeat.repeatedChildEntries(
+  children: List<PrototypeNode>,
+  rows: List<Map<String, PrototypeScalar>>,
+  path: String,
+  bind: Boolean,
+  textSources: PrototypeListTextSources?,
+): List<PrototypeChildEntry> {
+  val repeat = this
   return rows.flatMapIndexed { itemIndex, projected ->
-    val instance = RepeatInstance(repeat.`as`, projected, itemIndex)
+    val instance =
+      RepeatInstance(
+        repeat.`as`,
+        projected,
+        itemIndex,
+        repeat.sourceItems?.getOrNull(itemIndex)
+          ?: JsonObject(projected.mapValues { EmitContextResolver.scalar(it.value) }),
+        repeat.outerAlias,
+        textSources,
+      )
     val identity =
       if (bind) repeat.key?.let { projected[it]?.renderedText() } ?: itemIndex.toString()
       else itemIndex.toString()
     children.mapIndexed { index, child ->
       PrototypeChildEntry(
-        if (bind) child.bound(instance) else child,
+        if (bind || repeat.sourceItems != null) child.boundWithText(instance) else child,
         "$path.repeat[$identity].children[$index]",
         if (child.visibleWhen != null) (itemIndex * (repeat.stagger ?: 0)).coerceAtMost(600) else 0,
       )
@@ -219,12 +243,53 @@ private fun projectedRepeatRows(
           PrototypeScalar.Text(formatter.format(entry, input))
         }
     }
-  val error = PrototypeDerivedRows.validate(node, rows)
+  val error = PrototypeDerivedRows.validate(node, rows, repeat.sourceItems, repeat.outerAlias)
   require(error == null) { "$path${error?.path?.removePrefix("root")}: ${error?.message}" }
   return rows
 }
 
+private fun PrototypeNode.boundWithText(instance: RepeatInstance): PrototypeNode {
+  val bound = bound(instance)
+  val sources = instance.textSources ?: return bound
+  return resolvePrototypeListNodeText(
+    bound,
+    this,
+    sources,
+    if (sources.shield) instance::display else instance::interpolate,
+  )
+}
+
 private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
+  val nested = repeatSpec()?.takeIf { it.itemsField != null }
+  val resolvedRepeat = nested?.let { repeat ->
+    val raw =
+      (instance.source[checkNotNull(repeat.itemsField)] as? JsonArray)
+        .orEmpty()
+        .filterIsInstance<JsonObject>()
+        .take(
+          dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
+            .MAX_PROTOTYPE_INNER_REPEAT_ITEMS,
+        )
+    val outer =
+      instance.item.mapKeys { (key, _) -> "outer.$key" } +
+        ("\$outerIndex" to PrototypeScalar.Numeric(instance.index.toDouble()))
+    repeat.copy(
+      itemsField = null,
+      sourceItems = raw,
+      outerAlias = instance.alias,
+      items =
+        raw.map { row ->
+          row
+            .filterValues { it is JsonPrimitive && it != kotlinx.serialization.json.JsonNull }
+            .mapValues { (_, value) ->
+              kotlinx.serialization.json.Json.decodeFromJsonElement(
+                PrototypeScalar.serializer(),
+                value,
+              )
+            } + outer
+        },
+    )
+  }
   val semantics = semantics?.let {
     it.copy(
       label = it.label?.let(instance::display),
@@ -238,10 +303,11 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
   val styleWhen = styleWhen?.map { PrototypeStyleWhen(it.`when`.bound(instance), it.style) }
   val visibleWhen = visibleWhen?.bound(instance)
   val shared = shared?.let { it.copy(key = instance.interpolate(it.key)) }
-  fun List<PrototypeNode>.bound() = map { it.bound(instance) }
+  fun List<PrototypeNode>.bound() = if (nested != null) this else map { it.boundWithText(instance) }
   return when (this) {
     is PrototypeBoxNode ->
       copy(
+        repeat = resolvedRepeat ?: repeat,
         semantics = semantics,
         onAppear = onAppear,
         onTap = onTap,
@@ -254,6 +320,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeRowNode ->
       copy(
+        repeat = resolvedRepeat ?: repeat,
         semantics = semantics,
         onAppear = onAppear,
         onTap = onTap,
@@ -267,6 +334,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeColumnNode ->
       copy(
+        repeat = resolvedRepeat ?: repeat,
         semantics = semantics,
         onAppear = onAppear,
         onTap = onTap,
@@ -279,6 +347,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeFlowNode ->
       copy(
+        repeat = resolvedRepeat ?: repeat,
         semantics = semantics,
         onAppear = onAppear,
         onTap = onTap,
@@ -289,6 +358,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeGridNode ->
       copy(
+        repeat = resolvedRepeat ?: repeat,
         semantics = semantics,
         onAppear = onAppear,
         onTap = onTap,
@@ -299,6 +369,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeCarouselNode ->
       copy(
+        repeat = resolvedRepeat ?: repeat,
         semantics = semantics,
         onAppear = onAppear,
         onTap = onTap,
@@ -315,7 +386,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         shared = shared,
         visibleWhen = visibleWhen,
-        screens = screens.mapValues { (_, child) -> child.bound(instance) },
+        screens = screens.mapValues { (_, child) -> child.boundWithText(instance) },
       )
     is PrototypePagerNode ->
       copy(
@@ -365,6 +436,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
                 instance.alias,
                 instance.item.mapValues { (_, value) -> EmitContextResolver.scalar(value) },
                 instance.index,
+                instance.outerAlias,
               )
             options.copy(
               onTap = (bound.getValue("linkify") as JsonObject).getValue("onTap") as JsonArray,
@@ -393,7 +465,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
               onRefresh = it.onRefresh.map { action -> action.bound(instance) },
             )
           },
-        child = child.bound(instance),
+        child = child.boundWithText(instance),
       )
     is PrototypeTooltipNode ->
       copy(
@@ -412,7 +484,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
-        child = child.bound(instance),
+        child = child.boundWithText(instance),
       )
     is PrototypeBottomSheetNode ->
       copy(
@@ -423,7 +495,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
-        child = child.bound(instance),
+        child = child.boundWithText(instance),
       )
     is PrototypeImageNode ->
       copy(
@@ -469,7 +541,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         placeholder = placeholder?.let(instance::display),
         trailingActions = trailingActions?.map { it.bound(instance) },
         onSubmit = onSubmit?.map { it.bound(instance) },
-        child = child?.bound(instance),
+        child = child?.boundWithText(instance),
       )
     is PrototypeTextFieldNode ->
       copy(
@@ -505,11 +577,11 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         shared = shared,
         visibleWhen = visibleWhen,
-        list = list?.bound(instance),
-        detail = detail?.bound(instance),
-        content = content?.bound(instance),
-        main = main?.bound(instance),
-        supporting = supporting?.bound(instance),
+        list = list?.boundWithText(instance),
+        detail = detail?.boundWithText(instance),
+        content = content?.boundWithText(instance),
+        main = main?.boundWithText(instance),
+        supporting = supporting?.boundWithText(instance),
         selectionKey = selectionKey?.let(instance::interpolate),
         stateKey = stateKey?.let(instance::interpolate),
         openKey = openKey?.let(instance::interpolate),
@@ -661,7 +733,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         text = text?.let(instance::display),
         confirm = confirm.bound(instance),
         dismiss = dismiss?.bound(instance),
-        child = child?.bound(instance),
+        child = child?.boundWithText(instance),
       )
     is PrototypeIconButtonNode ->
       copy(
@@ -895,6 +967,7 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
               instance.alias,
               instance.item.mapValues { (_, value) -> EmitContextResolver.scalar(value) },
               instance.index,
+              instance.outerAlias,
             )
           },
       )
@@ -958,6 +1031,7 @@ private fun RepeatInstance.dataValue(binding: EmitContextBinding): EmitContextBi
     alias,
     item.mapValues { (_, value) -> EmitContextResolver.scalar(value) },
     index,
+    outerAlias,
   )
 
 private fun PrototypeCondition.bound(instance: RepeatInstance): PrototypeCondition =
@@ -988,7 +1062,7 @@ private fun RepeatInstance.interpolateText(scalar: PrototypeScalar): PrototypeSc
  * match a numeric state value); anything else renders to text.
  */
 private fun RepeatInstance.interpolateTyped(text: String): PrototypeScalar {
-  val only = PrototypeRepeatTemplate.segments(text, alias).singleOrNull()
+  val only = PrototypeRepeatTemplate.segments(text, alias, outerAlias).singleOrNull()
   val typed =
     when (only) {
       is PrototypeRepeatSegment.Index -> PrototypeScalar.Numeric(index.toDouble())
@@ -1003,7 +1077,7 @@ private fun RepeatInstance.interpolateTyped(text: String): PrototypeScalar {
  * derived and data passes keep it literal (#18628).
  */
 private fun RepeatInstance.display(text: String): String =
-  PrototypeRepeatTemplate.segments(text, alias).joinToString("") { segment ->
+  PrototypeRepeatTemplate.segments(text, alias, outerAlias).joinToString("") { segment ->
     when (segment) {
       is PrototypeRepeatSegment.Literal -> segment.text
       is PrototypeRepeatSegment.Index -> index.toString()
@@ -1015,7 +1089,7 @@ private fun RepeatInstance.display(text: String): String =
 
 /** Unknown fields cannot occur after validation; they are left as their literal placeholder. */
 private fun RepeatInstance.interpolate(text: String): String =
-  PrototypeRepeatTemplate.segments(text, alias).joinToString("") { segment ->
+  PrototypeRepeatTemplate.segments(text, alias, outerAlias).joinToString("") { segment ->
     when (segment) {
       is PrototypeRepeatSegment.Literal -> segment.text
       is PrototypeRepeatSegment.Index -> index.toString()
@@ -1042,15 +1116,23 @@ internal fun bindPrototypeListRow(
   node: PrototypeListNode,
   item: JsonObject,
   index: Int,
+  textSources: PrototypeListTextSources? = null,
 ): PrototypeNode =
   node.children
     .single()
-    .bound(
+    .boundWithText(
       RepeatInstance(
         node.repeat.`as`,
-        item.mapValues { (_, value) ->
-          kotlinx.serialization.json.Json.decodeFromJsonElement(PrototypeScalar.serializer(), value)
-        },
+        item
+          .filterValues { it is JsonPrimitive }
+          .mapValues { (_, value) ->
+            kotlinx.serialization.json.Json.decodeFromJsonElement(
+              PrototypeScalar.serializer(),
+              value,
+            )
+          },
         index,
+        source = item,
+        textSources = textSources,
       ),
     )

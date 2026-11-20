@@ -15,10 +15,11 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import dev.jasonpearson.automobile.protocol.PrototypeListNode
-import dev.jasonpearson.automobile.protocol.PrototypeListRows
+import dev.jasonpearson.automobile.protocol.*
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 
 /** One signature per page/window, retained until a new show recreates the holder. */
 internal class PrototypeListEndTrigger(private val endThreshold: Int) {
@@ -195,3 +196,113 @@ private fun PrototypeListAnchorEffect(
 }
 
 private class PrototypeListKeys(var keys: List<String>, var hasHeader: Boolean)
+
+private val listNodeJson = Json { ignoreUnknownKeys = false }
+
+internal class PrototypeListTextSources(
+  val data: JsonObject?,
+  val platform: JsonObject?,
+  /** Whether inserted values carry a shield (#18628); the renderer unshields them at the end. */
+  val shield: Boolean = false,
+)
+
+/** Fill text from the authored template, never scanning values inserted by row binding. */
+internal fun resolvePrototypeListNodeText(
+  node: PrototypeNode,
+  template: PrototypeNode,
+  sources: PrototypeListTextSources,
+  bindRow: (String) -> String,
+): PrototypeNode {
+  val json = listNodeJson
+  val raw = json.encodeToJsonElement(PrototypeNode.serializer(), node).jsonObject
+  val authored = json.encodeToJsonElement(PrototypeNode.serializer(), template).jsonObject
+  val resolved =
+    PrototypeDataResolver.resolveNodeText(
+      raw,
+      sources.data,
+      sources.platform,
+      PrototypeDataResolver.NodeTextOptions(authored, bindRow, sources.shield),
+    )
+  if (resolved == raw) return node
+  val decoded = json.decodeFromJsonElement(PrototypeNode.serializer(), resolved)
+  // The wire format omits runtime repeat metadata. Keep bound repeats and descendants intact;
+  // each descendant fills its own authored text with its repeat context.
+  return restorePrototypeListContainerChildren(node, decoded)
+}
+
+private fun restorePrototypeListContainerChildren(
+  node: PrototypeNode,
+  decoded: PrototypeNode,
+): PrototypeNode =
+  when (decoded) {
+    is PrototypeBoxNode ->
+      decoded.copy(
+        repeat = (node as PrototypeBoxNode).repeat,
+        children = node.children,
+      )
+    is PrototypeRowNode ->
+      decoded.copy(
+        repeat = (node as PrototypeRowNode).repeat,
+        children = node.children,
+      )
+    is PrototypeColumnNode ->
+      decoded.copy(
+        repeat = (node as PrototypeColumnNode).repeat,
+        children = node.children,
+      )
+    is PrototypeFlowNode ->
+      decoded.copy(
+        repeat = (node as PrototypeFlowNode).repeat,
+        children = node.children,
+      )
+    is PrototypeGridNode ->
+      decoded.copy(
+        repeat = (node as PrototypeGridNode).repeat,
+        children = node.children,
+      )
+    is PrototypeCarouselNode ->
+      decoded.copy(
+        repeat = (node as PrototypeCarouselNode).repeat,
+        children = node.children,
+      )
+    else -> restorePrototypeListSingleChild(node, decoded)
+  }
+
+private fun restorePrototypeListSingleChild(
+  node: PrototypeNode,
+  decoded: PrototypeNode,
+): PrototypeNode =
+  when (decoded) {
+    is PrototypeScrollNode -> decoded.copy(child = (node as PrototypeScrollNode).child)
+    is PrototypeBottomSheetNode -> decoded.copy(child = (node as PrototypeBottomSheetNode).child)
+    is PrototypeDrawerNode -> decoded.copy(child = (node as PrototypeDrawerNode).child)
+    is PrototypeDialogNode -> decoded.copy(child = (node as PrototypeDialogNode).child)
+    is PrototypeSearchBarNode -> decoded.copy(child = (node as PrototypeSearchBarNode).child)
+    else -> restorePrototypeListOtherChildren(node, decoded)
+  }
+
+private fun restorePrototypeListOtherChildren(
+  node: PrototypeNode,
+  decoded: PrototypeNode,
+): PrototypeNode =
+  when (decoded) {
+    is PrototypeCardNode -> decoded.copy(children = (node as PrototypeCardNode).children)
+    is PrototypePagerNode -> decoded.copy(children = (node as PrototypePagerNode).children)
+    is PrototypeStackNode -> decoded.copy(screens = (node as PrototypeStackNode).screens)
+    is PrototypeAdaptiveNode ->
+      decoded.copy(
+        list = (node as PrototypeAdaptiveNode).list,
+        detail = node.detail,
+        content = node.content,
+        main = node.main,
+        supporting = node.supporting,
+      )
+    is PrototypeListNode ->
+      decoded.copy(
+        repeat = (node as PrototypeListNode).repeat,
+        children = node.children,
+        header = node.header,
+        footer = node.footer,
+      )
+    else -> decoded
+  }

@@ -237,6 +237,7 @@ internal class PrototypeNodeMapping(
   private val derive: Map<String, PrototypeDerivedEntry> = emptyMap(),
   private val formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
   private val fillWindowRoot: Boolean = false,
+  private val rowTextSources: PrototypeListTextSources? = null,
   private val derivedValues: Map<String, kotlinx.serialization.json.JsonElement?> =
     PrototypeDerive.evaluate(
       derive,
@@ -296,6 +297,7 @@ internal class PrototypeNodeMapping(
           prototypeDerivedRepeatNode(node, derivedValues),
           path,
           formatter,
+          rowTextSources,
         )
     // Hidden stack screens are never mapped into the rendered tree (including modal/anchor layers).
     val entries =
@@ -440,6 +442,8 @@ internal class PrototypeNodeMapping(
               prototypeDerivedListRows(list, data, derivedValues),
               snapshot,
             ) { item, index ->
+              val textSources =
+                PrototypeListTextSources(data, list.repeat.platformSnapshot, shield = true)
               PrototypeNodeMapping(
                   state = localState,
                   pages = pages,
@@ -450,10 +454,11 @@ internal class PrototypeNodeMapping(
                   derive = derive,
                   derivedValues = derivedValues,
                   formatter = formatter,
+                  rowTextSources = textSources,
                   shieldedInputs = mayShield,
                 )
                 .map(
-                  bindPrototypeListRow(list, item, index),
+                  bindPrototypeListRow(list, item, index, textSources),
                   "$path.repeat[${JsonPrimitive(PrototypeListRows.key(list, item, index))}].children[0]",
                   if (inPager) localState else null,
                 )
@@ -497,6 +502,7 @@ internal fun validatedPrototypeChildren(
   node: PrototypeNode,
   path: String,
   formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
+  textSources: PrototypeListTextSources? = null,
 ): List<PrototypeChildEntry> {
   requirePrototypeRenderSizes(node.style, path)
   node.styleWhen?.forEachIndexed { index, entry ->
@@ -507,7 +513,7 @@ internal fun validatedPrototypeChildren(
       "$path: Size cannot be represented in Compose dp"
     }
   }
-  return prototypeChildEntries(node, path, formatter = formatter)
+  return prototypeChildEntries(node, path, formatter = formatter, textSources = textSources)
 }
 
 internal fun prototypeNodeRole(node: PrototypeNode): String =

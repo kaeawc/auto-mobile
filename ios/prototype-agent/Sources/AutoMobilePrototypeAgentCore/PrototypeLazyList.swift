@@ -19,6 +19,11 @@ struct PrototypeListRepeat: Decodable {
     let items: Items
     let `as`: String
     let key: String
+    let platformSnapshot: [String: JSONValue]?
+    enum CodingKeys: String, CodingKey {
+        case items, `as`, key
+        case platformSnapshot = "_platform"
+    }
 }
 
 /// Resolved independently so a renderer can compose rows without expanding the authored tree.
@@ -53,8 +58,22 @@ enum PrototypeLazyList {
               case let .array(items)? = spec.items.resolve(data),
               items.indices.contains(index) else { return nil }
         let fields = PrototypeDataValues.project(items[index].objectFields ?? [:]).objectFields ?? [:]
-        let bound = PrototypeRepeatInstance(alias: spec.as, item: fields, index: index).bind(raw)
-        return (fields[spec.key]?.displayString ?? "", PrototypeDataResolver.resolveRoot(bound, data: data))
+        let instance = PrototypeRepeatInstance(
+            alias: spec.as, item: fields, index: index, sourceItem: items[index].objectFields,
+            identity: fields[spec.key]?.displayString
+        )
+        // Fill authored text tokens once; only authored pointers bind row context before lookup.
+        let sources = PrototypeDataResolver.resolveRepeatSources(raw, data: data)
+        let expanded = PrototypeRepeat.expand(
+            sources, outer: instance, formatter: FoundationPrototypeValueFormatter(), environment: .device(),
+            bindText: { text, row in
+                PrototypeDataText.bind(text, data: data, platform: spec.platformSnapshot, bindRow: row.interpolate)
+            }
+        )
+        let bound = PrototypeDataResolver.resolveRoot(
+            expanded, data: data, platform: spec.platformSnapshot, resolveText: false
+        )
+        return (fields[spec.key]?.displayString ?? "", bound)
     }
 
     static func row(node: PrototypeNode, data: [String: JSONValue]?, index: Int) throws -> Row? {

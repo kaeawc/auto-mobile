@@ -67,9 +67,12 @@ internal object PrototypeDataValues {
       value != JsonNull &&
       (value.isString || value.booleanOrNull != null || value.doubleOrNull?.isFinite() == true)
 
-  fun project(item: JsonObject): JsonObject =
+  fun project(item: JsonObject, includeArrays: Boolean = false): JsonObject =
     JsonObject(
-      item.filter { (key, value) -> PrototypeRepeatTemplate.isFieldName(key) && isScalar(value) },
+      item.filter { (key, value) ->
+        PrototypeRepeatTemplate.isFieldName(key) &&
+          (isScalar(value) || (includeArrays && value is JsonArray))
+      },
     )
 
   fun rendered(value: JsonElement?): String =
@@ -195,12 +198,18 @@ internal class PrototypeRepeatData(
             PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS,
           ),
         )
-        .map(PrototypeDataValues::project)
+        .map { PrototypeDataValues.project(it) }
     }
 
   fun array(pointer: String): JsonArray =
     arrays.getOrPut(pointer) {
-      JsonArray(items(pointer).take(PrototypeSpecValidator.maxRepeatItems))
+      JsonArray(
+        source(pointer)
+          .orEmpty()
+          .filterIsInstance<JsonObject>()
+          .take(PrototypeSpecValidator.maxRepeatItems)
+          .map { PrototypeDataValues.project(it, includeArrays = true) },
+      )
     }
 }
 
@@ -212,14 +221,19 @@ internal object PrototypeDataText {
   fun pointers(text: String, namespace: String): List<String> =
     placeholders(text, namespace).map { it.pointer }
 
-  private fun placeholders(text: String, namespace: String = "data"): List<Placeholder> {
+  private fun placeholders(
+    text: String,
+    namespace: String = "data",
+    bindRow: ((String) -> String)? = null,
+  ): List<Placeholder> {
     val found = mutableListOf<Placeholder>()
     var cursor = 0
     while (cursor < text.length) {
-      val close = closingBrace(text, cursor, namespace)
+      val close = closingBrace(text, cursor, namespace, bindRow != null)
       val inner = if (close < 0) "" else text.substring(cursor + 1, close)
-      val pointer =
+      val authoredPointer =
         if (inner.startsWith("$namespace:")) inner.substring(namespace.length + 1) else ""
+      val pointer = bindRow?.invoke(authoredPointer) ?: authoredPointer
       if (PrototypeDataPointer.isValid(pointer)) {
         found.add(Placeholder(cursor, close + 1, pointer))
         cursor = close + 1
@@ -230,15 +244,25 @@ internal object PrototypeDataText {
     return found
   }
 
-  private fun closingBrace(text: String, cursor: Int, namespace: String): Int {
+  private fun closingBrace(
+    text: String,
+    cursor: Int,
+    namespace: String,
+    nested: Boolean,
+  ): Int {
     if (text[cursor] != '{' || !text.startsWith("$namespace:", cursor + 1)) return -1
     val end =
       minOf(
         text.length,
         cursor + 3 + namespace.length + PrototypeSpecValidator.MAX_PROTOTYPE_DATA_POINTER_LENGTH,
       )
+    var depth = 0
     for (index in cursor + 1 until end) {
-      if (text[index] == '}') return index
+      if (nested && text[index] == '{') depth++
+      if (text[index] == '}') {
+        if (depth == 0) return index
+        depth--
+      }
     }
     return -1
   }
@@ -295,20 +319,24 @@ internal object PrototypeDataText {
     text: String,
     data: JsonObject?,
     platform: JsonObject?,
+    bindRow: ((String) -> String)? = null,
     shield: Boolean = false,
   ): String {
     val sources =
-      placeholders(text).map { it to data } + placeholders(text, "platform").map { it to platform }
+      placeholders(text, bindRow = bindRow).map { it to data } +
+        placeholders(text, "platform", bindRow).map { it to platform }
     return buildString {
       var cursor = 0
       for ((span, source) in sources.sortedBy { it.first.start }) {
         if (span.start < cursor) continue
-        append(text.substring(cursor, span.start))
+        val literal = text.substring(cursor, span.start)
+        append(bindRow?.invoke(literal) ?: literal)
         val value = PrototypeDataValues.rendered(PrototypeDataPointer.resolve(source, span.pointer))
         append(if (shield) PrototypeTextShield.shield(value) else value)
         cursor = span.end
       }
-      append(text.substring(cursor))
+      val literal = text.substring(cursor)
+      append(bindRow?.invoke(literal) ?: literal)
     }
   }
 
@@ -328,29 +356,58 @@ internal object PrototypeDataText {
 }
 
 /**
- * Pure, one-time resolution before repeat expansion and state interpolation. A renderer passes
- * `shield` so the data and platform values it inserts stay literal through its later state, derived
- * and row passes (#18628); the default output is the shared cross-platform resolution contract.
+ * Pure resolution of sources and conditions; authored lazy-row text is deferred to the renderer. A
+ * renderer passes `shield` so the data and platform values it inserts stay literal through its
+ * later state, derived and row passes (#18628); the default output is the shared cross-platform
+ * resolution contract.
  */
 object PrototypeDataResolver {
   fun resolveRoot(root: JsonObject, data: JsonObject?, platform: JsonObject? = null): JsonObject =
-    resolveRoot(root, data, PrototypeRepeatData(data), platform, shield = false)
+    resolveRoot(root, data, PrototypeRepeatData(data), platform, ResolveMode(Pass.ALL, false))
+
+  private data class ResolveMode(val pass: Pass, val shield: Boolean)
+
+  private enum class Pass {
+    ALL,
+    DEFER_ROW_TEXT,
+  }
+
+  /** How a node's authored text is filled: from [template], with row text bound by [bindRow]. */
+  class NodeTextOptions(
+    val template: JsonObject? = null,
+    val bindRow: ((String) -> String)? = null,
+    val shield: Boolean = false,
+  )
+
+  /** Fills authored text tokens once, preserving row-bound actions and runtime metadata. */
+  fun resolveNodeText(
+    root: JsonObject,
+    data: JsonObject?,
+    platform: JsonObject? = null,
+    options: NodeTextOptions = NodeTextOptions(),
+  ): JsonObject = textFields(root, data, platform, options)
 
   private fun resolveRoot(
     root: JsonObject,
     data: JsonObject?,
     repeats: PrototypeRepeatData,
     platform: JsonObject?,
-    shield: Boolean,
+    mode: ResolveMode,
   ): JsonObject {
-    val own = textFields(root, data, platform, shield)
+    val own =
+      if (mode.pass == Pass.DEFER_ROW_TEXT) root
+      else textFields(root, data, platform, NodeTextOptions(shield = mode.shield))
     val resolved =
       JsonObject(
         own.mapValues { (key, value) ->
           when (key) {
             "repeat" ->
-              if ((root["type"] as? JsonPrimitive)?.content == "list") value
-              else resolveRepeat(value, repeats)
+              if ((root["type"] as? JsonPrimitive)?.content == "list") {
+                val repeat = value as? JsonObject
+                if (repeat != null && platform != null && platform.isNotEmpty())
+                  JsonObject(repeat + ("_platform" to platform))
+                else value
+              } else resolveRepeat(value, repeats)
             "enabledWhen",
             "visibleWhen",
             "errorWhen" -> resolveCondition(value, data, platform)
@@ -359,7 +416,12 @@ object PrototypeDataResolver {
           }
         },
       )
-    return mapChildren(resolved) { resolveRoot(it, data, repeats, platform, shield) }
+    // Snapshot platform reads with the list; resolve text only after binding each row.
+    val lazy = root["type"] == JsonPrimitive("list")
+    return mapChildren(resolved) { child, rowTemplate ->
+      val childMode = if (lazy && rowTemplate) mode.copy(pass = Pass.DEFER_ROW_TEXT) else mode
+      resolveRoot(child, data, repeats, platform, childMode)
+    }
   }
 
   fun resolve(
@@ -372,7 +434,13 @@ object PrototypeDataResolver {
     if (!PrototypeBindingScan.hasBindings(root)) return spec
     val resolved =
       json.decodeFromJsonElement<PrototypeNode>(
-        resolveRoot(root, spec.data, PrototypeRepeatData(spec.data), platform, shield),
+        resolveRoot(
+          root,
+          spec.data,
+          PrototypeRepeatData(spec.data),
+          platform,
+          ResolveMode(Pass.ALL, shield),
+        ),
       )
     return spec.copy(root = resolved)
   }
@@ -430,14 +498,16 @@ object PrototypeDataResolver {
     node: JsonObject,
     data: JsonObject?,
     platform: JsonObject?,
-    shield: Boolean,
+    options: NodeTextOptions,
   ): JsonObject {
     val replacements = mutableMapOf<String, JsonElement>()
-    PrototypeBindableFields.first<Boolean>(node, "") { value, path, kind ->
+    PrototypeBindableFields.first<Boolean>(options.template ?: node, "") { value, path, kind ->
       val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
       if (kind == PrototypeBindableKind.TEXT && text != null) {
         replacements[path] =
-          JsonPrimitive(PrototypeDataText.bindSources(text, data, platform, shield))
+          JsonPrimitive(
+            PrototypeDataText.bindSources(text, data, platform, options.bindRow, options.shield),
+          )
       }
       null
     }
@@ -466,12 +536,15 @@ object PrototypeDataResolver {
         else -> value
       }
 
-  private fun mapChildren(node: JsonObject, transform: (JsonObject) -> JsonObject): JsonObject {
+  private fun mapChildren(
+    node: JsonObject,
+    transform: (JsonObject, Boolean) -> JsonObject,
+  ): JsonObject {
     if (node["type"] == JsonPrimitive("adaptive")) {
       val slots =
         listOf("list", "detail", "content", "main", "supporting")
           .mapNotNull { key ->
-            (node[key] as? JsonObject)?.let { key to transform(it) }
+            (node[key] as? JsonObject)?.let { key to transform(it, false) }
           }
           .toMap()
       return JsonObject(node + slots)
@@ -479,11 +552,11 @@ object PrototypeDataResolver {
     val extras =
       listOf("header", "footer")
         .mapNotNull { key ->
-          (node[key] as? JsonObject)?.let { key to transform(it) }
+          (node[key] as? JsonObject)?.let { key to transform(it, false) }
         }
         .toMap()
     val child = node["child"] as? JsonObject
-    if (child != null) return JsonObject(node + ("child" to transform(child)))
+    if (child != null) return JsonObject(node + ("child" to transform(child, false)))
     val screens = node["screens"] as? JsonObject
     if (screens != null)
       return JsonObject(
@@ -491,7 +564,7 @@ object PrototypeDataResolver {
           ("screens" to
             JsonObject(
               screens.mapValues { (_, entry) ->
-                if (entry is JsonObject) transform(entry) else entry
+                if (entry is JsonObject) transform(entry, false) else entry
               },
             )),
       )
@@ -502,7 +575,7 @@ object PrototypeDataResolver {
         ("children" to
           JsonArray(
             children.map { entry ->
-              if (entry is JsonObject) transform(entry) else entry
+              if (entry is JsonObject) transform(entry, true) else entry
             },
           )),
     )

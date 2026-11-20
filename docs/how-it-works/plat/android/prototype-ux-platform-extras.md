@@ -136,22 +136,19 @@ keys use group-scoped glassEffectID, independently of visibility-pair matching;
 nested groups establish a new namespace. Keys must be unique within the nearest
 group and cannot also belong to visibility pairs. Under repeat, including on the
 repeated node, a glass shared key must be a template referencing repeat.key.
-Existing capability rules still apply. `glassUnion` is a 1–64 character ASCII id token
+`glassUnion` is a 1–64 character ASCII id token
 (`[A-Za-z_][A-Za-z0-9_]*`); `glassTransition` is matchedGeometry, materialize or
 identity. Both require a base glass surface on the same node.
-`backgroundExtension: true` is image-only and does not require the image itself
-to be glass. All four fields are node-only (invalid in window.ios/theme.ios) and
-require only the glass capability on iOS; Android ignores them with field paths
-in platformNotes.
+`backgroundExtension: true` is image-only; the image need not be glass. All four
+fields are node-only (invalid in window.ios/theme.ios) and need only the iOS glass
+capability; Android ignores them with field paths in platformNotes.
 
 The system's Liquid Glass implementation handles Reduce Transparency and
-Increase Contrast. On iOS 17–25 the device does not advertise
-`prototype_glass_v1`, so the host refuses glass there: there is no simulated
-translucent fill or material substitute. Android advertises the capability on every API level:
-API 31 and later blur earlier sibling layers (Haze) and older devices draw a tonal scrim instead.
-A glass node without `cornerRadius` is a capsule on Android as on iOS. An Android
-renderer advertising glass must report any approximation (clear variant,
-ignored `interactive`) in `platformNotes`.
+Increase Contrast. iOS 17–25 does not advertise `prototype_glass_v1`, so the host
+refuses glass there with no simulated substitute. Android advertises it on every API
+level: API 31+ blurs earlier sibling layers (Haze) and older devices draw a tonal
+scrim. A glass node without `cornerRadius` is a capsule on Android as on iOS. Android
+reports any approximation (clear variant, ignored `interactive`) in `platformNotes`.
 
 ### Motion tokens
 

@@ -57,6 +57,7 @@ class AppAttachAgentTest {
   private class Target : AttachTarget {
     override val appInstanceId = "test-instance"
     override val showingId = "test-showing"
+    override val showingStartSequence = 3L
     val patches = mutableListOf<Triple<String, Long?, JsonArray>>()
     var reply = PrototypeResult(0, success = true, revision = 7)
 
@@ -235,6 +236,7 @@ class AppAttachAgentTest {
         put("agentVersion", "0.1.0")
         put("appInstanceId", "test-instance")
         put("showingId", "test-showing")
+        put("showingStartSequence", 3)
         put("protocolVersion", 1)
         put("droppedEvents", 0)
         put(

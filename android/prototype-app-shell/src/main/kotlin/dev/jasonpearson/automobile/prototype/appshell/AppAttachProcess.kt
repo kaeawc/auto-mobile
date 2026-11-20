@@ -35,6 +35,9 @@ internal class AppAttachProcess(
   override val showingId: String?
     get() = target?.showingId
 
+  override val showingStartSequence: Long?
+    get() = target?.showingStartSequence
+
   override fun nextSequence(): Long = ++lastSequence
 
   override fun nextShowingId(): String = "$appInstanceId:${++showing}"

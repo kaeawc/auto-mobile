@@ -99,11 +99,17 @@ object PrototypeGeneratedValues {
     return PrototypeDataValue.Resolved(resolve(binding["value"] ?: binding, context))
   }
 
-  /** Binding destinations only; payloads and callback lists are never scanned as literals. */
+  /**
+   * Binding destinations only; payloads and callback lists are never scanned as literals. An
+   * `{object}` data value contributes its member bindings in sorted name order (#18826).
+   */
   fun bindings(action: JsonObject): List<JsonElement> = buildList {
     val type = (action["type"] as? JsonPrimitive)?.content
-    if (type in setOf("setData", "appendData", "upsertData", "prependData", "setState"))
-      action["value"]?.let(::add)
+    if (type in setOf("setData", "appendData", "upsertData", "prependData")) {
+      val members = (action["value"] as? JsonObject)?.get("object") as? JsonObject
+      if (members != null) addAll(members.toSortedMap().values) else action["value"]?.let(::add)
+    }
+    if (type == "setState") action["value"]?.let(::add)
     if (type == "request") {
       for (field in listOf("headers", "query")) addAll(
         (action[field] as? JsonObject).orEmpty().toSortedMap().values,

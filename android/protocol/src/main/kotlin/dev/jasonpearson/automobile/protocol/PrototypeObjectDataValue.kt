@@ -54,13 +54,14 @@ object PrototypeObjectDataValue {
   }
 
   /**
-   * Each member resolves like a top-level value, in authored order; the first unresolved member
-   * fails the write.
+   * Each member resolves like a top-level value, in sorted name order (the order iOS and the host
+   * use, so a `{generate}` member precedes a `{lastGenerated}` one identically); the first
+   * unresolved member fails the write.
    */
   fun resolve(members: JsonObject?, inputs: EmitContextInputs): PrototypeDataValue {
     members ?: return invalid("An object data write value needs member bindings")
     val resolved = LinkedHashMap<String, JsonElement>()
-    for ((name, member) in members) {
+    for ((name, member) in members.toSortedMap()) {
       val binding = member as? JsonObject
       val value =
         if (binding == null || "object" in binding)

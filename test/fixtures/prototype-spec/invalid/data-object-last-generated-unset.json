@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "data-object-last-generated-unset",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "rows": []
+    },
+    "root": {
+      "type": "button",
+      "label": "Add",
+      "onTap": [
+        {
+          "type": "appendData",
+          "path": "/data/rows",
+          "value": {
+            "object": {
+              "ref": {
+                "lastGenerated": true
+              },
+              "status": {
+                "value": "sending"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0]"
+}

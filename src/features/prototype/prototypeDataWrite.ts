@@ -390,13 +390,17 @@ export function resolvePrototypeDataWriteValue(
     : { success: true, value: value as PrototypeJson };
 }
 
-/** Each member resolves like a top-level value, in authored order; the first unresolved one fails the write. */
+/**
+ * Each member resolves like a top-level value, in sorted name order (iOS cannot see authored order,
+ * and a `{generate}` member must precede a `{lastGenerated}` one identically everywhere); the first
+ * unresolved one fails the write.
+ */
 function resolveObjectValue(
   members: Record<string, PrototypeRuntimeFlatValue>,
   inputs: PrototypeDataWriteInputs,
 ): PrototypeDataWriteValueResult {
   const value: Record<string, PrototypeJson> = {};
-  for (const name of Object.keys(members)) {
+  for (const name of Object.keys(members).sort()) {
     const member = resolvePrototypeDataWriteValue(members[name], inputs);
     if (!member.success) {
       return member;

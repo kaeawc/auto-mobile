@@ -44,16 +44,26 @@ internal abstract class WorkspaceShellUiFixture(
     )
 
   /**
-   * Runs a few frames on the paused test clock. With `autoAdvance` off and the capture on
-   * `Dispatchers.Unconfined`, a state change, its effects and a fake's callbacks all finish inside
-   * these frames, so the tests never wait on wall-clock time (#18918).
+   * Runs a few frames on the paused test clock, enough for a plain state change to recompose. With
+   * `autoAdvance` off and the capture on `Dispatchers.Unconfined`, nothing in these tests waits on
+   * wall-clock time (#18918).
    */
   protected fun ComposeUiTest.settle() {
     repeat(SETTLE_FRAMES) { mainClock.advanceTimeByFrame() }
   }
 
+  /**
+   * Steps frames on the paused test clock until [condition] holds. A capture's effects are queued
+   * for the next frame, so the frames it takes depend on the path, never on wall-clock time; the
+   * budget is virtual time, kept under the screenshot notice's auto-dismiss.
+   */
+  protected fun ComposeUiTest.advanceUntil(condition: () -> Boolean) {
+    mainClock.advanceTimeUntil(timeoutMillis = CAPTURE_BUDGET_MS, condition = condition)
+  }
+
   protected companion object {
     const val SETTLE_FRAMES = 3
+    const val CAPTURE_BUDGET_MS = 1_000L
     const val ONE_PX_PNG =
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
   }
@@ -411,7 +421,7 @@ internal class WorkspaceShellUiTest : WorkspaceShellUiFixture() {
       mainClock.autoAdvance = false
 
       onNodeWithContentDescription("Screenshot Pixel 8").performClick()
-      settle()
+      advanceUntil { fake.observationRequestCount == 1 }
 
       // Screenshot is NOT a RunControl device mutation — it requests an observation on the stream.
       assertEquals(1, fake.observationRequestCount)
@@ -422,8 +432,8 @@ internal class WorkspaceShellUiTest : WorkspaceShellUiFixture() {
 
       // The returned frame's PNG bytes are written via the saver, and the pane confirms where.
       fake.emitScreenshot(ScreenshotStreamUpdate("a", 0L, onePxPng, 1, 1))
+      advanceUntil { savedBytes != null }
       settle()
-      assertTrue(savedBytes != null)
       assertEquals("Pixel 8", savedDeviceName)
       assertEquals(Base64.getDecoder().decode(onePxPng).toList(), savedBytes!!.toList())
       onNodeWithContentDescription("Screenshot status Pixel 8").assertIsDisplayed()
@@ -465,16 +475,13 @@ internal class WorkspaceShellUiTest : WorkspaceShellUiFixture() {
     mainClock.autoAdvance = false
 
     runOnUiThread { request.value = "b" to 1 }
-    settle()
-    assertEquals(1, second.observationRequestCount)
+    advanceUntil { second.observationRequestCount == 1 }
     assertEquals(0, first.observationRequestCount)
     second.emitScreenshot(ScreenshotStreamUpdate("b", 0L, ONE_PX_PNG, 1, 1))
-    settle()
-    assertEquals("Pixel 9", savedName)
-    assertEquals(
-      1,
-      onAllNodesWithContentDescription("Screenshot status Pixel 9").fetchSemanticsNodes().size,
-    )
+    advanceUntil { savedName == "Pixel 9" }
+    advanceUntil {
+      onAllNodesWithContentDescription("Screenshot status Pixel 9").fetchSemanticsNodes().size == 1
+    }
     onNodeWithContentDescription("Screenshot status Pixel 9").assertIsDisplayed()
     onNodeWithContentDescription("Screenshot status Pixel 8").assertDoesNotExist()
 
@@ -523,11 +530,9 @@ internal class WorkspaceShellUiTest : WorkspaceShellUiFixture() {
     settle()
     assertEquals(0, fake.observationRequestCount)
     runOnUiThread { mode.value = InteractionMode.Input }
-    settle()
-    assertEquals(1, fake.observationRequestCount)
+    advanceUntil { fake.observationRequestCount == 1 }
     fake.emitScreenshot(ScreenshotStreamUpdate("a", 0L, ONE_PX_PNG, 1, 1))
-    settle()
-    assertEquals("Pixel 8", savedName)
+    advanceUntil { savedName == "Pixel 8" }
   }
 
   @Test

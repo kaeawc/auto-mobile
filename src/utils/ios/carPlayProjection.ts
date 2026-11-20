@@ -35,6 +35,8 @@ export const carPlayProjectionStateSchema = z.discriminatedUnion("found", [
 ]);
 
 export type CarPlayProjectionState = z.infer<typeof carPlayProjectionStateSchema>;
+export type CarPlayProjectingState = Extract<CarPlayProjectionState, { found: true }> &
+  ({ isCarDisplay: true } | { isCarInstrumentsDisplay: true });
 
 export interface CarPlayProjectionProbe {
   probe(udid: string, options?: CarPlayHelperCallOptions): Promise<CarPlayProjectionState>;
@@ -87,8 +89,10 @@ export class DefaultCarPlayProjectionProbe implements CarPlayProjectionProbe {
   }
 }
 
-export function assertCarPlayProjecting(state: CarPlayProjectionState): void {
-  if (state.isCarDisplay || state.isCarInstrumentsDisplay) {
+export function assertCarPlayProjecting(
+  state: CarPlayProjectionState,
+): asserts state is CarPlayProjectingState {
+  if (state.found && (state.isCarDisplay || state.isCarInstrumentsDisplay)) {
     return;
   }
   const status = state.found
@@ -102,6 +106,8 @@ export function assertCarPlayProjecting(state: CarPlayProjectionState): void {
 export async function requireCarPlayProjection(
   udid: string,
   probe: CarPlayProjectionProbe,
-): Promise<void> {
-  assertCarPlayProjecting(await probe.probe(udid));
+): Promise<CarPlayProjectingState> {
+  const state = await probe.probe(udid);
+  assertCarPlayProjecting(state);
+  return state;
 }

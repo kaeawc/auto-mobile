@@ -193,7 +193,9 @@ describe("CarPlay projection", () => {
 
   test("require probes the selected device and propagates refusal or probe failure", async () => {
     const fake = new FakeCarPlayProjectionProbe(parseCarPlayProjectionState(carJson));
-    expect(await requireCarPlayProjection("one", fake)).toBeUndefined();
+    const projecting = await requireCarPlayProjection("one", fake);
+    expect(projecting.identity).toBe("Car[2]");
+    expect(projecting.displayId).toBe(2);
     fake.state = parseCarPlayProjectionState(airPlayJson);
     await expect(requireCarPlayProjection("two", fake)).rejects.toThrow(
       "not projecting (AirPlay[3])",

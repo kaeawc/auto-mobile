@@ -222,7 +222,7 @@
     "micromark-extension-gfm-strikethrough": "^2.1.0",
     "micromark-extension-gfm-table": "^2.1.2",
     "oxc-parser": "0.159.0",
-    "oxfmt": "0.78.0",
+    "oxfmt": "0.79.0",
     "oxlint": "1.94.0",
     "oxlint-tsgolint": "7.0.2007",
     "pixelmatch": "^8.0.0",

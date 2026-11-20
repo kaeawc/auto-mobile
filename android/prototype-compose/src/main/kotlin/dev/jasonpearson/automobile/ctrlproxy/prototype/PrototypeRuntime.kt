@@ -188,7 +188,11 @@ class PrototypeRuntime(
   private val requestHideKeyboard: suspend () -> Unit = {},
   monotonicMs: () -> Long = { System.nanoTime() / 1_000_000L },
   private val uploadAssets: PrototypeAssetSource? = null,
+  private val idGenerator: PrototypeIdGenerator = SystemPrototypeIdGenerator,
+  private val generatedClock: PrototypeClock = PrototypeClock(clock),
 ) {
+  private var actionContext = PrototypeActionContext(idGenerator, generatedClock)
+
   private val reportWarning = warn
 
   private fun publicDiagnostic(message: String, fallback: String): String =
@@ -827,61 +831,83 @@ class PrototypeRuntime(
   private suspend fun run(
     actions: List<PrototypeAction>,
     writes: Map<Int, Pair<String, PrototypeSpec>>,
+    context: PrototypeActionContext = PrototypeActionContext(idGenerator, generatedClock),
   ) {
-    val baseline = current.state
-    val plannedData = current.spec.data
-    val plannedStacks = current.stacks
-    val touched = LinkedHashSet<String>()
-    for ((index, action) in actions.withIndex()) {
-      if (!current.active) break
-      when (action) {
-        is PrototypeEmitAction -> emitAction(action)
-        is PrototypeSetPageAction -> {
-          val page = current.pages[action.pager] ?: continue
-          setPage(
-            action.pager,
-            when (val target = action.page) {
-              PrototypePageTarget.Next -> page + 1
-              PrototypePageTarget.Prev -> page - 1
-              is PrototypePageTarget.Index -> target.index
-            },
-          )
-        }
-        is PrototypePushAction,
-        is PrototypePopAction,
-        is PrototypePopToRootAction,
-        is PrototypeReplaceAction,
-        is PrototypeSetStackAction -> runStackAction(action)
-        PrototypeDismissAction -> dismiss()
-        PrototypeHideKeyboardAction -> requestHideKeyboard()
-        is PrototypeSetDataAction,
-        is PrototypeAppendDataAction,
-        is PrototypePrependDataAction,
-        is PrototypeUpsertDataAction,
-        is PrototypeRemoveDataAction -> writeData(action)
-        is PrototypeRequestAction -> startRequest(action, touched)
-        is PrototypePlatformAction -> startPlatformCall(action, touched)
-        is PrototypeScrollToAction -> requestScroll(action)
-        is PrototypeStartTimerAction -> timerEngine.start(action)
-        is PrototypeCancelTimerAction -> timerEngine.cancel(action.id)
-        else -> {
-          val (key, value) = action.stateWrite(current.state) ?: continue
-          val planned =
-            writes[index]?.second?.takeIf {
-              it.state.orEmpty()[key] == value && it.state.orEmpty() - key == current.state - key
-            }
-          // Lifecycle lists may change the same key: relative actions read the live value.
-          // The original plan still preflights the interaction before any side effects run.
-          if (
-            planned != null && current.spec.data === plannedData && current.stacks == plannedStacks
-          )
-            writeInteractionSpec(planned)
-          else writeInteractionSpec(validated(current.spec, mapOf(key to value)))
-          touched += key
+    val previousContext = actionContext
+    actionContext = context
+    try {
+      val baseline = current.state
+      val plannedData = current.spec.data
+      val plannedStacks = current.stacks
+      val touched = LinkedHashSet<String>()
+      for ((index, action) in actions.withIndex()) {
+        if (!current.active) break
+        when (action) {
+          is PrototypeEmitAction -> emitAction(action)
+          is PrototypeSetPageAction -> runPageAction(action)
+          is PrototypePushAction,
+          is PrototypePopAction,
+          is PrototypePopToRootAction,
+          is PrototypeReplaceAction,
+          is PrototypeSetStackAction -> runStackAction(action)
+          PrototypeDismissAction -> dismiss()
+          PrototypeHideKeyboardAction -> requestHideKeyboard()
+          is PrototypeSetDataAction,
+          is PrototypeAppendDataAction,
+          is PrototypePrependDataAction,
+          is PrototypeUpsertDataAction,
+          is PrototypeRemoveDataAction -> writeData(action)
+          is PrototypeRequestAction -> startRequest(action, touched)
+          is PrototypePlatformAction -> startPlatformCall(action, touched)
+          is PrototypeScrollToAction -> requestScroll(action)
+          is PrototypeStartTimerAction -> timerEngine.start(action)
+          is PrototypeCancelTimerAction -> timerEngine.cancel(action.id)
+          else -> {
+            val (key, value) = resolvedStateAction(action)?.stateWrite(current.state) ?: continue
+            val planned =
+              writes[index]?.second?.takeIf {
+                it.state.orEmpty()[key] == value && it.state.orEmpty() - key == current.state - key
+              }
+            // Lifecycle lists may change the same key: relative actions read the live value.
+            // The original plan still preflights the interaction before any side effects run.
+            if (
+              planned != null &&
+                current.spec.data === plannedData &&
+                current.stacks == plannedStacks
+            )
+              writeInteractionSpec(planned)
+            else writeInteractionSpec(validated(current.spec, mapOf(key to value)))
+            touched += key
+          }
         }
       }
+      if (current.active) emitStateChange(touched.filter { baseline[it] != current.state[it] })
+    } finally {
+      actionContext = previousContext
     }
-    if (current.active) emitStateChange(touched.filter { baseline[it] != current.state[it] })
+  }
+
+  private suspend fun runPageAction(action: PrototypeSetPageAction) {
+    val page = current.pages[action.pager] ?: return
+    setPage(
+      action.pager,
+      when (val target = action.page) {
+        PrototypePageTarget.Next -> page + 1
+        PrototypePageTarget.Prev -> page - 1
+        is PrototypePageTarget.Index -> target.index
+      },
+    )
+  }
+
+  private fun resolvedStateAction(action: PrototypeAction): PrototypeAction? {
+    if (action !is PrototypeSetStateAction) return action
+    val binding = action.value as? PrototypeScalar.Binding ?: return action
+    val result = PrototypeDataWriter.resolveValue(binding.value, bindingInputs())
+    if (result !is PrototypeDataValue.Resolved) return null
+    val value =
+      runCatching { runtimeJson.decodeFromJsonElement(PrototypeScalar.serializer(), result.value) }
+        .getOrNull() ?: return null
+    return action.copy(value = value)
   }
 
   /**
@@ -898,6 +924,7 @@ class PrototypeRuntime(
     val writes = HashMap<Int, Pair<String, PrototypeSpec>>()
     for ((index, action) in actions.withIndex()) {
       if (action == PrototypeDismissAction) break
+      if (action is PrototypeSetStateAction && action.value is PrototypeScalar.Binding) continue
       val (key, value) = action.stateWrite(spec.state.orEmpty()) ?: continue
       spec = validated(spec, mapOf(key to value))
       writes[index] = key to spec
@@ -1297,6 +1324,9 @@ class PrototypeRuntime(
   /** Bindings read the committed values at the action, after the writes before it in the list. */
   private fun bindingInputs() =
     object : EmitContextInputs {
+      override val actionContext: PrototypeActionContext
+        get() = this@PrototypeRuntime.actionContext
+
       override fun state(key: String): JsonElement? =
         current.state[key]?.let(EmitContextResolver::scalar)
 
@@ -1434,6 +1464,16 @@ class PrototypeRuntime(
   }
 
   private fun dataWrite(action: PrototypeAction): PrototypeDataWrite? {
+    // Values precede selectors, so a generate in the value is available to where.equals.
+    val binding =
+      when (action) {
+        is PrototypeSetDataAction -> action.value
+        is PrototypeAppendDataAction -> action.value
+        is PrototypePrependDataAction -> action.value
+        is PrototypeUpsertDataAction -> action.value
+        else -> null
+      }
+    val resolved = binding?.let { dataWriteValue(it, "data") ?: return null }
     val selector =
       when (action) {
         is PrototypeSetDataAction -> action.where
@@ -1448,7 +1488,7 @@ class PrototypeRuntime(
         ) ?: return null
       PrototypeDataMatch(it.field, equals)
     }
-    return prototypeDataWrite(action, where, ::dataWriteValue) { path ->
+    return prototypeDataWrite(action, where, { _, _ -> resolved }) { path ->
       prototypeListMaxItemsFor(current.spec, path)
     }
   }
@@ -1659,7 +1699,10 @@ class PrototypeRuntime(
     val append: PrototypeRequestAppend?,
     val sensitive: Boolean,
     val progressKey: String?,
+    val context: PrototypeActionContext,
+    val member: String?,
   ) {
+    var where: PrototypeDataMatch? = null
     var uploadBytes: Long? = null
 
     lateinit var job: Job
@@ -1756,41 +1799,39 @@ class PrototypeRuntime(
         action.append,
         canCarrySecure(),
         action.progressKey,
+        actionContext.copy(),
+        action.member,
       )
     }
     // The newest request wins even when it fails to resolve: the older one must not land later.
     supersedeRequests(action.into, action.append?.to)
-    val upload =
+    var upload: PrototypeUploadBody? = null
+    val resolution =
       try {
-        resolveUpload(action)
-      } catch (error: IllegalArgumentException) {
-        return finishRequest(
-          info(bound.url),
-          PrototypeRequestResponse.Failed(
-            PrototypeRequestError(
-              PrototypeRequestErrorCode.INVALID_REQUEST,
-              error.message ?: "Invalid upload",
-            ),
-          ),
+        PrototypeRequestResolver.resolve(bound, bound.url, bindingInputs()) { binding ->
+          if (PrototypeUploadResolver.isUpload(binding)) {
+            upload = resolveUpload(action)
+            PrototypeDataValue.Resolved(JsonNull)
+          } else PrototypeDataWriter.resolveValue(binding, bindingInputs())
+        }
+      } catch (error: PrototypeUploadBindingException) {
+        uploadResolutionFailure(
+          error,
+          if (error.error.code == PrototypeDataWriteErrorCode.LAST_GENERATED_UNSET)
+            PrototypeRequestErrorCode.LAST_GENERATED_UNSET
+          else PrototypeRequestErrorCode.INVALID_REQUEST,
         )
+      } catch (error: IllegalArgumentException) {
+        uploadResolutionFailure(error, PrototypeRequestErrorCode.INVALID_REQUEST)
       }
     val resolved =
-      when (
-        val result =
-          PrototypeRequestResolver.resolve(
-            if (upload == null) bound else bound.copy(body = null),
-            bound.url,
-            bindingInputs(),
-          )
-      ) {
+      when (resolution) {
         is PrototypeResolvedRequestResult.Failure ->
-          return finishRequest(
-            info(bound.url),
-            PrototypeRequestResponse.Failed(result.error),
-          )
-        is PrototypeResolvedRequestResult.Success -> result.request
+          return finishRequest(info(bound.url), PrototypeRequestResponse.Failed(resolution.error))
+        is PrototypeResolvedRequestResult.Success -> resolution.request
       }
     val started = info(resolved.url)
+    started.where = resolved.where
     started.owner = this
     started.uploadBytes = upload?.fileBytes
     if (!requestLimiter.tryAcquire()) {
@@ -1809,12 +1850,22 @@ class PrototypeRuntime(
         method = started.method,
         url = resolved.url,
         headers = resolved.headers,
-        body = resolved.body,
+        body = resolved.body.takeIf { upload == null },
         timeoutMs = action.timeoutMs ?: PrototypeSpecValidator.DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS,
         uploadBody = upload,
         onUploadProgress = uploadProgressCallback(action.progressKey, started),
       )
     launchRequest(started, request)
+  }
+
+  private fun uploadResolutionFailure(
+    error: IllegalArgumentException,
+    code: PrototypeRequestErrorCode,
+  ): PrototypeResolvedRequestResult.Failure {
+    warn("Refused upload: ${error.message}")
+    return PrototypeResolvedRequestResult.Failure(
+      PrototypeRequestError(code, error.message ?: "Invalid upload"),
+    )
   }
 
   private fun resolveUpload(action: PrototypeRequestAction): PrototypeUploadBody? {
@@ -1969,9 +2020,14 @@ class PrototypeRuntime(
       PrototypeRequestOutcome.complete(
         request.into,
         publicResponse(response, request.sensitive),
-        request.append?.let {
-          it.copy(maxItems = prototypeListMaxItemsFor(current.spec, it.to)?.toLong())
-        },
+        PrototypeRequestWriteOptions(
+          append =
+            request.append?.let {
+              it.copy(maxItems = prototypeListMaxItemsFor(current.spec, it.to)?.toLong())
+            },
+          where = request.where,
+          member = request.member,
+        ),
         ::trialDataWrites,
       ) { write ->
         writes += write
@@ -2007,7 +2063,7 @@ class PrototypeRuntime(
     val previousEvent = eventData
     eventData = request.eventContext
     try {
-      run(followUps, followUpWrites)
+      run(followUps, followUpWrites, request.context)
     } finally {
       eventData = previousEvent
     }

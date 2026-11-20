@@ -1,4 +1,4 @@
-import type { BootedDevice } from "../../models";
+import type { BootedDevice, DeviceInfo } from "../../models";
 
 /**
  * On-disk format of a fixture capture (#18770). One directory per tool call holds
@@ -70,7 +70,11 @@ export interface CapturedCommand {
    * keeps out of logs was scrubbed from argv or output.
    */
   redacted?: true;
-  /** True when stdout or stderr was cut at a capture limit and ends in the truncation marker. */
+  /**
+   * True when stdout or stderr was cut at a capture limit and ends in the truncation marker, or
+   * when the command overflowed node's `maxBuffer` (`errorCode` `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`)
+   * and its output is only what fit.
+   */
   truncated?: true;
 }
 
@@ -80,19 +84,27 @@ export interface ToolCallCapture {
   commands: CapturedCommand[];
 }
 
-export function capturedDeviceOf(device: BootedDevice): CapturedDevice {
+/**
+ * The captured device: the resolved `BootedDevice`'s own fields, with gaps filled from the
+ * image the pool admitted for it (`PooledDevice.androidImage`). A session-routed target carries
+ * only platform, id, name and form factor; its OS, model and runtime facts live on that image
+ * (#18896). An image of another platform is ignored.
+ */
+export function capturedDeviceOf(device: BootedDevice, admittedImage?: DeviceInfo): CapturedDevice {
+  const image: Partial<DeviceInfo> =
+    admittedImage?.platform === device.platform ? admittedImage : {};
   const fields: CapturedDevice = {
     platform: device.platform,
     deviceId: device.deviceId,
     name: device.name,
-    model: device.model,
-    deviceType: device.deviceType,
-    formFactor: device.formFactor,
-    osVersion: device.osVersion,
-    apiLevel: device.apiLevel,
-    iosVersion: device.iosVersion,
-    runtimeId: device.runtimeId,
-    runtime: device.runtime,
+    model: device.model ?? image.model,
+    deviceType: device.deviceType ?? image.deviceType,
+    formFactor: device.formFactor ?? image.formFactor,
+    osVersion: device.osVersion ?? image.osVersion,
+    apiLevel: device.apiLevel ?? image.apiLevel,
+    iosVersion: device.iosVersion ?? image.iosVersion,
+    runtimeId: device.runtimeId ?? image.runtimeId,
+    runtime: device.runtime ?? image.runtime,
   };
   return Object.fromEntries(
     Object.entries(fields).filter(([, value]) => value !== undefined),

@@ -18,7 +18,13 @@ internal object PrototypeRequestAppendWrites {
     val message: String? = null,
   )
 
-  fun stage(into: String?, body: JsonElement?, append: PrototypeRequestAppend?): Staged {
+  fun stage(
+    into: String?,
+    body: JsonElement?,
+    append: PrototypeRequestAppend?,
+    where: PrototypeDataMatch? = null,
+    member: String? = null,
+  ): Staged {
     // A literal JSON null is distinct from an empty HTTP body (Kotlin null).
     if (body is JsonNull)
       return Staged(emptyList(), 0, "The response body is JSON null, which /data cannot hold.")
@@ -37,7 +43,7 @@ internal object PrototypeRequestAppendWrites {
       appended = source.second.size
       rest = source.first
     }
-    if (into != null) writes.add(PrototypeDataWrite.Set(into, rest))
+    if (into != null) writes.add(PrototypeDataWrite.Set(into, rest, where, member))
     return Staged(writes, appended)
   }
 

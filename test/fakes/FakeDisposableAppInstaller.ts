@@ -8,10 +8,15 @@ import type { DisposableAppPermissionGrants } from "../../src/features/prototype
 export class FakeDisposableAppInstaller implements DisposableAppInstaller {
   readonly packages = new Map<string, string | undefined>();
   readonly installs: { deviceId: string; artifactPath: string }[] = [];
+  readonly seeds: { appId: string; artifactPath: string }[] = [];
   readonly resets: string[] = [];
   readonly grants: { appId: string; grants: DisposableAppPermissionGrants }[] = [];
   readonly uninstalls: string[] = [];
 
+  /** When set, `seedStorage` rejects with it after recording the seed. */
+  seedFailure: Error | undefined;
+  /** Called as `seedStorage` starts, for example to check the artifact still exists. */
+  onSeed: ((appId: string, artifactPath: string) => Promise<void>) | undefined;
   /** When set, `resetStorage` rejects with it after recording the reset. */
   resetFailure: Error | undefined;
   /** When set, `applyPermissions` rejects with it after recording the grants. */
@@ -33,6 +38,14 @@ export class FakeDisposableAppInstaller implements DisposableAppInstaller {
   async install(deviceId: string, appId: string, artifactPath: string) {
     this.installs.push({ deviceId, artifactPath });
     this.packages.set(`${deviceId}/${appId}`, this.signer);
+  }
+
+  async seedStorage(_deviceId: string, appId: string, artifactPath: string) {
+    await this.onSeed?.(appId, artifactPath);
+    this.seeds.push({ appId, artifactPath });
+    if (this.seedFailure) {
+      throw this.seedFailure;
+    }
   }
 
   async resetStorage(_deviceId: string, appId: string) {

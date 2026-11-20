@@ -344,6 +344,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         ),
       withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
       markPartialAfterMutation: (result) => markPartialAfterMutation(result),
+      tapPoint: async (point, signal) => (await this.textClient.tapPoint?.(point, signal)) ?? false,
     });
   }
 

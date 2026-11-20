@@ -65,6 +65,7 @@ function harness() {
 function operationsFor(installer: IosDisposableAppInstaller, deviceId: string, idOrPrefix: string) {
   return [
     installer.install(deviceId, idOrPrefix, bundle),
+    installer.seedStorage(deviceId, idOrPrefix, bundle),
     installer.resetStorage(deviceId, idOrPrefix),
     installer.applyPermissions(deviceId, idOrPrefix, noGrants),
     installer.uninstall(deviceId, idOrPrefix),
@@ -74,7 +75,7 @@ function operationsFor(installer: IosDisposableAppInstaller, deviceId: string, i
 }
 
 describe("IosDisposableAppInstaller", () => {
-  test("installs in place and writes the saved Viewer layout after each install", async () => {
+  test("installs in place after validating the bundled spec, leaving storage to seedStorage", async () => {
     const { installer, operations, simctl, data, files, clearStorage } = harness();
     await installer.install(simulator, appId, bundle);
     await installer.install(simulator, appId, bundle);
@@ -83,22 +84,39 @@ describe("IosDisposableAppInstaller", () => {
       { udid: simulator, appPath: bundle },
       { udid: simulator, appPath: bundle },
     ]);
-    expect(simctl.containers).toEqual([appId, appId]);
-    expect(data.writes).toEqual([
-      { containerPath: container, spec },
-      { containerPath: container, spec },
-    ]);
-    expect(operations.events).toEqual([
-      "read",
-      "install",
-      "container",
-      "data",
-      "read",
-      "install",
-      "container",
-      "data",
-    ]);
+    expect(data.writes).toEqual([]);
+    expect(operations.events).toEqual(["read", "install", "read", "install"]);
     expect(clearStorage).not.toHaveBeenCalled();
+  });
+
+  test("does not install a bundle whose spec does not parse", async () => {
+    const { installer, simctl, files } = harness();
+    files.readFile.mockResolvedValueOnce("{not json");
+    await expect(installer.install(simulator, appId, bundle)).rejects.toThrow(
+      `Cannot install iOS disposable app ${appId}`,
+    );
+    expect(simctl.installed).toEqual([]);
+  });
+
+  test("seeds the saved Viewer layout from the bundle into the data container", async () => {
+    const { installer, operations, simctl, data, files } = harness();
+    await installer.seedStorage(simulator, appId, bundle);
+    expect(files.readFile).toHaveBeenCalledWith(path.join(bundle, "prototype.json"));
+    expect(simctl.containers).toEqual([appId]);
+    expect(data.writes).toEqual([{ containerPath: container, spec }]);
+    expect(operations.events).toEqual(["read", "container", "data"]);
+  });
+
+  test("reports a seeding failure as a structured error", async () => {
+    const { installer, data } = harness();
+    data.write = async () => {
+      throw new Error("disk full");
+    };
+    const failure = installer.seedStorage(simulator, appId, bundle);
+    await expect(failure).rejects.toBeInstanceOf(ActionableError);
+    await expect(failure).rejects.toThrow(
+      `Cannot seed storage for iOS disposable app ${appId}: disk full`,
+    );
   });
 
   test("wipes the data container and restores the spec from the installed bundle", async () => {

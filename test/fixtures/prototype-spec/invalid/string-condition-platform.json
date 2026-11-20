@@ -19,5 +19,5 @@
     }
   },
   "expectedPath": "root.visibleWhen.startsWith",
-  "expectedMessage": "Requires key"
+  "expectedMessage": "Requires key or derived"
 }

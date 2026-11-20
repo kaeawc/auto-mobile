@@ -38,10 +38,22 @@ function parseFrontBoardEvent(line: string) {
   return parsed.success ? parsed.data : null;
 }
 
-/** Take the latest FrontBoard open request and the first subsequent default-scene ready event. */
+const SCENE_SUFFIX =
+  "(?:default|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})";
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Take the latest FrontBoard open request and the first subsequent ready event for the app's
+ * main scene: `<bundleId>-default`, or a session-backed `<bundleId>-<UUID>` (e.g. Safari).
+ */
 export function parseIosSceneReady(output: string, bundleId: string): SceneReadyTiming {
   const requestMessage = `Received request to open "${bundleId}"`;
-  const readySuffix = `:sceneID:${bundleId}-default] scene content state changed: ready`;
+  const readyPattern = new RegExp(
+    `:sceneID:${escapeRegExp(bundleId)}-${SCENE_SUFFIX}\\] scene content state changed: ready$`,
+  );
   let requestTimestampMs: number | null = null;
   const readyTimestampsMs: number[] = [];
 
@@ -56,7 +68,7 @@ export function parseIosSceneReady(output: string, bundleId: string): SceneReady
     }
     if (event.eventMessage.includes(requestMessage)) {
       requestTimestampMs = Math.max(requestTimestampMs ?? -Infinity, timestampMs);
-    } else if (event.eventMessage.endsWith(readySuffix)) {
+    } else if (readyPattern.test(event.eventMessage)) {
       readyTimestampsMs.push(timestampMs);
     }
   }

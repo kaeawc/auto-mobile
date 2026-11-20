@@ -56,4 +56,20 @@ describe("parseIosSceneReady", () => {
     ].join("\n");
     expect(parseIosSceneReady(mixed, APP).ttidMs).toBe(1);
   });
+
+  test("accepts a session-backed UUID scene ID but not another app's scene", () => {
+    const safari = "com.apple.mobilesafari";
+    const scene = (id: string) =>
+      `[(FBSceneManager):sceneID:${id}] scene content state changed: ready`;
+    const log = (id: string) =>
+      [
+        event("2026-11-19 08:06:50.000000-0500", `Received request to open "${safari}" from x.`),
+        event("2026-11-19 08:06:50.071000-0500", scene(id)),
+      ].join("\n");
+    expect(
+      parseIosSceneReady(log(`${safari}-99296365-ED2B-4CB1-8BE1-D10FED611372`), safari).ttidMs,
+    ).toBe(71);
+    expect(parseIosSceneReady(log("comXapple.mobilesafari-default"), safari).ttidMs).toBeNull();
+    expect(parseIosSceneReady(log(`${safari}-secondary`), safari).ttidMs).toBeNull();
+  });
 });

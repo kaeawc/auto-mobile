@@ -87,10 +87,13 @@ describe("prototype show with anchors (#9316)", () => {
   // the 100 ms budget excludes beforeAll.
   beforeAll(async () => {
     const restoreRegistry = preserveToolRegistry();
-    install();
-    await call({ action: "show", spec: anchoredSpec({ elementId: "button_elevated" }) });
-    unsubscribe();
-    restoreRegistry();
+    try {
+      install();
+      await call({ action: "show", spec: anchoredSpec({ elementId: "button_elevated" }) });
+    } finally {
+      unsubscribe?.();
+      restoreRegistry();
+    }
   });
 
   beforeEach(() => {

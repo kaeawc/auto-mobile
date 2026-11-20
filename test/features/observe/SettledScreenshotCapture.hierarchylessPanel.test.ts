@@ -182,7 +182,7 @@ test("a device-read raster that matches the stale-portrait Duo panel is display-
     ...fixtureObservation(),
     screenSize: { ...screenSize, units: "points" as const },
     viewHierarchy: { hierarchy: { node: {} }, rotation: runnerRotation },
-    rotation: resolveIosObserveRotation(runnerRotation, screenSize),
+    rotation: resolveIosObserveRotation(runnerRotation, screenSize, true),
     screenshotOrientation: "native" as const,
   } as ObserveResult;
   await capture().attachScreenshotRaster(observation, screenshotPixels);

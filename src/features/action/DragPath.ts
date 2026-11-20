@@ -15,6 +15,11 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import {
+  isRunnerSpringBoardIconDrag,
+  RUNNER_SPRINGBOARD_ICON_DRAG_CODE,
+  springBoardIconDragMessage,
+} from "../observe/ios/runnerErrorCodes";
 import { layerGestureRefusal } from "../observe/hierarchyLayer";
 import { isAdoptableCapture } from "../observe/isAdoptableCapture";
 import { snapshotReferences, type SnapshotReferenceStore } from "../observe/SnapshotReferenceStore";
@@ -384,6 +389,13 @@ export class DragPath extends BaseVisualChange {
       }
       // No loop: even a fresh iOS capture can repeat a semantic token; a second rejection surfaces.
       result = await dispatch(retry.frameContext);
+    }
+    if (!result.success && isRunnerSpringBoardIconDrag(result)) {
+      return {
+        success: false,
+        unsupported: RUNNER_SPRINGBOARD_ICON_DRAG_CODE,
+        error: springBoardIconDragMessage("dragPath", result.error),
+      };
     }
     if (!result.success) {
       const note =

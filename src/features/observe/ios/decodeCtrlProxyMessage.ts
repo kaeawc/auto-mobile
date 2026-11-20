@@ -387,6 +387,7 @@ function decodeMultiFingerSwipeResult(message: WebSocketMessage): unknown {
     totalTimeMs: message.totalTimeMs ?? 0,
     error: message.error,
     perfTiming: message.perfTiming,
+    ...(message.errorCode === undefined ? {} : { errorCode: message.errorCode }),
   };
 }
 

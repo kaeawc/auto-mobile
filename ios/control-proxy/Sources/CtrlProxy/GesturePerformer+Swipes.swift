@@ -160,6 +160,9 @@ import os
             guard let app = gestureApplication(for: target) else {
                 throw GestureError.noApplication
             }
+            if let first = points.first {
+                try refuseSpringBoardIconDragStart(x: first.x, y: first.y)
+            }
             let cgPoints = points.map { CGPoint(x: $0.x, y: $0.y) }
             let offsets = points.map { TimeInterval($0.offsetMs) / 1000.0 }
             try catchingObjCException {
@@ -214,6 +217,7 @@ import os
         {
             GesturePhaseDiagnostics.current?.begin("targetResolution")
             let target = gestureApplicationTarget()
+            try refuseSpringBoardIconDragStart(x: startX, y: startY)
             if try deliverDragToUnpinnedForegroundApp(
                 target: target, start: GesturePoint(x: startX, y: startY), end: GesturePoint(x: endX, y: endY),
                 press: pressDuration, move: dragDuration, hold: holdDuration

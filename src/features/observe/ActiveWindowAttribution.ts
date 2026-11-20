@@ -9,7 +9,7 @@ import { requireAndroidOrIosPlatform } from "../../models";
 import { logger } from "../../utils/logger";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { appendObserveError } from "./ObserveError";
-import { resolveIosObserveRotation } from "./iosObserveRotation";
+import { hasMultiplePanels, resolveIosObserveRotation } from "./iosObserveRotation";
 import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
 import type { DeviceStateCollector } from "./collectors/DeviceStateCollector";
 import type { HierarchyPlatformValidator } from "./HierarchyPlatformValidator";
@@ -241,7 +241,7 @@ interface ActiveWindowAttributionDependencies {
     | "collectBackStack"
     | "collectActiveWindow"
   >;
-  device: () => Pick<BootedDevice, "platform">;
+  device: () => Pick<BootedDevice, "platform" | "displays">;
   platformValidator: () => HierarchyPlatformValidator;
   resolveObservationTimestampMs: (result: ObserveResult) => number | undefined;
   extractScreenSizeFromHierarchy: (
@@ -899,7 +899,11 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
     }
     if (this.device.platform === "ios") {
       result.screenSize = this.extractScreenSizeFromHierarchy(hierarchy) ?? result.screenSize;
-      result.rotation = resolveIosObserveRotation(hierarchy.rotation, result.screenSize);
+      result.rotation = resolveIosObserveRotation(
+        hierarchy.rotation,
+        result.screenSize,
+        hasMultiplePanels(this.device),
+      );
     } else {
       this.dependencies.xrDisplaySize?.applyCached(result, hierarchy);
       result.rotation = hierarchy.rotation;

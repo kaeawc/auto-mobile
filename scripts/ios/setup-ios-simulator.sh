@@ -1,7 +1,10 @@
 #!/bin/bash
 #
 # iOS Simulator Setup Script
-# Ensures an iOS Simulator runtime is available for the current Xcode version.
+# Ensures an iOS Simulator runtime is available for the selected Xcode: the
+# repository pin (scripts/ios/xcode_version.sh) when installed, else DEVELOPER_DIR
+# or the active Xcode. It prefers the general runtime matching that Xcode's SDK
+# and never a device-specific one (see scripts/ios/simulator-select.sh).
 #
 # This script is designed for CI environments (GitHub Actions) where:
 # - Xcode is pre-installed but simulator runtimes may be missing or mismatched
@@ -115,10 +118,25 @@ if ! command -v rg &> /dev/null; then
     exit 1
 fi
 
+if ! command -v jq &> /dev/null; then
+    log_error "jq not found. Install with: brew install jq"
+    exit 1
+fi
+
 if ! command -v xcodebuild &> /dev/null; then
     log_error "xcodebuild not found. Please install Xcode."
     exit 1
 fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/ios/simulator-select.sh
+source "${SCRIPT_DIR}/simulator-select.sh"
+# Use the repository-pinned Xcode (scripts/ios/xcode_version.sh) unless DEVELOPER_DIR
+# already names one, so a host whose xcode-select still points at an older Xcode
+# needs no machine-wide switch.
+# shellcheck source=scripts/ios/xcode_version.sh
+source "${SCRIPT_DIR}/xcode_version.sh"
+select_pinned_xcode
 
 # Get Xcode version info
 XCODE_VERSION_FULL=$(xcodebuild -version)
@@ -131,7 +149,7 @@ XCODE_VERSION_LINE="${XCODE_VERSION_FULL%%$'\n'*}"
 XCODE_VERSION="${XCODE_VERSION_LINE#Xcode }"
 XCODE_BUILD_LINE="${XCODE_VERSION_FULL##*$'\n'}"
 XCODE_BUILD="${XCODE_BUILD_LINE#Build version }"
-XCODE_PATH=$(xcode-select -p)
+XCODE_PATH="${DEVELOPER_DIR:-$(xcode-select -p)}"
 
 log_info "Xcode version: ${XCODE_VERSION} (${XCODE_BUILD})"
 log_info "Xcode path: ${XCODE_PATH}"
@@ -151,7 +169,6 @@ fi
 echo "" >&2
 
 # Script directory for finding project files
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IOS_DIR="${PROJECT_ROOT}/ios"
 
@@ -177,124 +194,75 @@ if [ -z "$MIN_IOS_VERSION" ]; then
 fi
 log_info "Minimum iOS deployment target: ${MIN_IOS_VERSION}"
 
-# List available simulator runtimes
-echo "" >&2
-echo -e "${BLUE}Available Simulator Runtimes:${NC}" >&2
-RUNTIMES_OUTPUT=$(xcrun simctl list runtimes 2>/dev/null || echo "")
-if [ -z "$RUNTIMES_OUTPUT" ]; then
-    log_warn "No simulator runtimes found"
-else
-    echo "$RUNTIMES_OUTPUT" | grep -E "iOS|watchOS|tvOS|visionOS" | sed -n '1,10p' | while read -r line; do
-        echo "  $line" >&2
-    done
-fi
+# Runtime and simulator selection reads `simctl --json` through the shared jq
+# programs in simulator-select.sh, so it skips what text parsing could not tell
+# apart: a device-specific runtime such as iOS-27-2-iPhone19-4 (iPhone Duo only,
+# listed as "iOS 27.2" next to the general iOS-27-2), a Duo-only runtime such as
+# iOS-27-1, an unavailable runtime and one newer than this Xcode's SDK (#18812).
+IFS=. read -r sdk_major sdk_minor _ <<< "${MAX_IOS_SDK_VERSION}"
+SDK_MAJOR_MINOR="${sdk_major}.${sdk_minor:-0}"
 
-# Parse available iOS runtimes and find the best one
-IOS_RUNTIMES=$(echo "$RUNTIMES_OUTPUT" | grep "^iOS" || echo "")
-log_debug "iOS runtimes: $IOS_RUNTIMES"
+BEST_IOS_VERSION=""
+BEST_RUNTIME_ID=""
+SIMULATOR_DEVICE=""
+SIMULATOR_UDID=""
 
-# Extract version numbers from runtimes (e.g., "iOS 18.5" -> "18.5")
-get_available_ios_versions() {
-    echo "$IOS_RUNTIMES" | sed -n 's/^iOS \([0-9.]*\).*/\1/p' | sort -V
+# Sets BEST_IOS_VERSION / BEST_RUNTIME_ID to the newest usable runtime matching
+# the SDK (else the newest usable one in [MIN_IOS_VERSION, SDK]), and
+# SIMULATOR_UDID / SIMULATOR_DEVICE to an available iPhone on that runtime.
+select_runtime_and_simulator() {
+    local runtimes_json devices_json pick
+    runtimes_json=$(xcrun simctl list runtimes iOS --json 2>/dev/null) || runtimes_json=""
+    [[ -n "${runtimes_json}" ]] || runtimes_json='{"runtimes":[]}'
+
+    echo -e "${BLUE}Available iOS Simulator Runtimes:${NC}" >&2
+    jq -r '.runtimes[]? | "  \(.name) - \(.identifier)"' <<< "${runtimes_json}" >&2 2>/dev/null \
+        || log_warn "Could not parse simctl runtimes"
+
+    pick=$(jq -r --arg v "${SDK_MAJOR_MINOR}" --arg min "${MIN_IOS_VERSION}" \
+        "${IOS_SIM_PICK_RUNTIME_JQ}" <<< "${runtimes_json}" 2>/dev/null) || pick=""
+    BEST_IOS_VERSION=""
+    BEST_RUNTIME_ID=""
+    SIMULATOR_DEVICE=""
+    SIMULATOR_UDID=""
+    if [[ -z "${pick}" ]]; then
+        return 0
+    fi
+    BEST_IOS_VERSION="${pick%%$'\t'*}"
+    BEST_RUNTIME_ID="${pick#*$'\t'}"
+
+    devices_json=$(xcrun simctl list devices --json 2>/dev/null) || devices_json=""
+    [[ -n "${devices_json}" ]] || devices_json='{"devices":{}}'
+    # min = v = the chosen version: a booted iPhone on that version's general
+    # runtime wins, else any available iPhone on the chosen runtime.
+    pick=$(jq -r --argjson runtimes "${runtimes_json}" --arg v "${BEST_IOS_VERSION}" \
+        --arg min "${BEST_IOS_VERSION}" --arg runtime "${BEST_RUNTIME_ID}" \
+        "${IOS_SIM_PICK_SIMULATOR_JQ}" <<< "${devices_json}" 2>/dev/null) || pick=""
+    if [[ -n "${pick}" ]]; then
+        SIMULATOR_UDID="${pick%%$'\t'*}"
+        SIMULATOR_DEVICE="${pick#*$'\t'}"
+    else
+        log_debug "No available iPhone simulator on ${BEST_RUNTIME_ID}"
+    fi
 }
 
-# Check if a version meets the minimum requirement
-# Run a command the way an `if` condition would (errexit is ignored inside it)
-# and record its exit status in RUN_STATUS, so callers can branch on it without
-# a function name in a condition.
-RUN_STATUS=0
-run_capture_status() {
-local run_rc=0
-"$@" || run_rc=$?
-RUN_STATUS="${run_rc}"
-}
-
-version_gte() {
-    local version=$1
-    local min=$2
-    [ "$(printf '%s\n' "$min" "$version" | sort -V | sed -n '1p')" = "$min" ]
-}
-# Static reference for indirect callers; this branch never executes.
-if false; then version_gte "$@"; fi
-
-# Find the best available iOS runtime (highest version >= minimum, <= max SDK)
-find_best_ios_runtime() {
-    local min_version=$1
-    local max_version=$2
-    local best_version=""
-
-    while IFS= read -r version; do
-        run_capture_status version_gte "$version" "$min_version"
-        if [ -n "$version" ] && [ "$RUN_STATUS" -eq 0 ]; then
-            # Skip runtimes newer than what this Xcode supports
-            run_capture_status version_gte "$max_version" "$version"
-            if [ "$RUN_STATUS" -ne 0 ]; then
-                log_debug "Skipping iOS ${version} (exceeds SDK ${max_version})"
-                continue
-            fi
-            best_version="$version"
-        fi
-    done < <(get_available_ios_versions)
-
-    echo "$best_version"
-}
-
-BEST_IOS_VERSION=$(find_best_ios_runtime "$MIN_IOS_VERSION" "$MAX_IOS_SDK_VERSION")
+select_runtime_and_simulator
 
 if [ -n "$BEST_IOS_VERSION" ]; then
-    log_success "Found compatible iOS runtime: iOS ${BEST_IOS_VERSION}"
+    log_success "Found compatible iOS runtime: iOS ${BEST_IOS_VERSION} (${BEST_RUNTIME_ID})"
 else
-    log_warn "No compatible iOS runtime found (need >= ${MIN_IOS_VERSION}, <= ${MAX_IOS_SDK_VERSION})"
+    log_warn "No compatible iOS runtime found (need >= ${MIN_IOS_VERSION}, <= ${SDK_MAJOR_MINOR})"
 fi
 echo "" >&2
 
-# Find available simulator devices for the best runtime
-find_simulator_device() {
-    local ios_version=$1
-
-    if [ -z "$ios_version" ]; then
-        echo ""
-        return
-    fi
-
-    # Get devices for this iOS version
-    local devices
-    devices=$(xcrun simctl list devices "iOS ${ios_version}" 2>/dev/null | grep -E "iPhone|iPad" | grep -v "unavailable" | sed -n '1,5p' || echo "")
-
-    if [ -z "$devices" ]; then
-        log_debug "No devices found for iOS ${ios_version}"
-        echo ""
-        return
-    fi
-
-    log_debug "Available devices for iOS ${ios_version}:"
-    log_debug "$devices"
-
-    # Prefer iPhone 16, then iPhone 15, then any iPhone.
-    # Require a non-alphanumeric after the number (or end of line) so
-    # "iPhone 16" does not also match "iPhone 16e" — the old `[^0-9]` matched
-    # the 'e' and could select the 16e, defeating the preference order (#3652).
-    local device_name=""
-    if grep -qE "iPhone 16([^0-9A-Za-z]|$)" <<<"${devices}"; then
-        device_name=$(echo "$devices" | grep -E "iPhone 16([^0-9A-Za-z]|$)" | sed -n '1p' | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
-    elif grep -qE "iPhone 15([^0-9A-Za-z]|$)" <<<"${devices}"; then
-        device_name=$(echo "$devices" | grep -E "iPhone 15([^0-9A-Za-z]|$)" | sed -n '1p' | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
-    elif [[ "${devices}" == *"iPhone"* ]]; then
-        device_name=$(echo "$devices" | grep "iPhone" | sed -n '1p' | sed 's/^[[:space:]]*//' | cut -d'(' -f1 | sed 's/[[:space:]]*$//')
-    fi
-
-    echo "$device_name"
-}
-
-SIMULATOR_DEVICE=$(find_simulator_device "$BEST_IOS_VERSION")
-
-# Build the destination string
+# Build the destination string. A UDID is unambiguous where a name + OS pair is
+# not (the general and the Duo-only runtime both report OS 27.2).
 build_destination() {
     local ios_version=$1
-    local device_name=$2
+    local udid=$2
 
-    if [ -n "$device_name" ] && [ -n "$ios_version" ]; then
-        echo "platform=iOS Simulator,name=${device_name},OS=${ios_version}"
+    if [ -n "$udid" ]; then
+        echo "platform=iOS Simulator,id=${udid}"
     elif [ -n "$ios_version" ]; then
         echo "platform=iOS Simulator,OS=${ios_version}"
     else
@@ -361,25 +329,26 @@ if [ "$NEEDS_DOWNLOAD" = true ]; then
 
     # Refresh runtime list
     sleep 2
-    RUNTIMES_OUTPUT=$(xcrun simctl list runtimes 2>/dev/null || echo "")
-    IOS_RUNTIMES=$(echo "$RUNTIMES_OUTPUT" | grep "^iOS" || echo "")
-    BEST_IOS_VERSION=$(find_best_ios_runtime "$MIN_IOS_VERSION" "$MAX_IOS_SDK_VERSION")
-    SIMULATOR_DEVICE=$(find_simulator_device "$BEST_IOS_VERSION")
+    select_runtime_and_simulator
 fi
 
 # Final destination
-DESTINATION=$(build_destination "$BEST_IOS_VERSION" "$SIMULATOR_DEVICE")
+DESTINATION=$(build_destination "$BEST_IOS_VERSION" "$SIMULATOR_UDID")
 
 # Export for use by other scripts
 export IOS_SIMULATOR_RUNTIME="$BEST_IOS_VERSION"
+export IOS_SIMULATOR_RUNTIME_ID="$BEST_RUNTIME_ID"
 export IOS_SIMULATOR_DEVICE="$SIMULATOR_DEVICE"
+export IOS_SIMULATOR_UDID="$SIMULATOR_UDID"
 export IOS_SIMULATOR_DESTINATION="$DESTINATION"
 
 # Write to GitHub Actions output if available
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
     {
         echo "ios-runtime=${BEST_IOS_VERSION}"
+        echo "ios-runtime-id=${BEST_RUNTIME_ID}"
         echo "ios-device=${SIMULATOR_DEVICE}"
+        echo "ios-udid=${SIMULATOR_UDID}"
         echo "ios-destination=${DESTINATION}"
     } >> "$GITHUB_OUTPUT"
 fi
@@ -391,7 +360,9 @@ if [ "$DRY_RUN" = false ]; then
 # Auto-generated by setup-ios-simulator.sh
 # Source this file or read these values for xcodebuild commands
 IOS_SIMULATOR_RUNTIME="${BEST_IOS_VERSION}"
+IOS_SIMULATOR_RUNTIME_ID="${BEST_RUNTIME_ID}"
 IOS_SIMULATOR_DEVICE="${SIMULATOR_DEVICE}"
+IOS_SIMULATOR_UDID="${SIMULATOR_UDID}"
 IOS_SIMULATOR_DESTINATION="${DESTINATION}"
 EOF
     log_debug "Wrote destination config to ${DEST_FILE}"
@@ -405,7 +376,7 @@ echo -e "${CYAN}========================================${NC}" >&2
 echo "" >&2
 echo "  Xcode version:     ${XCODE_VERSION}" >&2
 echo "  Min iOS target:    ${MIN_IOS_VERSION}" >&2
-echo "  iOS runtime:       ${BEST_IOS_VERSION:-none}" >&2
+echo "  iOS runtime:       ${BEST_IOS_VERSION:-none} ${BEST_RUNTIME_ID}" >&2
 echo "  Simulator device:  ${SIMULATOR_DEVICE:-auto}" >&2
 echo "  Destination:       ${DESTINATION}" >&2
 echo "" >&2

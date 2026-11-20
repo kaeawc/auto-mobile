@@ -25,11 +25,16 @@ portable test/features/utility/WatchNotificationDeliveryLog.test.ts     # pure w
 
 # --- portable: path has an iOS token but the test needs no iOS host --------------
 
+portable test/features/audit/IosOnDemandAuditEngines.test.ts              # fake observer, clock and process commands over a captured launchctl listing
 portable test/features/utility/ios/*.test.ts  # registry, env construction and injected compiler/filesystem only
+portable test/features/action/iosRotateFloatingWindow.test.ts           # pure rotate verification over captured iPad values
 portable test/daemon/iosCameraPosterSessionCleanup.test.ts  # fake session manager and in-memory registry only
 
 portable test/utils/ios/carPlayProjection.test.ts                        # JSON contract and injected exec only; no host processes
 portable test/utils/ios/carPlayScreenPower.test.ts                       # JSON contract and injected exec only; no host processes
+portable test/utils/ios/carPlayDisplay.test.ts                           # fake powerer, probe and timer only; no host processes
+portable test/utils/ios/healthKitSeeder*.test.ts                         # HealthKit seeder over fake runner, sheet, builder and FakeTimer; temp dirs only
+portable test/utils/ios/simctlHealthSimulatorRunner.test.ts              # injected exec only; no simctl runs
 
 # Source, workflow and script scans read repository files and run no iOS code.
 portable test/features/prototype/web/webIosParity*.test.ts               # Chromium/file-based parity checks; no iOS host commands
@@ -61,6 +66,7 @@ portable test/features/action/sendkeys/IosSdkTextRouting.test.ts        # sendKe
 portable test/features/action/SendKeys.iosSdkBridge.test.ts              # sendKeys executor over a fake router
 portable test/features/observe/collectors/IosObservationCollector.sdkBridge.test.ts # collector merge over fakes
 portable test/features/observe/collectors/IosObservationCollector.sdkWeb.test.ts # collector web merge over fakes
+portable test/features/observe/iosObserveRotation.test.ts # pure rotation resolver over a captured Duo fixture; no iOS host
 portable test/features/prototype/prototypeIosSpecContract.test.ts        # generator output equals the embedded Swift contract file
 portable test/features/prototype/prototypeIosIconSymbols.test.ts         # schema table equals generated Swift symbols
 portable test/features/storage/iosStorageDiscovery.test.ts           # pure parsing of the SDK storage capability payload

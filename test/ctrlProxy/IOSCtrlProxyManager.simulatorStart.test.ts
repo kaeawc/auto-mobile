@@ -712,6 +712,39 @@ describe("IOSCtrlProxyManager simulator start", function () {
       }
     });
 
+    test("startOnSimulator() installs the runner's host app before spawning xcodebuild (#18644)", async function () {
+      PortManager.setPortAvailabilityCheckerForTesting({
+        isPortAvailable: (port: number) => port !== 8765,
+      });
+      try {
+        const hostAppPath = "/tmp/Debug-iphonesimulator/AutoMobileTest.app";
+        const fakeBuilder = createStartableBuilder("/tmp/test.xctestrun", {
+          getAppBundlePath: async () => hostAppPath,
+        });
+        const installs: Array<{ path: string | null; spawnsBefore: number }> = [];
+        const { steps } = createManagerWithOwnSteps({
+          device: testDevice,
+          timer: fakeTimer,
+          builder: fakeBuilder,
+          processExecutor: fakeExecutor,
+          appBundleGuard: {
+            uninstallLegacyAppIfPresent: async () => {},
+            verifyInstalledAppBundle: async () => {},
+            installHostAppIfMissing: async (path) => {
+              installs.push({ path, spawnsBefore: fakeExecutor.getSpawnedProcesses().length });
+            },
+          },
+        });
+
+        await steps.startOnSimulator();
+
+        expect(installs).toEqual([{ path: hostAppPath, spawnsBefore: 0 }]);
+        expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
+      } finally {
+        PortManager.setPortAvailabilityCheckerForTesting(null);
+      }
+    });
+
     test("startOnSimulator() gives the resident runner its own process signal, not the ambient request signal (issue #6410)", async function () {
       // The runner is a shared, long-lived resident process serving every session
       // targeting this device. Binding its OS-level kill to whichever MCP

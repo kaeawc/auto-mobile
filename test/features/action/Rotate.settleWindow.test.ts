@@ -164,7 +164,7 @@ describe("Android rotation settle window", () => {
   );
 
   test.each(["normal", "recovered", "unconfirmed", "reverted"])(
-    "session omission restores only after confirmation: %s",
+    "session omission keeps auto-rotate off until release (#18833): %s",
     async (outcome) => {
       let state: RotationRestoreState | undefined;
       rotate = new Rotate(
@@ -198,23 +198,18 @@ describe("Android rotation settle window", () => {
         }
       });
       if (outcome === "reverted") {
+        // A sensor that would revert once auto-rotate is back on never gets the chance.
         postRestore = () => portrait;
       }
       const result = await rotate.execute("landscape");
-      expect(result.success).toBe(outcome === "normal" || outcome === "recovered");
+      expect(result.success).toBe(outcome !== "unconfirmed");
       const commands = adb.getExecutedCommands();
-      expect(commands.includes(restoreCommand)).toBe(outcome !== "unconfirmed");
-      expect(commands.includes("shell settings put system user_rotation 0")).toBe(
-        outcome === "reverted",
-      );
+      expect(commands.includes(restoreCommand)).toBe(false);
+      expect(commands.includes("shell settings put system user_rotation 0")).toBe(false);
+      // The map goes back with the other originals on release, not at the end of the call.
+      expect(commands.some((c) => c.startsWith("shell settings put secure"))).toBe(false);
       expect(state?.accelerometerRotation).toBe(1);
-      if (outcome !== "unconfirmed") {
-        const mapRestore = commands.indexOf(
-          "shell settings put secure device_state_rotation_lock 0:2",
-        );
-        expect(mapRestore).toBeGreaterThan(-1);
-        expect(mapRestore).toBeLessThan(commands.indexOf(restoreCommand));
-      }
+      expect(state?.deviceStateRotationLock).toBe("0:2");
     },
   );
 

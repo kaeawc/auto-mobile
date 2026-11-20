@@ -95,6 +95,8 @@ mavenpublish = "0.37.0"
 dokka = "2.3.0"
 compose-multiplatform = "1.12.2"
 compose-hot-reload = "1.2.0"
+# dev.chrisbanes.haze, Apache-2.0: in-composition backdrop blur for prototype node layers (#15126).
+haze = "2.1.0"
 metro = "1.5.2"
 conveyor = "2.0"
 # Build-time license collection for ProtoViewer's in-app licenses screen (#14158). Gradle plugin only:
@@ -174,6 +176,7 @@ androidx-work-runtime = { module = "androidx.work:work-runtime", version.ref = "
 androidx-car-app-testing = { module = "androidx.car.app:app-testing", version.ref = "androidx-car-app" }
 
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "androidx-compose-bom" }
+haze-blur = { module = "dev.chrisbanes.haze:haze-blur", version.ref = "haze" }
 compose-ui-core = { group = "androidx.compose.ui", name = "ui" }
 compose-ui-util = { group = "androidx.compose.ui", name = "ui-util" }
 compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }

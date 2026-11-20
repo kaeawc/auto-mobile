@@ -58,8 +58,7 @@ on derived repeat keys and emit names. Missing source fields are allowed and for
 minFraction must not exceed maxFraction when both are supplied. Omitted numeric
 fraction options use Intl/CLDR defaults (currency respects minor units, including
 zero for JPY). Number grouping true/default respects the locale's minimum grouping
-digits; false disables grouping. Compact, currency, and percent do too. Locale defaults to the device locale; timeZone defaults to the
-device zone. Overrides accept a simple BCP 47 tag of at most 35 characters and an
+digits; false disables grouping. Compact, currency, and percent do too. Locale and timeZone default to the device's. Overrides accept a simple BCP 47 tag of at most 35 characters and an
 IANA zone identifier of at most 128 characters. Shape validation does not prove
 engine support for a locale or zone.
 
@@ -73,7 +72,6 @@ undefined for invalid inputs; its resolver converts that to an empty string.
 Relative formatting reads an injected nowMs snapshot, never the clock. Choose the largest elapsed threshold not exceeding abs(input-nowMs):
 year=365 days, month=30 days, day=24 hours, hour=60 minutes, minute=60 seconds,
 second=1000 ms. Truncate toward zero. Under one second uses localized "now".
-There are no weeks or calendar-month arithmetic.
 
 `prototype_format_v1` gates either derive map, including empty maps, before show
 or the complete patch result. Shared `derive/formatters.json` cases define parity: normalize
@@ -131,7 +129,7 @@ keys use group-scoped glassEffectID, independently of visibility-pair matching;
 nested groups establish a new namespace. Keys must be unique within the nearest
 group and cannot also belong to visibility pairs. Under repeat, including on the
 repeated node, a glass shared key must be a template referencing repeat.key.
-Existing capability rules still apply. `glassUnion` is a 1–64 character ASCII id token
+`glassUnion` is a 1–64 character ASCII id token
 (`[A-Za-z_][A-Za-z0-9_]*`); `glassTransition` is matchedGeometry, materialize or
 identity. Both require a base glass surface on the same node.
 `backgroundExtension: true` is image-only and does not require the image itself
@@ -197,7 +195,8 @@ process kills. The journal records the package's last update time and is discard
 one, so `adb install -r` (which keeps app storage) starts a fresh identity and ledger. Clearing app
 data deletes it. Saves run off the main thread, at most once per event; a frame reaches the host
 only after the write of the state it exposes completes. A snapshot over the 4 MiB journal limit
-evicts its oldest pending events as dropped, so the ledger always saves.
+evicts its oldest pending events as dropped, so the ledger still saves; a save that still fails is
+logged and keeps the previous file.
 
 `hello_result` reports identity and an optional `showingId`, which changes when the Activity
 mounts a new runtime. A same-process remount clears the dismissal and keeps pending events. Older
@@ -234,8 +233,8 @@ overflow or blocked writes close the peer, and events and requests continue with
   by device id. Each record holds appId, slug, platform, label, spec sha256, template, signer,
   installedAt and expiresAt. Writes are serialized and atomic. A corrupt file or
   record is skipped with a warning. An install writes its record and new expiresAt once the package
-  is on the device, before permissions apply. A permission failure then reports the app installed
-  without its permissions, and the sweep still sees the current TTL.
+  is on the device, before permissions apply. Grants and revokes run one at a time without
+  rollback, so a permission failure can leave them partly applied; the sweep still sees the current TTL.
 - **Lifecycle.** `ttlHours` defaults to 72, accepts 0 to 720, and 0 means no expiry. Re-installing
   a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
   uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs

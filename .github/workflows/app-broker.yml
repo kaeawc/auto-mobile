@@ -1,0 +1,121 @@
+# waaagh App broker (kaeawc/waaagh#268): acts as the waaagh-bot GitHub App for a cloud session that
+# must never see the App's key. A session dispatches it (scripts/app-broker.sh) with op=status to
+# post the `orchestrate/review` commit status on a PR's head, or op=merge to merge that PR at that
+# head once the App's own `orchestrate/review` there is success. The App token is minted here from
+# this repository's GH_APP_ID / GH_APP_PRIVATE_KEY secrets, scoped to this repository and to the one
+# permission the write needs, used once and never printed or passed on. Reads use the workflow's
+# own read-only GITHUB_TOKEN.
+# Callers: the actors listed in the APP_BROKER_ACTORS repository variable (comma-separated logins),
+# else the repository owner. Copy this file unchanged to .github/workflows/app-broker.yml in each
+# target repository; waaagh's copy is tested to match it.
+name: app-broker
+
+on:
+  workflow_dispatch:
+    inputs:
+      op:
+        description: "status (post orchestrate/review) or merge (merge at sha once it is success)"
+        required: true
+        type: choice
+        options: [status, merge]
+      pr:
+        description: "Pull request number"
+        required: true
+        type: string
+      sha:
+        description: "The PR head commit (40 hex characters) the status or merge is for"
+        required: true
+        type: string
+      state:
+        description: "op=status: the status state"
+        required: false
+        type: choice
+        options: [success, failure, pending, error]
+        default: success
+      description:
+        description: "op=status: the status description (at most 140 characters)"
+        required: false
+        type: string
+        default: ""
+      method:
+        description: "op=merge: the merge method"
+        required: false
+        type: choice
+        options: [squash, merge, rebase]
+        default: squash
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: read
+
+concurrency:
+  group: app-broker-${{ github.event.inputs.pr }}
+  cancel-in-progress: false
+
+jobs:
+  broker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_REPO: ${{ github.repository }}
+      ACTOR: ${{ github.actor }}
+      ALLOWED: ${{ vars.APP_BROKER_ACTORS }}
+      OWNER: ${{ github.repository_owner }}
+      OP: ${{ github.event.inputs.op }}
+      PR: ${{ github.event.inputs.pr }}
+      SHA: ${{ github.event.inputs.sha }}
+      STATE: ${{ github.event.inputs.state }}
+      DESCRIPTION: ${{ github.event.inputs.description }}
+      METHOD: ${{ github.event.inputs.method }}
+    steps:
+      - name: Check the caller and the request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          allowed=${ALLOWED:-$OWNER}
+          case ",${allowed// /}," in *",$ACTOR,"*) ;; *) echo "::error::$ACTOR may not use the broker (APP_BROKER_ACTORS: $allowed)"; exit 1 ;; esac
+          [[ "$PR" =~ ^[1-9][0-9]*$ ]] || { echo "::error::pr must be a number"; exit 1; }
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be 40 hex characters"; exit 1; }
+          ((${#DESCRIPTION} <= 140)) || { echo "::error::description is over 140 characters"; exit 1; }
+          pr=$(gh api "repos/$GH_REPO/pulls/$PR")
+          [[ "$(jq -r .state <<<"$pr")" == open ]] || { echo "::error::PR $PR is not open"; exit 1; }
+          head=$(jq -r .head.sha <<<"$pr")
+          [[ "$head" == "$SHA" ]] || { echo "::error::PR $PR head is $head, not $SHA: nothing done"; exit 1; }
+          [[ "$(jq -r .head.repo.full_name <<<"$pr")" == "$GH_REPO" ]] || { echo "::error::PR $PR comes from a fork: nothing done"; exit 1; }
+
+      - name: Mint the App token for this repository
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-statuses: ${{ github.event.inputs.op == 'status' && 'write' || '' }}
+          permission-contents: ${{ github.event.inputs.op == 'merge' && 'write' || '' }}
+          permission-pull-requests: ${{ github.event.inputs.op == 'merge' && 'write' || '' }}
+
+      - name: Post the orchestrate/review status
+        if: github.event.inputs.op == 'status'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/$GH_REPO/statuses/$SHA" -f state="$STATE" -f context=orchestrate/review \
+            -f description="$DESCRIPTION" --jq '"posted \(.context)=\(.state) on \(.sha // "'"$SHA"'") by \(.creator.login)"'
+
+      - name: Merge at the reviewed head
+        if: github.event.inputs.op == 'merge'
+        env:
+          READ_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          BOT: ${{ steps.app.outputs.app-slug }}[bot]
+        run: |
+          set -euo pipefail
+          # The newest orchestrate/review at this head must be success, posted by this App.
+          latest=$(GH_TOKEN=$READ_TOKEN gh api --paginate "repos/$GH_REPO/commits/$SHA/statuses?per_page=100" |
+            jq -s -c '[.[][] | select(.context == "orchestrate/review")] | sort_by(.updated_at // .created_at) | last // {}')
+          [[ "$(jq -r .state <<<"$latest")" == success ]] || { echo "::error::orchestrate/review at $SHA is not success: $(jq -r '.state // "absent"' <<<"$latest")"; exit 1; }
+          [[ "$(jq -r .creator.login <<<"$latest")" == "$BOT" ]] || { echo "::error::orchestrate/review at $SHA was posted by $(jq -r .creator.login <<<"$latest"), not $BOT"; exit 1; }
+          gh api -X PUT "repos/$GH_REPO/pulls/$PR/merge" -f sha="$SHA" -f merge_method="$METHOD" --jq '"merged=\(.merged) sha=\(.sha) \(.message)"'

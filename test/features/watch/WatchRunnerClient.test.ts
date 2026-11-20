@@ -102,7 +102,7 @@ describe("watch runner protocol", () => {
       client.close();
     },
   );
-  test("times out without real sleeps and ignores a late reply", async () => {
+  test("a sent command times out with a recovery hint and ignores a late reply", async () => {
     const { client, socket, timer } = arrange();
     socket.connected();
     const pending = client.request({ type: "home" });
@@ -111,13 +111,18 @@ describe("watch runner protocol", () => {
       (error: unknown) => error,
     );
     await drainMicrotasks(2);
+    expect(socket.sent).toEqual([{ type: "home", requestId: "1" }]);
     timer.advanceTime(50);
-    expect(String(await rejection)).toContain("timed out");
+    const error = await rejection;
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(String(error)).toContain(
+      "Watch runner home timed out after 50ms. A system screen such as the Smart Stack widget editor or gallery may be blocking the runner; call launchApp or press the home button to recover.",
+    );
     socket.receive({ type: "home_result", requestId: socket.sent[0].requestId, success: true });
     expect(timer.getSleepHistory()).toEqual([]);
     client.close();
   });
-  test("a late handshake cannot send a timed-out command", async () => {
+  test("a handshake timeout uses the original message and prevents a late send", async () => {
     const { client, socket, timer } = arrange();
     const pending = client.request({ type: "home" });
     const rejection = pending.then(
@@ -125,10 +130,13 @@ describe("watch runner protocol", () => {
       (error: unknown) => error,
     );
     timer.advanceTime(50);
-    expect(String(await rejection)).toContain("timed out");
+    const error = await rejection;
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error).toHaveProperty("message", "Watch runner home timed out after 50ms");
     socket.connected();
     await drainMicrotasks(2);
     expect(socket.sent).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
     client.close();
   });
   test("aborts waiting commands before dispatch and rejects pending commands on disconnect", async () => {

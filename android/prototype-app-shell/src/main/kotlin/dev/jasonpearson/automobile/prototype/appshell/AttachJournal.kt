@@ -201,7 +201,9 @@ internal class FileAttachJournal(
     }
     if (bytes.size > maxBytes) throw IOException("Attach journal exceeds its size limit")
     if (pending.size < state.pending.size) {
-      log("Attach journal dropped ${state.pending.size - pending.size} oldest pending events to fit")
+      log(
+        "Attach journal dropped ${state.pending.size - pending.size} oldest pending events to fit",
+      )
     }
     return bytes
   }

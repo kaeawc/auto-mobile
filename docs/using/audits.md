@@ -68,7 +68,8 @@ configured thresholds. When `appId` is not in the foreground, the result lists i
 memory snapshot of `appId`.
 
 Each result has `passed`, its metrics and its violations; `failed` is set when `failOn` matched.
-When the app rendered no frames during the check (an idle screen), the frame-time percentiles
+Frame-time percentiles and jank counts both cover only the frames rendered during the check, not
+frames from app launch or earlier screens. When the app rendered no frames during the check (an idle screen), the frame-time percentiles
 `p50Ms`–`p99Ms` are null and `metrics.frameTimeUnmeasured` says why. AutoMobile then skips the
 frame-time check, so it does not fail the call. For raw captures use `performanceTrace`,
 `captureTrace`, `measureStartup` or `heapDump`.

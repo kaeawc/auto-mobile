@@ -39,6 +39,14 @@
   <string name="share">Share</string>
   <!-- Title of the dialog warning about sensitive data before sharing. -->
   <string name="share_warning_title">Review sensitive prototype data</string>
+  <!-- Share warning line; %1$s is a technical JSON path in the prototype, which must not be translated. -->
+  <string name="share_warning_credential_header">Credential header at %1$s</string>
+  <!-- Share warning line; %1$s is a technical JSON path in the prototype, which must not be translated. -->
+  <string name="share_warning_credential_query">Credential in a link query at %1$s</string>
+  <!-- Share warning line; %1$s is a technical JSON path in the prototype, which must not be translated. -->
+  <string name="share_warning_private_host">Private network address at %1$s</string>
+  <!-- Share warning line for any other sensitive value; %1$s is a technical JSON path, which must not be translated. -->
+  <string name="share_warning_other">Sensitive value at %1$s</string>
   <!-- Destructive action in the library menu and delete confirmation dialog. -->
   <string name="delete">Delete</string>
   <!-- Title of the delete confirmation dialog. -->
@@ -59,6 +67,38 @@
   <string name="open_prototype">Open %1$s</string>
   <!-- Import screen error line; %1$s is a technical path or token, %2$s the reason. Translators may reorder the placeholders. -->
   <string name="import_rejected">%1$s: %2$s</string>
+  <!-- Import error reason: the app received a link or file it may not read (not an external content URI). -->
+  <string name="import_reason_uri_required">ProtoViewer can only import files shared from another app.</string>
+  <!-- Import error reason: the prototype file or one of its parts exceeds the size limit. -->
+  <string name="import_reason_too_large">This prototype is too large to import.</string>
+  <!-- Import error reason: reading or saving the file failed. -->
+  <string name="import_reason_unreadable">This prototype could not be read or saved.</string>
+  <!-- Import error reason: an image in the prototype has unsupported dimensions. -->
+  <string name="import_reason_invalid_image">An image in this prototype has invalid dimensions.</string>
+  <!-- Import error reason: the screen description (spec) in the prototype is invalid. -->
+  <string name="import_reason_spec_invalid">The screen description in this prototype is invalid.</string>
+  <!-- Import error reason: the file is not a valid prototype archive. -->
+  <string name="import_reason_archive_invalid">This file is not a valid prototype archive.</string>
+  <!-- Import error reason: a checksum in the archive does not match, so the file may be damaged. -->
+  <string name="import_reason_integrity">This prototype file is damaged or was changed after export.</string>
+  <!-- Import error reason: the manifest in the prototype archive is invalid. -->
+  <string name="import_reason_manifest_invalid">The manifest in this prototype archive is invalid.</string>
+  <!-- Import error reason: an image or font in the prototype is missing or has the wrong type. -->
+  <string name="import_reason_asset_invalid">An image or font in this prototype is missing or invalid.</string>
+  <!-- Import error reason: the prototype uses custom shaders, which ProtoViewer refuses. -->
+  <string name="import_reason_custom_shaders">This prototype uses custom shaders, which ProtoViewer does not run.</string>
+  <!-- Import error reason: the saved prototype could not be found. -->
+  <string name="import_reason_not_found">The prototype could not be found.</string>
+  <!-- Import error reason: saved library data is damaged. -->
+  <string name="import_reason_corrupt">The saved prototype data is damaged.</string>
+  <!-- Import error reason: device storage failed while saving. -->
+  <string name="import_reason_storage">ProtoViewer could not save the prototype to storage.</string>
+  <!-- Import error reason: the library has reached its size or item limit. -->
+  <string name="import_reason_library_full">The library is full. Delete a prototype and try again.</string>
+  <!-- Import error reason: fallback for any other invalid prototype. -->
+  <string name="import_reason_invalid">This prototype is invalid.</string>
+  <!-- Library label given to an imported prototype that has no name of its own. -->
+  <string name="default_import_label">Imported prototype</string>
   <!-- Import capability error; %1$s is a comma-separated list of technical capability names, which must not be translated. -->
   <string name="import_requires_capabilities">This prototype needs a newer ProtoViewer. Missing capabilities: %1$s</string>
   <!-- Import screen button opening the ProtoViewer Play Store page; also its accessible name. -->

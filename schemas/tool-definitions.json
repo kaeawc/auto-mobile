@@ -832,7 +832,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "State-preserving background-process kill for saved-state restoration tests (background, killBackgrounded; iOS kills with SIGKILL after Home); trimMemory (Android only) sends onTrimMemory(level) to the running app without killing it.",
+    "description": "State-preserving background-process kill for saved-state restoration tests (background, killBackgrounded; iOS kills with SIGKILL after Home); trimMemory sends onTrimMemory(level) on Android, or with level memoryWarning simulates a memory warning for the foreground app on an iOS simulator, without killing it.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -848,7 +848,7 @@
           "enum": ["background", "killBackgrounded", "trimMemory"]
         },
         "level": {
-          "description": "onTrimMemory level to send; required for trimMemory, rejected otherwise",
+          "description": "Trim level; required for trimMemory, rejected otherwise. Android: an onTrimMemory level. iOS simulator: memoryWarning",
           "type": "string",
           "enum": [
             "RUNNING_MODERATE",
@@ -857,7 +857,8 @@
             "UI_HIDDEN",
             "BACKGROUND",
             "MODERATE",
-            "COMPLETE"
+            "COMPLETE",
+            "memoryWarning"
           ]
         },
         "platform": {
@@ -909,7 +910,14 @@
         },
         "mechanism": {
           "type": "string",
-          "enum": ["home", "am-kill", "am-send-trim-memory", "ios-sigkill", "unsupported"]
+          "enum": [
+            "home",
+            "am-kill",
+            "am-send-trim-memory",
+            "ios-sigkill",
+            "simulator-memory-warning-file",
+            "unsupported"
+          ]
         },
         "trimLevel": {
           "type": "string",
@@ -920,7 +928,8 @@
             "UI_HIDDEN",
             "BACKGROUND",
             "MODERATE",
-            "COMPLETE"
+            "COMPLETE",
+            "memoryWarning"
           ]
         },
         "userId": {
@@ -958,6 +967,7 @@
           "enum": [
             "app_not_running",
             "app_in_foreground",
+            "app_not_foreground",
             "background_not_verified",
             "kill_failed",
             "ambiguous_user",
@@ -10299,7 +10309,6 @@
               "getDataStore",
               "getDeepLinks",
               "getDeviceState",
-              "getIosSimulatorCapabilities",
               "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",
@@ -10474,7 +10483,6 @@
               "getDataStore",
               "getDeepLinks",
               "getDeviceState",
-              "getIosSimulatorCapabilities",
               "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",
@@ -11837,118 +11845,6 @@
     "_meta": {
       "automobile/deviceReadOnly": true,
       "automobile/requires": ["platform:android", "platform:ios"]
-    }
-  },
-  {
-    "name": "getIosSimulatorCapabilities",
-    "title": "Get iOS Simulator Capabilities",
-    "annotations": {
-      "readOnlyHint": true
-    },
-    "description": "Discover biometric capabilities for a selected iOS Simulator device type and runtime.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "deviceType": {
-          "type": "string",
-          "minLength": 1,
-          "description": "CoreSimulator device-type identifier selected from automobile:devices/images."
-        },
-        "runtime": {
-          "type": "string",
-          "minLength": 1,
-          "description": "CoreSimulator runtime identifier selected from automobile:devices/images."
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        }
-      },
-      "required": ["deviceType", "runtime"],
-      "additionalProperties": false
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "schemaVersion": {
-          "type": "number",
-          "const": 1
-        },
-        "platform": {
-          "type": "string",
-          "const": "ios"
-        },
-        "deviceType": {
-          "type": "string"
-        },
-        "runtime": {
-          "type": "string"
-        },
-        "selection": {
-          "type": "object",
-          "properties": {
-            "valid": {
-              "type": "boolean"
-            },
-            "reason": {
-              "type": "string"
-            }
-          },
-          "required": ["valid"],
-          "additionalProperties": false
-        },
-        "capabilities": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string",
-                "enum": [
-                  "biometrics.enrollment",
-                  "biometrics.match",
-                  "biometrics.fail",
-                  "biometrics.cancel",
-                  "biometrics.error"
-                ]
-              },
-              "state": {
-                "type": "string",
-                "enum": ["supported", "partial", "unsupported"]
-              },
-              "reason": {
-                "type": "string"
-              },
-              "prerequisites": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            },
-            "required": ["id", "state", "reason"],
-            "additionalProperties": false
-          }
-        }
-      },
-      "required": [
-        "schemaVersion",
-        "platform",
-        "deviceType",
-        "runtime",
-        "selection",
-        "capabilities"
-      ],
-      "additionalProperties": {}
-    },
-    "_meta": {
-      "automobile/deviceReadOnly": true,
-      "automobile/requires": []
     }
   },
   {
@@ -36141,7 +36037,6 @@
               "getDataStore",
               "getDeepLinks",
               "getDeviceState",
-              "getIosSimulatorCapabilities",
               "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",
@@ -49775,7 +49670,6 @@
             "getDataStore",
             "getDeepLinks",
             "getDeviceState",
-            "getIosSimulatorCapabilities",
             "getLogs",
             "getNavigationGraph",
             "getNetworkGraph",
@@ -49909,7 +49803,6 @@
               "getDataStore",
               "getDeepLinks",
               "getDeviceState",
-              "getIosSimulatorCapabilities",
               "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",

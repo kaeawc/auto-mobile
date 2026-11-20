@@ -161,3 +161,108 @@ export function parseProcStat(
   }
   return { processTicks: utime + stime, startTimeTicks };
 }
+
+/** One gfxinfo `HISTOGRAM:` line: frame-time bucket (ms, ascending) and its cumulative count. */
+export type FrameHistogram = ReadonlyArray<{ bucketMs: number; count: number }>;
+
+/** Frame-time percentiles over the audit window, from a histogram delta (#18802). */
+export interface WindowFramePercentiles {
+  frames: number;
+  p50Ms: number;
+  p90Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+}
+
+/**
+ * Parse the frame-time `HISTOGRAM:` line (`5ms=0 6ms=3 ...`). The `GPU HISTOGRAM:` line is a
+ * different measurement and is not matched. Returns null when the dump prints no histogram.
+ */
+export function parseFrameHistogram(gfxinfo: string): FrameHistogram | null {
+  const line = gfxinfo.match(/^[ \t]*HISTOGRAM:(.*)$/m);
+  if (!line) {
+    return null;
+  }
+  const buckets = [...line[1].matchAll(/(\d+)ms=(\d+)/g)].map((match) => ({
+    bucketMs: parseInt(match[1], 10),
+    count: parseInt(match[2], 10),
+  }));
+  return buckets.length > 0 ? buckets : null;
+}
+
+/** The `Stats since: <ns>` epoch of a gfxinfo dump; it changes when the stats are reset. */
+export function parseStatsSince(gfxinfo: string): string | null {
+  const match = gfxinfo.match(/^[ \t]*Stats since:[ \t]*(\d+)ns/m);
+  return match ? match[1] : null;
+}
+
+/**
+ * The frames rendered between two histogram readings. Null when the readings do not share
+ * bucket bounds. A bucket that went down means the stats were reset between the readings,
+ * so the end reading alone lies inside the window (as in `counterDelta`).
+ */
+export function histogramDelta(start: FrameHistogram, end: FrameHistogram): FrameHistogram | null {
+  if (
+    start.length !== end.length ||
+    start.some((bucket, index) => bucket.bucketMs !== end[index].bucketMs)
+  ) {
+    return null;
+  }
+  if (start.some((bucket, index) => end[index].count < bucket.count)) {
+    return end;
+  }
+  return end.map((bucket, index) => ({
+    bucketMs: bucket.bucketMs,
+    count: bucket.count - start[index].count,
+  }));
+}
+
+/** gfxinfo's own percentile walk (hwui JankTracker::findPercentile) over a histogram. */
+function histogramPercentile(
+  histogram: FrameHistogram,
+  frames: number,
+  percentile: number,
+): number {
+  let remaining = frames - Math.floor((percentile * frames) / 100);
+  for (let index = histogram.length - 1; index >= 0; index--) {
+    remaining -= histogram[index].count;
+    if (remaining <= 0) {
+      return histogram[index].bucketMs;
+    }
+  }
+  return histogram[0].bucketMs;
+}
+
+/**
+ * Frame-time percentiles of the frames rendered between two gfxinfo dumps, so they describe
+ * the same window as the jank counters. Returns null when either dump has no histogram or the
+ * histograms cannot be compared; `frames` is 0 when the window rendered nothing.
+ */
+export function computeWindowFramePercentiles(
+  startGfxinfo: string,
+  endGfxinfo: string,
+): WindowFramePercentiles | { frames: 0 } | null {
+  const start = parseFrameHistogram(startGfxinfo);
+  const end = parseFrameHistogram(endGfxinfo);
+  const startEpoch = parseStatsSince(startGfxinfo);
+  const endEpoch = parseStatsSince(endGfxinfo);
+  // A new `Stats since:` means the stats were reset between the readings (the live
+  // PerformanceMonitor resets them): the closing histogram then holds only window frames, even
+  // when its counts are not below the opening ones.
+  const reset = startEpoch !== null && endEpoch !== null && startEpoch !== endEpoch;
+  const window = start && end ? (reset ? end : histogramDelta(start, end)) : null;
+  if (!window) {
+    return null;
+  }
+  const frames = window.reduce((sum, bucket) => sum + bucket.count, 0);
+  if (frames === 0) {
+    return { frames: 0 };
+  }
+  return {
+    frames,
+    p50Ms: histogramPercentile(window, frames, 50),
+    p90Ms: histogramPercentile(window, frames, 90),
+    p95Ms: histogramPercentile(window, frames, 95),
+    p99Ms: histogramPercentile(window, frames, 99),
+  };
+}

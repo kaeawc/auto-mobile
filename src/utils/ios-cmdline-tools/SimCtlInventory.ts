@@ -7,6 +7,7 @@ import {
   AppleDeviceRuntime,
   AppleDeviceType,
   normalizeIosVersion,
+  compareRuntimeGenerality,
   pickHighestRuntime,
   isDeviceAvailable,
   SimulatorList,
@@ -304,7 +305,11 @@ export class SimCtlInventory {
         }
         return !max || compareStrictNumericVersions(version, max) <= 0;
       })
-      .sort((left, right) => compareStrictNumericVersions(right.version, left.version));
+      .sort(
+        (left, right) =>
+          compareStrictNumericVersions(right.version, left.version) ||
+          compareRuntimeGenerality(right, left),
+      );
 
     if (matching.length > 0) {
       logger.debug(

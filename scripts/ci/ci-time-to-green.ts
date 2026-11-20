@@ -81,6 +81,13 @@ function fileCache(dir: string): CacheStore {
   };
 }
 
+function describeCalls(api: BudgetedGhApi): string {
+  return [...api.callsByKind]
+    .sort((a, b) => b[1] - a[1])
+    .map(([kind, count]) => `${kind}=${count}`)
+    .join(", ");
+}
+
 async function resolveRepo(options: CliOptions): Promise<string> {
   if (options.repo) {
     return options.repo;
@@ -133,10 +140,12 @@ async function loadBundle(options: CliOptions): Promise<Bundle> {
         circleci: options.circleci,
         circleciMainPushes: options.circleciMainPushes,
         circleciMacosMatcher,
+        partialOnStop: options.partialOnStop,
       },
       requiredChecks,
     );
   } catch (error) {
+    console.error(`API calls by kind: ${describeCalls(api)}`);
     if (error instanceof FetchStoppedError) {
       throw new FetchStoppedError(
         error.reason,
@@ -145,7 +154,14 @@ async function loadBundle(options: CliOptions): Promise<Bundle> {
     }
     throw error;
   }
-  console.error(`fetched with ${api.calls} API calls (cache: ${cacheDir})`);
+  if (bundle.meta.partial) {
+    console.error(
+      `partial: ${bundle.meta.partial.message}; ${bundle.meta.partial.omittedHeadShas} head SHAs left out (cache: ${cacheDir}; rerun with the same --cache-dir to resume)`,
+    );
+  }
+  console.error(
+    `fetched with ${api.calls} API calls (cache: ${cacheDir}); by kind: ${describeCalls(api)}`,
+  );
   if (options.saveBundle) {
     mkdirSync(dirname(options.saveBundle), { recursive: true });
     writeFileSync(options.saveBundle, JSON.stringify(bundle));
@@ -164,7 +180,7 @@ async function main(argv: readonly string[]): Promise<number> {
   process.stdout.write(
     options.json ? `${JSON.stringify(report, null, 2)}\n` : renderMarkdown(report),
   );
-  return EXIT_OK;
+  return report.partial ? EXIT_STOPPED : EXIT_OK;
 }
 
 main(process.argv.slice(2)).then(

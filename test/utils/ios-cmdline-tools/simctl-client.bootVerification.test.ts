@@ -1606,6 +1606,32 @@ describe("SimCtlClient boot self-verification", () => {
     expect(bootstatusCalls(harness.calls).length).toBe(1);
   });
 
+  // #14116: host resource exhaustion and a launchd_sim bind failure are reported with their
+  // recovery; boot never relaunches CoreSimulatorService or erases on its own.
+  test.each([
+    [
+      "host resource exhaustion",
+      "The current system settings are not sufficient to allow booting additional simulators: maxFiles",
+      "killall -9 com.apple.CoreSimulator.CoreSimulatorService",
+    ],
+    ["a launchd_sim bind failure", "launchd_sim could not bind to session", "launchd_sim"],
+  ])("reports %s with its recovery instead of retrying", async (_name, text, guidance) => {
+    const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
+    harness.setStates(["Shutdown"]);
+    harness.failBootStatusWith(coreSimulator405Error(text));
+
+    const result = await harness.timer
+      .resolvePromise(harness.simctl.startSimulator(UDID, 5000))
+      .catch((error: unknown) => error);
+
+    expect(result).toBeInstanceOf(ActionableError);
+    expect(String(result)).toContain(guidance);
+    expect(harness.calls.some((call) => call.includes("killall") || call.includes(" erase "))).toBe(
+      false,
+    );
+    expect(bootstatusCalls(harness.calls).length).toBe(1);
+  });
+
   // Issue #6411: CoreSimulator also emits the 405 with the domain/code appended
   // *inline after* the reported state ("...current state: Booted (domain=...,
   // code=405)"). A greedy state capture folded that trailing clause into the

@@ -68,129 +68,128 @@ fields identified by secure metadata, always redact their values.
 
 ## Matrix
 
-| Tool                          | Status            | Notes                                                                                                                                            |
-| ----------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `accessibility`               | not-supported     | Needs runner work.                                                                                                                               |
-| `accessibilityAction`         | refused-by-design | Android-only (TalkBack and Switch Access actions).                                                                                               |
-| `accessibilityAudit`          | not-supported     | Needs runner work.                                                                                                                               |
-| `accessibilityFocus`          | not-supported     | Needs runner work.                                                                                                                               |
-| `ambient`                     | refused-by-design | Wear OS only.                                                                                                                                    |
-| `appLifecycle`                | not-supported     |                                                                                                                                                  |
-| `backgroundWork`              | refused-by-design | Android-only.                                                                                                                                    |
-| `barrier`                     | not-supported     | Plan-only multi-device primitive.                                                                                                                |
-| `biometricAuth`               | refused-by-design | Apple TV has no biometric sensor.                                                                                                                |
-| `captureAudio`                | not-supported     |                                                                                                                                                  |
-| `captureTrace`                | not-supported     | Needs runner work.                                                                                                                               |
-| `changeLocalization`          | not-supported     |                                                                                                                                                  |
-| `clearKeyValueFile`           | not-supported     |                                                                                                                                                  |
-| `clearMockNetwork`            | not-supported     |                                                                                                                                                  |
-| `clipboard`                   | refused-by-design | The tvOS simulator runtime has no pasteboard service; the refusal says so.                                                                       |
-| `compareScreenshot`           | pass              | Record and compare via `simctl io` screenshots.                                                                                                  |
-| `crashApp`                    | pass              | `simctl spawn launchctl kill` in the `system/` domain (tvOS app services are not under `user/<uid>/`).                                           |
-| `criticalSection`             | not-supported     | Plan-only multi-device primitive.                                                                                                                |
-| `deleteDevice`                | pass              | Destroy with verified inventory absence.                                                                                                         |
-| `deleteKeychainItem`          | not-supported     |                                                                                                                                                  |
-| `deviceSnapshot`              | not-supported     |                                                                                                                                                  |
-| `displayConfig`               | refused-by-design | The tvOS simulator runtime has no appearance or content-size service; the refusal says so.                                                       |
-| `displayProfile`              | refused-by-design | Android-only.                                                                                                                                    |
-| `dragAndDrop`                 | refused-by-design | No touch surface.                                                                                                                                |
-| `dragPath`                    | refused-by-design | No touch surface.                                                                                                                                |
-| `executePlan`                 | pass              |                                                                                                                                                  |
-| `explore`                     | pass              | Moves focus and selects. Only works when the embedded-SDK tool set is enabled; otherwise the call fails with `Unknown tool: explore` ([#17528]). |
-| `exportPlan`                  | host-only         |                                                                                                                                                  |
-| `focusNavigate`               | pass              |                                                                                                                                                  |
-| `getAndroid`                  | host-only         | Android AVD discovery.                                                                                                                           |
-| `getApple`                    | host-only         | iOS Simulator discovery.                                                                                                                         |
-| `getAppPermissions`           | refused-by-design | simctl has no permission read verb; the refusal says so. `setAppPermissions` covers the write side.                                              |
-| `getDataStore`                | refused-by-design | Android-only (Jetpack DataStore).                                                                                                                |
-| `getDeepLinks`                | pass              |                                                                                                                                                  |
-| `getDeviceState`              | not-supported     |                                                                                                                                                  |
-| `getIosSimulatorCapabilities` | host-only         |                                                                                                                                                  |
-| `getLogs`                     | pass              | `simctl spawn log show`; `appId` is required and Android-only filters are ignored with a warning.                                                |
-| `getNavigationGraph`          | not-supported     |                                                                                                                                                  |
-| `getNetworkGraph`             | not-supported     |                                                                                                                                                  |
-| `getNotificationPolicy`       | not-supported     |                                                                                                                                                  |
-| `getPreference`               | not-supported     |                                                                                                                                                  |
-| `heapDump`                    | refused-by-design | Android-only.                                                                                                                                    |
-| `highlight`                   | not-supported     |                                                                                                                                                  |
-| `hitTest`                     | refused-by-design | No touch surface.                                                                                                                                |
-| `homeScreen`                  | pass              | Presses the Siri Remote `home` button (same press as `pressButton home`); the result reports the press, not a checked home screen.               |
-| `hoverAt`                     | refused-by-design | No stylus or pointer.                                                                                                                            |
-| `identifyInteractions`        | not-supported     | Also behind the debug flag.                                                                                                                      |
-| `injectAudioInput`            | not-supported     |                                                                                                                                                  |
-| `inspectPackageSigning`       | not-supported     |                                                                                                                                                  |
-| `installApp`                  | pass              |                                                                                                                                                  |
-| `keyboard`                    | not-supported     |                                                                                                                                                  |
-| `killDevice`                  | pass              |                                                                                                                                                  |
-| `killProfile`                 | refused-by-design | Android-only.                                                                                                                                    |
-| `launchApp`                   | pass              |                                                                                                                                                  |
-| `listApps`                    | pass              |                                                                                                                                                  |
-| `listDataStores`              | refused-by-design | Android-only (Jetpack DataStore).                                                                                                                |
-| `listDeviceImages`            | pass              |                                                                                                                                                  |
-| `listDevices`                 | pass              | Filters with `platform: "tvos"`.                                                                                                                 |
-| `manufacturerProfile`         | refused-by-design | Android-only.                                                                                                                                    |
-| `measureStartup`              | refused-by-design | Available on Android and iOS Simulator.                                                                                                          |
-| `mediaSession`                | refused-by-design | Android-only.                                                                                                                                    |
-| `mockNetwork`                 | not-supported     |                                                                                                                                                  |
-| `multiTouch`                  | refused-by-design | No touch surface.                                                                                                                                |
-| `navigateTo`                  | not-supported     |                                                                                                                                                  |
-| `network`                     | not-supported     |                                                                                                                                                  |
-| `observe`                     | pass              | Reports `focusedElement`. Typed values are withheld while the keyboard is open; see the observe text policy.                                     |
-| `openLink`                    | pass              | Opens declared app schemes. A web URL or an undeclared scheme fails with the documented error.                                                   |
-| `performanceAudit`            | not-supported     | Needs runner work.                                                                                                                               |
-| `performanceTrace`            | not-supported     | Needs runner work.                                                                                                                               |
-| `phoneCall`                   | refused-by-design | No telephony.                                                                                                                                    |
-| `pinchOn`                     | refused-by-design | No touch surface.                                                                                                                                |
-| `portReverse`                 | refused-by-design | Android-only.                                                                                                                                    |
-| `postNotification`            | pass              | `simctl push` to the app named by `appId` (required).                                                                                            |
-| `pressButton`                 | pass              | Any remote button long-presses with `durationMs` (100–10000 ms) if the runner lists `press_button_hold`. No `steps` or touch-surface swipes.     |
-| `prototype`                   | not-supported     |                                                                                                                                                  |
-| `provisionDevice`             | pass              | Boots with readiness `none`; readiness `automation` also starts the runner, as `startDevice` does.                                               |
-| `putAppFile`                  | not-supported     |                                                                                                                                                  |
-| `recentApps`                  | not-supported     |                                                                                                                                                  |
-| `reconcileDeviceResources`    | not-supported     |                                                                                                                                                  |
-| `recordDeviceGestures`        | not-supported     |                                                                                                                                                  |
-| `recordToolCalls`             | host-only         |                                                                                                                                                  |
-| `removeKeyValue`              | not-supported     |                                                                                                                                                  |
-| `resetAppLogs`                | not-supported     |                                                                                                                                                  |
-| `resetKeychain`               | not-supported     |                                                                                                                                                  |
-| `rotaryScroll`                | refused-by-design | Wear OS only.                                                                                                                                    |
-| `rotate`                      | refused-by-design | No orientation.                                                                                                                                  |
-| `rotateCrown`                 | refused-by-design | watchOS only.                                                                                                                                    |
-| `selectAllText`               | not-supported     |                                                                                                                                                  |
-| `sendBroadcast`               | refused-by-design | Android-only.                                                                                                                                    |
-| `sendKeys`                    | pass              | Requires a focused keyboard (`pressButton select` on the field); otherwise `no focused text input`. Read plain values after close.               |
-| `sendSms`                     | refused-by-design | No telephony.                                                                                                                                    |
-| `setActiveDevice`             | pass              |                                                                                                                                                  |
-| `setAppLinks`                 | refused-by-design | Android-only.                                                                                                                                    |
-| `setAppPermissions`           | pass              | `simctl privacy` grant, revoke or reset; changes are not read back (`verified: false`).                                                          |
-| `setDeviceResources`          | not-supported     |                                                                                                                                                  |
-| `setDeviceState`              | not-supported     |                                                                                                                                                  |
-| `setKeyValue`                 | not-supported     |                                                                                                                                                  |
-| `setNotificationPolicy`       | not-supported     |                                                                                                                                                  |
-| `setPosture`                  | refused-by-design | No foldable posture.                                                                                                                             |
-| `setPreference`               | not-supported     |                                                                                                                                                  |
-| `setSensor`                   | refused-by-design | Android-only.                                                                                                                                    |
-| `setToolEnabled`              | host-only         |                                                                                                                                                  |
-| `setUIState`                  | not-supported     | Also behind the debug flag.                                                                                                                      |
-| `shake`                       | refused-by-design | No motion gesture.                                                                                                                               |
-| `siri`                        | not-supported     |                                                                                                                                                  |
-| `snapshotOf`                  | not-supported     |                                                                                                                                                  |
-| `sqlQuery`                    | not-supported     |                                                                                                                                                  |
-| `statusBar`                   | refused-by-design | The tvOS simulator runtime has no status bar override; the refusal says so.                                                                      |
-| `stopAudioInput`              | not-supported     |                                                                                                                                                  |
-| `swipeAt`                     | refused-by-design | XCUITest does not expose touch-surface swipes on tvOS; use directional presses and focus navigation.                                             |
-| `swipeOn`                     | refused-by-design | XCUITest does not expose touch-surface swipes on tvOS; use directional presses and focus navigation.                                             |
-| `systemAlerts`                | not-supported     |                                                                                                                                                  |
-| `systemTray`                  | refused-by-design | No notification shade.                                                                                                                           |
-| `tapAny`                      | refused-by-design | No touch surface; use `tapOn` or `focusNavigate`.                                                                                                |
-| `tapAt`                       | refused-by-design | No touch surface.                                                                                                                                |
-| `tapOn`                       | pass              | Moves focus to the element by text or `elementId` and selects it.                                                                                |
-| `terminateApp`                | pass              |                                                                                                                                                  |
-| `uninstallApp`                | pass              |                                                                                                                                                  |
-| `videoRecording`              | pass              | `simctl io recordVideo`, HEVC MP4.                                                                                                               |
-| `wakeAndUnlock`               | refused-by-design | No keyguard.                                                                                                                                     |
-| `windowMode`                  | refused-by-design | Android-only.                                                                                                                                    |
+| Tool                       | Status            | Notes                                                                                                                                            |
+| -------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `accessibility`            | not-supported     | Needs runner work.                                                                                                                               |
+| `accessibilityAction`      | refused-by-design | Android-only (TalkBack and Switch Access actions).                                                                                               |
+| `accessibilityAudit`       | not-supported     | Needs runner work.                                                                                                                               |
+| `accessibilityFocus`       | not-supported     | Needs runner work.                                                                                                                               |
+| `ambient`                  | refused-by-design | Wear OS only.                                                                                                                                    |
+| `appLifecycle`             | not-supported     |                                                                                                                                                  |
+| `backgroundWork`           | refused-by-design | Android-only.                                                                                                                                    |
+| `barrier`                  | not-supported     | Plan-only multi-device primitive.                                                                                                                |
+| `biometricAuth`            | refused-by-design | Apple TV has no biometric sensor.                                                                                                                |
+| `captureAudio`             | not-supported     |                                                                                                                                                  |
+| `captureTrace`             | not-supported     | Needs runner work.                                                                                                                               |
+| `changeLocalization`       | not-supported     |                                                                                                                                                  |
+| `clearKeyValueFile`        | not-supported     |                                                                                                                                                  |
+| `clearMockNetwork`         | not-supported     |                                                                                                                                                  |
+| `clipboard`                | refused-by-design | The tvOS simulator runtime has no pasteboard service; the refusal says so.                                                                       |
+| `compareScreenshot`        | pass              | Record and compare via `simctl io` screenshots.                                                                                                  |
+| `crashApp`                 | pass              | `simctl spawn launchctl kill` in the `system/` domain (tvOS app services are not under `user/<uid>/`).                                           |
+| `criticalSection`          | not-supported     | Plan-only multi-device primitive.                                                                                                                |
+| `deleteDevice`             | pass              | Destroy with verified inventory absence.                                                                                                         |
+| `deleteKeychainItem`       | not-supported     |                                                                                                                                                  |
+| `deviceSnapshot`           | not-supported     |                                                                                                                                                  |
+| `displayConfig`            | refused-by-design | The tvOS simulator runtime has no appearance or content-size service; the refusal says so.                                                       |
+| `displayProfile`           | refused-by-design | Android-only.                                                                                                                                    |
+| `dragAndDrop`              | refused-by-design | No touch surface.                                                                                                                                |
+| `dragPath`                 | refused-by-design | No touch surface.                                                                                                                                |
+| `executePlan`              | pass              |                                                                                                                                                  |
+| `explore`                  | pass              | Moves focus and selects. Only works when the embedded-SDK tool set is enabled; otherwise the call fails with `Unknown tool: explore` ([#17528]). |
+| `exportPlan`               | host-only         |                                                                                                                                                  |
+| `focusNavigate`            | pass              |                                                                                                                                                  |
+| `getAndroid`               | host-only         | Android AVD discovery.                                                                                                                           |
+| `getApple`                 | host-only         | iOS Simulator discovery.                                                                                                                         |
+| `getAppPermissions`        | refused-by-design | simctl has no permission read verb; the refusal says so. `setAppPermissions` covers the write side.                                              |
+| `getDataStore`             | refused-by-design | Android-only (Jetpack DataStore).                                                                                                                |
+| `getDeepLinks`             | pass              |                                                                                                                                                  |
+| `getDeviceState`           | not-supported     |                                                                                                                                                  |
+| `getLogs`                  | pass              | `simctl spawn log show`; `appId` is required and Android-only filters are ignored with a warning.                                                |
+| `getNavigationGraph`       | not-supported     |                                                                                                                                                  |
+| `getNetworkGraph`          | not-supported     |                                                                                                                                                  |
+| `getNotificationPolicy`    | not-supported     |                                                                                                                                                  |
+| `getPreference`            | not-supported     |                                                                                                                                                  |
+| `heapDump`                 | refused-by-design | Android-only.                                                                                                                                    |
+| `highlight`                | not-supported     |                                                                                                                                                  |
+| `hitTest`                  | refused-by-design | No touch surface.                                                                                                                                |
+| `homeScreen`               | pass              | Presses the Siri Remote `home` button (same press as `pressButton home`); the result reports the press, not a checked home screen.               |
+| `hoverAt`                  | refused-by-design | No stylus or pointer.                                                                                                                            |
+| `identifyInteractions`     | not-supported     | Also behind the debug flag.                                                                                                                      |
+| `injectAudioInput`         | not-supported     |                                                                                                                                                  |
+| `inspectPackageSigning`    | not-supported     |                                                                                                                                                  |
+| `installApp`               | pass              |                                                                                                                                                  |
+| `keyboard`                 | not-supported     |                                                                                                                                                  |
+| `killDevice`               | pass              |                                                                                                                                                  |
+| `killProfile`              | refused-by-design | Android-only.                                                                                                                                    |
+| `launchApp`                | pass              |                                                                                                                                                  |
+| `listApps`                 | pass              |                                                                                                                                                  |
+| `listDataStores`           | refused-by-design | Android-only (Jetpack DataStore).                                                                                                                |
+| `listDeviceImages`         | pass              |                                                                                                                                                  |
+| `listDevices`              | pass              | Filters with `platform: "tvos"`.                                                                                                                 |
+| `manufacturerProfile`      | refused-by-design | Android-only.                                                                                                                                    |
+| `measureStartup`           | refused-by-design | Available on Android and iOS Simulator.                                                                                                          |
+| `mediaSession`             | refused-by-design | Android-only.                                                                                                                                    |
+| `mockNetwork`              | not-supported     |                                                                                                                                                  |
+| `multiTouch`               | refused-by-design | No touch surface.                                                                                                                                |
+| `navigateTo`               | not-supported     |                                                                                                                                                  |
+| `network`                  | not-supported     |                                                                                                                                                  |
+| `observe`                  | pass              | Reports `focusedElement`. Typed values are withheld while the keyboard is open; see the observe text policy.                                     |
+| `openLink`                 | pass              | Opens declared app schemes. A web URL or an undeclared scheme fails with the documented error.                                                   |
+| `performanceAudit`         | not-supported     | Needs runner work.                                                                                                                               |
+| `performanceTrace`         | not-supported     | Needs runner work.                                                                                                                               |
+| `phoneCall`                | refused-by-design | No telephony.                                                                                                                                    |
+| `pinchOn`                  | refused-by-design | No touch surface.                                                                                                                                |
+| `portReverse`              | refused-by-design | Android-only.                                                                                                                                    |
+| `postNotification`         | pass              | `simctl push` to the app named by `appId` (required).                                                                                            |
+| `pressButton`              | pass              | Any remote button long-presses with `durationMs` (100–10000 ms) if the runner lists `press_button_hold`. No `steps` or touch-surface swipes.     |
+| `prototype`                | not-supported     |                                                                                                                                                  |
+| `provisionDevice`          | pass              | Boots with readiness `none`; readiness `automation` also starts the runner, as `startDevice` does.                                               |
+| `putAppFile`               | not-supported     |                                                                                                                                                  |
+| `recentApps`               | not-supported     |                                                                                                                                                  |
+| `reconcileDeviceResources` | not-supported     |                                                                                                                                                  |
+| `recordDeviceGestures`     | not-supported     |                                                                                                                                                  |
+| `recordToolCalls`          | host-only         |                                                                                                                                                  |
+| `removeKeyValue`           | not-supported     |                                                                                                                                                  |
+| `resetAppLogs`             | not-supported     |                                                                                                                                                  |
+| `resetKeychain`            | not-supported     |                                                                                                                                                  |
+| `rotaryScroll`             | refused-by-design | Wear OS only.                                                                                                                                    |
+| `rotate`                   | refused-by-design | No orientation.                                                                                                                                  |
+| `rotateCrown`              | refused-by-design | watchOS only.                                                                                                                                    |
+| `selectAllText`            | not-supported     |                                                                                                                                                  |
+| `sendBroadcast`            | refused-by-design | Android-only.                                                                                                                                    |
+| `sendKeys`                 | pass              | Requires a focused keyboard (`pressButton select` on the field); otherwise `no focused text input`. Read plain values after close.               |
+| `sendSms`                  | refused-by-design | No telephony.                                                                                                                                    |
+| `setActiveDevice`          | pass              |                                                                                                                                                  |
+| `setAppLinks`              | refused-by-design | Android-only.                                                                                                                                    |
+| `setAppPermissions`        | pass              | `simctl privacy` grant, revoke or reset; changes are not read back (`verified: false`).                                                          |
+| `setDeviceResources`       | not-supported     |                                                                                                                                                  |
+| `setDeviceState`           | not-supported     |                                                                                                                                                  |
+| `setKeyValue`              | not-supported     |                                                                                                                                                  |
+| `setNotificationPolicy`    | not-supported     |                                                                                                                                                  |
+| `setPosture`               | refused-by-design | No foldable posture.                                                                                                                             |
+| `setPreference`            | not-supported     |                                                                                                                                                  |
+| `setSensor`                | refused-by-design | Android-only.                                                                                                                                    |
+| `setToolEnabled`           | host-only         |                                                                                                                                                  |
+| `setUIState`               | not-supported     | Also behind the debug flag.                                                                                                                      |
+| `shake`                    | refused-by-design | No motion gesture.                                                                                                                               |
+| `siri`                     | not-supported     |                                                                                                                                                  |
+| `snapshotOf`               | not-supported     |                                                                                                                                                  |
+| `sqlQuery`                 | not-supported     |                                                                                                                                                  |
+| `statusBar`                | refused-by-design | The tvOS simulator runtime has no status bar override; the refusal says so.                                                                      |
+| `stopAudioInput`           | not-supported     |                                                                                                                                                  |
+| `swipeAt`                  | refused-by-design | XCUITest does not expose touch-surface swipes on tvOS; use directional presses and focus navigation.                                             |
+| `swipeOn`                  | refused-by-design | XCUITest does not expose touch-surface swipes on tvOS; use directional presses and focus navigation.                                             |
+| `systemAlerts`             | not-supported     |                                                                                                                                                  |
+| `systemTray`               | refused-by-design | No notification shade.                                                                                                                           |
+| `tapAny`                   | refused-by-design | No touch surface; use `tapOn` or `focusNavigate`.                                                                                                |
+| `tapAt`                    | refused-by-design | No touch surface.                                                                                                                                |
+| `tapOn`                    | pass              | Moves focus to the element by text or `elementId` and selects it.                                                                                |
+| `terminateApp`             | pass              |                                                                                                                                                  |
+| `uninstallApp`             | pass              |                                                                                                                                                  |
+| `videoRecording`           | pass              | `simctl io recordVideo`, HEVC MP4.                                                                                                               |
+| `wakeAndUnlock`            | refused-by-design | No keyguard.                                                                                                                                     |
+| `windowMode`               | refused-by-design | Android-only.                                                                                                                                    |
 
 Totals: 27 pass, 49 not-supported, 40 refused-by-design, 6 host-only. The tvOS
 allowlist also holds `startDevice`, which is not in the published tool

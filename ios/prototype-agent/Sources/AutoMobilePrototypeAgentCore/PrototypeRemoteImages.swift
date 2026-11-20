@@ -9,6 +9,22 @@ public enum PrototypeRemoteImages {
     public static let maxIOSMemoryBytes = 67_108_864
     /// Longest decoded edge in pixels; larger sources are downsampled while decoding.
     static let maxDecodedEdge = 2048
+
+    /// Loopback http images are a compile-time development feature: a runtime cleartext flag cannot
+    /// enable them in a release build. The ProtoViewer dev build compiles -O without DEBUG.
+    #if DEBUG || PROTOVIEWER_ALLOW_CLEARTEXT
+        static let developmentLoopback = true
+    #else
+        static let developmentLoopback = false
+    #endif
+
+    /// Header gate before any pixels are allocated. Sources deeper than 8 bits per component, or
+    /// without depth metadata, are budgeted at eight bytes per pixel.
+    static func fitsDecodeBudget(width: Double, height: Double, depth: Int?) -> Bool {
+        let bytesPerPixel: Double = depth.map { (1 ... 8).contains($0) ? 4 : 8 } ?? 8
+        return width > 0 && height > 0 && width * height * bytesPerPixel <= Double(maxIOSMemoryBytes)
+    }
+
     public static let maxDiskBytes = 134_217_728
     public static let maxLoads = 6
 

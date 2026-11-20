@@ -96,13 +96,18 @@ The iOS saved prototype is its own app, so `deleteSaved` uninstalls it and its s
 ## Remote images
 
 iOS advertises `prototype_remote_image_v1` on iOS 17+. Device-routed image URLs resolve bindings
-before validation and load through an ephemeral, cookie-free URLSession. Each redirect is revalidated,
-with at most five hops. Public HTTPS destinations are allowed; literal loopback HTTP requires an
-explicit development configuration. DNS answers and connected addresses use the request classifier,
-with private addresses refused for images. ProtoViewer shares its request consent gate with image loads.
+before validation. Image loads dial checked public IP addresses and verify the connected address
+before sending; app-supplied device hooks receive image loads instead. Image requests drop
+authorization, cookie and referer headers, and every redirect hop is revalidated against the image
+policy, with at most five hops. Public HTTPS destinations are allowed; literal loopback HTTP requires
+a DEBUG or ProtoViewer development build plus an explicit cleartext configuration. Images refuse
+daemon ports and private addresses. ProtoViewer shares its request consent gate with image loads.
 
 Downloads stop at 8 MiB and have a 30 s ceiling. PNG, JPEG and WebP signatures must decode through
-ImageIO. Decoded images use a 64 MiB memory cache; the app-private URL-hashed disk LRU holds 128 MiB.
+ImageIO. The header must fit 64 MiB at four bytes per pixel, or eight for sources deeper than 8 bits
+per component or without depth metadata; decoding applies EXIF orientation and downsamples to 2048
+pixels on the longest edge.
+Decoded images use a 64 MiB memory cache; the app-private URL-hashed disk LRU holds 128 MiB.
 At most six loads run across renderer configurations. Placeholder and error assets or colors render
 in the image slot. `crossfade: true` fades in over 200 ms unless Reduce Motion is enabled.
 Accessibility reports `loading`, `loaded` or `error`, without the URL. Host-routed URLs do not start

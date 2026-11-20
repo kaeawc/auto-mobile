@@ -31,28 +31,35 @@ final class PrototypePinnedHttpClientTests: XCTestCase {
     }
 
     func testImageTransportDialsOnlyCheckedPublicAddresses() async throws {
-        let egress = PrototypeRequestEgressCheck(
-            policy: PrototypeEgressPolicy(), resolver: FakeHostResolver(), remoteImageDevelopment: false
-        )
         func imageClient(_ resolver: FakeHostResolver, _ connector: FakePinnedConnector) -> PrototypePinnedHttpClient {
             PrototypePinnedHttpClient(
-                resolver: resolver, connector: connector, deadlines: FakePinnedDeadline(),
-                imageEgress: egress, nowMs: { 1 }
+                resolver: resolver,
+                connector: connector,
+                deadlines: FakePinnedDeadline(),
+                nowMs: {
+                    1
+                }
             )
         }
+        func imageRequest(_ url: String) -> PrototypeHttpRequest {
+            PrototypeHttpRequest(job: PrototypeRequestJob(
+                requestId: "image", prototypeId: "image", via: .device, method: .get,
+                url: url, headers: [:], body: nil, timeoutMs: 1000
+            ), maxResponseBytes: 1000, isRemoteImage: true)
+        }
         let connector = FakePinnedConnector([FakePinnedConnection()])
-        _ = try await imageClient(FakeHostResolver(), connector).perform(pinnedRequest("https://public.example/a.png"))
+        _ = try await imageClient(FakeHostResolver(), connector).perform(imageRequest("https://public.example/a.png"))
         XCTAssertEqual(connector.dials, [.init(address: "8.8.8.8", port: 443, tlsServerName: "public.example")])
         let blocked = FakePinnedConnector([])
         for url in ["http://public.example/a.png", "https://192.168.1.1/a.png"] {
             do {
-                _ = try await imageClient(FakeHostResolver(), blocked).perform(pinnedRequest(url))
+                _ = try await imageClient(FakeHostResolver(), blocked).perform(imageRequest(url))
                 XCTFail("Accepted \(url)")
             } catch {}
         }
         do {
             _ = try await imageClient(FakeHostResolver(["192.168.1.1"]), blocked)
-                .perform(pinnedRequest("https://public.example/a.png"))
+                .perform(imageRequest("https://public.example/a.png"))
             XCTFail("Private DNS answer accepted")
         } catch {}
         XCTAssertTrue(blocked.dials.isEmpty)

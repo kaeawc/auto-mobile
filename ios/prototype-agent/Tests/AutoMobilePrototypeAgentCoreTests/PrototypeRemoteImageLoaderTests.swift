@@ -52,6 +52,41 @@ final class PrototypeRemoteImageLoaderTests: XCTestCase {
         return data as Data
     }
 
+    func testHeaderBudgetCountsEightBytesPerPixelForDeepOrUnknownDepth() {
+        // 4096 x 4096 fits 64 MiB at 8-bit RGBA but needs 128 MiB at 16 bits per component.
+        XCTAssertTrue(PrototypeRemoteImages.fitsDecodeBudget(width: 4096, height: 4096, depth: 8))
+        XCTAssertFalse(PrototypeRemoteImages.fitsDecodeBudget(width: 4096, height: 4096, depth: 16))
+        XCTAssertFalse(PrototypeRemoteImages.fitsDecodeBudget(width: 4096, height: 4096, depth: nil))
+        XCTAssertTrue(PrototypeRemoteImages.fitsDecodeBudget(width: 2896, height: 2896, depth: 16))
+        XCTAssertFalse(PrototypeRemoteImages.fitsDecodeBudget(width: 0, height: 16, depth: 8))
+    }
+
+    func testSixteenBitPNGReportsDepthAndDownsamplesBeforeDecode() async throws {
+        // A wide, shallow source exercises 16-bit downsampling without a slow binary fixture.
+        let width = PrototypeRemoteImages.maxDecodedEdge * 2
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: width, height: 16, bitsPerComponent: 16, bytesPerRow: width * 8,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo.byteOrder16Little.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let sourceImage = try XCTUnwrap(context.makeImage())
+        let bytes = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(bytes, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, sourceImage, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(bytes, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        XCTAssertEqual((properties[kCGImagePropertyDepth] as? NSNumber)?.intValue, 16)
+        XCTAssertLessThan(bytes.length, PrototypeRemoteImages.maxDownloadBytes)
+        let loader = PrototypeRemoteImageLoader(
+            client: ImageClient(bytes as Data), memory: PrototypeRemoteImageMemory(), directory: nil
+        )
+        let loaded = try await loader.load("https://public.example/sixteen-bit")
+        XCTAssertLessThan(loaded.image.width, width)
+        XCTAssertLessThanOrEqual(max(loaded.image.width, loaded.image.height), PrototypeRemoteImages.maxDecodedEdge)
+        XCTAssertLessThanOrEqual(loaded.decodedBytes, PrototypeRemoteImages.maxIOSMemoryBytes)
+    }
+
     func testDecodedMemoryCacheAvoidsTransport() async throws {
         let client = ImageClient(Self.png)
         let loader = PrototypeRemoteImageLoader(

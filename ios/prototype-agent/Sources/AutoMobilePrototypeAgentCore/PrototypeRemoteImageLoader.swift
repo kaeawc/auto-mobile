@@ -13,35 +13,36 @@ final class PrototypeRemoteImage: NSObject, @unchecked Sendable {
         let webp = prefix.count == 12 && prefix.prefix(4).elementsEqual("RIFF".utf8) &&
             prefix.suffix(4).elementsEqual("WEBP".utf8)
         guard bytes.count <= PrototypeRemoteImages.maxDownloadBytes, png || jpeg || webp,
-              let source = CGImageSourceCreateWithData(bytes as CFData, nil),
+              let source = CGImageSourceCreateWithData(
+                  bytes as CFData,
+                  [kCGImageSourceShouldCache: false] as CFDictionary
+              ),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
               let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
-              width.doubleValue > 0, height.doubleValue > 0,
               // Reject decompression bombs from the header before any pixels are allocated.
-              width.doubleValue * height.doubleValue * 4 <= Double(PrototypeRemoteImages.maxIOSMemoryBytes),
+              PrototypeRemoteImages.fitsDecodeBudget(
+                  width: width.doubleValue, height: height.doubleValue,
+                  depth: (properties[kCGImagePropertyDepth] as? NSNumber)?.intValue
+              ),
               // The thumbnail path applies the EXIF orientation and bounds the decoded edge.
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                   kCGImageSourceCreateThumbnailFromImageAlways: true,
                   kCGImageSourceCreateThumbnailWithTransform: true,
                   kCGImageSourceThumbnailMaxPixelSize: PrototypeRemoteImages.maxDecodedEdge,
                   kCGImageSourceShouldCacheImmediately: true,
-              ] as CFDictionary),
+              ] as CFDictionary), image.height > 0,
               image.bytesPerRow <= PrototypeRemoteImages.maxIOSMemoryBytes / image.height
         else { throw PrototypeRemoteImageLoader.Failure.invalidImage }
         self.image = image
     }
 }
 
-/// URLSession streams into the existing bounded HTTP seam; errors never leave the view as URL text.
+/// Loads bounded image responses through the configured HTTP transport.
 actor PrototypeRemoteImageLoader {
     enum Failure: Error { case invalidImage, disabled }
 
-    #if DEBUG || PROTOVIEWER_ALLOW_CLEARTEXT
-        static let shared = PrototypeRemoteImageLoader(development: true)
-    #else
-        static let shared = PrototypeRemoteImageLoader()
-    #endif
+    static let shared = PrototypeRemoteImageLoader(development: PrototypeRemoteImages.developmentLoopback)
     private let client: any PrototypeHttpClient
     private let egress: PrototypeRequestEgressCheck
     private let gate: PrototypeLibraryNetworkGate?
@@ -61,6 +62,8 @@ actor PrototypeRemoteImageLoader {
             .appendingPathComponent("AutoMobilePrototypeRemoteImages", isDirectory: true),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
+        // A runtime flag never enables image loopback in a build without the development flag.
+        let development = development && PrototypeRemoteImages.developmentLoopback
         let imageEgress = PrototypeRequestEgressCheck(
             policy: PrototypeEgressPolicy(), resolver: resolver, remoteImageDevelopment: development
         )
@@ -70,9 +73,8 @@ actor PrototypeRemoteImageLoader {
         } else {
             #if canImport(Network)
                 // Dial only the checked addresses; URLSession would re-resolve after the preflight.
-                transport = PrototypePinnedHttpClient(
-                    resolver: resolver, allowsCleartext: development, imageEgress: imageEgress
-                )
+                // Image requests carry isRemoteImage, so every redirect hop keeps the image egress.
+                transport = PrototypePinnedHttpClient(resolver: resolver, allowsCleartext: development)
             #else
                 transport = PrototypeURLSessionClient(remoteImageDevelopment: development, resolver: resolver)
             #endif
@@ -120,7 +122,7 @@ actor PrototypeRemoteImageLoader {
         let request = PrototypeHttpRequest(job: PrototypeRequestJob(
             requestId: "image", prototypeId: "image", via: .device, method: .get,
             url: resolvedURL, headers: [:], body: nil, timeoutMs: 30000
-        ), maxResponseBytes: PrototypeRemoteImages.maxDownloadBytes)
+        ), maxResponseBytes: PrototypeRemoteImages.maxDownloadBytes, isRemoteImage: true)
         // The transport owns DNS preflight inside its total deadline, including every redirect.
         let response = try await client.perform(request)
         try Task.checkCancellation()

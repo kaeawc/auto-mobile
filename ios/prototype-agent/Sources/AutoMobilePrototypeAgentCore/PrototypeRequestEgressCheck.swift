@@ -23,24 +23,22 @@ struct PrototypeRequestEgressCheck: Sendable {
         guard !text.contains("{"), !text.contains("}"), text.utf16.count <= PrototypeRemoteImages.maxURLLength else {
             throw Self.blocked
         }
-        try PrototypeRemoteImages.validate(nodes: [.init(value: [
+        do { try PrototypeRemoteImages.validate(nodes: [.init(value: [
             "type": .string("image"), "url": .string(text),
-        ], path: "image")], state: [:])
+        ], path: "image")], state: [:]) } catch { throw Self.blocked }
         guard let url = URL(string: text), url.scheme?.lowercased() == "https" || isImageLoopback(url) else {
             throw Self.blocked
         }
-        guard let host = url.host, (1 ... 65535).contains(Self.port(url)) else { throw Self.blocked }
-        if isImageLoopback(url) {
-            // Development loopback must not reach the AutoMobile daemon.
-            guard !policy.daemonPorts.contains(Self.port(url)) else { throw Self.blocked }
-        } else {
+        guard let host = url.host, policy.checkImagePort(Self.port(url)) == .allow else { throw Self.blocked }
+        if !isImageLoopback(url) {
             guard policy.checkHost(host: host, port: Self.port(url)) == .allow,
                   !PrototypeEgressPolicy.isIPLiteral(host) || isPublic(host) else { throw Self.blocked }
         }
     }
 
     private func isPublic(_ address: String) -> Bool {
-        guard let literal = PrototypeEgressPolicy.canonicalLiteral(address) else { return false }
+        guard let literal = PrototypeEgressPolicy.canonicalLiteral(address),
+              address.contains(":") || literal == address else { return false }
         return PrototypeEgressPolicy.classify(literal) == .public
     }
 
@@ -51,6 +49,7 @@ struct PrototypeRequestEgressCheck: Sendable {
         if remoteImageDevelopment != nil {
             try validateImageURL(request.url?.absoluteString ?? "")
             if let url = request.url, isImageLoopback(url) {
+                guard policy.checkImagePort(Self.port(url)) == .allow else { throw Self.blocked }
                 let addresses = url.host?.lowercased() == "localhost" ? try await resolver
                     .addresses(for: "localhost") : [url.host ?? ""]
                 guard !addresses.isEmpty, addresses.allSatisfy({
@@ -74,10 +73,14 @@ struct PrototypeRequestEgressCheck: Sendable {
 
     func checkConnected(address: String, url: URL, port: Int? = nil) -> Bool {
         if isImageLoopback(url) {
-            guard !policy.daemonPorts.contains(port ?? Self.port(url)) else { return false }
-            return ["127.0.0.1", "::1"].contains(PrototypeEgressPolicy.canonicalLiteral(address) ?? "")
+            return policy.checkImagePort(Self.port(url)) == .allow &&
+                policy.checkImagePort(port ?? Self.port(url)) == .allow &&
+                ["127.0.0.1", "::1"].contains(PrototypeEgressPolicy.canonicalLiteral(address) ?? "")
         }
-        return (remoteImageDevelopment == nil || isPublic(address)) &&
+        return (
+            remoteImageDevelopment == nil ||
+                (policy.checkImagePort(port ?? Self.port(url)) == .allow && isPublic(address))
+        ) &&
             policy.check(host: address, port: port ?? Self.port(url), addresses: [address]) == .allow
     }
 

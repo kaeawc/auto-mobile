@@ -15,12 +15,14 @@ final class PrototypeEmbeddedAPITests: XCTestCase {
 
     private actor Client {
         private(set) var calls: [URLRequest] = []
+        let body: Data
+        init(body: Data = Data(#""ok""#.utf8)) { self.body = body }
         func perform(_ request: URLRequest) throws -> (Data, HTTPURLResponse) {
             calls.append(request)
             let response = try XCTUnwrap(HTTPURLResponse(
                 url: XCTUnwrap(request.url), statusCode: 200, httpVersion: nil, headerFields: ["X-Test": "yes"]
             ))
-            return (Data(#""ok""#.utf8), response)
+            return (body, response)
         }
     }
 
@@ -29,6 +31,28 @@ final class PrototypeEmbeddedAPITests: XCTestCase {
         let via: String?
         let hostHandler: Bool
         let expectedRoute: String
+    }
+
+    func testRemoteImagesUseEmbeddedDeviceHookAndValidateBeforeDispatch() async throws {
+        let device = Client(body: PrototypeRemoteImageLoaderTests.png)
+        let host = Client()
+        let configuration = PrototypeNetworkConfiguration(
+            deviceClient: { try await device.perform($0) }, hostHandler: { try await host.perform($0) }
+        )
+        // A fresh URL prevents the shared memory/disk cache from hiding dispatch.
+        let url = "https://public.example/embedded-image-\(UUID().uuidString)"
+        let image = try await configuration.remoteImages.load(url)
+        XCTAssertEqual(image.image.width, 1)
+        do {
+            _ = try await configuration.remoteImages.load("https://10.0.0.1/image")
+            XCTFail("Private URL reached app hook")
+        } catch {
+            XCTAssertEqual((error as? PrototypeRequestError)?.code, .blockedDestination)
+        }
+        let calls = await device.calls
+        XCTAssertEqual(calls.map { $0.url?.absoluteString }, [url])
+        let hostCalls = await host.calls
+        XCTAssertTrue(hostCalls.isEmpty)
     }
 
     func testPublicConfigurationRoutesSharedFixtureThroughFakeClientsAndMapsRequestEvents() async throws {

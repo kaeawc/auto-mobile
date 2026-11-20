@@ -56,7 +56,10 @@ public struct PrototypeNetworkConfiguration: Sendable {
         public static func pinned(allowsCleartext: Bool = false) -> PrototypeNetworkConfiguration {
             var configuration =
                 PrototypeNetworkConfiguration(device: PrototypePinnedHttpClient(allowsCleartext: allowsCleartext))
-            configuration.remoteImages = PrototypeRemoteImageLoader(development: allowsCleartext)
+            configuration.remoteImages = PrototypeRemoteImageLoader(
+                client: configuration.device,
+                development: PrototypeRemoteImages.developmentLoopback && allowsCleartext
+            )
             return configuration
         }
     #endif
@@ -73,6 +76,9 @@ public struct PrototypeNetworkConfiguration: Sendable {
     public init(deviceClient: Client? = nil, hostHandler: Client? = nil) {
         device = deviceClient.map { EmbeddedHttpClient(client: $0) } ?? PrototypeURLSessionClient()
         handler = hostHandler.map { EmbeddedHttpClient(client: $0) }
+        if deviceClient != nil {
+            remoteImages = PrototypeRemoteImageLoader(client: device)
+        }
     }
 
     @MainActor

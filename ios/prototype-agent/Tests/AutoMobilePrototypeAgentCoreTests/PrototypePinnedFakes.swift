@@ -22,6 +22,11 @@ final class FakePinnedConnection: PrototypePinnedConnection, @unchecked Sendable
         self.chunks = chunks.map { Data($0.utf8) }
     }
 
+    init(response: Data, address: String? = "8.8.8.8") {
+        remoteAddress = address
+        chunks = [response]
+    }
+
     var sent: String { lock.withLock { String(data: writes.reduce(Data(), +), encoding: .utf8) ?? "<invalid UTF-8>" } }
     var cancelled: Bool { lock.withLock { stopped } }
     var receiveCount: Int { lock.withLock { reads } }

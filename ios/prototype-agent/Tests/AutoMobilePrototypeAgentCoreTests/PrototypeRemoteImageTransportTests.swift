@@ -2,6 +2,12 @@
 import XCTest
 
 final class PrototypeRemoteImageTransportTests: XCTestCase {
+    override class func setUp() {
+        super.setUp()
+        // Compile the shared contract patterns outside individual transport test timing.
+        _ = PrototypeContractValidator.matches("blankText", "")
+    }
+
     private func loader() -> PrototypeRemoteImageLoader {
         let client = PrototypeURLSessionClient(
             protocolClasses: [StubProtocol.self], remoteImageDevelopment: false,
@@ -14,6 +20,99 @@ final class PrototypeRemoteImageTransportTests: XCTestCase {
             directory: nil
         )
     }
+
+    func testPinnedImageChecksConnectionBeforeSendingAnyBytes() async throws {
+        let connection = FakePinnedConnection(address: "192.168.1.1")
+        let connector = FakePinnedConnector([connection])
+        let client = PrototypePinnedHttpClient(
+            resolver: FakeHostResolver(), connector: connector, deadlines: FakePinnedDeadline(), nowMs: { 0 }
+        )
+        let loader = PrototypeRemoteImageLoader(
+            client: client, memory: PrototypeRemoteImageMemory(), directory: nil
+        )
+        do {
+            _ = try await loader.load("https://public.example/pinned-image")
+            XCTFail("Private connection delivered image")
+        } catch {
+            XCTAssertEqual((error as? PrototypeHttpFailure)?.error.code, .blockedDestination)
+        }
+        XCTAssertEqual(connector.dials.count, 1)
+        XCTAssertTrue(connection.sent.isEmpty)
+        XCTAssertEqual(connection.receiveCount, 0)
+        XCTAssertTrue(connection.cancelled)
+    }
+
+    func testPinnedImageRedirectRetainsPublicOnlyPolicy() async throws {
+        for location in ["https://10.0.0.1/image", "https://public.example:3000/image"] {
+            let redirect =
+                FakePinnedConnection("HTTP/1.1 302 Found\r\nLocation: \(location)\r\nContent-Length: 0\r\n\r\n")
+            let connector = FakePinnedConnector([redirect])
+            let resolver = FakeHostResolver()
+            let client = PrototypePinnedHttpClient(
+                resolver: resolver, connector: connector, deadlines: FakePinnedDeadline(), nowMs: { 0 }
+            )
+            let loader = PrototypeRemoteImageLoader(
+                client: client, memory: PrototypeRemoteImageMemory(), directory: nil
+            )
+            do {
+                _ = try await loader.load("https://public.example/redirect-image")
+                XCTFail("Unsafe image redirect accepted")
+            } catch {
+                XCTAssertEqual((error as? PrototypeHttpFailure)?.error.code, .blockedDestination)
+            }
+            XCTAssertEqual(connector.dials.count, 1)
+            XCTAssertEqual(resolver.requestedHosts, ["public.example"])
+        }
+    }
+
+    func testPinnedImageLoopbackFollowsCompileTimeDevelopmentSetting() async throws {
+        let png = PrototypeRemoteImageLoaderTests.png
+        var response = Data("HTTP/1.1 200 OK\r\nContent-Length: \(png.count)\r\n\r\n".utf8)
+        response.append(png)
+        let connection = FakePinnedConnection(response: response, address: "127.0.0.1")
+        let connector = FakePinnedConnector([connection])
+        let client = PrototypePinnedHttpClient(
+            resolver: FakeHostResolver(["127.0.0.1"]), connector: connector,
+            deadlines: FakePinnedDeadline(), allowsCleartext: true, nowMs: { 0 }
+        )
+        let loader = PrototypeRemoteImageLoader(
+            client: client, memory: PrototypeRemoteImageMemory(),
+            development: PrototypeRemoteImages.developmentLoopback, directory: nil
+        )
+        #if DEBUG || PROTOVIEWER_ALLOW_CLEARTEXT
+            let image = try await loader.load("http://localhost:8080/image")
+            XCTAssertEqual(image.image.width, 1)
+            XCTAssertEqual(connector.dials.map(\.address), ["127.0.0.1"])
+        #else
+            do {
+                _ = try await loader.load("http://localhost:8080/image")
+                XCTFail("Release image loopback accepted")
+            } catch {
+                XCTAssertEqual((error as? PrototypeRequestError)?.code, .blockedDestination)
+            }
+            XCTAssertTrue(connector.dials.isEmpty)
+        #endif
+    }
+
+    #if !DEBUG && !PROTOVIEWER_ALLOW_CLEARTEXT && canImport(Network)
+        @MainActor
+        func testReleaseConfigurationsRefuseImageLoopbackEvenWithCleartextEnabled() async throws {
+            let library = PrototypeLibraryNetwork.configuration(
+                gate: PrototypeLibraryNetworkGate(enabled: true), allowsCleartext: true
+            ) { _, _ in
+                XCTFail("Release image loopback reached pinned factory")
+                return .pinned(allowsCleartext: true)
+            }
+            for configuration in [PrototypeNetworkConfiguration.pinned(allowsCleartext: true), library] {
+                do {
+                    _ = try await configuration.remoteImages.load("http://localhost:8080/image")
+                    XCTFail("Release configuration accepted image loopback")
+                } catch {
+                    XCTAssertEqual((error as? PrototypeRequestError)?.code, .blockedDestination)
+                }
+            }
+        }
+    #endif
 
     func testURLSessionHappyPathAndNoAmbientHeaders() async throws {
         StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: [PrototypeRemoteImageLoaderTests.png]) }

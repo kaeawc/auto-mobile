@@ -8,19 +8,31 @@ final class PrototypeRemoteImageEgressTests: XCTestCase {
         )
     }
 
+    private func assertBlocked(_ error: Error, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual((error as? PrototypeRequestError)?.code, .blockedDestination, "\(error)", file: file, line: line)
+    }
+
     func testStaticAndDNSPrivateHostsRefused() async throws {
-        for host in ["10.0.0.1", "169.254.169.254", "192.168.1.1", "172.16.1.1", "[fd00::1]", "127.0.0.1"] {
+        for host in [
+            "10.0.0.1", "169.254.169.254", "192.168.1.1", "172.16.1.1", "[fd00::1]", "127.0.0.1",
+            "100.64.0.1", "[::ffff:10.0.0.1]", "[::ffff:127.0.0.1]", "[fe80::1]",
+            "2130706433", "0x7f.1", "010.0.0.1",
+        ] {
+            XCTAssertThrowsError(try check().validateImageURL("https://\(host)/")) { assertBlocked($0) }
             do {
                 try await check().validate(URLRequest(url: XCTUnwrap(URL(string: "https://\(host)/"))))
                 XCTFail("Private host accepted")
-            } catch {}
+            } catch { assertBlocked(error) }
         }
-        for addresses in [["10.0.0.1"], ["8.8.8.8", "192.168.1.1"], ["fd00::1"]] {
+        for addresses in [
+            ["10.0.0.1"], ["8.8.8.8", "192.168.1.1"], ["fd00::1"], ["100.64.0.1"],
+            ["::ffff:10.0.0.1"], ["::ffff:127.0.0.1"], ["fe80::1"],
+        ] {
             do {
                 try await check(addresses: addresses)
                     .validate(URLRequest(url: XCTUnwrap(URL(string: "https://public.example/"))))
                 XCTFail("Private DNS answer accepted")
-            } catch {}
+            } catch { assertBlocked(error) }
         }
     }
 
@@ -31,14 +43,41 @@ final class PrototypeRemoteImageEgressTests: XCTestCase {
             do {
                 try await check().validate(request)
                 XCTFail("Production loopback accepted")
-            } catch {}
+            } catch { assertBlocked(error) }
             let requests = PrototypeRequestEgressCheck(policy: PrototypeEgressPolicy(), resolver: FakeHostResolver())
             do {
                 try await requests.validate(request)
                 XCTFail("Request policy was loosened")
-            } catch {}
+            } catch { assertBlocked(error) }
         }
-        XCTAssertThrowsError(try check(development: true).validateImageURL("http://public.example/image"))
+        XCTAssertThrowsError(try check(development: true).validateImageURL("http://public.example/image")) {
+            assertBlocked($0)
+        }
+    }
+
+    func testDaemonPortsRefusedOnPublicAndDevelopmentLoopbackImages() async throws {
+        for port in [8765, 3000, 3010] {
+            for origin in ["https://public.example", "http://localhost", "http://127.0.0.1", "http://[::1]"] {
+                let url = try XCTUnwrap(URL(string: "\(origin):\(port)/image"))
+                let egress = check(development: true, addresses: ["127.0.0.1"])
+                XCTAssertThrowsError(try egress.validateImageURL(url.absoluteString)) { assertBlocked($0) }
+                do {
+                    try await egress.validate(URLRequest(url: url))
+                    XCTFail("Daemon port accepted")
+                } catch { assertBlocked(error) }
+                XCTAssertFalse(egress.checkConnected(
+                    address: origin.hasPrefix("https") ? "8.8.8.8" : "127.0.0.1",
+                    url: url
+                ))
+            }
+        }
+        let egress = PrototypeRequestEgressCheck(
+            policy: PrototypeEgressPolicy(daemonPorts: [8080]), resolver: FakeHostResolver(),
+            remoteImageDevelopment: true
+        )
+        XCTAssertThrowsError(try egress.validateImageURL("http://localhost:8080/image")) { assertBlocked($0) }
+        let loopback = try XCTUnwrap(URL(string: "http://localhost:8081/image"))
+        XCTAssertFalse(egress.checkConnected(address: "127.0.0.1", url: loopback, port: 8080))
     }
 
     func testDevelopmentLoopbackNeverReachesDaemonPorts() throws {
@@ -61,14 +100,14 @@ final class PrototypeRemoteImageEgressTests: XCTestCase {
         do {
             _ = try await loader.load(bound)
             XCTFail("Bound private destination accepted")
-        } catch {}
+        } catch { assertBlocked(error) }
         for url in [
             "https://user:pass@public.example/image",
             "https://public.example/a b",
             "{photo}",
             "ftp://public.example/a",
         ] {
-            XCTAssertThrowsError(try check().validateImageURL(url))
+            XCTAssertThrowsError(try check().validateImageURL(url)) { assertBlocked($0) }
         }
     }
 
@@ -84,7 +123,7 @@ final class PrototypeRemoteImageEgressTests: XCTestCase {
             do {
                 _ = try await call.redirect(to: XCTUnwrap(URL(string: target)), status: 302, egress: egress)
                 XCTFail("Unsafe redirect accepted")
-            } catch {}
+            } catch { assertBlocked(error) }
         }
         let call = PrototypeURLSessionCall(maxBytes: 100, timeoutMs: 30000, request: request)
         for _ in 0 ..< 5 {
@@ -93,7 +132,7 @@ final class PrototypeRemoteImageEgressTests: XCTestCase {
         do {
             _ = try await call.redirect(to: XCTUnwrap(request.url), status: 302, egress: egress)
             XCTFail("Redirect loop exceeded cap")
-        } catch {}
+        } catch { assertBlocked(error) }
     }
 
     func testRedirectStripsHeadersAndAllowsOnlyDevelopmentLoopbackDowngrade() async throws {
@@ -112,7 +151,7 @@ final class PrototypeRemoteImageEgressTests: XCTestCase {
         do {
             _ = try await ordinary.redirect(to: XCTUnwrap(next.url), status: 302, egress: requests)
             XCTFail("Request downgrade policy was loosened")
-        } catch {}
+        } catch { assertBlocked(error) }
     }
 
     func testConnectedAddressCannotBypassPreflight() throws {

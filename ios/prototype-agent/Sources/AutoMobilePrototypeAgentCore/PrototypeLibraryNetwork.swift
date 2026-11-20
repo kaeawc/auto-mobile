@@ -34,7 +34,9 @@ public enum PrototypeLibraryNetwork {
             gate: gate, factory: { epoch in pinned(allowsCleartext, epoch) }, onLocalNetworkDenied: onLocalNetworkDenied
         ))
         configuration.remoteImages = PrototypeRemoteImageLoader(
-            development: allowsCleartext, gate: gate, onLocalNetworkDenied: onLocalNetworkDenied
+            client: configuration.device,
+            development: PrototypeRemoteImages.developmentLoopback && allowsCleartext,
+            gate: gate, onLocalNetworkDenied: onLocalNetworkDenied
         )
         return configuration
     }

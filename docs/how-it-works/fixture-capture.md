@@ -8,7 +8,7 @@ Capture is off unless `AUTOMOBILE_CAPTURE_FIXTURES_DIR` names a directory in the
 
 ## What is recorded
 
-`ToolRegistry` opens one capture scope per tool call, for plain and device-aware tools alike, including tools that `executePlan` and other tools call internally. A nested tool call opens its own scope, so every command belongs to the innermost tool call that issued it. A device-aware call records the device it resolved.
+`ToolRegistry` opens one capture scope per tool call, for plain and device-aware tools alike, including tools that `executePlan` and other tools call internally. A nested tool call opens its own scope, so every command belongs to the innermost tool call that issued it. A device-aware call records the device it resolved, and `startDevice` records the device it booted. Facts the resolved device lacks (a session-routed Android target carries only platform, id, name and form factor) come from the image the device pool admitted for it.
 
 Commands are recorded in `runExecSeam` (`src/utils/ExecSeam.ts`), the one exec path that `AdbClient`, the simctl/xcrun runners, `HostCommandExecutor`, `xcodebuild`, `security` and the emulator client share. Each command records its argv, working directory, stdout, stderr, exit code (or the signal or node error code for a command that never exited normally) and duration. Every recorded command ran on the host, so its output is a real capture.
 

@@ -76,6 +76,11 @@ export interface DisposableAppInstallation {
 export interface DisposableAppInstaller {
   /** Installs `appId` from `artifactPath`, updating in place and keeping app storage. */
   install(deviceId: string, appId: string, artifactPath: string): Promise<void>;
+  /**
+   * Writes the app's initial storage from `artifactPath` once the host has recorded the install;
+   * omitted when the platform needs no seeding.
+   */
+  seedStorage?(deviceId: string, appId: string, artifactPath: string): Promise<void>;
   /** Clears the installed app's storage. */
   resetStorage(deviceId: string, appId: string): Promise<void>;
   applyPermissions(
@@ -214,16 +219,58 @@ export class DisposableAppManager {
     return this.withAppLock(input.deviceId, appId, () => this.installLocked(input, appId));
   }
 
-  private async installAndRelease(
+  /**
+   * Installs the artifact, records the app, then seeds its storage while the artifact still exists.
+   * Recording comes before seeding, so a seeding failure cannot leave the app untracked or keep a
+   * previous install's expiry for the sweep to act on (#16506, #18871).
+   */
+  private async installRecordAndRelease(
     { stamper, installer }: { stamper: DisposableAppStamper; installer: DisposableAppInstaller },
     [deviceId, appId]: readonly [string, string],
     artifactPath: string,
-  ): Promise<void> {
+    record: () => Promise<number | null>,
+  ): Promise<number | null> {
     try {
       await installer.install(deviceId, appId, artifactPath);
+      const expiresAt = await record();
+      if (installer.seedStorage) {
+        try {
+          await installer.seedStorage(deviceId, appId, artifactPath);
+        } catch (error) {
+          throw new ActionableError(
+            `${appId} is installed on ${deviceId} (expires ${isoOrNull(expiresAt) ?? "never"}), but its storage was not seeded: ${errorMessage(error)}. Reinstall it with installApp to retry, or uninstall it with uninstallApp.`,
+            { cause: error },
+          );
+        }
+      }
+      return expiresAt;
     } finally {
       await stamper.release?.(artifactPath);
     }
+  }
+
+  /** Records the installed app with a renewed lifetime and returns its expiry. */
+  private async recordInstall(
+    input: DisposableAppInstallInput,
+    appId: string,
+    install: { attachToken: string; template: string; lifetime: number | null },
+  ): Promise<number | null> {
+    const installedAt = this.deps.timer.now();
+    const expiresAt = install.lifetime === null ? null : installedAt + install.lifetime;
+    await this.deps.registry.put(input.deviceId, {
+      appId,
+      slug: input.app.slug,
+      platform: input.platform,
+      label: input.app.label,
+      specId: disposableSpecId(input.spec),
+      attachToken: install.attachToken,
+      specSha256: createHash("sha256").update(JSON.stringify(input.spec)).digest("hex"),
+      template: install.template,
+      signer: await this.support(input.platform).stamper.signer(),
+      installedAt,
+      expiresAt,
+    });
+    return expiresAt;
   }
 
   private async installLocked(
@@ -253,28 +300,12 @@ export class DisposableAppManager {
       template,
       declarations,
     });
-    await this.installAndRelease(
+    const expiresAt = await this.installRecordAndRelease(
       { stamper, installer },
       [input.deviceId, appId],
       stamped.artifactPath,
+      () => this.recordInstall(input, appId, { attachToken, template: template.name, lifetime }),
     );
-    // Record the app as soon as it is on the device, so a reset or permission failure below cannot
-    // leave it untracked or keep a previous install's expiry for the sweep to act on (#16506).
-    const installedAt = this.deps.timer.now();
-    const expiresAt = lifetime === null ? null : installedAt + lifetime;
-    await this.deps.registry.put(input.deviceId, {
-      appId,
-      slug: input.app.slug,
-      platform: input.platform,
-      label: input.app.label,
-      specId: disposableSpecId(input.spec),
-      attachToken,
-      specSha256: createHash("sha256").update(JSON.stringify(input.spec)).digest("hex"),
-      template: template.name,
-      signer: await stamper.signer(),
-      installedAt,
-      expiresAt,
-    });
     if (input.app.reset === true) {
       try {
         await installer.resetStorage(input.deviceId, appId);

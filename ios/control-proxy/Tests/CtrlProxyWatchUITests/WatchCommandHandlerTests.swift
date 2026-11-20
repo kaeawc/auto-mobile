@@ -49,12 +49,18 @@ final class WatchCommandHandlerTests: XCTestCase {
     }
 
     func testSwipeRouteKeepsAlertPath() {
-        for appForeground in [false, true] {
-            for clockfaceForeground in [false, true] {
-                XCTAssertEqual(watchSwipeRoute(
-                    hasAlerts: true, appForeground: appForeground, clockfaceForeground: clockfaceForeground
-                ), .systemAlert)
-            }
+        for clockfaceForeground in [false, true] {
+            XCTAssertEqual(watchSwipeRoute(
+                hasAlerts: true, appForeground: true, clockfaceForeground: clockfaceForeground
+            ), .systemAlert)
+        }
+    }
+
+    func testSwipeRouteUsesSystemWhenAlertIsOverBackgroundedApp() {
+        for clockfaceForeground in [false, true] {
+            XCTAssertEqual(watchSwipeRoute(
+                hasAlerts: true, appForeground: false, clockfaceForeground: clockfaceForeground
+            ), .system)
         }
     }
 

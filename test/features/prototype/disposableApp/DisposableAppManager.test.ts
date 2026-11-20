@@ -213,6 +213,42 @@ describe("DisposableAppManager.install", () => {
     expect(installer.uninstalls).toEqual([]);
   });
 
+  test("seeds storage after recording the app and before releasing the artifact", async () => {
+    const appId = disposableAppId("android", "feedly");
+    const seen: { registered: string[]; released: number }[] = [];
+    installer.onSeed = async () => {
+      const registered = (await registry.list(DEVICE)).map((record) => record.appId);
+      seen.push({ registered, released: stamper.released.length });
+    };
+    await manager.install(input());
+    expect(installer.seeds).toEqual([{ appId, artifactPath: installer.installs[0].artifactPath }]);
+    expect(seen).toEqual([{ registered: [appId], released: 0 }]);
+    expect(stamper.released).toHaveLength(1);
+  });
+
+  test.each([
+    ["a first install", false],
+    ["a reinstall", true],
+  ])("%s whose storage seeding fails still records the new expiry", async (_name, reinstall) => {
+    const appId = disposableAppId("android", "feedly");
+    if (reinstall) {
+      await manager.install(input({ ttlHours: 1 }));
+      timer.advanceTime(HOUR);
+    }
+    installer.seedFailure = new Error("data container write failed");
+    const installedAt = reinstall ? HOUR : 0;
+    await expect(manager.install(input({ ttlHours: 2 }))).rejects.toThrow(
+      `${appId} is installed on ${DEVICE} (expires ${new Date(installedAt + 2 * HOUR).toISOString()}), but its storage was not seeded: data container write failed.`,
+    );
+    expect(await registry.list(DEVICE)).toEqual([
+      expect.objectContaining({ appId, installedAt, expiresAt: installedAt + 2 * HOUR }),
+    ]);
+    expect(stamper.released).toHaveLength(reinstall ? 2 : 1);
+    expect(installer.grants).toHaveLength(reinstall ? 1 : 0);
+    timer.advanceTime(HOUR);
+    expect(await manager.sweepExpired(DEVICE, "android")).toEqual({ removed: [], skipped: [] });
+  });
+
   test("a reinstall whose storage reset fails still records the new expiry", async () => {
     await manager.install(input({ ttlHours: 1 }));
     timer.advanceTime(HOUR);

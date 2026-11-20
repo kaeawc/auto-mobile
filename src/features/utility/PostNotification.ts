@@ -49,7 +49,7 @@ function withWatchPresentationWarning(
 }
 
 function watchNotPresentedWarning(bundleId: string): string {
-  return `The watch delivered the push to ${bundleId} but showed no banner: the app is in the foreground and its notification delegate declined to present it (notifications are authorized, not denied). Background the app (homeScreen) and post again if the banner is needed.`;
+  return `The watch delivered the push to ${bundleId} but showed no banner: the app is in the foreground and its notification delegate declined to present it (notifications are authorized, not denied). Background the app (pressButton home) and post again if the banner is needed.`;
 }
 
 interface PostNotificationAction {

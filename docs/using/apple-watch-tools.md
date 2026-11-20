@@ -143,7 +143,7 @@ pre-grant notification authorization, so the app must request permission. Find A
 - If the app is in the foreground and its notification delegate declines to present the alert,
   the watch delivers the push without a banner. `postNotification` returns `success: true` with a
   `warning` saying so (notifications are authorized, not denied). Background the app with
-  `homeScreen`, then post again if you need the banner.
+  `pressButton` `home`, then post again if you need the banner.
 - When no delivery verdict is available, success means the simulator accepted the push.
 - A banner disappears after a few seconds. Call `observe` right after the push to inspect its short
   look; the long look exposes its action buttons.

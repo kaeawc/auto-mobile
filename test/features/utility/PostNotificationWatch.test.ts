@@ -195,7 +195,7 @@ describe("PostNotification - watchOS simulator", () => {
     expect(result.success).toBe(true);
     expect(result.error).toBeUndefined();
     expect(result.warning).toContain("showed no banner");
-    expect(result.warning).toContain("Background the app");
+    expect(result.warning).toContain("pressButton home");
     expect(pushCalls()).toHaveLength(1);
   });
 

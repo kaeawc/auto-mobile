@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "path";
+import { chmod, mkdtemp, open, rm, writeFile } from "fs/promises";
+import { tmpdir } from "os";
 import {
   assertCtrlProxyApkOverrideUsable,
   CtrlProxyApkOverrideUnusableError,
   preflightCtrlProxyApkOverride,
   resolveCtrlProxyApkPathOverride,
+  statReadableFile,
   type ApkOverrideStat,
 } from "../../src/ctrlProxy/ctrlProxyApkOverride";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -83,6 +86,45 @@ describe("assertCtrlProxyApkOverrideUsable", () => {
 
   test("an existing file passes", async () => {
     await assertCtrlProxyApkOverrideUsable(STALE, fakeStat({ [STALE]: "file" }), "x.");
+  });
+});
+
+describe("statReadableFile", () => {
+  test("refuses a file whose metadata is visible but which cannot be opened for reading", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "apk-override-"));
+    const apk = path.join(dir, "control-proxy-debug.apk");
+    try {
+      await writeFile(apk, "apk");
+      await chmod(apk, 0o000);
+      const readable = await open(apk, "r").then(
+        async (handle) => {
+          await handle.close();
+          return true;
+        },
+        () => false,
+      );
+      // Root (and Windows) can open a mode-000 file; there the case does not arise.
+      if (readable) {
+        await assertCtrlProxyApkOverrideUsable(apk, statReadableFile, "x.");
+        return;
+      }
+      await expect(assertCtrlProxyApkOverrideUsable(apk, statReadableFile, "x.")).rejects.toThrow(
+        `${apk}, which cannot be read (`,
+      );
+    } finally {
+      await chmod(apk, 0o600);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("reports an open file's type", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "apk-override-"));
+    try {
+      await writeFile(path.join(dir, "a.apk"), "apk");
+      expect((await statReadableFile(path.join(dir, "a.apk"))).isFile()).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

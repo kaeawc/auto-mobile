@@ -1,10 +1,24 @@
+import * as fs from "fs/promises";
 import { ENV, readEnvRaw } from "../config/env";
 import { ActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
-/** The one stat the override check needs; `fs.promises.stat` satisfies it. */
+/** Reads the override's file type; it throws when the path cannot be opened for reading. */
 export type ApkOverrideStat = (path: string) => Promise<{ isFile(): boolean }>;
+
+/**
+ * Opens the override for reading and stats the open handle, so an existing file the daemon cannot
+ * read (mode 000) is refused like a missing one; a bare `stat` needs no read permission.
+ */
+export const statReadableFile: ApkOverrideStat = async (path) => {
+  const handle = await fs.open(path, "r");
+  try {
+    return await handle.stat();
+  } finally {
+    await handle.close();
+  }
+};
 
 /**
  * The `AUTOMOBILE_CTRL_PROXY_APK_PATH` override as an absolute path (relative values resolve

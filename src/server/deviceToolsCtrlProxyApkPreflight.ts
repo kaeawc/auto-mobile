@@ -1,5 +1,4 @@
-import * as fs from "fs/promises";
-import { preflightCtrlProxyApkOverride } from "../ctrlProxy/ctrlProxyApkOverride";
+import { preflightCtrlProxyApkOverride, statReadableFile } from "../ctrlProxy/ctrlProxyApkOverride";
 import type { DeviceToolsDependencies } from "../features/deviceLifecycle/core/dependencies";
 import type { Platform } from "../models";
 
@@ -11,7 +10,7 @@ export async function preflightAndroidCtrlProxyApkOverride(
   if (platform === "android") {
     await preflightCtrlProxyApkOverride(
       deps.env ?? process.env,
-      deps.ctrlProxyApkOverrideStat ?? fs.stat,
+      deps.ctrlProxyApkOverrideStat ?? statReadableFile,
     );
   }
 }

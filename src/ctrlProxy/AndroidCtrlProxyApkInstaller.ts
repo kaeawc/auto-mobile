@@ -28,6 +28,7 @@ import { CtrlProxyApkStageError } from "./CtrlProxyApkStageError";
 import {
   assertCtrlProxyApkOverrideUsable,
   CtrlProxyApkOverrideUnusableError,
+  statReadableFile,
 } from "./ctrlProxyApkOverride";
 import type { InstalledApkSha256Result } from "./AndroidCtrlProxyManagerTypes";
 import { adbFailureOutput } from "../utils/android-cmdline-tools/adbFailureOutput";
@@ -108,7 +109,7 @@ export class AndroidCtrlProxyApkInstaller {
         logger.info("Using local accessibility service APK", { path: overridePath });
         await assertCtrlProxyApkOverrideUsable(
           overridePath,
-          fs.stat,
+          statReadableFile,
           "The CtrlProxy APK was not installed.",
         );
         await fs.copyFile(overridePath, apkPath);

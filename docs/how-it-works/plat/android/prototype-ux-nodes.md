@@ -299,7 +299,7 @@ A `textField` may also declare three optional fields:
   `done`.
 
 Multiline text has no IME action, so validation refuses `imeAction` and `onSubmit` with
-`multiline: true`. These need `prototype_text_field_actions_v1`, with the same refusal.
+`multiline: true`; a field with either and no `multiline` is single-line, so Enter runs the action. These need `prototype_text_field_actions_v1`, with the same refusal.
 
 Android draws `trailingIcon` as an `IconButton` in the field's trailing slot. Its `label` is the content description and its tag is
 `<testTag>.trailingIcon`. Android maps `imeAction` to Compose

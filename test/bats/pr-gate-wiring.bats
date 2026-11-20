@@ -131,6 +131,25 @@ load yq-helpers
   done
 }
 
+@test "performance-tool sources trigger the Android emulator job's performance smoke (#18725)" {
+  require_mikefarah_yq
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-android")
+    | (.with.filters | from_yaml | .android[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  local path
+  for path in \
+    'src/features/performance/**' \
+    'src/features/performanceTrace/**' \
+    'src/features/profiling/**' \
+    'src/server/*performance*'; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
+  done
+  grep -q 'performance-tool-smoke.sh' "$BATS_TEST_DIRNAME/../../scripts/android/run-emulator-suites.sh"
+}
+
 @test "required CtrlProxy job runs prototype-compose tests and coverage" {
   require_mikefarah_yq
   [ "$(yq -r '.jobs."kotlin-code-coverage".name' "$WF")" = 'Run CtrlProxy Unit Tests' ]

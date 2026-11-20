@@ -14,6 +14,7 @@ import { SingleFlight } from "../../utils/cache/SingleFlight";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { TvosRunnerClient } from "./TvosRunnerClient";
+import { TvosRunnerError } from "./TvosRunnerError";
 import { TargetAppForegroundRestore, type TvosForegroundRestore } from "./TvosForegroundRestore";
 import { tvosTargetApps } from "./TvosTargetApps";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -39,6 +40,21 @@ interface TvosRunnerRestartResult {
   unownedRunner?: TvosRunnerClient;
 }
 
+interface TvosRunnerPorts {
+  allocate(deviceId: string): number;
+  release(deviceId: string, port: number): void;
+  /** Keep a port another process's runner answered on out of the next allocations. */
+  quarantine?(port: number): void;
+}
+
+/** Ports tried per start before reporting the runner unavailable. */
+const MAX_RUNNER_PORT_ATTEMPTS = 3;
+
+/** The client reached a runner for another platform, so another process holds the port. */
+function isForeignRunnerError(error: unknown): boolean {
+  return error instanceof TvosRunnerError && error.errorCode === "invalid_runner_platform";
+}
+
 /** Owns only runners launched here; a pre-registered runner is reused without taking ownership. */
 export class TvosRunnerLifecycle {
   private readonly runners = new Map<string, OwnedRunner>();
@@ -48,7 +64,7 @@ export class TvosRunnerLifecycle {
     private readonly dependencies: {
       artifacts: Pick<TvosRunnerArtifacts, "resolve">;
       launcher: TvosRunnerLauncher;
-      ports: { allocate(deviceId: string): number; release(deviceId: string, port: number): void };
+      ports: TvosRunnerPorts;
       timer?: Timer;
       /** Brings the app under test back in front once a launched runner is up (#18020). */
       foreground?: TvosForegroundRestore;
@@ -159,13 +175,7 @@ export class TvosRunnerLifecycle {
       signal.throwIfAborted();
       const xctestrun = await this.dependencies.artifacts.resolve(signal);
       signal.throwIfAborted();
-      entry.port = this.dependencies.ports.allocate(deviceId);
-      const handle = await this.dependencies.launcher.launch({
-        deviceId,
-        xctestrun,
-        port: entry.port,
-        signal,
-      });
+      const handle = await this.launchOnFreePort(entry, { deviceId, xctestrun, signal });
       entry.stop = handle.stop;
       if (signal.aborted || this.runners.get(deviceId) !== entry) {
         if (this.runners.get(deviceId) !== entry) {
@@ -194,6 +204,41 @@ export class TvosRunnerLifecycle {
       return { runnerUnavailable: reason };
     } finally {
       signal.removeEventListener("abort", onAbort);
+    }
+  }
+
+  /**
+   * Another daemon on this host can allocate a port and bind its runner only after this process's
+   * bind probe found the port free, so the client then reaches that foreign runner (#18912). The
+   * client refuses it by platform; quarantine the port and launch again on the next free one.
+   */
+  private async launchOnFreePort(
+    entry: OwnedRunner,
+    options: { deviceId: string; xctestrun: string; signal: AbortSignal },
+  ): Promise<{ stop(): void }> {
+    const { deviceId, signal } = options;
+    for (let attempt = 1; ; attempt++) {
+      const port = this.dependencies.ports.allocate(deviceId);
+      entry.port = port;
+      try {
+        return await this.dependencies.launcher.launch({ ...options, port });
+      } catch (error) {
+        if (
+          !isForeignRunnerError(error) ||
+          attempt >= MAX_RUNNER_PORT_ATTEMPTS ||
+          signal.aborted ||
+          this.runners.get(deviceId) !== entry
+        ) {
+          throw error;
+        }
+        logger.warn(
+          `[TvosRunner] Port ${port} for ${deviceId} is held by another runner; retrying on another port`,
+          error,
+        );
+        this.dependencies.ports.quarantine?.(port);
+        this.dependencies.ports.release(deviceId, port);
+        entry.port = undefined;
+      }
     }
   }
 
@@ -346,6 +391,7 @@ export function getTvosRunnerLifecycle(): TvosRunnerLifecycle {
             reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
           }),
         release: (deviceId, port) => PortManager.releaseIfAllocated(`tvos:${deviceId}`, port),
+        quarantine: (port) => PortManager.quarantine(port),
       },
     });
     process.once("exit", () => defaultLifecycle?.stopAll());

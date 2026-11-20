@@ -1,21 +1,25 @@
 import { z } from "zod/v4";
 
-/** Failures, including the not-debuggable refusal, throw, so every heapDump result is a success. */
+/** Failures throw, so every heapDump result carries `success: true`. */
 export const heapDumpResultSchema = z
   .object({
     success: z.literal(true),
-    /** Host `.hprof` path. */
+    /** Host `.hprof` or `.memgraph` path. */
     path: z.string(),
     sizeBytes: z.number(),
     appId: z.string(),
-    native: z.boolean(),
-    attempts: z.array(
-      z.object({
-        command: z.string(),
-        outcome: z.enum(["dumped", "empty"]),
-        output: z.string().optional(),
-      }),
-    ),
+    format: z.enum(["hprof", "memgraph"]),
+    native: z.boolean().optional(),
+    attempts: z
+      .array(
+        z.object({
+          command: z.string(),
+          outcome: z.enum(["dumped", "empty"]),
+          output: z.string().optional(),
+        }),
+      )
+      .optional(),
+    pid: z.number().int().positive().optional(),
     message: z.string(),
   })
   .passthrough();

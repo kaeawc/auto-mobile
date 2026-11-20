@@ -32,6 +32,8 @@ export class FakePrototypeAgentClient implements PrototypeAgentClient {
     this.patchHold = reply;
   }
   closed = false;
+  /** Sequences passed to `acknowledgeEventsThrough`, in call order. */
+  readonly acknowledged: number[] = [];
   private readonly replies: Reply[] = [];
   private readonly eventListeners = new Set<(event: PrototypeAgentMessage) => void>();
   private readonly closedListeners = new Set<(error: Error) => void>();
@@ -81,6 +83,10 @@ export class FakePrototypeAgentClient implements PrototypeAgentClient {
   onEvent(listener: (event: PrototypeAgentMessage) => void): () => void {
     this.eventListeners.add(listener);
     return () => this.eventListeners.delete(listener);
+  }
+
+  acknowledgeEventsThrough(sequence: number): void {
+    this.acknowledged.push(sequence);
   }
 
   listenerCount(): number {

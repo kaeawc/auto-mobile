@@ -26,7 +26,7 @@ import { XcodebuildClient } from "../../utils/ios-cmdline-tools/XcodebuildClient
 const PID_LOOKUP_TIMEOUT_MS = 5_000;
 
 /** Simulator apps run under launchd_sim; physical devices have no pid lookup yet. */
-async function resolveIosAppPid(
+export async function resolveIosAppPid(
   device: BootedDevice,
   appId: string,
   signal?: AbortSignal,

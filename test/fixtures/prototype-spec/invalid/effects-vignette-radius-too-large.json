@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "vignette-radius",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Effect",
+      "style": {
+        "effects": [
+          {
+            "type": "vignette",
+            "radius": 1.01
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.style.effects[0].radius",
+  "expectedMessage": "Invalid number value"
+}

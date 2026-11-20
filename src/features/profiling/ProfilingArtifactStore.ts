@@ -1,5 +1,5 @@
 /**
- * Where `heapDump` puts the `.hprof` files it pulls. Injectable
+ * Where profiling tools put binary artifacts (`.hprof`, `.memgraph`). Injectable
  * so tests never touch the host file system.
  */
 export interface ProfilingArtifactStore {

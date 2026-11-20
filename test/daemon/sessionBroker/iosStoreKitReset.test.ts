@@ -183,6 +183,19 @@ describe("runner StoreKit session reset", () => {
     expect(rig.cleared.isCleared(UDID, "com.example.shop")).toBe(true);
   });
 
+  test("a confirmed clear that answers after an overlapping touch leaves the bundle unclean", async () => {
+    const cleared = new InMemoryStoreKitClearedSessions();
+    const sender: StoreKitSender = {
+      requestStoreKit: async () => {
+        cleared.markTouched(UDID, "com.example.shop");
+        return { success: true, totalTimeMs: 1, transactions: [] };
+      },
+    };
+    const reset = new RunnerStoreKitSessionReset(() => sender, cleared);
+    await reset.clear(UDID, "com.example.shop", new AbortController().signal);
+    expect(cleared.isCleared(UDID, "com.example.shop")).toBe(false);
+  });
+
   test("no runner session after a confirmed clear with no change since is already clean", async () => {
     const rig = clear(NO_SESSION);
     rig.cleared.markCleared(UDID, "com.example.shop");

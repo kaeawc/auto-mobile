@@ -192,7 +192,7 @@ class PrototypeChannelController(
   /** `realtime.send`: sent when open, queued while (re)connecting, refused otherwise. */
   suspend fun send(channel: String, data: String): PrototypeChannelError? = lock.withLock {
     val slot = slots[channel] ?: return@withLock unknown(channel)
-    if (ended) {
+    if (closing) {
       return@withLock PrototypeChannelError(
         PrototypeChannelError.NETWORK,
         "The channels are closed",

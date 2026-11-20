@@ -47,6 +47,7 @@ internal class PrototypeRealtimeModule(
   config: PrototypeRealtimeConfig,
   sink: PrototypeChannelSink,
   scope: CoroutineScope,
+  onError: (Throwable) -> Unit,
   newId: () -> String,
 ) : PrototypePlatformModule {
   override val name = NAME
@@ -58,7 +59,15 @@ internal class PrototypeRealtimeModule(
   override val events = emptyFlow<PlatformEvent>()
 
   private val controller =
-    PrototypeChannelController(prototypeId, config.transports, sink, scope, config.random, newId)
+    PrototypeChannelController(
+      prototypeId,
+      config.transports,
+      sink,
+      scope,
+      config.random,
+      onError,
+      newId,
+    )
   private val inbox = Channel<suspend () -> Unit>(Channel.UNLIMITED)
 
   init {

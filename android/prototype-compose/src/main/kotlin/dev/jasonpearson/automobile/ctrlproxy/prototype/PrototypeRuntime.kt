@@ -474,7 +474,14 @@ class PrototypeRuntime(
     current.active && channel in current.spec.channels.orEmpty()
 
   private val realtimeModule = realtime?.let {
-    PrototypeRealtimeModule(spec.id, it, realtimeSink, requestScope, newRequestId)
+    PrototypeRealtimeModule(
+      spec.id,
+      it,
+      realtimeSink,
+      requestScope,
+      { error -> Log.w("PrototypeRuntime", "Realtime sink failed", error) },
+      newRequestId,
+    )
   }
 
   val platformRegistry =

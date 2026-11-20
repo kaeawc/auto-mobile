@@ -20,7 +20,9 @@
 #
 # Versions are compared numerically, component by component. A "major.minor"
 # argument matches a runtime whose version is exactly it or starts with it plus
-# a dot, so "26.6" matches 26.6 and 26.6.1 but not 26.60.
+# a dot, so "26.6" matches 26.6 and 26.6.1 but not 26.60. "Between the
+# deployment target and the SDK" (in_sdk_range) includes the SDK's patch
+# runtimes, so SDK 27.2 accepts 27.2.1.
 
 IOS_SIM_JQ_DEFS='
 def ver: split(".") | map(tonumber? // 0);
@@ -32,6 +34,9 @@ def usable_ios_runtime:
   | select(.supportedDeviceTypes == null
       or any(.supportedDeviceTypes[]; .productFamily == "iPhone" and ((.name // "") | test("Duo") | not)));
 def matches_major_minor($v): .version == $v or (.version | startswith($v + "."));
+def in_sdk_range($min; $v):
+  (.version | ver) >= ($min | ver)
+  and ((.version | ver) <= ($v | ver) or matches_major_minor($v));
 '
 
 # --arg v MAJOR.MINOR -> number of usable runtimes matching it.
@@ -46,7 +51,7 @@ IOS_SIM_COUNT_MATCHING_RUNTIMES_JQ="${IOS_SIM_JQ_DEFS}"'
 IOS_SIM_PICK_RUNTIME_JQ="${IOS_SIM_JQ_DEFS}"'
 [.runtimes[] | usable_ios_runtime] as $usable
 | ([$usable[] | select(matches_major_minor($v))] | sort_by(.version | ver) | last)
-  // ([$usable[] | select((.version | ver) >= ($min | ver) and (.version | ver) <= ($v | ver))]
+  // ([$usable[] | select(in_sdk_range($min; $v))]
       | sort_by(.version | ver) | last)
 | select(. != null)
 | [.version, .identifier] | @tsv
@@ -62,7 +67,7 @@ IOS_SIM_PICK_SIMULATOR_JQ="${IOS_SIM_JQ_DEFS}"'
 def gen: [(.deviceTypeIdentifier // "") | match("iPhone-([0-9]+)") | .captures[0].string | tonumber][0] // 0;
 def rank: [(if (.name | startswith("iPhone")) then 1 else 0 end), gen, .name];
 [$runtimes.runtimes[] | usable_ios_runtime
-  | select((.version | ver) >= ($min | ver) and (.version | ver) <= ($v | ver))
+  | select(in_sdk_range($min; $v))
   | .identifier] as $in_range
 | [.devices | to_entries[] | .key as $rt | .value[]
     | select(.isAvailable != false)

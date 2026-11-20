@@ -1,8 +1,10 @@
-import { mkdtemp, mkdir, writeFile, copyFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, copyFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { toActionableError } from "../../models/ActionableError";
+import { errorMessage } from "../../models/describeUnknownError";
 import { execFileAsync, type ExecFileAsync } from "../HostCommandExecutor";
+import { logger } from "../logger";
 
 /** Bundle id of the disposable HealthKit seeding app. */
 export const HEALTHKIT_SEEDER_BUNDLE_ID = "dev.am.hkseeder";
@@ -104,42 +106,85 @@ export const HEALTHKIT_SEEDER_ENTITLEMENTS = `<?xml version="1.0" encoding="UTF-
 </dict></plist>
 `;
 
-export interface HealthKitAppBuilder {
-  /** Builds and ad-hoc signs the disposable app; returns the `.app` bundle path. */
-  build(): Promise<string>;
+export interface HealthKitAppBuild {
+  /** The ad-hoc signed `.app` bundle path. */
+  appPath: string;
+  /** Removes what the build created on the host; call once the app is installed. */
+  dispose(): Promise<void>;
 }
+
+export interface HealthKitAppBuilder {
+  /** Builds and ad-hoc signs the disposable app. */
+  build(): Promise<HealthKitAppBuild>;
+}
+
+/** Filesystem seam for the builder's temporary root. */
+export interface HealthKitBuildFs {
+  mkdtemp(prefix: string): Promise<string>;
+  rm(path: string): Promise<void>;
+}
+
+const nodeBuildFs: HealthKitBuildFs = {
+  mkdtemp: (prefix) => mkdtemp(prefix),
+  rm: (path) => rm(path, { recursive: true, force: true }),
+};
 
 /** Builds the seeder with `swiftc` + `codesign`, as in the #18796 probe. */
 export class SwiftcHealthKitAppBuilder implements HealthKitAppBuilder {
   constructor(
     private readonly exec: ExecFileAsync = execFileAsync,
+    /** Caller-owned directory; it is never removed. Without it the builder owns a temp root. */
     private readonly workDir?: string,
+    private readonly fs: HealthKitBuildFs = nodeBuildFs,
   ) {}
 
-  async build(): Promise<string> {
+  async build(): Promise<HealthKitAppBuild> {
+    let ownedRoot: string | undefined;
     try {
-      const root = this.workDir ?? (await mkdtemp(join(tmpdir(), "am-hkseeder-")));
-      const app = join(root, `${EXECUTABLE}.app`);
-      await mkdir(app, { recursive: true });
-      const swift = join(root, "App.swift");
-      const info = join(root, "Info.plist");
-      const ent = join(root, "ent.plist");
-      await writeFile(swift, HEALTHKIT_SEEDER_SWIFT);
-      await writeFile(info, HEALTHKIT_SEEDER_INFO_PLIST);
-      await writeFile(ent, HEALTHKIT_SEEDER_ENTITLEMENTS);
-      const sdk = (await this.exec("xcrun", ["--sdk", "iphonesimulator", "--show-sdk-path"])).stdout
-        .toString()
-        .trim();
-      await this.exec("swiftc", [
-        ...["-parse-as-library", "-sdk", sdk, "-target", "arm64-apple-ios17.0-simulator"],
-        ...["-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__entitlements"],
-        ...["-Xlinker", ent, "-o", join(app, EXECUTABLE), swift],
-      ]);
-      await copyFile(info, join(app, "Info.plist"));
-      await this.exec("codesign", ["-f", "-s", "-", app]);
-      return app;
+      let root = this.workDir;
+      if (root === undefined) {
+        ownedRoot = await this.fs.mkdtemp(join(tmpdir(), "am-hkseeder-"));
+        root = ownedRoot;
+      }
+      const appPath = await this.compile(root);
+      return { appPath, dispose: () => this.removeOwnedRoot(ownedRoot) };
     } catch (error) {
+      await this.removeOwnedRoot(ownedRoot);
       throw toActionableError(error, "Failed to build the HealthKit seeding app");
+    }
+  }
+
+  private async compile(root: string): Promise<string> {
+    const app = join(root, `${EXECUTABLE}.app`);
+    await mkdir(app, { recursive: true });
+    const swift = join(root, "App.swift");
+    const info = join(root, "Info.plist");
+    const ent = join(root, "ent.plist");
+    await writeFile(swift, HEALTHKIT_SEEDER_SWIFT);
+    await writeFile(info, HEALTHKIT_SEEDER_INFO_PLIST);
+    await writeFile(ent, HEALTHKIT_SEEDER_ENTITLEMENTS);
+    const sdk = (await this.exec("xcrun", ["--sdk", "iphonesimulator", "--show-sdk-path"])).stdout
+      .toString()
+      .trim();
+    await this.exec("swiftc", [
+      ...["-parse-as-library", "-sdk", sdk, "-target", "arm64-apple-ios17.0-simulator"],
+      ...["-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__entitlements"],
+      ...["-Xlinker", ent, "-o", join(app, EXECUTABLE), swift],
+    ]);
+    await copyFile(info, join(app, "Info.plist"));
+    await this.exec("codesign", ["-f", "-s", "-", app]);
+    return app;
+  }
+
+  private async removeOwnedRoot(root: string | undefined): Promise<void> {
+    if (!root) {
+      return;
+    }
+    try {
+      await this.fs.rm(root);
+    } catch (error) {
+      // Best-effort cleanup: a leftover temp root must not fail or mask the seed result.
+      logger.warn(`Failed to remove HealthKit seeder build root ${root}: ${errorMessage(error)}`);
     }
   }
 }

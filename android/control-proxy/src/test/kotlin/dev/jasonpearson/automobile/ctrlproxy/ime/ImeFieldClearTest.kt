@@ -179,4 +179,87 @@ class ImeFieldClearTest {
     assertFalse(deleted)
     assertFalse(result.partialApplication)
   }
+
+  @Test
+  fun `selected text with empty surroundings is deleted rather than reported cleared (#18861)`() {
+    // After select-all the connection reports no text before or after the cursor: both sides
+    // exclude the selected range, so only getSelectedText sees the field content.
+    var selected = "abcdef"
+    val calls = mutableListOf<String>()
+    val result =
+      clearImeField(
+        finishComposing = { true },
+        readBefore = { "" },
+        readAfter = { "" },
+        selection =
+          ImeSelection(
+            read = { selected },
+            delete = {
+              calls.add("deleteSelected")
+              selected = ""
+              true
+            },
+          ),
+      ) { before, after ->
+        calls.add("delete:$before:$after")
+        true
+      }
+    assertTrue(result.success)
+    assertFalse(result.partialApplication)
+    assertEquals(listOf("deleteSelected"), calls)
+  }
+
+  @Test
+  fun `selection with surrounding text deletes the selection then both sides`() {
+    var selected = "mid"
+    var before = "pre"
+    var after = "post"
+    val calls = mutableListOf<String>()
+    val result =
+      clearImeField(
+        finishComposing = { true },
+        readBefore = { before },
+        readAfter = { after },
+        selection =
+          ImeSelection(
+            read = { selected },
+            delete = {
+              calls.add("deleteSelected")
+              selected = ""
+              true
+            },
+          ),
+      ) { b, a ->
+        calls.add("delete:$b:$a")
+        before = ""
+        after = ""
+        true
+      }
+    assertTrue(result.success)
+    assertEquals(listOf("deleteSelected", "delete:3:4"), calls)
+  }
+
+  @Test
+  fun `rejected selection delete is a partial typed failure`() {
+    var deletions = 0
+    val result =
+      clearImeField(
+        finishComposing = { true },
+        readBefore = { "" },
+        readAfter = { "" },
+        selection =
+          ImeSelection(
+            read = { "abcdef" },
+            delete = {
+              deletions++
+              false
+            },
+          ),
+      ) { _, _ ->
+        error("surrounding delete must not run without surrounding text")
+      }
+    assertFalse(result.success)
+    assertTrue(result.partialApplication)
+    assertEquals(1, deletions)
+  }
 }

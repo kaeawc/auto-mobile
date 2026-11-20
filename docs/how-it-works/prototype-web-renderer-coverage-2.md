@@ -82,10 +82,14 @@ descriptions here are the Android skin's.
   window's bottom with 12 px around it, as wide as the window up to 600 px, at least 48 px tall. It
   uses `inverseSurface` with 4 px corners and `bodyMedium` `inverseOnSurface` text, then its
   optional `inversePrimary` action tagged `<testTag>.action`.
-- **Drawer.** A drawer fills the window inside its safe-area insets. Its scrim resolves like a
-  sheet's and is tagged `<testTag>.close`. The surface sits at its `edge` (`end` unless `start`,
-  mirrored in RTL), full height and `min(320px, 100% - 56px)` wide. It paints `surface` at tonal
-  elevation 3 with a 3 px shadow unless an authored background resolves, and holds its child.
+- **Drawer.** A drawer fills the window inside its safe-area insets and consumes them, so
+  `safeAreaPadding` inside it adds nothing. Its scrim resolves like a sheet's and is tagged
+  `<testTag>.close`. The surface sits at its `edge` (`end` unless `start`, mirrored in RTL),
+  centred vertically, full height and `min(320px, 100% - 56px)` wide, also as a fullscreen root.
+  Authored sizes resolve against that row. It paints `surface` under `surfaceTint` at tonal
+  elevation 3 (`surfaceContainerHigh` in the iOS skin) with a 3 px shadow unless an authored
+  background resolves. It holds its child in a column from the leading edge, and an open drawer
+  takes initial focus like a dialog.
 - **Fullscreen scrim.** A fullscreen placement's `scrim` paints behind the window's content,
   resolved like a sheet's scrim. Without one the window is transparent.
 

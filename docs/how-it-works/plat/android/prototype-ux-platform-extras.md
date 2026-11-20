@@ -64,8 +64,7 @@ engine support for a locale or zone.
 
 Epoch milliseconds must be finite integers within the Date range. Strings are
 `YYYY-MM-DD` (midnight UTC) or `YYYY-MM-DDTHH:mm:ss[.fraction]Z` / a signed
-`hh:mm` offset. Hours must be 00–23 and minutes/seconds 00–59; hour 24 and
-leap second 60 are rejected. Invalid calendar dates, unzoned date-times, wrong types and
+`hh:mm` offset. Hours must be 00–23 and minutes/seconds 00–59. Invalid calendar dates, unzoned date-times, wrong types and
 missing pointers display as the empty string.
 
 Relative formatting reads an injected nowMs snapshot, never the clock. Choose the largest elapsed threshold not exceeding abs(input-nowMs):
@@ -78,8 +77,6 @@ U+202F and U+00A0 to plain space before comparisons. Exact cases pin supported
 English output; structural cases allow documented CLDR differences in foreign
 currency symbols, narrow relative abbreviations, zero-relative wording and
 non-English data. The fixture note records the divergence policy and unit thresholds.
-
-`dateTime`, `duration`, `plural` and `fileSize` are not format kinds (invalid).
 
 ## Platform namespaces (#15257)
 
@@ -118,8 +115,7 @@ shape; omission uses a capsule. Base and conditional styles require
 `prototype_scroll_edge_effect_v1`. iOS 26 uses the native scroll edge style;
 iOS 17–25 reuse the scrollability-aware `fadeEdges` mask, 24 dp for soft and
 8 dp for hard. Authored `fadeEdges` lengths override those defaults; `none`
-disables only the default fallback mask or native effect. Explicit `fadeEdges`
-remain applied on every supported iOS version. Android accepts the contract but does not advertise or
+disables only the default fallback mask or native effect. Android accepts the contract but does not advertise or
 render edgeEffect.
 
 In `ios`, `glassGroup: {spacing}` accepts finite 0–200 dp on column, row, box,
@@ -138,8 +134,7 @@ in platformNotes.
 
 The system's Liquid Glass implementation handles Reduce Transparency and
 Increase Contrast. On iOS 17–25 the device does not advertise
-`prototype_glass_v1`, so the host refuses glass there: there is no simulated
-translucent fill or material substitute. Android advertises the capability on every API level:
+`prototype_glass_v1`, so the host refuses glass there. Android advertises the capability on every API level:
 API 31 and later blur earlier sibling layers (Haze) and older devices draw a tonal scrim instead.
 An Android
 renderer advertising glass must report any approximation (clear variant,
@@ -162,8 +157,7 @@ color and border color use critically damped effects springs.
 | either scheme effects | 1 / 1 / 1                             | 3800 / 1600 / 800                 |
 
 Compose uses `spring(dampingRatio, stiffness)`. SwiftUI uses
-`interpolatingSpring(mass: 1, stiffness: k, damping: 2 * dampingRatio * sqrt(k))`,
-so both renderers use the same physical spring. Reduced motion snaps spatial
+`interpolatingSpring(mass: 1, stiffness: k, damping: 2 * dampingRatio * sqrt(k))`. Reduced motion snaps spatial
 changes and retains effects; motion off snaps everything. iOS advertises the token capability
 but still refuses the motion v2/v3 features it lacks.
 
@@ -215,7 +209,7 @@ missing events. A separate writer uses a 256-frame queue and five-second write d
 overflow or blocked writes close the peer, and events and requests continue with replay retained.
 
 - **Identity.** The package is `dev.jasonpearson.automobile.app.<slug>_<sha256(slug) 8 hex>`.
-  Hyphens in the slug become underscores because Android package segments allow only
+  Slug hyphens become underscores, as Android package segments allow only
   `[A-Za-z0-9_]`. A slug is lowercase hyphen-separated words of at most 48 characters that start
   with a letter. The prefix is never agent-chosen, so a disposable app cannot replace a real one.
 - **Permissions** come only from the spec's root `requires`. `INTERNET` is always declared.
@@ -240,8 +234,11 @@ overflow or blocked writes close the peer, and events and requests continue with
   a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
   uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs
   from the host's disposable-app key: one requested id is refused with an error, and in a bulk
-  removal the package is reported under `skipped`. A record whose app is already gone from the
-  device is still cleared.
+  removal the package is reported under `skipped`. When the session broker acquires an Android
+  device, it sweeps expired apps within the preparation deadline. The acquisition result reports
+  the removed app IDs, and each removal is logged at `warn`. A record whose app is already gone
+  from the device is still cleared. Doctor reports expired apps that are still installed or
+  registered on each connected Android device.
 - **Device commands.** The Android installer runs `adb install -r` (then `pm clear` for `reset`),
   `pm grant` per granted manifest permission, and `pm revoke` plus the `user-set user-fixed` flags
   per denied one, so a denial reads as blocked with no dialog. It refuses a grant and a deny that

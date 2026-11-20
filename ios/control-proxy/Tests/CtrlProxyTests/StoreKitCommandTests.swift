@@ -268,15 +268,35 @@ final class StoreKitCommandTests: XCTestCase {
         XCTAssertTrue(result.success)
     }
 
-    func testIosTwentySixInternalErrorBecomesUnsupported() async throws {
-        for (os, expectUnsupported) in [(26, true), (27, true), (18, false)] {
+    func testIosTwentySixRejectionsBecomeUnsupported() async throws {
+        // SKInternalErrorDomain 3: iOS 26.5 runner without embedded entitlements (#18644).
+        // SKServiceErrorDomain 2: iOS 27.2 runner with them, target app not installed (mt0098c).
+        let shapes = [("SKInternalErrorDomain", 3), ("SKServiceErrorDomain", 2)]
+        for (domain, code) in shapes {
+            for (os, expectUnsupported) in [(26, true), (27, true), (18, false)] {
+                let session = FakeStoreKitTestSession()
+                session.failureError = NSError(domain: domain, code: code)
+                let handler = handler(StoreKitSessionStore(supported: true, osMajorVersion: os) { _ in session })
+                try await load(handler)
+                let result = try await run(handler, "buy", fields: ["productId": "coins"])
+                XCTAssertFalse(result.success)
+                XCTAssertEqual(result.error?.hasPrefix("unsupported:"), expectUnsupported, "\(domain) iOS \(os)")
+                if expectUnsupported {
+                    XCTAssertTrue(result.error?.contains("\(domain) \(code)") == true, result.error ?? "")
+                }
+            }
+        }
+    }
+
+    func testIosTwentySixOtherStoreKitErrorsStayRaw() async throws {
+        for (domain, code) in [("SKServiceErrorDomain", 3), ("SKInternalErrorDomain", 2), ("SKErrorDomain", 2)] {
             let session = FakeStoreKitTestSession()
-            session.failureError = NSError(domain: "SKInternalErrorDomain", code: 3)
-            let handler = handler(StoreKitSessionStore(supported: true, osMajorVersion: os) { _ in session })
+            session.failureError = NSError(domain: domain, code: code)
+            let handler = handler(StoreKitSessionStore(supported: true, osMajorVersion: 27) { _ in session })
             try await load(handler)
             let result = try await run(handler, "buy", fields: ["productId": "coins"])
             XCTAssertFalse(result.success)
-            XCTAssertEqual(result.error?.hasPrefix("unsupported:"), expectUnsupported, "iOS \(os)")
+            XCTAssertEqual(result.error?.hasPrefix("unsupported:"), false, "\(domain) \(code)")
         }
     }
 

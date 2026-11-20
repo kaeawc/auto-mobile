@@ -183,8 +183,8 @@ A disposable app installs one spec as its own app, with its own package, label, 
 and foreground-service types. The host core lives in `src/features/prototype/disposableApp/`.
 The Android stamper packages a spec into a signed APK. The `prototype` actions `installApp`,
 `listApps` and `uninstallApp` (`{appId}`, `{all: true}` or `{expired: true}`) run on the daemon's
-`DisposableAppManager`, built on the first such call. iOS runs them on simulators only
-([iOS disposable apps](../ios/prototype-agent-saved.md#disposable-apps)). The headless virtual
+`DisposableAppManager`, built on the first such call. iOS runs them on
+[simulators only](../ios/prototype-agent-saved.md#disposable-apps), and the headless virtual
 device refuses them.
 
 On Android, `patch`, `status`, `inspect` and `awaitEvent` with an installed spec id attach over
@@ -235,9 +235,9 @@ overflow or blocked writes close the peer, and events and requests continue with
 - **Registry.** The registry file `disposable-apps.json` under the AutoMobile data dir keys records
   by device id. Each record holds appId, slug, platform, label, spec sha256, template, signer,
   installedAt and expiresAt. The host serializes writes and makes them atomic. It skips a corrupt
-  file or record with a warning. An install writes its record, with the new expiresAt, as soon as
-  the package is on the device and before the host seeds storage, resets it or applies permissions. A failure in any of these then surfaces as an error saying the app is
-  installed without that step, and the sweep still sees the current TTL.
+  file or record with a warning. An install writes its record, with the new expiresAt, once
+  the package is on the device and before seeding, reset or permissions. If one of those fails, the
+  error says the app is installed without that step, and the sweep still sees the current TTL.
 - **Lifecycle.** `ttlHours` defaults to 72, accepts 0 to 720, and 0 means no expiry. Re-installing
   a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
   uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs

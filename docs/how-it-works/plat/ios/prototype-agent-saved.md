@@ -250,6 +250,6 @@ provisioning for disposable apps on them is planned as a host setting. The iOS-s
   mode.
 - **Signer.** A simulator does not report a signer, so removal relies on the reserved prefix alone.
 - **Storage.** After the host records the install, it writes the bundled `prototype.json` into the
-  app's data container as the saved Viewer layout. A seeding failure surfaces as an error saying the
-  app is installed but its storage was not seeded; the record and its expiry stay current. `reset`
+  app's data container as the saved Viewer layout. If seeding fails, the error says the app is
+  installed but not seeded. The record and its expiry stay current. `reset`
   clears the data container and writes the layout again from the installed bundle.

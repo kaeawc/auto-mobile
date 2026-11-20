@@ -98,13 +98,18 @@ function isSameRowAfterScroll(
   if (moved === 0 && match.target.kind === "action") {
     return true;
   }
+  // Only rows the scroll moved can measure it (#18872): a pinned action, or any row that stayed
+  // in place, matches a zero offset whatever the list did, and would vouch for a different
+  // same-label row that happens to sit where the match was.
   const before = uniqueRowsByKey(previous.sheet);
   return [...uniqueRowsByKey(sheet)].some(([otherKey, row]) => {
     const old = before.get(otherKey);
+    if (otherKey === key || old === undefined || row.target.kind === "action") {
+      return false;
+    }
+    const rowMoved = old.element.bounds.top - row.element.bounds.top;
     return (
-      otherKey !== key &&
-      old !== undefined &&
-      Math.abs(old.element.bounds.top - row.element.bounds.top - moved) <= SCROLL_TOLERANCE_PX
+      Math.abs(rowMoved) > SCROLL_TOLERANCE_PX && Math.abs(rowMoved - moved) <= SCROLL_TOLERANCE_PX
     );
   });
 }

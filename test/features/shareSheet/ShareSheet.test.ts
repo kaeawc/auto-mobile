@@ -221,6 +221,22 @@ describe("Android share sheet", () => {
     expect(inputs).toEqual([SWIPE_UP]);
   });
 
+  test("does not let the pinned Copy action vouch for a same-place row on the next page", async () => {
+    // Page 2 shares only the pinned Copy action and the target's label with page 1, at the
+    // same coordinates: a different app, so the label is ambiguous across pages.
+    const laterPage = [
+      ["Nearby Share", "Files"],
+      ["Chrome", "Photos"],
+      ["Copy to clipboard", "Keep"],
+      ["Drive", "Maps"],
+    ].reduce((page, [from, to]) => renamed(page, from, to), android14);
+    const { tool, inputs } = makeShareSheet([android14, laterPage]);
+    await expect(
+      tool.execute({ action: "select", label: "AutoMobile Share Sink" }),
+    ).rejects.toThrow(/Ambiguous share target "AutoMobile Share Sink"/);
+    expect(inputs.some(({ args }) => args[0] === "tap")).toBe(false);
+  });
+
   test("treats the same row carried up by the scroll as one target", async () => {
     const { tool, inputs } = makeShareSheet([android14, scrolled(android14, 100)]);
     expect(await tool.execute({ action: "select", label: "AutoMobile Share Sink" })).toMatchObject({

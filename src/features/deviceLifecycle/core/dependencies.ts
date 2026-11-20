@@ -1,4 +1,3 @@
-import type { ApkOverrideStat } from "../../../ctrlProxy/ctrlProxyApkOverride";
 import type { IosCameraPosterRegistry } from "../../utility/ios/IosCameraPosterRegistry";
 import type { IosCameraPosterDylibProvider } from "../../utility/ios/IosCameraPosterDylibProvider";
 import type { AvdColdBootMarkerStore } from "../../../utils/android-cmdline-tools/AvdColdBootMarkerStore";
@@ -131,8 +130,6 @@ export interface DeviceToolsDependencies {
   notifyDeviceInventoryResourcesChanged: (installedAppResourcesChanged: boolean) => Promise<void>;
   syncInstalledAppResourceRegistry: () => Promise<boolean>;
   ensureCtrlProxyReady?: (request: RunnerReadinessRequest) => Promise<void>;
-  /** Opens and stats the AUTOMOBILE_CTRL_PROXY_APK_PATH override before an Android boot. */
-  ctrlProxyApkOverrideStat?: ApkOverrideStat;
   /** Apple Watch simulator lookup and boot for startDevice (#14908); defaults to simctl. */
   simulatorPairServiceFactory?: () => Pick<
     SimulatorPairService,

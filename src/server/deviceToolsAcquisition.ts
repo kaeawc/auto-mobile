@@ -1,4 +1,3 @@
-import { preflightAndroidCtrlProxyApkOverride } from "./deviceToolsCtrlProxyApkPreflight";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { ActionableError, toActionableError } from "../models";
 import type { DeviceInfo } from "../models";
@@ -489,6 +488,7 @@ async function prepareDevice(
   await assertAndroidCtrlProxyApkOverrideBeforeBoot(args, getDeviceToolsDependencies());
   const perf = createPerformanceTracker(true);
   perf.serial(budgets.operationName);
+  const deps = getDeviceToolsDependencies();
   const autolockEnabled = captureAutolockPolicy(deps.env);
   admitRestartReservedStart(args);
   const deviceUtils = deps.deviceManagerFactory();

@@ -26,7 +26,6 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
-import { CtrlProxyApkOverrideUnusableError } from "../../src/ctrlProxy/ctrlProxyApkOverride";
 import { logger } from "../../src/utils/logger";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";

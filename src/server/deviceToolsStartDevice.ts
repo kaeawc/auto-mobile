@@ -19,6 +19,7 @@ import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTr
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { DeviceShuttingDownError } from "../models/deviceAcquisitionRefusals";
 import { ActionableError, BootedDevice, DeviceInfo, type Platform } from "../models";
+import { withRequestedCarPlay } from "./startDeviceCarPlay";
 import { withRequestedHeadUnit } from "./startDeviceHeadUnit";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
@@ -992,10 +993,12 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
             progress,
             requestSignal,
           );
-          return await withRequestedHeadUnit(args.androidAuto, ready, {
-            signal: requestSignal,
-            totalDeadlineMs: deadlineMs,
-          });
+          const bounds = { signal: requestSignal, totalDeadlineMs: deadlineMs };
+          return await withRequestedCarPlay(
+            args.carPlay,
+            await withRequestedHeadUnit(args.androidAuto, ready, bounds),
+            bounds,
+          );
         },
       },
     );

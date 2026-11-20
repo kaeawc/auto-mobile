@@ -99,7 +99,7 @@ is no new package. The table in `scripts/store-listing/iconTargets.ts` produces:
 
 - Android, per density (mdpi to xxxhdpi): adaptive `foreground`, `background` and `monochrome` layers
   (108 dp) and the rounded legacy `ic_launcher` (48 dp).
-- Play: the 512 px store icon.
+- Play: the 512 px store icon and the 1024 x 500 feature graphic (the background layer filling the banner with the foreground centred, no text so it renders identically on any host).
 - iOS: an `AppIcon.appiconset` with the 1024 px icon in light, dark and tinted appearances (opaque,
   no alpha) and its `Contents.json`.
 
@@ -108,7 +108,7 @@ and monochrome vector drawables matching these SVG sources. The foreground and m
 retain the evenodd holes. ProtoViewer requires API 26, so no legacy fallback is needed. The same
 adaptive resource supports round launcher masks.
 
-Two runs over the same sources write byte-identical files. The PNGs are build output and are
+Two runs over the same sources write byte-identical files. The iOS Viewer build (`scripts/ios/protoviewer-build.sh`) renders the 1024 px icon and downscales it to the 120 and 180 px loose files `CFBundleIconFiles` names; it still ships no asset catalog. The PNGs are build output and are
 git-ignored: this repository routes `*.png` through Git LFS, and generated art does not belong in
 history. Distinct dev and beta icons (as in #14152's proposal) are a second layer pair plus a channel
 column in the table; they are not drawn yet.

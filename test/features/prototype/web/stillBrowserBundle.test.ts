@@ -1,11 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
+import { MAX_PROTOTYPE_WEB_EXPORT_BYTES as MAX_EXPORT_BYTES } from "../../../../packages/prototype-web/build";
 import { bundleForBrowser, type BrowserBundle } from "./browserBundle";
-
-/** Budget from docs/how-it-works/prototype-web-library.md for the core entry. */
-// Owner set one 0.5 MB budget for the export's HTML, JS and CSS counted together, minified, in
-// place of the separate minified and gzip limits that were raised per merge.
-const MAX_EXPORT_BYTES = 500_000;
 
 /** Server-only modules the renderer once reached; any of them back in the closure is a regression. */
 const FORBIDDEN_INPUTS = [

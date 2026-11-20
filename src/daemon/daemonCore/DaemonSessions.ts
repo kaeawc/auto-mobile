@@ -222,7 +222,7 @@ export class DaemonSessions {
         defaultPersonaRestoreRegistry.retireDevice(deviceId);
         defaultSystemAlertPolicyRegistry.retireDevice(deviceId);
         defaultKeyboardProfileRestoreRegistry.retireDevice(deviceId);
-        defaultDisplayInventoryProvider.invalidate(deviceId);
+        defaultDisplayInventoryProvider.retire(deviceId);
         this.host.services.deviceReadiness().clearExplicitDevicePin(deviceId);
         this.host.services.deviceSessionRegistry().onDeviceDisconnected(deviceId);
         // Full removal: prune AFTER epoch retirement, which also invalidates frames.

@@ -87,6 +87,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import dev.jasonpearson.automobile.protocol.PrototypeTooltipNode
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
+import dev.jasonpearson.automobile.protocol.PrototypeUpsertDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeValidityKeys
 import dev.jasonpearson.automobile.protocol.PrototypeVideoPlayerNode
 import dev.jasonpearson.automobile.protocol.PrototypeWebViewNode
@@ -946,6 +947,8 @@ private fun PrototypeAction.boundDataAction(instance: RepeatInstance): Prototype
     is PrototypePrependDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataActionValue(value))
     is PrototypeAppendDataAction ->
+      copy(path = instance.dataPath(path), value = instance.dataActionValue(value))
+    is PrototypeUpsertDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataActionValue(value))
     is PrototypeRemoveDataAction ->
       copy(path = instance.dataPath(path), where = where?.boundWhere(instance))

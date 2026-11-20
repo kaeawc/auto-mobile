@@ -32,6 +32,26 @@ final class PrototypeObjectDataValueTests: XCTestCase {
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("prototype_data_actions_v3"))
     }
 
+    func testEveryDataWriteRefusesASecureStateMemberOrValue() throws {
+        let secure = ["state:token"]
+        for type in ["setData", "appendData", "prependData", "upsertData"] {
+            XCTAssertThrowsError(try PrototypeSecureStorageRules.validateDataAction([
+                "type": .string(type), "path": .string("/data/rows"),
+                "value": json(#"{"object":{"title":{"state":"draft"},"secret":{"state":"token"}}}"#),
+            ], path: "action", secure: secure), type) {
+                XCTAssertTrue(String(describing: $0).contains("action.value.object.secret"), type)
+            }
+            XCTAssertThrowsError(try PrototypeSecureStorageRules.validateDataAction([
+                "type": .string(type), "path": .string("/data/rows"),
+                "value": .object(["state": .string("token")]),
+            ], path: "action", secure: secure), type)
+            XCTAssertNoThrow(try PrototypeSecureStorageRules.validateDataAction([
+                "type": .string(type), "path": .string("/data/rows"),
+                "value": json(#"{"object":{"title":{"state":"draft"}}}"#),
+            ], path: "action", secure: secure), type)
+        }
+    }
+
     func testMembersResolveLikeTopLevelValuesAndAMissingSourceFails() throws {
         let resolved = try PrototypeDataWrite.resolveValue(json("""
         {"object":{"title":{"state":"draft"},"from":{"data":"/todos/0/title"},"done":{"value":false}}}

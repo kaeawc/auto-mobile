@@ -65,7 +65,7 @@ enum PrototypeDataWrite {
     {
         // An `{object}` value (#18826) is handled before emit validation, which does not accept it.
         if case let .object(form)? = binding, form.count == 1, let members = form["object"] {
-            return resolveObject(members, inputs: inputs)
+            return resolveObject(members, inputs: inputs, context: context)
         }
         if let generated = PrototypeGeneratedValues.resolveBinding(binding, context: context) { return generated }
         guard let binding,
@@ -107,7 +107,7 @@ enum PrototypeDataWrite {
     /// Each member resolves like a top-level value; the first unresolved member (in sorted name
     /// order) fails the write.
     private static func resolveObject(
-        _ members: JSONValue, inputs: some PrototypeEmitContextInputs
+        _ members: JSONValue, inputs: some PrototypeEmitContextInputs, context: PrototypeActionContext?
     )
         -> Result<JSONValue, PrototypeDataWriteFailure>
     {
@@ -121,7 +121,7 @@ enum PrototypeDataWrite {
                     code: .invalidValue, message: "Object member \(name) must be a flat value binding"
                 ))
             }
-            switch resolveValue(.object(member), inputs: inputs) {
+            switch resolveValue(.object(member), inputs: inputs, context: context) {
             case let .success(value):
                 resolved[name] = value
             case let .failure(failure):

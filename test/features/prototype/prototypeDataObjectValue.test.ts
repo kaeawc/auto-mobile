@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { actionSchema } from "../../../src/features/prototype/prototypeSpec";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 import { prototypeRequiredCapabilities } from "../../../src/features/prototype/prototypeCapabilityGates";
-import { resolvePrototypeDataWriteValue } from "../../../src/features/prototype/prototypeDataWrite";
+import {
+  applyPrototypeDataAction,
+  resolvePrototypeDataWriteValue,
+} from "../../../src/features/prototype/prototypeDataWrite";
 import { bindNodeFields } from "../../../src/features/prototype/prototypeTemplate";
 
 const append = (value: unknown, extra: Record<string, unknown> = {}) => ({
@@ -118,6 +121,27 @@ describe("data action object values (#18826)", () => {
     expect(
       resolvePrototypeDataWriteValue({ object: { title: { data: "/nope" } } }, inputs),
     ).toMatchObject({ success: false, error: { code: "not_found" } });
+  });
+
+  test("a prependData object value inserts one row at the front, as the devices do", () => {
+    const result = applyPrototypeDataAction(
+      {
+        type: "prependData",
+        path: "/data/archive",
+        value: { object: { title: { state: "draft" }, done: { value: true } } },
+      },
+      { state: { draft: "Walk dog" }, data: { archive: [{ title: "Old", done: false }] } },
+    );
+    expect(result).toEqual({
+      success: true,
+      trimmed: 0,
+      data: {
+        archive: [
+          { title: "Walk dog", done: true },
+          { title: "Old", done: false },
+        ],
+      },
+    });
   });
 
   test("repeat item and index members bind per instance", () => {

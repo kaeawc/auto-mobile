@@ -65,12 +65,10 @@ export function prototypeObjectDataActionsUnsupportedMessage(
   fields: readonly string[],
   platform: "android" | "ios",
 ): string {
-  return prototypeDataActionsUnsupportedMessage(fields, platform)
-    .replace(PROTOTYPE_DATA_ACTIONS_CAPABILITY, PROTOTYPE_DATA_ACTIONS_V3_CAPABILITY)
-    .replace(
-      ", or answer the tap from the host with a /data patch.",
-      ", or write each member with its own setData action.",
-    );
+  return prototypeDataActionsUnsupportedMessage(fields, platform).replace(
+    PROTOTYPE_DATA_ACTIONS_CAPABILITY,
+    PROTOTYPE_DATA_ACTIONS_V3_CAPABILITY,
+  );
 }
 
 const INDEX_SEGMENT = "{index}";

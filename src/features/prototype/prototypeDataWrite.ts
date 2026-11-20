@@ -526,14 +526,8 @@ function applyResolvedDataAction(
         maxItems,
       });
     case "prependData":
-      return Array.isArray(value)
-        ? applyPrototypeDataWrite(data, {
-            op: "prepend",
-            path,
-            value: value,
-            maxItems,
-          })
-        : refused("invalid_value", "prependData requires an array");
+      // One row, wrapped as the page `[row]` exactly as the Android and iOS runtimes do (#16715).
+      return applyPrototypeDataWrite(data, { op: "prepend", path, value: [value], maxItems });
     default:
       return refused("invalid_value", "Not a data action");
   }

@@ -3,7 +3,9 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import dev.jasonpearson.automobile.protocol.*
 import java.io.File
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.*
 import org.junit.Test
@@ -268,6 +270,32 @@ class PrototypeRepeatTest {
       (rows[1].source?.onTap?.first() as PrototypeSetStateAction).value,
     )
     assertEquals(PrototypeEmitAction("pick_7"), rows[1].source?.onTap?.get(3))
+  }
+
+  @Test
+  fun `an upsert object value binds item and index members per row`() {
+    val upsert =
+      PrototypeButtonNode(
+        label = "Save",
+        onTap =
+          listOf(
+            PrototypeUpsertDataAction(
+              "/data/saved",
+              Json.parseToJsonElement(
+                  """{"object":{"id":{"item":"id"},"at":{"index":true},"done":{"value":true}}}""",
+                )
+                .jsonObject,
+              key = "/id",
+            ),
+          ),
+      )
+    val rows = mapPrototypeSpec(spec(list(upsert))).root.children
+    assertEquals(
+      Json.parseToJsonElement(
+        """{"object":{"id":{"value":"a"},"at":{"value":0},"done":{"value":true}}}""",
+      ),
+      (rows[0].source?.onTap?.get(0) as PrototypeUpsertDataAction).value,
+    )
   }
 
   @Test

@@ -1,5 +1,5 @@
 # waaagh App broker (kaeawc/waaagh#268): acts as the waaagh-bot GitHub App for a cloud session that
-# must never see the App's key. A session dispatches it (scripts/app-broker.sh) with op=status to
+# must never see the App's key. A session dispatches it (waaagh's app-broker.sh) with op=status to
 # post the `orchestrate/review` commit status on a PR's head, or op=merge to merge that PR at that
 # head once the App's own `orchestrate/review` there is success. The App token is minted here from
 # this repository's GH_APP_ID / GH_APP_PRIVATE_KEY secrets, scoped to this repository and to the one

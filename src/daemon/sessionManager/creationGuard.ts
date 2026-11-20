@@ -233,9 +233,7 @@ export class SessionCreationGuard {
           creation.abandoned = true;
         },
       );
-      // Natural point to retry a rotation or screen reader an earlier release could not restore.
-      await this.host.stateRestore.retryAbandonedRotationRestore(created.assignedDevice);
-      await this.host.stateRestore.retryAbandonedScreenReaderRestore(created.assignedDevice);
+      await this.restoreAbandonedDeviceState(created, persistedRecovery !== undefined);
       return created;
     } finally {
       if (this.host.sessionSlots.getCreation(sessionId) === creation) {
@@ -243,6 +241,16 @@ export class SessionCreationGuard {
         this.host.slotShadowProbe.check(sessionId, "creation-end");
       }
     }
+  }
+
+  /** Natural point to retry a rotation or screen reader an earlier release could not restore. */
+  private async restoreAbandonedDeviceState(created: Session, recovered: boolean): Promise<void> {
+    if (recovered) {
+      // A reclaimed session keeps holding its rotation: its release restores the saved originals.
+      this.host.stateRestore.adoptRotationOriginalsForRecoveredSession(created);
+    }
+    await this.host.stateRestore.retryAbandonedRotationRestore(created.assignedDevice);
+    await this.host.stateRestore.retryAbandonedScreenReaderRestore(created.assignedDevice);
   }
 
   /**

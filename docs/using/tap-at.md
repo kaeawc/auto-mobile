@@ -11,7 +11,7 @@ image metadata.
 
 On iOS, a successful tap with a post-tap observation includes `effect: { screenChanged, basis }`, comparing observations for evidence of a screen change.
 On iOS, `dispatchRoute` is the runner-reported route (for example, `xcuiCoordinate` or `displayTargetedRecord`), omitted when unreported.
-`tapOn` reports the same optional `dispatchRoute` for iOS coordinate taps, double taps and long presses. It is omitted for taps performed by VoiceOver activation or the SDK bridge.
+The `tapOn` tool reports the same optional `dispatchRoute` for iOS coordinate taps, double taps and long presses. It is omitted for taps performed by VoiceOver activation or the SDK bridge.
 
 ## Android XR
 

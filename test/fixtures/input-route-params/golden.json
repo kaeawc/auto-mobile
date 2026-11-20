@@ -1384,19 +1384,19 @@
     "route": "input/key",
     "label": "key \"\"",
     "ok": false,
-    "message": "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right"
+    "message": "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right, a-z"
   },
   {
     "route": "input/key",
     "label": "key \"nope\"",
     "ok": false,
-    "message": "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right"
+    "message": "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right, a-z"
   },
   {
     "route": "input/key",
     "label": "key \"ENTER\"",
     "ok": false,
-    "message": "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right"
+    "message": "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right, a-z"
   },
   {
     "route": "input/key",
@@ -1420,7 +1420,7 @@
     "route": "input/key",
     "label": "key before deviceId",
     "ok": false,
-    "message": "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right"
+    "message": "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right, a-z"
   },
   {
     "route": "input/gestureStart",

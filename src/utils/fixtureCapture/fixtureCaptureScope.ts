@@ -55,15 +55,23 @@ const UNKNOWN_SOURCE: CaptureSourceIdentity = {
 
 type Scrub = (text: string) => string;
 
-interface BoundedText {
+/** A stream already cut at the per-stream limit; the call budget is applied at close. */
+interface StreamCut {
   text: string;
-  truncated: boolean;
+  cut: boolean;
+}
+
+/** A finished command whose output still awaits the per-call budget. */
+interface PendingCommand extends Omit<CapturedCommand, "stdout" | "stderr" | "truncated"> {
+  stdout: StreamCut;
+  stderr: StreamCut;
+  /** Output was cut before capture saw it (node's maxBuffer), so it is incomplete. */
+  incomplete: boolean;
 }
 
 class ToolCallCaptureScope {
-  private commands: CapturedCommand[] = [];
+  private commands: PendingCommand[] = [];
   private issued = 0;
-  private keptChars = 0;
   private closedFlag = false;
   device: CapturedDevice | undefined;
   private readonly startMs: number;
@@ -87,32 +95,47 @@ class ToolCallCaptureScope {
   }
 
   /** Dropped once the scope is closed: background work started in the call outlives it. */
-  record(command: CapturedCommand): void {
+  record(command: PendingCommand): void {
     if (!this.closedFlag) {
       this.commands.push(command);
     }
   }
 
-  /** Keep at most the stream limit and what is left of the call limit, then mark the cut. */
-  bound(value: string): BoundedText {
-    const room = Math.max(
-      0,
-      Math.min(this.limits.streamChars, this.limits.callChars - this.keptChars),
-    );
-    const kept = Math.min(value.length, room);
-    this.keptChars += kept;
-    return kept === value.length
-      ? { text: value, truncated: false }
-      : { text: `${value.slice(0, kept)}${TRUNCATED_OUTPUT_MARKER}`, truncated: true };
+  /** Keep at most the per-stream limit; the per-call limit is applied in issue order at close. */
+  cutStream(value: string): StreamCut {
+    return value.length > this.limits.streamChars
+      ? { text: value.slice(0, this.limits.streamChars), cut: true }
+      : { text: value, cut: false };
   }
 
-  /** Close the scope and release its command list; later records are ignored. */
+  /**
+   * Close the scope and release its command list; later records are ignored. Concurrent
+   * commands finish out of order, so they are sorted by issue order first and the per-call
+   * budget is spent in that order: which command loses output never depends on timing.
+   */
   private close(): CapturedCommand[] {
     this.closedFlag = true;
-    const commands = this.commands;
+    const pending = this.commands.sort((left, right) => left.index - right.index);
     this.commands = [];
-    // Concurrent commands finish out of order; serialize them in the order they were issued.
-    return commands.sort((left, right) => left.index - right.index);
+    let keptChars = 0;
+    const bound = (stream: StreamCut): { text: string; truncated: boolean } => {
+      const kept = Math.min(stream.text.length, Math.max(0, this.limits.callChars - keptChars));
+      keptChars += kept;
+      return stream.cut || kept < stream.text.length
+        ? { text: `${stream.text.slice(0, kept)}${TRUNCATED_OUTPUT_MARKER}`, truncated: true }
+        : { text: stream.text, truncated: false };
+    };
+    return pending.map(({ stdout: rawStdout, stderr: rawStderr, incomplete, ...command }) => {
+      const stdout = bound(rawStdout);
+      const stderr = bound(rawStderr);
+      const truncated = incomplete || stdout.truncated || stderr.truncated;
+      return {
+        ...command,
+        stdout: stdout.text,
+        stderr: stderr.text,
+        ...(truncated ? { truncated: true as const } : {}),
+      };
+    });
   }
 
   async flush(): Promise<void> {
@@ -222,6 +245,12 @@ export interface CapturedCommandHandle {
   finish(outcome: CapturedCommandOutcome): void;
 }
 
+/**
+ * Node's execFile code when a stream outgrew `maxBuffer`: it kills the child and hands back only
+ * what fit, which can be exactly the stream limit, so the length alone cannot show the cut.
+ */
+const MAX_BUFFER_ERROR_CODE = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+
 function text(value: unknown): string {
   if (typeof value === "string") {
     return value;
@@ -295,19 +324,17 @@ export function beginCapturedCommand(
       }
       const fields = outcomeFields(outcome);
       const clean = scrubbed(recordedArgv(argv, redactLabel), fields, scrubs);
-      const stdout = scope.bound(clean.stdout);
-      const stderr = scope.bound(clean.stderr);
       const redacted = redactLabel !== undefined || clean.changed;
       scope.record({
         index,
         argv: clean.argv,
         ...(cwd === undefined ? {} : { cwd }),
         ...fields,
-        stdout: stdout.text,
-        stderr: stderr.text,
+        stdout: scope.cutStream(clean.stdout),
+        stderr: scope.cutStream(clean.stderr),
+        incomplete: fields.errorCode === MAX_BUFFER_ERROR_CODE,
         durationMs: scope.deps.timer.now() - startMs,
         ...(redacted ? { redacted: true as const } : {}),
-        ...(stdout.truncated || stderr.truncated ? { truncated: true as const } : {}),
       });
     },
   };

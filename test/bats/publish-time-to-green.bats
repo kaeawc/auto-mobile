@@ -90,11 +90,35 @@ teardown() {
   grep -Fq 'no report was published for this window' "$GITHUB_STEP_SUMMARY"
 }
 
-@test "API budget stop exits 4 without published files" {
-  TTG_MAX_API_CALLS=3 run bash "$SCRIPT"
+@test "API budget stop before the run listing exits 4 without published files" {
+  TTG_MAX_API_CALLS=2 run bash "$SCRIPT"
   [ "$status" -eq 4 ]
   [ -z "$(ls -A "$TTG_OUT_DIR")" ]
   grep -Fq 'no report was published for this window' "$GITHUB_STEP_SUMMARY"
+}
+
+@test "API budget stop after the run listing publishes a report marked partial and exits 4" {
+  # Rulesets (2 calls) and the run listing (1) fit; the first jobs call does not (#18691).
+  TTG_MAX_API_CALLS=3 run bash "$SCRIPT"
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"::error::"*"a partial report was published"* ]]
+  [ "$(find "$TTG_OUT_DIR" -type f | wc -l | tr -d ' ')" -eq 3 ]
+  grep -Fq '**Partial report:** the fetch stopped on the API call budget' "$TTG_OUT_DIR/time-to-green.md"
+  jq -e '.partial.reason == "budget" and .partial.omittedHeadShas == 1' "$TTG_OUT_DIR/time-to-green.json"
+  jq -e '.meta.partial.omittedRuns == 1' "$TTG_OUT_DIR/time-to-green-bundle.json"
+  grep -Eq '^## PR time-to-green report \(PARTIAL\): 3d, pull_request runs only, generated ' "$GITHUB_STEP_SUMMARY"
+}
+
+@test "TTG_CACHE_DIR keeps the fetch cache so a rerun does not refetch cached items" {
+  export TTG_CACHE_DIR="$TEST_ROOT/keep/cache"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -n "$(find "$TTG_CACHE_DIR" -name 'files-*.json')" ]
+  : > "$GH_STUB_LOG"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  run grep -c '/files' "$GH_STUB_LOG"
+  [ "$output" = 0 ]
 }
 
 @test "invalid window exits 2 before any gh call" {
@@ -185,6 +209,19 @@ load yq-helpers
   run yq -r '.jobs.report.steps[] | select(.name == "Publish time-to-green report") | .env.TTG_SINCE' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = "\${{ inputs.since || '24h' }}" ]
+}
+
+@test "workflow restores and always saves the fetch cache of this run" {
+  require_mikefarah_yq
+  run yq -r '.jobs.report.steps[] | select(.name == "Publish time-to-green report") | .env.TTG_CACHE_DIR' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'scratch/ci-time-to-green-cache' ]
+  run yq -r '.jobs.report.steps[] | select(.uses == "actions/cache/restore@v5") | [.with.path, .with.key, .with."restore-keys"] | @tsv' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'scratch/ci-time-to-green-cache\tci-time-to-green-${{ github.run_id }}-${{ github.run_attempt }}\tci-time-to-green-${{ github.run_id }}-' ]
+  run yq -r '.jobs.report.steps[] | select(.uses == "actions/cache/save@v5") | [.if, .with.path] | @tsv' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'always()\tscratch/ci-time-to-green-cache' ]
 }
 
 @test "artifact upload is unconditional with 90-day retention" {

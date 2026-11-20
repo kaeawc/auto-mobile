@@ -57,8 +57,11 @@ export interface InjectAudioOptions {
   startDelayMs?: number;
   /** Stop after this long even when looping. */
   maxDurationMs?: number;
-  /** Runs after authorization, immediately before opening the stream. Throw to refuse it. */
-  beforeStreamOpen?: () => void;
+  /**
+   * Runs after authorization, immediately before opening the stream, and is awaited. Throw or
+   * reject to refuse it; no stream is opened then.
+   */
+  beforeStreamOpen?: () => void | Promise<void>;
 }
 
 export interface InjectionResult {
@@ -315,9 +318,12 @@ export class EmulatorAudioClient {
     await this.authorizer.dispose();
   }
 
-  private async open(method: string, beforeStreamOpen?: () => void): Promise<GrpcCall> {
+  private async open(
+    method: string,
+    beforeStreamOpen?: () => void | Promise<void>,
+  ): Promise<GrpcCall> {
     const authorization = await this.authorizer.authorization(method);
-    beforeStreamOpen?.();
+    await beforeStreamOpen?.();
     return this.transport.open(method, authorization ? { authorization } : {});
   }
 

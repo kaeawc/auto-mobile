@@ -227,6 +227,42 @@ describe("StoreKitTest cleared-session ledger", () => {
     await storeKit.run(simulator, { action: "load", appId, configPath: "/tmp/P.storekit" });
     expect(cleared.isCleared(deviceId, appId)).toBe(false);
   });
+
+  const OTHER_ACTIVE = {
+    success: false,
+    totalTimeMs: 0,
+    error:
+      "storekit environment active for bundleId com.example.first; send clear for it before loading another bundle",
+  };
+
+  test("a load refused for another active bundle leaves an untouched bundle clean", async () => {
+    const { storeKit, cleared } = harness("simulator", () => OTHER_ACTIVE);
+    const result = await storeKit.run(simulator, {
+      action: "load",
+      appId,
+      configPath: "/tmp/P.storekit",
+    });
+    expect(result.success).toBe(false);
+    expect(cleared.isCleared(deviceId, appId)).toBe(true);
+    expect(cleared.isTouched(deviceId, appId)).toBe(false);
+  });
+
+  test("a load refused for another active bundle keeps a bundle touched since its clear unclean", async () => {
+    const { storeKit, cleared } = harness("simulator", () => OTHER_ACTIVE);
+    cleared.markTouched(deviceId, appId);
+    await storeKit.run(simulator, { action: "load", appId, configPath: "/tmp/P.storekit" });
+    expect(cleared.isCleared(deviceId, appId)).toBe(false);
+    expect(cleared.isTouched(deviceId, appId)).toBe(true);
+  });
+
+  test("another refused mutation does not count as the other-bundle refusal", async () => {
+    const { storeKit, cleared } = harness("simulator", () => ({
+      ...OTHER_ACTIVE,
+      error: "no storekit session for bundleId; call load first",
+    }));
+    await storeKit.run(simulator, { action: "buy", appId, productId: "p" });
+    expect(cleared.isCleared(deviceId, appId)).toBe(false);
+  });
 });
 
 describe("StoreKitTest validation", () => {

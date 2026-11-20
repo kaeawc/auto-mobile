@@ -16,9 +16,8 @@ The agent's contract is split across these pages:
 - [Layout and component contracts](prototype-agent-contracts.md)
 - [Saved prototypes, sharing and effects](prototype-agent-saved.md)
 
-Disposable prototype apps use ad-hoc–signed Viewer bundles on iOS simulators. Physical
-iPhones use ProtoViewer in the first release. Wildcard provisioning for disposable
-apps on physical iPhones is planned as a host setting.
+Disposable prototype apps are described under
+[Disposable apps](prototype-agent-saved.md#disposable-apps).
 
 ## Background
 

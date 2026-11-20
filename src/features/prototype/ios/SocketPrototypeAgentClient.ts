@@ -38,6 +38,10 @@ export function isObject(value: unknown): value is PrototypeAgentMessage {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isShowingStartSequence(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
 export function parseHandshake(
   message: PrototypeAgentMessage,
 ): PrototypeAgentHandshake | undefined {
@@ -52,6 +56,12 @@ export function parseHandshake(
     return undefined;
   }
   return {
+    ...(typeof message.showingId === "string" && message.showingId.length > 0
+      ? { showingId: message.showingId }
+      : {}),
+    ...(isShowingStartSequence(message.showingStartSequence)
+      ? { showingStartSequence: message.showingStartSequence }
+      : {}),
     agentVersion,
     protocolVersion,
     capabilities,
@@ -181,7 +191,7 @@ export class SocketPrototypeAgentClient implements PrototypeAgentClient {
     });
   }
 
-  onEvent(listener: (event: PrototypeAgentMessage) => void): () => void {
+  onEvent(listener: (event: PrototypeAgentMessage) => unknown): () => void {
     this.eventListeners.add(listener);
     return () => this.eventListeners.delete(listener);
   }
@@ -287,10 +297,24 @@ export class SocketPrototypeAgentClient implements PrototypeAgentClient {
     pending.resolve(handshake);
   }
 
+  private refreshShowingId(result: PrototypeAgentResult): void {
+    const showingId = result.status?.showingId;
+    if (result.success && typeof showingId === "string" && showingId.length > 0) {
+      this.handshake.showingId = showingId;
+      const start = result.status?.showingStartSequence;
+      if (isShowingStartSequence(start)) {
+        this.handshake.showingStartSequence = start;
+      } else {
+        delete this.handshake.showingStartSequence;
+      }
+    }
+  }
+
   private dispatch(message: PrototypeAgentMessage): void {
     if (isResult(message)) {
       if (message.status !== undefined) {
         message.status = parsePrototypeAgentStatus(message.status);
+        this.refreshShowingId(message);
       }
       const waiter = this.waiters.get(message.requestId);
       if (waiter !== undefined) {

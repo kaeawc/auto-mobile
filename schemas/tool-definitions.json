@@ -832,7 +832,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "State-preserving background-process kill for saved-state restoration tests (background, killBackgrounded; iOS kills with SIGKILL after Home); trimMemory (Android only) sends onTrimMemory(level) to the running app without killing it.",
+    "description": "State-preserving background-process kill for saved-state restoration tests (background, killBackgrounded; iOS kills with SIGKILL after Home); trimMemory sends onTrimMemory(level) on Android, or with level memoryWarning simulates a memory warning for the foreground app on an iOS simulator, without killing it.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -848,7 +848,7 @@
           "enum": ["background", "killBackgrounded", "trimMemory"]
         },
         "level": {
-          "description": "onTrimMemory level to send; required for trimMemory, rejected otherwise",
+          "description": "Trim level; required for trimMemory, rejected otherwise. Android: an onTrimMemory level. iOS simulator: memoryWarning",
           "type": "string",
           "enum": [
             "RUNNING_MODERATE",
@@ -857,7 +857,8 @@
             "UI_HIDDEN",
             "BACKGROUND",
             "MODERATE",
-            "COMPLETE"
+            "COMPLETE",
+            "memoryWarning"
           ]
         },
         "platform": {
@@ -909,7 +910,14 @@
         },
         "mechanism": {
           "type": "string",
-          "enum": ["home", "am-kill", "am-send-trim-memory", "ios-sigkill", "unsupported"]
+          "enum": [
+            "home",
+            "am-kill",
+            "am-send-trim-memory",
+            "ios-sigkill",
+            "simulator-memory-warning-file",
+            "unsupported"
+          ]
         },
         "trimLevel": {
           "type": "string",
@@ -920,7 +928,8 @@
             "UI_HIDDEN",
             "BACKGROUND",
             "MODERATE",
-            "COMPLETE"
+            "COMPLETE",
+            "memoryWarning"
           ]
         },
         "userId": {
@@ -958,6 +967,7 @@
           "enum": [
             "app_not_running",
             "app_in_foreground",
+            "app_not_foreground",
             "background_not_verified",
             "kill_failed",
             "ambiguous_user",
@@ -10299,7 +10309,6 @@
               "getDataStore",
               "getDeepLinks",
               "getDeviceState",
-              "getIosSimulatorCapabilities",
               "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",
@@ -10474,7 +10483,6 @@
               "getDataStore",
               "getDeepLinks",
               "getDeviceState",
-              "getIosSimulatorCapabilities",
               "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",
@@ -11840,118 +11848,6 @@
     }
   },
   {
-    "name": "getIosSimulatorCapabilities",
-    "title": "Get iOS Simulator Capabilities",
-    "annotations": {
-      "readOnlyHint": true
-    },
-    "description": "Discover biometric capabilities for a selected iOS Simulator device type and runtime.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "deviceType": {
-          "type": "string",
-          "minLength": 1,
-          "description": "CoreSimulator device-type identifier selected from automobile:devices/images."
-        },
-        "runtime": {
-          "type": "string",
-          "minLength": 1,
-          "description": "CoreSimulator runtime identifier selected from automobile:devices/images."
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        }
-      },
-      "required": ["deviceType", "runtime"],
-      "additionalProperties": false
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "schemaVersion": {
-          "type": "number",
-          "const": 1
-        },
-        "platform": {
-          "type": "string",
-          "const": "ios"
-        },
-        "deviceType": {
-          "type": "string"
-        },
-        "runtime": {
-          "type": "string"
-        },
-        "selection": {
-          "type": "object",
-          "properties": {
-            "valid": {
-              "type": "boolean"
-            },
-            "reason": {
-              "type": "string"
-            }
-          },
-          "required": ["valid"],
-          "additionalProperties": false
-        },
-        "capabilities": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string",
-                "enum": [
-                  "biometrics.enrollment",
-                  "biometrics.match",
-                  "biometrics.fail",
-                  "biometrics.cancel",
-                  "biometrics.error"
-                ]
-              },
-              "state": {
-                "type": "string",
-                "enum": ["supported", "partial", "unsupported"]
-              },
-              "reason": {
-                "type": "string"
-              },
-              "prerequisites": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            },
-            "required": ["id", "state", "reason"],
-            "additionalProperties": false
-          }
-        }
-      },
-      "required": [
-        "schemaVersion",
-        "platform",
-        "deviceType",
-        "runtime",
-        "selection",
-        "capabilities"
-      ],
-      "additionalProperties": {}
-    },
-    "_meta": {
-      "automobile/deviceReadOnly": true,
-      "automobile/requires": []
-    }
-  },
-  {
     "name": "getLogs",
     "title": "Read Device Logs",
     "annotations": {
@@ -13236,20 +13132,29 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Android: dump a running debuggable or profileable app's heap (am dumpheap) to a host .hprof; refuses other apps with heap_dump_not_debuggable.",
+    "description": "Dump a running app's heap to a host file. Android writes .hprof for debuggable or profileable apps. iOS Simulator writes .memgraph for processes macOS allows inspecting.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9._-]+$",
-          "description": "Running debuggable or profileable app to dump",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$"
+            },
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*$"
+            }
+          ],
+          "description": "Package name or bundle ID of the running app to dump",
           "minLength": 1,
-          "maxLength": 256
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "native": {
-          "description": "Dump the native heap (am dumpheap -n); default Java",
+          "description": "Android only: dump the native heap; default Java",
           "type": "boolean"
         },
         "platform": {
@@ -13288,6 +13193,10 @@
         "appId": {
           "type": "string"
         },
+        "format": {
+          "type": "string",
+          "enum": ["hprof", "memgraph"]
+        },
         "native": {
           "type": "boolean"
         },
@@ -13311,11 +13220,16 @@
             "additionalProperties": false
           }
         },
+        "pid": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
         "message": {
           "type": "string"
         }
       },
-      "required": ["success", "path", "sizeBytes", "appId", "native", "attempts", "message"],
+      "required": ["success", "path", "sizeBytes", "appId", "format", "message"],
       "additionalProperties": {}
     },
     "_meta": {
@@ -34899,6 +34813,13 @@
                 "additionalProperties": false
               },
               "description": "Apps left installed, with why (outside the prefix or another signer)"
+            },
+            "pending": {
+              "description": "all/expired only: apps not started before the call's deadline; call again with the same target",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": ["removed", "skipped"],
@@ -36134,7 +36055,6 @@
               "getDataStore",
               "getDeepLinks",
               "getDeviceState",
-              "getIosSimulatorCapabilities",
               "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",
@@ -40658,7 +40578,7 @@
           "enum": ["portrait", "landscape"]
         },
         "lockOrientation": {
-          "description": "Android only. true keeps automatic rotation off to hold the requested orientation. Omission restores the prior automatic-rotation setting after orientation confirmation, including in a device session; an unreadable initial setting is left unchanged. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
+          "description": "Android only. true keeps automatic rotation off to hold the requested orientation. Omission in a device session does the same, and releasing the session restores the original automatic-rotation setting; a direct call without a session restores it before returning. An unreadable initial setting is left unchanged by omission. false enables automatic rotation right after rotating, even if originally locked, so the sensor may revert the orientation; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
           "type": "boolean"
         },
         "display": {
@@ -49768,7 +49688,6 @@
             "getDataStore",
             "getDeepLinks",
             "getDeviceState",
-            "getIosSimulatorCapabilities",
             "getLogs",
             "getNavigationGraph",
             "getNetworkGraph",
@@ -49902,7 +49821,6 @@
               "getDataStore",
               "getDeepLinks",
               "getDeviceState",
-              "getIosSimulatorCapabilities",
               "getLogs",
               "getNavigationGraph",
               "getNetworkGraph",

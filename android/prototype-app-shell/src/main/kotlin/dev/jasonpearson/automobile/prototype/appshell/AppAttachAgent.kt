@@ -34,6 +34,15 @@ internal interface AttachConnection {
 
 internal interface AttachTarget {
   val appInstanceId: String
+  val showingId: String?
+    get() = null
+
+  /**
+   * First event sequence of the current showing. The host ignores a replayed dismissal below it,
+   * which ended an earlier showing of this process.
+   */
+  val showingStartSequence: Long?
+    get() = null
 
   suspend fun patch(id: String, baseRevision: Long?, ops: JsonArray): PrototypeResult
 
@@ -139,6 +148,8 @@ internal class AppAttachAgent(
           put("type", "hello_result")
           put("agentVersion", "0.1.0")
           put("appInstanceId", target.appInstanceId)
+          target.showingId?.let { put("showingId", it) }
+          target.showingStartSequence?.let { put("showingStartSequence", it) }
           put("protocolVersion", 1)
           put("capabilities", JsonArray(CAPABILITIES.map(::JsonPrimitive)))
           put("droppedEvents", dropped)

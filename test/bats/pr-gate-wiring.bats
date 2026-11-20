@@ -34,11 +34,12 @@ load yq-helpers
 @test "required gate jobs exist with stable context names" {
   require_mikefarah_yq
   local job expected
-  for job in ide-plugin-gate ios-build-gate shell-tests-gate; do
+  for job in ide-plugin-gate ios-build-gate shell-tests-gate ios-spm-root-package-gate; do
     case "$job" in
       ide-plugin-gate) expected="IDE Plugin" ;;
       ios-build-gate) expected="iOS Build" ;;
       shell-tests-gate) expected="Shell Tests" ;;
+      ios-spm-root-package-gate) expected="Build Root SPM Package" ;;
     esac
     run yq -r ".jobs.\"${job}\".name" "$WF"
     [ "$status" -eq 0 ]
@@ -130,6 +131,25 @@ load yq-helpers
   done
 }
 
+@test "performance-tool sources trigger the Android emulator job's performance smoke (#18725)" {
+  require_mikefarah_yq
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-android")
+    | (.with.filters | from_yaml | .android[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  local path
+  for path in \
+    'src/features/performance/**' \
+    'src/features/performanceTrace/**' \
+    'src/features/profiling/**' \
+    'src/server/*performance*'; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
+  done
+  grep -q 'performance-tool-smoke.sh' "$BATS_TEST_DIRNAME/../../scripts/android/run-emulator-suites.sh"
+}
+
 @test "required CtrlProxy job runs prototype-compose tests and coverage" {
   require_mikefarah_yq
   [ "$(yq -r '.jobs."kotlin-code-coverage".name' "$WF")" = 'Run CtrlProxy Unit Tests' ]
@@ -146,6 +166,19 @@ load yq-helpers
   [ "$status" -eq 0 ]
   [[ " $output " == *' :prototype-compose:testDebugUnitTest '* ]]
   [[ " $output " == *' :prototype-compose:createDebugUnitTestCoverageReport '* ]]
+}
+
+@test "PR and merge Kotlin coverage run prototype release-variant unit tests" {
+  require_mikefarah_yq
+  local workflow module
+  for workflow in "$WF" .github/workflows/merge.yml; do
+    run yq -r '.jobs."kotlin-code-coverage".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
+    [ "$status" -eq 0 ]
+    for module in prototype-compose prototype-saved; do
+      [[ " $output " == *" :${module}:testDebugUnitTest "* ]]
+      [[ " $output " == *" :${module}:testReleaseUnitTest "* ]]
+    done
+  done
 }
 
 @test "Kotlin badge includes the prototype-compose Android debug coverage report" {

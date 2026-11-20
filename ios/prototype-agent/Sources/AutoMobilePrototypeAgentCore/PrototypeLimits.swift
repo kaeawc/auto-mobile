@@ -29,6 +29,8 @@ enum PrototypeLimits {
     /// re-checks it on every state write; see `PrototypeStateValidator.specBytes`.
     static let maxSpecBytes = 1_048_576
 
+    static let maxUploadBytes = PrototypeContractValidator.limit("MAX_PROTOTYPE_UPLOAD_BYTES")
+
     static let maxDataDepth = 8
     static let maxDataArrayItems = PrototypeContractValidator.limit("MAX_PROTOTYPE_DATA_ARRAY_ITEMS")
     static let maxDataPointerLength = 256

@@ -72,6 +72,8 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     "android/prototype-saved/src/main/kotlin/**",
     "ios/auto-mobile-sdk/Sources/**",
     "ios/control-proxy/Sources/**",
+    // androidTemplateCapabilities.test.ts selects templates from the packaged base sidecar.
+    "android/prototype-app-shell/src/base/assets/capabilities.json",
     // iosCameraPosterLaunch.test.ts reads the captured fixture app reports.
     "ios/CameraPosterInjection/fixtures/**",
     // ctrlProxyProtocol.test.ts reads the @SerialName set from this tree.

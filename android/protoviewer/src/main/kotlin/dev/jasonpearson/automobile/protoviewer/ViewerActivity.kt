@@ -38,8 +38,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.lifecycleScope
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidBiometricSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidLocationSource
-import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPermissionsSource
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeCaptureSupport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBiometricModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeCaptureModules
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
@@ -48,6 +49,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeScheduledTask
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureValueStore
+import dev.jasonpearson.automobile.ctrlproxy.prototype.androidPrototypePermissionSources
 import dev.jasonpearson.automobile.protocol.PrototypeLibraryProvenance
 import dev.jasonpearson.automobile.protocol.PrototypeWebView
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
@@ -346,11 +348,15 @@ private class ViewerContent(
     val platform =
       remember(context, activity) {
         PrototypePlatform(
-          listOfNotNull(
-            PrototypeLocationModule(AndroidLocationSource(context)),
-            PrototypeBiometricModule(AndroidBiometricSource(activity)),
-            PrototypePermissionsModule(AndroidPermissionsSource(activity)),
-            secure?.let(::PrototypeSecureStorageModule),
+          PrototypeCaptureModules.retain(
+            listOfNotNull(
+              PrototypeLocationModule(AndroidLocationSource(context)),
+              PrototypeBiometricModule(AndroidBiometricSource(activity)),
+              // Camera and microphone prompt only when the spec calls permissions.request.
+              PrototypePermissionsModule(androidPrototypePermissionSources(activity)),
+              secure?.let(::PrototypeSecureStorageModule),
+            ),
+            AndroidPrototypeCaptureSupport(context),
           ),
         )
       }

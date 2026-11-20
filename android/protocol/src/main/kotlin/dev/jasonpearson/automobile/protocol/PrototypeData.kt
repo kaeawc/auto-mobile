@@ -314,15 +314,16 @@ internal object PrototypeDataText {
       append(literal(text.substring(cursor)))
     }
 
+  /** With [shield], each inserted value is shielded from later placeholder scans (#18628). */
   fun bindSources(
     text: String,
     data: JsonObject?,
     platform: JsonObject?,
-    deferData: Boolean = false,
     bindRow: ((String) -> String)? = null,
+    shield: Boolean = false,
   ): String {
     val sources =
-      (if (deferData) emptyList() else placeholders(text, bindRow = bindRow).map { it to data }) +
+      placeholders(text, bindRow = bindRow).map { it to data } +
         placeholders(text, "platform", bindRow).map { it to platform }
     return buildString {
       var cursor = 0
@@ -330,7 +331,8 @@ internal object PrototypeDataText {
         if (span.start < cursor) continue
         val literal = text.substring(cursor, span.start)
         append(bindRow?.invoke(literal) ?: literal)
-        append(PrototypeDataValues.rendered(PrototypeDataPointer.resolve(source, span.pointer)))
+        val value = PrototypeDataValues.rendered(PrototypeDataPointer.resolve(source, span.pointer))
+        append(if (shield) PrototypeTextShield.shield(value) else value)
         cursor = span.end
       }
       val literal = text.substring(cursor)
@@ -354,34 +356,47 @@ internal object PrototypeDataText {
 }
 
 /**
- * Pure resolution of sources and conditions; authored lazy-row text is deferred to the renderer.
+ * Pure resolution of sources and conditions; authored lazy-row text is deferred to the renderer. A
+ * renderer passes `shield` so the data and platform values it inserts stay literal through its
+ * later state, derived and row passes (#18628); the default output is the shared cross-platform
+ * resolution contract.
  */
 object PrototypeDataResolver {
   fun resolveRoot(root: JsonObject, data: JsonObject?, platform: JsonObject? = null): JsonObject =
-    resolveRoot(root, data, PrototypeRepeatData(data), platform, Pass.ALL)
+    resolveRoot(root, data, PrototypeRepeatData(data), platform, ResolveMode(Pass.ALL, false))
+
+  private data class ResolveMode(val pass: Pass, val shield: Boolean)
 
   private enum class Pass {
     ALL,
     DEFER_ROW_TEXT,
   }
 
+  /** How a node's authored text is filled: from [template], with row text bound by [bindRow]. */
+  class NodeTextOptions(
+    val template: JsonObject? = null,
+    val bindRow: ((String) -> String)? = null,
+    val shield: Boolean = false,
+  )
+
   /** Fills authored text tokens once, preserving row-bound actions and runtime metadata. */
   fun resolveNodeText(
     root: JsonObject,
     data: JsonObject?,
     platform: JsonObject? = null,
-    template: JsonObject = root,
-    bindRow: ((String) -> String)? = null,
-  ): JsonObject = textFields(root, data, platform, template = template, bindRow = bindRow)
+    options: NodeTextOptions = NodeTextOptions(),
+  ): JsonObject = textFields(root, data, platform, options)
 
   private fun resolveRoot(
     root: JsonObject,
     data: JsonObject?,
     repeats: PrototypeRepeatData,
     platform: JsonObject?,
-    pass: Pass,
+    mode: ResolveMode,
   ): JsonObject {
-    val own = if (pass == Pass.DEFER_ROW_TEXT) root else textFields(root, data, platform)
+    val own =
+      if (mode.pass == Pass.DEFER_ROW_TEXT) root
+      else textFields(root, data, platform, NodeTextOptions(shield = mode.shield))
     val resolved =
       JsonObject(
         own.mapValues { (key, value) ->
@@ -404,16 +419,29 @@ object PrototypeDataResolver {
     // Snapshot platform reads with the list; resolve text only after binding each row.
     val lazy = root["type"] == JsonPrimitive("list")
     return mapChildren(resolved) { child, rowTemplate ->
-      val childPass = if (lazy && rowTemplate) Pass.DEFER_ROW_TEXT else pass
-      resolveRoot(child, data, repeats, platform, childPass)
+      val childMode = if (lazy && rowTemplate) mode.copy(pass = Pass.DEFER_ROW_TEXT) else mode
+      resolveRoot(child, data, repeats, platform, childMode)
     }
   }
 
-  fun resolve(spec: PrototypeSpec, platform: JsonObject? = null): PrototypeSpec {
+  fun resolve(
+    spec: PrototypeSpec,
+    platform: JsonObject? = null,
+    shield: Boolean = false,
+  ): PrototypeSpec {
     val json = PrototypeSpecValidator.json
     val root = json.encodeToJsonElement(PrototypeNode.serializer(), spec.root).jsonObject
     if (!PrototypeBindingScan.hasBindings(root)) return spec
-    val resolved = json.decodeFromJsonElement<PrototypeNode>(resolveRoot(root, spec.data, platform))
+    val resolved =
+      json.decodeFromJsonElement<PrototypeNode>(
+        resolveRoot(
+          root,
+          spec.data,
+          PrototypeRepeatData(spec.data),
+          platform,
+          ResolveMode(Pass.ALL, shield),
+        ),
+      )
     return spec.copy(root = resolved)
   }
 
@@ -470,15 +498,16 @@ object PrototypeDataResolver {
     node: JsonObject,
     data: JsonObject?,
     platform: JsonObject?,
-    template: JsonObject = node,
-    bindRow: ((String) -> String)? = null,
+    options: NodeTextOptions,
   ): JsonObject {
     val replacements = mutableMapOf<String, JsonElement>()
-    PrototypeBindableFields.first<Boolean>(template, "") { value, path, kind ->
+    PrototypeBindableFields.first<Boolean>(options.template ?: node, "") { value, path, kind ->
       val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
       if (kind == PrototypeBindableKind.TEXT && text != null) {
         replacements[path] =
-          JsonPrimitive(PrototypeDataText.bindSources(text, data, platform, bindRow = bindRow))
+          JsonPrimitive(
+            PrototypeDataText.bindSources(text, data, platform, options.bindRow, options.shield),
+          )
       }
       null
     }

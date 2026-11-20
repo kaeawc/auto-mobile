@@ -11,6 +11,8 @@ internal interface AttachEventLedger {
   val lastSequence: Long
 
   fun nextSequence(): Long
+
+  fun nextShowingId(): String
 }
 
 /** Retains delivery independently of the UI; tests inject scope, identity and listener startup. */
@@ -25,11 +27,20 @@ internal class AppAttachProcess(
   override var lastSequence = 0L
     private set
 
+  private var showing = 0L
   private var target: AttachTarget? = null
   private var listenerStarted = false
   val agent = AppAttachAgent(token, this, scope, clock = clock, log = log)
 
+  override val showingId: String?
+    get() = target?.showingId
+
+  override val showingStartSequence: Long?
+    get() = target?.showingStartSequence
+
   override fun nextSequence(): Long = ++lastSequence
+
+  override fun nextShowingId(): String = "$appInstanceId:${++showing}"
 
   fun bind(target: AttachTarget): () -> Unit {
     this.target = target

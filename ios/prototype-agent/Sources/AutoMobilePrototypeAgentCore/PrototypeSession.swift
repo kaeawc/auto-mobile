@@ -135,6 +135,8 @@ struct PrototypeSession {
     private var revisions: [String: Int] = [:]
     /// `request` actions in flight (#12529) and the commands for the driver that runs them; see
     /// `takeRequestCommands`.
+    var uploadAssets: (any PrototypeUploadAssetSource)?
+    var uploadBoundary: any PrototypeUploadBoundaryGenerating = PrototypeUploadBoundaryGenerator()
     private(set) var requests = PrototypeRequestLedger()
     private var platformEventData: JSONValue?
     private var platformIssued = 0
@@ -1317,7 +1319,9 @@ extension PrototypeSession {
             events += cancelRequest(older, message: "Superseded by a newer request to \(target)")
         }
         let urlText = PrototypeRequestResolver.urlText(action, inputs: inputs)
-        let resolved = PrototypeRequestResolver.resolve(action, urlText: urlText, inputs: inputs)
+        let resolved = PrototypeRequestResolver.resolve(
+            action, urlText: urlText, inputs: inputs, assets: uploadAssets, boundary: uploadBoundary
+        )
         // A request that failed to resolve still reports the method and URL text it tried.
         let request = (try? resolved.get()) ?? PrototypeResolvedRequest(
             method: action.method.flatMap(PrototypeRequestMethod.init(rawValue:)) ?? .get,
@@ -1331,7 +1335,9 @@ extension PrototypeSession {
             url: request.url,
             headers: request.headers,
             body: request.body,
-            timeoutMs: action.timeoutMs.flatMap { Int(exactly: $0) }
+            timeoutMs: action.timeoutMs.flatMap { Int(exactly: $0) },
+            uploadBody: request.uploadBody,
+            progressKey: action.progressKey
         )
         let inFlight = PrototypeInFlightRequest(
             job: job,
@@ -1353,6 +1359,17 @@ extension PrototypeSession {
         }
         requests.start(inFlight)
         return events + writeRequestStatus(inFlight.statusKey, "loading")
+    }
+
+    /// Progress is admitted by the driver's single ownership/monotonicity tracker before this write.
+    mutating func writeUploadProgress(_ requestId: String, key: String, value: Int) -> [PrototypeEvent] {
+        guard isShown, let request = requests.inFlight[requestId], request.job.progressKey == key,
+              request.job.uploadBody != nil, case .number? = state[key] else { return [] }
+        var next = state
+        next[key] = .number(Double(value))
+        guard next != state, accepts(next) else { return [] }
+        state = next
+        return emitStateChange([key])
     }
 
     /// A response (or failure) for a request this session started. A request that was cancelled,

@@ -273,6 +273,8 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "Emulator gRPC audio failures (#13628, #13629) are thrown as ActionableError through the generic tool-error path, which serializes only the message; the code reaches clients as the message's leading [code] text, not a structured wire field.",
   "features/deviceLifecycle/teardown/stuckEmulatorEscalation":
     "Emulator teardown failure (#14018) is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code is a property on the error, not a structured wire field.",
+  "utils/ios/healthSeedError":
+    "iOS HealthKit seeder (#18801) is an internal utility with no tool wiring yet; when a tool wraps it, the code reaches clients as the message's leading `code:` text, not a structured wire field.",
   "models/ResetCapacityWaitExceededError":
     "Broker-internal iOS reset failure (#15107): drainFailureOutcome turns it into a device destroy and the reset timing receipt records its message; it never reaches an MCP/tool or daemon refusal as a structured code.",
   "features/prototype/ios/installerErrors/PrototypeInstallPhysicalDeviceError":
@@ -308,6 +310,8 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "Store precondition failure raised inside the broker; it is classified as a permanent clean-release failure by cleanReleaseFailure.ts and never serialized as a coded tool or daemon refusal (session_broker_invariant_failed appears nowhere on the wire). It reaches daemon RPCs only as an untyped rethrow (brokerRejection rethrows unknown errors; store requireValue/ownedResource can throw it out of releaseOnce).",
   "features/profiling/HeapDumpRefusedError":
     "heapDump refusal (heap_dump_not_debuggable) thrown by AndroidHeapDump and carried to the client as the tool error text (test/features/profiling/AndroidHeapDump.test.ts); it is not a daemon or session-broker refusal and has no wire fields beyond the message.",
+  "features/profiling/MemgraphNotInspectableError":
+    "heapDump refusal (heap_dump_not_inspectable) thrown by IosHeapDump when leaks is denied access to a Simulator process and carried to the client as the tool error text (test/features/profiling/IosHeapDump.test.ts); it is not a daemon or session-broker refusal and has no wire fields beyond the message.",
   "server/SessionLogSourceError":
     "Session-log source failure caught by DefaultSessionLogService.runSource and reported as that source's {status, reason, code} outcome inside a successful collection (test/server/physicalIosSessionLog.test.ts); it never escapes as a tool or daemon refusal.",
   "daemon/sessionBroker/SessionBrokerStoppingError":

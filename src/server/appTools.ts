@@ -31,7 +31,7 @@ import {
   ActionableError,
   BootedDevice,
   type AppLifecycleAction,
-  type AppTrimMemoryLevel,
+  type AppLifecycleTrimLevel,
   type AppLifecycleResult,
   type CrashAppResult,
   type InstallAppResult,
@@ -578,7 +578,7 @@ const createAppLifecycleHandler =
   (dependencies: AppLifecycleToolDependencies) =>
   async (
     device: BootedDevice,
-    args: { appId: string; action: AppLifecycleAction; level?: AppTrimMemoryLevel },
+    args: { appId: string; action: AppLifecycleAction; level?: AppLifecycleTrimLevel },
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
@@ -970,7 +970,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
 
   ToolRegistry.registerDeviceAware(
     "appLifecycle",
-    "State-preserving background-process kill for saved-state restoration tests (background, killBackgrounded; iOS kills with SIGKILL after Home); trimMemory (Android only) sends onTrimMemory(level) to the running app without killing it.",
+    "State-preserving background-process kill for saved-state restoration tests (background, killBackgrounded; iOS kills with SIGKILL after Home); trimMemory sends onTrimMemory(level) on Android, or with level memoryWarning simulates a memory warning for the foreground app on an iOS simulator, without killing it.",
     appLifecycleSchema,
     {
       handler: appLifecycleHandler,

@@ -54,6 +54,13 @@ export interface ExternalJobFact {
   macos: boolean;
 }
 
+export interface PartialFetch {
+  reason: "budget" | "rate-limit";
+  message: string;
+  omittedHeadShas: number;
+  omittedRuns: number;
+}
+
 export interface Bundle {
   externalJobs?: ExternalJobFact[];
   meta: {
@@ -64,6 +71,10 @@ export interface Bundle {
     prRunsOnly: boolean;
     circleci?: boolean;
     circleciScope?: "pr-heads" | "pr-heads+main-pushes";
+    /** Skipped pull_request runs kept without jobs: their workflow skips no required check. */
+    skippedRunsWithoutJobs?: number;
+    /** Set when the fetch stopped early: only head SHAs fetched in full are in the bundle. */
+    partial?: PartialFetch;
   };
   runs: RunFact[];
   prs: PrFact[];
@@ -308,6 +319,8 @@ export interface QueueRow {
 
 export interface Report {
   window: { since: string; until: string };
+  /** Non-null when the fetch stopped early and head SHAs were left out of every figure. */
+  partial: PartialFetch | null;
   requiredChecks: string[];
   prTypeFilter: PrType | null;
   counts: {
@@ -696,6 +709,7 @@ export function buildReport(
   const byCheck = checkAttempts(bundle, jobs);
   return {
     window: { since: bundle.meta.since, until: bundle.meta.until },
+    partial: bundle.meta.partial ?? null,
     requiredChecks: bundle.meta.requiredChecks,
     prTypeFilter,
     counts: {
@@ -798,6 +812,19 @@ function concurrencyRows(concurrency: Report["concurrency"]): string[][] {
   ];
 }
 
+function partialNotice(partial: PartialFetch | null): string[] {
+  if (partial === null) {
+    return [];
+  }
+  const cause = partial.reason === "budget" ? "the API call budget" : "a GitHub rate limit";
+  return [
+    `> **Partial report:** the fetch stopped on ${cause} (${partial.message}). ` +
+      `${partial.omittedHeadShas} head SHAs (${partial.omittedRuns} runs) that were not fetched in full ` +
+      `are left out of every figure below.`,
+    ``,
+  ];
+}
+
 export function renderMarkdown(report: Report): string {
   const lines: string[] = [
     `# CI time-to-green report`,
@@ -806,6 +833,7 @@ export function renderMarkdown(report: Report): string {
       (report.prTypeFilter ? ` (PR type: ${report.prTypeFilter})` : ""),
     `Required checks (from the ruleset): ${report.requiredChecks.length}`,
     ``,
+    ...partialNotice(report.partial),
     `## PR head SHAs`,
     ``,
     ...table(

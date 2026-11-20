@@ -52,6 +52,8 @@ export interface PrototypeDeviceStatus {
 
 export interface PrototypeTransport {
   readonly eventInstanceId?: string;
+  readonly eventShowingId?: string;
+  readonly eventShowingStartSequence?: number;
   show(spec: PrototypeSpec, options?: PrototypeShowOptions): Promise<PrototypeResult>;
   dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult>;
   patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypePatchReply>;
@@ -61,8 +63,11 @@ export interface PrototypeTransport {
   ): Promise<PrototypeAssetResult>;
   removeAsset(id: string, options?: PrototypeAssetRequestOptions): Promise<PrototypeAssetResult>;
   status(timeoutMs?: number): Promise<PrototypeDeviceStatus>;
-  /** Subscribes to decoded `prototype_event` pushes; returns an unsubscribe function. */
-  onEvent(listener: (event: PrototypeEvent) => void): () => void;
+  /**
+   * Subscribes to decoded `prototype_event` pushes; returns an unsubscribe function. A listener
+   * returns false when it rejected the event, so it is not acknowledged to the device.
+   */
+  onEvent(listener: (event: PrototypeEvent) => unknown): () => void;
 }
 
 // Each transport maps to one stable source object for subscription ownership.
@@ -73,6 +78,12 @@ export function prototypeEventSource(transport: PrototypeTransport): PrototypeEv
   let source = eventSources.get(transport);
   if (source === undefined) {
     source = {
+      get showingId() {
+        return transport.eventShowingId;
+      },
+      get showingStartSequence() {
+        return transport.eventShowingStartSequence;
+      },
       get instanceId() {
         return transport.eventInstanceId;
       },

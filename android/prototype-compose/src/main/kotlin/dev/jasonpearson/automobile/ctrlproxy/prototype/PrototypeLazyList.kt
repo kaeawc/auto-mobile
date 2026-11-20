@@ -199,20 +199,30 @@ private class PrototypeListKeys(var keys: List<String>, var hasHeader: Boolean)
 
 private val listNodeJson = Json { ignoreUnknownKeys = false }
 
-internal class PrototypeListTextSources(val data: JsonObject?, val platform: JsonObject?)
+internal class PrototypeListTextSources(
+  val data: JsonObject?,
+  val platform: JsonObject?,
+  /** Whether inserted values carry a shield (#18628); the renderer unshields them at the end. */
+  val shield: Boolean = false,
+)
 
 /** Fill text from the authored template, never scanning values inserted by row binding. */
 internal fun resolvePrototypeListNodeText(
   node: PrototypeNode,
   template: PrototypeNode,
-  data: JsonObject?,
-  platform: JsonObject?,
+  sources: PrototypeListTextSources,
   bindRow: (String) -> String,
 ): PrototypeNode {
   val json = listNodeJson
   val raw = json.encodeToJsonElement(PrototypeNode.serializer(), node).jsonObject
   val authored = json.encodeToJsonElement(PrototypeNode.serializer(), template).jsonObject
-  val resolved = PrototypeDataResolver.resolveNodeText(raw, data, platform, authored, bindRow)
+  val resolved =
+    PrototypeDataResolver.resolveNodeText(
+      raw,
+      sources.data,
+      sources.platform,
+      PrototypeDataResolver.NodeTextOptions(authored, bindRow, sources.shield),
+    )
   if (resolved == raw) return node
   val decoded = json.decodeFromJsonElement(PrototypeNode.serializer(), resolved)
   // The wire format omits runtime repeat metadata. Keep bound repeats and descendants intact;

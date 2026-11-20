@@ -20,6 +20,8 @@ export class FakeDisposableAppInstaller implements DisposableAppInstaller {
   inspectGate: Promise<void> | undefined;
   /** Called as `inspect` starts, before it waits on `inspectGate`. */
   onInspect: (() => void) | undefined;
+  /** Called as `uninstall` runs, for example to advance a FakeTimer by the command's duration. */
+  onUninstall: ((appId: string) => void) | undefined;
 
   constructor(private readonly signer: string | undefined = "host-key") {}
 
@@ -49,6 +51,7 @@ export class FakeDisposableAppInstaller implements DisposableAppInstaller {
 
   async uninstall(deviceId: string, appId: string): Promise<void> {
     this.uninstalls.push(appId);
+    this.onUninstall?.(appId);
     this.packages.delete(`${deviceId}/${appId}`);
   }
 

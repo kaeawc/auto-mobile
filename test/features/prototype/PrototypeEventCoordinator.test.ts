@@ -43,6 +43,91 @@ describe("PrototypeEventCoordinator", () => {
     expect((await waiting).event?.sequence).toBe(1);
   });
 
+  test.each([
+    { label: "CtrlProxy to app", from: undefined, to: "app" },
+    { label: "app to CtrlProxy", from: "app", to: undefined },
+  ])("instance identity switching $label resets the epoch", async ({ from, to }) => {
+    const source = (instanceId: string | undefined) => {
+      const fake = new FakeCtrlProxy(timer);
+      return { fake, instanceId, onPrototypeEvent: fake.onPrototypeEvent.bind(fake) };
+    };
+    coordinator.adopt(scope, "panel", source(from), { replayed: [], lastSequence: 10 });
+    const next = source(to);
+    const waiting = coordinator.awaitEvent(scope, "panel", next, {});
+    next.fake.emitPrototypeEvent(event(1));
+    expect(coordinator.counts(scope, "panel")?.lastSequence).toBe(1);
+    expect((await waiting).event?.sequence).toBe(1);
+  });
+
+  test("a source with no instance identity keeps the epoch across reconnects", () => {
+    const source = () => {
+      const fake = new FakeCtrlProxy(timer);
+      return { fake, onPrototypeEvent: fake.onPrototypeEvent.bind(fake) };
+    };
+    coordinator.adopt(scope, "panel", source(), { replayed: [], lastSequence: 10 });
+    coordinator.adopt(scope, "panel", source(), { replayed: [event(1)], lastSequence: 0 });
+    expect(coordinator.counts(scope, "panel")).toMatchObject({ pendingCount: 0, lastSequence: 10 });
+  });
+
+  test.each([{ eventName: "next" }, { kind: "emit" as const }])(
+    "same-process remount resumes a filtered wait %j without losing pending events",
+    async (filter) => {
+      const source = {
+        instanceId: "process",
+        showingId: "first",
+        onPrototypeEvent: client.onPrototypeEvent.bind(client),
+      };
+      coordinator.adopt(scope, "panel", source, { replayed: [], lastSequence: 0 });
+      client.emitPrototypeEvent(event(1, "panel", "page_changed", "pending"));
+      client.emitPrototypeEvent(event(2, "panel", "dismissed"));
+      expect(await coordinator.awaitEvent(scope, "panel", source, filter)).toMatchObject({
+        reason: "dismissed",
+      });
+      source.showingId = "second";
+      coordinator.adopt(scope, "panel", source, {
+        replayed: [event(3, "panel", "emit", "next")],
+        lastSequence: 3,
+      });
+      expect(await coordinator.awaitEvent(scope, "panel", source, filter)).toMatchObject({
+        event: { sequence: 3 },
+      });
+      expect(
+        await coordinator.awaitEvent(scope, "panel", source, { kind: "dismissed" }),
+      ).toMatchObject({ event: { sequence: 2 } });
+      expect(
+        await coordinator.awaitEvent(scope, "panel", source, { eventName: "pending" }),
+      ).toMatchObject({ event: { sequence: 1 } });
+      const waiting = coordinator.awaitEvent(scope, "panel", source, filter);
+      client.emitPrototypeEvent(event(4, "panel", "emit", "next"));
+      expect((await waiting).event?.sequence).toBe(4);
+    },
+  );
+
+  test("consuming an earlier showing's dismissal preserves events when the remount also ended", async () => {
+    const source = {
+      instanceId: "process",
+      showingId: "first",
+      onPrototypeEvent: client.onPrototypeEvent.bind(client),
+    };
+    coordinator.adopt(scope, "panel", source, { replayed: [], lastSequence: 0 });
+    client.emitPrototypeEvent(event(1, "panel", "dismissed"));
+    source.showingId = "second";
+    coordinator.adopt(scope, "panel", source, {
+      replayed: [event(2), event(3, "panel", "dismissed")],
+      lastSequence: 3,
+    });
+    expect(
+      (await coordinator.awaitEvent(scope, "panel", source, { kind: "dismissed" })).event?.sequence,
+    ).toBe(1);
+    expect(coordinator.counts(scope, "panel")?.pendingCount).toBe(2);
+    expect(
+      (await coordinator.awaitEvent(scope, "panel", source, { kind: "emit" })).event?.sequence,
+    ).toBe(2);
+    expect(
+      (await coordinator.awaitEvent(scope, "panel", source, { kind: "dismissed" })).event?.sequence,
+    ).toBe(3);
+  });
+
   test("two sources on one device retain independent waits and subscriptions", async () => {
     const app = new FakeCtrlProxy(timer);
     coordinator.show(scope, "panel", client);

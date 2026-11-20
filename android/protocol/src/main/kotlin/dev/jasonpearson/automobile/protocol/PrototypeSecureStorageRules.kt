@@ -150,7 +150,8 @@ internal object PrototypeSecureStorageRules {
       val key =
         (value as? JsonPrimitive)
           ?.takeIf { it.isString }
-          ?.let { placeholderKey(it.content, secure) } ?: PrototypeSecureBindings.secureKey(value, root, secure)
+          ?.let { placeholderKey(it.content, secure) }
+          ?: PrototypeSecureBindings.secureKey(value, root, secure)
       if (key != null)
         return fail(
           at,
@@ -240,5 +241,4 @@ internal object PrototypeSecureBindings {
       if (source == "state") PrototypeSecureStorageRules.secureKeyFor(input, secure) else null
     }
   }
-
 }

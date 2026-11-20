@@ -295,7 +295,10 @@ object PrototypeDataWriter {
       "state" in binding -> {
         val key = binding.getValue("state").jsonPrimitive.content
         inputs.state(key)?.let(PrototypeDataValue::Resolved)
-          ?: PrototypeDataBindings.failure(PrototypeDataWriteErrorCode.INVALID_VALUE, "State key $key is not set")
+          ?: PrototypeDataBindings.failure(
+            PrototypeDataWriteErrorCode.INVALID_VALUE,
+            "State key $key is not set",
+          )
       }
       "data" in binding || "derived" in binding ->
         PrototypeDataBindings.resolveDataOrDerived(binding, inputs)
@@ -304,7 +307,10 @@ object PrototypeDataWriter {
         val pointer = binding.getValue(source).jsonPrimitive.content
         val value = if (source == "platform") inputs.platform(pointer) else inputs.event(pointer)
         value?.let(PrototypeDataValue::Resolved)
-          ?: PrototypeDataBindings.failure(PrototypeDataWriteErrorCode.NOT_FOUND, "Data pointer $pointer does not exist")
+          ?: PrototypeDataBindings.failure(
+            PrototypeDataWriteErrorCode.NOT_FOUND,
+            "Data pointer $pointer does not exist",
+          )
       }
       else ->
         PrototypeDataBindings.failure(

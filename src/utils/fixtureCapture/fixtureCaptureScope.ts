@@ -62,6 +62,7 @@ interface BoundedText {
 
 class ToolCallCaptureScope {
   private commands: CapturedCommand[] = [];
+  private issued = 0;
   private keptChars = 0;
   private closedFlag = false;
   device: CapturedDevice | undefined;
@@ -80,8 +81,9 @@ class ToolCallCaptureScope {
     return this.closedFlag;
   }
 
-  get nextIndex(): number {
-    return this.commands.length;
+  /** Reserve the next ordinal when a command starts, so indices follow issue order. */
+  reserveIndex(): number {
+    return this.issued++;
   }
 
   /** Dropped once the scope is closed: background work started in the call outlives it. */
@@ -109,7 +111,8 @@ class ToolCallCaptureScope {
     this.closedFlag = true;
     const commands = this.commands;
     this.commands = [];
-    return commands;
+    // Concurrent commands finish out of order; serialize them in the order they were issued.
+    return commands.sort((left, right) => left.index - right.index);
   }
 
   async flush(): Promise<void> {
@@ -284,6 +287,7 @@ export function beginCapturedCommand(
   }
   const { scope, redactLabel, scrubs = [] } = store;
   const startMs = scope.deps.timer.now();
+  const index = scope.reserveIndex();
   return {
     finish(outcome) {
       if (scope.closed) {
@@ -295,7 +299,7 @@ export function beginCapturedCommand(
       const stderr = scope.bound(clean.stderr);
       const redacted = redactLabel !== undefined || clean.changed;
       scope.record({
-        index: scope.nextIndex,
+        index,
         argv: clean.argv,
         ...(cwd === undefined ? {} : { cwd }),
         ...fields,

@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import path from "node:path";
 import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import { runExecSeam, type ExecSeamOptions } from "../../../src/utils/ExecSeam";
@@ -175,6 +176,23 @@ describe("fixture capture scope", () => {
     });
   });
 
+  test("indexes concurrent commands in the order they started, not finished", async () => {
+    const { deps, writer } = captureDeps();
+    const ok = { stdout: "", stderr: "" };
+    await runWithFixtureCapture("listApps", deps, async () => {
+      const first = beginCapturedCommand(["adb", "first"]);
+      const second = beginCapturedCommand(["adb", "second"]);
+      second?.finish(ok);
+      first?.finish(ok);
+    });
+    expect(
+      writer.captures[0]?.commands.map((cmd) => ({ index: cmd.index, arg: cmd.argv[1] })),
+    ).toEqual([
+      { index: 0, arg: "first" },
+      { index: 1, arg: "second" },
+    ]);
+  });
+
   test("attributes each command to the innermost tool call", async () => {
     const { deps, writer, timer } = captureDeps();
     const ok = { stdout: "", stderr: "" };
@@ -319,7 +337,9 @@ describe("fixtureCaptureFromEnv", () => {
 
 describe("resolveCaptureDirectory", () => {
   test("resolves a relative directory against the working directory and keeps an absolute one", () => {
-    expect(resolveCaptureDirectory("captures", "/daemon/cwd")).toBe("/daemon/cwd/captures");
-    expect(resolveCaptureDirectory("/abs/captures", "/daemon/cwd")).toBe("/abs/captures");
+    const cwd = path.resolve("/daemon/cwd");
+    const absolute = path.resolve("/abs/captures");
+    expect(resolveCaptureDirectory("captures", cwd)).toBe(path.join(cwd, "captures"));
+    expect(resolveCaptureDirectory(absolute, cwd)).toBe(absolute);
   });
 });

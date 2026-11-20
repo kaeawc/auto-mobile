@@ -43,7 +43,7 @@ final class PrototypeRemoteImageTransportTests: XCTestCase {
     }
 
     func testPinnedImageRedirectRetainsPublicOnlyPolicy() async throws {
-        for location in ["https://10.0.0.1/image", "https://public.example:3000/image"] {
+        for location in ["https://10.0.0.1/image", "https://10.0.0.1:3000/image"] {
             let redirect =
                 FakePinnedConnection("HTTP/1.1 302 Found\r\nLocation: \(location)\r\nContent-Length: 0\r\n\r\n")
             let connector = FakePinnedConnector([redirect])

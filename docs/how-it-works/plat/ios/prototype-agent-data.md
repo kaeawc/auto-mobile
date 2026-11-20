@@ -101,7 +101,7 @@ before sending; app-supplied device hooks receive image loads instead. Image req
 authorization, cookie and referer headers, and every redirect hop is revalidated against the image
 policy, with at most five hops. Public HTTPS destinations are allowed; literal loopback HTTP requires
 a DEBUG or ProtoViewer development build plus an explicit cleartext configuration. Images refuse
-daemon ports and private addresses. ProtoViewer shares its request consent gate with image loads.
+private addresses, and refuse daemon ports on loopback and private addresses (a public host may use them). ProtoViewer shares its request consent gate with image loads.
 
 Downloads stop at 8 MiB and have a 30 s ceiling. PNG, JPEG and WebP signatures must decode through
 ImageIO. The header must fit 64 MiB at four bytes per pixel, or eight for sources deeper than 8 bits

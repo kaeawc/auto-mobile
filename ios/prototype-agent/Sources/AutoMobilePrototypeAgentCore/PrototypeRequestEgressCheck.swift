@@ -29,8 +29,11 @@ struct PrototypeRequestEgressCheck: Sendable {
         guard let url = URL(string: text), url.scheme?.lowercased() == "https" || isImageLoopback(url) else {
             throw Self.blocked
         }
-        guard let host = url.host, policy.checkImagePort(Self.port(url)) == .allow else { throw Self.blocked }
-        if !isImageLoopback(url) {
+        guard let host = url.host else { throw Self.blocked }
+        if isImageLoopback(url) {
+            guard policy.checkImagePort(Self.port(url)) == .allow else { throw Self.blocked }
+        } else {
+            // Daemon ports are refused only on private addresses, as for ordinary requests.
             guard policy.checkHost(host: host, port: Self.port(url)) == .allow,
                   !PrototypeEgressPolicy.isIPLiteral(host) || isPublic(host) else { throw Self.blocked }
         }
@@ -78,8 +81,7 @@ struct PrototypeRequestEgressCheck: Sendable {
                 ["127.0.0.1", "::1"].contains(PrototypeEgressPolicy.canonicalLiteral(address) ?? "")
         }
         return (
-            remoteImageDevelopment == nil ||
-                (policy.checkImagePort(port ?? Self.port(url)) == .allow && isPublic(address))
+            remoteImageDevelopment == nil || isPublic(address)
         ) &&
             policy.check(host: address, port: port ?? Self.port(url), addresses: [address]) == .allow
     }

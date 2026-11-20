@@ -55,9 +55,17 @@ final class PrototypeRemoteImageEgressTests: XCTestCase {
         }
     }
 
-    func testDaemonPortsRefusedOnPublicAndDevelopmentLoopbackImages() async throws {
+    func testDaemonPortsRefusedOnLoopbackAndPrivateButAllowedOnPublicImages() async throws {
         for port in [8765, 3000, 3010] {
-            for origin in ["https://public.example", "http://localhost", "http://127.0.0.1", "http://[::1]"] {
+            let publicURL = try XCTUnwrap(URL(string: "https://public.example:\(port)/image"))
+            let publicEgress = check(development: true, addresses: ["8.8.8.8"])
+            XCTAssertNoThrow(try publicEgress.validateImageURL(publicURL.absoluteString))
+            try await publicEgress.validate(URLRequest(url: publicURL))
+            XCTAssertTrue(publicEgress.checkConnected(address: "8.8.8.8", url: publicURL))
+            let privateURL = try XCTUnwrap(URL(string: "https://10.0.0.1:\(port)/image"))
+            XCTAssertThrowsError(try publicEgress.validateImageURL(privateURL.absoluteString)) { assertBlocked($0) }
+            XCTAssertFalse(publicEgress.checkConnected(address: "10.0.0.1", url: privateURL))
+            for origin in ["http://localhost", "http://127.0.0.1", "http://[::1]"] {
                 let url = try XCTUnwrap(URL(string: "\(origin):\(port)/image"))
                 let egress = check(development: true, addresses: ["127.0.0.1"])
                 XCTAssertThrowsError(try egress.validateImageURL(url.absoluteString)) { assertBlocked($0) }

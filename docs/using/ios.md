@@ -24,8 +24,6 @@ Most tools work the same on Android and iOS. These guides cover iOS:
 - [App lifecycle](app-lifecycle.md) sends a simulated memory warning to the
   foreground app on a simulator.
 - [Emulator and simulator audio](emulator-audio.md)
-- [CarPlay on the iOS Simulator](carplay.md) turns on a simulator's CarPlay
-  screen.
 - [Accessibility and performance audits](audits.md) and
   [Performance traces](performance-trace.md)
 
@@ -45,3 +43,4 @@ drives.
 - [Apple TV](apple-tv.md)
 - [Apple Watch](apple-watch.md)
 - [Apple Vision Pro simulator](visionos-simulator.md)
+- [CarPlay on iOS simulators](carplay.md)

@@ -92,8 +92,9 @@ export interface DeviceClaimMirror {
    * The claim itself, decided by the table (#11811 step d): `claimed` once the row names this
    * owner, `refused` while a live foreign owner holds it. When the table cannot decide (no
    * registry open, a failed write after bounded busy retries) it is `unusable` once a registry
-   * must decide claims, and the claim is refused retryably (owner decision 2026-11-07, E1);
-   * before that, and for a skipped registry, it is `unavailable` and the claim files decide.
+   * must decide claims (see `registryExpected`), and the claim is refused retryably (owner
+   * decision 2026-11-07, E1); otherwise, and for a skipped registry, it is `unavailable` and the
+   * claim files decide.
    */
   acquire?(
     deviceId: string,
@@ -138,10 +139,12 @@ export interface StoreDeviceClaimMirrorOptions {
   /** Delay before the nth retry of a device's write; its length bounds the retries. */
   retryDelaysMs?: readonly number[];
   /**
-   * True once a registry must decide this daemon's claims (after socket bind, when startup creates
-   * it). Then a claim the table cannot decide is `unusable`, not left to the files (#11811, E1).
+   * True when a registry must decide this daemon's claims, given the failure the claim saw (none
+   * when no registry is open). Then a claim the table cannot decide is `unusable`, not left to the
+   * files (#11811, E1). Local daemons use `localClaimRegistryExpectation`: always after socket
+   * bind, and before bind whenever a registry file exists that does not still need migrating.
    */
-  registryExpected?: () => boolean;
+  registryExpected?: (error?: unknown) => boolean;
   /** Waits between busy acquire attempts; defaults to {@link DEVICE_CLAIM_ACQUIRE_BUSY_BACKOFF}. */
   busyBackoff?: BackoffPolicy;
 }
@@ -305,7 +308,7 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
    * else leave the claim to the files.
    */
   private undecided(deviceId: string, error?: unknown): DeviceClaimAcquisition {
-    const expected = this.options.registryExpected?.() === true;
+    const expected = this.options.registryExpected?.(error) === true;
     if (!expected && error === undefined) {
       // No registry yet and none required: the files decide, as on a host before claims tables.
       return { outcome: "unavailable" };

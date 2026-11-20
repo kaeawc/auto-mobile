@@ -135,6 +135,8 @@ struct PrototypeSession {
     private var revisions: [String: Int] = [:]
     /// `request` actions in flight (#12529) and the commands for the driver that runs them; see
     /// `takeRequestCommands`.
+    var uploadAssets: (any PrototypeUploadAssetSource)?
+    var uploadBoundary: any PrototypeUploadBoundaryGenerating = PrototypeUploadBoundaryGenerator()
     private(set) var requests = PrototypeRequestLedger()
     private var platformEventData: JSONValue?
     private var platformIssued = 0
@@ -148,7 +150,17 @@ struct PrototypeSession {
     private var timerCommands: [PrototypeTimerCommand] = []
     private var appeared: Set<String> = []
 
-    init(clock: PrototypeClock = SystemPrototypeClock()) {
+    private let generatedClock: PrototypeEpochClock
+    private let idGenerator: PrototypeIdGenerator
+    private var actionContext: PrototypeActionContext?
+
+    init(
+        clock: PrototypeClock = SystemPrototypeClock(),
+        idGenerator: PrototypeIdGenerator = SystemPrototypeIdGenerator(),
+        generatedClock: PrototypeEpochClock? = nil
+    ) {
+        self.idGenerator = idGenerator
+        self.generatedClock = generatedClock ?? SystemPrototypeEpochClock()
         platformRateLimiter = PrototypePlatformRateLimiter(clock: clock)
     }
 
@@ -471,11 +483,11 @@ struct PrototypeSession {
     /// The tap is atomic, as on Android (#11408, #11551): every state write is planned and
     /// validated against the controls bound to its key (`PrototypeStateValidator`) before anything
     /// runs, so one rejected write drops the whole tap with no write, page move or event.
-    mutating func run(_ actions: [PrototypeAction]) -> [PrototypeEvent] {
+    mutating func run(_ actions: [PrototypeAction], context: PrototypeActionContext? = nil) -> [PrototypeEvent] {
         guard isShown else { return [] }
         if let failed = requireValid(actions) { return failed }
         guard let writes = plannedWrites(actions, from: state) else { return [] }
-        return execute(actions, writes)
+        return execute(actions, writes, context: context)
     }
 
     /// One interaction as one unit, as Android's `PrototypeRuntime.control`: the control's `own`
@@ -525,6 +537,7 @@ struct PrototypeSession {
         var writes: [Int: PlannedWrite] = [:]
         for (index, action) in actions.enumerated() {
             if action.type == "dismiss" { break }
+            if action.type == "setState", PrototypeGeneratedValues.form(action.value) != nil { continue }
             guard let write = stateWrite(action, in: planned) else { continue }
             planned[write.key] = write.value
             planned = clampedPagerState(planned)
@@ -565,13 +578,31 @@ struct PrototypeSession {
     }
 
     /// Runs `actions` in order, applying the writes planned for them.
-    private mutating func execute(_ actions: [PrototypeAction], _ writes: [Int: PlannedWrite]) -> [PrototypeEvent] {
+    private mutating func execute(
+        _ actions: [PrototypeAction],
+        _ writes: [Int: PlannedWrite],
+        context: PrototypeActionContext? = nil
+    )
+        -> [PrototypeEvent]
+    {
+        let previous = actionContext
+        actionContext = context ?? PrototypeActionContext(ids: idGenerator, clock: generatedClock)
+        defer { actionContext = previous }
         let baseline = state
         var touched: [String] = []
         var events: [PrototypeEvent] = []
         for (index, action) in actions.enumerated() {
             guard isShown else { break }
             switch action.type {
+            case "setState" where PrototypeGeneratedValues.form(action.value) != nil:
+                if let key = action.key,
+                   case let .success(value)? = PrototypeGeneratedValues.resolveBinding(
+                       action.value,
+                       context: actionContext
+                   )
+                {
+                    applyPlannedWrite((key, value), touched: &touched)
+                }
             case "hideKeyboard":
                 viewCommands.append(.hideKeyboard)
             case "emit":
@@ -631,28 +662,58 @@ struct PrototypeSession {
         )
         var value: JSONValue?
         if operation != .remove {
-            guard case let .success(resolved) = PrototypeDataWrite.resolveValue(action.value, inputs: inputs) else {
+            guard case let .success(resolved) = PrototypeDataWrite.resolveValue(
+                action.value,
+                inputs: inputs,
+                context: actionContext
+            ) else {
                 return []
             }
             value = operation == .prepend ? .array([resolved]) : resolved
+        }
+        var match: PrototypeDataWrite.Match?
+        if let selector = action.where {
+            guard case let .success(equals) = PrototypeDataWrite.resolveValue(
+                selector.equals,
+                inputs: inputs,
+                context: actionContext
+            )
+            else { return [] }
+            match = .init(field: selector.field, equals: equals)
         }
         if operation == .upsert {
             guard let key = action.key else { return [] }
             return (try? commitDataWrite(.upsert, path: path, value: value, key: key, maxItems: action.maxItems).get())
                 ?? []
         }
-        return (try? commitDataWrite(operation, path: path, value: value).get()) ?? []
+        return (try? commitDataWrite(operation, path: path, value: value, where: match, member: action.member).get()) ??
+            []
     }
 
     /// Applies one data write to the shown spec: the data change, the rebuilt drawn tree, the
     /// bumped revision and the `change` event. A refused write changes nothing.
     private mutating func commitDataWrite(
         _ operation: PrototypeDataWrite.Operation, path: String, value: JSONValue?, key: String? = nil,
-        maxItems actionMaxItems: Int? = nil
+        maxItems actionMaxItems: Int? = nil, where match: PrototypeDataWrite.Match? = nil, member: String? = nil
     )
         -> Result<[PrototypeEvent], PrototypeDataWriteFailure>
     {
         guard let spec else { return .failure(.init(code: .notFound, message: "No prototype is shown")) }
+        let metadata = PrototypeDataWriteEvent(
+            op: operation,
+            path: path,
+            value: nil,
+            maxItems: nil,
+            revision: dataRevision + 1,
+            where: match,
+            member: member
+        )
+        guard PrototypeEmitContext.fits(metadata.payload) else {
+            return .failure(.init(
+                code: .limitExceeded,
+                message: "Data write selector exceeds the change event payload limit"
+            ))
+        }
         let data: [String: JSONValue]
         let listMaxItems = operation == .append || operation == .extend || operation == .prepend
             || operation == .upsert ? PrototypeLazyList.listMaxItems(spec: spec, dataPath: path) : nil
@@ -664,7 +725,7 @@ struct PrototypeSession {
             path: path,
             value: value,
             maxItems: maxItems.map(Double.init),
-            key: key
+            key: key, where: match, member: member
         ) {
         case let .success(written): data = written.data
         case let .failure(failure): return .failure(failure)
@@ -688,6 +749,8 @@ struct PrototypeSession {
         revisions[rebuilt.id] = revision
         var payload: [String: JSONValue] = ["op": .string(operation.rawValue), "revision": .number(Double(revision))]
         if let key { payload["key"] = .string(key) }
+        if let match { payload["where"] = .object(["field": .string(match.field), "equals": match.equals]) }
+        if let member { payload["member"] = .string(member) }
         if let maxItems { payload["maxItems"] = .number(Double(maxItems)) }
         // The value is left out when the event would not fit the emit payload limit, so the host,
         // which cannot mirror a write it was not shown, stops tracking the spec (as on Android).
@@ -1293,7 +1356,14 @@ extension PrototypeSession {
             events += cancelRequest(older, message: "Superseded by a newer request to \(target)")
         }
         let urlText = PrototypeRequestResolver.urlText(action, inputs: inputs)
-        let resolved = PrototypeRequestResolver.resolve(action, urlText: urlText, inputs: inputs)
+        let resolved = PrototypeRequestResolver.resolve(
+            action,
+            urlText: urlText,
+            inputs: inputs,
+            context: actionContext,
+            assets: uploadAssets,
+            boundary: uploadBoundary
+        )
         // A request that failed to resolve still reports the method and URL text it tried.
         let request = (try? resolved.get()) ?? PrototypeResolvedRequest(
             method: action.method.flatMap(PrototypeRequestMethod.init(rawValue:)) ?? .get,
@@ -1307,7 +1377,9 @@ extension PrototypeSession {
             url: request.url,
             headers: request.headers,
             body: request.body,
-            timeoutMs: action.timeoutMs.flatMap { Int(exactly: $0) }
+            timeoutMs: action.timeoutMs.flatMap { Int(exactly: $0) },
+            uploadBody: request.uploadBody,
+            progressKey: action.progressKey
         )
         let inFlight = PrototypeInFlightRequest(
             job: job,
@@ -1315,7 +1387,10 @@ extension PrototypeSession {
             statusKey: action.statusKey,
             onSuccess: action.onSuccess ?? [],
             onError: action.onError ?? [],
-            append: action.append
+            append: action.append,
+            where: request.where,
+            member: action.member,
+            context: actionContext?.copy()
         )
         if case let .failure(error) = resolved {
             return events + finishRequest(inFlight, .failed(error, durationMs: 0))
@@ -1329,6 +1404,17 @@ extension PrototypeSession {
         }
         requests.start(inFlight)
         return events + writeRequestStatus(inFlight.statusKey, "loading")
+    }
+
+    /// Progress is admitted by the driver's single ownership/monotonicity tracker before this write.
+    mutating func writeUploadProgress(_ requestId: String, key: String, value: Int) -> [PrototypeEvent] {
+        guard isShown, let request = requests.inFlight[requestId], request.job.progressKey == key,
+              request.job.uploadBody != nil, case .number? = state[key] else { return [] }
+        var next = state
+        next[key] = .number(Double(value))
+        guard next != state, accepts(next) else { return [] }
+        state = next
+        return emitStateChange([key])
     }
 
     /// A response (or failure) for a request this session started. A request that was cancelled,
@@ -1355,17 +1441,28 @@ extension PrototypeSession {
         var wroteBody = false
         if case let .received(_, _, body, _) = response, meta.error == nil, let into = inFlight.into {
             let stored = PrototypeRequestOutcome.storedBody(body, method: inFlight.job.method)
-            if leavesNoRoomForMeta(stored, into: into, meta: meta) {
+            if leavesNoRoomForMeta(stored, into: into, meta: meta, where: inFlight.where, member: inFlight.member) {
                 // The completion is atomic: a body that fits without room for any `__meta` is not
                 // written, and the request is an error whose minimal metadata is written if it fits.
                 meta.error = PrototypeRequestError(.invalidResponse, PrototypeRequestOutcome.noRoomForMeta)
                 minimalMeta = true
             } else {
-                switch commitDataWrite(.set, path: into, value: stored) {
+                switch commitDataWrite(
+                    .set,
+                    path: into,
+                    value: stored,
+                    where: inFlight.where,
+                    member: inFlight.member
+                ) {
                 case let .success(written):
                     events += written
                     wroteBody = true
-                case let .failure(failure): meta.error = PrototypeRequestError(.invalidResponse, failure.message)
+                case let .failure(failure): meta.error = PrototypeRequestError(
+                        inFlight
+                            .where == nil ? .invalidResponse :
+                            PrototypeRequestErrorCode(rawValue: failure.code.rawValue) ??
+                            .invalidResponse, failure.message
+                    )
                 }
             }
         }
@@ -1388,7 +1485,7 @@ extension PrototypeSession {
             name: PrototypeRequestEvent.name,
             payload: PrototypeRequestEvent.payload(job: inFlight.job, into: inFlight.into, meta: meta)
         )
-        return events + run(failed ? inFlight.onError : inFlight.onSuccess)
+        return events + run(failed ? inFlight.onError : inFlight.onSuccess, context: inFlight.context?.copy())
     }
 
     /// The `__meta` values to try, in order: whole, without `headers`, and (only when `minimal`)
@@ -1403,8 +1500,23 @@ extension PrototypeSession {
     }
 
     /// Whether the body would fit at `into` but no form of `<into>__meta` would fit beside it.
-    private func leavesNoRoomForMeta(_ stored: JSONValue, into: String, meta: PrototypeRequestMeta) -> Bool {
-        guard case let .success(withBody) = PrototypeDataWrite.apply(spec?.data, op: .set, path: into, value: stored)
+    private func leavesNoRoomForMeta(
+        _ stored: JSONValue,
+        into: String,
+        meta: PrototypeRequestMeta,
+        where match: PrototypeDataWrite.Match? = nil,
+        member: String? = nil
+    )
+        -> Bool
+    {
+        guard case let .success(withBody) = PrototypeDataWrite.apply(
+            spec?.data,
+            op: .set,
+            path: into,
+            value: stored,
+            where: match,
+            member: member
+        )
         else { return false }
         return !metaForms(meta, minimal: false).contains { form in
             if case .success = PrototypeDataWrite.apply(withBody, op: .set, path: into + "__meta", value: form) {
@@ -1501,7 +1613,7 @@ extension PrototypeSession {
             spec.data ?? [:],
             into: request.into,
             response: response,
-            append: append
+            append: append, where: request.where, member: request.member
         )
         var meta = outcome.meta
         var staged = self
@@ -1513,9 +1625,19 @@ extension PrototypeSession {
                 case let .success(written): events += written
                 case let .failure(error): throw PrototypeRequestError(.invalidResponse, "append.to \(error.message)")
                 }
-                if let into = request.into, let pointer = PrototypeDataWrite.pointer(ofPath: into) {
-                    let rest = PrototypeDataPointer.resolve(outcome.data, pointer: pointer)
-                    events += try staged.commitDataWrite(.set, path: into, value: rest).get()
+                if let into = request.into {
+                    let rest = PrototypeRequestOutcome.removing(
+                        body,
+                        tokens: PrototypeDataPointer.tokens(append.from)[...]
+                    )
+                    let stored = rest.map { PrototypeRequestOutcome.storedBody($0, method: request.job.method) }
+                    events += try staged.commitDataWrite(
+                        .set,
+                        path: into,
+                        value: stored,
+                        where: request.where,
+                        member: request.member
+                    ).get()
                 }
             }
             if let into = request.into {
@@ -1543,7 +1665,7 @@ extension PrototypeSession {
             name: PrototypeRequestEvent.name,
             payload: PrototypeRequestEvent.payload(job: request.job, into: request.into, meta: meta)
         )
-        return events + run(failed ? request.onError : request.onSuccess)
+        return events + run(failed ? request.onError : request.onSuccess, context: request.context?.copy())
     }
 }
 
@@ -1610,6 +1732,11 @@ extension PrototypeSession {
             nodeId: PrototypeNode.owningNodeId(of: action, in: spec.root)
         )
         if failure == nil { failure = PrototypePlatformDriver.invalidArguments(call) }
+        if failure == nil, call.call == "permissions.request", case let .array(names)? = call.args["names"],
+           names.contains(where: { !spec.declaredPermissions.contains($0.stringValue ?? "") })
+        {
+            failure = .failure(.invalidArgs, "Permission is not declared in requires.permissions")
+        }
         if failure == nil, let refusal = platformRateLimiter.refusal(for: call.call) {
             return events + finishPlatform(pending, refusal, durationMs: 0)
         }

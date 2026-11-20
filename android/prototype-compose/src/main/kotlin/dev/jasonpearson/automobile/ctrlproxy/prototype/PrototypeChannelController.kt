@@ -3,15 +3,17 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import dev.jasonpearson.automobile.protocol.PrototypeChannelCoalescer
 import dev.jasonpearson.automobile.protocol.PrototypeChannelLimits
 import dev.jasonpearson.automobile.protocol.PrototypeChannelRoutes
-import kotlin.coroutines.cancellation.CancellationException
 import kotlin.random.Random
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -64,15 +66,22 @@ interface PrototypeChannelSink {
  * Attempts reset once a connection has stayed open for [STABLE_OPEN_MS], so a server that accepts
  * and drops at once still backs off. Sends made while connecting or reconnecting wait in a bounded
  * queue that is flushed on open and dropped when the channel closes.
+ *
+ * A sink call that throws goes to [onError] and the state machine carries on: the connection still
+ * opens, queued sends still drain, the reconnect timer is still installed and later effects in a
+ * flush still run. After each sink call the controller checks the slot is still current, so a
+ * patch, end or [close] that landed meanwhile stops the stale work.
  */
 @InternalAutoMobilePrototypeApi
-@Suppress("TooManyFunctions") // One state machine; the handlers share its slots and lock.
+// One state machine: handlers share its slots and lock, and every collaborator is a seam.
+@Suppress("TooManyFunctions", "LongParameterList")
 class PrototypeChannelController(
   private val prototypeId: String,
   private val transports: PrototypeChannelTransports,
   private val sink: PrototypeChannelSink,
   private val scope: CoroutineScope,
   private val random: Random = Random.Default,
+  private val onError: (Throwable) -> Unit,
   private val newId: () -> String,
 ) {
   private class Slot(val id: String, val declaration: PrototypeChannelDeclaration) {
@@ -109,30 +118,14 @@ class PrototypeChannelController(
   private val dirty = linkedSetOf<String>()
   private var flush: Job? = null
   private var started = false
-  private var closed = false
+  // Set by beginClose() or before close() waits for the lock, so work suspended in a sink call (or
+  // still waiting for the lock) sees it at once.
   @Volatile private var closing = false
-
-  /** Closed, or a [beginClose] has run and [close] has not reached the lock yet. */
-  private val ended: Boolean
-    get() = closed || closing
+  // close() has started; a later close() returns at once.
+  @Volatile private var closeStarted = false
 
   init {
-    scope.launch { for (work in inbox) lock.withLock { if (!ended) isolated("inbox", work) } }
-  }
-
-  /**
-   * Runs one piece of controller work so that a throw from the sink or a transport ends only that
-   * work: the inbox keeps draining and [close] still closes every connection.
-   */
-  private suspend fun isolated(what: String, work: suspend () -> Unit) {
-    try {
-      work()
-    } catch (cancelled: CancellationException) {
-      throw cancelled
-    } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
-      // A sink handler or transport may throw anything; the other channels keep running.
-      sink.warn("Realtime $what failed: ${error.message}")
-    }
+    scope.launch { for (work in inbox) lock.withLock { if (!closing) report { work() } } }
   }
 
   /**
@@ -152,7 +145,7 @@ class PrototypeChannelController(
    * channels as they are, closes removed ones, and reconnects only changed ones that were live.
    */
   suspend fun update(channels: Map<String, PrototypeChannelDeclaration>) = lock.withLock {
-    if (ended) return@withLock
+    if (closing) return@withLock
     for (id in slots.keys - channels.keys) slots.remove(id)?.let(::abandon)
     for ((id, declaration) in channels) {
       val previous = slots[id]
@@ -160,21 +153,21 @@ class PrototypeChannelController(
       val live = previous?.status?.active == true
       previous?.let(::abandon)
       val slot = Slot(id, declaration).also { slots[id] = it }
-      publish(slot)
+      report { publish(slot) }
       // A changed channel keeps its state: only live ones reconnect, and only a newly declared
       // channel connects on show.
       val newOnShow = previous == null && started && declaration.connectOnShow
-      if (live || newOnShow) connect(slot)
+      if (live || newOnShow) report { connect(slot) }
     }
   }
 
   /** The prototype is shown: connect every `onShow` channel that is still idle. */
   suspend fun show() = lock.withLock {
-    if (ended || started) return@withLock
+    if (closing || started) return@withLock
     started = true
-    for (slot in slots.values) {
+    for (slot in slots.values.toList()) {
       if (slot.declaration.connectOnShow && slot.status == PrototypeChannelStatus.IDLE)
-        connect(slot)
+        report { connect(slot) }
     }
   }
 
@@ -186,7 +179,7 @@ class PrototypeChannelController(
     lock.withLock {
       val slot = slots[channel] ?: return@withLock unknown(channel)
       if (!wanted()) return@withLock abandoned()
-      if (!ended && !slot.status.active) {
+      if (!closing && !slot.status.active) {
         slot.attempt = 0
         connect(slot)
       }
@@ -196,7 +189,7 @@ class PrototypeChannelController(
   /** `realtime.disconnect`: closes the connection with 1000 and drops queued sends. */
   suspend fun disconnect(channel: String): PrototypeChannelError? = lock.withLock {
     val slot = slots[channel] ?: return@withLock unknown(channel)
-    if (ended || !slot.status.active) return@withLock null
+    if (closing || !slot.status.active) return@withLock null
     end(slot)
     slot.connection?.close(NORMAL_CLOSURE, "")
     slot.connection = null
@@ -218,7 +211,7 @@ class PrototypeChannelController(
   ): PrototypeChannelError? = lock.withLock {
     val slot = slots[channel] ?: return@withLock unknown(channel)
     if (!wanted()) return@withLock abandoned()
-    if (ended) {
+    if (closing) {
       return@withLock PrototypeChannelError(
         PrototypeChannelError.NETWORK,
         "The channels are closed",
@@ -229,15 +222,20 @@ class PrototypeChannelController(
 
   /** Dismiss or reset: closes every connection; the sink hears nothing more. */
   suspend fun close() {
-    lock.withLock {
-      if (closed) return@withLock
-      closed = true
-      flush?.cancel()
-      window.clear()
-      slots.values.forEach(::abandon)
-      slots.clear()
+    if (closeStarted) return
+    closeStarted = true
+    closing = true
+    // A later close() returns at once, so this cleanup must finish even if the caller is cancelled
+    // while a sink call holds the lock.
+    withContext(NonCancellable) {
+      lock.withLock {
+        flush?.cancel()
+        window.clear()
+        slots.values.forEach(::abandon)
+        slots.clear()
+      }
+      inbox.close()
     }
-    inbox.close()
   }
 
   private fun sendError(slot: Slot, data: String): PrototypeChannelError? {
@@ -274,18 +272,23 @@ class PrototypeChannelController(
   }
 
   private suspend fun connect(slot: Slot) {
+    val generation = slot.generation
     slot.closeCode = null
     slot.closeReason = null
     slot.error = null
-    setStatus(
-      slot,
-      if (slot.attempt == 0) PrototypeChannelStatus.CONNECTING
-      else PrototypeChannelStatus.RECONNECTING,
-    )
+    report {
+      setStatus(
+        slot,
+        if (slot.attempt == 0) PrototypeChannelStatus.CONNECTING
+        else PrototypeChannelStatus.RECONNECTING,
+      )
+    }
+    if (!isCurrent(slot, generation)) return slot.queue.clear()
     open(slot)
   }
 
-  private fun open(slot: Slot) {
+  private suspend fun open(slot: Slot) {
+    if (closing || slots[slot.id] !== slot) return slot.queue.clear()
     val generation = ++slot.generation
     val declaration = slot.declaration
     val request =
@@ -299,27 +302,24 @@ class PrototypeChannelController(
         headers = declaration.headers,
         lastEventId = slot.lastEventId.takeIf { declaration.kind == PrototypeChannelKind.SSE },
       )
-    val listener = listener(slot, generation)
-    slot.connection =
+    val connection =
       try {
-        transports.forVia(declaration.via).open(request, listener)
-      } catch (@Suppress("TooGenericExceptionCaught") error: RuntimeException) {
-        // A transport that throws instead of reporting fails this attempt like a network error,
-        // so the channel backs off and reconnects as usual.
-        sink.warn("Realtime channel ${slot.id} failed to open: ${error.message}")
-        listener.onClosed(
-          null,
-          null,
-          PrototypeChannelError(PrototypeChannelError.NETWORK, error.message ?: "open failed"),
-        )
-        null
+        transports.forVia(declaration.via).open(request, listener(slot, generation))
+      } catch (error: CancellationException) {
+        throw error
+      } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+        // A transport that cannot start is a failed attempt: it backs off like a dropped one.
+        onError(error)
+        val reason = PrototypeChannelError(PrototypeChannelError.NETWORK, error.message ?: "$error")
+        return ended(slot, null, null, reason)
       }
+    slot.connection = connection
   }
 
   private fun listener(slot: Slot, generation: Long) =
     object : PrototypeChannelListener {
       private fun post(work: suspend () -> Unit) {
-        inbox.trySend { if (slots[slot.id] === slot && slot.generation == generation) work() }
+        inbox.trySend { if (isCurrent(slot, generation)) work() }
       }
 
       override fun onOpen(protocol: String?) = post { opened(slot, generation) }
@@ -334,11 +334,12 @@ class PrototypeChannelController(
     }
 
   private suspend fun opened(slot: Slot, generation: Long) {
-    setStatus(slot, PrototypeChannelStatus.OPEN)
+    report { setStatus(slot, PrototypeChannelStatus.OPEN) }
+    if (!isCurrent(slot, generation)) return slot.queue.clear()
     while (slot.queue.isNotEmpty()) slot.connection?.send(slot.queue.removeFirst())
     slot.timer =
       timer(STABLE_OPEN_MS) {
-        if (slot.generation == generation && slot.attempt != 0) {
+        if (isCurrent(slot, generation) && slot.attempt != 0) {
           slot.attempt = 0
           publish(slot)
         }
@@ -347,6 +348,7 @@ class PrototypeChannelController(
   }
 
   private suspend fun received(slot: Slot, data: String, event: String?, id: String?) {
+    val generation = slot.generation
     if (id != null) slot.lastEventId = id
     dirty += slot.id
     if (data.toByteArray(Charsets.UTF_8).size > PrototypeChannelLimits.maxFrameBytes) {
@@ -361,18 +363,22 @@ class PrototypeChannelController(
       return
     }
     slot.framesIn++
-    sink.event(
-      FRAME_EVENT,
-      buildJsonObject {
-        put("channel", slot.id)
-        put("data", decoded)
-        event?.let { put("event", it) }
-        id?.let { put("id", it) }
-      },
-    )
-    PrototypeChannelRoutes.match(slot.declaration.routes, decoded, event)?.let {
-      // A fresh array per frame: coalescing keeps frames by identity.
-      window += Routed(slot, JsonArray(it), decoded)
+    val delivered = report {
+      sink.event(
+        FRAME_EVENT,
+        buildJsonObject {
+          put("channel", slot.id)
+          put("data", decoded)
+          event?.let { put("event", it) }
+          id?.let { put("id", it) }
+        },
+      )
+    }
+    if (!isCurrent(slot, generation)) return
+    if (delivered) {
+      PrototypeChannelRoutes.match(slot.declaration.routes, decoded, event)?.let {
+        window += Routed(slot, it, decoded)
+      }
     }
     scheduleFlush()
   }
@@ -388,7 +394,7 @@ class PrototypeChannelController(
       }
 
   private fun scheduleFlush() {
-    if (flush?.isActive == true) return
+    if (closing || flush?.isActive == true) return
     flush = timer(PrototypeChannelLimits.flushMs.toLong()) { flushWindow() }
   }
 
@@ -397,17 +403,21 @@ class PrototypeChannelController(
     // coalescing, so a stale write cannot stand in for a live channel's write to the same target.
     val frames = window.filter { slots[it.slot.id] === it.slot }
     window.clear()
-    val kept = PrototypeChannelCoalescer.coalesce(frames.map { it.actions })
-    var from = 0
-    for (actions in kept) {
-      val index = (from until frames.size).first { frames[it].actions === actions }
-      from = index + 1
+    val signatures = frames.map {
+      PrototypeChannelCoalescer.coalescingActions(it.actions, it.event)
+    }
+    // Each effect is applied once: one that throws is reported, never replayed, and the rest run.
+    for (index in PrototypeChannelCoalescer.keptIndices(signatures)) {
+      if (closing) return
       val routed = frames[index]
-      sink.run(routed.slot.id, routed.actions, routed.event)
+      report { sink.run(routed.slot.id, routed.actions, routed.event) }
     }
     val changed = dirty.toList()
     dirty.clear()
-    changed.mapNotNull { slots[it] }.forEach { publish(it) }
+    for (slot in changed.mapNotNull { slots[it] }) {
+      if (closing) return
+      report { publish(slot) }
+    }
   }
 
   private suspend fun ended(
@@ -416,7 +426,11 @@ class PrototypeChannelController(
     reason: String?,
     error: PrototypeChannelError?,
   ) {
+    // A new generation: stale callbacks of this connection, and a stability reset already posted,
+    // can no longer touch the slot.
+    val generation = ++slot.generation
     slot.timer?.cancel()
+    slot.timer = null
     slot.connection = null
     slot.closeCode = code
     slot.closeReason = reason
@@ -426,15 +440,26 @@ class PrototypeChannelController(
     val delayMs = slot.declaration.backoffMs(next) { random.nextDouble() }
     if (delayMs == null) {
       slot.queue.clear()
-      setStatus(
-        slot,
-        if (error != null) PrototypeChannelStatus.ERROR else PrototypeChannelStatus.CLOSED,
-      )
+      report {
+        setStatus(
+          slot,
+          if (error != null) PrototypeChannelStatus.ERROR else PrototypeChannelStatus.CLOSED,
+        )
+      }
     } else {
       slot.attempt = next
-      setStatus(slot, PrototypeChannelStatus.RECONNECTING)
-      val generation = slot.generation
-      slot.timer = timer(delayMs.toLong()) { if (slot.generation == generation) open(slot) }
+      report { setStatus(slot, PrototypeChannelStatus.RECONNECTING) }
+    }
+    if (!isCurrent(slot, generation)) return slot.queue.clear()
+    if (delayMs != null) {
+      slot.timer =
+        timer(delayMs.toLong()) {
+          if (isCurrent(slot, generation)) {
+            // This timer is done; a failed open must not cancel it from inside.
+            slot.timer = null
+            open(slot)
+          }
+        }
     }
     callback?.let { sink.run(slot.id, it, eventOf(slot)) }
   }
@@ -484,11 +509,27 @@ class PrototypeChannelController(
 
   private fun timer(millis: Long, work: suspend () -> Unit): Job = scope.launch {
     delay(millis)
-    lock.withLock { if (!ended) isolated("timer", work) }
+    lock.withLock { if (!closing) report { work() } }
   }
 
   private fun abandoned() =
     PrototypeChannelError(PrototypeChannelError.NETWORK, "The caller stopped waiting")
+
+  private fun isCurrent(slot: Slot, generation: Long): Boolean =
+    !closing && slots[slot.id] === slot && slot.generation == generation
+
+  /** Runs [work], handing a failure to [onError]; true when it completed. */
+  private inline fun report(work: () -> Unit): Boolean =
+    try {
+      work()
+      true
+    } catch (error: CancellationException) {
+      throw error
+    } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+      // The sink or a transport failed; the state machine must keep running past it.
+      onError(error)
+      false
+    }
 
   private fun unknown(channel: String) =
     PrototypeChannelError(

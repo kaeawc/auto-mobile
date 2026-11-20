@@ -14,7 +14,6 @@ import { logger } from "../../../utils/logger";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
 import {
-  connectPrototypeAgent,
   NodePrototypeAgentConnector,
   type PrototypeAgentClient,
   type PrototypeAgentConnector,
@@ -26,7 +25,7 @@ import {
 } from "./prototypeViewerEndpoint";
 import { PrototypeViewerConnections } from "./PrototypeViewerConnections";
 import { BufferedViewerClient } from "./BufferedViewerClient";
-import { HandshakeReplaySocket } from "./HandshakeReplaySocket";
+import { connectBufferedPrototypeAgent } from "./connectBufferedPrototypeAgent";
 export { PrototypeViewerConnections } from "./PrototypeViewerConnections";
 export { CompositePrototypeAgentConnections } from "./CompositePrototypeAgentConnections";
 
@@ -180,26 +179,8 @@ export function createPrototypeViewerAttacher(
         }
       },
     },
-    connect: async (port, token) => {
-      const socket = new HandshakeReplaySocket(await connector.connect(port));
-      try {
-        const raw = await connectPrototypeAgent({
-          port,
-          token,
-          connector: { connect: async () => socket },
-          timer: deps.timer ?? defaultTimer,
-        });
-        const buffered = new BufferedViewerClient(raw);
-        socket.release();
-        return buffered;
-      } catch (error) {
-        socket.end();
-        throw new ActionableError(
-          "Prototype viewer authentication failed; reopen the viewer and retry.",
-          { cause: error },
-        );
-      }
-    },
+    connect: (port, token) =>
+      connectBufferedPrototypeAgent(port, token, connector, { timer: deps.timer ?? defaultTimer }),
     connections: deps.connections ?? prototypeViewerConnections,
   });
 }

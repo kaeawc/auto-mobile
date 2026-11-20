@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../models/describeUnknownError";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -20,6 +20,10 @@ import {
 } from "./disposableAppPermissions";
 import type { DisposableAppRecord, DisposableAppRegistry } from "./DisposableAppRegistry";
 import { type DisposableAppTemplate, selectDisposableAppTemplate } from "./disposableAppTemplates";
+import {
+  DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS,
+  DISPOSABLE_APP_UNINSTALL_STEP_MS,
+} from "./disposableAppUninstallBudget";
 
 /**
  * Host side of disposable prototype apps (#14184): install a spec as its own app, list the apps
@@ -36,6 +40,9 @@ export type DisposableAppIcon = { asset: string } | { backgroundColor: string };
 
 export interface DisposableAppStampInput {
   appId: string;
+  attachToken?: string;
+  /** Development-only opt-in to expose attach on physical Android devices. */
+  allowPhysicalDeviceAttach?: boolean;
   slug: string;
   label: string;
   icon?: DisposableAppIcon;
@@ -55,6 +62,8 @@ export interface DisposableAppStamper {
   /** Digest of the host's disposable-app signing key; installed apps must match it. */
   signer(): Promise<string>;
   stamp(input: DisposableAppStampInput): Promise<DisposableAppStamped>;
+  /** Frees a stamped artifact once the install attempt ends; omitted when it is a shared cache. */
+  release?(artifactPath: string): Promise<void>;
 }
 
 export interface DisposableAppInstallation {
@@ -85,9 +94,14 @@ export interface DisposableAppPlatformSupport {
 }
 
 export interface DisposableAppManagerDependencies {
+  attachTokens?: { next(): string };
   platforms: Partial<Record<DisposableAppPlatform, DisposableAppPlatformSupport>>;
   registry: DisposableAppRegistry;
   timer: Pick<Timer, "now">;
+  /** Bulk removal deadline; defaults to `DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS`. */
+  bulkUninstallBudgetMs?: number;
+  /** Worst case for one removal; defaults to `DISPOSABLE_APP_UNINSTALL_STEP_MS`. */
+  uninstallStepMs?: number;
 }
 
 export interface DisposableAppInstallInput {
@@ -142,6 +156,12 @@ export interface DisposableAppRemoval {
 export interface DisposableAppUninstallResult {
   removed: DisposableAppRemoval[];
   skipped: DisposableAppRemoval[];
+  /**
+   * Bulk targets not started because the call's deadline could not fit another removal. Present
+   * only when the call stopped early; call `uninstallApp` again with the same target to continue:
+   * apps this call skipped are tried last next time, so the retry reaches the pending ones.
+   */
+  pending?: string[];
 }
 
 const REMOVED = Symbol("removed");
@@ -162,18 +182,42 @@ function ttlMs(ttlHours: number | undefined): number | null {
   return hours === 0 ? null : hours * HOUR_MS;
 }
 
+function disposableSpecId(spec: PrototypeJson): string | undefined {
+  if (spec === null || typeof spec !== "object" || Array.isArray(spec)) {
+    return undefined;
+  }
+  return typeof spec.id === "string" ? spec.id : undefined;
+}
+
 export class DisposableAppManager {
   /**
    * Per-app lifecycle chains keyed by `deviceId/appId`, so an expiry decision made before a
    * same-slug reinstall cannot delete the renewed installation.
    */
   private readonly appLocks = new Map<string, Promise<unknown>>();
+  /**
+   * Apps a bulk removal skipped (outside the prefix or another signer), per device. A later bulk
+   * call tries them last, so a deadline-bounded retry always reaches apps it can still remove.
+   */
+  private readonly bulkSkipped = new Map<string, Set<string>>();
 
   constructor(private readonly deps: DisposableAppManagerDependencies) {}
 
   async install(input: DisposableAppInstallInput): Promise<DisposableAppInstallResult> {
     const appId = disposableAppId(input.platform, input.app.slug);
     return this.withAppLock(input.deviceId, appId, () => this.installLocked(input, appId));
+  }
+
+  private async installAndRelease(
+    { stamper, installer }: { stamper: DisposableAppStamper; installer: DisposableAppInstaller },
+    [deviceId, appId]: readonly [string, string],
+    artifactPath: string,
+  ): Promise<void> {
+    try {
+      await installer.install(deviceId, appId, artifactPath);
+    } finally {
+      await stamper.release?.(artifactPath);
+    }
   }
 
   private async installLocked(
@@ -188,10 +232,13 @@ export class DisposableAppManager {
       declarations.permissions,
     );
     const template = selectDisposableAppTemplate(input.spec, await stamper.templates());
-    const existing = (await this.deps.registry.list(input.deviceId)).some(
+    const existing = (await this.deps.registry.list(input.deviceId)).find(
       (record) => record.appId === appId,
     );
+    const attachToken =
+      existing?.attachToken ?? this.deps.attachTokens?.next() ?? randomBytes(32).toString("hex");
     const stamped = await stamper.stamp({
+      attachToken,
       appId,
       slug: input.app.slug,
       label: input.app.label,
@@ -200,7 +247,11 @@ export class DisposableAppManager {
       template,
       declarations,
     });
-    await installer.install(input.deviceId, appId, stamped.artifactPath);
+    await this.installAndRelease(
+      { stamper, installer },
+      [input.deviceId, appId],
+      stamped.artifactPath,
+    );
     // Record the app as soon as it is on the device, so a reset or permission failure below cannot
     // leave it untracked or keep a previous install's expiry for the sweep to act on (#16506).
     const installedAt = this.deps.timer.now();
@@ -210,6 +261,8 @@ export class DisposableAppManager {
       slug: input.app.slug,
       platform: input.platform,
       label: input.app.label,
+      specId: disposableSpecId(input.spec),
+      attachToken,
       specSha256: createHash("sha256").update(JSON.stringify(input.spec)).digest("hex"),
       template: template.name,
       signer: await stamper.signer(),
@@ -242,7 +295,7 @@ export class DisposableAppManager {
       expiresAt: isoOrNull(expiresAt),
       template: template.name,
       permissions: { declared: declarations.permissions, ...grants },
-      updated: existing,
+      updated: existing !== undefined,
       launched: false,
     };
   }
@@ -288,14 +341,55 @@ export class DisposableAppManager {
       "all" in target
         ? [(await this.list(deviceId, platform)).map((entry) => entry.appId), "all"]
         : [await this.expiredIds(deviceId, platform), "expired"];
+    return this.removeBulk(deviceId, platform, this.skippedLast(deviceId, ids), reason);
+  }
+
+  /** `ids` with the ones an earlier bulk call skipped on this device moved to the end. */
+  private skippedLast(deviceId: string, ids: string[]): string[] {
+    const skipped = this.bulkSkipped.get(deviceId) ?? new Set<string>();
+    return [
+      ...ids.filter((appId) => !skipped.has(appId)),
+      ...ids.filter((appId) => skipped.has(appId)),
+    ];
+  }
+
+  private recordBulkOutcome(deviceId: string, appId: string, skipped: boolean): void {
+    const ids = this.bulkSkipped.get(deviceId) ?? new Set<string>();
+    if (skipped) {
+      ids.add(appId);
+    } else {
+      ids.delete(appId);
+    }
+    this.bulkSkipped.set(deviceId, ids);
+  }
+
+  /**
+   * Removes `ids` in order until the bulk deadline cannot fit another worst-case step; the rest
+   * are returned as `pending`.
+   */
+  private async removeBulk(
+    deviceId: string,
+    platform: DisposableAppPlatform,
+    ids: string[],
+    reason: string,
+  ): Promise<DisposableAppUninstallResult> {
     const result: DisposableAppUninstallResult = { removed: [], skipped: [] };
-    for (const appId of ids) {
+    const stepMs = this.deps.uninstallStepMs ?? DISPOSABLE_APP_UNINSTALL_STEP_MS;
+    const deadline =
+      this.deps.timer.now() +
+      Math.max(this.deps.bulkUninstallBudgetMs ?? DISPOSABLE_APP_BULK_UNINSTALL_BUDGET_MS, stepMs);
+    for (const [index, appId] of ids.entries()) {
+      if (this.deps.timer.now() + stepMs > deadline) {
+        result.pending = ids.slice(index);
+        break;
+      }
       const outcome = await this.removeOne(deviceId, platform, appId, reason);
       if (outcome === REMOVED) {
         result.removed.push({ appId, reason });
       } else if (outcome !== RENEWED) {
         result.skipped.push({ appId, reason: outcome });
       }
+      this.recordBulkOutcome(deviceId, appId, typeof outcome === "string");
     }
     return result;
   }

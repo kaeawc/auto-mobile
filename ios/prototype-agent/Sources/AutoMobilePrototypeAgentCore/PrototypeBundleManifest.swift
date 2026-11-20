@@ -30,7 +30,7 @@ struct PrototypeBundleManifest {
         var names: [String] = []
         for item in required {
             guard let name = item.stringValue,
-                  name.range(of: #"^[a-z][a-z0-9_]*$"#, options: .regularExpression) != nil,
+                  name.range(of: #"^[a-z][A-Za-z0-9_]*$"#, options: .regularExpression) != nil,
                   names.last.map({ $0 < name }) ?? true
             else { throw PrototypeBundleFailure(.requiresInvalid, "bundle.json") }
             names.append(name)

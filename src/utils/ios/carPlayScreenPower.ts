@@ -20,8 +20,8 @@ const stateSchema = z
     carPlay: z
       .object({
         found: z.boolean(),
+        screenID: z.number().int().nonnegative().nullable(),
         powerState: z.number().int().nullable(),
-        enabled: z.boolean().nullable(),
       })
       .strict(),
   })
@@ -34,6 +34,7 @@ const failureSchema = z
           "device-not-found",
           "device-not-booted",
           "private-api-unavailable",
+          "unsupported-runtime",
           "no-carplay-screen",
           "power-on-failed",
           "usage",
@@ -44,9 +45,25 @@ const failureSchema = z
   })
   .strict();
 export type CarPlayPowerState = z.infer<typeof stateSchema>;
+
+/** Bounds a caller puts on one CarPlay helper run: the child is killed on abort or timeout. */
+export interface CarPlayHelperCallOptions {
+  signal?: AbortSignal;
+  /** Caps the helper's own exec timeout; the smaller of the two applies. */
+  timeoutMs?: number;
+}
+
+/** The smaller of the helper's default exec timeout and the caller's remaining budget. */
+export function boundedHelperTimeoutMs(defaultMs: number, options?: CarPlayHelperCallOptions) {
+  return options?.timeoutMs === undefined ? defaultMs : Math.min(defaultMs, options.timeoutMs);
+}
+
+const POWER_HELPER_TIMEOUT_MS = 135000;
+
 export interface CarPlayScreenPowerer {
   status(udid: string): Promise<CarPlayPowerState>;
-  powerOn(udid: string, options: { enable: boolean }): Promise<CarPlayPowerState>;
+  /** Makes TVOut the CarPlay car display; repeat after every simulator boot. */
+  powerOn(udid: string, options?: CarPlayHelperCallOptions): Promise<CarPlayPowerState>;
 }
 
 export function parseCarPlayPowerState(json: string): CarPlayPowerState {
@@ -67,24 +84,32 @@ export class DefaultCarPlayScreenPowerer implements CarPlayScreenPowerer {
   ) {}
 
   status(udid: string): Promise<CarPlayPowerState> {
-    return this.run(udid, "status", false);
+    return this.run(udid, "status");
   }
-  powerOn(udid: string, options: { enable: boolean }): Promise<CarPlayPowerState> {
-    return this.run(udid, "power-on", options.enable);
+  powerOn(udid: string, options?: CarPlayHelperCallOptions): Promise<CarPlayPowerState> {
+    return this.run(udid, "power-on", options);
   }
 
-  private async run(udid: string, action: string, enable: boolean): Promise<CarPlayPowerState> {
+  private async run(
+    udid: string,
+    action: string,
+    options?: CarPlayHelperCallOptions,
+  ): Promise<CarPlayPowerState> {
     const path = readEnvRaw(ENV.CARPLAY_POWER_HELPER_PATH, this.env);
     if (!path?.trim()) {
       throw new ActionableError(
         "Build ios/carplay-power and set AUTOMOBILE_CARPLAY_POWER_HELPER_PATH to its carplay-power-helper executable.",
       );
     }
-    const args = [udid, action, ...(enable ? ["--enable"] : [])];
+    const args = [udid, action];
     try {
       const result = await runExecSeam(
         (options) => this.exec(path, args, options),
-        { timeoutMs: 135000, maxBuffer: 1024 * 1024 },
+        {
+          timeoutMs: boundedHelperTimeoutMs(POWER_HELPER_TIMEOUT_MS, options),
+          maxBuffer: 1024 * 1024,
+          signal: options?.signal,
+        },
         { command: path, args },
         { preserveError: true },
       );

@@ -67,6 +67,15 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
     #endif
 
     func perform(_ request: PrototypeHttpRequest) async throws -> PrototypeHttpResponse {
+        try await perform(request, delivery: PrototypeDeliveryCheck(), uploadProgress: nil)
+    }
+
+    func perform(
+        _ request: PrototypeHttpRequest, delivery _: PrototypeDeliveryCheck,
+        uploadProgress: PrototypeUploadProgressCallback?
+    )
+        async throws -> PrototypeHttpResponse
+    {
         let started = nowMs()
         let call = PrototypePinnedCall()
         let timeout = PrototypeRequestError(.timeout, "Request timed out after \(request.timeoutMs)ms.")
@@ -81,8 +90,12 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
                     })
                     let task = Task {
                         guard call.active else { return }
-                        do { try call.finish(.success(await execute(request, call: call, started: started))) }
-                        catch { call.finish(.failure(error)) }
+                        do { try call.finish(.success(await execute(
+                            request,
+                            call: call,
+                            started: started,
+                            uploadProgress: uploadProgress
+                        ))) } catch { call.finish(.failure(error)) }
                     }
                     call.install(task: task)
                 }
@@ -99,7 +112,8 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
     }
 
     private func execute(
-        _ initial: PrototypeHttpRequest, call: PrototypePinnedCall, started: Double
+        _ initial: PrototypeHttpRequest, call: PrototypePinnedCall, started: Double,
+        uploadProgress: PrototypeUploadProgressCallback?
     )
         async throws -> PrototypeHttpResponse
     {
@@ -114,6 +128,9 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
             defer { connection.cancel() }
             try Task.checkCancellation()
             try await connection.send(PrototypeHTTP1Codec.serialize(request, url: url))
+            if let upload = request.uploadBody {
+                uploadProgress?(Int64(upload.data.count), Int64(upload.data.count))
+            }
             let response = try await read(connection, request: request)
             if [301, 302, 303, 307, 308].contains(response.status), let location = response.headers["location"] {
                 guard count < 5, let next = URL(string: location, relativeTo: url)?.absoluteURL,
@@ -297,6 +314,7 @@ extension PrototypeHttpRequest {
         self.url = url
         self.headers = headers
         body = dropBody ? nil : request.body
+        uploadBody = dropBody ? nil : request.uploadBody
         timeoutMs = request.timeoutMs
         maxResponseBytes = request.maxResponseBytes
     }

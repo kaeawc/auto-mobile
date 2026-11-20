@@ -299,7 +299,7 @@ A `textField` may also declare three optional fields:
   `done`.
 
 Multiline text has no IME action, so validation refuses `imeAction` and `onSubmit` with
-`multiline: true`. These need `prototype_text_field_actions_v1`, with the same refusal.
+`multiline: true`; a field with either and no `multiline` is single-line, so Enter runs the action. These need `prototype_text_field_actions_v1`, with the same refusal.
 
 Android draws `trailingIcon` as an `IconButton` in the field's trailing slot. Its `label` is the content description and its tag is
 `<testTag>.trailingIcon`. Android maps `imeAction` to Compose
@@ -309,4 +309,5 @@ and `onSubmit`, and draws the trailing icon as an SF Symbol button inside the fi
 `leadingIcon` is a built-in icon name drawn in the field's leading slot (decoration, no actions; an
 SF Symbol on iOS), gated by `prototype_text_field_leading_icon_v1`.
 
-A `secure` field's value is not redacted: it lives in state, `change` events and `inspect`.
+A `secure` field masks its text. Values listed in `storage.secure` are also omitted from public
+state, `change` payloads and `inspect`; see [secure storage](prototype-ux-platform-services.md).

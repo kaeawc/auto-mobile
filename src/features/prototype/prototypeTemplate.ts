@@ -1,3 +1,4 @@
+import { prototypeActionNeedsDataV2 } from "./prototypeGeneratedBindings";
 import { prototypeChannelHandlers } from "./prototypeChannelHandlers";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 /**
@@ -155,6 +156,7 @@ export type FieldKind =
   | "request"
   | "deviceRequest"
   | "uploadRequest"
+  | "keyedData"
   | "prependData"
   | "scrollTo"
   | "hideKeyboard"
@@ -270,6 +272,10 @@ function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
   if (action.type === "prependData") {
     visit(action, path, "prependData");
   }
+  const where = record(action.where);
+  if (where) {
+    action.where = { ...where, equals: mapBinding(where.equals, `${path}.where.equals`, visit) };
+  }
   mapField(action, "path", path, { kind: "dataPath", visit });
   if (action.type !== "removeData" && action.value !== undefined) {
     action.value = mapBinding(action.value, `${path}.value`, visit);
@@ -322,6 +328,9 @@ function mapRouteAction(action: Raw, path: string, visit: FieldVisitor): void {
 }
 
 function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
+  if (prototypeActionNeedsDataV2(action)) {
+    visit(action, path, "keyedData");
+  }
   mapRouteAction(action, path, visit);
   if (
     ["setData", "appendData", "prependData", "upsertData", "removeData"].includes(
@@ -397,6 +406,10 @@ function mapRequestEntries(action: Raw, field: string, path: string, visit: Fiel
 /** `url` and literal header/query strings are text; `into` is a data path; follow-ups recurse. */
 function mapRequestAction(action: Raw, path: string, visit: FieldVisitor): void {
   visit(action, path, "request");
+  const where = record(action.where);
+  if (where) {
+    action.where = { ...where, equals: mapBinding(where.equals, `${path}.where.equals`, visit) };
+  }
   if (action.via === "device") {
     visit(action, path, "deviceRequest");
   }

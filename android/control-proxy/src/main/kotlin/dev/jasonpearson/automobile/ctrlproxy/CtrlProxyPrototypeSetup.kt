@@ -62,6 +62,7 @@ internal fun CtrlProxy.createPrototypeController(): PrototypeController {
     lifecycle = prototypeLifecycle(windowBlocked),
     eventSink = prototypeEventSink(),
     storage = prototypeStorage,
+    purgeSecureStorage = ::purgePrototypeSecureStorage,
     backdropSupport =
       PrototypeBackdropSupport {
         // Cross-window blur can be switched off at runtime (battery saver, developer

@@ -5,11 +5,19 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+/** A single object member compared with a resolved JSON value. */
+data class PrototypeDataMatch(val field: String, val equals: JsonElement)
+
 /** One `/data` write, with the path spelled `/data/<pointer>` and any `{index}` already bound. */
 sealed interface PrototypeDataWrite {
   val path: String
 
-  data class Set(override val path: String, val value: JsonElement) : PrototypeDataWrite
+  data class Set(
+    override val path: String,
+    val value: JsonElement,
+    val where: PrototypeDataMatch? = null,
+    val member: String? = null,
+  ) : PrototypeDataWrite
 
   data class Upsert(
     override val path: String,
@@ -36,7 +44,8 @@ sealed interface PrototypeDataWrite {
     val maxItems: Number? = null,
   ) : PrototypeDataWrite
 
-  data class Remove(override val path: String) : PrototypeDataWrite
+  data class Remove(override val path: String, val where: PrototypeDataMatch? = null) :
+    PrototypeDataWrite
 
   /** The wire `op` of the `change` event that reports this write. */
   val op: String
@@ -52,8 +61,10 @@ sealed interface PrototypeDataWrite {
 }
 
 enum class PrototypeDataWriteErrorCode(val wireValue: String) {
+  LAST_GENERATED_UNSET("lastGenerated_unset"),
   INVALID_PATH("invalid_path"),
   INVALID_VALUE("invalid_value"),
+  AMBIGUOUS_MATCH("ambiguous_match"),
   NOT_FOUND("not_found"),
   NOT_ARRAY("not_array"),
   LIMIT_EXCEEDED("limit_exceeded"),
@@ -96,6 +107,8 @@ object PrototypeDataWriter {
       return it
     }
     val current = data ?: JsonObject(emptyMap())
+    if (PrototypeKeyedDataWrite.appliesTo(write))
+      return PrototypeKeyedDataWrite.apply(current, pointer, write)
     targetRefusal(current, pointer, write)?.let {
       return it
     }
@@ -280,6 +293,9 @@ object PrototypeDataWriter {
    * `{state}` and `{data}` read the committed values at the action; a missing source is an error.
    */
   fun resolveValue(binding: EmitContextBinding, inputs: EmitContextInputs): PrototypeDataValue {
+    PrototypeGeneratedValues.resolveBinding(binding, inputs.actionContext)?.let {
+      return it
+    }
     fun fail(code: PrototypeDataWriteErrorCode, message: String) =
       PrototypeDataValue.Failure(PrototypeDataWriteError(code, message))
     return when {
@@ -319,7 +335,7 @@ sealed interface PrototypeDataValue {
 /** The row window an append, prepend, extend or upsert leaves after `maxItems` trims it. */
 internal object PrototypeDataArrayWindow {
   /** JSON identity uses numeric value and exact strings, including nested identity objects. */
-  private fun sameKey(left: JsonElement, right: JsonElement): Boolean =
+  internal fun sameKey(left: JsonElement, right: JsonElement): Boolean =
     when {
       left is JsonArray && right is JsonArray ->
         left.size == right.size && left.indices.all { sameKey(left[it], right[it]) }

@@ -1,8 +1,8 @@
 # observe
 
-| Tool                    | What it does                                                                                                 | Requires                                                                                                                                                                                                                                                                                                                                               |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 👁️ <code>observe</code> | Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display | <span class="tool-requires"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span> <span role="img" aria-label="watchOS" title="watchOS">⌚</span> <span role="img" aria-label="tvOS" title="tvOS">📺</span> <span role="img" aria-label="visionOS" title="visionOS">🥽</span></span> |
+| Tool                    | What it does                                                                                                 | Platforms                                                                                                                                                                                                                                                                                                                                               | Needs                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| 👁️ <code>observe</code> | Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span> <span role="img" aria-label="watchOS" title="watchOS">⌚</span> <span role="img" aria-label="tvOS" title="tvOS">📺</span> <span role="img" aria-label="visionOS" title="visionOS">🥽</span></span> | <span class="tool-needs">—</span> |
 
 Call `observe` to read the current screen before choosing a target. The default
 `skeleton` and `context` rows describe controls and visible text; `project: "full"`
@@ -29,6 +29,13 @@ When the screenshot is gone, the read returns JSON with code `OBSERVATION_NOT_RE
 | `cache-cleared`     | The device's cache was cleared, for example when its session ended.   |
 
 With no `evictedBecause`, the id is unknown. In every case, call `observe` again.
+
+## Apps with several scenes on iOS
+
+When an iOS app has more than one connected scene, `observe` and the element-based
+action tools such as `tapOn` fail with a `multi_scene` error that lists the scenes.
+Close all but one scene, then retry. The tools do not fall back to a different
+observation source.
 
 ## Toggle labels
 

@@ -3,6 +3,17 @@ import Foundation
 import XCTest
 
 final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
+    func testUploadAndDeviceTransportAreAdvertisedTogetherAtTheMinimumOS() {
+        struct MinimumOS: OSVersionProvider { let majorVersion = 17 }
+        for capability in [
+            PrototypeAgentProtocol.networkUploadCapability,
+            PrototypeAgentProtocol.networkDeviceCapability,
+        ] {
+            XCTAssertTrue(PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS()).contains(capability))
+            XCTAssertTrue(AutoMobilePrototypeCapabilities.supported.contains(capability))
+        }
+    }
+
     func testWindowAndKeyboardAreAdvertisedAtTheMinimumOS() {
         struct MinimumOS: OSVersionProvider { let majorVersion = 17 }
         let capabilities = Set(PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS()))
@@ -23,6 +34,17 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         XCTAssertTrue(
             PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS(), registryCapabilities: [settings])
                 .contains(settings)
+        )
+    }
+
+    func testPermissionsIsAdvertisedOnlyThroughItsRegisteredModuleAtMinimumOS() {
+        struct MinimumOS: OSVersionProvider { let majorVersion = 17 }
+        let capability = "prototype_platform_permissions_v1"
+        XCTAssertFalse(PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS()).contains(capability))
+        XCTAssertFalse(AutoMobilePrototypeCapabilities.supported.contains(capability))
+        XCTAssertTrue(
+            PrototypeAgentProtocol.advertisedCapabilities(os: MinimumOS(), registryCapabilities: [capability])
+                .contains(capability)
         )
     }
 
@@ -51,7 +73,6 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // not through the static list this test reads.
         // no renderer yet, and so do device media items (#14192).
         var exclusions: Set<String> = [
-            "prototype_network_upload_v1", // Contract only until upload execution ships.
             // Realtime transport, routing and lifecycle remain owed by the runtime slices.
             "prototype_platform_realtime_v1", "prototype_platform_realtime_device_v1",
             "prototype_platform_test_v1",
@@ -97,7 +118,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_audioRecorder_v1",
             // Contract only; the Viewer notification runtime is owed (#14282).
             "prototype_platform_notifications_v1",
-            // Contract only; the Viewer permission runtime is owed (#14299).
+            // Registered by the agent and Viewer registries, not the static list.
             "prototype_platform_permissions_v1",
             // Contract only; the scheduled notification runtimes are owed (#14283).
             "prototype_platform_notifications_scheduled_v1",

@@ -24,6 +24,8 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeInteraction
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntimeContent
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageBackends
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
 import dev.jasonpearson.automobile.ctrlproxy.prototype.collectStackBackProgress
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeInitialDeviceState
@@ -89,7 +91,22 @@ fun AutoMobilePrototype(
             PrototypeClipboardModule(AndroidPrototypeClipboard(clipboardContext)),
         )
     }
-  val validation = remember(spec) { PrototypeSpecValidator.validate(spec) }
+  val validation =
+    remember(spec, runtimePlatform) {
+      val parsed = PrototypeSpecValidator.validate(spec)
+      if (
+        parsed is PrototypeSpecValidation.Success &&
+          "secureStorage" in parsed.spec.requires?.platform.orEmpty() &&
+          runtimePlatform.registry.modules.none { it is PrototypeSecureStorageModule }
+      ) {
+        PrototypeSpecValidation.Failure(
+          dev.jasonpearson.automobile.protocol.PrototypeSpecError(
+            "$",
+            "Unsupported capabilities: ${PrototypeSecureStorageModule.CAPABILITY}",
+          ),
+        )
+      } else parsed
+    }
   Box(modifier) {
     when (validation) {
       is PrototypeSpecValidation.Failure ->
@@ -363,7 +380,13 @@ private class EmbeddedOwner(
   ) {
     val opened =
       PrototypeStoragePersistence(
-          config.storage.adapt(),
+          PrototypeStorageBackends(
+            config.storage.adapt(),
+            config.platform.registry.modules
+              .filterIsInstance<PrototypeSecureStorageModule>()
+              .singleOrNull()
+              ?.store,
+          ),
           CoroutinePrototypeScheduler(config.scope),
           io,
           registry = config.environment.host?.storageRegistry,

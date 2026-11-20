@@ -12,6 +12,8 @@ import {
   androidDisposableAppDevices,
 } from "../../features/prototype/disposableApp/android/AndroidDisposableAppInstaller";
 import { AndroidDisposableAppStamper } from "../../features/prototype/disposableApp/android/AndroidDisposableAppStamper";
+import { createIosDisposableAppSupport } from "../../features/prototype/disposableApp/ios/iosDisposableAppFactory";
+import { requireDisposableAppSimulator } from "../../features/prototype/disposableApp/ios/iosDisposableAppIdentity";
 import type { PrototypeJson } from "../../features/prototype/prototypeJson";
 import type { BootedDevice } from "../../models";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
@@ -33,12 +35,13 @@ export const isDisposableAppAction = (action: string): action is PrototypeDispos
 /** The manager calls these actions make; tests inject a manager over fakes. */
 export type PrototypeDisposableApps = Pick<DisposableAppManager, "install" | "list" | "uninstall">;
 
-/** The daemon's manager: Android stamping and adb, with the registry under the data dir. */
+/** The daemon's manager: Android and iOS support, with the registry under the data dir. */
 export function defaultDisposableAppManager(
   dependencies: { adbFactory?: AdbClientFactory; timer?: Pick<Timer, "now"> } = {},
 ): DisposableAppManager {
   return new DisposableAppManager({
     platforms: {
+      ios: createIosDisposableAppSupport(),
       android: {
         stamper: new AndroidDisposableAppStamper(),
         installer: new AndroidDisposableAppInstaller(
@@ -53,7 +56,7 @@ export function defaultDisposableAppManager(
 
 /**
  * The injected manager, or the daemon's built on the first disposable-app call, so other actions
- * never construct the Android stamper.
+ * never construct the disposable app stampers.
  */
 export function lazyDisposableApps(
   dependencies: { disposableApps?: PrototypeDisposableApps; adbFactory?: AdbClientFactory },
@@ -76,8 +79,11 @@ function uninstallTarget(args: PrototypeArgs): DisposableAppUninstallTarget {
 function appPlatform(device: BootedDevice): DisposableAppPlatform {
   if (device.platform !== "android" && device.platform !== "ios") {
     throw new ActionableError(
-      `Disposable prototype apps need an Android device; ${device.deviceId} is ${device.platform}.`,
+      `Disposable prototype apps need an Android device or iOS simulator; ${device.deviceId} is ${device.platform}.`,
     );
+  }
+  if (device.platform === "ios") {
+    requireDisposableAppSimulator(device.deviceId);
   }
   return device.platform;
 }
@@ -96,15 +102,21 @@ async function run(
   apps: PrototypeDisposableApps,
   device: BootedDevice,
   args: PrototypeArgs,
+  attachments?: { forget(deviceId: string, appId: string): Promise<void> },
 ): Promise<PrototypeOutput> {
   if (args.action === "installApp") {
-    return { success: true, disposableApp: await apps.install(installInput(device, args)) };
+    const disposableApp = await apps.install(installInput(device, args));
+    await attachments?.forget(device.deviceId, disposableApp.appId);
+    return { success: true, disposableApp };
   }
   if (args.action === "listApps") {
     return { success: true, disposableApps: await apps.list(device.deviceId, appPlatform(device)) };
   }
   const target = uninstallTarget(args);
   const uninstalled = await apps.uninstall(device.deviceId, appPlatform(device), target);
+  await Promise.all(
+    uninstalled.removed.map(({ appId }) => attachments?.forget(device.deviceId, appId)),
+  );
   return { success: true, uninstalled };
 }
 
@@ -113,9 +125,10 @@ export async function disposableAppOutput(
   apps: PrototypeDisposableApps,
   device: BootedDevice,
   args: PrototypeArgs,
+  attachments?: { forget(deviceId: string, appId: string): Promise<void> },
 ): Promise<PrototypeOutput> {
   try {
-    return await run(apps, device, args);
+    return await run(apps, device, args, attachments);
   } catch (error) {
     logger.warn(`prototype ${args.action} failed on ${device.deviceId}`, error);
     return {

@@ -33,6 +33,8 @@ setup() {
     esac
   }
   export -f xcrun rg xcode-select xcodebuild
+  # A set DEVELOPER_DIR keeps select_pinned_xcode from reading the host's Xcode.
+  export DEVELOPER_DIR=/stub/Xcode.app/Contents/Developer
 }
 
 # Runs the script with the given args and asserts it logged the expected

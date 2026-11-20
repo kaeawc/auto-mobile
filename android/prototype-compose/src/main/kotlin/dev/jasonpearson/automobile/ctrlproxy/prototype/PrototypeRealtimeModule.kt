@@ -61,7 +61,16 @@ internal class PrototypeRealtimeModule(
   override val events = emptyFlow<PlatformEvent>()
 
   private val controller =
-    PrototypeChannelController(prototypeId, config.transports, sink, scope, config.random, newId)
+    PrototypeChannelController(
+      prototypeId = prototypeId,
+      transports = config.transports,
+      sink = sink,
+      scope = scope,
+      random = config.random,
+      // A sink or transport throw is isolated by the controller; surface it as a warning.
+      onError = { sink.warn("Realtime channel work failed: ${it.message}") },
+      newId = newId,
+    )
   private val inbox = Channel<suspend () -> Unit>(Channel.UNLIMITED)
 
   init {

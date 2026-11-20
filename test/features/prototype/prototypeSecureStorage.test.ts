@@ -4,6 +4,8 @@ import {
   prototypeSecureStorageError,
 } from "../../../src/features/prototype/prototypeSecureStorage";
 import { prototypeStorageSchema } from "../../../src/features/prototype/prototypeStorageSchema";
+import { prototypePlatformError } from "../../../src/features/prototype/prototypePlatform";
+import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 const spec = (overrides: Record<string, unknown> = {}) => ({
   requires: { platform: ["secureStorage", "biometric"] },
@@ -137,6 +139,149 @@ describe("prototypeStorageSchema secure fields", () => {
         storage({ secure: ["state:a"], secureAuth: { "state:a": "pin" } }),
       ).success,
     ).toBe(false);
+  });
+});
+
+describe("secure route params and platform args", () => {
+  const error = (action: Record<string, unknown>, root = spec()) =>
+    prototypePlatformError(root, [{ value: action, path: "root.onTap[0]" }], () => undefined);
+  const binding = { state: "token" };
+  const actions = [
+    { type: "push", stack: "nav", screen: "detail", params: { t: binding } },
+    { type: "replace", stack: "nav", screen: "detail", params: { t: binding } },
+    {
+      type: "setStack",
+      stack: "nav",
+      path: [{ screen: "home" }, { screen: "detail", params: { t: binding } }],
+    },
+    { type: "platform", call: "clipboard.copy", args: { text: binding } },
+  ];
+
+  for (const [index, action] of actions.entries()) {
+    test(`${action.type} refuses secure state with the Kotlin message and a located path`, () => {
+      expect(error(action)).toEqual({
+        path: `root.onTap[0].${index === 2 ? "path[1].params.t" : index === 3 ? "args.text" : "params.t"}`,
+        message: `Secure storage key state:token cannot be sent in ${index === 3 ? "platform args" : "route params"}`,
+      });
+    });
+  }
+
+  test("bindings are checked in sorted order with quoted member paths and repeat matching", () => {
+    expect(
+      error({
+        type: "push",
+        params: { z: binding, "a-b": { state: "tok{item.id}" } },
+      }),
+    ).toEqual({
+      path: 'root.onTap[0].params["a-b"]',
+      message: "Secure storage key state:token cannot be sent in route params",
+    });
+    expect(error({ type: "platform", args: { "a-b": { state: "tok{item.id}" } } })).toEqual({
+      path: 'root.onTap[0].args["a-b"]',
+      message: "Secure storage key state:token cannot be sent in platform args",
+    });
+  });
+
+  test("public bindings, literal placeholders and specs without secure keys pass", () => {
+    for (const type of ["push", "replace", "setStack", "platform"]) {
+      const values = { public: { state: "remember" }, literal: { value: "{token}" } };
+      expect(
+        error({ type, params: values, args: values, path: [{ screen: "detail", params: values }] }),
+      ).toBeUndefined();
+    }
+    for (const action of actions) {
+      expect(error(action, spec({ storage: storage({}) }))).toBeUndefined();
+    }
+  });
+
+  test("request opt-in does not permit route or platform leaks", () => {
+    for (const action of actions) {
+      expect(error({ ...action, allowSecureInRequest: true })).toBeDefined();
+    }
+  });
+
+  test("the host validator rejects secure bindings in complete route and platform specs", () => {
+    const base = {
+      ...spec(),
+      id: "vault",
+      window: { placement: { type: "fullscreen" } },
+      requires: { platform: ["secureStorage", "biometric", "clipboard"] },
+    };
+    for (const action of actions) {
+      const platform = action.type === "platform";
+      const button = { type: "button", label: "Go", onTap: [action] };
+      expect(
+        validatePrototypeSpec({
+          ...base,
+          root: platform
+            ? button
+            : {
+                type: "stack",
+                id: "nav",
+                start: "home",
+                screens: { home: button, detail: { type: "text", text: "Detail" } },
+                routes: { detail: { params: { t: "string" } } },
+              },
+        }),
+      ).toMatchObject({
+        success: false,
+        error: {
+          path: `${platform ? "root" : 'root.screens["home"]'}.onTap[0].${action.type === "setStack" ? "path[1].params.t" : platform ? "args.text" : "params.t"}`,
+          message: `Secure storage key state:token cannot be sent in ${platform ? "platform args" : "route params"}`,
+        },
+      });
+    }
+  });
+});
+
+describe("secure data-write values", () => {
+  const error = (action: Record<string, unknown>, root = spec()) =>
+    prototypePlatformError(root, [{ value: action, path: "root.onTap[0]" }], () => undefined);
+  const writes = ["setData", "appendData", "upsertData", "prependData"].map((type) => ({
+    type,
+    path: "/data/copy",
+    value: { state: "token" },
+  }));
+
+  for (const action of writes) {
+    test(`${action.type} refuses a secure state value with a located path`, () => {
+      expect(error(action)).toEqual({
+        path: "root.onTap[0].value",
+        message: "Secure storage key state:token cannot be written to data",
+      });
+      expect(error({ ...action, value: { state: "tok{item.id}" } })).toEqual({
+        path: "root.onTap[0].value",
+        message: "Secure storage key state:token cannot be written to data",
+      });
+    });
+  }
+
+  test("public values, literals and specs without secure keys pass; opt-in does not apply", () => {
+    for (const action of writes) {
+      expect(error({ ...action, value: { state: "remember" } })).toBeUndefined();
+      expect(error({ ...action, value: { value: "{token}" } })).toBeUndefined();
+      expect(error(action, spec({ storage: storage({}) }))).toBeUndefined();
+      expect(error({ ...action, allowSecureInRequest: true })).toBeDefined();
+    }
+    expect(error({ type: "removeData", path: "/data/copy" })).toBeUndefined();
+  });
+
+  test("the host validator rejects a secure setData value in a complete spec", () => {
+    expect(
+      validatePrototypeSpec({
+        ...spec(),
+        id: "vault",
+        window: { placement: { type: "fullscreen" } },
+        data: { copy: "" },
+        root: { type: "button", label: "Copy", onTap: [writes[0]] },
+      }),
+    ).toMatchObject({
+      success: false,
+      error: {
+        path: "root.onTap[0].value",
+        message: "Secure storage key state:token cannot be written to data",
+      },
+    });
   });
 });
 

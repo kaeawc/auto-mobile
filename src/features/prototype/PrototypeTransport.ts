@@ -51,6 +51,9 @@ export interface PrototypeDeviceStatus {
 }
 
 export interface PrototypeTransport {
+  readonly eventInstanceId?: string;
+  readonly eventShowingId?: string;
+  readonly eventShowingStartSequence?: number;
   show(spec: PrototypeSpec, options?: PrototypeShowOptions): Promise<PrototypeResult>;
   dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult>;
   patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypePatchReply>;
@@ -60,19 +63,32 @@ export interface PrototypeTransport {
   ): Promise<PrototypeAssetResult>;
   removeAsset(id: string, options?: PrototypeAssetRequestOptions): Promise<PrototypeAssetResult>;
   status(timeoutMs?: number): Promise<PrototypeDeviceStatus>;
-  /** Subscribes to decoded `prototype_event` pushes; returns an unsubscribe function. */
-  onEvent(listener: (event: PrototypeEvent) => void): () => void;
+  /**
+   * Subscribes to decoded `prototype_event` pushes; returns an unsubscribe function. A listener
+   * returns false when it rejected the event, so it is not acknowledged to the device.
+   */
+  onEvent(listener: (event: PrototypeEvent) => unknown): () => void;
 }
 
-// The event coordinator keeps one subscription per device and replaces it only when the source
-// object changes, so each transport must map to one stable source object.
+// Each transport maps to one stable source object for subscription ownership.
 const eventSources = new WeakMap<PrototypeTransport, PrototypeEventSource>();
 
 /** The coordinator's view of a transport; the same object for the same transport. */
 export function prototypeEventSource(transport: PrototypeTransport): PrototypeEventSource {
   let source = eventSources.get(transport);
   if (source === undefined) {
-    source = { onPrototypeEvent: (listener) => transport.onEvent(listener) };
+    source = {
+      get showingId() {
+        return transport.eventShowingId;
+      },
+      get showingStartSequence() {
+        return transport.eventShowingStartSequence;
+      },
+      get instanceId() {
+        return transport.eventInstanceId;
+      },
+      onPrototypeEvent: (listener) => transport.onEvent(listener),
+    };
     eventSources.set(transport, source);
   }
   return source;

@@ -4000,6 +4000,12 @@
           "type": "list",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "status",
+          "type": "json",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -8866,6 +8872,20 @@
         "hasDefault": true
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeDataWhere": [
+      {
+        "name": "field",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "equals",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect": [
       {
         "name": "path",
@@ -10290,6 +10310,32 @@
         "type": "list",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "secure",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeStorageSecureMetadata": [
+      {
+        "name": "key",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "present",
+        "type": "boolean",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "bytes",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeStyle": [
@@ -14112,6 +14158,12 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "where",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeDataWhere",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "replace": [
@@ -14227,6 +14279,18 @@
       },
       {
         "name": "progressKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "where",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeDataWhere",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "member",
         "type": "string",
         "nullable": true,
         "hasDefault": true
@@ -15132,6 +15196,18 @@
         "type": "json",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "where",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeDataWhere",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "member",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "setPage": [

@@ -1,3 +1,4 @@
+import com.android.build.api.variant.HostTestBuilder
 import com.vanniktech.maven.publish.AndroidSingleVariantLibrary
 import com.vanniktech.maven.publish.JavadocJar
 import dev.jasonpearson.automobile.buildlogic.apisignature.ApiSignatureCheckTask
@@ -21,6 +22,14 @@ android {
   buildFeatures { compose = true }
 
   testOptions { unitTests.isIncludeAndroidResources = true }
+}
+
+// AGP 9 creates host unit tests only for the tested (debug) build type. Release-only behavior
+// (BuildConfig.DEBUG == false) needs its own run, so CI also runs testReleaseUnitTest (#18623).
+androidComponents {
+  beforeVariants(selector().withBuildType("release")) { variant ->
+    variant.hostTests.getValue(HostTestBuilder.UNIT_TEST_TYPE).enable = true
+  }
 }
 
 kotlin {
@@ -49,12 +58,15 @@ dependencies {
   implementation(libs.compose.adaptive.navigation)
   implementation(libs.compose.adaptive.navigation.suite)
   implementation(libs.compose.material.icons.extended)
+  implementation(libs.haze.blur)
   api(libs.kotlinx.coroutines)
 
   testImplementation(libs.bundles.unit.test)
   testImplementation(libs.robolectric)
   testImplementation(libs.compose.ui.junit)
   debugImplementation(libs.bundles.compose.ui.debug)
+  // createComposeRule() needs ComponentActivity in the release unit-test manifest too.
+  testReleaseImplementation(libs.compose.ui.test.manifest)
 }
 
 // --- API surface tracking (#13727) ---

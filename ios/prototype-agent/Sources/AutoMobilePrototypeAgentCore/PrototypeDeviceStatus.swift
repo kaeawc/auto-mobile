@@ -74,9 +74,11 @@ final class PrototypeDeviceStatusModule: PrototypePlatformModule {
     let debounceMs: Int
     private let source: any PrototypeDeviceStatusSource
     private let clock: PrototypeClock
+    private var override = DeviceStatusOverride(platform: "ios")
     private var reading: [String: JSONValue] = [:]
     private var delivered: [String: JSONValue]?
     private var started = false
+    private var generation = 0
     private var pending: PrototypeTimerHandle?
     private var subscribers: [Int: AsyncStream<PlatformEvent>.Continuation] = [:]
     private var nextSubscriber = 0
@@ -142,14 +144,26 @@ final class PrototypeDeviceStatusModule: PrototypePlatformModule {
 
     func availability() -> PlatformAvailability { .ready }
 
+    func mode(_ mode: DeviceStatusMode) {
+        override.mode(mode)
+        publish()
+    }
+
+    func seed(_ seed: [String: JSONValue]) throws {
+        try override.seed(module: name, seed)
+        publish()
+    }
+
     func stop() {
-        guard started else { return }
+        let wasStarted = started
         started = false
-        source.stop()
+        generation += 1
+        if wasStarted { source.stop() }
         pending?.cancel()
         pending = nil
         subscribers.values.forEach { $0.finish() }
         subscribers = [:]
+        override = DeviceStatusOverride(platform: "ios")
         reading = [:]
         delivered = nil
     }
@@ -161,11 +175,21 @@ final class PrototypeDeviceStatusModule: PrototypePlatformModule {
     private func start() {
         guard !started else { return }
         started = true
-        source.start { [weak self] in self?.receive($0) }
+        let session = generation
+        source.start { [weak self] reading in
+            guard let self, generation == session else { return }
+            receive(reading)
+        }
     }
 
     private func receive(_ next: [String: JSONValue]) {
         guard started else { return }
+        override.reading(next)
+        publish()
+    }
+
+    private func publish() {
+        guard let next = override.shown else { return }
         guard delivered != nil else {
             reading = next
             delivered = next
@@ -175,8 +199,12 @@ final class PrototypeDeviceStatusModule: PrototypePlatformModule {
         reading = next
         subscribers.values.forEach { $0.yield(.stateRefresh(name)) }
         pending?.cancel()
+        let session = generation
         pending = clock.schedule(afterMilliseconds: debounceMs) { [weak self] in
-            MainActor.assumeIsolated { self?.settle() }
+            MainActor.assumeIsolated {
+                guard let self, self.generation == session else { return }
+                self.settle()
+            }
         }
     }
 

@@ -61,6 +61,7 @@
     "doc-example-1.json",
     "doc-example-2.json",
     "doc-example-3.json",
+    "effects-vignette-radius-boundary.json",
     "elevation-gradient-aspect-ratio.json",
     "emit-context-16-entries.json",
     "emit-context-arbitrary-names.json",
@@ -121,6 +122,7 @@
     "icon-effects-repeat.json",
     "icon-effects.json",
     "integer-json-spellings.json",
+    "keyed-data-writes.json",
     "keyframes-alpha-pulse.json",
     "keyframes-data-trigger.json",
     "keyframes-icon-like.json",
@@ -481,6 +483,7 @@
     "z-effects-all-types.json",
     "z-effects-animated-phase.json",
     "z-effects-at-limits.json",
+    "z-effects-expanded-at-limits.json",
     "z-effects-style-when.json"
   ],
   "invalid": [
@@ -849,6 +852,7 @@
     "effects-source-key.json",
     "effects-type-shader.json",
     "effects-unknown-type.json",
+    "effects-vignette-radius-too-large.json",
     "elevation-over-max.json",
     "emit-context-17-entries.json",
     "emit-context-empty-name.json",
@@ -2032,6 +2036,7 @@
     "strict-gate-prototype_content_transition_v1.json",
     "strict-gate-prototype_custom_shaders_v1.json",
     "strict-gate-prototype_data_actions_v1.json",
+    "strict-gate-prototype_data_actions_v2.json",
     "strict-gate-prototype_data_model_v1.json",
     "strict-gate-prototype_derive_v1.json",
     "strict-gate-prototype_design_platform_v1.json",
@@ -2621,6 +2626,17 @@
     }
   },
   "validCapabilities": {
+    "adaptive-data-slots.json": ["prototype_adaptive_v1", "prototype_data_model_v1"],
+    "adaptive-list-detail.json": ["prototype_adaptive_v1"],
+    "adaptive-navigation-suite.json": ["prototype_adaptive_v1"],
+    "adaptive-nested.json": ["prototype_adaptive_v1"],
+    "adaptive-select.json": ["prototype_adaptive_v1"],
+    "adaptive-supporting.json": ["prototype_adaptive_v1"],
+    "auth-block-minimal.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_auth_v1",
+      "prototype_platform_v1"
+    ],
     "backdrop-blur-zero.json": ["prototype_backdrop_v1"],
     "backdrop-full.json": ["prototype_backdrop_v1"],
     "backdrop-material-only.json": ["prototype_backdrop_v1"],
@@ -2630,6 +2646,7 @@
     "bar-scroll-screen-local.json": ["prototype_bar_scroll_v1", "prototype_stack_v1"],
     "bounds-anchor-aligned.json": [],
     "bounds-at-limits.json": [],
+    "camera-preview.json": ["prototype_platform_camera_v1", "prototype_platform_v1"],
     "carousel-hero-repeat.json": ["prototype_carousel_v1"],
     "carousel-multi-browse.json": ["prototype_carousel_v1"],
     "chart-variants.json": ["prototype_chart_v1", "prototype_data_model_v1"],
@@ -2647,7 +2664,21 @@
     "checks-form.json": ["prototype_checks_v1"],
     "checks-rules.json": ["prototype_checks_v1"],
     "choreography.json": ["prototype_choreography_v1", "prototype_motion_v2"],
+    "clipboard-copy.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
+    "clipboard-has-text.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
+    "clipboard-paste-button.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
+    "clipboard-paste.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_clipboard_v1",
+      "prototype_platform_v1"
+    ],
+    "clipboard-sensitive-copy.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
     "color-role-and-corner-tokens.json": [],
+    "commerce-catalog.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_commerce_v1",
+      "prototype_platform_v1"
+    ],
     "component-gallery.json": [],
     "concept-voice-note.json": [
       "prototype_data_model_v1",
@@ -2678,6 +2709,7 @@
     "doc-example-1.json": [],
     "doc-example-2.json": [],
     "doc-example-3.json": [],
+    "effects-vignette-radius-boundary.json": ["prototype_effects_v1"],
     "elevation-gradient-aspect-ratio.json": [],
     "emit-context-16-entries.json": ["prototype_emit_context_v1"],
     "emit-context-arbitrary-names.json": ["prototype_emit_context_v1"],
@@ -2698,11 +2730,124 @@
     "flow-max-lines-repeat.json": ["prototype_flow_grid_v1"],
     "font-asset.json": [],
     "fullscreen-all-nodes.json": [],
+    "gesture-button.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "gesture-dialog-confirm.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "gesture-event-binding.json": [
+      "prototype_platform_biometric_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_sensors_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-map.markerTap.json": [
+      "prototype_platform_biometric_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_sensors_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-notifications.action.json": [
+      "prototype_platform_biometric_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_sensors_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-notifications.opened.json": [
+      "prototype_platform_biometric_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_sensors_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-notifications.reply.json": [
+      "prototype_platform_biometric_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_sensors_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-onDoubleTap.json": [
+      "prototype_gestures_v1",
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-onLongPress.json": [
+      "prototype_gestures_v1",
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-onSubmit.json": [
+      "prototype_platform_share_v1",
+      "prototype_platform_v1",
+      "prototype_text_field_actions_v1"
+    ],
+    "gesture-onTap.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "gesture-tap-onError.json": [
+      "prototype_network_v1",
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-tap-onSuccess.json": [
+      "prototype_network_v1",
+      "prototype_platform_share_v1",
+      "prototype_platform_v1"
+    ],
+    "gesture-top-app-bar.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "gesture-unflagged-call.json": [
+      "prototype_platform_clipboard_v1",
+      "prototype_platform_v1",
+      "prototype_timers_v1"
+    ],
     "gestures-repeat.json": ["prototype_gestures_v1"],
     "gestures.json": ["prototype_gestures_v1"],
+    "glass-conditional.json": ["prototype_glass_v1"],
+    "glass-defaults.json": ["prototype_glass_v1"],
+    "glass-edge-hard.json": ["prototype_scroll_edge_effect_v1"],
+    "glass-edge-none-authored-fades.json": [
+      "prototype_scroll_edge_effect_v1",
+      "prototype_style_polish_v2"
+    ],
+    "glass-edge-none.json": ["prototype_scroll_edge_effect_v1"],
+    "glass-edge-soft.json": ["prototype_scroll_edge_effect_v1"],
+    "glass-image-extension.json": ["prototype_glass_v1"],
+    "glass-namespace-mixed.json": ["prototype_glass_v1", "prototype_platform_namespace_v1"],
+    "glass-namespace-only.json": ["prototype_glass_v1"],
+    "glass-shared-nearest-group.json": ["prototype_glass_v1", "prototype_shared_element_v2"],
+    "glass-shared-repeat-carrier-template.json": [
+      "prototype_data_model_v1",
+      "prototype_glass_v1",
+      "prototype_shared_element_v2"
+    ],
+    "glass-shared-repeat-template.json": [
+      "prototype_data_model_v1",
+      "prototype_glass_v1",
+      "prototype_shared_element_v2"
+    ],
     "grid-adaptive-min-width.json": ["prototype_flow_grid_v1"],
     "grid-fixed-columns-span.json": ["prototype_flow_grid_v1"],
+    "hide-keyboard-channel-literals.json": [
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
+    "hide-keyboard-free-form-maps.json": ["prototype_routes_v1", "prototype_stack_v1"],
+    "hide-keyboard-ignored-accessory.json": ["prototype_platform_namespace_v1"],
+    "hide-keyboard-request-query.json": ["prototype_data_model_v1", "prototype_network_v1"],
+    "hide-keyboard.json": ["prototype_hide_keyboard_v1"],
+    "icon-effects-integer-spellings.json": ["prototype_icon_effects_v1"],
+    "icon-effects-repeat.json": ["prototype_data_model_v1", "prototype_icon_effects_v1"],
+    "icon-effects.json": ["prototype_data_model_v1", "prototype_icon_effects_v1"],
     "integer-json-spellings.json": [],
+    "keyed-data-writes.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_actions_v2",
+      "prototype_data_model_v1"
+    ],
     "keyframes-alpha-pulse.json": ["prototype_keyframes_v1"],
     "keyframes-data-trigger.json": ["prototype_data_model_v1", "prototype_keyframes_v1"],
     "keyframes-icon-like.json": ["prototype_keyframes_v1"],
@@ -2710,6 +2855,8 @@
     "keyframes-repeat.json": ["prototype_keyframes_v1"],
     "keyframes-shake.json": ["prototype_keyframes_v1"],
     "keyframes-sixteen-nodes.json": ["prototype_keyframes_v1"],
+    "layout-direction-ltr.json": ["prototype_layout_direction_v1"],
+    "layout-direction-rtl.json": ["prototype_layout_direction_v1"],
     "linkify-repeat-binding.json": ["prototype_emit_context_v1", "prototype_linkify_v1"],
     "linkify-repeat-data-rows.json": [
       "prototype_data_actions_v1",
@@ -2752,25 +2899,125 @@
       "prototype_lazy_list_v1"
     ],
     "loading-states.json": ["prototype_data_model_v1", "prototype_loading_states_v1"],
+    "location-block-minimal.json": ["prototype_platform_location_v1", "prototype_platform_v1"],
+    "location-block.json": ["prototype_platform_location_v1", "prototype_platform_v1"],
+    "loop-eight-nodes.json": ["prototype_loops_v1"],
+    "loop-eight-with-shimmer.json": ["prototype_loading_states_v1", "prototype_loops_v1"],
+    "loop-lower-bounds.json": ["prototype_loops_v1"],
+    "loop-pulse-default.json": ["prototype_loops_v1"],
+    "loop-pulse-finite.json": ["prototype_loops_v1"],
+    "loop-pulse-infinite.json": ["prototype_loops_v1"],
+    "loop-repeat-eight.json": ["prototype_loops_v1"],
+    "loop-spin-default.json": ["prototype_loops_v1"],
+    "loop-spin-finite.json": ["prototype_loops_v1"],
+    "loop-spin-infinite.json": ["prototype_loops_v1"],
+    "loop-upper-bounds.json": ["prototype_loops_v1"],
+    "map-backend-channel-literal.json": ["prototype_platform_realtime_v1", "prototype_platform_v1"],
+    "map-backends.json": [
+      "prototype_platform_map_google_v1",
+      "prototype_platform_map_maplibre_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_v1"
+    ],
+    "map-marker-asset-icon.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_v1"
+    ],
+    "map-marker-tap-emit-context.json": [
+      "prototype_data_model_v1",
+      "prototype_emit_context_v1",
+      "prototype_platform_location_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_v1"
+    ],
+    "map-node-limits.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_v1"
+    ],
+    "map-node.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_location_v1",
+      "prototype_platform_map_v1",
+      "prototype_platform_v1"
+    ],
     "material-app-bar-dialog-pickers.json": [],
     "material-controls.json": [],
     "material-slider-chip-card.json": [],
+    "media-cast-button.json": [
+      "prototype_platform_cast_v1",
+      "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
     "media-image-data-no-root-data.json": [
       "prototype_data_model_v1",
       "prototype_platform_media_items_v1"
     ],
     "media-image-data.json": ["prototype_data_model_v1", "prototype_platform_media_items_v1"],
     "media-literal-id.json": ["prototype_data_model_v1"],
+    "media-players.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
     "media-repeat-asset.json": ["prototype_data_model_v1", "prototype_flow_grid_v1"],
     "media-tab-item-data.json": ["prototype_data_model_v1", "prototype_platform_media_items_v1"],
+    "media-video-feed.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
+    "media-video-node-limit-repeat.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
+    "media-video-node-limit.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
+    "media-video-player-captions.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
+    "media-video-player-screen-named-data.json": [
+      "prototype_platform_media_v1",
+      "prototype_platform_v1",
+      "prototype_stack_v1"
+    ],
+    "media-video-player.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
+    "media-video-poster-exact-image-limit.json": [
+      "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
     "menu-overflow.json": ["prototype_menus_v1"],
     "motion-none.json": [],
+    "motion-tokens-default.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
+    "motion-tokens-fast.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
+    "motion-tokens-slow.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
     "motion-v2.json": ["prototype_motion_v2"],
     "motion3-alpha.json": ["prototype_motion_v2"],
     "motion3-expressive.json": ["prototype_motion_v3"],
     "motion3-layout.json": ["prototype_motion_v2", "prototype_motion_v3"],
     "motion3-press.json": ["prototype_motion_v3"],
+    "notify-channel-blocked-read.json": [
+      "prototype_platform_notifications_v1",
+      "prototype_platform_v1"
+    ],
+    "notify-channels-block.json": ["prototype_platform_notifications_v1", "prototype_platform_v1"],
     "notify-limits-at-boundary.json": [
+      "prototype_platform_notifications_v1",
+      "prototype_platform_v1"
+    ],
+    "notify-post-messaging.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
+    "notify-post-styles.json": ["prototype_platform_notifications_v1", "prototype_platform_v1"],
+    "notify-push.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_push_v1",
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
+    "notify-schedule.json": [
+      "prototype_platform_notifications_scheduled_v1",
       "prototype_platform_notifications_v1",
       "prototype_platform_v1"
     ],
@@ -2787,13 +3034,71 @@
     "on-appear-repeat.json": ["prototype_timers_v1"],
     "on-appear.json": ["prototype_timers_v1"],
     "opaque-json-keys.json": [],
+    "open-url-https-in-app.json": ["prototype_platform_links_v1", "prototype_platform_v1"],
+    "open-url-modes.json": ["prototype_platform_links_v1", "prototype_platform_v1"],
+    "open-url-schemes.json": ["prototype_platform_links_v1", "prototype_platform_v1"],
     "pager-indicator-dots.json": ["prototype_carousel_v1"],
     "pager-indicator-placement.json": ["prototype_carousel_v1"],
     "pager-options.json": ["prototype_pager_options_v1"],
     "pager-state-key-indicator.json": ["prototype_pager_state_key_v1"],
+    "platform-audio-recorder.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_audioRecorder_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-auth.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_auth_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-biometric.json": ["prototype_platform_biometric_v1", "prototype_platform_v1"],
+    "platform-calendar.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_calendar_v1",
+      "prototype_platform_v1"
+    ],
     "platform-call.json": [
       "prototype_data_model_v1",
       "prototype_platform_test_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-camera-capture.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_camera_capture_v1",
+      "prototype_platform_camera_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-camera-live.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_camera_v1",
+      "prototype_platform_camera_video_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-cast.json": ["prototype_platform_cast_v1", "prototype_platform_v1"],
+    "platform-commerce.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_commerce_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-connectivity.json": ["prototype_platform_connectivity_v1", "prototype_platform_v1"],
+    "platform-contacts-fields-pair.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_contacts_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-contacts-fields-single.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_contacts_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-contacts-fields.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_contacts_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-contacts.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_contacts_v1",
       "prototype_platform_v1"
     ],
     "platform-feedback-bound-effect.json": [
@@ -2811,50 +3116,104 @@
       "prototype_platform_test_v1",
       "prototype_platform_v1"
     ],
+    "platform-location.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_location_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-media-library-pick.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_mediaLibrary_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-media-library-query-save.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_mediaLibrary_query_v1",
+      "prototype_platform_mediaLibrary_save_v1",
+      "prototype_platform_mediaLibrary_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-media-queue-combining-mark.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_media_queue_v1",
+      "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-media-queue.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_media_queue_v1",
+      "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-permissions-request.json": [
+      "prototype_platform_permissions_v1",
+      "prototype_platform_v1"
+    ],
     "platform-reads.json": ["prototype_platform_test_v1", "prototype_platform_v1"],
     "platform-repeat.json": ["prototype_platform_test_v1", "prototype_platform_v1"],
     "platform-requires.json": ["prototype_platform_test_v1", "prototype_platform_v1"],
+    "platform-sensors.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
+    "platform-settings.json": ["prototype_platform_settings_v1", "prototype_platform_v1"],
     "platform-state-device.json": ["prototype_platform_device_v1", "prototype_platform_v1"],
     "platform-status-audio.json": ["prototype_platform_audio_v1", "prototype_platform_v1"],
     "platform-status-battery.json": ["prototype_platform_battery_v1", "prototype_platform_v1"],
     "platform-status-power.json": ["prototype_platform_power_v1", "prototype_platform_v1"],
-    "platform-connectivity.json": ["prototype_platform_connectivity_v1", "prototype_platform_v1"],
-    "platform-biometric.json": ["prototype_platform_biometric_v1", "prototype_platform_v1"],
-    "open-url-https-in-app.json": ["prototype_platform_links_v1", "prototype_platform_v1"],
-    "open-url-modes.json": ["prototype_platform_links_v1", "prototype_platform_v1"],
-    "open-url-schemes.json": ["prototype_platform_links_v1", "prototype_platform_v1"],
-    "platform-calendar.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_calendar_v1",
-      "prototype_platform_v1"
-    ],
-    "platform-contacts.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_contacts_v1",
-      "prototype_platform_v1"
-    ],
-    "platform-contacts-fields.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_contacts_v1",
-      "prototype_platform_v1"
-    ],
-    "platform-contacts-fields-single.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_contacts_v1",
-      "prototype_platform_v1"
-    ],
-    "platform-contacts-fields-pair.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_contacts_v1",
-      "prototype_platform_v1"
-    ],
-    "platform-settings.json": ["prototype_platform_settings_v1", "prototype_platform_v1"],
     "prepend-data.json": [
       "prototype_data_actions_v1",
       "prototype_data_model_v1",
       "prototype_lazy_list_v1"
     ],
     "press-scale.json": [],
+    "realtime-channels.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
+    "realtime-data-writes.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_realtime_v1"
+    ],
+    "realtime-opaque-looking-id.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1",
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
+    "realtime-review-boundaries.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_realtime_device_v1",
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1",
+      "prototype_text_field_options_v1"
+    ],
+    "realtime-review-channel-at-limit.json": [
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
+    "realtime-review-legacy-bindings.json": [
+      "prototype_platform_device_v1",
+      "prototype_platform_test_v1",
+      "prototype_platform_v1"
+    ],
+    "realtime-review-menu-bindings.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_menus_v1",
+      "prototype_platform_device_v1",
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
+    "realtime-sse.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_realtime_device_v1",
+      "prototype_platform_realtime_v1",
+      "prototype_platform_v1"
+    ],
     "reduced-motion.json": ["prototype_reduced_motion_v1"],
     "repeat-component-labels.json": [],
     "repeat-exact-node-limit.json": [],
@@ -2866,6 +3225,57 @@
       "prototype_network_device_v1",
       "prototype_network_v1"
     ],
+    "request-upload-16-parts.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "request-upload-data.json": [
+      "prototype_data_model_v1",
+      "prototype_network_upload_v1",
+      "prototype_network_v1"
+    ],
+    "request-upload-file.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "request-upload-form.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "request-upload-progress-only.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "request-upload-progress.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "request-upload-review-form-data-keys.json": [
+      "prototype_network_upload_v1",
+      "prototype_network_v1"
+    ],
+    "request-upload.json": ["prototype_network_upload_v1", "prototype_network_v1"],
+    "routes-bindings.json": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_routes_v1",
+      "prototype_stack_v1",
+      "prototype_storage_v1"
+    ],
+    "routes-boundaries.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
+    "routes-integration-list-refresh.json": [
+      "prototype_data_model_v1",
+      "prototype_lazy_list_v1",
+      "prototype_refresh_v1",
+      "prototype_routes_v1",
+      "prototype_stack_v1"
+    ],
+    "routes-literal-anchor-selector.json": ["prototype_tooltip_v1"],
+    "routes-literal-chart-series.json": ["prototype_chart_v1", "prototype_data_model_v1"],
+    "routes-literal-fields.json": ["prototype_text_field_options_v1"],
+    "routes-literal-items-label.json": [],
+    "routes-literal-list-item.json": [],
+    "routes-literal-options.json": ["prototype_menus_v1"],
+    "routes-literal-scroll-target.json": [
+      "prototype_chat_scroll_v1",
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_text_field_actions_v1"
+    ],
+    "routes-long-param-name.json": ["prototype_routes_v1", "prototype_stack_v1"],
+    "routes-menu-bound-keys.json": [
+      "prototype_menus_v1",
+      "prototype_routes_v1",
+      "prototype_stack_v1"
+    ],
+    "routes-repeat-alias-backcompat.json": [],
+    "routes-repeat-key-mixed-valid.json": ["prototype_routes_v1", "prototype_stack_v1"],
+    "routes.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
     "row-weight-size-bounds.json": [],
     "scroll-motion-all.json": ["prototype_scroll_motion_v1"],
     "scroll-motion-exact-cap.json": ["prototype_scroll_motion_v1"],
@@ -2874,18 +3284,50 @@
     "search-bar-docked.json": ["prototype_search_bar_v1"],
     "search-bar-minimal.json": ["prototype_search_bar_v1"],
     "search-bar.json": ["prototype_search_bar_v1"],
+    "secure-storage-request-opt-in.json": [
+      "prototype_emit_context_v1",
+      "prototype_network_device_v1",
+      "prototype_network_v1",
+      "prototype_platform_biometric_v1",
+      "prototype_platform_secureStorage_v1",
+      "prototype_platform_v1",
+      "prototype_storage_v1"
+    ],
+    "secure-storage-request-other-keys.json": [
+      "prototype_emit_context_v1",
+      "prototype_network_device_v1",
+      "prototype_network_v1",
+      "prototype_platform_biometric_v1",
+      "prototype_platform_secureStorage_v1",
+      "prototype_platform_v1",
+      "prototype_storage_v1"
+    ],
+    "secure-storage.json": [
+      "prototype_emit_context_v1",
+      "prototype_platform_biometric_v1",
+      "prototype_platform_secureStorage_v1",
+      "prototype_platform_v1",
+      "prototype_storage_v1"
+    ],
     "select-dropdown.json": ["prototype_menus_v1"],
     "selection-controls.json": [],
+    "sensors-block-minimal.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
+    "sensors-block-rates.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
     "set-state-matching-values.json": [],
     "set-state-repeat-templated-value.json": [],
     "set-state-unbound-key.json": [],
+    "share-alias-item.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "share-alias-row.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-bound.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-contact.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "share-file-name-128-bytes.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-file-placeholders.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-files.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-full.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-templated-host.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "share-text.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "share-url-grapheme-host.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
+    "share-url-grapheme-path.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
     "shared-element-16-keys.json": ["prototype_shared_element_v1"],
     "shared-element.json": ["prototype_shared_element_v1"],
     "shared-v2-alias.json": ["prototype_shared_element_v1", "prototype_shared_element_v2"],
@@ -2896,6 +3338,29 @@
     "shared-v2-same-dialog.json": ["prototype_shared_element_v2"],
     "sheet-bindings.json": [],
     "stack-navigation.json": ["prototype_stack_v1"],
+    "stack-patterns-source-only.json": ["prototype_stack_patterns_v1", "prototype_stack_v1"],
+    "stack-patterns-zoom-idle.json": [
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
+    "stack-patterns-zoom-shared-v2.json": [
+      "prototype_shared_element_v2",
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
+    "stack-patterns-zoom.json": [
+      "prototype_shared_element_v1",
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
+    "stack-patterns.json": [
+      "prototype_stack_patterns_v1",
+      "prototype_stack_transitions_v1",
+      "prototype_stack_v1"
+    ],
     "stack-transitions.json": ["prototype_stack_transitions_v1", "prototype_stack_v1"],
     "strict-action-depth-boundary.json": ["prototype_network_v1"],
     "strict-bom.json": [],
@@ -3123,6 +3588,11 @@
     "theme-device.json": [],
     "theme-modes-colors.json": ["prototype_theme_modes_v1"],
     "theme-modes-exact-image-limit.json": ["prototype_theme_modes_v1"],
+    "theme-modes-glass.json": [
+      "prototype_glass_v1",
+      "prototype_shared_element_v2",
+      "prototype_theme_modes_v1"
+    ],
     "theme-modes-images.json": ["prototype_theme_modes_v1"],
     "theme-modes-only-mode-colors.json": ["prototype_theme_modes_v1"],
     "theme-modes-style-polish-v2.json": ["prototype_style_polish_v2", "prototype_theme_modes_v1"],
@@ -3147,459 +3617,13 @@
     "watch-41mm-list.json": [],
     "watch-45mm-metric-confirm.json": [],
     "watch-49mm-now-playing.json": [],
-    "width-dp-at-max.json": [],
-    "window-dead-taps.json": [],
-    "z-effects-all-types.json": ["prototype_effects_v1"],
-    "z-effects-animated-phase.json": ["prototype_effects_v1"],
-    "z-effects-at-limits.json": ["prototype_effects_v1"],
-    "z-effects-style-when.json": ["prototype_effects_v1"],
-    "routes-bindings.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_routes_v1",
-      "prototype_stack_v1",
-      "prototype_storage_v1"
-    ],
-    "routes-boundaries.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
-    "routes-integration-list-refresh.json": [
-      "prototype_data_model_v1",
-      "prototype_lazy_list_v1",
-      "prototype_refresh_v1",
-      "prototype_routes_v1",
-      "prototype_stack_v1"
-    ],
-    "routes-literal-anchor-selector.json": ["prototype_tooltip_v1"],
-    "routes-literal-chart-series.json": ["prototype_chart_v1", "prototype_data_model_v1"],
-    "routes-literal-fields.json": ["prototype_text_field_options_v1"],
-    "routes-literal-items-label.json": [],
-    "routes-literal-list-item.json": [],
-    "routes-literal-options.json": ["prototype_menus_v1"],
-    "routes-literal-scroll-target.json": [
-      "prototype_chat_scroll_v1",
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_text_field_actions_v1"
-    ],
-    "routes-long-param-name.json": ["prototype_routes_v1", "prototype_stack_v1"],
-    "routes-menu-bound-keys.json": [
-      "prototype_menus_v1",
-      "prototype_routes_v1",
-      "prototype_stack_v1"
-    ],
-    "routes-repeat-alias-backcompat.json": [],
-    "routes-repeat-key-mixed-valid.json": ["prototype_routes_v1", "prototype_stack_v1"],
-    "routes.json": ["prototype_routes_v1", "prototype_stack_v1", "prototype_storage_v1"],
-    "window-motion.json": ["prototype_window_motion_v1"],
-    "stack-patterns-source-only.json": ["prototype_stack_patterns_v1", "prototype_stack_v1"],
-    "stack-patterns-zoom-idle.json": [
-      "prototype_stack_patterns_v1",
-      "prototype_stack_transitions_v1",
-      "prototype_stack_v1"
-    ],
-    "stack-patterns-zoom.json": [
-      "prototype_shared_element_v1",
-      "prototype_stack_patterns_v1",
-      "prototype_stack_transitions_v1",
-      "prototype_stack_v1"
-    ],
-    "stack-patterns.json": [
-      "prototype_stack_patterns_v1",
-      "prototype_stack_transitions_v1",
-      "prototype_stack_v1"
-    ],
-    "stack-patterns-zoom-shared-v2.json": [
-      "prototype_shared_element_v2",
-      "prototype_stack_patterns_v1",
-      "prototype_stack_transitions_v1",
-      "prototype_stack_v1"
-    ],
-    "realtime-channels.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1"
-    ],
-    "realtime-data-writes.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_platform_realtime_v1"
-    ],
-    "realtime-opaque-looking-id.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_lazy_list_v1",
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1"
-    ],
-    "realtime-review-boundaries.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_platform_realtime_device_v1",
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1",
-      "prototype_text_field_options_v1"
-    ],
-    "realtime-review-legacy-bindings.json": [
-      "prototype_platform_device_v1",
-      "prototype_platform_test_v1",
-      "prototype_platform_v1"
-    ],
-    "realtime-review-menu-bindings.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_menus_v1",
-      "prototype_platform_device_v1",
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1"
-    ],
-    "realtime-sse.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_platform_realtime_device_v1",
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1"
-    ],
-    "clipboard-copy.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
-    "clipboard-has-text.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
-    "clipboard-paste-button.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
-    "clipboard-paste.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_clipboard_v1",
-      "prototype_platform_v1"
-    ],
-    "clipboard-sensitive-copy.json": ["prototype_platform_clipboard_v1", "prototype_platform_v1"],
-    "icon-effects-repeat.json": ["prototype_data_model_v1", "prototype_icon_effects_v1"],
-    "icon-effects.json": ["prototype_data_model_v1", "prototype_icon_effects_v1"],
-    "icon-effects-integer-spellings.json": ["prototype_icon_effects_v1"],
-    "realtime-review-channel-at-limit.json": [
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1"
-    ],
-    "request-upload-16-parts.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload-data.json": [
-      "prototype_data_model_v1",
-      "prototype_network_upload_v1",
-      "prototype_network_v1"
-    ],
-    "request-upload-file.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload-form.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload-progress-only.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload-progress.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload.json": ["prototype_network_upload_v1", "prototype_network_v1"],
-    "request-upload-review-form-data-keys.json": [
-      "prototype_network_upload_v1",
-      "prototype_network_v1"
-    ],
-    "share-file-name-128-bytes.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-url-grapheme-path.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-url-grapheme-host.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-alias-item.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "share-alias-row.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "theme-modes-glass.json": [
-      "prototype_glass_v1",
-      "prototype_shared_element_v2",
-      "prototype_theme_modes_v1"
-    ],
-    "glass-defaults.json": ["prototype_glass_v1"],
-    "glass-image-extension.json": ["prototype_glass_v1"],
-    "glass-conditional.json": ["prototype_glass_v1"],
-    "glass-edge-soft.json": ["prototype_scroll_edge_effect_v1"],
-    "glass-edge-hard.json": ["prototype_scroll_edge_effect_v1"],
-    "glass-edge-none.json": ["prototype_scroll_edge_effect_v1"],
-    "glass-edge-none-authored-fades.json": [
-      "prototype_scroll_edge_effect_v1",
-      "prototype_style_polish_v2"
-    ],
-    "glass-namespace-mixed.json": ["prototype_glass_v1", "prototype_platform_namespace_v1"],
-    "glass-namespace-only.json": ["prototype_glass_v1"],
-    "glass-shared-nearest-group.json": ["prototype_glass_v1", "prototype_shared_element_v2"],
-    "glass-shared-repeat-carrier-template.json": [
-      "prototype_data_model_v1",
-      "prototype_glass_v1",
-      "prototype_shared_element_v2"
-    ],
-    "glass-shared-repeat-template.json": [
-      "prototype_data_model_v1",
-      "prototype_glass_v1",
-      "prototype_shared_element_v2"
-    ],
-    "motion-tokens-fast.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
-    "motion-tokens-default.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
-    "motion-tokens-slow.json": ["prototype_motion_tokens_v1", "prototype_motion_v2"],
-    "adaptive-list-detail.json": ["prototype_adaptive_v1"],
-    "adaptive-navigation-suite.json": ["prototype_adaptive_v1"],
-    "adaptive-supporting.json": ["prototype_adaptive_v1"],
-    "adaptive-nested.json": ["prototype_adaptive_v1"],
-    "adaptive-select.json": ["prototype_adaptive_v1"],
-    "adaptive-data-slots.json": ["prototype_adaptive_v1", "prototype_data_model_v1"],
-    "notify-post-messaging.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_platform_notifications_v1",
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1"
-    ],
-    "notify-post-styles.json": ["prototype_platform_notifications_v1", "prototype_platform_v1"],
-    "platform-media-library-pick.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_mediaLibrary_v1",
-      "prototype_platform_v1"
-    ],
-    "platform-camera-capture.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_camera_capture_v1",
-      "prototype_platform_camera_v1",
-      "prototype_platform_v1"
-    ],
-    "platform-auth.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_auth_v1",
-      "prototype_platform_v1"
-    ],
-    "platform-location.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_location_v1",
-      "prototype_platform_v1"
-    ],
-    "window-controls.json": ["prototype_platform_window_controls_v1"],
-    "window-controls-system.json": ["prototype_platform_window_controls_v1"],
-    "auth-block-minimal.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_auth_v1",
-      "prototype_platform_v1"
-    ],
-    "location-block.json": ["prototype_platform_location_v1", "prototype_platform_v1"],
-    "location-block-minimal.json": ["prototype_platform_location_v1", "prototype_platform_v1"],
-    "platform-commerce.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_commerce_v1",
-      "prototype_platform_v1"
-    ],
-    "secure-storage.json": [
-      "prototype_emit_context_v1",
-      "prototype_platform_biometric_v1",
-      "prototype_platform_secureStorage_v1",
-      "prototype_platform_v1",
-      "prototype_storage_v1"
-    ],
-    "hide-keyboard.json": ["prototype_hide_keyboard_v1"],
-    "hide-keyboard-request-query.json": ["prototype_data_model_v1", "prototype_network_v1"],
-    "hide-keyboard-channel-literals.json": [
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1"
-    ],
-    "hide-keyboard-free-form-maps.json": ["prototype_routes_v1", "prototype_stack_v1"],
-    "hide-keyboard-ignored-accessory.json": ["prototype_platform_namespace_v1"],
-    "platform-sensors.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
-    "platform-audio-recorder.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_audioRecorder_v1",
-      "prototype_platform_v1"
-    ],
-    "media-players.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_media_v1",
-      "prototype_platform_v1"
-    ],
-    "platform-camera-live.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_camera_v1",
-      "prototype_platform_camera_video_v1",
-      "prototype_platform_v1"
-    ],
-    "platform-cast.json": ["prototype_platform_cast_v1", "prototype_platform_v1"],
-    "media-video-player.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
-    "media-video-player-screen-named-data.json": [
-      "prototype_platform_media_v1",
-      "prototype_platform_v1",
-      "prototype_stack_v1"
-    ],
-    "notify-channels-block.json": ["prototype_platform_notifications_v1", "prototype_platform_v1"],
-    "media-video-player-captions.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_media_v1",
-      "prototype_platform_v1"
-    ],
-    "platform-media-queue-combining-mark.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_media_queue_v1",
-      "prototype_platform_media_v1",
-      "prototype_platform_v1"
-    ],
-    "platform-media-queue.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_media_queue_v1",
-      "prototype_platform_media_v1",
-      "prototype_platform_v1"
-    ],
-    "platform-media-library-query-save.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_mediaLibrary_query_v1",
-      "prototype_platform_mediaLibrary_save_v1",
-      "prototype_platform_mediaLibrary_v1",
-      "prototype_platform_v1"
-    ],
-    "notify-channel-blocked-read.json": [
-      "prototype_platform_notifications_v1",
-      "prototype_platform_v1"
-    ],
-    "map-node.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_location_v1",
-      "prototype_platform_map_v1",
-      "prototype_platform_v1"
-    ],
-    "map-node-limits.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_map_v1",
-      "prototype_platform_v1"
-    ],
-    "map-marker-asset-icon.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_map_v1",
-      "prototype_platform_v1"
-    ],
-    "map-marker-tap-emit-context.json": [
-      "prototype_data_model_v1",
-      "prototype_emit_context_v1",
-      "prototype_platform_location_v1",
-      "prototype_platform_map_v1",
-      "prototype_platform_v1"
-    ],
-    "sensors-block-rates.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
-    "sensors-block-minimal.json": ["prototype_platform_sensors_v1", "prototype_platform_v1"],
-    "secure-storage-request-opt-in.json": [
-      "prototype_emit_context_v1",
-      "prototype_network_device_v1",
-      "prototype_network_v1",
-      "prototype_platform_biometric_v1",
-      "prototype_platform_secureStorage_v1",
-      "prototype_platform_v1",
-      "prototype_storage_v1"
-    ],
-    "secure-storage-request-other-keys.json": [
-      "prototype_emit_context_v1",
-      "prototype_network_device_v1",
-      "prototype_network_v1",
-      "prototype_platform_biometric_v1",
-      "prototype_platform_secureStorage_v1",
-      "prototype_platform_v1",
-      "prototype_storage_v1"
-    ],
-    "commerce-catalog.json": [
-      "prototype_data_model_v1",
-      "prototype_platform_commerce_v1",
-      "prototype_platform_v1"
-    ],
-    "media-cast-button.json": [
-      "prototype_platform_cast_v1",
-      "prototype_platform_media_v1",
-      "prototype_platform_v1"
-    ],
-    "camera-preview.json": ["prototype_platform_camera_v1", "prototype_platform_v1"],
-    "media-video-feed.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
-    "media-video-node-limit.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
-    "media-video-node-limit-repeat.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
-    "media-video-poster-exact-image-limit.json": [
-      "prototype_platform_media_v1",
-      "prototype_platform_v1"
-    ],
-    "notify-push.json": [
-      "prototype_data_actions_v1",
-      "prototype_data_model_v1",
-      "prototype_platform_notifications_v1",
-      "prototype_platform_push_v1",
-      "prototype_platform_realtime_v1",
-      "prototype_platform_v1"
-    ],
-    "notify-schedule.json": [
-      "prototype_platform_notifications_scheduled_v1",
-      "prototype_platform_notifications_v1",
-      "prototype_platform_v1"
-    ],
-    "layout-direction-ltr.json": ["prototype_layout_direction_v1"],
-    "layout-direction-rtl.json": ["prototype_layout_direction_v1"],
-    "gesture-button.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "gesture-dialog-confirm.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "gesture-event-binding.json": [
-      "prototype_platform_biometric_v1",
-      "prototype_platform_device_v1",
-      "prototype_platform_map_v1",
-      "prototype_platform_notifications_v1",
-      "prototype_platform_sensors_v1",
-      "prototype_platform_v1"
-    ],
-    "gesture-map.markerTap.json": [
-      "prototype_platform_biometric_v1",
-      "prototype_platform_device_v1",
-      "prototype_platform_map_v1",
-      "prototype_platform_notifications_v1",
-      "prototype_platform_sensors_v1",
-      "prototype_platform_v1"
-    ],
-    "gesture-notifications.action.json": [
-      "prototype_platform_biometric_v1",
-      "prototype_platform_device_v1",
-      "prototype_platform_map_v1",
-      "prototype_platform_notifications_v1",
-      "prototype_platform_sensors_v1",
-      "prototype_platform_v1"
-    ],
-    "gesture-notifications.opened.json": [
-      "prototype_platform_biometric_v1",
-      "prototype_platform_device_v1",
-      "prototype_platform_map_v1",
-      "prototype_platform_notifications_v1",
-      "prototype_platform_sensors_v1",
-      "prototype_platform_v1"
-    ],
-    "gesture-notifications.reply.json": [
-      "prototype_platform_biometric_v1",
-      "prototype_platform_device_v1",
-      "prototype_platform_map_v1",
-      "prototype_platform_notifications_v1",
-      "prototype_platform_sensors_v1",
-      "prototype_platform_v1"
-    ],
-    "gesture-onDoubleTap.json": [
-      "prototype_gestures_v1",
-      "prototype_platform_share_v1",
-      "prototype_platform_v1"
-    ],
-    "gesture-onLongPress.json": [
-      "prototype_gestures_v1",
-      "prototype_platform_share_v1",
-      "prototype_platform_v1"
-    ],
-    "gesture-onSubmit.json": [
-      "prototype_platform_share_v1",
-      "prototype_platform_v1",
-      "prototype_text_field_actions_v1"
-    ],
-    "gesture-onTap.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "gesture-tap-onError.json": [
-      "prototype_network_v1",
-      "prototype_platform_share_v1",
-      "prototype_platform_v1"
-    ],
-    "gesture-tap-onSuccess.json": [
-      "prototype_network_v1",
-      "prototype_platform_share_v1",
-      "prototype_platform_v1"
-    ],
-    "gesture-top-app-bar.json": ["prototype_platform_share_v1", "prototype_platform_v1"],
-    "gesture-unflagged-call.json": [
-      "prototype_platform_clipboard_v1",
-      "prototype_platform_v1",
-      "prototype_timers_v1"
-    ],
+    "webview-node-limits.json": ["prototype_platform_v1", "prototype_platform_webview_v1"],
     "webview-node.json": [
       "prototype_data_actions_v1",
       "prototype_data_model_v1",
       "prototype_platform_v1",
       "prototype_platform_webview_v1"
     ],
-    "webview-node-limits.json": ["prototype_platform_v1", "prototype_platform_webview_v1"],
     "webview-url-combining-path.json": [
       "prototype_data_actions_v1",
       "prototype_data_model_v1",
@@ -3607,27 +3631,15 @@
       "prototype_platform_webview_v1"
     ],
     "webview-url-default-port.json": ["prototype_platform_v1", "prototype_platform_webview_v1"],
-    "loop-eight-nodes.json": ["prototype_loops_v1"],
-    "loop-eight-with-shimmer.json": ["prototype_loading_states_v1", "prototype_loops_v1"],
-    "loop-lower-bounds.json": ["prototype_loops_v1"],
-    "loop-pulse-default.json": ["prototype_loops_v1"],
-    "loop-pulse-finite.json": ["prototype_loops_v1"],
-    "loop-pulse-infinite.json": ["prototype_loops_v1"],
-    "loop-repeat-eight.json": ["prototype_loops_v1"],
-    "loop-spin-default.json": ["prototype_loops_v1"],
-    "loop-spin-finite.json": ["prototype_loops_v1"],
-    "loop-spin-infinite.json": ["prototype_loops_v1"],
-    "loop-upper-bounds.json": ["prototype_loops_v1"],
-    "map-backends.json": [
-      "prototype_platform_map_google_v1",
-      "prototype_platform_map_maplibre_v1",
-      "prototype_platform_map_v1",
-      "prototype_platform_v1"
-    ],
-    "map-backend-channel-literal.json": ["prototype_platform_realtime_v1", "prototype_platform_v1"],
-    "platform-permissions-request.json": [
-      "prototype_platform_permissions_v1",
-      "prototype_platform_v1"
-    ]
+    "width-dp-at-max.json": [],
+    "window-controls-system.json": ["prototype_platform_window_controls_v1"],
+    "window-controls.json": ["prototype_platform_window_controls_v1"],
+    "window-dead-taps.json": [],
+    "window-motion.json": ["prototype_window_motion_v1"],
+    "z-effects-all-types.json": ["prototype_effects_v1"],
+    "z-effects-animated-phase.json": ["prototype_effects_v1"],
+    "z-effects-at-limits.json": ["prototype_effects_v1"],
+    "z-effects-expanded-at-limits.json": ["prototype_effects_v1"],
+    "z-effects-style-when.json": ["prototype_effects_v1"]
   }
 }

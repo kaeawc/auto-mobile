@@ -119,8 +119,8 @@ precise reading. Its coordinates are rounded to two decimal places, its `accurac
 `altitudeM`, `speedMps` and `bearingDeg`. On iOS the system reduces the fix itself; a precise request under reduced accuracy asks for
 temporary full accuracy only when the host declares `NSLocationTemporaryUsageDescriptionDictionary`. Failures
 use the typed codes `permission_denied`, `unavailable`, `timeout` and `platform_error`. The `unavailable` code
-carries a `reason`: `disabled` on both platforms (location services off, or on Android below API 31 a coarse-only grant with no
-network provider), and on iOS also
+carries a `reason`. On both platforms it can be `disabled`: location services are off, or, on Android below API 31, a
+coarse-only grant has no network provider. On iOS it can also be
 `missing_usage_description` (the host has no `NSLocationWhenInUseUsageDescription`; the runtime then never touches
 Core Location and reports `servicesEnabled: false`).
 
@@ -142,11 +142,14 @@ write. It writes at most once per `minIntervalMs` (whole milliseconds, 1000 to o
 `requires.permissions`. The runtime delivers no updates in the background. On Android, CtrlProxy, ProtoViewer and the app shell
 register and advertise `prototype_platform_location_v1` using platform `LocationManager`, without Play services.
 Below API 31 GPS needs fine permission, so a coarse-only grant uses only the network provider and reports
-`unavailable` with reason `disabled` when none exists. Disposable apps do not advertise location. On iOS, the injected
+`unavailable` with reason `disabled` when none exists. Disposable apps do not advertise location.
+
+On iOS, the injected
 prototype agent, ProtoViewer and the Viewer app advertise it using `CLLocationManager`, and the runtime asks for
 authorization only on an explicit `location.request`. The iOS runtime checks the host's usage description before
-accessing location. The shared registry stops updates and pending requests when its final observer releases it; a
-later presentation can restart updates.
+accessing location. Each iOS presentation owns its location manager, configuration, cached fix and pending requests.
+Replacing or re-showing it clears its cached fix and invalidates earlier callbacks; dismissing or stopping it
+ends its subscriptions without stopping another presentation's updates. A later presentation can restart updates.
 
 The delivered `location.updated` event carries only `{accuracyM, approximate}`, so coordinates reach the host
 only when the spec emits them or writes them into `/data`. The reference the runtimes copy is `prototypeLocationEventSummary`

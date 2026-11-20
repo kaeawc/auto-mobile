@@ -1,9 +1,9 @@
 # Accessibility and performance audits
 
-| Tool                               | What it does                                                                                    | Requires                             |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------ |
-| 🚦 <code>performanceAudit</code>   | Pass/fail performance checks of an app on the current screen, against the configured thresholds | <span class="tool-requires">—</span> |
-| ✅ <code>accessibilityAudit</code> | Audit the accessibility of the current screen                                                   | <span class="tool-requires">—</span> |
+| Tool                               | What it does                                                                                    | Platforms                                                                                                                                                   | Needs                             |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| 🚦 <code>performanceAudit</code>   | Pass/fail performance checks of an app on the current screen, against the configured thresholds | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span></span> | <span class="tool-needs">—</span> |
+| ✅ <code>accessibilityAudit</code> | Audit the accessibility of the current screen                                                   | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span></span> | <span class="tool-needs">—</span> |
 
 Two tools check the current screen on demand and can fail a plan step: `accessibilityAudit` for
 accessibility and `performanceAudit` for UI performance and memory. Neither changes feature-flag
@@ -54,7 +54,7 @@ restart the daemon so it installs the current runner.
 
 ## `performanceAudit`
 
-Android only.
+Both checks support Android and iOS Simulator. Calls on physical iOS devices fail.
 
 | Parameter | Meaning                                                                                                 |
 | --------- | ------------------------------------------------------------------------------------------------------- |
@@ -62,13 +62,29 @@ Android only.
 | `appId`   | App to audit (default: the foreground app)                                                              |
 | `failOn`  | `error` or `warning` fails the call when a check does not pass or cannot run; `never` (default) reports |
 
-`performance` measures UI jank, frame time and touch latency of the foreground app against the
-configured thresholds. When `appId` is not in the foreground, the result lists it under
-`unsupported` instead, and `failOn` `error` or `warning` then fails the call. `memory` takes a
-memory snapshot of `appId`.
+`performance` measures UI jank and frame time of the foreground app against the configured
+thresholds. Touch latency is measured on Android only. On iOS Simulator, instrument the app with
+auto-mobile-sdk to report frame metrics. The check reports `unsupported` when the app is in the
+background or the simulator receives no fresh frame metrics. `memory` takes a snapshot of
+`appId` on Android and checks its RSS growth over three seconds on iOS Simulator.
 
 Each result has `passed`, its metrics and its violations; `failed` is set when `failOn` matched.
-When the app rendered no frames during the check (an idle screen), the frame-time percentiles
+On Android, frame-time percentiles and jank counts both cover only the frames rendered during the check, not
+frames from app launch or earlier screens. When the app rendered no frames during the check (an idle screen), the frame-time percentiles
 `p50Ms`–`p99Ms` are null and `metrics.frameTimeUnmeasured` says why. AutoMobile then skips the
 frame-time check, so it does not fail the call. For raw captures use `performanceTrace`,
-`captureTrace`, `measureStartup` or `heapDump`.
+`captureTrace`, `measureStartup` or [`heapDump`](#heapdump).
+
+## `heapDump`
+
+Launch the app, then pass its Android package name or iOS bundle ID as `appId`.
+The result includes the host file `path`, its `sizeBytes`, and its `format`.
+
+- Android writes an `.hprof` for a debuggable or profileable app. Set `native: true` to capture
+  the native heap. `heap_dump_not_debuggable` means you need a debuggable or profileable build.
+- iOS Simulator writes a `.memgraph` you can open in Xcode. Leave `native` unset. If you get
+  `heap_dump_not_inspectable`, try a debuggable Simulator build. If the app stopped, relaunch
+  it and retry.
+
+`heapDump` is unsupported on physical iPhones. For allocation profiling on a physical iPhone,
+attach to the running app with the Allocations template in Instruments (`xctrace`).

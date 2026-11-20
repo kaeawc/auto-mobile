@@ -437,16 +437,29 @@ export class EmulatorAudioService {
       this.assertInjectionSafe(deviceId, route.endpoint);
       session = route.open();
       const injectionId = this.deps.ids.next();
-      if (route.endpoint) {
+      const endpoint = route.endpoint;
+      if (endpoint) {
         // A rejected injectAudio may already have opened the unsafe stream. Do not undo this.
-        this.recordInjectionStart(deviceId, route.endpoint);
+        this.recordInjectionStart(deviceId, endpoint);
       }
       const injection = await session.injectAudio(pcm, {
         loop: request.loop,
         startDelayMs: request.startDelayMs,
         maxDurationMs,
-        // This invocation already recorded its own start; only earlier starts are repeats.
-        beforeStreamOpen: () => this.assertInjectionSafe(deviceId, route.endpoint, 1),
+        beforeStreamOpen: async () => {
+          if (endpoint && guestCapture) {
+            try {
+              // The recorder may have stopped since it settled; a stream without one crashes the
+              // emulator (#18687). This refusal opens no stream, so it does not count as a start.
+              await guestCapture.assertRunning();
+            } catch (error) {
+              this.forgetInjectionStart(deviceId, endpoint);
+              throw error;
+            }
+          }
+          // This invocation already recorded its own start; only earlier starts are repeats.
+          this.assertInjectionSafe(deviceId, endpoint, 1);
+        },
       });
       return { session, injection, injectionId, guestCapture };
     } catch (error) {
@@ -454,6 +467,16 @@ export class EmulatorAudioService {
       throw route.endpoint
         ? await this.classifyInjectionError(deviceId, route.endpoint, error)
         : toActionableError(error, `Audio injection on ${deviceId} failed`);
+    }
+  }
+
+  private forgetInjectionStart(deviceId: string, endpoint: EmulatorGrpcEndpoint): void {
+    const key = `${deviceId}:${endpoint.pid}`;
+    const starts = (this.injectionStarts.get(key) ?? 0) - 1;
+    if (starts > 0) {
+      this.injectionStarts.set(key, starts);
+    } else {
+      this.injectionStarts.delete(key);
     }
   }
 

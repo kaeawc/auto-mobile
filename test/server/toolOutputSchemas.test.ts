@@ -79,17 +79,20 @@ test("observations advertise and validate the optional visionOS hierarchyBundleI
   }
   const observe = generatedDefinitions.find((definition) => definition.name === "observe")!;
   const observeOutput: Record<string, unknown> = observe.outputSchema ?? {};
-  expect(
-    resolveJsonSchemaReference(
-      observeOutput,
-      observe.outputSchema?.properties.hierarchyBundleId ?? {},
-    ),
-  ).toMatchObject({
+  const hierarchyBundleIdNode = resolveJsonSchemaReference(
+    observeOutput,
+    observe.outputSchema?.properties.hierarchyBundleId ?? {},
+  );
+  // Bun's toMatchObject writes an asymmetric matcher into the received object.
+  // The resolved node is the module-shared generated definition, so match a
+  // clone: mutating it broke outputSchema.references.test.ts in one process (#18750).
+  expect(structuredClone(hierarchyBundleIdNode)).toMatchObject({
     type: "string",
     description: expect.stringContaining(
       "window app the runner that returned the hierarchy was started for",
     ),
   });
+  expect(typeof hierarchyBundleIdNode.description).toBe("string");
 });
 
 test("observe advertises optional typed per-panel observations", () => {

@@ -84,6 +84,25 @@ enum PrototypeStrictBindings {
     }
 
     static func validate(nodes: [PrototypeLocatedValue], actions: [PrototypeLocatedValue], state: Fields) throws {
+        let progressKeys = Set(actions.compactMap { action -> String? in
+            guard action.value["type"] == .string("request"),
+                  PrototypeUploadResolver.isUpload(action.value["body"]) else { return nil }
+            return action.value["progressKey"]?.stringValue
+        })
+        for node in nodes where !progressKeys.isDisjoint(with: boundKeys(node.value)) {
+            for key in boundKeys(node.value) where progressKeys.contains(key) {
+                for value in [0.0, 100.0] {
+                    var written = state
+                    written[key] = .number(value)
+                    if try field(node.value, state: written) != nil || secondary(node.value, state: written) != nil {
+                        throw PrototypeContractValidator.invalid(
+                            "\(node.path).stateKey",
+                            "Upload progress controls must accept 0–100; set max: 100 on a bound progress control"
+                        )
+                    }
+                }
+            }
+        }
         for node in nodes {
             try PrototypeAdaptive.validate(node.value, path: node.path, state: state)
             if let field = try field(node.value, state: state) { throw PrototypeContractValidator.invalid(
@@ -118,6 +137,7 @@ enum PrototypeStrictBindings {
                         "Decrement requires a numeric state key"
                 ) }
                 if type == "setState", !action.operandTemplated, let operand = value["value"],
+                   PrototypeGeneratedValues.form(operand) == nil,
                    operand.objectFields?["event"] == nil, operand.objectFields?["platform"] == nil
                 {
                     let controls = nodes.filter { boundKeys($0.value).contains(key) }

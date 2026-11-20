@@ -1,3 +1,8 @@
+import { prototypeGeneratedForms } from "./prototypeGeneratedBindings";
+import {
+  resolvePrototypeGeneratedJson,
+  type PrototypeActionContext,
+} from "./prototypeGeneratedValues";
 import { isPrototypeDataPointer } from "./prototypeData";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import type { PrototypeData, PrototypeDataActionValue, PrototypeJson } from "./prototypeSpec";
@@ -28,6 +33,7 @@ export type PrototypeDataWrite =
   | { op: "remove"; path: string; where?: PrototypeDataMatch };
 
 export type PrototypeDataWriteErrorCode =
+  | "lastGenerated_unset"
   | "invalid_path"
   | "invalid_value"
   | "ambiguous_match"
@@ -339,6 +345,7 @@ export type PrototypeRuntimeDataActionValue =
 export interface PrototypeDataWriteInputs {
   state: Readonly<Record<string, PrototypeJson>>;
   data?: unknown;
+  context?: PrototypeActionContext;
 }
 
 export type PrototypeDataWriteValueResult =
@@ -352,6 +359,10 @@ export function resolvePrototypeDataWriteValue(
 ): PrototypeDataWriteValueResult {
   if ("object" in binding) {
     return resolveObjectValue(binding.object, inputs);
+  }
+  const generated = resolveGeneratedBinding(binding, inputs.context);
+  if (generated) {
+    return generated;
   }
   if ("value" in binding) {
     return { success: true, value: binding.value };
@@ -398,4 +409,132 @@ function resolveObjectValue(
     });
   }
   return { success: true, value };
+}
+
+function resolveGeneratedBinding(
+  binding: PrototypeRuntimeDataActionValue,
+  context: PrototypeActionContext | undefined,
+): PrototypeDataWriteValueResult | undefined {
+  const forms = prototypeGeneratedForms(binding);
+  if (forms.length > 0) {
+    if (!context) {
+      return {
+        success: false,
+        error: {
+          code: forms[0] === "lastGenerated" ? "lastGenerated_unset" : "invalid_value",
+          message: "Generated bindings require an action-list context",
+        },
+      };
+    }
+    let generated = context.lastGenerated !== undefined;
+    for (const form of forms) {
+      if (form === "generate") {
+        generated = true;
+      }
+      if (form === "lastGenerated" && !generated) {
+        return {
+          success: false,
+          error: {
+            code: "lastGenerated_unset",
+            message: "No preceding generate in this action list",
+          },
+        };
+      }
+    }
+    const value = "value" in binding ? binding.value : binding;
+    return { success: true, value: resolvePrototypeGeneratedJson(value, context) };
+  }
+  return undefined;
+}
+
+export function resolvePrototypeDataMatch(
+  selector: unknown,
+  inputs: PrototypeDataWriteInputs,
+):
+  | { success: true; where?: PrototypeDataMatch }
+  | { success: false; error: PrototypeDataWriteError } {
+  const where = record(selector);
+  if (!where) {
+    return { success: true };
+  }
+  const equals = resolvePrototypeDataWriteValue(
+    where.equals as PrototypeRuntimeDataActionValue,
+    inputs,
+  );
+  return equals.success
+    ? { success: true, where: { field: String(where.field), equals: equals.value } }
+    : equals;
+}
+
+/** Resolve at execution only; the mirror consumes the resulting write, never these bindings. */
+export function applyPrototypeDataAction(
+  action: Record<string, unknown>,
+  inputs: PrototypeDataWriteInputs,
+): PrototypeDataWriteResult {
+  const path = String(action.path);
+  const value =
+    action.type === "removeData"
+      ? undefined
+      : resolvePrototypeDataWriteValue(action.value as PrototypeRuntimeDataActionValue, inputs);
+  if (value && !value.success) {
+    return value;
+  }
+  const match = resolvePrototypeDataMatch(action.where, inputs);
+  if (!match.success) {
+    return match;
+  }
+  const { where } = match;
+  if (action.type === "removeData") {
+    return applyPrototypeDataWrite(inputs.data, { op: "remove", path, where });
+  }
+  if (!value?.success) {
+    return refused("invalid_value", "Missing action value");
+  }
+  return applyResolvedDataAction(action, inputs.data, value.value, where);
+}
+
+function applyResolvedDataAction(
+  action: Record<string, unknown>,
+  data: unknown,
+  value: PrototypeJson,
+  where?: PrototypeDataMatch,
+): PrototypeDataWriteResult {
+  const path = String(action.path);
+  const maxItems = typeof action.maxItems === "number" ? action.maxItems : undefined;
+  switch (action.type) {
+    case "setData":
+      return applyPrototypeDataWrite(data, {
+        op: "set",
+        path,
+        value: value,
+        where,
+        member: typeof action.member === "string" ? action.member : undefined,
+      });
+    case "appendData":
+      return applyPrototypeDataWrite(data, {
+        op: "append",
+        path,
+        value: value,
+        maxItems,
+      });
+    case "upsertData":
+      return applyPrototypeDataWrite(data, {
+        op: "upsert",
+        path,
+        value: value,
+        key: String(action.key),
+        maxItems,
+      });
+    case "prependData":
+      return Array.isArray(value)
+        ? applyPrototypeDataWrite(data, {
+            op: "prepend",
+            path,
+            value: value,
+            maxItems,
+          })
+        : refused("invalid_value", "prependData requires an array");
+    default:
+      return refused("invalid_value", "Not a data action");
+  }
 }

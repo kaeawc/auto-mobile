@@ -22,6 +22,15 @@ map.
 | `prototype_network_device_v1`           | `request` with `via: "device"`                            | Advertised        | Advertised    |
 | `prototype_network_upload_v1`           | upload request bodies and progress                        | Advertised        | Advertised    |
 
+Keyed requests and generated bindings require `prototype_data_actions_v2`. A request with
+`where: {field, equals: binding}` requires `into` naming an array at a `/data` object member.
+The response replaces its single matching element, or the element's optional `member`.
+No match is `not_found`; duplicate matches are `ambiguous_match`. Failed writes leave the array
+unchanged and run onError. Metadata remains at `<into>__meta` beside the array; non-keyed requests
+retain the object-member into rule. A secure state selector requires `allowSecureInRequest: true`;
+secure selectors in setData/removeData are refused. Generated forms do not name secure state keys.
+For scope and evaluation rules, see [generated values](prototype-ux-actions.md#data-actions-12519).
+
 A device without a capability is refused before uploads or show, with a message naming the
 capability. Device-side verification is the manual run in `skills/manual-test/prototype-acceptance.md`
 ("Data, storage and network").

@@ -5,6 +5,7 @@ import Foundation
 enum PrototypeDataWriteCode: String, Equatable {
     case invalidPath = "invalid_path"
     case invalidValue = "invalid_value"
+    case lastGeneratedUnset = "lastGenerated_unset"
     case ambiguousMatch = "ambiguous_match"
     case notFound = "not_found"
     case notArray = "not_array"
@@ -21,7 +22,7 @@ struct PrototypeDataWriteFailure: Error, Equatable {
 /// this runtime cannot drift. Nothing here touches a session; a refused write returns a failure and
 /// the input is untouched.
 enum PrototypeDataWrite {
-    struct Match: Equatable { let field: String; let equals: JSONValue }
+    struct Match: Equatable, Sendable { let field: String; let equals: JSONValue }
 
     enum Operation: String, Equatable {
         case set
@@ -58,7 +59,7 @@ enum PrototypeDataWrite {
     /// missing source is an error. `{item}` and `{index}` are bound by repeat expansion before an
     /// action runs, so one left here was written outside a repeat. `page` is not a data binding.
     static func resolveValue(
-        _ binding: JSONValue?, inputs: some PrototypeEmitContextInputs
+        _ binding: JSONValue?, inputs: some PrototypeEmitContextInputs, context: PrototypeActionContext? = nil
     )
         -> Result<JSONValue, PrototypeDataWriteFailure>
     {
@@ -66,6 +67,7 @@ enum PrototypeDataWrite {
         if case let .object(form)? = binding, form.count == 1, let members = form["object"] {
             return resolveObject(members, inputs: inputs)
         }
+        if let generated = PrototypeGeneratedValues.resolveBinding(binding, context: context) { return generated }
         guard let binding,
               let bindings = try? PrototypeEmitContext.validate(.object(["value": binding]), path: "value"),
               case let .object(form)? = bindings["value"], form.count == 1, let kind = form.keys.first
@@ -439,7 +441,9 @@ extension PrototypeDataWrite {
     /// must name a member, and when that member is a literal the rest must resolve non-null in it.
     private static func validateObject(
         _ members: [String: JSONValue], fields: [String: JSONValue], at path: String
-    ) throws {
+    )
+        throws
+    {
         if fields["type"] == .string("upsertData") {
             let tokens = PrototypeDataPointer.tokens(fields["key"]?.stringValue ?? "")
             let member = tokens.first.flatMap { members[$0]?.objectFields }

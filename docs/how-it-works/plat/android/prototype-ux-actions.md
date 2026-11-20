@@ -52,7 +52,8 @@ or sheet binding's scalar type at runtime (renderer-enforced, #9300).
 on the device, so "add to cart" or "delete row" needs no agent round trip. They require
 `prototype_data_actions_v1` with `prototype_data_model_v1`; prepend also requires
 `prototype_lazy_list_v1`. Keyed `setData` and `removeData` additionally require
-`prototype_data_actions_v2`, and an `{object}` value `prototype_data_actions_v3`. The
+`prototype_data_actions_v2`, as do generated value bindings and keyed request writes, and an
+`{object}` value `prototype_data_actions_v3`. The
 host refuses a show, or a patch whose resulting spec contains one, on a device without it. It uses
 the same gate registry as every other capability (`PROTOTYPE_SPEC_CAPABILITY_GATES`, checked on
 the complete result of `show`, `patch` and `replaceNode`).
@@ -70,9 +71,19 @@ the complete result of `show`, `patch` and `replaceNode`).
   missing member source fails the write like a top-level one. An `upsertData` `key` must start with
   a member name, and must resolve non-null when that member is a `{value}` literal. The
   secure-storage and library copy-taint checks read each member.
+- Generated bindings are `{generate: "id"}`, `{now: "epochMs" | "iso"}` and `{lastGenerated: true}`.
+  They work in data-action values, setState values, request body/header/query bindings and selectors.
+  Exact one-key generated objects inside `{value: json}` expand recursively. Object members resolve
+  in ascending UTF-16 key order; arrays retain their order. Each occurrence resolves once at execution.
+  Ids use an injected `IdGenerator`; time uses `Timer.now()`. ISO time has UTC milliseconds and `Z`.
+  Each action-list invocation starts with no generated id. Only generate updates lastGenerated;
+  now leaves it unchanged. Requests copy the scope after resolving their own bindings, so delayed
+  success/error lists retain the dispatch id even after another action generates an id.
+  Validation rejects a statically unset read with `lastGenerated_unset`; runtime resolution returns
+  the same typed error for a missing scope or unset id. Follow-up generations affect only their copy.
 - `where: {field, equals: binding}` selects one object in the array at `path`, using JSON identity.
   No match returns `not_found`; duplicate matches return `ambiguous_match`. `equals` uses
-  `{value}`, `{state}`, `{data}` or repeat `{item}`/`{index}` bindings. On `setData`, optional
+  `{value}`, `{state}`, `{data}`, generated forms or repeat `{item}`/`{index}` bindings. On `setData`, optional
   `member` creates or replaces that object member; omitting it replaces the whole element.
   `field` and `member` must be non-empty names without `/` or `~`; `member` requires `where`.
 - Semantics are one pure function, `applyPrototypeDataWrite` (`src/features/prototype/prototypeDataWrite.ts`),
@@ -88,12 +99,19 @@ the complete result of `show`, `patch` and `replaceNode`).
   `appendData`, `prependData` or keyed write whose target is not an array. A target created only by an earlier write is the device's
   to check.
 
+The shared `test/fixtures/prototype-spec/data/generated-values.json` cases supply initialData,
+seeded ids, clockMs, actions and FIFO mockResponses. Expected outputs are final data or errorCode.
+Request completions run after the containing list, exercising the captured scope.
+
 Each device write is reported on a `change` event, using existing wire fields so no event field is
 added:
 
 - `name` is the written `/data/...` path (for an append, the array);
 - `payload` is `{op: "set"|"append"|"extend"|"prepend"|"remove", value?, where?, member?, maxItems?, revision}`;
 - `validity` may accompany it.
+
+Values and selector equality in these events are already resolved on the device. Both host mirrors
+apply them verbatim; they never generate another id or timestamp.
 
 A `change` whose name is a data path must carry a valid payload or the host drops it.
 `awaitEvent` returns it like any other event.

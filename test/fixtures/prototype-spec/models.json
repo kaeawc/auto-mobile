@@ -943,7 +943,9 @@
         }
       }
     },
-    "into": "/data/response",
+    "into": "/data/points",
+    "where": { "field": "id", "equals": { "value": 1 } },
+    "member": "response",
     "statusKey": "status",
     "via": "host",
     "allowSecureInRequest": false,

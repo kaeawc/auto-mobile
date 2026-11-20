@@ -61,6 +61,7 @@ sealed interface PrototypeDataWrite {
 }
 
 enum class PrototypeDataWriteErrorCode(val wireValue: String) {
+  LAST_GENERATED_UNSET("lastGenerated_unset"),
   INVALID_PATH("invalid_path"),
   INVALID_VALUE("invalid_value"),
   AMBIGUOUS_MATCH("ambiguous_match"),
@@ -292,6 +293,9 @@ object PrototypeDataWriter {
    * `{state}` and `{data}` read the committed values at the action; a missing source is an error.
    */
   fun resolveValue(binding: EmitContextBinding, inputs: EmitContextInputs): PrototypeDataValue {
+    PrototypeGeneratedValues.resolveBinding(binding, inputs.actionContext)?.let {
+      return it
+    }
     fun fail(code: PrototypeDataWriteErrorCode, message: String) =
       PrototypeDataValue.Failure(PrototypeDataWriteError(code, message))
     return when {
@@ -308,13 +312,7 @@ object PrototypeDataWriter {
         inputs.data(pointer)?.let(PrototypeDataValue::Resolved)
           ?: fail(PrototypeDataWriteErrorCode.NOT_FOUND, "Data pointer $pointer does not exist")
       }
-      "platform" in binding || "event" in binding -> {
-        val source = if ("platform" in binding) "platform" else "event"
-        val pointer = binding.getValue(source).jsonPrimitive.content
-        val value = if (source == "platform") inputs.platform(pointer) else inputs.event(pointer)
-        value?.let(PrototypeDataValue::Resolved)
-          ?: fail(PrototypeDataWriteErrorCode.NOT_FOUND, "Data pointer $pointer does not exist")
-      }
+      "platform" in binding || "event" in binding -> resolveSourcePointer(binding, inputs)
       else ->
         fail(
           PrototypeDataWriteErrorCode.INVALID_VALUE,
@@ -322,6 +320,23 @@ object PrototypeDataWriter {
         )
     }
   }
+}
+
+/** `{platform}` and `{event}` read a pointer from their source; a missing one is `not_found`. */
+private fun resolveSourcePointer(
+  binding: EmitContextBinding,
+  inputs: EmitContextInputs,
+): PrototypeDataValue {
+  val source = if ("platform" in binding) "platform" else "event"
+  val pointer = binding.getValue(source).jsonPrimitive.content
+  val value = if (source == "platform") inputs.platform(pointer) else inputs.event(pointer)
+  return value?.let(PrototypeDataValue::Resolved)
+    ?: PrototypeDataValue.Failure(
+      PrototypeDataWriteError(
+        PrototypeDataWriteErrorCode.NOT_FOUND,
+        "Data pointer $pointer does not exist",
+      ),
+    )
 }
 
 sealed interface PrototypeDataValue {

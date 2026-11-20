@@ -289,6 +289,8 @@ data class PrototypeRequestAction(
   val onError: List<PrototypeAction>? = null,
   val append: PrototypeRequestAppend? = null,
   val progressKey: String? = null,
+  val where: PrototypeDataWhere? = null,
+  val member: String? = null,
 ) : PrototypeAction()
 
 /**

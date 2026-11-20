@@ -440,6 +440,9 @@ internal object PrototypeBindableFields {
       requestBody(action["body"], "$path.body")?.let {
         return it
       }
+      binding((action["where"] as? JsonObject)?.get("equals"), "$path.where.equals")?.let {
+        return it
+      }
       field(action, "into", path, PrototypeBindableKind.REQUEST_INTO)?.let {
         return it
       }

@@ -70,7 +70,11 @@ export interface CapturedCommand {
    * keeps out of logs was scrubbed from argv or output.
    */
   redacted?: true;
-  /** True when stdout or stderr was cut at a capture limit and ends in the truncation marker. */
+  /**
+   * True when stdout or stderr was cut at a capture limit and ends in the truncation marker, or
+   * when the command overflowed node's `maxBuffer` (`errorCode` `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`)
+   * and its output is only what fit.
+   */
   truncated?: true;
 }
 

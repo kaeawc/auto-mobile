@@ -48,6 +48,12 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "Opt-in plan health summary results and files.",
   },
   {
+    name: "AUTOMOBILE_CAPTURE_FIXTURES_DIR",
+    kind: "opt-in",
+    scope: "daemon",
+    reason: "Opt-in fixture capture; setting this path records every tool call's host commands.",
+  },
+  {
     name: "AUTOMOBILE_TOOL_OUTPUTS_DIR",
     kind: "opt-in",
     reason: "Opt-in persistent tool-output artifacts.",

@@ -21,6 +21,13 @@ setup() {
     "${FIXTURE}/ios/prototype-agent/Viewer/ViewerApp.swift" \
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/Core.swift" \
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgent/Agent.swift"
+  mkdir -p "${FIXTURE}/scripts/store-listing"
+  cat > "${FIXTURE}/scripts/store-listing/generate-icons.ts" <<'TS'
+import { mkdirSync, writeFileSync } from "node:fs";
+const out = process.argv[process.argv.indexOf("--out") + 1];
+mkdirSync(`${out}/ios/AppIcon.appiconset`, { recursive: true });
+writeFileSync(`${out}/ios/AppIcon.appiconset/AppIcon-1024.png`, "png");
+TS
   export BUILD_LOG="${BATS_TEST_TMPDIR}/build.log"
   cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -44,7 +51,7 @@ elif [[ "$3" == swiftc ]]; then
   printf 'slice\n' > "$2"
 else
   [[ "$1 $2 $3" == '--sdk macosx swift' ]]
-  app="${!#}"
+  app="${*: -2:1}"
   touch "$app/ProtoViewerIcon60x60@2x.png" "$app/ProtoViewerIcon60x60@3x.png"
 fi
 SCRIPT
@@ -245,4 +252,27 @@ PY
   touch "$OUT/ProtoViewer.app/en.lproj/Assets.car"
   run bash "$SCRIPT" "$OUT"
   [ "$status" -ne 0 ]
+}
+
+@test "fails fast with an install hint when bun is not on PATH" {
+  PATH="${MOCK_BIN}:/usr/bin:/bin"
+  command -v bun > /dev/null && skip "bun is installed under /usr/bin or /bin"
+  run bash "$SCRIPT" "$OUT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'bun is required to render the ProtoViewer icon'* ]]
+  [[ "$output" == *'install-bun-deps.sh'* ]]
+  [ ! -e "$OUT/ProtoViewer.app/ProtoViewerIcon60x60@2x.png" ]
+}
+
+@test "an unresolvable sharp fails immediately instead of auto-installing, and no app is signed" {
+  command -v bun > /dev/null || skip "bun is not installed"
+  cat > "${FIXTURE}/scripts/store-listing/generate-icons.ts" <<'TS'
+await import("sharp-package-that-does-not-exist");
+TS
+  run timeout 20 bash "$SCRIPT" "$OUT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'Icon generator failed'* ]]
+  [[ "$output" == *'install-bun-deps.sh'* ]]
+  run cat "$BUILD_LOG"
+  [[ "$output" != *'--force --sign - '* ]]
 }

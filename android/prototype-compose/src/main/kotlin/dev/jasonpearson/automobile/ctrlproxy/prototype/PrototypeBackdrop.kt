@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.graphicsLayer
 import dev.jasonpearson.automobile.protocol.PrototypeBackdrop
@@ -36,10 +38,10 @@ fun interface PrototypeBackdropSupport {
 }
 
 /**
- * The Android blur decisions, shared by the window backdrop and by node-level `surface: "glass"`
- * (#15244, #15256): real blur needs API 31 (`RenderEffect` and window blur-behind) and, for a
- * window, cross-window blur not disabled by the device or battery saver. Below that, and for the
- * iOS-only `glass` material, the tonal fill is drawn instead.
+ * The Android blur decisions, shared by the window backdrop and by node-level `style.glass`
+ * (#15244, #15256): real blur needs API 31 (`RenderEffect` and window blur) and, for a window,
+ * cross-window blur not disabled by the device or battery saver. Below that, and for the iOS-only
+ * `glass` material, the tonal fill is drawn instead.
  */
 object PrototypeBackdrops {
   const val MIN_BLUR_SDK = 31
@@ -83,8 +85,7 @@ object PrototypeBackdrops {
 
 /**
  * Blurs this composable's own rendering with `RenderEffect` on API 31+ and is a no-op below it, so
- * a caller that needs the fallback decides with [PrototypeBackdrops.blurSupported] (node-level
- * glass reuses this).
+ * a caller that needs the fallback decides with [PrototypeBackdrops.blurSupported].
  */
 fun Modifier.prototypeRenderBlur(radiusDp: Float, sdkInt: Int = Build.VERSION.SDK_INT): Modifier =
   if (sdkInt < PrototypeBackdrops.MIN_BLUR_SDK || radiusDp <= 0f) this
@@ -102,6 +103,7 @@ fun Modifier.prototypeRenderBlur(radiusDp: Float, sdkInt: Int = Build.VERSION.SD
 @InternalAutoMobilePrototypeApi
 fun PrototypeBackdropLayer(
   plan: PrototypeBackdropPlan?,
+  shape: Shape = RectangleShape,
   content: @Composable () -> Unit,
 ) {
   if (plan == null) {
@@ -121,7 +123,7 @@ fun PrototypeBackdropLayer(
         )
       }
   Box {
-    if (color != null) Box(Modifier.matchParentSize().background(color))
+    if (color != null) Box(Modifier.matchParentSize().background(color, shape))
     content()
   }
 }

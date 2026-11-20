@@ -79,6 +79,10 @@ enum DefaultStoreKitTestSession {
                 }
             }
 
+            func clearSimulatedError() async throws {
+                try await clearPurchaseError()
+            }
+
             private func clearPurchaseError() async throws {
                 if simulatedPurchaseError {
                     try await session.setSimulatedError(nil, forAPI: .purchase)

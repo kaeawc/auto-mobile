@@ -89,6 +89,7 @@ describe("aapt2 xmltree parser", () => {
       "intent-filter",
       "intent-filter",
       "intent-filter",
+      "intent-filter",
     ]);
   });
 
@@ -214,11 +215,13 @@ describe("Android artifact policy", () => {
       manifest.replace(
         "      E: application",
         `      E: uses-permission-sdk-23 (line=99)
-        A: http://schemas.android.com/apk/res/android:name(0x01010003)="android.permission.CAMERA" (Raw: "android.permission.CAMERA")
+        A: http://schemas.android.com/apk/res/android:name(0x01010003)="android.permission.READ_CONTACTS" (Raw: "android.permission.READ_CONTACTS")
       E: application`,
       ),
     );
-    expect((await androidFailures(runner))[0].message).toContain("android.permission.CAMERA");
+    expect((await androidFailures(runner))[0].message).toContain(
+      "android.permission.READ_CONTACTS",
+    );
   });
 
   test("a boolean the policy cannot read fails closed instead of reading as false", async () => {

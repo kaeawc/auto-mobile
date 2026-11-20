@@ -1,0 +1,2 @@
+leaks[11786]: leaks cannot examine process 1 (launchd) because you do not have appropriate privileges to examine it; try running with `sudo`.
+leaks[11786]: [fatal] mach port for process 0 not valid

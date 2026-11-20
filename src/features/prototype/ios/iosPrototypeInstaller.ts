@@ -96,7 +96,7 @@ function permissionUsageStrings(
         : DEFAULT_FACE_ID_USAGE;
   }
   for (const permission of requires.permissions ?? []) {
-    // Notifications and nearbyWifi have no iOS Info.plist usage key.
+    // Notifications have no iOS Info.plist usage key.
     const key = DISPOSABLE_APP_IOS_USAGE_KEYS[permission.name];
     if (key) {
       strings[key] = permission.purpose;

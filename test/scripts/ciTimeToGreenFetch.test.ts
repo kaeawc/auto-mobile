@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 import {
   BudgetedGhApi,
   FetchStoppedError,
+  callKind,
   RUN_LIST_RESULT_CAP,
   fetchBundle,
   fetchRequiredChecks,
@@ -21,6 +22,7 @@ import {
   type CommitStatus,
   type FetchOptions,
   normalizeRun,
+  omitRelatedHeads,
   requiredChecksOfRuleset,
   type CacheStore,
   type GhApi,
@@ -237,6 +239,207 @@ describe("fetchBundle caching and API budget", () => {
     );
     expect(api.calls).toBe(2);
     expect(cache.entries.has("jobs-1-1")).toBe(true);
+  });
+});
+
+describe("skipped runs and partial bundles (#18691)", () => {
+  const job = (name: string, conclusion: string) => ({
+    id: name.length,
+    name,
+    status: "completed",
+    conclusion,
+    labels: ["ubuntu-latest"],
+  });
+  const run = (id: number, path: string, conclusion: string, sha = `sha${id}`) => ({
+    id,
+    path,
+    event: "pull_request",
+    head_sha: sha,
+    run_attempt: 1,
+    status: "completed",
+    conclusion,
+    created_at: `2026-10-10T10:${String(id).padStart(2, "0")}:00Z`,
+    pull_requests: [{ number: 7 }],
+  });
+  const jobsByRun: Record<number, ReturnType<typeof job>[]> = {
+    1: [job("Lint", "success")],
+    2: [job("Smoke (Advisory)", "skipped")],
+    3: [job("Smoke (Advisory)", "skipped")],
+    4: [job("Smoke (Advisory)", "skipped")],
+    5: [job("Lint", "skipped")],
+    6: [job("Lint", "skipped")],
+  };
+  const runs = [
+    run(1, "pr.yml", "success"),
+    run(2, "smoke.yml", "skipped"),
+    run(3, "smoke.yml", "skipped"),
+    run(4, "smoke.yml", "skipped"),
+    run(5, "gate.yml", "skipped"),
+    run(6, "gate.yml", "skipped"),
+  ];
+  const routes = (path: string): unknown => {
+    if (path.includes("/actions/runs?")) {
+      return { total_count: runs.length, workflow_runs: runs };
+    }
+    const jobs = /\/runs\/(\d+)\/jobs/.exec(path);
+    if (jobs) {
+      const list = jobsByRun[Number(jobs[1])];
+      return { total_count: list.length, jobs: list };
+    }
+    if (path.includes("/files")) {
+      return [{ filename: "src/a.ts" }];
+    }
+    return { number: 7, state: "open", head: { sha: "sha6" } };
+  };
+  const options: FetchOptions = {
+    repo: "o/r",
+    sinceMs: 0,
+    untilMs: 3_600_000,
+    prRunsOnly: true,
+    concurrency: 1,
+    classify: () => "ts-only",
+    circleci: false,
+    circleciMacosMatcher: () => false,
+  };
+  const jobRuns = (api: FakeApi) =>
+    api.paths.flatMap((path) => /\/runs\/(\d+)\/jobs/.exec(path)?.[1] ?? []).map(Number);
+
+  test("samples one skipped run per workflow and fetches the rest only when it skips a required check", async () => {
+    const api = new FakeApi(routes);
+    const bundle = await fetchBundle(api, new MemoryCache(), options, ["Lint"]);
+    expect(jobRuns(api).sort()).toEqual([1, 2, 5, 6]);
+    expect(bundle.runs.find((item) => item.id === 3)?.jobs).toEqual([]);
+    expect(bundle.runs.find((item) => item.id === 6)?.jobs.map((item) => item.name)).toEqual([
+      "Lint",
+    ]);
+    expect(bundle.meta.skippedRunsWithoutJobs).toBe(2);
+    expect(bundle.meta.partial).toBeUndefined();
+  });
+
+  test("a budget stop with partialOnStop keeps fully fetched head SHAs and marks the bundle partial", async () => {
+    const api = new BudgetedGhApi(new FakeApi(routes), 3);
+    const bundle = await fetchBundle(api, new MemoryCache(), { ...options, partialOnStop: true }, [
+      "Lint",
+    ]);
+    expect(api.calls).toBe(3);
+    expect(bundle.meta.partial).toMatchObject({ reason: "budget", omittedHeadShas: 6 });
+    expect(bundle.runs).toEqual([]);
+    expect(bundle.prs).toEqual([]);
+  });
+
+  test("partial bundles drop only the head SHAs a stop left incomplete", async () => {
+    const shared = runs.map((item) =>
+      item.id === 1
+        ? { ...item, head_sha: "kept", pull_requests: [{ number: 9 }] }
+        : { ...item, head_sha: "dropped" },
+    );
+    const api = new BudgetedGhApi(
+      new FakeApi((path) =>
+        path.includes("/actions/runs?")
+          ? { total_count: shared.length, workflow_runs: shared }
+          : routes(path),
+      ),
+      4,
+    );
+    const cache = new MemoryCache();
+    cache.entries.set("pull-9", { number: 9, state: "closed", head: { sha: "kept" } });
+    cache.entries.set("files-9-kept", [{ filename: "src/a.ts" }]);
+    // Listing plus runs 1, 2 and 5 spend the budget, so run 6 (sharing the "dropped" head) stops.
+    const bundle = await fetchBundle(api, cache, { ...options, partialOnStop: true }, ["Lint"]);
+    expect(bundle.meta.partial).toMatchObject({ omittedHeadShas: 1, omittedRuns: 5 });
+    expect(bundle.runs.map((item) => item.id)).toEqual([1]);
+    expect(bundle.prs.map((pr) => pr.number)).toEqual([9]);
+  });
+
+  test("an incomplete head drops every head of its PR so supersession is not misread", async () => {
+    const heads = [
+      { ...run(1, "pr.yml", "cancelled", "older"), pull_requests: [{ number: 7 }] },
+      { ...run(2, "pr.yml", "success", "newer"), pull_requests: [{ number: 7 }] },
+      { ...run(3, "pr.yml", "success", "other"), pull_requests: [{ number: 8 }] },
+    ];
+    const cache = new MemoryCache();
+    cache.entries.set("jobs-1-1", [job("Lint", "cancelled")]);
+    cache.entries.set("jobs-3-1", [job("Lint", "success")]);
+    cache.entries.set("pull-8", { number: 8, state: "closed", head: { sha: "other" } });
+    cache.entries.set("files-8-other", [{ filename: "src/a.ts" }]);
+    const api = new BudgetedGhApi(
+      new FakeApi(() => ({ total_count: heads.length, workflow_runs: heads })),
+      1,
+    );
+    const bundle = await fetchBundle(api, cache, { ...options, partialOnStop: true }, ["Lint"]);
+    expect(bundle.runs.map((item) => item.headSha)).toEqual(["other"]);
+    expect(bundle.meta.partial).toMatchObject({ omittedHeadShas: 2, omittedRuns: 2 });
+    expect(bundle.prs.map((pr) => pr.number)).toEqual([8]);
+  });
+
+  test("omitted heads close over shared PRs and over the branch of an unresolved head", () => {
+    const fact = (id: number, sha: string, prs: number[], branch?: string) => ({
+      raw: { ...run(id, "pr.yml", "success", sha), head_branch: branch, pull_requests: [] },
+      prs,
+    });
+    const items = [
+      fact(1, "x", [1]),
+      fact(2, "y", [2, 1]),
+      fact(3, "z", [2]),
+      fact(4, "orphan", [], "feature"),
+      fact(5, "sibling", [5], "feature"),
+      fact(6, "kept", [6], "other"),
+    ];
+    const facts = items.map((item) => ({ ...normalizeRun(item.raw, []), prNumbers: item.prs }));
+    const omitted = new Set(["x", "orphan"]);
+    omitRelatedHeads(
+      facts,
+      items.map((item) => item.raw),
+      omitted,
+    );
+    expect([...omitted].sort()).toEqual(["orphan", "sibling", "x", "y", "z"]);
+  });
+
+  test("an omitted head with no PR number and no branch drops every head", () => {
+    const raws = [
+      { ...run(1, "pr.yml", "success", "unlinked"), pull_requests: [] },
+      { ...run(2, "pr.yml", "success", "kept"), head_branch: "other" },
+    ];
+    const facts = [
+      { ...normalizeRun(raws[0], []), prNumbers: [] },
+      { ...normalizeRun(raws[1], []), prNumbers: [6] },
+    ];
+    const omitted = new Set(["unlinked"]);
+    omitRelatedHeads(facts, raws, omitted);
+    expect([...omitted].sort()).toEqual(["kept", "unlinked"]);
+  });
+
+  test("without partialOnStop a stop still throws, and the budget refuses every later call", async () => {
+    const inner = new FakeApi(routes);
+    const api = new BudgetedGhApi(inner, 2);
+    await expect(fetchBundle(api, new MemoryCache(), options, ["Lint"])).rejects.toBeInstanceOf(
+      FetchStoppedError,
+    );
+    await expect(api.get("repos/o/r/pulls/7")).rejects.toBe(api.stopped!);
+    expect(inner.paths).toHaveLength(2);
+  });
+
+  test("a rate limit from the client latches so no later call reaches the API", async () => {
+    const inner = new FakeApi(() => {
+      throw new FetchStoppedError("rate-limit", "GitHub API rate limit hit");
+    });
+    const api = new BudgetedGhApi(inner, 10);
+    await expect(api.get("a")).rejects.toBeInstanceOf(FetchStoppedError);
+    await expect(api.get("b")).rejects.toMatchObject({ reason: "rate-limit" });
+    expect(inner.paths).toEqual(["a"]);
+    expect(api.calls).toBe(1);
+  });
+
+  test("calls are counted per endpoint kind", async () => {
+    const api = new BudgetedGhApi(new FakeApi(() => ({})), 10);
+    await api.get("repos/o/r/actions/runs/12/jobs?filter=all&page=1");
+    await api.get("repos/o/r/actions/runs/13/jobs?filter=all&page=1");
+    await api.get(`repos/o/r/commits/${"a".repeat(40)}/statuses?per_page=100`);
+    expect(Object.fromEntries(api.callsByKind)).toEqual({
+      "actions/runs/:id/jobs": 2,
+      "commits/:id/statuses": 1,
+    });
+    expect(callKind("repos/o/r/pulls?state=all")).toBe("pulls");
   });
 });
 

@@ -38,25 +38,25 @@ separate from `storage.keys`. It requires `secureStorage` in `requires.platform`
 `prototype_platform_secureStorage_v1`. ProtoViewer, saved-prototype Activities and the disposable
 app shell register the module. CtrlProxy's injected overlay and unsupported embedded hosts refuse it.
 The module has no calls; `/platform/secureStorage/locked` is false. Biometric-bound `secureAuth`
-keys remain live-only and are neither persisted nor restored by this runtime.
+keys stay live-only: this runtime neither persists nor restores them.
 
 Each value is limited to 4096 UTF-8 bytes and excluded from the plaintext document and its byte
 budget. An app-private file under `prototype-storage/secure/` holds a Base64-encoded AES-GCM
 ciphertext with a fresh random 12-byte IV. The 256-bit AES key stays in AndroidKeyStore under
 `dev.automobile.prototype.<slug>-<full-id-sha256>`, without user authentication. The full id also
-authenticates the ciphertext; ProtoViewer uses its library entry id to isolate duplicate imports.
+authenticates the ciphertext; ProtoViewer isolates duplicate imports by library entry id.
 Writes sync a temporary file before atomic replacement. Missing or unusable keys and corrupt
-ciphertext leave values absent and produce a fixed warning without payloads or exception details.
+ciphertext leave values absent with a fixed warning that carries no payload or exception details.
 
 The [storage precedence and clearing rules](prototype-ux-storage.md) apply to both stores.
 Reset, `clearStorage` and deletion remove the secure file and its Keystore alias; dismissal retains
-them. Status, inspect, patch conflicts and events omit secure state values, including `change`
-payload values. Storage reports add optional `secure: [{key, present, bytes}]` metadata for
-persisted values. Neither values nor ciphertext appear in reports or runtime warnings.
+them. Status, inspect, patch conflicts and events (including `change` payloads) omit secure values.
+Storage reports add optional `secure: [{key, present, bytes}]` metadata. Neither values nor
+ciphertext appear in reports or runtime warnings.
 
-Secure keys cannot leave through an emit `context`. Requests may reference them only with
-`allowSecureInRequest: true`; otherwise validation refuses state bindings and text placeholders
-in URLs, headers, query values and bodies. See [request bindings](prototype-ux-request.md).
+Secure keys cannot bind into an emit `context` or, in host validation, a data-write `{state}`
+value. Requests may reference them only with `allowSecureInRequest: true`; otherwise validation
+refuses state bindings and text placeholders in URLs, headers, query values and bodies. See [request bindings](prototype-ux-request.md).
 
 **Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
 event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
@@ -166,7 +166,8 @@ Provisional authorization reads as `limited`.
 
 Android Activity hosts register `permissions` for `notifications`: ProtoViewer, disposable apps and
 CtrlProxy's SavedPrototypeActivity advertise the capability. A plain Activity without an
-ActivityResultRegistry and the CtrlProxy overlay omit it. Other canonical names return `unavailable`.
+ActivityResultRegistry and the CtrlProxy overlay omit it. Camera and microphone: see
+[ProtoViewer](../../protoviewer.md#31-standalone-unprivileged-apps).
 The result is `{results: {<name>: <state>}}`; each result also updates `/platform/permissions/<name>`.
 Bound request lists must name declared permissions, just like literal lists. Only one request can be
 in flight per Activity; a second returns `too_many_in_flight`. A permission prompt waits for the user

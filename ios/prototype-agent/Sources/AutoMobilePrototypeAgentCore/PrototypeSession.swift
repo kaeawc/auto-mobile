@@ -847,9 +847,7 @@ struct PrototypeSession {
         else { return }
         spec = next
         structureRevision += 1
-        if (current.derive ?? [:]).values.contains(where: {
-            $0.collection != nil && PrototypeDerive.affected($0, changed: changed)
-        }) {
+        if next.root !== current.root {
             rebuildNavigation(for: next.root, keepingPages: pages, keepingStacks: stacks)
         }
     }

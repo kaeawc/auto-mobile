@@ -18,6 +18,11 @@ class AndroidPermissionsSourceTest {
   }
 
   private class Gateway : AndroidPermissionsGateway {
+    override var permission = PrototypeRuntimePermission.NOTIFICATIONS
+    override var declared = true
+    override var hardware = true
+    override var settling = false
+    override var prompting = false
     override var sdk = 33
     override var foreground = true
     override var granted = false
@@ -433,6 +438,126 @@ class AndroidPermissionsSourceTest {
     )
     job.cancelAndJoin()
     assertEquals(0, gateway.resumes.subscriptionCount.value)
+    source.close()
+  }
+
+  @Test
+  fun `camera and microphone prompt on every sdk and ignore the notification setting`() = runTest {
+    for (kind in listOf(PrototypeRuntimePermission.CAMERA, PrototypeRuntimePermission.MICROPHONE)) {
+      val gateway =
+        Gateway().apply {
+          permission = kind
+          sdk = 26
+          notificationsEnabled = false
+        }
+      val source = AndroidPermissionsSource(gateway, Store(), StandardTestDispatcher(testScheduler))
+      assertEquals(PrototypePermissionState.NOT_DETERMINED, source.status())
+      val pending = async { source.request().single() }
+      runCurrent()
+      assertEquals(1, gateway.registrations)
+      gateway.granted = true
+      gateway.deliver!!(true)
+      assertEquals(
+        PrototypePermissionOutcome.Status(PrototypePermissionState.GRANTED),
+        pending.await(),
+      )
+      source.close()
+    }
+  }
+
+  @Test
+  fun `undeclared or absent capture hardware is unavailable and never prompts`() = runTest {
+    for (missing in listOf("declared", "hardware")) {
+      val gateway =
+        Gateway().apply {
+          permission = PrototypeRuntimePermission.CAMERA
+          declared = missing != "declared"
+          hardware = missing != "hardware"
+        }
+      val source = AndroidPermissionsSource(gateway, Store(), StandardTestDispatcher(testScheduler))
+      assertEquals(PrototypePermissionState.UNAVAILABLE, source.status())
+      assertEquals(
+        PrototypePermissionOutcome.Status(PrototypePermissionState.UNAVAILABLE),
+        source.request().single(),
+      )
+      assertEquals(0, gateway.registrations)
+      source.close()
+    }
+  }
+
+  @Test
+  fun `capture is unavailable while the Activity is not resumed`() = runTest {
+    val gateway =
+      Gateway().apply {
+        permission = PrototypeRuntimePermission.MICROPHONE
+        granted = true
+        foreground = false
+      }
+    val source = AndroidPermissionsSource(gateway, Store(), StandardTestDispatcher(testScheduler))
+    assertEquals(PrototypePermissionState.UNAVAILABLE, source.status())
+    gateway.foreground = true
+    assertEquals(PrototypePermissionState.GRANTED, source.status())
+    source.close()
+  }
+
+  @Test
+  fun `a request right after a prompt waits for resume instead of reading unavailable`() = runTest {
+    val gateway =
+      Gateway().apply {
+        permission = PrototypeRuntimePermission.MICROPHONE
+        foreground = false
+        settling = true
+      }
+    val source = AndroidPermissionsSource(gateway, Store(), StandardTestDispatcher(testScheduler))
+    val pending = async { source.request().single() }
+    runCurrent()
+    assertEquals(0, gateway.registrations)
+    gateway.foreground = true
+    gateway.settling = false
+    gateway.resumes.emit(Unit)
+    runCurrent()
+    assertEquals(1, gateway.registrations)
+    gateway.granted = true
+    gateway.deliver!!(true)
+    assertEquals(
+      PrototypePermissionOutcome.Status(PrototypePermissionState.GRANTED),
+      pending.await(),
+    )
+    source.close()
+  }
+
+  @Test
+  fun `closing while waiting for resume cancels without prompting`() = runTest {
+    val gateway =
+      Gateway().apply {
+        permission = PrototypeRuntimePermission.CAMERA
+        foreground = false
+        settling = true
+      }
+    val source = AndroidPermissionsSource(gateway, Store(), StandardTestDispatcher(testScheduler))
+    val pending = async { source.request().single() }
+    runCurrent()
+    source.close()
+    assertEquals(PrototypePermissionOutcome.Cancelled, pending.await())
+    assertEquals(0, gateway.registrations)
+  }
+
+  @Test
+  fun `a request while another dialog of the Activity is open is busy`() = runTest {
+    val gateway =
+      Gateway().apply {
+        permission = PrototypeRuntimePermission.MICROPHONE
+        foreground = false
+        prompting = true
+      }
+    val source = AndroidPermissionsSource(gateway, Store(), StandardTestDispatcher(testScheduler))
+    assertEquals(PrototypePermissionOutcome.Busy, source.request().single())
+    assertEquals(0, gateway.registrations)
+    gateway.prompting = false
+    assertEquals(
+      PrototypePermissionOutcome.Status(PrototypePermissionState.UNAVAILABLE),
+      source.request().single(),
+    )
     source.close()
   }
 }

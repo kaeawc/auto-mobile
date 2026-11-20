@@ -115,7 +115,6 @@ object ValidTools {
         "getAndroid",
         "getApple",
         "getDataStore",
-        "getIosSimulatorCapabilities",
         "getSessionRequirementCapability",
         "getPreference",
         "hitTest",

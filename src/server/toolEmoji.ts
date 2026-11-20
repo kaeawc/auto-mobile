@@ -117,7 +117,6 @@ export const TOOL_EMOJI: Readonly<Record<string, ToolEmojiEntry>> = Object.freez
   setDeviceState: tool("🎚️"),
   displayConfig: tool("🖥️"),
   displayProfile: tool("🎨"),
-  getIosSimulatorCapabilities: tool("🍏"),
   getSessionRequirementCapability: tool("🔮"),
   biometricAuth: tool("🪪"),
   shake: tool("📳"),

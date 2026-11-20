@@ -256,6 +256,50 @@ final class PortraitSpringBoardWindowsTests: XCTestCase {
         XCTAssertFalse(windows.contains([0, 0, 1032, 1376]))
     }
 
+    func testForegroundSpringBoardAlertTakesTheTreeRotation() throws {
+        // No landscape iPad SpringBoard alert has been captured: this places an alert of the
+        // captured #18858 shape (UIAlertController over its buttons) in the captured landscape
+        // home screen's first portrait window, framed in that window's portrait space.
+        let landscape = try capture("ios27_2-ipad-home-landscape-raw")
+        let alert = UIElementInfo(
+            text: "Remove “Safari”?",
+            className: "UIAlertController",
+            bounds: ElementBounds(left: 376, top: 548, right: 656, bottom: 828),
+            node: [
+                UIElementInfo(text: "Cancel", bounds: ElementBounds(left: 392, top: 760, right: 640, bottom: 808)),
+            ]
+        )
+        var children = try XCTUnwrap(landscape.hierarchy.node)
+        let windowIndex = try XCTUnwrap(children.firstIndex {
+            $0.className == "UIWindow" && box($0.bounds) == [0, 0, 1032, 1376]
+        })
+        children[windowIndex] = ElementLocator.copying(
+            children[windowIndex], node: (children[windowIndex].node ?? []) + [alert]
+        )
+        let (root, rotation) = ElementLocator.portraitSpringBoardWindowsInRootSpace(
+            ElementLocator.copying(landscape.hierarchy, node: children), deviceRotation: landscape.rotation
+        )
+        let rotationValue = try XCTUnwrap(rotation)
+
+        let topLevel = ElementLocator.appSnapshotAlertsInRootSpace([alert], portraitSpringBoard: rotationValue)
+
+        func find(_ text: String, in element: UIElementInfo) -> UIElementInfo? {
+            if element.text == text { return element }
+            return element.node?.lazy.compactMap { find(text, in: $0) }.first
+        }
+        let inTree = try XCTUnwrap(find("Remove “Safari”?", in: root))
+        // (x, y) -> (y, 1032 - x): the top-level copy lands where its in-tree copy does.
+        XCTAssertEqual(box(topLevel.first?.bounds), [548, 376, 828, 656])
+        XCTAssertEqual(box(topLevel.first?.bounds), box(inTree.bounds))
+        XCTAssertEqual(box(topLevel.first?.node?.first?.bounds), [760, 392, 808, 640])
+        XCTAssertEqual(box(topLevel.first?.node?.first?.bounds), box(inTree.node?.first?.bounds))
+        // Without a portrait SpringBoard rotation the alerts are returned as captured.
+        XCTAssertEqual(
+            ElementLocator.appSnapshotAlertsInRootSpace([alert], portraitSpringBoard: nil).map { box($0.bounds) },
+            [[376, 548, 656, 828]]
+        )
+    }
+
     func testPortraitHomeScreenIsUnchanged() throws {
         let portrait = try capture("ios27_2-ipad-home-portrait-raw")
         XCTAssertEqual(portrait.rotation, 0)

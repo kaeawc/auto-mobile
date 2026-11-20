@@ -444,7 +444,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 try getSystemAlerts(
                     appSnapshot: snapshot,
                     truncationReasons: &truncationReasons,
-                    keyboardFocus: keyboardFocus
+                    keyboardFocus: keyboardFocus,
+                    portraitSpringBoard: portraitSpringBoard
                 )
             }
 

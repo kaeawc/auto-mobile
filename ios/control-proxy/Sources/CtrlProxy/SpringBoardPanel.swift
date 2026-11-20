@@ -155,6 +155,19 @@ extension ElementLocator {
         return (copying(root, node: rotated), rotation)
     }
 
+    /// Alerts read from SpringBoard's own snapshot sit in the same portrait-framed windows as its
+    /// main tree (#18827), so they take the tree's rotation; otherwise the top-level alert copy
+    /// would keep portrait bounds beside its rotated in-tree copy.
+    nonisolated static func appSnapshotAlertsInRootSpace(
+        _ alerts: [UIElementInfo],
+        portraitSpringBoard: PortraitSpringBoardRotation?
+    )
+        -> [UIElementInfo]
+    {
+        guard let portraitSpringBoard else { return alerts }
+        return alerts.map { rotatedIntoLandscape($0, portraitSpringBoard: portraitSpringBoard) }
+    }
+
     /// Rotate a portrait SpringBoard alert subtree into the rotated app's landscape space (#18858).
     nonisolated static func rotatedIntoLandscape(
         _ element: UIElementInfo,

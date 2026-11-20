@@ -341,6 +341,11 @@ jobs:
             for package in ios/screen-capture ios/network-filter ios/audio-loopback ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
               (cd "${package}" && swift package resolve)
             done
+      # swift-build.sh builds ProtoViewer, whose icon generator needs Bun and sharp.
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: bash scripts/ci/install-bun-deps.sh
       - run:
           name: "Build Swift packages"
           command: ./scripts/ios/swift-build.sh

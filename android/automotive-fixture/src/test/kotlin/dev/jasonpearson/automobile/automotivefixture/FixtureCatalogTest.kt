@@ -60,9 +60,9 @@ class FixtureCatalogTest {
     }
     assertEquals(
       FixtureRow("template_list_long", "List 30", "Thirty fixed rows"),
-      FixtureCatalog.templateMenu.last(),
+      FixtureCatalog.templateMenu[4],
     )
-    assertEquals(5, FixtureCatalog.templateMenu.size)
+    assertEquals(9, FixtureCatalog.templateMenu.size)
   }
 
   @Test
@@ -80,8 +80,63 @@ class FixtureCatalogTest {
         "template_pane",
         "template_navigation",
         "template_list_long",
+        "template_tabs",
+        "template_refresh",
+        "template_silent",
+        "template_restrictions",
       ),
       FixtureCatalog.templateMenu.map { it.id },
+    )
+  }
+
+  @Test
+  fun `every menu screen is reachable within the host row limit`() {
+    listOf(1, 5, 6, 7).forEach { api ->
+      val entries = FixtureCatalog.menuEntries(api)
+      val pages =
+        (0 until FixtureCatalog.menuPageCount(api)).map { FixtureCatalog.menuPage(api, it) }
+      assertTrue(pages.all { it.size <= FixtureCatalog.HOST_LIST_ROW_LIMIT })
+      assertEquals(entries, pages.flatten().filter { it != FixtureCatalog.menuMoreRow })
+      assertEquals(pages.size - 1, pages.flatten().count { it == FixtureCatalog.menuMoreRow })
+      assertTrue(FixtureCatalog.menuMoreRow !in pages.last())
+    }
+    assertEquals(2, FixtureCatalog.menuPageCount(6))
+    assertEquals(9, FixtureCatalog.menuEntries(6).size)
+  }
+
+  @Test
+  fun `tab template is offered only on Car App API 6 and above`() {
+    assertTrue(FixtureCatalog.menuEntries(5).none { it.id == FixtureCatalog.TAB_TEMPLATE_ID })
+    assertEquals(8, FixtureCatalog.menuEntries(5).size)
+    assertTrue(FixtureCatalog.menuEntries(6).any { it.id == FixtureCatalog.TAB_TEMPLATE_ID })
+  }
+
+  @Test
+  fun `silent subtitle differs by revision but renders identically`() {
+    val first = FixtureCatalog.silentSubtitle(0)
+    val second = FixtureCatalog.silentSubtitle(1)
+    assertTrue(first != second)
+    assertEquals(first, second.replace("\u200B", ""))
+  }
+
+  @Test
+  fun `refresh rows change with the revision and tab rows differ per tab`() {
+    assertTrue(FixtureCatalog.refreshRows(0) != FixtureCatalog.refreshRows(1))
+    assertTrue(FixtureCatalog.tabRows(0) != FixtureCatalog.tabRows(1))
+    assertEquals(
+      listOf("tab_1", "tab_2"),
+      FixtureCatalog.tabTitles.indices.map(FixtureCatalog::tabId),
+    )
+  }
+
+  @Test
+  fun `restriction rows show each limit`() {
+    assertEquals(
+      listOf(
+        FixtureRow("limit_list", "List limit", "6"),
+        FixtureRow("limit_grid", "Grid limit", "0"),
+      ),
+      FixtureCatalog.restrictionRows(linkedMapOf("List" to 6, "Grid" to 0)),
     )
   }
 }

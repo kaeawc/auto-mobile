@@ -52,6 +52,16 @@ struct DemosTab: View {
                             icon: "network"
                         )
                     }
+
+                    NavigationLink {
+                        StoreKitDemo()
+                    } label: {
+                        DemoRow(
+                            title: "StoreKit",
+                            description: "Test in-app purchases and entitlements",
+                            icon: "cart"
+                        )
+                    }
                 }
 
                 Section("Performance") {

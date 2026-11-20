@@ -291,6 +291,12 @@ export const MEDIA_ENV = {
     default: "unset",
     doc: "Directory where executePlan writes a JSON health summary.",
   },
+  CAPTURE_FIXTURES_DIR: {
+    name: "AUTOMOBILE_CAPTURE_FIXTURES_DIR",
+    kind: "path",
+    default: "unset",
+    doc: "Directory where each tool call records the host commands it ran, with provenance.",
+  },
   REQUIRE_VIDEO_SERVER: {
     name: "AUTOMOBILE_REQUIRE_VIDEO_SERVER",
     kind: "bool",

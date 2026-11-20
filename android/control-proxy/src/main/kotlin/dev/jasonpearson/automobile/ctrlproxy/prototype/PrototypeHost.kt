@@ -35,6 +35,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
@@ -69,7 +71,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** The window blur-behind radius a request asks for; only a real-blur plan has one. */
+/** The window blur radius a request asks for; only a real-blur plan has one. */
 internal fun backdropBlurPx(request: PrototypeRequest, density: Float): Int =
   request.backdrop
     ?.takeIf { it.mode == PrototypeBackdropMode.BLUR }
@@ -165,6 +167,7 @@ data class PrototypeRequest(
   val onHostBack: (suspend () -> Unit)? = null,
   /** `window.backdrop` as resolved for this show (#15126); null without one. */
   val backdrop: PrototypeBackdropPlan? = null,
+  val backdropShape: Shape = RectangleShape,
   val windowControls: PrototypeWindowControls = PrototypeWindowControls(),
   val content: @Composable () -> Unit = { PrototypeTestContent() },
 ) {
@@ -203,6 +206,9 @@ interface PrototypeHost : PrototypeHostLifecycle, PrototypeClipboardHost {
   val isShowing: Boolean
   val currentPlacement: PrototypePlacement?
   val isTouchThroughActive: Boolean
+  /** The backdrop of the attached window after any platform fallback. */
+  val appliedBackdrop: PrototypeBackdropMode?
+    get() = null
 
   suspend fun show(request: PrototypeRequest = PrototypeRequest()): Boolean
 
@@ -320,6 +326,7 @@ class DefaultPrototypeHost(
   private val keyboard: PrototypeKeyboard = AndroidPrototypeKeyboard,
   /** Tests supply a deterministic waiter instead of driving real Compose frames. */
   private val firstRenderWaiter: PrototypeFirstRenderWaiter = CoroutinePrototypeFirstRenderWaiter,
+  private val cardBlurHost: PrototypeCardBlurHost = AndroidPrototypeCardBlurHost,
 ) : PrototypeHost {
   private val tvNavigation =
     context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
@@ -336,6 +343,23 @@ class DefaultPrototypeHost(
     var params: WindowManager.LayoutParams,
     var request: PrototypeRequest,
   ) {
+    var cardBlur: PrototypeCardBlur? = null
+    var cardWindow: PrototypeCardBlurWindow? = null
+
+    val surfaceView: View
+      get() = cardWindow?.decor ?: view
+
+    fun update(params: WindowManager.LayoutParams) {
+      val card = cardWindow
+      if (card != null) card.update(params) else target.windowManager.updateViewLayout(view, params)
+      this.params = params
+    }
+
+    fun remove() {
+      val card = cardWindow
+      if (card != null) card.remove() else target.windowManager.removeViewImmediate(view)
+    }
+
     /** A floating window's screen position as its anchored root last placed it (#9316). */
     var anchoredOrigin: IntOffset? by mutableStateOf(null)
     val visible = androidx.compose.runtime.mutableStateOf(true)
@@ -352,7 +376,10 @@ class DefaultPrototypeHost(
   private val clipboardMutex = Mutex()
 
   override val isHiddenForCapture: Boolean
-    get() = window?.view?.visibility == View.INVISIBLE
+    get() = window?.surfaceView?.visibility == View.INVISIBLE
+
+  override val appliedBackdrop: PrototypeBackdropMode?
+    get() = window?.request?.backdrop?.mode
 
   override val isShowing: Boolean
     get() = window != null
@@ -472,11 +499,14 @@ class DefaultPrototypeHost(
           it.request.surfaceId == request.surfaceId
       }
       val target = inPlace?.target ?: windowFor(request.displayId, request.layer)
+      val density = target.density()
+      val cardBlur = request.floatingCardBlur(density, sdkInt)
+      val resolved = request.resolveBackdrop(cardBlur)
       val params =
         prototypeLayoutParams(
           request.placement,
           request.hasTextField,
-          target.density(),
+          density,
           sdkInt,
           request.layer,
           imeLift(request),
@@ -484,7 +514,7 @@ class DefaultPrototypeHost(
           hasStackBack = request.hasStackBack || tvNavigation,
           opaque = prototypeWindowOpaque(request),
           surfaceId = request.surfaceId,
-          blurBehindRadiusPx = backdropBlurPx(request, target.density()),
+          blurBehindRadiusPx = backdropBlurPx(resolved, density),
         )
       windowControls.apply(params, request.windowControls)
       target.constrainDismissWindow(params, request)
@@ -493,11 +523,20 @@ class DefaultPrototypeHost(
       }
       // New content places its own anchored root again, so a replaced spec starts from its
       // placement.
-      inPlace?.anchoredOrigin = null
-      if (inPlace != null && (!request.bringToFront || !windowMotionEnabled(request, target)))
-        updateInPlace(inPlace, request, params)
-      else addWindow(target, request, params)
+      val reusable = inPlace?.takeIf { it.cardBlur == cardBlur }
+      if (reusable != null && (!request.bringToFront || !windowMotionEnabled(request, target))) {
+        reusable.anchoredOrigin = null
+        updateInPlace(reusable, resolved, params)
+      } else addWindow(target, resolved, params, cardBlur)
     }
+
+  private fun PrototypeRequest.resolveBackdrop(cardBlur: PrototypeCardBlur?): PrototypeRequest =
+    if (placement is PrototypePlacement.Floating && cardBlur == null) withTonalBackdrop() else this
+
+  private fun PrototypeRequest.withTonalBackdrop(): PrototypeRequest =
+    if (backdrop?.mode == PrototypeBackdropMode.BLUR)
+      copy(backdrop = backdrop.copy(mode = PrototypeBackdropMode.FALLBACK))
+    else this
 
   /** The keyboard's reach for a bottom sheet; other placements never read it. */
   private fun imeLift(request: PrototypeRequest): Int =
@@ -540,6 +579,7 @@ class DefaultPrototypeHost(
     target: PrototypeDisplayWindow,
     request: PrototypeRequest,
     params: WindowManager.LayoutParams,
+    cardBlur: PrototypeCardBlur?,
   ): Boolean {
     val owner = PrototypeWindowOwner()
     val view =
@@ -569,11 +609,12 @@ class DefaultPrototypeHost(
       )
     try {
       applyContent(added)
-      target.windowManager.addView(view, params)
+      if (cardBlur != null) attachCardBlur(added, cardBlur)
+      if (added.cardWindow == null) target.windowManager.addView(view, params)
     } catch (error: Exception) {
       Log.e(TAG, "Failed to add prototype", error)
       // addView may throw after partially attaching the view/composition.
-      if (isViewAttached(view)) retire(added)
+      if (isViewAttached(added.surfaceView)) retire(added)
       else {
         view.releaseEscape()
         added.back.release()
@@ -592,10 +633,21 @@ class DefaultPrototypeHost(
     return true
   }
 
+  private fun attachCardBlur(added: Window, blur: PrototypeCardBlur) {
+    try {
+      added.cardWindow = cardBlurHost.attach(added.target.context, added.view, added.params, blur)
+      added.cardBlur = blur
+    } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+      Log.w(TAG, "Card blur attachment failed, drawing tonal backdrop", error)
+      added.request = added.request.withTonalBackdrop()
+      applyContent(added)
+    }
+  }
+
   /** Best-effort removal of a window superseded on another display; it is no longer tracked. */
   private fun retire(old: Window) {
     try {
-      old.target.windowManager.removeViewImmediate(old.view)
+      old.remove()
     } catch (error: Exception) {
       // The old display may already be gone, taking its windows with it; nothing else to undo.
       Log.w(TAG, "Superseded prototype was already removed", error)
@@ -710,7 +762,7 @@ class DefaultPrototypeHost(
     current.target.constrainDismissWindow(params, current.request)
     if (touchThroughToken != null)
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-    if (copyParams(current.params).copyFrom(params) == 0 && isViewAttached(current.view))
+    if (copyParams(current.params).copyFrom(params) == 0 && isViewAttached(current.surfaceView))
       return true
     return update(current, params)
   }
@@ -873,7 +925,7 @@ class DefaultPrototypeHost(
   private fun dismissOnMain(): Boolean {
     val current = window ?: return true
     try {
-      current.target.windowManager.removeViewImmediate(current.view)
+      current.remove()
     } catch (error: Exception) {
       if (isNotAttached(error)) {
         Log.w(TAG, "Prototype already detached; clearing window", error)
@@ -965,8 +1017,7 @@ class DefaultPrototypeHost(
   private fun hideForCaptureOnMain(): View? {
     val current = window ?: return null
     current.owner.pause()
-    current.view.visibility = View.INVISIBLE
-    return current.view
+    return current.surfaceView.also { it.visibility = View.INVISIBLE }
   }
 
   private suspend fun <T> captureWhileHidden(maxHiddenMillis: Long, block: suspend () -> T): T =
@@ -991,8 +1042,8 @@ class DefaultPrototypeHost(
       mainThread.onMain {
         if (!isBlocked() && window?.request?.isSuspended?.invoke() != true) {
           view.visibility = View.VISIBLE
-          if (window?.view === view) window?.owner?.resume()
-        } else if (window?.view === view) dismissOnMain()
+          if (window?.surfaceView === view) window?.owner?.resume()
+        } else if (window?.surfaceView === view) dismissOnMain()
       }
     } catch (error: Exception) {
       Log.e(TAG, "Failed to restore prototype after capture", error)
@@ -1001,16 +1052,19 @@ class DefaultPrototypeHost(
 
   private fun update(current: Window, params: WindowManager.LayoutParams): Boolean {
     try {
-      current.target.windowManager.updateViewLayout(current.view, params)
+      current.update(params)
     } catch (error: Exception) {
       Log.e(TAG, "Failed to update prototype", error)
       if (isNotAttached(error) && window === current) {
+        if (current.cardWindow != null) {
+          runCatching { current.remove() }
+            .onFailure { Log.w(TAG, "Prototype card already detached", it) }
+        }
         clearWindow(current)
         onWindowLost()
       }
       return false
     }
-    current.params = params
     return true
   }
 
@@ -1356,33 +1410,25 @@ private fun PrototypeChrome(
           LocalPrototypeInsetFloor provides floor,
           LocalPrototypeFillsWindow provides true,
         ) {
-          request.content()
+          request.BackdropContent()
         }
       }
     }
   } else if (chrome.escape) {
     PrototypeChromelessContent(request, chrome, floor, scope, escapeVisible)
   } else if (chrome.closeVisible) {
-    Box {
-      // Not `alpha`, which clips to this wrap-content box: anchored nodes are drawn outside it.
-      Box(Modifier.graphicsLayer { alpha = chrome.contentAlpha }) {
-        CompositionLocalProvider(LocalPrototypeInsetFloor provides floor) { request.content() }
-      }
-      // Drawn after the content so authored nodes cannot cover it.
-      PrototypeCloseChip(
-        onClick = { scope.launch { request.onHostDismiss() } },
-        modifier =
-          Modifier.align(Alignment.TopEnd)
-            .windowInsetsPadding(
-              WindowInsets.systemBars
-                .union(floor.asComposeInsets())
-                .union(WindowInsets.displayCutout)
-                .only(WindowInsetsSides.Top + WindowInsetsSides.End),
-            ),
-      )
-    }
+    PrototypeCloseOverlay(request, chrome, floor, scope)
   } else
-    Box { CompositionLocalProvider(LocalPrototypeInsetFloor provides floor) { request.content() } }
+    Box {
+      CompositionLocalProvider(LocalPrototypeInsetFloor provides floor) {
+        request.BackdropContent()
+      }
+    }
+}
+
+@Composable
+private fun PrototypeRequest.BackdropContent() {
+  PrototypeBackdropLayer(backdrop, backdropShape, content)
 }
 
 /** Observe TalkBack changes for this composition, and release the platform listener with it. */
@@ -1401,6 +1447,35 @@ private fun prototypeTouchExplorationEnabled(): Boolean {
     onDispose { manager.removeTouchExplorationStateChangeListener(listener) }
   }
   return enabled
+}
+
+@Composable
+private fun PrototypeCloseOverlay(
+  request: PrototypeRequest,
+  chrome: PrototypeHostChrome,
+  floor: PrototypeInsetFloor,
+  scope: CoroutineScope,
+) {
+  Box {
+    // Not `alpha`, which clips to this wrap-content box: anchored nodes are drawn outside it.
+    Box(Modifier.graphicsLayer { alpha = chrome.contentAlpha }) {
+      CompositionLocalProvider(LocalPrototypeInsetFloor provides floor) {
+        request.BackdropContent()
+      }
+    }
+    // Drawn after the content so authored nodes cannot cover it.
+    PrototypeCloseChip(
+      onClick = { scope.launch { request.onHostDismiss() } },
+      modifier =
+        Modifier.align(Alignment.TopEnd)
+          .windowInsetsPadding(
+            WindowInsets.systemBars
+              .union(floor.asComposeInsets())
+              .union(WindowInsets.displayCutout)
+              .only(WindowInsetsSides.Top + WindowInsetsSides.End),
+          ),
+    )
+  }
 }
 
 @Composable
@@ -1435,7 +1510,7 @@ private fun PrototypeChromelessContent(
         LocalPrototypeFillsWindow provides true,
         LocalPrototypeInsetFloor provides floor,
       ) {
-        request.content()
+        request.BackdropContent()
       }
     }
     if (escapeVisible) {

@@ -389,6 +389,12 @@ jobs:
               # it, so an edit to it must exercise them rather than be skipped.
               - '.github/actions/gradle-task-run/**'
               - 'scripts/local-dev/hot-reload.sh'
+              # The emulator job's performance-tool smoke (#18725) exercises these
+              # daemon-side sources, so a change to them must run it.
+              - 'src/features/performance/**'
+              - 'src/features/performanceTrace/**'
+              - 'src/features/profiling/**'
+              - 'src/server/*performance*'
               - '.github/workflows/android*.yml'
               # This workflow controls Android-job gating, so changes to it
               # must exercise the gate rather than being silently skipped.
@@ -3054,6 +3060,19 @@ jobs:
         if: runner.environment == 'self-hosted'
         shell: bash
         run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}" --require-metal
+
+      # ProtoViewer renders its icon with the Bun/sharp generator, which hangs in Bun's
+      # auto-install without a dependency tree.
+      - name: "Setup Bun"
+        if: matrix.config.app == 'protoviewer'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: "Install Bun dependencies"
+        if: matrix.config.app == 'protoviewer'
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
 
       - name: "Build ${{ matrix.config.app }}"
         run: ./scripts/ios/swift-build-prototype-apps.sh "${{ matrix.config.app }}"

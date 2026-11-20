@@ -26,7 +26,6 @@ export type AutoRotatePlan = {
   wasAutoRotateEnabled: boolean;
   shouldRestoreAutoRotate: boolean;
   canForceAutoRotateOff: boolean;
-  restoreAfterConfirmation: boolean;
 };
 
 type AlreadyAppliedOrientationDecision =
@@ -290,18 +289,15 @@ export class RotationOutcomes {
     const preserveLock = lockOrientation === true;
     const restoreAutomaticRotation = lockOrientation === false;
     const wasAutoRotateEnabled = autoRotateState === "enabled";
-    const restoreAfterConfirmation =
-      sessionMode && lockOrientation === undefined && wasAutoRotateEnabled;
     return {
       preserveLock,
       restoreAutomaticRotation,
       wasAutoRotateEnabled,
+      // A session's omitted lock keeps auto-rotate off so the requested orientation holds;
+      // the session restores the captured originals on release (#18833). A direct call has no
+      // release to restore at, so it turns auto-rotate back on before returning.
       shouldRestoreAutoRotate:
-        restoreAutomaticRotation ||
-        (wasAutoRotateEnabled && !preserveLock && !restoreAfterConfirmation),
-      // A session's omitted lock used to persist until release. Restore it only
-      // after a confirmed rotation, preserving its existing unknown/error policy.
-      restoreAfterConfirmation,
+        restoreAutomaticRotation || (wasAutoRotateEnabled && !preserveLock && !sessionMode),
       canForceAutoRotateOff: lockOrientation !== undefined || autoRotateState !== "unknown",
     };
   }

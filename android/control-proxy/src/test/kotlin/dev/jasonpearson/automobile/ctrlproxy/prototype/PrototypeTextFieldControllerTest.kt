@@ -196,6 +196,26 @@ class PrototypeTextFieldControllerTest {
     }
 
   @Test
+  fun `an action's setState on the field's key moves its epoch and its own edits do not`() =
+    runTest {
+      controller.show("show", spec(field))
+      val runtime = checkNotNull(controller.activeRuntime)
+      controller.interact(runtime, PrototypeInteraction.TextChange("query", "typed"))
+      assertEquals(0, runtime.current.textEpochs["query"] ?: 0)
+      controller.interact(
+        runtime,
+        PrototypeInteraction.Tap(
+          listOf(PrototypeSetStateAction("query", PrototypeScalar.Text(""))),
+        ),
+      )
+      assertEquals(PrototypeScalar.Text(""), runtime.current.state["query"])
+      assertEquals(1, runtime.current.textEpochs["query"])
+      // An edit still in flight from the cleared text is stale and cannot bring it back.
+      controller.interact(runtime, PrototypeInteraction.TextChange("query", "typed!", epoch = 0))
+      assertEquals(PrototypeScalar.Text(""), runtime.current.state["query"])
+    }
+
+  @Test
   fun `edits arriving in order keep their per-prototype sequence`() = runTest {
     controller.show("show", spec(field))
     val runtime = checkNotNull(controller.activeRuntime)

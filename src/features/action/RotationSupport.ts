@@ -19,6 +19,13 @@ export interface RotationRestoreState {
    * such setting.
    */
   deviceStateRotationLock?: string;
+  /**
+   * The committed device state (posture) `accelerometerRotation` was captured in, recorded
+   * with `deviceStateRotationLock`. Restoring the map re-applies each posture's own auto-rotate
+   * setting, so a release in a different posture leaves `accelerometer_rotation` to the map
+   * instead of writing the captured posture's value over the current posture's entry.
+   */
+  deviceStateRotationLockState?: number;
 }
 
 export const DEVICE_STATE_ROTATION_LOCK = "device_state_rotation_lock";

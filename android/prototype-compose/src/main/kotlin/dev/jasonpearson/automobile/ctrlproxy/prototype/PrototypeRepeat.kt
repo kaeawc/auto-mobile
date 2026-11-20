@@ -1077,7 +1077,7 @@ private fun RepeatInstance.interpolateTyped(text: String): PrototypeScalar {
  * derived and data passes keep it literal (#18628).
  */
 private fun RepeatInstance.display(text: String): String =
-  PrototypeRepeatTemplate.segments(text, alias).joinToString("") { segment ->
+  PrototypeRepeatTemplate.segments(text, alias, outerAlias).joinToString("") { segment ->
     when (segment) {
       is PrototypeRepeatSegment.Literal -> segment.text
       is PrototypeRepeatSegment.Index -> index.toString()

@@ -15,6 +15,9 @@ const TEAM = "AMSEED0000";
  * Disposable app source, from the probe measured in #18796: it requests
  * authorization (which shows the Health Access sheet), saves the requested
  * samples and reads them back, printing `HKPROBE ...` lines on stdout.
+ * With `read=<steps|heartRate|sleep> from=<epoch s> to=<epoch s>` it saves
+ * nothing and prints one `sample` line per sample overlapping the range
+ * (`health.read`, #14215).
  */
 export const HEALTHKIT_SEEDER_SWIFT = `import UIKit
 import HealthKit
@@ -26,6 +29,13 @@ func intArg(_ name: String, _ fallback: Double) -> Double {
     if let v = Double(a.dropFirst(name.count + 1)) { return v }
   }
   return fallback
+}
+
+func stringArg(_ name: String) -> String? {
+  for a in ProcessInfo.processInfo.arguments where a.hasPrefix(name + "=") {
+    return String(a.dropFirst(name.count + 1))
+  }
+  return nil
 }
 
 @main class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -51,6 +61,7 @@ func intArg(_ name: String, _ fallback: Double) -> Double {
     return true
   }
   func writeAndRead(steps: HKQuantityType, hr: HKQuantityType, sleep: HKCategoryType) {
+    if let kind = stringArg("read") { readSamples(kind); return }
     if CommandLine.arguments.contains("readonly") { readBack(steps, hr, sleep); return }
     let end = Date(), start = end.addingTimeInterval(-3600)
     let s = HKQuantitySample(type: steps, quantity: HKQuantity(unit: .count(), doubleValue: intArg("steps", 4242)), start: start, end: end)
@@ -74,6 +85,31 @@ func intArg(_ name: String, _ fallback: Double) -> Double {
       store.execute(q)
     }
     group.notify(queue: .main) { log("done") }
+  }
+  func readSamples(_ kind: String) {
+    let pick: (HKSampleType, HKUnit?)
+    switch kind {
+    case "steps": pick = (HKQuantityType(.stepCount), HKUnit.count())
+    case "heartRate": pick = (HKQuantityType(.heartRate), HKUnit.count().unitDivided(by: .minute()))
+    case "sleep": pick = (HKCategoryType(.sleepAnalysis), nil)
+    default: log("unsupported read=\\(kind)"); log("done"); return
+    }
+    let (sampleType, unit) = pick
+    let from = Date(timeIntervalSince1970: intArg("from", 0))
+    let to = Date(timeIntervalSince1970: intArg("to", Date().timeIntervalSince1970))
+    let predicate = HKQuery.predicateForSamples(withStart: from, end: to, options: [])
+    let sort = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
+    let q = HKSampleQuery(sampleType: sampleType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: sort) { _, res, err in
+      for x in res ?? [] {
+        var value = 0.0
+        if let u = unit, let qs = x as? HKQuantitySample { value = qs.quantity.doubleValue(for: u) }
+        if let cs = x as? HKCategorySample { value = Double(cs.value) }
+        log("sample \\(sampleType.identifier) start=\\(x.startDate.timeIntervalSince1970) end=\\(x.endDate.timeIntervalSince1970) value=\\(value)")
+      }
+      log("read \\(sampleType.identifier) n=\\(res?.count ?? -1) err=\\(String(describing: err))")
+      log("done")
+    }
+    store.execute(q)
   }
 }
 `;

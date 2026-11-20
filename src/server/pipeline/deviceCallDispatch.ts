@@ -66,6 +66,7 @@ import type { ExecutionTargetContext } from "./executionTarget";
 import type { AuditRunner } from "./audit";
 import type { NavigationToolCallRecorder } from "./navigationRecording";
 import type { DeviceMutationRecording } from "../deviceMutationRecording";
+import { noteFixtureCaptureDevice } from "../../utils/fixtureCapture/fixtureCaptureScope";
 
 export function journaledDeviceHandler(
   name: string,
@@ -665,6 +666,7 @@ export async function invokeResolvedDeviceHandler(input: {
   const { target, name, args, handler, progress, signal, navigationRecorder, traits } = input;
   // Fail closed: a watch never reaches a tool that has not opted in (#14899).
   assertToolSupportsDevicePlatform(name, target.device);
+  noteFixtureCaptureDevice(target.device);
   if (target.deviceRead) {
     // A read-only device read is not this caller's use of the device: no navigation recording
     // and no audit run on a device the caller may not hold (#10830).

@@ -86,7 +86,13 @@ with open(info_path, "wb") as info_file:
     plistlib.dump(info, info_file)
 PY
 STUB
-  chmod +x "${STUB_DIR}/xcrun" "${STUB_DIR}/codesign" "${STUB_DIR}/PlistBuddy" "${STUB_DIR}/plutil"
+  cat > "${STUB_DIR}/bun" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >> "${BUN_CALLS}"
+STUB
+  printf 'runner' > "${RUNNER_APP}/CtrlProxyUITests-Runner"
+  export BUN_CALLS="${TEST_ROOT}/bun-calls"
+  chmod +x "${STUB_DIR}/bun" "${STUB_DIR}/xcrun" "${STUB_DIR}/codesign" "${STUB_DIR}/PlistBuddy" "${STUB_DIR}/plutil"
 }
 
 teardown() {
@@ -115,6 +121,13 @@ assert info["CFBundleDisplayName"] == "CtrlProxy"
 assert info["CFBundleName"] == "CtrlProxy"
 assert info["CFBundleIcons"]["CFBundlePrimaryIcon"]["CFBundleIconName"] == "AppIcon"
 PY
+}
+
+@test "embeds simulated entitlements into the runner executable before signing" {
+  run env PATH="${STUB_DIR}:$PATH" PLIST_BUDDY="${STUB_DIR}/PlistBuddy" PLUTIL="${STUB_DIR}/plutil" bash "${SCRIPT}" --derived-data "${DERIVED_DATA}"
+
+  [ "$status" -eq 0 ]
+  grep -F "embedSimulatedEntitlements.ts ${RUNNER_APP}/CtrlProxyUITests-Runner" "${BUN_CALLS}"
 }
 
 @test "all maintained CtrlProxy UI-test startup paths use patched build artifacts" {

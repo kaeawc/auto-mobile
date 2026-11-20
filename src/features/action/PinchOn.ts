@@ -3,7 +3,7 @@ import { rejectWatchAction } from "../watch/WatchActions";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { resolveGestureCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 import { supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
-import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
+import { hasMultiplePanels, resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import type { DisplayFence, DisplayFenceDependencies } from "./BaseVisualChange";
@@ -850,7 +850,13 @@ export class PinchOn extends BaseVisualChange {
       viewHierarchy: snapshot.hierarchy,
       screenSize: freshSize,
       ...(this.device.platform === "ios"
-        ? { rotation: resolveIosObserveRotation(snapshot.hierarchy.rotation, freshSize) }
+        ? {
+            rotation: resolveIosObserveRotation(
+              snapshot.hierarchy.rotation,
+              freshSize,
+              hasMultiplePanels(this.device),
+            ),
+          }
         : {}),
       // Insets belong to a coordinate space: never apply portrait edges to a
       // fresh landscape capture when the runner did not supply rotated insets.

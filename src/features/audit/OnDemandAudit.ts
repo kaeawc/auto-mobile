@@ -29,7 +29,7 @@ export type PerformanceAuditKind = (typeof PERFORMANCE_AUDIT_KINDS)[number];
 export const AUDIT_FAIL_ON = ["error", "warning", "never"] as const;
 export type AuditFailOn = (typeof AUDIT_FAIL_ON)[number];
 
-export type MemoryAuditResult = Awaited<ReturnType<MemoryAudit["runAudit"]>>;
+export type MemoryAuditResult = NonNullable<Awaited<ReturnType<MemoryAudit["runAudit"]>>>;
 
 /** Limits the accessibility audit to the subtree of one element. */
 export interface AuditContainer {
@@ -67,7 +67,7 @@ export interface OnDemandAuditEngines {
   /** The UI performance audit of the observed foreground app. */
   performance(result: ObserveResult): Promise<PerformanceAuditResult | undefined>;
   /** A memory snapshot of the app. */
-  memory(appId: string): Promise<MemoryAuditResult>;
+  memory(appId: string): Promise<MemoryAuditResult | undefined>;
   /** The audit elements of the observation, for container scoping. */
   elements(result: ObserveResult): Element[];
   baselines: AuditBaselineStore;
@@ -214,8 +214,17 @@ export class OnDemandAudit {
       await this.runPerformance(observation, appId, output);
     }
     if (kinds.has("memory")) {
-      output.memory = await this.engines.memory(appId);
+      await this.runMemory(appId, output);
     }
+  }
+
+  private async runMemory(appId: string, output: OnDemandAuditResult): Promise<void> {
+    const result = await this.engines.memory(appId);
+    if (result) {
+      output.memory = result;
+      return;
+    }
+    output.unsupported = { ...output.unsupported, memory: `${appId} is not running.` };
   }
 
   /** Returns the violations that count toward `failOn`, or undefined when the audit failed. */
@@ -315,8 +324,7 @@ export class OnDemandAudit {
     const failing = SEVERITY_FAILS[failOn];
     return (
       reported.some((violation) => failing.has(violation.severity)) ||
-      // A requested check that could not run (a background app's performance) cannot pass, so
-      // an assertion on it fails rather than succeeding silently (#17281).
+      // An assertion fails when a requested check could not run.
       Object.keys(output.unsupported ?? {}).length > 0 ||
       output.performance?.passed === false ||
       output.memory?.passed === false

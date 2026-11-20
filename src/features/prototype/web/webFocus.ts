@@ -29,8 +29,10 @@ function isFocusable(element: WebElement, inSpec: boolean): boolean {
   );
 }
 
-/** An open dialog's layer; on both platforms a modal dialog takes focus from the screen below. */
-const isModalLayer = (element: WebElement): boolean => element.attrs["data-part"] === "dialogLayer";
+/** A dialog or an open drawer: both draw a scrim over the window and take focus. */
+const MODAL_LAYERS: ReadonlySet<string> = new Set(["dialogLayer", "drawerLayer"]);
+const isModalLayer = (element: WebElement): boolean =>
+  MODAL_LAYERS.has(element.attrs["data-part"] ?? "");
 
 /** Child indices from the root to the last modal layer in document order, if any is open. */
 function lastModalPath(element: WebElement): number[] | undefined {
@@ -99,7 +101,7 @@ function walkAt(
 /**
  * Marks the first focusable spec node in document order with a focus ring (`data-focus="ring"`),
  * as a TV draws its initial focus; a 10-foot UI with no focus is not a usable preview. With a
- * dialog open, focus starts inside the last one. A tree with no focusable node comes back unchanged.
+ * dialog or drawer open, focus starts inside the last one. A tree with no focusable node comes back unchanged.
  */
 export function markInitialFocus(content: WebElement): WebElement {
   return walkAt(content, lastModalPath(content) ?? [], { found: false });

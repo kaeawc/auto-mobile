@@ -14,6 +14,7 @@ To add one, copy the [template](template.md).
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-11-19 | decision | [Per-runtime prototype budgets](2026-11-19-prototype-runtime-budgets.md)                                                           |
 | 2026-11-19 | decision | [Headless CarPlay on TVOut with a StarkConfig](2026-11-19-headless-carplay-tvout-stark.md)                                         |
+| 2026-11-18 | decision | [Tasks eligibility from measured tool durations](2026-11-18-tasks-eligibility-from-measured-durations.md)                          |
 | 2026-11-17 | decision | [Docs navigation grouped by task and platform](2026-11-17-docs-navigation-by-task.md)                                              |
 | 2026-11-17 | concept  | [Material 3 Expressive component availability at the pinned Compose BOM](2026-11-17-m3-expressive-component-availability.md)       |
 | 2026-11-16 | decision | [Android Auto provisioning accepts the welcome screen](2026-11-16-android-auto-terms-accepted-by-provisioning.md)                  |

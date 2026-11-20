@@ -20,6 +20,13 @@ import java.util.logging.Logger
 const val PROTOTYPE_BUNDLE_MIME = "application/vnd.automobile.prototype+zip"
 const val UNSUPPORTED_PROTOTYPE_REASON = "This prototype needs a newer ProtoViewer"
 
+// Stable English reason tokens: MCP results return them verbatim, and the import screen maps them
+// to string resources (importRejectionReason) instead of showing them.
+const val IMPORT_REASON_URI_REQUIRED = "External content URI required"
+const val IMPORT_REASON_TOO_LARGE = "Content exceeds byte limit"
+const val IMPORT_REASON_UNREADABLE = "Unable to read or commit prototype within limits"
+const val IMPORT_REASON_INVALID_IMAGE = "Invalid image dimensions"
+
 enum class ImportAction {
   View,
   Send,
@@ -85,17 +92,16 @@ class ValidatedLibraryImporter(
   ) // Injected content/storage adapters may throw operational exceptions.
   override fun import(request: LibraryImportRequest): LibraryImportResult {
     return try {
-      if (!allowed(request))
-        return LibraryImportResult.Rejected("uri", "External content URI required")
+      if (!allowed(request)) return LibraryImportResult.Rejected("uri", IMPORT_REASON_URI_REQUIRED)
       val bytes =
         content.open(checkNotNull(request.uri)).use(::readImportLimited)
-          ?: return LibraryImportResult.Rejected("content", "Content exceeds byte limit")
+          ?: return LibraryImportResult.Rejected("content", IMPORT_REASON_TOO_LARGE)
       val source =
         if (request.action == ImportAction.View) LibrarySource.file else LibrarySource.share
       importBytes(bytes, source, null, null)
     } catch (error: Exception) {
       Logger.getLogger("ProtoViewerImport").log(Level.WARNING, "Import failed", error)
-      LibraryImportResult.Rejected("content", "Unable to read or commit prototype within limits")
+      LibraryImportResult.Rejected("content", IMPORT_REASON_UNREADABLE)
     }
   }
 
@@ -124,7 +130,7 @@ class ValidatedLibraryImporter(
       }
     } catch (error: Exception) {
       Logger.getLogger("ProtoViewerImport").log(Level.WARNING, "Import failed", error)
-      LibraryImportResult.Rejected("content", "Unable to read or commit prototype within limits")
+      LibraryImportResult.Rejected("content", IMPORT_REASON_UNREADABLE)
     }
   }
 
@@ -151,7 +157,7 @@ class ValidatedLibraryImporter(
         (bundle.requires - capabilities).sorted(),
       )
     return assets.invalidPath(bundle)?.let {
-      LibraryImportResult.Rejected(it, "Invalid image dimensions")
+      LibraryImportResult.Rejected(it, IMPORT_REASON_INVALID_IMAGE)
     }
   }
 

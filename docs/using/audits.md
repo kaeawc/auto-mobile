@@ -72,4 +72,18 @@ Frame-time percentiles and jank counts both cover only the frames rendered durin
 frames from app launch or earlier screens. When the app rendered no frames during the check (an idle screen), the frame-time percentiles
 `p50Ms`–`p99Ms` are null and `metrics.frameTimeUnmeasured` says why. AutoMobile then skips the
 frame-time check, so it does not fail the call. For raw captures use `performanceTrace`,
-`captureTrace`, `measureStartup` or `heapDump`.
+`captureTrace`, `measureStartup` or [`heapDump`](#heapdump).
+
+## `heapDump`
+
+Launch the app, then pass its Android package name or iOS bundle ID as `appId`.
+The result includes the host file `path`, its `sizeBytes`, and its `format`.
+
+- Android writes an `.hprof` for a debuggable or profileable app. Set `native: true` to capture
+  the native heap. `heap_dump_not_debuggable` means you need a debuggable or profileable build.
+- iOS Simulator writes a `.memgraph` you can open in Xcode. Leave `native` unset. If you get
+  `heap_dump_not_inspectable`, try a debuggable Simulator build. If the app stopped, relaunch
+  it and retry.
+
+`heapDump` is unsupported on physical iPhones. For allocation profiling on a physical iPhone,
+attach to the running app with the Allocations template in Instruments (`xctrace`).

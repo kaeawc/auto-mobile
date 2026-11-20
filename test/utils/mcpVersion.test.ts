@@ -11,6 +11,7 @@ import {
   type GitVersionInfo,
   type McpVersionDeps,
   type McpVersionResolverDeps,
+  type SourceTreeState,
 } from "../../src/utils/mcpVersion";
 import {
   DefaultGitMetadataClient,
@@ -207,6 +208,32 @@ describe("createMcpVersionResolver", () => {
       warn.mockRestore();
       expect(resolver.isSettled()).toBe(true);
     }
+  });
+
+  test("settled tree state is known only when this process's own probe answered", async () => {
+    const LAUNCHED = `${plain}.dirty.47e2e3e8f6a5`;
+    const cases: [() => Promise<GitDirtyState | null>, SourceTreeState][] = [
+      [async () => ({ dirty: false, dirtyHash: null }), "clean"],
+      [async () => ({ dirty: true, dirtyHash: "abc123def456" }), "dirty"],
+      [async () => null, "unknown"],
+    ];
+    for (const [readDirtyState, expected] of cases) {
+      const { resolver } = fixture(readDirtyState, { readLaunchVersion: () => LAUNCHED });
+      expect(await resolver.resolveSettledTreeState()).toBe(expected);
+    }
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const { resolver } = fixture(async () => {
+        throw new Error("git timed out");
+      });
+      // The version reads clean, but the probe never established that.
+      expect(await resolver.resolveSettled()).toBe(plain);
+      expect(await resolver.resolveSettledTreeState()).toBe("unknown");
+    } finally {
+      warn.mockRestore();
+    }
+    const overridden = fixture(undefined, { env: { MCP_SERVER_VERSION: "9.9.9" } });
+    expect(await overridden.resolver.resolveSettledTreeState()).toBe("unknown");
   });
 
   test("isSettled is immediately true when no refinement is due", () => {

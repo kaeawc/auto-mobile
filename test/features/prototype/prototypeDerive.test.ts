@@ -315,3 +315,18 @@ test("derived conditions inside a lazy list row template follow recomputed raw v
     expect(decided).toEqual(visible);
   }
 });
+
+test("derived conditions on a modal in a lazy row template and its button follow raw values", () => {
+  const { spec, changes } = conditionFixture.lazyRowModal;
+  expect(validatePrototypeSpec(spec).success).toBe(true);
+  const derive = prototypeDeriveSchema.parse(spec.derive);
+  const sheet = spec.root.children[0]!;
+  for (const { state, sheets, enabled } of changes) {
+    const derived = memoizedPrototypeDerive(derive, spec.data, state);
+    const context = { state, derived, platform: "android" } as const;
+    const open = spec.data.rows.map(() => decide(sheet.visibleWhen, context));
+    expect(open.filter(Boolean).length).toBe(sheets);
+    const buttons = open.filter(Boolean).map(() => decide(sheet.child.enabledWhen, context));
+    expect(buttons).toEqual(enabled);
+  }
+});

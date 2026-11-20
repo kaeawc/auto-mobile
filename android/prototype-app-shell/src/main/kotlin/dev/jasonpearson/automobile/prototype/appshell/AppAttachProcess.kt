@@ -68,6 +68,9 @@ internal class AppAttachProcess(
   override val showingId: String?
     get() = target?.showingId
 
+  override val showingStartSequence: Long?
+    get() = target?.showingStartSequence
+
   // The emit that follows carries the counter to disk, so issuing a sequence costs no write.
   override fun nextSequence(): Long =
     synchronized(journalLock) {

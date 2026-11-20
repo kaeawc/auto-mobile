@@ -58,6 +58,7 @@ dependencies {
   implementation(libs.compose.adaptive.navigation)
   implementation(libs.compose.adaptive.navigation.suite)
   implementation(libs.compose.material.icons.extended)
+  implementation(libs.haze.blur)
   api(libs.kotlinx.coroutines)
 
   testImplementation(libs.bundles.unit.test)

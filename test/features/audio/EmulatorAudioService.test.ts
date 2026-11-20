@@ -235,7 +235,7 @@ describe("EmulatorAudioService host microphone safety", () => {
         session.injectAudio = async (source, options?: InjectAudioOptions) => {
           authorizationStarted.resolve();
           await authorized.promise;
-          options?.beforeStreamOpen?.();
+          await options?.beforeStreamOpen?.();
           transport.open("injectAudio", { authorization: "Bearer test" });
           return injectAudio(source, options);
         };
@@ -672,6 +672,39 @@ describe("verified guest capture guard", () => {
     expect(sessions[0].injected).toHaveLength(1);
     await service.stopInjection(started.injectionId);
     expect(guestCapture.closed).toEqual(["emulator-5554"]);
+  });
+
+  test("refuses injection when the recorder stopped before the stream opens (#18687)", async () => {
+    const { service, sessions, guestCapture } = setup();
+    guestCapture.stoppedBeforeStream = new EmulatorAudioError(
+      "audio_guest_capture_unavailable",
+      "the capture stopped before injection: absent",
+    );
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 10 } }),
+    ).rejects.toMatchObject({ code: "audio_guest_capture_unavailable" });
+    expect(guestCapture.runningChecks).toEqual(["emulator-5554"]);
+    expect(sessions[0].injected).toEqual([]);
+    expect(sessions[0].closed).toBe(1);
+    expect(guestCapture.closed).toEqual(["emulator-5554"]);
+    expect(service.activeInjectionIds("emulator-5554")).toEqual([]);
+    // No stream was opened, so the refusal does not make the next injection a repeat.
+    guestCapture.stoppedBeforeStream = undefined;
+    const started = await service.startInjection("emulator-5554", {
+      source: { kind: "tone", durationMs: 10 },
+    });
+    expect(sessions[1].injected).toHaveLength(1);
+    await service.stopInjection(started.injectionId);
+  });
+
+  test("rechecks the running recorder once, immediately before the stream opens", async () => {
+    const { service, sessions, guestCapture } = setup();
+    const started = await service.startInjection("emulator-5554", {
+      source: { kind: "tone", durationMs: 10 },
+    });
+    expect(guestCapture.runningChecks).toEqual(["emulator-5554"]);
+    expect(sessions[0].injected).toHaveLength(1);
+    await service.stopInjection(started.injectionId);
   });
 
   for (const reason of ["completed", "max_duration"] as const) {

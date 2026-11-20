@@ -197,7 +197,8 @@ function windowHeight(placement: Raw | undefined): Raw {
 /**
  * A fullscreen or sheet root fills its window on each axis it leaves unsized, as both devices do
  * (#16190); explicit sizes stay, and a floating root keeps its content size. A sheet's root also
- * carries the sheet's height as its bound (see windowHeight).
+ * carries the sheet's height as its bound (see windowHeight). A drawer root fills nothing: its
+ * surface keeps the drawer's width.
  */
 function sizedRoot(spec: unknown): unknown {
   const root = record(record(spec)?.root);
@@ -206,9 +207,11 @@ function sizedRoot(spec: unknown): unknown {
     return root;
   }
   const style = record(root.style) ?? {};
+  // A drawer root is a window layer whose surface keeps its own constrained width and height.
+  const fill = root.type === "drawer" ? {} : { width: "fill", height: "fill" };
   return {
     ...root,
-    style: { width: "fill", height: "fill", ...style, ...windowHeight(placement) },
+    style: { ...fill, ...style, ...windowHeight(placement) },
   };
 }
 

@@ -12,6 +12,7 @@ To add one, copy the [template](template.md).
 
 | Date       | Kind     | Entry                                                                                                                              |
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-11-19 | decision | [Committed page bundle and one export budget](2026-11-19-prototype-web-page-bundle.md)                                             |
 | 2026-11-19 | decision | [Headless CarPlay on TVOut with a StarkConfig](2026-11-19-headless-carplay-tvout-stark.md)                                         |
 | 2026-11-18 | decision | [Tasks eligibility from measured tool durations](2026-11-18-tasks-eligibility-from-measured-durations.md)                          |
 | 2026-11-17 | decision | [Docs navigation grouped by task and platform](2026-11-17-docs-navigation-by-task.md)                                              |

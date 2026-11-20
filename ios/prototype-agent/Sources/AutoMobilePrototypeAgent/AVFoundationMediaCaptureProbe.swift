@@ -1,4 +1,4 @@
-#if canImport(AVFoundation)
+#if os(iOS)
     import AVFoundation
 
     /// Reads capture hardware without opening a session, so it never triggers a permission prompt.

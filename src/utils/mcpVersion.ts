@@ -205,14 +205,26 @@ const adoptableLaunchVersion = (
     : undefined;
 };
 
+/**
+ * What this process's own dirty-state probe established about the source tree: `unknown` when
+ * there is no source checkout, the version is overridden, or the probe failed or timed out.
+ */
+export type SourceTreeState = "clean" | "dirty" | "unknown";
+
 /** Cache the startup stamp and refine tracked edits once, off the startup path. */
 export const createMcpVersionResolver = (
   deps: McpVersionResolverDeps,
-): { current(): string; isSettled(): boolean; resolveSettled(): Promise<string> } => {
+): {
+  current(): string;
+  isSettled(): boolean;
+  resolveSettled(): Promise<string>;
+  resolveSettledTreeState(): Promise<SourceTreeState>;
+} => {
   let cachedVersion: string | null = null;
   let refine: (() => Promise<void>) | undefined;
   let refinement: Promise<void> | undefined;
   let refined = false;
+  let treeState: SourceTreeState = "unknown";
   const startRefinement = (): Promise<void> => (refinement ??= refine?.() ?? Promise.resolve());
   return {
     current() {
@@ -236,6 +248,7 @@ export const createMcpVersionResolver = (
             logger.warn("Background git dirty-state resolution failed", error);
           }
           cachedVersion = refinedVersion(base, git, state, deps.readLaunchVersion);
+          treeState = state === null ? "unknown" : state.dirty ? "dirty" : "clean";
           refined = true;
         };
         deps.timer.setTimeout(() => void startRefinement(), 0);
@@ -253,6 +266,10 @@ export const createMcpVersionResolver = (
       // process alive. Start (or join) the same asynchronous probe immediately.
       await startRefinement();
       return this.current();
+    },
+    async resolveSettledTreeState() {
+      await this.resolveSettled();
+      return treeState;
     },
   };
 };
@@ -295,3 +312,7 @@ export const isMcpServerVersionSettled = (): boolean => getResolver().isSettled(
 
 /** Await the same one-shot refinement used by normal background discovery. */
 export const getSettledMcpServerVersion = (): Promise<string> => getResolver().resolveSettled();
+
+/** The tree state behind {@link getSettledMcpServerVersion}, once its probe has answered. */
+export const getSettledSourceTreeState = (): Promise<SourceTreeState> =>
+  getResolver().resolveSettledTreeState();

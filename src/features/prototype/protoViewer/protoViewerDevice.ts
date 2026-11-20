@@ -14,6 +14,11 @@ export interface ProtoViewerTempFiles {
 export interface ProtoViewerCapabilityReport {
   /** The installed build's version name, for messages; absent when the app did not say. */
   version?: string;
+  /**
+   * The installed build's versionCode, for the support window; absent when the platform's build
+   * number does not follow the release versionCode scheme.
+   */
+  versionCode?: number;
   capabilities: ReadonlySet<string>;
   /** Where to get a newer build on this platform. */
   updateUrl?: string;

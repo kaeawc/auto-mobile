@@ -96,7 +96,7 @@ compose-multiplatform = "1.12.2"
 compose-hot-reload = "1.2.0"
 # dev.chrisbanes.haze, Apache-2.0: in-composition backdrop blur for prototype node layers (#15126).
 haze = "2.1.0"
-metro = "1.5.2"
+metro = "1.6.0"
 conveyor = "2.0"
 # Build-time license collection for ProtoViewer's in-app licenses screen (#14158). Gradle plugin only:
 # no runtime library, the app renders the generated JSON itself.

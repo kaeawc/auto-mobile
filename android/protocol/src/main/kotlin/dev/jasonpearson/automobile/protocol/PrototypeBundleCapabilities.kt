@@ -114,7 +114,7 @@ internal object PrototypeBundleCapabilities {
     val type = text(action["type"])
     if (type in PrototypeDataRules.dataActionTypes) caps.add("prototype_data_actions_v1")
     if (type == "prependData") caps.add("prototype_lazy_list_v1")
-    if (PrototypeDataRules.isKeyedAction(action)) caps.add("prototype_data_actions_v2")
+    if (PrototypeGeneratedValues.needsDataV2(action)) caps.add("prototype_data_actions_v2")
   }
 
   private fun fields(node: JsonObject, caps: MutableSet<String>) {
@@ -130,13 +130,9 @@ internal object PrototypeBundleCapabilities {
       )
     )
       caps.add("prototype_loading_states_v1")
-    val repeat = node["repeat"] as? JsonObject
-    if (repeat?.containsKey("derive") == true) caps.add("prototype_format_v1")
-    if ((repeat?.get("items") as? JsonObject)?.containsKey("derived") == true)
-      caps.add("prototype_derive_v1")
-    if (repeat?.let { "key" in it || it["items"] is JsonObject } == true)
-      caps.add("prototype_data_model_v1")
+    repeatFields(node["repeat"] as? JsonObject, caps)
     PrototypeBindableFields.first<Unit>(node, "") { value, _, kind ->
+      if (kind == PrototypeBindableKind.DERIVED_CONDITION) caps.add("prototype_derive_v1")
       val bound =
         when (kind) {
           PrototypeBindableKind.TEXT -> text(value)?.let(PrototypeDataText::hasBinding) == true
@@ -150,6 +146,14 @@ internal object PrototypeBundleCapabilities {
       listOfNotNull(node["enabledWhen"], node["visibleWhen"], node["errorWhen"]) +
         (node["styleWhen"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.get("when") }
     if (conditions.any { hasField(it, setOf("data"), emptySet()) })
+      caps.add("prototype_data_model_v1")
+  }
+
+  private fun repeatFields(repeat: JsonObject?, caps: MutableSet<String>) {
+    if (repeat?.containsKey("derive") == true) caps.add("prototype_format_v1")
+    if ((repeat?.get("items") as? JsonObject)?.containsKey("derived") == true)
+      caps.add("prototype_derive_v1")
+    if (repeat?.let { "key" in it || it["items"] is JsonObject } == true)
       caps.add("prototype_data_model_v1")
   }
 

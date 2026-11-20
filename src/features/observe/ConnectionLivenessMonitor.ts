@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { outsideFixtureCapture } from "../../utils/fixtureCapture/fixtureCaptureScope";
 import { logger } from "../../utils/logger";
 import type { TimedOutRequest } from "../../utils/RequestManager";
 import type { Timer } from "../../utils/SystemTimer";
@@ -80,7 +81,9 @@ export class ConnectionLivenessMonitor {
         this.stopHealthCheck();
 
         // Attempt reconnection if auto-reconnect is enabled and not already connecting
-        this.host.reconnectAfterFailedHealthCheck();
+        // The interval inherits the capture scope of the tool call that connected; the reconnect
+        // it schedules is background work and must not be attributed to that call.
+        outsideFixtureCapture(() => this.host.reconnectAfterFailedHealthCheck());
       } else {
         logger.debug(
           `[${this.host.getLogTag()}] Health check passed (time since last: ${timeSinceLastCheck}ms)`,

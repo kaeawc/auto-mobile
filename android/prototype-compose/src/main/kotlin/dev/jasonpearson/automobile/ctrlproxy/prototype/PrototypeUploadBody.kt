@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.EmitContextInputs
 import dev.jasonpearson.automobile.protocol.PrototypeDataValue
+import dev.jasonpearson.automobile.protocol.PrototypeDataWriteError
 import dev.jasonpearson.automobile.protocol.PrototypeDataWriter
 import dev.jasonpearson.automobile.protocol.PrototypeRequestUploadPart
 import dev.jasonpearson.automobile.protocol.PrototypeRequests
@@ -40,6 +41,9 @@ sealed interface PrototypeUploadBody {
 }
 
 /** Kept separate from JSON binding resolution, which deliberately knows nothing about assets. */
+internal class PrototypeUploadBindingException(val error: PrototypeDataWriteError) :
+  IllegalArgumentException(error.message)
+
 internal object PrototypeUploadResolver {
   fun isUpload(body: JsonObject?): Boolean =
     body != null && body.keys.any { it in setOf("multipart", "form", "file") }
@@ -57,7 +61,7 @@ internal object PrototypeUploadResolver {
           )
         "form" in body ->
           PrototypeUploadBody.Form(
-            body.getValue("form").jsonObject.mapValues { (_, value) ->
+            body.getValue("form").jsonObject.toSortedMap().mapValues { (_, value) ->
               text(value.jsonObject, inputs)
             },
           )
@@ -90,7 +94,7 @@ internal object PrototypeUploadResolver {
     val value =
       when (val result = PrototypeDataWriter.resolveValue(binding, inputs)) {
         is PrototypeDataValue.Resolved -> result.value
-        is PrototypeDataValue.Failure -> throw IllegalArgumentException(result.error.message)
+        is PrototypeDataValue.Failure -> throw PrototypeUploadBindingException(result.error)
       }
     return when {
       value is JsonPrimitive && value.isString -> value.content

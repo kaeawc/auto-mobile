@@ -137,6 +137,7 @@ enum PrototypeStrictBindings {
                         "Decrement requires a numeric state key"
                 ) }
                 if type == "setState", !action.operandTemplated, let operand = value["value"],
+                   PrototypeGeneratedValues.form(operand) == nil,
                    operand.objectFields?["event"] == nil, operand.objectFields?["platform"] == nil
                 {
                     let controls = nodes.filter { boundKeys($0.value).contains(key) }

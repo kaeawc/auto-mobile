@@ -54,6 +54,15 @@ describe("provisionDevice Apple spec guidance", () => {
     });
   }
 
+  test("every Apple example names a general 27.2 runtime, the Xcode 27.2 default", () => {
+    for (const { platform } of APPLE_PLATFORMS) {
+      // Ends at the version: never a device-specific runtime such as iOS-27-2-iPhone19-4.
+      expect(APPLE_PROVISION_SPEC_GUIDANCE[platform].example.runtime).toMatch(
+        /\.SimRuntime\.[A-Za-z]+-27-2$/,
+      );
+    }
+  });
+
   test("ios: a short deviceType names its full CoreSimulator form", () => {
     const message = refusal({
       device: {

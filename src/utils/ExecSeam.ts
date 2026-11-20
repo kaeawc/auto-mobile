@@ -1,6 +1,7 @@
 import type { ExecResult } from "../models";
 import { wrapCommandError, type CommandErrorFormatOptions } from "./CommandError";
 import { createExecResult } from "./execResult";
+import { beginCapturedCommand } from "./fixtureCapture/fixtureCaptureScope";
 
 /**
  * Node exec option names as passed to the underlying `execFile`/`promisify`
@@ -50,6 +51,32 @@ export interface ExecSeamBehavior {
 }
 
 /**
+ * Runs `invoke` and, only when fixture capture mode is on for the current tool call (#18770),
+ * records the command and its outcome. The result or error passes through unchanged.
+ */
+async function invokeCaptured(
+  invoke: (options: ExecSeamOptions) => Promise<RawExecOutput>,
+  execOptions: ExecSeamOptions,
+  errorContext: CommandErrorFormatOptions,
+): Promise<RawExecOutput> {
+  const capture = beginCapturedCommand(
+    [errorContext.command, ...(errorContext.args ?? [])],
+    errorContext.cwd,
+  );
+  if (!capture) {
+    return invoke(execOptions);
+  }
+  try {
+    const output = await invoke(execOptions);
+    capture.finish(output);
+    return output;
+  } catch (error) {
+    capture.finish({ error });
+    throw error;
+  }
+}
+
+/**
  * Shared exec runner: maps request options to node exec option names, invokes
  * the executor's exec seam (shell string vs. file+argv, supplied by the
  * `invoke` closure), coerces the raw output via the canonical
@@ -90,7 +117,7 @@ export async function runExecSeam(
     if (options.env !== undefined) {
       execOptions.env = options.env;
     }
-    const { stdout, stderr } = await invoke(execOptions);
+    const { stdout, stderr } = await invokeCaptured(invoke, execOptions, errorContext);
     return createExecResult(stdout, stderr);
   } catch (error) {
     if (behavior.preserveError) {

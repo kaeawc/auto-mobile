@@ -1,3 +1,4 @@
+import { prototypeActionNeedsDataV2 } from "./prototypeGeneratedBindings";
 import { prototypeChannelHandlers } from "./prototypeChannelHandlers";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 /**
@@ -146,6 +147,7 @@ export type FieldKind =
   | "text"
   | "operand"
   | "substring"
+  | "derivedCondition"
   | "emitName"
   | "key"
   | "emitBinding"
@@ -224,11 +226,12 @@ function mapKeyList(data: Raw, key: string, path: string, visit: FieldVisitor): 
 }
 
 function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
+  mapField(condition, "derived", path, { kind: "derivedCondition", visit });
   mapField(condition, "data", path, { kind: "routePointer", visit });
   mapField(condition, "key", path, { kind: "key", visit });
   mapKeyList(condition, "valid", path, visit);
   const operandVisit: FieldVisitor = (value, fieldPath, kind) =>
-    visit(value, fieldPath, kind, Object.hasOwn(condition, "data"));
+    visit(value, fieldPath, kind, "data" in condition);
   mapField(condition, "equals", path, { kind: "operand", visit: operandVisit });
   mapField(condition, "notEquals", path, { kind: "operand", visit: operandVisit });
   mapField(condition, "contains", path, { kind: "substring", visit: operandVisit });
@@ -270,9 +273,6 @@ function mapEmitAction(action: Raw, path: string, visit: FieldVisitor): void {
 function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
   if (action.type === "prependData") {
     visit(action, path, "prependData");
-  }
-  if (action.where !== undefined || action.member !== undefined) {
-    visit(action, path, "keyedData");
   }
   const where = record(action.where);
   if (where) {
@@ -330,6 +330,9 @@ function mapRouteAction(action: Raw, path: string, visit: FieldVisitor): void {
 }
 
 function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
+  if (prototypeActionNeedsDataV2(action)) {
+    visit(action, path, "keyedData");
+  }
   mapRouteAction(action, path, visit);
   if (
     ["setData", "appendData", "prependData", "upsertData", "removeData"].includes(
@@ -405,6 +408,10 @@ function mapRequestEntries(action: Raw, field: string, path: string, visit: Fiel
 /** `url` and literal header/query strings are text; `into` is a data path; follow-ups recurse. */
 function mapRequestAction(action: Raw, path: string, visit: FieldVisitor): void {
   visit(action, path, "request");
+  const where = record(action.where);
+  if (where) {
+    action.where = { ...where, equals: mapBinding(where.equals, `${path}.where.equals`, visit) };
+  }
   if (action.via === "device") {
     visit(action, path, "deviceRequest");
   }

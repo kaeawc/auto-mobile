@@ -151,28 +151,18 @@ describe("CLI transparently enables gated tools", () => {
     expect(enable?.params).toMatchObject({ toolName: "provisionDevice", enabled: true });
   });
 
-  test("enables getIosSimulatorCapabilities and forwards a supplied session UUID only", async () => {
+  test("enables exportPlan and forwards a supplied session UUID only", async () => {
     const callsWithoutSession: Array<{ name: string; params: unknown }> = [];
     recordProxy(callsWithoutSession);
 
-    await runCliCommand([
-      "getIosSimulatorCapabilities",
-      "--deviceType",
-      "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
-      "--runtime",
-      "iOS-18-0",
-    ]);
+    await runCliCommand(["exportPlan", "--recordingId", "rec-1"]);
 
     const namesWithoutSession = callsWithoutSession.map((call) => call.name);
     expect(namesWithoutSession.indexOf("setToolEnabled")).toBeLessThan(
-      namesWithoutSession.indexOf("getIosSimulatorCapabilities"),
+      namesWithoutSession.indexOf("exportPlan"),
     );
-    const capabilitiesWithoutSession = callsWithoutSession.find(
-      (call) => call.name === "getIosSimulatorCapabilities",
-    );
-    expect(capabilitiesWithoutSession?.params).toEqual({
-      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
-      runtime: "iOS-18-0",
+    expect(callsWithoutSession.find((call) => call.name === "exportPlan")?.params).toEqual({
+      recordingId: "rec-1",
     });
 
     const callsWithSession: Array<{ name: string; params: unknown }> = [];
@@ -180,22 +170,17 @@ describe("CLI transparently enables gated tools", () => {
     await runCliCommand([
       "--session-uuid",
       "11111111-1111-4111-8111-111111111111",
-      "getIosSimulatorCapabilities",
-      "--deviceType",
-      "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
-      "--runtime",
-      "iOS-18-0",
+      "exportPlan",
+      "--recordingId",
+      "rec-1",
     ]);
 
     const namesWithSession = callsWithSession.map((call) => call.name);
     expect(namesWithSession.indexOf("setToolEnabled")).toBeLessThan(
-      namesWithSession.indexOf("getIosSimulatorCapabilities"),
+      namesWithSession.indexOf("exportPlan"),
     );
-    expect(
-      callsWithSession.find((call) => call.name === "getIosSimulatorCapabilities")?.params,
-    ).toEqual({
-      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
-      runtime: "iOS-18-0",
+    expect(callsWithSession.find((call) => call.name === "exportPlan")?.params).toEqual({
+      recordingId: "rec-1",
       sessionUuid: "11111111-1111-4111-8111-111111111111",
     });
   });

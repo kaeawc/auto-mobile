@@ -15,7 +15,7 @@ import type { HostChildProcess as ChildProcess } from "../HostCommandExecutor";
 
 import { logger } from "../logger";
 import { createSimulatorLaunchHandle } from "./simulatorLaunchHandle";
-import { bootDataMissingError } from "./simctlFailureClassifier";
+import { bootFailureGuidanceError } from "./simctlFailureClassifier";
 
 import { ExecResult, ActionableError, BootedDevice } from "../../models";
 import { DeviceAlreadyRunningError } from "../../models/DeviceAlreadyRunningError";
@@ -571,7 +571,7 @@ export class SimCtlBoot {
   ): Promise<boolean> {
     const reportedState = parseAlreadyBootedCoreSimulator405State(error, udid);
     if (reportedState === undefined) {
-      throw bootDataMissingError(udid, error) ?? error;
+      throw bootFailureGuidanceError(udid, error) ?? error;
     }
     if (reportedState === "Booting" || reportedState === "Shutting Down") {
       logger.debug(

@@ -1,4 +1,5 @@
 import { lazyDeviceClaims, StoreDeviceClaimMirror, type DeviceClaimMirror } from "../deviceClaims";
+import { localClaimRegistryExpectation } from "../deviceClaimRegistryExpectation";
 import type { DeviceClaimMirrorHub } from "../deviceClaimMirrorHub";
 import type { SqliteBindingRegistry } from "../sessionBroker/registry/sqliteBindingRegistry";
 import { bindingRegistryFileExists } from "../sessionBroker/registry/sqliteBindingRegistry";
@@ -105,6 +106,7 @@ export interface DaemonSessionsHost {
   /** The current registry open, served only after it settles. */
   bindingRegistry: () => Promise<SqliteBindingRegistry> | undefined;
   startBackgroundRegistryUpgrade: DaemonBroker["startBackgroundRegistryUpgrade"];
+  lastBindingRegistryOpenFailure: DaemonBroker["lastBindingRegistryOpenFailure"];
   deviceClaimMirrors: () => DeviceClaimMirrorHub;
   foreignCtrlProxyForwardEvidence: () => ForeignCtrlProxyForwardEvidence | undefined;
   deviceStateChangeNotifier: () => DeviceStateChangeNotifier;
@@ -138,8 +140,13 @@ export class DaemonSessions {
           whenOpen: async () => (await this.host.bindingRegistry())?.deviceClaims(),
           registryFileExists: bindingRegistryFileExists,
           openRegistry: () => this.host.startBackgroundRegistryUpgrade(),
-          // Bound daemons always create the registry, so from then on the table must decide.
-          registryExpected: () => this.host.identity.socketBindCommitted(),
+          // Bound daemons always create the registry, so from then on the table must decide;
+          // before bind it must whenever a migrated registry file exists (#11811, E1).
+          registryExpected: localClaimRegistryExpectation({
+            socketBound: () => this.host.identity.socketBindCommitted(),
+            registryFileExists: bindingRegistryFileExists,
+            lastOpenFailure: () => this.host.lastBindingRegistryOpenFailure(),
+          }),
           timer: this.host.services.timer(),
           daemonSessionId: this.host.identity.daemonSessionId(),
         }),
@@ -215,7 +222,7 @@ export class DaemonSessions {
         defaultPersonaRestoreRegistry.retireDevice(deviceId);
         defaultSystemAlertPolicyRegistry.retireDevice(deviceId);
         defaultKeyboardProfileRestoreRegistry.retireDevice(deviceId);
-        defaultDisplayInventoryProvider.invalidate(deviceId);
+        defaultDisplayInventoryProvider.retire(deviceId);
         this.host.services.deviceReadiness().clearExplicitDevicePin(deviceId);
         this.host.services.deviceSessionRegistry().onDeviceDisconnected(deviceId);
         // Full removal: prune AFTER epoch retirement, which also invalidates frames.

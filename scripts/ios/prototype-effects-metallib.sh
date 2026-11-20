@@ -27,7 +27,7 @@ if ! xcrun --sdk iphonesimulator metal --version > /dev/null 2>&1; then
   if [[ "${PROTOTYPE_EFFECTS_NO_DOWNLOAD:-}" == 1 || "${RUNNER_ENVIRONMENT:-}" == self-hosted ]]; then
     developer_dir="${DEVELOPER_DIR:-$(xcode-select -p 2> /dev/null || echo unknown)}"
     echo "The Metal Toolchain is not installed for the Xcode at ${developer_dir}." >&2
-    echo "Install it once: DEVELOPER_DIR=${developer_dir} xcodebuild -downloadComponent metalToolchain" >&2
+    echo "Install it once: DEVELOPER_DIR=$(printf '%q' "${developer_dir}") xcodebuild -downloadComponent metalToolchain" >&2
     exit 1
   fi
   xcodebuild -downloadComponent metalToolchain >&2

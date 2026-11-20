@@ -6,6 +6,7 @@ import type {
   ProvisionAndroidAutoOptions,
   ProvisionDeviceProfile,
   StartDeviceAndroidAutoOptions,
+  StartDeviceCarPlayOptions,
 } from "./schemas";
 
 // Export interfaces for type safety
@@ -28,6 +29,8 @@ export interface StartDeviceArgs {
   createIfMissing?: boolean;
   /** Android only: start a headless DHU for an already provisioned phone once it is ready (#17840). */
   androidAuto?: StartDeviceAndroidAutoOptions;
+  /** iOS Simulator only: power on the CarPlay screen once the simulator is ready (#18820). */
+  carPlay?: StartDeviceCarPlayOptions;
   /** Request-local owner admitted before boot; never mint a replacement if recovery fails. */
   __restartResumeSessionUuid?: string;
   /** Routing snapshot carried across acquisition schema parsing. */

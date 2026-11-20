@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  ALLOW_TAP,
   HealthKitSeeder,
+  TURN_ON_ALL_TAP,
+  type HealthSheetTap,
   parseHealthProbeOutput,
   planHealthSheetTaps,
   type HealthAppRun,
@@ -18,6 +21,7 @@ import {
   type HealthKitAppBuilder,
   HEALTHKIT_SEEDER_ENTITLEMENTS,
   HEALTHKIT_SEEDER_INFO_PLIST,
+  HEALTHKIT_SEEDER_SWIFT,
 } from "../../../src/utils/ios/healthKitSeederApp";
 
 const fixture = (name: string): string =>
@@ -91,9 +95,10 @@ class FakeSheet implements HealthSheetUi {
     this.polls += 1;
     return screen;
   }
-  async tapText(_udid: string, text: string): Promise<void> {
-    this.taps.push(text);
-    if (text === "Allow") {
+  async tap(_udid: string, selector: HealthSheetTap): Promise<void> {
+    const name = "text" in selector ? selector.text : selector.elementId;
+    this.taps.push(name);
+    if (selector === ALLOW_TAP) {
       this.onAllow();
     }
   }
@@ -190,11 +195,15 @@ describe("parseHealthProbeOutput", () => {
 });
 
 describe("planHealthSheetTaps", () => {
-  test("taps Turn On All then Allow on the captured sheet", () => {
-    expect(planHealthSheetTaps(sheetBeforeTurnOn)).toEqual(["Turn On All", "Allow"]);
+  test("taps Turn On All by label then Allow by its measured id on the captured sheet", () => {
+    expect(planHealthSheetTaps(sheetBeforeTurnOn)).toEqual([
+      { text: "Turn On All" },
+      { elementId: "UIA.Health.Allow.Button" },
+    ]);
   });
-  test("never taps Turn Off All", () => {
-    expect(planHealthSheetTaps(sheetAfterTurnOn)).toEqual(["Allow"]);
+  test("never taps Turn Off All, nor the shared category id", () => {
+    expect(planHealthSheetTaps(sheetAfterTurnOn)).toEqual([ALLOW_TAP]);
+    expect(planHealthSheetTaps(sheetBeforeTurnOn)[0]).toBe(TURN_ON_ALL_TAP);
   });
   test("the first-shown sheet has no Allow button yet", () => {
     expect(sheetBeforeTurnOn.some((e) => e.elementId === "UIA.Health.Allow.Button")).toBe(false);
@@ -213,7 +222,7 @@ describe("HealthKitSeeder", () => {
       `terminate UDID ${HEALTHKIT_SEEDER_BUNDLE_ID}`,
       `launch UDID ${HEALTHKIT_SEEDER_BUNDLE_ID} steps=100 hr=72 sleepHours=6`,
     ]);
-    expect(sheet.taps).toEqual(["Turn On All", "Allow"]);
+    expect(sheet.taps).toEqual(["Turn On All", "UIA.Health.Allow.Button"]);
     expect(result).toEqual({
       sheetAccepted: true,
       readBack: {
@@ -228,7 +237,7 @@ describe("HealthKitSeeder", () => {
     const { instance, sheet, timer } = seeder(run1, [[], [], sheetBeforeTurnOn]);
     await instance.seed("UDID");
     expect(timer.getSleepHistory()).toEqual([500, 500]);
-    expect(sheet.taps).toEqual(["Turn On All", "Allow"]);
+    expect(sheet.taps).toEqual(["Turn On All", "UIA.Health.Allow.Button"]);
   });
 
   test("an already-authorized app shows no sheet and still succeeds", async () => {
@@ -326,6 +335,123 @@ describe("HealthKitSeeder", () => {
   });
 });
 
+// Synthetic `read=` output in the app's line format (the read mode is not device-measured yet).
+const readOutput = (lines: string[]): string =>
+  [
+    'HKPROBE available=true args=["read=steps", "from=1000", "to=5000"]',
+    "HKPROBE requestAuthorization ok=true err=nil",
+    ...lines,
+    "HKPROBE done",
+    "",
+  ].join("\n");
+
+const STEPS_READ = readOutput([
+  "HKPROBE sample HKQuantityTypeIdentifierStepCount start=1795097577.5 end=1795101177.5 value=4242.0",
+  "HKPROBE sample HKQuantityTypeIdentifierStepCount start=1795101177.5 end=1795101178.0 value=10.0",
+  "HKPROBE read HKQuantityTypeIdentifierStepCount n=2 err=nil",
+]);
+
+describe("HealthKitSeeder.read", () => {
+  test("launches with the read args, accepts the sheet and returns samples in ms", async () => {
+    const { instance, runner, sheet } = seeder(STEPS_READ, [sheetBeforeTurnOn]);
+    const result = await instance.read("UDID", {
+      type: "steps",
+      range: { start: 1_000_000, end: 5_000_500 },
+    });
+    expect(runner.calls.at(-1)).toBe(
+      `launch UDID ${HEALTHKIT_SEEDER_BUNDLE_ID} read=steps from=1000 to=5000.5`,
+    );
+    expect(sheet.taps).toEqual(["Turn On All", "UIA.Health.Allow.Button"]);
+    expect(result).toEqual({
+      type: "steps",
+      sheetAccepted: true,
+      samples: [
+        { start: 1795097577500, end: 1795101177500, value: 4242, unit: "count" },
+        { start: 1795101177500, end: 1795101178000, value: 10, unit: "count" },
+      ],
+    });
+  });
+
+  test("an empty range reads back no samples", async () => {
+    const out = readOutput(["HKPROBE read HKCategoryTypeIdentifierSleepAnalysis n=0 err=nil"]);
+    const { instance } = seeder(out, [[]]);
+    const result = await instance.read("UDID", { type: "sleep", range: { start: 0, end: 1 } });
+    expect(result.samples).toEqual([]);
+  });
+
+  test("unsupported for an unknown type or a reversed range, before any build", async () => {
+    const { instance, runner, builder } = seeder(STEPS_READ, [[]]);
+    const unknown = await instance
+      .read("UDID", { type: "workouts", range: { start: 0, end: 1 } })
+      .catch((e) => e);
+    expect(unknown).toBeInstanceOf(HealthSeedError);
+    expect(unknown.code).toBe("unsupported");
+    expect(unknown.message).toContain("steps, heartRate, sleep");
+    const reversed = await instance
+      .read("UDID", { type: "steps", range: { start: 2, end: 1 } })
+      .catch((e) => e);
+    expect(reversed.code).toBe("unsupported");
+    const inherited = await instance
+      .read("UDID", { type: "toString", range: { start: 0, end: 1 } })
+      .catch((e) => e);
+    expect(inherited.code).toBe("unsupported");
+    expect(runner.calls).toEqual([]);
+    expect(builder.events).toEqual([]);
+  });
+
+  test("unsupported when the app refuses the read", async () => {
+    const out = "HKPROBE available=true args=[]\nHKPROBE unsupported read=steps\nHKPROBE done\n";
+    const { instance } = seeder(out, [[]]);
+    const error = await instance
+      .read("UDID", { type: "steps", range: { start: 0, end: 1 } })
+      .catch((e) => e);
+    expect(error.code).toBe("unsupported");
+  });
+
+  test("unavailable when HealthKit reports no health data", async () => {
+    const { instance } = seeder("HKPROBE available=false args=[]\nHKPROBE done\n", [[]]);
+    const error = await instance
+      .read("UDID", { type: "heartRate", range: { start: 0, end: 1 } })
+      .catch((e) => e);
+    expect(error.code).toBe("unavailable");
+  });
+
+  test("permission_denied when the read is not determined (HealthKit code 5)", async () => {
+    const out = readOutput([
+      'HKPROBE read HKQuantityTypeIdentifierStepCount n=-1 err=Optional(Error Domain=com.apple.healthkit Code=5 "Authorization not determined")',
+    ]);
+    const { instance } = seeder(out, [[]]);
+    const error = await instance
+      .read("UDID", { type: "steps", range: { start: 0, end: 1 } })
+      .catch((e) => e);
+    expect(error.code).toBe("permission_denied");
+    expect(error.message).toContain("Code=5");
+  });
+
+  test("read_failed for another query error or a sample count mismatch", async () => {
+    const failed = seeder(
+      readOutput([
+        "HKPROBE read HKQuantityTypeIdentifierStepCount n=-1 err=Optional(Error Domain=com.apple.healthkit Code=3)",
+      ]),
+      [[]],
+    );
+    const error = await failed.instance
+      .read("UDID", { type: "steps", range: { start: 0, end: 1 } })
+      .catch((e) => e);
+    expect(error.code).toBe("read_failed");
+
+    const short = seeder(
+      readOutput(["HKPROBE read HKQuantityTypeIdentifierStepCount n=3 err=nil"]),
+      [[]],
+    );
+    const mismatch = await short.instance
+      .read("UDID", { type: "steps", range: { start: 0, end: 1 } })
+      .catch((e) => e);
+    expect(mismatch.code).toBe("read_failed");
+    expect(mismatch.message).toContain("printed 0");
+  });
+});
+
 describe("disposable app resources", () => {
   test("entitlements carry the HealthKit keys and application-identifier for the bundle", () => {
     expect(HEALTHKIT_SEEDER_ENTITLEMENTS).toContain(
@@ -334,5 +460,16 @@ describe("disposable app resources", () => {
     expect(HEALTHKIT_SEEDER_ENTITLEMENTS).toContain(`.${HEALTHKIT_SEEDER_BUNDLE_ID}</string>`);
     expect(HEALTHKIT_SEEDER_INFO_PLIST).toContain("NSHealthUpdateUsageDescription");
     expect(HEALTHKIT_SEEDER_INFO_PLIST).toContain(HEALTHKIT_SEEDER_BUNDLE_ID);
+  });
+
+  test("the read mode keeps its Swift string interpolation", () => {
+    const readMode = HEALTHKIT_SEEDER_SWIFT.slice(
+      HEALTHKIT_SEEDER_SWIFT.indexOf("func readSamples"),
+    );
+    expect(readMode).toContain('log("unsupported read=\\(kind)")');
+    expect(readMode).toContain("value=\\(value)");
+    expect(HEALTHKIT_SEEDER_SWIFT).toContain(
+      'if let kind = stringArg("read") { readSamples(kind); return }',
+    );
   });
 });

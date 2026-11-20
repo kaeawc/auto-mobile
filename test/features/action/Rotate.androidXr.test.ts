@@ -86,7 +86,10 @@ describe("Rotate on Android XR (#18909)", () => {
       ...headset,
       formFactor: undefined,
     });
-    adb.setCommandResponse(`shell pm has-feature ${XR_SPATIAL_FEATURE}`, createExecResult("true", ""));
+    adb.setCommandResponse(
+      `shell pm has-feature ${XR_SPATIAL_FEATURE}`,
+      createExecResult("true", ""),
+    );
 
     await expect(rotate.execute("portrait")).rejects.toBeInstanceOf(RotateUnsupportedError);
     expect(adb.getExecutedCommands()).toEqual([`shell pm has-feature ${XR_SPATIAL_FEATURE}`]);

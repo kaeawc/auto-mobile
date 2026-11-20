@@ -44,7 +44,11 @@ function setup() {
   timer.enableAutoAdvance();
   // An empty display list skips the existence check; display 3 is naturally portrait.
   adb.setCommandResponse("shell wm size -d 3", createExecResult("Physical size: 1080x1920", ""));
-  return { adb, timer, rotate: new Rotate(device, { adb, timer, xrDetector: new FakeAndroidXrDetector() }) };
+  return {
+    adb,
+    timer,
+    rotate: new Rotate(device, { adb, timer, xrDetector: new FakeAndroidXrDetector() }),
+  };
 }
 
 const dumpsysCalls = (adb: FakeAdbExecutor) =>

@@ -37,6 +37,8 @@ interface InventoryEntry {
   outcome?: DisplayInventoryOutcome;
   retryAt?: number;
   pending?: Promise<void>;
+  /** Creation order per provider; fences shared history against superseded reads. */
+  generation: number;
 }
 
 /** Last successful panel list and consecutive failed reads for one device incarnation. */
@@ -44,6 +46,8 @@ interface InventoryHistory {
   token: string;
   lastGood?: { displays: DeviceDisplays; outcome: DisplayInventoryOutcome };
   failures: number;
+  /** Generation of the newest entry that wrote this history. */
+  generation: number;
 }
 
 /**
@@ -63,6 +67,7 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
   private readonly entries = new Map<string, InventoryEntry>();
   /** Survives invalidate(): a booted device's panel set is fixed, only its posture changes. */
   private readonly history = new Map<string, InventoryHistory>();
+  private nextGeneration = 0;
 
   private readonly timer: Pick<Timer, "now">;
   private readonly degradedRetryMs: number;
@@ -122,7 +127,7 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
   ): Promise<InventoryEntry> {
     let entry = this.entries.get(key);
     if (!entry || entry.token !== identityToken) {
-      entry = { token: identityToken, displays: null };
+      entry = { token: identityToken, displays: null, generation: this.nextGeneration++ };
       this.entries.set(key, entry);
       entry.pending = this.fetch(key, entry, device);
       await awaitWhileRequestIsLive(entry.pending, signal);
@@ -146,6 +151,19 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
     for (const key of this.entries.keys()) {
       if (key.endsWith(`:${deviceId}`)) {
         this.entries.delete(key);
+      }
+    }
+  }
+
+  /**
+   * The device is gone: drop its last good panels too, so a replacement that reuses the serial
+   * (and, on sessionless paths, the same identity token) cannot inherit them.
+   */
+  retire(deviceId: string): void {
+    this.invalidate(deviceId);
+    for (const key of this.history.keys()) {
+      if (key.endsWith(`:${deviceId}`)) {
+        this.history.delete(key);
       }
     }
   }
@@ -194,11 +212,11 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
       this.recordFailure(key, entry);
       return;
     }
-    const history = this.historyFor(key, entry.token);
-    history.failures = 0;
-    history.lastGood = entry.displays
-      ? { displays: entry.displays, outcome: entry.outcome }
-      : undefined;
+    const outcome = entry.outcome;
+    this.updateHistory(key, entry, (history) => {
+      history.failures = 0;
+      history.lastGood = entry.displays ? { displays: entry.displays, outcome } : undefined;
+    });
     entry.retryAt = result.degraded ? this.timer.now() + this.degradedRetryMs : undefined;
   }
 
@@ -208,24 +226,42 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
    * does not drop observe to the single-display default.
    */
   private recordFailure(key: string, entry: InventoryEntry): void {
-    const history = this.historyFor(key, entry.token);
-    history.failures++;
-    if (history.lastGood) {
+    const prior = this.history.get(key);
+    const lastGood = prior?.token === entry.token ? prior.lastGood : undefined;
+    const history = this.updateHistory(key, entry, (current) => {
+      current.failures++;
+    });
+    if (lastGood) {
       logger.warn(
         `[DisplayInventoryProvider] Serving last good display inventory for ${key} after a failed read`,
       );
-      entry.displays = history.lastGood.displays;
-      entry.outcome = history.lastGood.outcome;
+      entry.displays = lastGood.displays;
+      entry.outcome = lastGood.outcome;
     }
-    entry.retryAt = this.timer.now() + this.failureBackoff.delayForAttempt(history.failures);
+    // A superseded read keeps its own retry clock and leaves the streak to the newer entry.
+    entry.retryAt = this.timer.now() + this.failureBackoff.delayForAttempt(history?.failures ?? 1);
   }
 
-  private historyFor(key: string, token: string): InventoryHistory {
+  /**
+   * Applies a read's result to the shared history unless a newer entry already wrote it: a
+   * superseded read that completes late must not replace a newer read's panels or failure streak,
+   * nor reset a newer incarnation's history.
+   */
+  private updateHistory(
+    key: string,
+    entry: InventoryEntry,
+    apply: (history: InventoryHistory) => void,
+  ): InventoryHistory | undefined {
     let history = this.history.get(key);
-    if (!history || history.token !== token) {
-      history = { token, failures: 0 };
+    if (history && history.generation > entry.generation) {
+      return undefined;
+    }
+    if (!history || history.token !== entry.token) {
+      history = { token: entry.token, failures: 0, generation: entry.generation };
       this.history.set(key, history);
     }
+    history.generation = entry.generation;
+    apply(history);
     return history;
   }
 }

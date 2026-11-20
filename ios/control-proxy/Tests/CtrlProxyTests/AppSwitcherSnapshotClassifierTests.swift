@@ -58,6 +58,43 @@ final class AppSwitcherSnapshotClassifierTests: XCTestCase {
         XCTAssertFalse(AppSwitcherSnapshotClassifier.isVisible(cards))
     }
 
+    func testCapturedParkedIPadWindowIsNotTheSwitcher() throws {
+        // #18828: the parked window's card is scaled like a switcher card but reports Stashed.
+        let elements = try snapshots("ios27_2-ipad-windowed-files-parked-after-home")
+        XCTAssertTrue(elements.contains { $0.identifier.hasPrefix("card:") && $0.value == "Stashed" })
+        XCTAssertFalse(AppSwitcherSnapshotClassifier.isVisible(elements))
+        let active = elements.map {
+            AppSwitcherSnapshotClassifier.ElementSnapshot(identifier: $0.identifier, frame: $0.frame, value: "Active")
+        }
+        XCTAssertTrue(AppSwitcherSnapshotClassifier.isVisible(active))
+    }
+
+    func testCapturedHomeScreensShowTheIconList() throws {
+        // #18828: Home parks the floating iPad window, which stays .runningForeground.
+        for name in ["ios27_0-home-screen-no-switcher", "ios27_2-ipad-windowed-files-parked-after-home"] {
+            XCTAssertTrue(try SpringBoardHomeScreenClassifier.isShowing(snapshots(name)), name)
+        }
+    }
+
+    func testCapturedForegroundAppsAndSwitchersHideTheIconList() throws {
+        for name in [
+            "ios26_5-safari-foreground-no-switcher",
+            "ios27_0-safari-foreground-no-switcher",
+            "ios26_5-safari-switcher-open",
+            "ios27_0-safari-switcher-open",
+            "ios27_2-ipad-windowed-files-floating-focused",
+        ] {
+            XCTAssertFalse(try SpringBoardHomeScreenClassifier.isShowing(snapshots(name)), name)
+        }
+    }
+
+    func testZeroSizedIconListIsNotTheHomeScreen() {
+        let iconList = AppSwitcherSnapshotClassifier.ElementSnapshot(
+            identifier: SpringBoardHomeScreenClassifier.iconListIdentifier, frame: .zero, value: nil
+        )
+        XCTAssertFalse(SpringBoardHomeScreenClassifier.isShowing([iconList]))
+    }
+
     func testActiveValueAloneCannotVerifyAFullScreenCard() throws {
         let elements = try snapshots("ios27_0-safari-foreground-no-switcher").map {
             AppSwitcherSnapshotClassifier.ElementSnapshot(identifier: $0.identifier, frame: $0.frame, value: "Active")

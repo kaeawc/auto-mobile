@@ -57,6 +57,13 @@ export class DefaultAuditRunner implements AuditRunner {
       perf,
     });
 
+    if (!auditResult) {
+      this.log.info(
+        `[ToolRegistry] Skipped memory audit for ${name} because ${packageName} is not running`,
+      );
+      return response;
+    }
+
     if (!auditResult.passed) {
       const errorMsg = `Memory audit FAILED for ${packageName} during ${name}\n\n${auditResult.diagnostics}`;
       logger.error(`[ToolRegistry] ${errorMsg}`);

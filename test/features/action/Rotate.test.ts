@@ -636,14 +636,14 @@ describe("Rotate", () => {
       ]);
     }
 
-    test("session default restores auto-rotate and records originals before writes", async () => {
+    test("session default keeps auto-rotate off and records originals before writes (#18833)", async () => {
       const original = useSession();
-      settingsSequence(["1"]);
+      settingsSequence(["1", "0"]);
       const result = await rotate.execute("landscape");
       expect(result.success).toBe(true);
-      expect(result.orientationLockState).toBe("unlocked");
+      expect(result.orientationLockState).toBe("locked");
       expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(
-        true,
+        false,
       );
       expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
       const calls = fakeAdb.getExecutedCommands();
@@ -660,7 +660,7 @@ describe("Rotate", () => {
       expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
     });
 
-    test("session already-matching orientation preserves automatic rotation without writes", async () => {
+    test("session already-matching orientation with omitted lock holds it like true (#18833)", async () => {
       const original = useSession();
       fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=1"));
       fakeAdb.setCommandResponseSequence("shell settings get system accelerometer_rotation", [
@@ -669,8 +669,11 @@ describe("Rotate", () => {
       ]);
       const result = await rotate.execute("landscape");
       expect(result.success).toBe(true);
-      expect(result.orientationLockState).toBe("unlocked");
-      expect(original()).toBeUndefined();
+      expect(result.orientationLockState).toBe("locked");
+      expect(original()).toMatchObject({ accelerometerRotation: 1 });
+      expect(fakeAdb.getExecutedCommands()).toContain(
+        "shell settings put system accelerometer_rotation 0",
+      );
     });
 
     test("session unknown initial auto-rotate preserves guard and records null", async () => {

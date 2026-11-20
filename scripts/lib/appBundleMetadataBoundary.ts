@@ -16,6 +16,13 @@ export const EXCEPTIONS = new Map<string, string>([
     // bundle path is passed as a single literal argv element, never a shell string.
     "CtrlProxy launch-gate signature/notarization verification (#4760).",
   ],
+  [
+    "src/utils/ios/healthKitSeederApp.ts",
+    // Ad-hoc SIGNS (`codesign -f -s -`) the disposable HealthKit seeding app it just built,
+    // with entitlements embedded at link time. Signing is a write, not bundle-metadata
+    // inspection, so AppBundleMetadataClient (a read-only owner) is not applicable (#18801).
+    "Ad-hoc signing of the disposable HealthKit seeding app (#18801).",
+  ],
 ]);
 
 const EXECUTION_METHODS = new Set([

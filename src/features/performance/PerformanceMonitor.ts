@@ -385,8 +385,9 @@ export class PerformanceMonitor {
 
     const now = this.timer.now();
     const promises: Promise<void>[] = [];
-    const resolveIOSProcess = createIOSPerformanceProcessResolver(() =>
-      this.execFileAsync("ps", [...PS_SNAPSHOT_ARGS]),
+    const resolveIOSProcess = createIOSPerformanceProcessResolver(
+      () => this.execFileAsync("ps", [...PS_SNAPSHOT_ARGS]),
+      this.simCtlClientFactory,
     );
 
     for (const device of this.monitoredDevices.values()) {
@@ -558,7 +559,7 @@ export class PerformanceMonitor {
    * Sample metrics for an iOS device.
    * iOS metrics are limited compared to Android:
    * - FPS/frame time: Not available without in-app SDK
-   * - CPU/Memory: Available via simctl spawn
+   * - CPU/Memory: Available from host ps for simulator apps
    */
   private async sampleIOSDevice(
     device: MonitoredDevice,

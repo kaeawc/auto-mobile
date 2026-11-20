@@ -18,7 +18,16 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ios/local-sim-build-args.sh
 source "${SCRIPT_DIR}/local-sim-build-args.sh"
+# shellcheck source=scripts/ios/simulator-select.sh
+source "${SCRIPT_DIR}/simulator-select.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# Build with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+# Shell-test fixtures that copy this script without the helper keep the active Xcode.
+if [[ -f "${PROJECT_ROOT}/scripts/ios/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${PROJECT_ROOT}/scripts/ios/xcode_version.sh"
+  select_pinned_xcode
+fi
 # shellcheck source=scripts/lib/spotlight-exclude.sh
 source "${PROJECT_ROOT}/scripts/lib/spotlight-exclude.sh"
 # IOS_DIR is overridable (tests point it at a fixture dir); defaults to ios/.
@@ -121,45 +130,71 @@ fi
 XCODE_VERSION=$(xcodebuild -version | head -1)
 print_info "Xcode version: ${XCODE_VERSION}"
 
-# Find an available iOS simulator
-# First try to find a booted one, then fall back to any available iPhone simulator
-find_simulator() {
-    # Look for a booted iPhone simulator
-    local booted_sim
-    booted_sim=$(xcrun simctl list devices booted 2>/dev/null | grep -E "iPhone.*Booted" | head -1 | sed -E 's/.*\(([A-F0-9-]+)\).*/\1/')
-    if [ -n "${booted_sim}" ]; then
-        echo "${booted_sim}"
-        return
+# No usable simulator. Under CI this fails: a gating job must not pass having
+# run zero tests. A local run keeps the old behavior and skips with a hint.
+no_simulator() {
+    if [ -n "${CI:-}" ]; then
+        echo -e "${RED}Error: $1${NC}" >&2
+        exit 1
     fi
-
-    # No booted simulator - look for any available iPhone simulator
-    local available_sim
-    available_sim=$(xcrun simctl list devices available 2>/dev/null | grep -E "iPhone 16[^e]" | head -1 | sed -E 's/.*\(([A-F0-9-]+)\).*/\1/')
-    if [ -n "${available_sim}" ]; then
-        echo "${available_sim}"
-        return
-    fi
-
-    # Fall back to any iPhone
-    available_sim=$(xcrun simctl list devices available 2>/dev/null | grep -E "iPhone" | head -1 | sed -E 's/.*\(([A-F0-9-]+)\).*/\1/')
-    echo "${available_sim}"
-}
-
-# Capture via a temp file rather than $(find_simulator): a function inside a
-# command substitution runs with errexit silently disabled (SC2311).
-simulator_id_file=$(mktemp)
-find_simulator > "${simulator_id_file}"
-SIMULATOR_ID=$(<"${simulator_id_file}")
-rm -f "${simulator_id_file}"
-if [ -z "${SIMULATOR_ID}" ]; then
-    echo -e "${YELLOW}Warning: No iOS simulator available. Xcode tests will be skipped.${NC}"
-    echo -e "${YELLOW}To run tests, create a simulator: xcrun simctl create 'iPhone 16' 'iPhone 16'${NC}"
+    echo -e "${YELLOW}Warning: $1 Xcode tests will be skipped.${NC}"
     echo ""
     exit 0
+}
+
+if ! command -v jq &> /dev/null; then
+    echo -e "${RED}Error: jq not found. Install with: brew install jq${NC}" >&2
+    exit 1
 fi
 
-# Get simulator name for display
-SIMULATOR_NAME=$(xcrun simctl list devices 2>/dev/null | grep "${SIMULATOR_ID}" | sed -E 's/^[[:space:]]+([^(]+).*/\1/' | sed 's/[[:space:]]*$//')
+# Pick the simulator from simctl's JSON (scripts/ios/simulator-select.sh). Under
+# CI: the dedicated "AutoMobile Playground CI" simulator on the chosen runtime
+# (reused by name, else created). Locally: a
+# booted iPhone on a usable runtime first, else an iPhone on the
+# runtime matching this Xcode's SDK major.minor, else on the newest usable
+# runtime between the deployment target and the SDK. Text greps of
+# `simctl list` used to pick a device whose runtime this Xcode cannot run.
+SDK_VERSION=$(xcrun --sdk iphonesimulator --show-sdk-version)
+IFS=. read -r _sdk_major _sdk_minor _ <<< "${SDK_VERSION}"
+SDK_MAJOR_MINOR="${_sdk_major}.${_sdk_minor:-0}"
+# Playground's deployment target (ios/Playground/project.yml).
+MIN_IOS="${XCODE_TEST_MIN_IOS:-17.0}"
+print_info "iOS Simulator SDK: ${SDK_VERSION} (deployment target iOS ${MIN_IOS})"
+
+RUNTIMES_JSON=$(xcrun simctl list --json runtimes)
+DEVICES_JSON=$(xcrun simctl list --json devices)
+RUNTIME_LINE=$(jq -r --arg v "${SDK_MAJOR_MINOR}" --arg min "${MIN_IOS}" "${IOS_SIM_PICK_RUNTIME_JQ}" <<< "${RUNTIMES_JSON}")
+if [ -z "${RUNTIME_LINE}" ]; then
+    no_simulator "No usable iOS Simulator runtime between iOS ${MIN_IOS} and the SDK's iOS ${SDK_MAJOR_MINOR}. Run scripts/ios/ensure-simulator-runtime.sh (or xcodebuild -downloadPlatform iOS)."
+fi
+RUNTIME_VERSION="${RUNTIME_LINE%%$'\t'*}"
+RUNTIME_ID="${RUNTIME_LINE#*$'\t'}"
+print_info "Simulator runtime: iOS ${RUNTIME_VERSION} (${RUNTIME_ID})"
+
+if [ -n "${CI:-}" ]; then
+    # Shared CI host: never adopt a booted or pre-existing simulator (it may
+    # belong to another job). Use one dedicated simulator on the chosen runtime.
+    SIMULATOR_LINE=$(jq -r --arg runtime "${RUNTIME_ID}" --arg name "${IOS_SIM_CI_NAME}" "${IOS_SIM_PICK_NAMED_JQ}" <<< "${DEVICES_JSON}")
+    if [ -z "${SIMULATOR_LINE}" ]; then
+        DEVICE_TYPE=$(jq -r --arg runtime "${RUNTIME_ID}" "${IOS_SIM_PICK_IPHONE_DEVICE_TYPE_JQ}" <<< "${RUNTIMES_JSON}")
+        if [ -z "${DEVICE_TYPE}" ]; then
+            no_simulator "iOS ${RUNTIME_VERSION} (${RUNTIME_ID}) lists no iPhone device type to create a simulator from."
+        fi
+        print_info "Creating \"${IOS_SIM_CI_NAME}\" (${DEVICE_TYPE}) on iOS ${RUNTIME_VERSION}"
+        CREATED_UDID=$(xcrun simctl create "${IOS_SIM_CI_NAME}" "${DEVICE_TYPE}" "${RUNTIME_ID}")
+        if [ -z "${CREATED_UDID}" ]; then
+            no_simulator "simctl create returned no UDID for ${DEVICE_TYPE} on ${RUNTIME_ID}."
+        fi
+        SIMULATOR_LINE="${CREATED_UDID}"$'\t'"${IOS_SIM_CI_NAME}"
+    fi
+else
+    SIMULATOR_LINE=$(jq -r --argjson runtimes "${RUNTIMES_JSON}" --arg v "${SDK_MAJOR_MINOR}" --arg min "${MIN_IOS}" --arg runtime "${RUNTIME_ID}" "${IOS_SIM_PICK_SIMULATOR_JQ}" <<< "${DEVICES_JSON}")
+fi
+if [ -z "${SIMULATOR_LINE}" ]; then
+    no_simulator "No iPhone simulator on iOS ${RUNTIME_VERSION}. Create one: xcrun simctl create 'iPhone' <iPhone device type> ${RUNTIME_ID}"
+fi
+SIMULATOR_ID="${SIMULATOR_LINE%%$'\t'*}"
+SIMULATOR_NAME="${SIMULATOR_LINE#*$'\t'}"
 print_info "Using simulator: ${SIMULATOR_NAME} (${SIMULATOR_ID})"
 echo ""
 

@@ -1,4 +1,6 @@
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
+import { resolveImageRelativePoint } from "../../../src/features/action/imageRelativePoint";
+import { resolveIosObserveRotation } from "../../../src/features/observe/iosObserveRotation";
 import { SettledScreenshotCapture } from "../../../src/features/observe/SettledScreenshotCapture";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { logger } from "../../../src/utils/logger";
@@ -6,6 +8,7 @@ import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProt
 import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import duoSessionlessObserve from "../../fixtures/ios-duo/observe-sessionless-inner-landscape-17846.json";
+import staleAfterUnfold from "../../fixtures/ios-duo/observe-inner-stale-portrait-after-unfold-18831.json";
 import duoRunnerLaunchQueuedObserve from "../../fixtures/ios-duo/observe-runner-launch-queued-inner-landscape-17880.json";
 
 // The Duo inventory stores both panels portrait, in pixels (cover 466x678 pt, inner 669x951 pt).
@@ -171,4 +174,43 @@ test("the #17880 fixture raster orients its runner_launch_queued inner panel", a
   expect(
     warn.mock.calls.some((call) => String(call[0]).includes("incompatible aspect ratios")),
   ).toBe(false);
+});
+
+test("a device-read raster that matches the stale-portrait Duo panel is display-aligned (#18831)", async () => {
+  const { runnerRotation, screenSize, screenshotPixels } = staleAfterUnfold;
+  const observation = {
+    ...fixtureObservation(),
+    screenSize: { ...screenSize, units: "points" as const },
+    viewHierarchy: { hierarchy: { node: {} }, rotation: runnerRotation },
+    rotation: resolveIosObserveRotation(runnerRotation, screenSize),
+    screenshotOrientation: "native" as const,
+  } as ObserveResult;
+  await capture().attachScreenshotRaster(observation, screenshotPixels);
+  expect(observation.rotation).toBe(1);
+  expect(observation.screenshotOrientation).toBe("display");
+  expect(observation.screenshotPixelsPerNativeUnit).toEqual({ x: 3, y: 3 });
+  const source = {
+    screenshot: {
+      screenSize,
+      screenshotOrientation: observation.screenshotOrientation!,
+      rotation: 1 as const,
+      imageSize: screenshotPixels,
+    },
+  };
+  // Home button from #18245 at (903, 404) points on the landscape inner panel.
+  expect(
+    resolveImageRelativePoint({ unit: "pixels", x: 2709, y: 1212, source }, "ios", screenSize),
+  ).toEqual({ x: 903, y: 404 });
+  expect(
+    resolveImageRelativePoint(
+      {
+        unit: "normalized",
+        x: 903 / 951,
+        y: 404 / 669,
+        source: { screenshot: { ...source.screenshot, imageSize: undefined } },
+      },
+      "ios",
+      screenSize,
+    ),
+  ).toEqual({ x: 903, y: 404 });
 });

@@ -66,8 +66,7 @@ Epoch milliseconds must be finite integers within the Date range. Strings are
 `YYYY-MM-DD` (midnight UTC) or `YYYY-MM-DDTHH:mm:ss[.fraction]Z` / a signed
 `hh:mm` offset. Hours must be 00–23 and minutes/seconds 00–59; hour 24 and
 leap second 60 are rejected. Invalid calendar dates, unzoned date-times, wrong types and
-missing pointers display as the empty string. The host's pure formatter returns
-undefined for invalid inputs; its resolver converts that to an empty string.
+missing pointers display as the empty string.
 
 Relative formatting reads an injected nowMs snapshot, never the clock. Choose the largest elapsed threshold not exceeding abs(input-nowMs):
 year=365 days, month=30 days, day=24 hours, hour=60 minutes, minute=60 seconds,

@@ -1232,7 +1232,6 @@ test/features/performance/PerformanceAudit.refreshRate.test.ts
 test/features/performance/PerformanceAudit.ttff.test.ts
 test/features/performance/PerformanceAudit.window.test.ts
 test/features/performance/PerformanceDemandProbe.test.ts
-test/features/performance/PerformanceMonitor.cost.test.ts
 test/features/performance/PerformanceMonitor.demand.test.ts
 test/features/performance/SdkFrameMetricsStore.test.ts
 test/features/performance/startupLaunchParsing.test.ts

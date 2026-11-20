@@ -9,17 +9,22 @@ import org.junit.jupiter.api.TestFactory
 
 class PrototypeListWritesTest {
   private fun fixtures(name: String): JsonArray =
-    Json.parseToJsonElement(File(fixtureDirectory(), "list-writes/$name.json").readText()).jsonArray
+    Json.parseToJsonElement(File(fixtureDirectory(), "$name.json").readText()).jsonArray
 
   @TestFactory
   fun dataWrites(): List<DynamicTest> =
-    fixtures("data-writes").map { raw ->
+    (fixtures("list-writes/data-writes") + fixtures("data/keyed-writes")).map { raw ->
       val fixture = raw.jsonObject
       DynamicTest.dynamicTest(fixture.getValue("name").jsonPrimitive.content) {
         val write = fixture.getValue("write").jsonObject
         val path = write.getValue("path").jsonPrimitive.content
         val value = write["value"] ?: JsonNull
         val maxItems = write["maxItems"]?.jsonPrimitive?.double
+        val where =
+          write["where"]?.jsonObject?.let {
+            PrototypeDataMatch(it.getValue("field").jsonPrimitive.content, it.getValue("equals"))
+          }
+        val member = write["member"]?.jsonPrimitive?.content
         val input =
           when (write.getValue("op").jsonPrimitive.content) {
             "upsert" ->
@@ -32,8 +37,8 @@ class PrototypeListWritesTest {
             "append" -> PrototypeDataWrite.Append(path, value, maxItems)
             "prepend" -> PrototypeDataWrite.Prepend(path, value, maxItems)
             "extend" -> PrototypeDataWrite.Extend(path, value, maxItems)
-            "set" -> PrototypeDataWrite.Set(path, value)
-            "remove" -> PrototypeDataWrite.Remove(path)
+            "set" -> PrototypeDataWrite.Set(path, value, where, member)
+            "remove" -> PrototypeDataWrite.Remove(path, where)
             else -> error("Unknown fixture op")
           }
         val expected = fixture.getValue("expected").jsonObject
@@ -52,7 +57,7 @@ class PrototypeListWritesTest {
 
   @TestFactory
   fun requestOutcomes(): List<DynamicTest> =
-    fixtures("request-outcomes").map { raw ->
+    fixtures("list-writes/request-outcomes").map { raw ->
       val fixture = raw.jsonObject
       DynamicTest.dynamicTest(fixture.getValue("name").jsonPrimitive.content) {
         val response = fixture.getValue("response").jsonObject

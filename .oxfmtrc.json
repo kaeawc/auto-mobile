@@ -3,6 +3,7 @@
   "ignorePatterns": [
     "test/fixtures/observe-output/swipeon-container-floating-bar-18338/*.json",
     "test/fixtures/observe-output/compose-control-shapes-17955/*.json",
+    "test/fixtures/observe-output/compose-interop-3183/*.json",
     "test/fixtures/wear/systemtray/ctrlproxy-card-expanded-reply-input.json",
     "test/fixtures/wear/systemtray/ctrlproxy-round384-stream-reply-card.json",
     "test/fixtures/wear/systemtray/ctrlproxy-reply-keyboard.json",
@@ -10,6 +11,7 @@
     "test/fixtures/xr-headset/*.json",
     "test/fixtures/xr/systemui-hidden-chrome.json",
     "test/fixtures/ios-carplay/*.json",
+    "test/fixtures/ios-healthkit/*",
     "test/fixtures/simctl/pairs/**",
     "test/fixtures/android-avdmanager/*.txt",
     "test/fixtures/visionos-settings/*.json",

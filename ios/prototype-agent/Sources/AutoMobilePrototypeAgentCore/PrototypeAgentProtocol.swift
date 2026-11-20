@@ -46,8 +46,10 @@ enum PrototypeAgentProtocol {
         iconSfSymbolsCapability,
         dataModelCapability,
         dataActionsCapability,
+        dataActionsV2Capability,
         networkCapability,
         networkDeviceCapability,
+        networkUploadCapability,
         textFieldOptionsCapability,
         gesturesCapability,
         swipeActionsCapability,
@@ -190,6 +192,7 @@ enum PrototypeAgentProtocol {
     /// `setData`, `appendData`, `prependData` and `removeData` change `/data` from a tap and report each write as a
     /// `change` event named for the `/data/...` path with `{op, value?, revision}` (#12519). Same name
     /// as the CtrlProxy capability; the host refuses a spec using one on an agent without it.
+    static let dataActionsV2Capability = "prototype_data_actions_v2"
     static let dataActionsCapability = "prototype_data_actions_v1"
     /// The `request` action (#12529): host-proxied calls (`via: "host"`, the default) through
     /// `prototype_request` / `prototype_response` frames, and the `/data`, `__meta`, `statusKey` and
@@ -199,6 +202,7 @@ enum PrototypeAgentProtocol {
     /// `via: "device"`: the agent makes the call itself through its own HTTP client. Same name as the
     /// CtrlProxy capability.
     static let networkDeviceCapability = "prototype_network_device_v1"
+    static let networkUploadCapability = "prototype_network_upload_v1"
     /// Text field options (#12066): keyboard, secure and multiline input, drawn labels and chrome,
     /// supporting text and a UTF-16 length limit with counter. Same name as the CtrlProxy capability.
     static let textFieldOptionsCapability = "prototype_text_field_options_v1"

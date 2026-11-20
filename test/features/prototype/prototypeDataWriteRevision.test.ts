@@ -474,3 +474,38 @@ test("status snapshot replays prepend and maxItems", () => {
   );
   expect(store.status(scope).prototypes[0]?.data).toEqual({ cart: [{ sku: "b" }] });
 });
+
+test.each(["set", "remove"] as const)(
+  "keyed %s events replay exactly in both host mirrors",
+  (op) => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    const shown = store.shownSpecs;
+    shown.endShow("d", shown.beginShow("d"), { id: "shop", spec });
+    store.record(
+      { deviceId: "d" },
+      "show",
+      { id: "shop" },
+      { result: { success: true }, details: { data: spec.data } },
+    );
+    const payload = {
+      op,
+      revision: 1,
+      where: { field: "sku", equals: "a" },
+      ...(op === "set" ? { member: "qty", value: 2 } : {}),
+    };
+    const wire = dataWrite(1, CART, payload);
+    const decoded = decodePrototypeEvent(wire, "test");
+    expect(decoded).toBeDefined();
+    const write = prototypeDataWriteOf(decoded!);
+    expect(write).toEqual({ ...payload, path: CART });
+    store.recordEvent({ deviceId: "d" }, decoded!);
+    const expected = { cart: op === "set" ? [{ sku: "a", qty: 2 }] : [], note: "hi" };
+    expect(dataOf(shown)).toEqual(expected);
+    expect(store.status({ deviceId: "d" }).prototypes[0]?.data).toEqual(expected);
+    expect(shown.dataPatchGuard("d", "shop", [CART], 0)).toEqual({
+      kind: "conflict",
+      revision: 1,
+      paths: [CART],
+    });
+  },
+);

@@ -148,6 +148,7 @@ export class DaemonBroker {
   private registryClosing = false;
   // No retry can make this daemon understand new migrations; restart re-evaluates the schema.
   private unsupportedRegistrySchema: BindingRegistrySchemaUnsupportedError | undefined;
+  private lastRegistryOpenFailure: unknown;
   constructor(private readonly host: DaemonBrokerHost) {}
 
   /**
@@ -334,6 +335,14 @@ export class DaemonBroker {
     return true;
   }
 
+  /**
+   * The latest failed registry open's error, cleared when an open succeeds. A forgotten open
+   * leaves no promise for a claim to join, so the claim mirror reads why it failed here (#11811).
+   */
+  lastBindingRegistryOpenFailure(): unknown {
+    return this.lastRegistryOpenFailure;
+  }
+
   openBindingRegistry(
     signal?: AbortSignal,
     options?: { quiet?: boolean },
@@ -389,6 +398,9 @@ export class DaemonBroker {
     this.host.setBindingRegistry(opening);
     opening.then(
       (registry) => {
+        if (this.host.bindingRegistry() === opening) {
+          this.lastRegistryOpenFailure = undefined;
+        }
         if (!this.registryClosing) {
           this.host.services.daemonState().setBindingRegistrySchemaProbe(registry);
         }
@@ -402,6 +414,9 @@ export class DaemonBroker {
       () => undefined,
     );
     opening.catch((error: unknown) => {
+      if (this.host.bindingRegistry() === opening) {
+        this.lastRegistryOpenFailure = error;
+      }
       if (error instanceof BindingRegistrySchemaUnsupportedError) {
         this.host.deviceClaimMirrors().skip();
         this.unsupportedRegistrySchema = error;

@@ -5,6 +5,7 @@ import Foundation
 enum PrototypeDataWriteCode: String, Equatable {
     case invalidPath = "invalid_path"
     case invalidValue = "invalid_value"
+    case ambiguousMatch = "ambiguous_match"
     case notFound = "not_found"
     case notArray = "not_array"
     case limitExceeded = "limit_exceeded"
@@ -20,6 +21,8 @@ struct PrototypeDataWriteFailure: Error, Equatable {
 /// this runtime cannot drift. Nothing here touches a session; a refused write returns a failure and
 /// the input is untouched.
 enum PrototypeDataWrite {
+    struct Match: Equatable { let field: String; let equals: JSONValue }
+
     enum Operation: String, Equatable {
         case set
         case append
@@ -104,11 +107,20 @@ enum PrototypeDataWrite {
     /// satisfy the data limits, including `maxDataWriteBytes`, or nothing is written.
     static func apply(
         _ data: [String: JSONValue]?, op operation: Operation, path: String, value: JSONValue?, maxItems: Double? = nil,
-        key: String? = nil
+        key: String? = nil, where match: Match? = nil, member: String? = nil
     )
         -> Result<[String: JSONValue], PrototypeDataWriteFailure>
     {
-        applyWindowed(data, op: operation, path: path, value: value, maxItems: maxItems, key: key).map(\.data)
+        applyWindowed(
+            data,
+            op: operation,
+            path: path,
+            value: value,
+            maxItems: maxItems,
+            key: key,
+            where: match,
+            member: member
+        ).map(\.data)
     }
 
     struct Applied: Equatable {
@@ -118,7 +130,7 @@ enum PrototypeDataWrite {
 
     static func applyWindowed(
         _ data: [String: JSONValue]?, op operation: Operation, path: String, value: JSONValue?, maxItems: Double? = nil,
-        key: String? = nil
+        key: String? = nil, where match: Match? = nil, member: String? = nil
     )
         -> Result<Applied, PrototypeDataWriteFailure>
     {
@@ -144,6 +156,17 @@ enum PrototypeDataWrite {
             return fail(.invalidValue, "\(name) maxItems must be a positive safe integer")
         }
         let current = data ?? [:]
+        if match != nil || member != nil {
+            return keyedWrite(
+                current,
+                operation: operation,
+                path: path,
+                pointer: pointer,
+                value: value,
+                match: match,
+                member: member
+            )
+        }
         let tokens = PrototypeDataPointer.tokens(pointer)
         let existing = PrototypeDataPointer.resolve(.object(current), tokens: tokens[...])
         if let refusal = targetRefusal(current, tokens: tokens, existing: existing, op: operation, path: path) {
@@ -198,6 +221,45 @@ enum PrototypeDataWrite {
             )
         }
         return .success(Applied(data: next, trimmed: trimmed))
+    }
+
+    private static func keyedWrite(
+        _ data: [String: JSONValue], operation: Operation, path: String, pointer: String,
+        value: JSONValue?, match: Match?, member: String?
+    )
+        -> Result<Applied, PrototypeDataWriteFailure>
+    {
+        func validName(_ name: String) -> Bool {
+            !name.isEmpty && name.utf16.count <= PrototypeLimits.maxDataPointerLength && !name.contains("/") && !name
+                .contains("~")
+        }
+        guard operation == .set || operation == .remove, let match, validName(match.field),
+              member.map(validName) ?? true, operation == .set || member == nil
+        else { return fail(.invalidPath, "Keyed writes need safe field and member names and a where selector") }
+        guard let target = PrototypeDataPointer.resolve(data, pointer: pointer) else {
+            return fail(.notFound, "Keyed target \(path) does not exist")
+        }
+        guard case let .array(items) = target else { return fail(.notArray, "Keyed target \(path) is not an array") }
+        let matches = items.indices.filter { index in
+            guard let fields = items[index].objectFields,
+                  let key = PrototypeDataPointer.exactKey(match.field, in: fields) else { return false }
+            return sameKey(fields[key].value, match.equals)
+        }
+        guard let index = matches.first else { return fail(.notFound, "No element matches where") }
+        guard matches.count == 1 else { return fail(.ambiguousMatch, "More than one element matches where") }
+        var changed = items
+        if operation == .remove {
+            changed.remove(at: index)
+        } else if let member {
+            guard let next = mutate(items[index], tokens: [member][...], op: .set, value: value) else {
+                return fail(.invalidValue, "set write needs a value")
+            }
+            changed[index] = next
+        } else {
+            guard let value else { return fail(.invalidValue, "set write needs a value") }
+            changed[index] = value
+        }
+        return applyWindowed(data, op: .set, path: path, value: .array(changed))
     }
 
     /// Match JSON identities without Swift's canonical-equivalence string comparison.
@@ -373,9 +435,10 @@ extension PrototypeDataWrite {
                     "A data write value must be a string, boolean, finite number, array or object"
                 ) }
             }
-            if ["appendData", "prependData", "upsertData"].contains(fields["type"]?.stringValue ?? ""),
-               !path.contains("{index}"),
-               let value = PrototypeDataPointer.resolve(data, pointer: pointer)
+            if ["appendData", "prependData", "upsertData"]
+                .contains(fields["type"]?.stringValue ?? "") || fields["where"] != nil,
+                !path.contains("{index}"),
+                let value = PrototypeDataPointer.resolve(data, pointer: pointer)
             {
                 guard case .array = value else { throw PrototypeContractValidator.invalid(
                     "\(action.path).path",

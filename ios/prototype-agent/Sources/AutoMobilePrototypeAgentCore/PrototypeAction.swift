@@ -23,6 +23,8 @@ struct PrototypeAction: Decodable, Sendable {
     /// `setData`/`appendData`/`prependData`/`removeData`: `/data/<pointer>`, a whole `{index}` segment bound per
     /// repeat row at expansion (#12519).
     let path: String?
+    let `where`: PrototypeDataWhere?
+    let member: String?
     let key: String?
     /// `upsertData`'s cap on the array it writes.
     let maxItems: Int?
@@ -60,7 +62,7 @@ struct PrototypeAction: Decodable, Sendable {
         case mapMarkerId = "_mapMarkerId"
         case type, name, payload, context, pager, page, stack, screen, transition, source, path, key, value, scroll, to,
              animated, call, args, params, force
-        case id, afterMs, everyMs, maxRuns, actions, maxItems
+        case id, afterMs, everyMs, maxRuns, actions, maxItems, `where`, member
         case incrementAmount = "by"
         case requireValid, method, url, headers, query, progressKey, body, into, append, statusKey, via, timeoutMs,
              onSuccess,
@@ -82,8 +84,10 @@ struct PrototypeAction: Decodable, Sendable {
         scroll: String? = nil, to: JSONValue? = nil, animated: Bool? = nil,
         call: String? = nil, args: [String: JSONValue]? = nil,
         params: [String: JSONValue]? = nil, force: Bool? = nil, stackPath: [PrototypeRouteEntry]? = nil,
-        maxItems: Int? = nil
+        maxItems: Int? = nil, where selector: PrototypeDataWhere? = nil, member: String? = nil
     ) {
+        self.where = selector
+        self.member = member
         self.maxItems = maxItems
         self.scroll = scroll
         self.to = to
@@ -173,7 +177,9 @@ struct PrototypeAction: Decodable, Sendable {
             params: container.decodeIfPresent([String: JSONValue].self, forKey: .params),
             force: container.decodeIfPresent(Bool.self, forKey: .force),
             stackPath: type == "setStack" ? container.decode([PrototypeRouteEntry].self, forKey: .path) : nil,
-            maxItems: container.decodeIfPresent(Int.self, forKey: .maxItems)
+            maxItems: container.decodeIfPresent(Int.self, forKey: .maxItems),
+            where: container.decodeIfPresent(PrototypeDataWhere.self, forKey: .where),
+            member: container.decodeIfPresent(String.self, forKey: .member)
         )
         mapMarkerId = try container.decodeIfPresent(String.self, forKey: .mapMarkerId)
     }

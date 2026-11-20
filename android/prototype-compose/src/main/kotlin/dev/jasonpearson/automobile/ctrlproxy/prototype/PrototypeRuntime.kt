@@ -1317,6 +1317,15 @@ class PrototypeRuntime(
    * Null once the write took effect (and reported itself), else why it was refused.
    */
   private suspend fun applyDataWrite(write: PrototypeDataWrite): PrototypeDataWriteError? {
+    if (
+      prototypeDataWritePayload(write, Long.MAX_VALUE).toString().toByteArray(Charsets.UTF_8).size >
+        PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES
+    ) {
+      return PrototypeDataWriteError(
+        PrototypeDataWriteErrorCode.LIMIT_EXCEEDED,
+        "Data write selector exceeds the change event payload limit",
+      )
+    }
     val before = current
     val spec =
       when (val staged = stageDataWrite(before, before.spec, write)) {
@@ -1331,7 +1340,7 @@ class PrototypeRuntime(
     emit(
       kind = PrototypeEventKind.CHANGE,
       name = write.path,
-      payload = dataWritePayload(write, revision),
+      payload = prototypeDataWritePayload(write, revision),
     )
     return null
   }
@@ -1413,81 +1422,24 @@ class PrototypeRuntime(
   }
 
   private fun dataWrite(action: PrototypeAction): PrototypeDataWrite? {
-    return when (action) {
-      is PrototypeSetDataAction ->
-        dataWriteValue(action.value, action.path)?.let { PrototypeDataWrite.Set(action.path, it) }
-      is PrototypeAppendDataAction ->
-        dataWriteValue(action.value, action.path)?.let {
-          PrototypeDataWrite.Append(
-            action.path,
-            it,
-            prototypeListMaxItemsFor(current.spec, action.path),
-          )
-        }
-      // `prependData` inserts one row, so the resolved value is wrapped as the page `[row]`, as on
-      // iOS and in the `change` event (#16715).
-      is PrototypePrependDataAction ->
-        dataWriteValue(action.value, action.path)?.let {
-          PrototypeDataWrite.Prepend(
-            action.path,
-            JsonArray(listOf(it)),
-            prototypeListMaxItemsFor(current.spec, action.path),
-          )
-        }
-      is PrototypeUpsertDataAction ->
-        dataWriteValue(action.value, action.path)?.let {
-          PrototypeDataWrite.Upsert(
-            action.path,
-            action.key,
-            it,
-            listOfNotNull(action.maxItems, prototypeListMaxItemsFor(current.spec, action.path))
-              .minOrNull(),
-          )
-        }
-      is PrototypeRemoveDataAction -> PrototypeDataWrite.Remove(action.path)
-      else -> null
+    val selector =
+      when (action) {
+        is PrototypeSetDataAction -> action.where
+        is PrototypeRemoveDataAction -> action.where
+        else -> null
+      }
+    val where = selector?.let {
+      val equals =
+        dataWriteValue(
+          it.equals,
+          (action as? PrototypeSetDataAction)?.path ?: (action as PrototypeRemoveDataAction).path,
+        ) ?: return null
+      PrototypeDataMatch(it.field, equals)
+    }
+    return prototypeDataWrite(action, where, ::dataWriteValue) { path ->
+      prototypeListMaxItemsFor(current.spec, path)
     }
   }
-
-  /**
-   * `{op, value?, revision}`. The value is left out when the payload would not fit an event, so the
-   * host, which cannot mirror a write it was not shown, stops tracking the spec.
-   */
-  private fun dataWritePayload(write: PrototypeDataWrite, revision: Long): JsonObject {
-    fun payload(value: JsonElement?) = buildJsonObject {
-      put("op", write.op)
-      if (write is PrototypeDataWrite.Upsert) put("key", write.key)
-      if (value != null) put("value", value)
-      val maximum =
-        when (write) {
-          is PrototypeDataWrite.Append -> write.maxItems
-          is PrototypeDataWrite.Prepend -> write.maxItems
-          is PrototypeDataWrite.Extend -> write.maxItems
-          is PrototypeDataWrite.Upsert -> write.maxItems
-          else -> null
-        }
-      maximum?.let { put("maxItems", it.toLong()) }
-      put("revision", revision)
-    }
-    val value = dataWriteValue(write)
-    val full = payload(value)
-    return if (
-      full.toString().toByteArray(Charsets.UTF_8).size <=
-        PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES
-    )
-      full
-    else payload(null)
-  }
-
-  private fun dataWriteValue(write: PrototypeDataWrite): JsonElement? =
-    when (write) {
-      is PrototypeDataWrite.Upsert -> write.value
-      is PrototypeDataWrite.Set -> write.value
-      is PrototypeDataWrite.Append -> write.value
-      is PrototypeDataWrite.Prepend -> write.value
-      is PrototypeDataWrite.Extend -> write.value
-      is PrototypeDataWrite.Remove -> null
-    }
 
   private suspend fun startPlatformCall(
     action: PrototypePlatformAction,
@@ -1706,6 +1658,13 @@ class PrototypeRuntime(
 
   private val inFlight = LinkedHashMap<String, RequestInFlight>()
 
+  /**
+   * The request id that last reset each `progressKey` to 0. Only that upload writes the key, so a
+   * concurrent upload sharing the key (non-overlapping `into`, so not superseded) cannot raise it
+   * again after the newer one reset it.
+   */
+  private val progressOwners = HashMap<String, String>()
+
   /** Dismissal ends every request without a trace: the runtime is closed, so nothing is sent. */
   private fun cancelRequests() {
     val jobs = synchronized(inFlight) { inFlight.values.map { it.job }.also { inFlight.clear() } }
@@ -1723,6 +1682,8 @@ class PrototypeRuntime(
   @InternalAutoMobilePrototypeApi
   fun handOverRequests(replacement: PrototypeRuntime) {
     val moved = synchronized(inFlight) { inFlight.values.toList().also { inFlight.clear() } }
+    val owners = synchronized(progressOwners) { progressOwners.toMap() }
+    synchronized(replacement.progressOwners) { replacement.progressOwners.putAll(owners) }
     moved.forEach { request ->
       requestLimiter.release()
       replacement.adoptRequest(request)
@@ -1747,8 +1708,11 @@ class PrototypeRuntime(
       else entry
     }
 
-  private fun canCarrySecure(action: PrototypeRequestAction): Boolean =
-    action.allowSecureInRequest == true || current.spec.storage?.secure.orEmpty().isNotEmpty()
+  /**
+   * Whether a response may echo a secure value, so its headers are dropped. Only a spec with secure
+   * keys holds any; `allowSecureInRequest` on a spec without them sends nothing secure.
+   */
+  private fun canCarrySecure(): Boolean = current.spec.storage?.secure.orEmpty().isNotEmpty()
 
   /**
    * A `request` action: resolves its bindings against the committed state and data, moves
@@ -1778,7 +1742,7 @@ class PrototypeRuntime(
         action.onError,
         eventData,
         action.append,
-        canCarrySecure(action),
+        canCarrySecure(),
         action.progressKey,
       )
     }
@@ -1825,7 +1789,7 @@ class PrototypeRuntime(
         )
       return finishRequest(started, PrototypeRequestResponse.Failed(error))
     }
-    writeRequestLoading(action, upload, touched)
+    writeRequestLoading(action, upload, started.requestId, touched)
     val request =
       PrototypeHttpRequest(
         requestId = started.requestId,
@@ -1852,12 +1816,14 @@ class PrototypeRuntime(
   private suspend fun writeRequestLoading(
     action: PrototypeRequestAction,
     upload: PrototypeUploadBody?,
+    requestId: String,
     touched: MutableSet<String>,
   ) {
     action.statusKey?.let { key ->
       if (writeStatus(key, PrototypeRequests.STATUS_LOADING)) touched += key
     }
-    if (upload != null) action.progressKey?.let { writeUploadProgress(it, 0, reset = true) }
+    if (upload != null)
+      action.progressKey?.let { writeUploadProgress(it, 0, requestId, reset = true) }
   }
 
   private fun uploadProgressCallback(key: String?, started: RequestInFlight): ((Int) -> Unit)? =
@@ -1873,7 +1839,7 @@ class PrototypeRuntime(
                   synchronized(owner.inFlight) { owner.inFlight[started.requestId] === started }
               ) {
                 try {
-                  owner.writeUploadProgress(key, percent)
+                  owner.writeUploadProgress(key, percent, started.requestId)
                 } finally {
                   owner.interactionRevision = null
                 }
@@ -2040,7 +2006,7 @@ class PrototypeRuntime(
     response: PrototypeRequestResponse,
   ) {
     if (request.uploadBytes != null && response is PrototypeRequestResponse.Received) {
-      request.progressKey?.let { writeUploadProgress(it, 100) }
+      request.progressKey?.let { writeUploadProgress(it, 100, request.requestId) }
     }
   }
 
@@ -2069,8 +2035,23 @@ class PrototypeRuntime(
     )
   }
 
-  /** Only writes a numeric percent to an existing numeric state key, never request values. */
-  private suspend fun writeUploadProgress(key: String, percent: Int, reset: Boolean = false) {
+  /**
+   * Only writes a numeric percent to an existing numeric state key, never request values. A [reset]
+   * makes [requestId] the key's owner; any other write from a request that does not own the key, or
+   * that would not raise it, is dropped.
+   */
+  private suspend fun writeUploadProgress(
+    key: String,
+    percent: Int,
+    requestId: String,
+    reset: Boolean = false,
+  ) {
+    val owned =
+      synchronized(progressOwners) {
+        if (reset) progressOwners[key] = requestId
+        progressOwners[key] == requestId
+      }
+    if (!owned) return
     val value = PrototypeScalar.Numeric(percent.coerceIn(0, 100).toDouble())
     val previous = current.state[key] as? PrototypeScalar.Numeric ?: return
     if (previous.value == value.value || (!reset && previous.value >= value.value)) return

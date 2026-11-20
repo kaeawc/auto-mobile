@@ -19,7 +19,12 @@ export interface PrototypeChannelResolvedAction {
 export type PrototypeChannelFrameActions = readonly PrototypeChannelResolvedAction[];
 
 function targetOf(action: PrototypeChannelResolvedAction): string | undefined {
-  if (action.type === "setData" && typeof action.path === "string") {
+  if (
+    action.type === "setData" &&
+    action.where === undefined &&
+    action.member === undefined &&
+    typeof action.path === "string"
+  ) {
     return `data:${action.path}`;
   }
   return action.type === "setState" && typeof action.key === "string"

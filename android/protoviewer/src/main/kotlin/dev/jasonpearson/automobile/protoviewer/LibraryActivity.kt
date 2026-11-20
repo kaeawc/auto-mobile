@@ -113,17 +113,7 @@ class LibraryActivity : ComponentActivity() {
           },
         )
         pendingExport?.let { exported ->
-          AlertDialog(
-            onDismissRequest = { cancelShare() },
-            title = { Text(getString(R.string.share_warning_title)) },
-            text = { Text(exported.warnings.joinToString("\n") { "${it.code}: ${it.path}" }) },
-            confirmButton = {
-              TextButton(onClick = { send(exported) }) { Text(getString(R.string.share)) }
-            },
-            dismissButton = {
-              TextButton(onClick = { cancelShare() }) { Text(getString(R.string.cancel)) }
-            },
-          )
+          ShareWarningDialog(exported, send = { send(exported) }, cancel = ::cancelShare)
         }
       }
     }
@@ -482,5 +472,27 @@ private fun ConfirmationDialog(
       TextButton(modifier = Modifier.testTag(tag), onClick = confirm) { Text(confirmLabel) }
     },
     dismissButton = { TextButton(onClick = dismiss) { Text(stringResource(R.string.cancel)) } },
+  )
+}
+
+/** Sensitive-data review before sharing; each warning names its technical JSON path. */
+@Composable
+internal fun ShareWarningDialog(
+  exported: LibraryShareExport,
+  send: () -> Unit,
+  cancel: () -> Unit,
+) {
+  AlertDialog(
+    onDismissRequest = cancel,
+    title = { Text(stringResource(R.string.share_warning_title)) },
+    text = {
+      Text(
+        exported.warnings
+          .map { stringResource(shareWarningText(it.code), it.path) }
+          .joinToString("\n"),
+      )
+    },
+    confirmButton = { TextButton(onClick = send) { Text(stringResource(R.string.share)) } },
+    dismissButton = { TextButton(onClick = cancel) { Text(stringResource(R.string.cancel)) } },
   )
 }

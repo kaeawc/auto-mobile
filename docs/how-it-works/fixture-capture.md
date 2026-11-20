@@ -1,6 +1,6 @@
 # Fixture capture mode
 
-Parser and contract fixtures under `test/fixtures/` must come from running AutoMobile's tools on a real device, emulator or simulator, with their provenance recorded (#18769). Fixture capture mode records the host commands each tool call runs, so a fixture can be recaptured by running the tool again instead of by hand.
+Parser and contract fixtures under `test/fixtures/` must come from running AutoMobile's tools on a real device, emulator or simulator, with their provenance recorded (#18769). Fixture capture mode records the host commands each tool call runs, so a fixture can be recaptured by running the tool again instead of by hand. The reasoning behind the design is in [Fixture capture mode](../devlog/2026-11-20-fixture-capture-mode.md).
 
 ## Switch
 
@@ -16,21 +16,21 @@ A scope closes when its capture is written, and a closed scope records nothing m
 
 ### Size limits
 
-Each stream of a command keeps at most `MAX_CAPTURED_STREAM_CHARS` (1 MiB, node's default `maxBuffer`) characters, and one tool call keeps at most `MAX_CAPTURED_CALL_CHARS` (8 MiB) of stdout plus stderr across all its commands. A stream cut by either limit ends in `<truncated:fixture-capture-limit>` and its command is marked `truncated: true`. Once a call's limit is used up, later commands are still recorded with their argv and exit code, but with empty, truncated output. A truncated command cannot be promoted.
+Each stream of a command keeps at most `MAX_CAPTURED_STREAM_CHARS` (1 MiB, node's default `maxBuffer`) characters. One tool call keeps at most `MAX_CAPTURED_CALL_CHARS` (8 MiB) of stdout plus stderr across all its commands. A stream that either limit cuts ends in `<truncated:fixture-capture-limit>`, and its command gets `truncated: true`. The writer spends the call limit in issue order, so when concurrent commands finish out of order, the highest `index` still loses output first. Once a call's limit is used up, later commands keep their argv and exit code, but their output is empty and truncated. A command that overflowed node's `maxBuffer` (`errorCode` `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`) keeps only the output node handed back. That output can be exactly the stream limit, so the command gets `truncated: true` even without the marker. Promotion refuses a truncated command.
 
 Not recorded: long-lived spawned processes (`AdbClient.spawn`, streaming `screenrecord`/`logcat`), CtrlProxy WebSocket frames and XCTestRunner result frames. iOS CtrlProxy exchanges have their own recorder, `AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR`.
 
 ### Redaction at capture time
 
-Owner policy is to redact nothing at capture time except text typed into a password field. A command that passes `AdbExecuteOptions.logLabel` (password typing, lock-screen PIN settings) is already kept out of logs, and runs under `withFixtureCaptureRedaction`, so its argv is recorded as the executable plus `<redacted:password-field>` and it is marked `redacted: true`.
+Owner policy is to redact nothing at capture time except text typed into a password field. A command that passes `AdbExecuteOptions.logLabel` (password typing, lock-screen PIN settings) already stays out of logs and runs under `withFixtureCaptureRedaction`. Its argv becomes the executable plus `<redacted:password-field>`, and the command gets `redacted: true`.
 
-A caller that scrubs secrets from its own logs applies the same scrubber to the capture with `withFixtureCaptureScrub`. bundletool `build-apks` output can echo keystore passwords, so it runs under `scrubBundletoolText`: the passwords are replaced in argv, stdout and stderr before any truncation, and a command whose text the scrubber changed is marked `redacted: true`. A redacted command cannot be promoted.
+A caller that scrubs secrets from its own logs applies the same scrubber to the capture with `withFixtureCaptureScrub`. bundletool `build-apks` output can echo keystore passwords, so it runs under `scrubBundletoolText`. The scrubber replaces the passwords in argv, stdout and stderr before any truncation, and a command whose text it changed gets `redacted: true`. Promotion refuses a redacted command.
 
 ## On-disk format
 
 Each tool call writes `<dir>/<tool>_<epoch-ms>_<id>/` once the call settles, whether it succeeded or threw:
 
-- `provenance.json`: `schemaVersion`, `tool.name`, `captureDate` (ISO-8601 UTC call start), `automobileVersion` (a source checkout carries the commit as `+g<sha>[.dirty]`), `sourceTreeState` (`clean`, `dirty` or `unknown`; the writer awaits the daemon's dirty-state probe first, and a probe that failed or timed out gives `unknown`), and `device` when one was resolved: platform, device id, name, model, device type, form factor, OS version, API level, iOS version, runtime id.
+- `provenance.json`: `schemaVersion`, `tool.name`, `captureDate` (ISO-8601 UTC call start) and `automobileVersion` (a source checkout carries the commit as `+g<sha>[.dirty]`). It also holds `sourceTreeState`: `clean`, `dirty` or `unknown`. The writer awaits the daemon's dirty-state probe first, and a probe that failed or timed out gives `unknown`. When the call resolved a device, `device` holds its platform, device id, name, model, device type, form factor, OS version, API level, iOS version and runtime id.
 - `commands.json`: the commands in issue order, each with `index`, `argv`, `cwd`, `exitCode`, `signal`, `errorCode`, `durationMs`, `stdout`, `stderr`, `redacted` and `truncated`.
 
 A failure to write a capture is logged as a warning and never fails the tool call. A change to the format bumps `FIXTURE_CAPTURE_SCHEMA_VERSION`; the promote step accepts only the current version.
@@ -46,7 +46,7 @@ bun scripts/fixtures/promote-capture.ts --capture "$DIR/measureStartup_<ms>_<id>
 
 - The destination must be `test/fixtures/<area>/<form-factor>/<name>.txt`. The form-factor directory is one of the device model's form factors (`phone`, `tablet`, `foldable`, `tv`, `watch`, `automotive`, `xr-headset`, `xr-glasses`). Only `.txt` is accepted, because oxfmt would rewrite a JSON or Markdown capture.
 - `sourceTreeState` is `dirty` for modified tracked files only: the probe ignores untracked files, so a new untracked file under `src/` or `scripts/` still reads `clean`. Commit or stash new files before a capture run.
-- The step refuses a capture without a device, without an OS version or API level, whose device reports a different form factor, whose `automobileVersion` names no commit or a dirty checkout, or whose `sourceTreeState` is not `clean`. It also refuses a redacted or truncated command. A device that reports no form factor takes the directory's form factor, and the sidecar marks it `formFactorDeclared`.
+- The step refuses a capture without a device or without an OS version or API level. It also refuses one whose device reports a different form factor, whose `automobileVersion` names no commit or a dirty checkout, or whose `sourceTreeState` is not `clean`. It refuses a redacted or truncated command. A device that reports no form factor takes the directory's form factor, and the sidecar marks it `formFactorDeclared`.
 - The device id becomes `<serial>` (Android) or `<udid>` (Apple platforms), the home directory becomes `~`, and the executable in argv becomes its basename.
-- Next to the fixture it writes `<name>.provenance.json`: `provenance: "captured"`, tool, redacted argv, exit code, stream, capture date, source commit, AutoMobile version and the device's platform, form factor, model, device type, OS version, API level and runtime id. The sidecar is formatted with oxfmt.
-- When `git check-attr eol` does not already report `lf` for the fixture, it adds `test/fixtures/<area>/<form-factor>/* text eol=lf` to `.gitattributes`, after the last entry for the same area (or the last `test/fixtures/` entry), so Windows checkouts do not convert the fixture to CRLF. The pin also makes git normalise line endings on commit: a capture with CRLF line endings (older-API `adb shell` output) is stored and checked out with LF, so the committed fixture is not byte-identical to that capture.
+- Next to the fixture it writes `<name>.provenance.json`: `provenance: "captured"`, tool, redacted argv, exit code, stream, capture date, source commit and AutoMobile version. The sidecar also holds the device's platform, form factor, model, device type, OS version, API level and runtime id, and oxfmt formats it.
+- When `git check-attr eol` does not already report `lf` for the fixture, it adds `test/fixtures/<area>/<form-factor>/* text eol=lf` to `.gitattributes`. The line goes after the last entry for the same area (or the last `test/fixtures/` entry), so Windows checkouts do not convert the fixture to CRLF. The pin also makes git normalise line endings on commit. A capture with CRLF line endings (older-API `adb shell` output) is stored and checked out with LF, so the committed fixture is not byte-identical to that capture.

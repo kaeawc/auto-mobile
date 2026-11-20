@@ -1953,6 +1953,26 @@ describe("prototype web still (#16346)", () => {
     expect(textOf(byTag(still, "r")[0]!)).toBe("{secret}");
   });
 
+  test("inserted derived placeholders stay literal while authored ones resolve", () => {
+    const spec = {
+      ...reference,
+      data: { ...(reference.data as Record<string, unknown>), note: "{derived:totalText}" },
+      root: {
+        type: "column",
+        repeat: { as: "item", items: [{ label: "{derived:totalText}" }] },
+        children: [
+          { type: "text", testTag: "a", text: "{derived:totalText}" },
+          { type: "text", testTag: "d", text: "{data:/note}" },
+          { type: "text", testTag: "r", text: "{item.label}" },
+        ],
+      },
+    };
+    const still = renderPrototypeStill(spec);
+    expect(textOf(byTag(still, "a")[0]!)).toBe("$42.50");
+    expect(textOf(byTag(still, "d")[0]!)).toBe("{derived:totalText}");
+    expect(textOf(byTag(still, "r")[0]!)).toBe("{derived:totalText}");
+  });
+
   test("a repeated line with no rows stays wrap-sized", () => {
     const row = byTag(
       renderPrototypeStill({

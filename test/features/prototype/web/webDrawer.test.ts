@@ -81,6 +81,74 @@ describe("web still drawer (#16536)", () => {
   });
 });
 
+describe("web still drawer parity (#18451)", () => {
+  const surfaceOf = (spec: Spec, options = {}) =>
+    byPart(renderPrototypeStill(spec, options).element, "drawer")[0]!;
+
+  test("the tonal blend uses surfaceTint, not primary", () => {
+    const themed = {
+      ...specWith([drawer()]),
+      theme: { colors: { primary: "#000000", surfaceTint: "#ff0000" } },
+    };
+    // surface (254,247,255) under (255,0,0) at (4.5 ln 4 + 2) / 100 = 0.08238.
+    expect(surfaceOf(themed).style["background-color"]).toBe("rgba(254,227,234,1)");
+  });
+
+  test("a drawer that is the fullscreen root keeps its constrained width", () => {
+    const spec = { id: "s", state: { menu: true }, root: drawer() };
+    expect(surfaceOf(spec).style).toMatchObject({
+      width: "max(0px, min(320px, calc(100% - 56px)))",
+      height: "100%",
+    });
+    expect(surfaceOf(spec).style.flex).toBeUndefined();
+  });
+
+  test("the layer's insets are consumed: safeAreaPadding inside adds no more", () => {
+    const child = {
+      type: "column",
+      safeAreaPadding: { types: ["systemBars"], edges: ["top", "bottom", "start", "end"] },
+      children: [{ type: "text", text: "Inbox" }],
+    };
+    const surface = surfaceOf(
+      specWith([drawer({ child, safeAreaPadding: child.safeAreaPadding })]),
+    );
+    const inset = (element: WebElement) =>
+      Object.values(element.style).some((value) => value.includes("var(--safe-"));
+    expect(find(surface, inset)).toEqual([]);
+  });
+
+  test("unsized content starts at the leading edge, as Android's column does", () => {
+    expect(surfaceOf(specWith([drawer()])).style["align-items"]).toBe("flex-start");
+  });
+
+  test("an authored height is centred vertically in the frame", () => {
+    const still = renderPrototypeStill(specWith([drawer({ style: { height: { dp: 100 } } })]));
+    const [frame] = byPart(still.element, "drawerFrame");
+    expect(frame!.style["align-items"]).toBe("center");
+    expect(byPart(frame!, "drawer")[0]!.style.height).toBe("100px");
+  });
+
+  test("a filled height resolves against the row, so the width stays capped", () => {
+    const style = surfaceOf(specWith([drawer({ style: { height: "fill" } })])).style;
+    expect(style.flex).toBeUndefined();
+    expect(style).toMatchObject({
+      height: "100%",
+      "align-self": "stretch",
+      width: "max(0px, min(320px, calc(100% - 56px)))",
+    });
+  });
+
+  test("the iOS skin paints surfaceContainerHigh, not the Android tonal surface", () => {
+    const themed = {
+      ...specWith([drawer()]),
+      theme: { colors: { surfaceContainerHigh: "#123456" } },
+    };
+    const ios = { frame: "iphone-16" };
+    expect(surfaceOf(themed, ios).style["background-color"]).toBe("rgba(18,52,86,1)");
+    expect(surfaceOf(themed).style["background-color"]).not.toBe("rgba(18,52,86,1)");
+  });
+});
+
 describe("web still fullscreen scrim (#16536)", () => {
   test("a fullscreen placement scrim paints behind the window's content", () => {
     const still = renderPrototypeStill(

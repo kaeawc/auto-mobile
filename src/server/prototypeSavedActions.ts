@@ -625,6 +625,25 @@ function savedElementAnchorFailure(): PrototypeSavedOutput {
   });
 }
 
+/**
+ * The per-prototype viewer template has no web view module (#18814); only ProtoViewer draws one,
+ * and saves with pin or icon never route to ProtoViewer (protoViewerHandles).
+ */
+function iosSavedWebViewRefusal(args: PrototypeSavedInput): PrototypeSavedOutput | undefined {
+  const path = prototypeWebViewNodePath(args.spec!);
+  if (path === undefined) {
+    return undefined;
+  }
+  const remedy = protoViewerHandles(args)
+    ? "Install ProtoViewer on the simulator and save again, or remove the webView node."
+    : "Saves with pin or icon do not use ProtoViewer, so remove the webView node and save again.";
+  return {
+    success: false,
+    errorCode: "unsupported_capability",
+    error: `The webView node at ${path} is not supported by the saved prototype viewer. ${remedy} Nothing was saved.`,
+  };
+}
+
 async function saveIosPrototype(
   backend: () => IosSavedPrototypeInstaller,
   udid: string,
@@ -642,18 +661,9 @@ async function saveIosPrototype(
   if (hasElementAnchors(args.spec!)) {
     return savedElementAnchorFailure();
   }
-  const webViewPath = prototypeWebViewNodePath(args.spec!);
-  if (webViewPath !== undefined) {
-    // The per-prototype viewer template has no web view module (#18814); only ProtoViewer draws one,
-    // and saves with pin or icon never route to ProtoViewer (protoViewerHandles).
-    const remedy = protoViewerHandles(args)
-      ? "Install ProtoViewer on the simulator and save again, or remove the webView node."
-      : "Saves with pin or icon do not use ProtoViewer, so remove the webView node and save again.";
-    return {
-      success: false,
-      errorCode: "unsupported_capability",
-      error: `The webView node at ${webViewPath} is not supported by the saved prototype viewer. ${remedy} Nothing was saved.`,
-    };
+  const webViewRefusal = iosSavedWebViewRefusal(args);
+  if (webViewRefusal) {
+    return webViewRefusal;
   }
   const prepared = await preparePrototypeAssets(
     args.assets ?? [],

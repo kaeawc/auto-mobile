@@ -196,7 +196,7 @@ internal fun RenderPrototypeSplitButton(
           node.enabled,
         ),
         { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) },
-        Modifier.semantics { contentDescription = source.contentDescription ?: node.text },
+        Modifier.semantics { contentDescription = node.contentDescription ?: node.text },
       ) {
         prototypeIcon(source.icon)?.let {
           Icon(it, contentDescription = null, Modifier.size(ButtonDefaults.IconSize))

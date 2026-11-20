@@ -13,6 +13,7 @@ import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
@@ -212,6 +213,31 @@ class PrototypeExpressiveComponentsTest {
       PrototypeInteraction.Tap(listOf(PrototypeEmitAction("send"))),
       interactions.single(),
     )
+  }
+
+  @Test
+  fun `split button and fab name themselves from the resolved description`() {
+    val state = mapOf("name" to PrototypeScalar.Text("Ada"))
+    val split =
+      model(
+        PrototypeButtonNode(
+          testTag = "send",
+          label = "Send",
+          contentDescription = "Save {name}",
+          onTap = listOf(PrototypeEmitAction("send")),
+          split = PrototypeButtonSplit(listOf(PrototypeMenuEntry("Draft"))),
+        ),
+        state,
+      )
+    val fabNode = model(fab.copy(label = "New {name}", contentDescription = "Create {name}"), state)
+    render(motion = false) {
+      RenderPrototypeButton(split, Modifier) { interactions += it }
+      RenderPrototypeFab(fabNode, Modifier.testTag("create")) { interactions += it }
+    }
+    compose.onNode(hasContentDescription("Save Ada") and hasClickAction()).assertExists()
+    compose.onNode(hasContentDescription("Create Ada") and hasClickAction()).assertExists()
+    compose.onAllNodes(hasContentDescription("Save {name}")).assertCountEquals(0)
+    compose.onAllNodes(hasContentDescription("Create {name}")).assertCountEquals(0)
   }
 
   @Test

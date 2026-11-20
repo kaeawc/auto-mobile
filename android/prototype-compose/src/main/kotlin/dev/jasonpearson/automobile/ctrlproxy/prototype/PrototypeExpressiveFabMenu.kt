@@ -59,7 +59,7 @@ internal fun RenderPrototypeFabMenu(
         interact(PrototypeInteraction.Tap(item.onTap))
       }
     }
-    PrototypeFabMenuButton(source, open) {
+    PrototypeFabMenuButton(node, source, open) {
       source.onTap?.takeIf { it.isNotEmpty() }?.let { interact(PrototypeInteraction.Tap(it)) }
       open = !open
     }
@@ -106,14 +106,20 @@ private fun PrototypeFabMenuItems(
  * and carries its own accessible name, since the node's semantics sit on the outer layout.
  */
 @Composable
-private fun PrototypeFabMenuButton(source: PrototypeFabNode, open: Boolean, onClick: () -> Unit) {
+private fun PrototypeFabMenuButton(
+  node: PrototypeRenderNode,
+  source: PrototypeFabNode,
+  open: Boolean,
+  onClick: () -> Unit,
+) {
   val icon: @Composable () -> Unit = {
     prototypeIcon(if (open) "close" else source.icon)?.let { Icon(it, contentDescription = null) }
   }
+  // The label and description are read from the render node: state placeholders are resolved there.
+  val label = node.text.takeIf { source.label != null }
   val fab = Modifier.semantics {
-    contentDescription = source.contentDescription ?: source.label ?: source.icon
+    contentDescription = node.contentDescription ?: label ?: source.icon
   }
-  val label = source.label
   when {
     label != null ->
       ExtendedFloatingActionButton(

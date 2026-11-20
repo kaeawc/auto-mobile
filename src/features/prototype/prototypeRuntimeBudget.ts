@@ -104,8 +104,11 @@ function oversizedActionWindows(value: unknown, path: string, fields: string[]):
     return;
   }
   oversizedDataAction(object, path, fields);
+  // A data action's `value` is a literal or binding, never more actions: its size is checked
+  // above, and its contents are not read as actions.
+  const dataAction = PROTOTYPE_DATA_ACTION_TYPES.some((name) => name === object.type);
   for (const key of Object.keys(object).sort()) {
-    if (!OPAQUE_FIELDS.has(key)) {
+    if (!OPAQUE_FIELDS.has(key) && !(dataAction && key === "value")) {
       oversizedActionWindows(object[key], path ? `${path}.${key}` : key, fields);
     }
   }

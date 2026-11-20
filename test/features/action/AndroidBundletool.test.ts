@@ -5,6 +5,11 @@ import {
   scrubBundletoolText,
 } from "../../../src/features/action/AndroidBundletool";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import { runExecSeam } from "../../../src/utils/ExecSeam";
+import type { ToolCallCapture } from "../../../src/utils/fixtureCapture/fixtureCaptureFormat";
+import { runWithFixtureCapture } from "../../../src/utils/fixtureCapture/fixtureCaptureScope";
+import type { HostCommandExecutor } from "../../../src/utils/HostCommandExecutor";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAndroidArtifactHost } from "../../fakes/FakeAndroidArtifactHost";
 import { FakeBundletoolLocator } from "../../fakes/FakeBundletoolLocator";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
@@ -24,6 +29,45 @@ describe("scrubBundletoolText", () => {
     expect(scrubBundletoolText("a pw b pw c key", ["pw", "", "key"])).toBe(
       `a ${REDACTED_SECRET} b ${REDACTED_SECRET} c ${REDACTED_SECRET}`,
     );
+  });
+});
+
+describe("AndroidBundletool.buildApks fixture capture", () => {
+  test("a capture holds the scrubbed build-apks output and marks it redacted", async () => {
+    const timer = new FakeTimer();
+    const captures: ToolCallCapture[] = [];
+    // Runs each command through the real exec seam, so the capture sees what bundletool echoed.
+    const seamHost: HostCommandExecutor = {
+      executeCommand: (file, args = []) =>
+        runExecSeam(
+          async () => ({ stdout: "", stderr: `Keystore password 'ks-s3cret' was incorrect` }),
+          {},
+          { command: file, args },
+        ),
+    };
+    const tool = new AndroidBundletool({
+      hostExecutor: seamHost,
+      locator: new FakeBundletoolLocator(),
+      artifactHost: new FakeAndroidArtifactHost(),
+      adbPath: async () => "/sdk/platform-tools/adb",
+      deviceId: "emulator-5554",
+    });
+    const request = {
+      bundle: { keystore: { path: "/k.jks", alias: "a", storePassword: "ks-s3cret" } },
+    };
+    await runWithFixtureCapture(
+      "installApp",
+      {
+        writer: { write: async (capture) => void captures.push(capture) },
+        timer,
+        sourceIdentity: async () => ({ automobileVersion: "0", sourceTreeState: "clean" }),
+      },
+      () => tool.buildApks("/app.aab", request, "/scratch"),
+    );
+    const [command] = captures[0]?.commands ?? [];
+    expect(command?.stderr).toBe(`Keystore password '${REDACTED_SECRET}' was incorrect`);
+    expect(command?.redacted).toBe(true);
+    expect(JSON.stringify(captures)).not.toContain("ks-s3cret");
   });
 });
 

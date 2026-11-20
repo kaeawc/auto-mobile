@@ -18,10 +18,25 @@ no interactive runtime. The planned release is in the devlog entries under Backg
 - `bun run build` in that directory bundles each entry on its own with `bun build --target=browser`
   into `dist/index.js` and `dist/element.js` (gitignored). `dist/element.js` is the package's only
   side effect. The library source is `src/features/prototype/web/embed/`.
+- The same build bundles the page entry `packages/prototype-web/src/page.ts` into the committed
+  `src/features/prototype/web/prototypeWebPageBundle.generated.ts`. The entry holds `mount` and a
+  boot that mounts the options in the page's `script[type="application/json"][data-prototype-page]`
+  on its `[data-prototype-host]`. The function `prototypeWebPageBundle()` reads that file and never
+  bundles at request time. Nothing serves it yet: the prototype web resource still returns the
+  static page from `buildPrototypeWebPage`, with no script.
+- The file carries a version mark where the bundle names the root `package.json` version. The
+  function `prototypeWebPageBundle()` replaces the mark with the release's version, so a version
+  bump does not change the file.
+- The test `prototypeWebPageBundle.test.ts` rebuilds the file and fails when the committed one
+  differs. Regenerate it with `bun run build` in `packages/prototype-web/`, or compare with
+  `bun build.ts --check`.
+- Every export has one budget: 500,000 bytes of HTML, JS and CSS counted together, minified, with
+  no gzip limit (`MAX_PROTOTYPE_WEB_EXPORT_BYTES` in `build.ts`). The build refuses to write an
+  export over it, and the bundle tests fail on one.
 - `test/features/prototype/web/prototypeWebPackage.typecheck.ts` assigns each export and public type
   both ways between `index.d.ts` and the implementation, so the typecheck fails when they drift.
 - `prototypeWebLibraryBundle.test.ts` is the boundary check. Each entry's browser bundle reaches no
-  Node builtin and stays within the export budget below, and the element adds at most 8,000 bytes
+  Node builtin and stays within the export budget above, and the element adds at most 8,000 bytes
   over `index`. Its only inputs are
   `src/features/prototype/`, the CtrlProxy protocol constants and the root `package.json`, whose
   `version` is the library version.
@@ -133,3 +148,4 @@ fails the run, so the list only shrinks.
 
 - [Embeddable web prototype library plan](../devlog/2026-11-03-prototype-web-library-plan.md)
 - [Web library advertises the host's known capabilities](../devlog/2026-11-16-prototype-web-library-capabilities.md)
+- [Committed page bundle and one export budget](../devlog/2026-11-19-prototype-web-page-bundle.md)

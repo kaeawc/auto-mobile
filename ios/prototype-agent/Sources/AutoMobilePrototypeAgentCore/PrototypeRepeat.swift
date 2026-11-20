@@ -745,7 +745,8 @@ struct PrototypeRepeatInstance {
             bindString("key", in: &fields)
         case .string("emit")?:
             bindEmit(&fields)
-        case .string("setData")?, .string("appendData")?, .string("prependData")?, .string("removeData")?:
+        case .string("setData")?, .string("appendData")?, .string("prependData")?, .string("upsertData")?,
+             .string("removeData")?:
             bindDataAction(&fields)
         case .string("startTimer")?:
             if case let .array(actions)? = fields["actions"] {
@@ -778,6 +779,10 @@ struct PrototypeRepeatInstance {
     /// text placeholders, `into` binds like a data path, binding objects bind like a data value,
     /// and the follow-up lists bind recursively.
     private func bindRequest(_ fields: inout [String: JSONValue]) {
+        if var selector = fields["where"]?.objectFields, let binding = selector["equals"]?.objectFields {
+            selector["equals"] = bindDataValue(binding)
+            fields["where"] = .object(selector)
+        }
         bindString("url", in: &fields)
         bindString("statusKey", in: &fields)
         if case let .string(path)? = fields["into"] { fields["into"] = .string(bindDataPath(path)) }

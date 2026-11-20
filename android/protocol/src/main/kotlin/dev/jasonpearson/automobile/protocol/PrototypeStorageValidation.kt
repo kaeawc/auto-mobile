@@ -46,6 +46,37 @@ internal object PrototypeStorageValidation {
     return byteLimitError(bytes, enforceBytes)
   }
 
+  fun keyedBindingError(
+    spec: JsonObject,
+    context: PrototypeStateChecks.Context,
+  ): PrototypeSpecError? {
+    for ((action, path) in context.actions) {
+      val type = (action["type"] as? JsonPrimitive)?.content
+      if (type !in setOf("setData", "removeData", "request")) continue
+      val candidates = buildList {
+        (action["where"] as? JsonObject)?.get("equals")?.let { add(it to "$path.where.equals") }
+        if (type != "request") action["value"]?.let { add(it to "$path.value") }
+      }
+      for ((binding, at) in candidates) {
+        // Reuse the existing template-aware secure guard, including the request opt-in.
+        val probe = buildJsonObject {
+          put("type", "request")
+          put("body", binding)
+          if (type == "request")
+            action["allowSecureInRequest"]?.let { put("allowSecureInRequest", it) }
+        }
+        val error = PrototypeSecureStorageRules.actionError(probe, path, spec) ?: continue
+        return error.copy(
+          path = at,
+          message =
+            if (type == "request") error.message
+            else error.message.replace("a request without allowSecureInRequest", "data actions"),
+        )
+      }
+    }
+    return null
+  }
+
   private fun byteLimitError(bytes: Int, enforceBytes: Boolean): PrototypeSpecError? =
     if (
       enforceBytes &&

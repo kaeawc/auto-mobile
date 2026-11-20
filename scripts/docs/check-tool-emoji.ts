@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { Glob } from "bun";
+import { dropGitIgnored } from "../lib/gitIgnored";
 import catalog from "../../schemas/tool-definitions.json";
 import { TOOL_EMOJI, TOOLS_PAGE, toolPage } from "../../src/server/toolEmoji";
 
@@ -249,9 +250,12 @@ export function registryProblems(
 
 function main(): void {
   const repoRoot = join(dirname(import.meta.path), "..", "..");
-  const docs = [...new Glob("docs/**/*.md").scanSync({ cwd: repoRoot })]
-    .map((path) => path.replaceAll("\\", "/"))
-    .sort();
+  const docs = dropGitIgnored(
+    repoRoot,
+    [...new Glob("docs/**/*.md").scanSync({ cwd: repoRoot })].map((path) =>
+      path.replaceAll("\\", "/"),
+    ),
+  ).sort();
   const read = (path: string) => readFileSync(join(repoRoot, path), "utf8");
   const listed = catalog.map((definition) => definition.name);
   const problems = [

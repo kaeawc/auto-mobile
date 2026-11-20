@@ -297,7 +297,7 @@ describe("CircleCI macOS policy (#10887, #11010)", () => {
   test("nightly XCTestRunner Simulator Tests runs the same tests and daemon budget as the PR opt-in workflow", () => {
     const githubSteps = loadJobSteps(XCTESTRUNNER_WORKFLOW, "ios-xctest-runner-simulator-tests");
     for (const name of [
-      "Run selected CtrlProxy iOS tests (Xcode 26.6)",
+      "Run selected CtrlProxy iOS tests (Xcode 27.2)",
       "Run odd-width CtrlProxy screenshot test (iPhone 15)",
     ]) {
       const github = onlyTesting(stepNamed(githubSteps, name)?.run ?? "");

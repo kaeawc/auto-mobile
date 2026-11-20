@@ -26,6 +26,8 @@ protocol StoreKitTestSessioning: AnyObject {
     func expire(subscriptionId: String) throws
     func setTimeRate(_ rate: StoreKitTimeRate) throws
     func setSimulatedError(_ code: Int) async throws
+    /// Drops a simulated error the session still holds for purchases an app starts itself.
+    func clearSimulatedError() async throws
     func allTransactions() -> [StoreKitTransaction]
 }
 
@@ -34,23 +36,29 @@ protocol StoreKitSessionProviding: Sendable {
     func execute(_ request: RequestStoreKit) async throws -> [StoreKitTransaction]?
 }
 
-/// Serializes session access on the main actor. The shared default outlives handlers
-/// and WebSocket connections; tests inject a store with an in-memory factory.
+/// Serializes session access on the main actor and allows one active environment at a time.
+/// The shared default outlives handlers and WebSocket connections; tests inject a store with
+/// an in-memory factory.
 @MainActor
 final class StoreKitSessionStore: StoreKitSessionProviding {
     nonisolated static let shared = StoreKitSessionStore()
     private var busyBundles: Set<String> = []
     private var sessions: [String: any StoreKitTestSessioning] = [:]
+    /// The error `setSimulatedError` queued for each bundle's next runner `buy`.
+    private var pendingErrors: [String: Int] = [:]
     private let factory: @MainActor @Sendable (String) throws -> any StoreKitTestSessioning
     private let supported: Bool
+    private let osMajorVersion: Int
 
     nonisolated init(
         supported: Bool = DefaultStoreKitTestSession.isSupported,
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
         factory: @escaping @MainActor @Sendable (String) throws -> any StoreKitTestSessioning = {
             try DefaultStoreKitTestSession.make(configPath: $0)
         }
     ) {
         self.supported = supported
+        self.osMajorVersion = osMajorVersion
         self.factory = factory
     }
 
@@ -70,17 +78,43 @@ final class StoreKitSessionStore: StoreKitSessionProviding {
             guard path.hasPrefix("/"), URL(fileURLWithPath: path).pathExtension == "storekit" else {
                 throw CommandError.invalidParameter("configPath", "expected an absolute .storekit path")
             }
+            // SKTestSession state is process-global, so a second bundle's reset would erase the first's.
+            if let active = sessions.keys.first(where: { $0 != request.bundleId }) {
+                throw VerbatimLocalizedError(
+                    message: "storekit environment active for bundleId \(active); "
+                        + "send clear for it before loading another bundle"
+                )
+            }
             let session = try factory(path)
             session.resetToDefaultState()
             session.clearTransactions()
             session.disableDialogs = true
             sessions[request.bundleId] = session
+            pendingErrors[request.bundleId] = nil
             return nil
         }
         guard let session = sessions[request.bundleId] else {
             throw VerbatimLocalizedError(message: "no storekit session for bundleId; call load first")
         }
-        return try await perform(request, session: session)
+        do {
+            return try await perform(request, session: session)
+        } catch {
+            throw actionable(error, action: request.action)
+        }
+    }
+
+    /// iOS 26's storekitd rejects the runner's bundle ("not installed for development") for
+    /// purchases and expiries the runner starts, which surfaces as SKInternalErrorDomain 3.
+    private func actionable(_ error: any Error, action: String) -> any Error {
+        let nsError = error as NSError
+        guard osMajorVersion >= 26, action == "buy" || action == "expire",
+              nsError.domain == "SKInternalErrorDomain", nsError.code == 3
+        else { return error }
+        return VerbatimLocalizedError(
+            message: "unsupported: StoreKit Testing cannot \(action) on iOS \(osMajorVersion) simulators: "
+                + "the system rejects the runner as not installed for development "
+                + "(SKInternalErrorDomain 3). Use an iOS 18 simulator."
+        )
     }
 
     private func perform(_ request: RequestStoreKit, session: any StoreKitTestSessioning) async throws
@@ -88,7 +122,12 @@ final class StoreKitSessionStore: StoreKitSessionProviding {
     {
         switch request.action {
         case "buy":
-            try await session.buy(productId: required(request.productId, name: "productId"))
+            let productId = try required(request.productId, name: "productId")
+            if let code = pendingErrors.removeValue(forKey: request.bundleId) {
+                try await session.clearSimulatedError()
+                throw NSError(domain: "SKErrorDomain", code: code)
+            }
+            try await session.buy(productId: productId)
         case "refund":
             guard let identifier = request.transactionId else { throw CommandError.missingParameter("transactionId") }
             guard identifier >= 0 else { throw CommandError.invalidParameter("transactionId", String(identifier)) }
@@ -98,6 +137,7 @@ final class StoreKitSessionStore: StoreKitSessionProviding {
         case "clear":
             session.resetToDefaultState()
             session.clearTransactions()
+            pendingErrors[request.bundleId] = nil
             let transactions = session.allTransactions()
             sessions.removeValue(forKey: request.bundleId)
             return transactions
@@ -123,6 +163,7 @@ final class StoreKitSessionStore: StoreKitSessionProviding {
                 throw CommandError.invalidParameter("simulatedError", String(code))
             }
             try await session.setSimulatedError(code)
+            pendingErrors[request.bundleId] = code
         case "disableDialogs":
             guard let enabled = request.enabled else { throw CommandError.missingParameter("enabled") }
             session.disableDialogs = enabled

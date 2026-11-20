@@ -43,6 +43,7 @@ export interface HeapDumpAttempt {
 export interface HeapDumpResult {
   path: string;
   sizeBytes: number;
+  format: "hprof";
   native: boolean;
   attempts: HeapDumpAttempt[];
 }
@@ -116,7 +117,13 @@ export class AndroidHeapDump {
       if (sizeBytes === 0) {
         throw new ActionableError(`The pulled heap dump ${hostPath} is empty.`);
       }
-      return { path: hostPath, sizeBytes, native: request.native === true, attempts };
+      return {
+        path: hostPath,
+        sizeBytes,
+        format: "hprof",
+        native: request.native === true,
+        attempts,
+      };
     } catch (error) {
       await store.remove(hostPath);
       throw error;

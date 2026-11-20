@@ -21,13 +21,17 @@ import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import java.util.Base64
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
-internal abstract class WorkspaceShellUiFixture {
+internal abstract class WorkspaceShellUiFixture(
+  /** Runs pane screenshot captures on the test thread, so they follow [ComposeUiTest.mainClock]. */
+  protected val captureDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+) {
 
   protected fun col(id: String, name: String, platform: Platform = Platform.Android) =
     DeviceColumn(deviceId = id, name = name, platform = platform)
@@ -399,7 +403,7 @@ internal class WorkspaceShellUiTest : WorkspaceShellUiFixture() {
                     savedBytes = bytes
                     "/tmp/shots/$name.png"
                   },
-                captureDispatcher = Dispatchers.Unconfined,
+                captureDispatcher = captureDispatcher,
               ),
           )
         }
@@ -453,7 +457,7 @@ internal class WorkspaceShellUiTest : WorkspaceShellUiFixture() {
                   savedName = name
                   "/tmp/shots/$name.png"
                 },
-              captureDispatcher = Dispatchers.Unconfined,
+              captureDispatcher = captureDispatcher,
             ),
         )
       }
@@ -509,7 +513,7 @@ internal class WorkspaceShellUiTest : WorkspaceShellUiFixture() {
                   savedName = name
                   "/tmp/shots/$name.png"
                 },
-              captureDispatcher = Dispatchers.Unconfined,
+              captureDispatcher = captureDispatcher,
             ),
         )
       }

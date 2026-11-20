@@ -264,6 +264,42 @@ describe("fixture capture scope", () => {
     expect(commands?.[2]?.argv).toEqual(["adb", "c"]);
   });
 
+  test("spends the per-call limit in issue order when commands finish out of order", async () => {
+    const { deps, writer } = captureDeps();
+    const limited = { ...deps, limits: { streamChars: 10, callChars: 6 } };
+    await runWithFixtureCapture("listApps", limited, async () => {
+      const first = beginCapturedCommand(["adb", "first"]);
+      const second = beginCapturedCommand(["adb", "second"]);
+      second?.finish({ stdout: "22222", stderr: "" });
+      first?.finish({ stdout: "11111", stderr: "" });
+    });
+    expect(
+      writer.captures[0]?.commands.map(({ argv, stdout, truncated }) => ({
+        arg: argv[1],
+        stdout,
+        truncated,
+      })),
+    ).toEqual([
+      { arg: "first", stdout: "11111", truncated: undefined },
+      { arg: "second", stdout: `2${TRUNCATED_OUTPUT_MARKER}`, truncated: true },
+    ]);
+  });
+
+  test("marks a command that overflowed node's maxBuffer truncated at any output length", async () => {
+    const { deps, writer, timer } = captureDeps();
+    const limited = { ...deps, limits: { streamChars: 4, callChars: 100 } };
+    const overflow = execError({ code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER", stdout: "abcd" });
+    await runWithFixtureCapture("observe", limited, async () => {
+      await expect(seamCommand(timer, ["shell", "dumpsys"], overflow)).rejects.toBe(overflow);
+    });
+    expect(writer.captures[0]?.commands[0]).toMatchObject({
+      exitCode: null,
+      errorCode: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+      stdout: "abcd",
+      truncated: true,
+    });
+  });
+
   test("applies a caller's scrubber before truncation and marks the command redacted", async () => {
     const { deps, writer, timer } = captureDeps();
     const scrub = (value: string) => value.split("s3cret").join("<redacted>");

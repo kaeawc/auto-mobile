@@ -5,6 +5,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/lib/spotlight-exclude.sh
 source "${repo_root}/scripts/lib/spotlight-exclude.sh"
+# Compile with the repository-pinned Xcode's SDK unless DEVELOPER_DIR already names one.
+if [[ -f "${repo_root}/scripts/ios/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${repo_root}/scripts/ios/xcode_version.sh"
+  select_pinned_xcode
+fi
 device_id="${1:-}"
 if [[ $# -ne 1 || -z "${device_id}" ]]; then
     echo "Usage: bash scripts/ios/userdefaults-no-sdk-smoke.sh <booted-simulator-udid>" >&2

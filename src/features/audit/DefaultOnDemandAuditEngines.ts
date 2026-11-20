@@ -9,6 +9,7 @@ import { BaselineManager } from "../accessibility/BaselineManager";
 import { MemoryAudit } from "../memory/MemoryAudit";
 import { serverConfig } from "../../utils/ServerConfig";
 import { NoOpPerformanceTracker } from "../../utils/NoOpPerformanceTracker";
+import { createIosOnDemandAuditEngines } from "./IosOnDemandAuditEngines";
 import type { AuditBaselineStore, OnDemandAuditEngines } from "./OnDemandAudit";
 
 /**
@@ -27,6 +28,9 @@ function namedBaselineStore(manager: BaselineManager): AuditBaselineStore {
 
 /** The production engines: the same ones `observe` runs behind its feature flags. */
 export function createDefaultOnDemandAuditEngines(device: BootedDevice): OnDemandAuditEngines {
+  if (device.platform === "ios") {
+    return createIosOnDemandAuditEngines(device);
+  }
   const observeScreen = new RealObserveScreen(device);
   return {
     async observe() {

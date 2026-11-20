@@ -13,6 +13,7 @@ import {
   internalRestartResumeTargets,
 } from "./internalToolParams";
 import { disabledDeviceResourceReport } from "../utils/iosDeviceResourceImpact";
+import { noteFixtureCaptureDevice } from "../utils/fixtureCapture/fixtureCaptureScope";
 import type { DeviceBootResult } from "../devices/deviceBootSelection";
 import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
@@ -835,6 +836,13 @@ export function bootSourceLabel(source: "booted" | "cold-boot"): string {
   return source === "cold-boot" ? "started by this call" : "already booted";
 }
 
+/** A startDevice capture records the device it booted, with the same image facts (#18896). */
+function notePooledCaptureDevice(device: BootedDevice, sourceImage: DeviceInfo | undefined) {
+  const pooled = initializedDevicePool()?.getDevice(device.deviceId) ?? undefined;
+  noteFixtureCaptureDevice(device, sourceImage ?? pooled?.androidImage);
+  return pooled;
+}
+
 function buildBootedResponse(
   { device, source, provisioned, prebootDisabledResources }: DeviceBootResult,
   perf: ReturnType<typeof createPerformanceTracker>,
@@ -855,10 +863,11 @@ function buildBootedResponse(
 ) {
   perf.end();
   const timing = perf.getTimings();
+  const pooled = notePooledCaptureDevice(device, sourceImage);
   const description = describeDevice({
     kind: "booted",
     device,
-    pooled: initializedDevicePool()?.getDevice(device.deviceId) ?? undefined,
+    pooled,
     discovery: sourceImage,
     configured: configuredImage,
     session: { sessionId },

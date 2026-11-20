@@ -143,3 +143,48 @@ for (const changed of [false, true]) {
     expect(deviceUtils.getGetDeviceImagesDetailedCalls()).toHaveLength(2);
   });
 }
+
+test("getAndroid refuses a missing CtrlProxy APK override before reserving or booting (#18823)", async () => {
+  setDeviceToolsDependencies({
+    env: { AUTOMOBILE_CTRL_PROXY_APK_PATH: "/deleted/lane/control-proxy-debug.apk" },
+    ctrlProxyApkOverrideProbe: {
+      stat: async (filePath) => {
+        throw new Error(`ENOENT: no such file or directory, stat '${filePath}'`);
+      },
+    },
+  });
+  const handlers = createAcquisitionHandlers({
+    bootAndPrepareDevice: async () => {
+      events.push("prepare");
+      throw new ActionableError("must not boot");
+    },
+  });
+  deviceUtils.setBootedDevices("android", [
+    { platform: "android", name: "Pixel", deviceId: "emulator-5554" },
+  ]);
+  await expect(handlers.getAndroidHandler({ deviceId: "emulator-5554" })).rejects.toThrow(
+    /AUTOMOBILE_CTRL_PROXY_APK_PATH points to \/deleted\/lane\/control-proxy-debug\.apk/,
+  );
+  expect(events).toEqual([]);
+});
+
+test("getApple ignores the Android CtrlProxy APK override", async () => {
+  setDeviceToolsDependencies({
+    env: { AUTOMOBILE_CTRL_PROXY_APK_PATH: "/deleted/lane/control-proxy-debug.apk" },
+    ctrlProxyApkOverrideProbe: {
+      stat: async () => {
+        throw new Error("probe must not run for iOS");
+      },
+    },
+  });
+  const handlers = createAcquisitionHandlers({
+    bootAndPrepareDevice: async () => {
+      events.push("prepare");
+      throw new ActionableError("reached preparation");
+    },
+  });
+  await expect(handlers.getAppleHandler({ deviceId: "UDID" })).rejects.toThrow(
+    "reached preparation",
+  );
+  expect(events).toContain("prepare");
+});

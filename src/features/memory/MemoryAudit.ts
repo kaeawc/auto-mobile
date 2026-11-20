@@ -62,7 +62,7 @@ export class MemoryAudit {
   }
 
   /**
-   * Run a complete memory audit around an action
+   * Run a complete memory audit around an action, or return undefined if the app has no process before the action.
    */
   async runAudit(
     packageName: string,
@@ -72,11 +72,14 @@ export class MemoryAudit {
       action,
       perf = new NoOpPerformanceTracker(),
     }: { action: () => Promise<void>; perf?: PerformanceTracker },
-  ): Promise<MemoryAuditResult> {
+  ): Promise<MemoryAuditResult | undefined> {
     logger.info(`[MemoryAudit] Running memory audit for ${packageName} (${toolName})`);
 
     // Collect metrics around the action
     const metrics = await this.metricsCollector.collectMetrics(packageName, action, perf);
+    if (!metrics) {
+      return undefined;
+    }
 
     // Get baseline for this app/tool combination
     const baseline = await this.baselineManager.getBaseline(

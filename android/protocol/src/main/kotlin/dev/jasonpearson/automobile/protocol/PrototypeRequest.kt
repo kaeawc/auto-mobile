@@ -150,7 +150,14 @@ enum class PrototypeRequestErrorCode(val wireValue: String) {
   HTTP_ERROR("http_error"),
 
   /** A 2xx body that `/data` cannot hold. */
-  INVALID_RESPONSE("invalid_response");
+  INVALID_RESPONSE("invalid_response"),
+  LAST_GENERATED_UNSET("lastGenerated_unset"),
+  NOT_FOUND("not_found"),
+  AMBIGUOUS_MATCH("ambiguous_match"),
+  NOT_ARRAY("not_array"),
+  INVALID_PATH("invalid_path"),
+  INVALID_VALUE("invalid_value"),
+  LIMIT_EXCEEDED("limit_exceeded");
 
   companion object {
     fun fromWire(value: String): PrototypeRequestErrorCode? = entries.firstOrNull {
@@ -186,6 +193,9 @@ data class PrototypeResolvedRequest(
   val url: String,
   val headers: Map<String, String>,
   val body: JsonElement?,
+  val where: PrototypeDataMatch? = null,
+  val member: String? = null,
+  val context: PrototypeActionContext? = null,
 )
 
 sealed interface PrototypeResolvedRequestResult {
@@ -207,6 +217,9 @@ object PrototypeRequestResolver {
     action: PrototypeRequestAction,
     url: String,
     inputs: EmitContextInputs,
+    resolveBody: (EmitContextBinding) -> PrototypeDataValue = {
+      PrototypeDataWriter.resolveValue(it, inputs)
+    },
   ): PrototypeResolvedRequestResult {
     val target =
       when (val parsed = parseHttpUrl(url)) {
@@ -214,33 +227,24 @@ object PrototypeRequestResolver {
         is Parsed.Url -> parsed
       }
     val headers = linkedMapOf<String, String>()
-    val headerNames = HashSet<String>()
     val query = target.segments.toMutableList()
-    // Query entries are set in sorted key order (UTF-16 code units), whatever order they were
-    // authored in, so every platform builds the same URL.
-    val authored = listOf("headers" to action.headers, "query" to action.query?.toSortedMap())
-    for ((field, entries) in authored) {
-      for ((name, raw) in entries.orEmpty()) {
-        val text =
-          entryText(raw, "$field.$name", inputs)
-            ?: return invalidRequest(
-              bindingFailure(raw, "$field.$name", inputs),
-            )
-        if (field == "headers") {
-          if (!headerNames.add(name.lowercase())) {
-            return invalidRequest("headers.$name duplicates another header name")
-          }
-          headers[name] = text
-        } else setQuery(query, name, text)
-      }
+    resolveEntries(action, inputs, headers, query)?.let {
+      return it
     }
     var body: JsonElement? = null
     action.body?.let { binding ->
-      when (val resolved = PrototypeDataWriter.resolveValue(binding, inputs)) {
+      when (val resolved = resolveBody(binding)) {
         is PrototypeDataValue.Resolved -> body = PrototypeRequests.sortedKeys(resolved.value)
-        is PrototypeDataValue.Failure -> return invalidRequest("body: ${resolved.error.message}")
+        is PrototypeDataValue.Failure -> return bindingFailure(resolved.error, "body")
       }
     }
+    val where =
+      action.where?.let { selector ->
+        when (val result = PrototypeDataWriter.resolveValue(selector.equals, inputs)) {
+          is PrototypeDataValue.Resolved -> PrototypeDataMatch(selector.field, result.value)
+          is PrototypeDataValue.Failure -> return bindingFailure(result.error, "where.equals")
+        }
+      }
     val method = action.method ?: PrototypeRequests.DEFAULT_METHOD
     val resolved =
       PrototypeResolvedRequest(
@@ -248,8 +252,44 @@ object PrototypeRequestResolver {
         url = target.render(query.takeUnless { action.query.isNullOrEmpty() }),
         headers = headers,
         body = body,
+        where = where,
+        member = action.member,
+        context = inputs.actionContext?.copy(),
       )
     return PrototypeResolvedRequestResult.Success(resolved)
+  }
+
+  private fun resolveEntries(
+    action: PrototypeRequestAction,
+    inputs: EmitContextInputs,
+    headers: MutableMap<String, String>,
+    query: MutableList<String>,
+  ): PrototypeResolvedRequestResult.Failure? {
+    val headerNames = HashSet<String>()
+    // Query entries are set in sorted key order (UTF-16 code units), whatever order they were
+    // authored in, so every platform builds the same URL.
+    val authored =
+      listOf("headers" to action.headers?.toSortedMap(), "query" to action.query?.toSortedMap())
+    for ((field, entries) in authored) {
+      for ((name, raw) in entries.orEmpty()) {
+        val value =
+          if (raw is JsonObject) {
+            when (val result = PrototypeDataWriter.resolveValue(raw, inputs)) {
+              is PrototypeDataValue.Resolved -> result.value
+              is PrototypeDataValue.Failure -> return bindingFailure(result.error, "$field.$name")
+            }
+          } else raw
+        val text =
+          scalarText(value)
+            ?: return invalidRequest("$field.$name must resolve to a string, number or boolean")
+        if (field == "headers") {
+          if (!headerNames.add(name.lowercase()))
+            return invalidRequest("headers.$name duplicates another header name")
+          headers[name] = text
+        } else setQuery(query, name, text)
+      }
+    }
+    return null
   }
 
   private fun invalidRequest(message: String) =
@@ -257,22 +297,15 @@ object PrototypeRequestResolver {
       PrototypeRequestError(PrototypeRequestErrorCode.INVALID_REQUEST, message),
     )
 
-  /** The scalar text of one header or query entry, or null when it cannot be bound to one. */
-  private fun entryText(raw: JsonElement, what: String, inputs: EmitContextInputs): String? {
-    val value =
-      if (raw is JsonObject) {
-        (PrototypeDataWriter.resolveValue(raw, inputs) as? PrototypeDataValue.Resolved)?.value
-      } else raw
-    return scalarText(value)
-  }
-
-  private fun bindingFailure(raw: JsonElement, what: String, inputs: EmitContextInputs): String {
-    val failure =
-      (raw as? JsonObject)?.let { PrototypeDataWriter.resolveValue(it, inputs) }
-        as? PrototypeDataValue.Failure
-    return failure?.let { "$what: ${it.error.message}" }
-      ?: "$what must resolve to a string, number or boolean"
-  }
+  private fun bindingFailure(error: PrototypeDataWriteError, field: String) =
+    PrototypeResolvedRequestResult.Failure(
+      PrototypeRequestError(
+        if (error.code == PrototypeDataWriteErrorCode.LAST_GENERATED_UNSET)
+          PrototypeRequestErrorCode.LAST_GENERATED_UNSET
+        else PrototypeRequestErrorCode.INVALID_REQUEST,
+        "$field: ${error.message}",
+      ),
+    )
 
   private fun scalarText(value: JsonElement?): String? {
     val primitive = value as? JsonPrimitive ?: return null
@@ -394,6 +427,12 @@ data class PrototypeRequestResult(
 
 data class PrototypeRequestApplied(val data: JsonObject?, val result: PrototypeRequestResult)
 
+data class PrototypeRequestWriteOptions(
+  val append: PrototypeRequestAppend? = null,
+  val where: PrototypeDataMatch? = null,
+  val member: String? = null,
+)
+
 /**
  * What a `request` does with its response (the twin of `applyPrototypeRequestOutcome`):
  * - 2xx: the body is written to `into` with the `setData` semantics (parsed JSON as is, anything
@@ -447,23 +486,41 @@ object PrototypeRequestOutcome {
     append: PrototypeRequestAppend?,
     trial: (List<PrototypeDataWrite>) -> PrototypeDataWriteError?,
     commit: (PrototypeDataWrite) -> PrototypeDataWriteError?,
+  ): PrototypeRequestResult =
+    complete(into, response, PrototypeRequestWriteOptions(append), trial, commit)
+
+  fun complete(
+    into: String?,
+    response: PrototypeRequestResponse,
+    options: PrototypeRequestWriteOptions,
+    trial: (List<PrototypeDataWrite>) -> PrototypeDataWriteError?,
+    commit: (PrototypeDataWrite) -> PrototypeDataWriteError?,
   ): PrototypeRequestResult {
     var meta = metaOf(response)
     var wroteInto = false
     var appended = 0
     if (response is PrototypeRequestResponse.Received && meta.error == null) {
-      val staged = PrototypeRequestAppendWrites.stage(into, response.body, append)
-      val appendRefusal =
-        staged.writes
-          .firstOrNull()
-          ?.takeIf { it is PrototypeDataWrite.Extend }
-          ?.let { trial(listOf(it)) }
-          ?.let { "append.to ${it.message}" }
-      val refusal = staged.message ?: appendRefusal ?: trial(staged.writes)?.message
-      if (refusal != null) meta = invalidMeta(meta, refusal)
+      val staged =
+        PrototypeRequestAppendWrites.stage(
+          into,
+          response.body,
+          options.append,
+          options.where,
+          options.member,
+        )
+      val refusal = responseRefusal(staged, options.where, trial)
+      if (refusal != null) meta = meta.copy(error = refusal)
       else {
         val metadata = into?.let { metadataWrite(it, meta, staged.writes, trial) }
-        if (into != null && metadata == null) meta = invalidMeta(meta, METADATA_DOES_NOT_FIT)
+        if (into != null && metadata == null)
+          meta =
+            meta.copy(
+              error =
+                PrototypeRequestError(
+                  PrototypeRequestErrorCode.INVALID_RESPONSE,
+                  METADATA_DOES_NOT_FIT,
+                ),
+            )
         else {
           for (write in staged.writes) {
             val error = commit(write)
@@ -498,9 +555,6 @@ object PrototypeRequestOutcome {
     }
   }
 
-  private fun invalidMeta(meta: PrototypeRequestMeta, message: String): PrototypeRequestMeta =
-    meta.copy(error = PrototypeRequestError(PrototypeRequestErrorCode.INVALID_RESPONSE, message))
-
   private fun metadataWrite(
     into: String,
     meta: PrototypeRequestMeta,
@@ -531,13 +585,20 @@ object PrototypeRequestOutcome {
     into: String?,
     response: PrototypeRequestResponse,
     append: PrototypeRequestAppend? = null,
+  ): PrototypeRequestApplied = apply(data, into, response, PrototypeRequestWriteOptions(append))
+
+  fun apply(
+    data: JsonObject?,
+    into: String?,
+    response: PrototypeRequestResponse,
+    options: PrototypeRequestWriteOptions,
   ): PrototypeRequestApplied {
     var current = data
     val result =
       complete(
         into,
         response,
-        append,
+        options,
         { writes -> dataTrial(current, writes) },
         { write ->
           when (val written = PrototypeDataWriter.apply(current, write)) {
@@ -551,6 +612,29 @@ object PrototypeRequestOutcome {
       )
     return PrototypeRequestApplied(current, result)
   }
+}
+
+private fun responseRefusal(
+  staged: PrototypeRequestAppendWrites.Staged,
+  where: PrototypeDataMatch?,
+  trial: (List<PrototypeDataWrite>) -> PrototypeDataWriteError?,
+): PrototypeRequestError? {
+  staged.message?.let {
+    return PrototypeRequestError(PrototypeRequestErrorCode.INVALID_RESPONSE, it)
+  }
+  val first = staged.writes.firstOrNull()
+  if (first is PrototypeDataWrite.Extend)
+    trial(listOf(first))?.let {
+      return PrototypeRequestError(
+        PrototypeRequestErrorCode.INVALID_RESPONSE,
+        "append.to ${it.message}",
+      )
+    }
+  val error = trial(staged.writes) ?: return null
+  val code =
+    if (where == null) PrototypeRequestErrorCode.INVALID_RESPONSE
+    else checkNotNull(PrototypeRequestErrorCode.fromWire(error.code.wireValue))
+  return PrototypeRequestError(code, error.message)
 }
 
 /** The `emit` event a finished request is reported as (`prototypeRequestEvent.ts`). */

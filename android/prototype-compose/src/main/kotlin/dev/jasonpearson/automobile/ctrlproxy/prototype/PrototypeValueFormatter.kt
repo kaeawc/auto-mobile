@@ -16,9 +16,7 @@ import java.util.Locale
 import java.util.TimeZone
 import kotlinx.serialization.json.*
 
-internal fun interface PrototypeClock {
-  fun nowMillis(): Long
-}
+internal typealias PrototypeClock = dev.jasonpearson.automobile.protocol.PrototypeClock
 
 internal fun interface PrototypeValueFormatter {
   fun format(entry: PrototypeDerivedEntry, input: JsonElement?): String
@@ -178,7 +176,7 @@ internal class AndroidPrototypeValueFormatter(
           )
         }
       }
-    val diff = millis - clock.nowMillis()
+    val diff = millis - clock.nowEpochMs()
     if (kotlin.math.abs(diff) < 1000)
       return formatter.format(
         RelativeDateTimeFormatter.Direction.PLAIN,

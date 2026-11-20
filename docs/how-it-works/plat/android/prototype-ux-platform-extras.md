@@ -183,8 +183,9 @@ A disposable app installs one spec as its own app, with its own package, label, 
 and foreground-service types. The host core lives in `src/features/prototype/disposableApp/`.
 The Android stamper packages a spec into a signed APK. The `prototype` actions `installApp`,
 `listApps` and `uninstallApp` (`{appId}`, `{all: true}` or `{expired: true}`) run on the daemon's
-`DisposableAppManager`, built on the first such call. iOS refuses them until its stamper exists.
-The headless virtual device refuses them too.
+`DisposableAppManager`, built on the first such call. iOS runs them on
+[simulators only](../ios/prototype-agent-saved.md#disposable-apps), and the headless virtual
+device refuses them.
 
 On Android, `patch`, `status`, `inspect` and `awaitEvent` with an installed spec id attach over
 `automobile-app-<appId>`. Conflicting installed spec ids return their slugs. Call `launchApp` first.
@@ -198,9 +199,13 @@ The listener requires a nonblank `assets/prototype/attach-token` and an emulator
 to permit physical devices. This applies to debug and release templates alike, independently of APK debuggability. The token-in-APK model is development-only: anyone who can read the APK can recover the token. Reinstalling a slug in place reuses the token. A second connection cannot
 replace an authenticated live peer. Status and patch conflicts redact `storage.secure` state keys.
 
-Events replay at least once. A process-scoped agent keeps its listener, buffer, sequence ledger
-and `appInstanceId` across reconnects and Activity recreation. Activities rebind targets. A
-new process resets identity and epoch. `hello_result` reports identity and an optional
+Events replay at least once. Activities rebind targets to a process-scoped attach listener.
+The `appInstanceId`, sequence ledger and unacknowledged events persist in app storage across
+process kills. The journal records the package's last update time, and the app discards a journal
+written under another one, so an in-place reinstall (`adb install -r`, which keeps app storage)
+starts a fresh identity and ledger; clearing app data deletes it. The journal is saved off the main
+thread, at most once per event, and a frame reaches the host only after the state it exposes is saved.
+`hello_result` reports identity and an optional
 `showingId`, which changes when the Activity mounts a new runtime. A same-process remount clears
 the dismissal and keeps pending events. Older apps without `showingId` keep process-only identity.
 One daemon-host attacher serves every MCP registration and keeps app/device cursors. `hello` sends
@@ -210,9 +215,9 @@ replay. Status reconciles only its app. The 256-event buffer closes on overflow 
 cleanup and host disposal close sockets, remove adb forwards and forget device cursors. Uninstall
 and reinstall each forget only that app's cursors.
 
-Events stay buffered until acknowledged and replay on the next hello; the host de-duplicates
-replays by sequence, within the connection and coordinator. The app retains 200 events, drops the
-oldest on overflow, and reports cumulative `droppedEvents` in hello and status; sequence gaps expose
+The app stores up to 200 unacknowledged events and replays them on the next hello. The host
+de-duplicates replays by sequence within the connection and coordinator. The app drops the oldest
+event on overflow and reports cumulative `droppedEvents` in hello and status. Sequence gaps expose
 missing events. A separate writer uses a 256-frame queue and five-second write deadline. Queue
 overflow or blocked writes close the peer, and events and requests continue with replay retained.
 
@@ -234,9 +239,9 @@ overflow or blocked writes close the peer, and events and requests continue with
 - **Registry.** The registry file `disposable-apps.json` under the AutoMobile data dir keys records
   by device id. Each record holds appId, slug, platform, label, spec sha256, template, signer,
   installedAt and expiresAt. The host serializes writes and makes them atomic. It skips a corrupt
-  file or record with a warning. An install writes its record, with the new expiresAt, as soon as
-  the package is on the device and before the host applies permissions. A permission failure then surfaces as an error saying the app is
-  installed without its permissions, and the sweep still sees the current TTL.
+  file or record with a warning. An install writes its record, with the new expiresAt, once
+  the package is on the device and before seeding, reset or permissions. If one of those fails, the
+  error says the app is installed without that step, and the sweep still sees the current TTL.
 - **Lifecycle.** `ttlHours` defaults to 72, accepts 0 to 720, and 0 means no expiry. Re-installing
   a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
   uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs

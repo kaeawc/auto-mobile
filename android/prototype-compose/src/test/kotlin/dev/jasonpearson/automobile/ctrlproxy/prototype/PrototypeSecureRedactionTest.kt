@@ -321,6 +321,28 @@ class PrototypeSecureRedactionTest {
     }
 
   @Test
+  fun `validation refuses secure state bindings in data actions`() {
+    val original = spec()
+    val actions =
+      listOf(
+        PrototypeSetDataAction("/data/copy", buildJsonObject { put("state", "token") }),
+      )
+    val rejected =
+      PrototypeSpecValidator.validate(
+        Json.encodeToString(
+          original.copy(root = PrototypeButtonNode(label = "Copy", onTap = actions)),
+        ),
+      )
+    assertTrue(rejected.toString(), rejected is PrototypeSpecValidation.Failure)
+    val failure = (rejected as PrototypeSpecValidation.Failure).error
+    assertEquals("root.onTap[0].value", failure.path)
+    assertEquals(
+      "Secure storage key state:token cannot be sent in data actions",
+      failure.message,
+    )
+  }
+
+  @Test
   fun `validated data actions refuse secure bindings and preserve ordinary state writes`() =
     runTest {
       val original = spec()
@@ -329,12 +351,14 @@ class PrototypeSecureRedactionTest {
           PrototypeSetDataAction("/data/copy", buildJsonObject { put("state", "token") }),
           PrototypeSetDataAction("/data/public", buildJsonObject { put("state", "public") }),
         )
-      val validated =
+      val validation =
         PrototypeSpecValidator.validate(
           Json.encodeToString(
-            original.copy(root = PrototypeButtonNode(label = "Copy", onTap = actions)),
+            original.copy(root = PrototypeButtonNode(label = "Copy", onTap = actions.drop(1))),
           ),
-        ) as PrototypeSpecValidation.Success
+        )
+      assertTrue(validation.toString(), validation is PrototypeSpecValidation.Success)
+      val validated = validation as PrototypeSpecValidation.Success
       val events = mutableListOf<PrototypeEvent>()
       val logs = mutableListOf<String>()
       var sequence = 0L
@@ -349,7 +373,8 @@ class PrototypeSecureRedactionTest {
           warn = { logs += it },
           requestScope = backgroundScope,
         )
-      runtime.handle(PrototypeInteraction.Tap((validated.spec.root as PrototypeButtonNode).onTap!!))
+      // Direct runtime callers must also refuse secure bindings while executing safe siblings.
+      runtime.handle(PrototypeInteraction.Tap(actions))
       assertFalse("copy" in runtime.current.spec.data!!.keys)
       assertEquals(JsonPrimitive("hello"), runtime.current.spec.data!!["public"])
       val change = events.single { it.kind == PrototypeEventKind.CHANGE }

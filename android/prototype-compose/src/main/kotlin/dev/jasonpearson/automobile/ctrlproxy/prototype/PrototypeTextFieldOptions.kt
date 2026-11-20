@@ -17,6 +17,14 @@ internal fun prototypeTextFieldImeAction(action: String?, hasSubmit: Boolean): I
     else -> if (hasSubmit) ImeAction.Done else ImeAction.Default
   }
 
+/**
+ * The field's `multiline` setting, null for a legacy field that keeps Compose's growing default. A
+ * keyboard action makes an unset field single-line, as on iOS: Enter then runs the action instead
+ * of inserting a newline (#18824). Validation refuses an action with `multiline: true`.
+ */
+internal fun prototypeTextFieldMultiline(multiline: Boolean?, ime: ImeAction): Boolean? =
+  multiline ?: if (ime == ImeAction.Default) null else false
+
 internal fun prototypeTextFieldSecure(secure: Boolean?, keyboardType: String?): Boolean =
   secure == true || keyboardType == "password"
 

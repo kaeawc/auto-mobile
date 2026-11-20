@@ -13,7 +13,7 @@ import type { BootedDevice, ObserveResult, ScreenIdentity } from "../../../model
 import type { ViewHierarchy as ViewHierarchyInterface } from "../interfaces/ViewHierarchy";
 import { inheritHierarchySnapshot } from "../HierarchyCapture";
 import { projectActionableHierarchy } from "../HierarchyNormalization";
-import { resolveIosObserveRotation } from "../iosObserveRotation";
+import { hasMultiplePanels, resolveIosObserveRotation } from "../iosObserveRotation";
 import { deriveIosScreenIdentity } from "../ios/IosScreenIdentity";
 import type { PlatformCollectionContext } from "./AndroidObservationCollector";
 import type { HierarchyCollectorPort } from "./collectorPorts";
@@ -248,7 +248,11 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
     if (result.viewHierarchy?.systemInsets) {
       result.systemInsets = result.viewHierarchy.systemInsets;
     }
-    result.rotation = resolveIosObserveRotation(result.viewHierarchy?.rotation, result.screenSize);
+    result.rotation = resolveIosObserveRotation(
+      result.viewHierarchy?.rotation,
+      result.screenSize,
+      hasMultiplePanels(this.deps.device()),
+    );
   }
 
   private projectIosObservationHierarchy(result: ObserveResult): void {

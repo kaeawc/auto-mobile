@@ -146,6 +146,27 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return this.targetLayer === "prototype" && this.targetPasswordField;
   }
 
+  /** Scope an executor observation to the layer whose window receives the typed text. */
+  private scopeToInputLayer(observation: ObserveResult): ObserveResult {
+    if (this.targetLayer === undefined && this.device.platform === "android") {
+      // Without a layer, read the window that holds input focus: a focused prototype
+      // receives the text while the app's field keeps its own focus underneath (#18895).
+      return inputFocusedPrototypeLayer(observation.viewHierarchy) === undefined
+        ? observation
+        : scopeObserveResultToLayer(observation, "prototype", "android");
+    }
+    if (this.targetLayer !== "prototype") {
+      return observation;
+    }
+    return observation.viewHierarchy
+      ? scopeObserveResultToLayer(
+          observation,
+          "prototype",
+          requireAndroidOrIosPlatform(this.device.platform, "sendKeys"),
+        )
+      : { ...observation, focusedElement: undefined, accessibilityFocusedElement: undefined };
+  }
+
   isPasswordTarget(): boolean {
     return this.session.typingPasswordField;
   }
@@ -178,23 +199,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           // Reuse the auto/password pre-check, before the first IME activation.
           span.editorState = readImeEditorState(observation);
         }
-        if (this.targetLayer === undefined && this.device.platform === "android") {
-          // Without a layer, read the window that holds input focus: a focused prototype
-          // receives the text while the app's field keeps its own focus underneath (#18895).
-          return inputFocusedPrototypeLayer(observation.viewHierarchy) === undefined
-            ? observation
-            : scopeObserveResultToLayer(observation, "prototype", "android");
-        }
-        if (this.targetLayer !== "prototype") {
-          return observation;
-        }
-        return observation.viewHierarchy
-          ? scopeObserveResultToLayer(
-              observation,
-              "prototype",
-              requireAndroidOrIosPlatform(device.platform, "sendKeys"),
-            )
-          : { ...observation, focusedElement: undefined, accessibilityFocusedElement: undefined };
+        return this.scopeToInputLayer(observation);
       },
       captureScreenshot: observer.captureScreenshot?.bind(observer),
     };

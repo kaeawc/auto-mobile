@@ -22,11 +22,11 @@ after focusing a field with `selector`.
 
 A letter with modifiers is a keyboard shortcut:
 
-| Shortcut              | Command                                                         |
-| --------------------- | --------------------------------------------------------------- |
-| Go home (iOS)         | `{ "action": "key", "key": "h", "modifiers": ["meta"] }`        |
-| Show the dock (iPad)  | `{ "action": "key", "key": "d", "modifiers": ["meta", "alt"] }` |
-| Select all in a field | `{ "action": "key", "key": "a", "modifiers": ["meta"] }`        |
+| Shortcut                                | Command                                                         |
+| --------------------------------------- | --------------------------------------------------------------- |
+| Go home (iOS)                           | `{ "action": "key", "key": "h", "modifiers": ["meta"] }`        |
+| Show the dock (iPad)                    | `{ "action": "key", "key": "d", "modifiers": ["meta", "alt"] }` |
+| Select all in a focused field (Android) | `{ "action": "key", "key": "a", "modifiers": ["ctrl"] }`        |
 
 - **iOS simulator:** the chord is sent as the simulator's hardware keyboard, so
   system shortcuts reach SpringBoard and no text field needs focus. The result

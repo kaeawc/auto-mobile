@@ -53,13 +53,12 @@ import { clearIosFieldWithVerification } from "../iosClearVerification";
 import type { HierarchyLayer } from "../../../models/HierarchyLayer";
 import type { InsertTextState } from "../../observe/android/ctrlProxyProtocol";
 import type { BootedDevice, ObserveResult } from "../../../models";
-import { requireAndroidOrIosPlatform } from "../../../models/Platform";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
-import { scopeObserveResultToLayer } from "../../observe/hierarchyLayer";
+import { scopeToInputLayer } from "./inputLayerScope";
 import { imeCommitUnitFields } from "../../observe/android/CtrlProxyText";
 import { getFocusedTextLength } from "../ClearText";
 import { InputKey } from "../InputKey";
@@ -175,16 +174,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           // Reuse the auto/password pre-check, before the first IME activation.
           span.editorState = readImeEditorState(observation);
         }
-        if (this.targetLayer !== "prototype") {
-          return observation;
-        }
-        return observation.viewHierarchy
-          ? scopeObserveResultToLayer(
-              observation,
-              "prototype",
-              requireAndroidOrIosPlatform(device.platform, "sendKeys"),
-            )
-          : { ...observation, focusedElement: undefined, accessibilityFocusedElement: undefined };
+        return scopeToInputLayer(observation, this.targetLayer, this.device.platform);
       },
       captureScreenshot: observer.captureScreenshot?.bind(observer),
     };

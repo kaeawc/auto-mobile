@@ -149,6 +149,17 @@ function dataWriteError(
   path: string,
   root: Raw,
 ): PrototypePlatformError | undefined {
+  const members = record(record(value)?.object);
+  if (members) {
+    // An `{object}` value (#18826) binds each member like a top-level value.
+    for (const name of Object.keys(members).sort()) {
+      const error = dataWriteError(members[name], memberPath(`${path}.object`, name), root);
+      if (error) {
+        return error;
+      }
+    }
+    return undefined;
+  }
   const key = bindingKey(value, strings(record(root.storage)?.secure));
   return key ? { path, message: `Secure storage key ${key} cannot be written to data` } : undefined;
 }

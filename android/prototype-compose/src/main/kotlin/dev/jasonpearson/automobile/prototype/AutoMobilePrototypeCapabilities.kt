@@ -30,6 +30,7 @@ object AutoMobilePrototype {
       "prototype_content_transition_v1",
       "prototype_data_actions_v1",
       "prototype_data_actions_v2",
+      "prototype_data_actions_v3",
       "prototype_data_model_v1",
       "prototype_design_platform_v1",
       "prototype_drawer_v1",

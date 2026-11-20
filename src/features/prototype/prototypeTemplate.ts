@@ -156,6 +156,7 @@ export type FieldKind =
   | "deviceRequest"
   | "uploadRequest"
   | "keyedData"
+  | "objectData"
   | "prependData"
   | "scrollTo"
   | "hideKeyboard"
@@ -280,8 +281,30 @@ function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
   }
   mapField(action, "path", path, { kind: "dataPath", visit });
   if (action.type !== "removeData" && action.value !== undefined) {
-    action.value = mapBinding(action.value, `${path}.value`, visit);
+    action.value = mapDataValue(action, path, visit);
   }
+}
+
+/**
+ * A data action's value; an `{object}` value (#18826) marks the whole action for its capability
+ * gate and binds each member as its own value at `<path>.value.object.<member>`.
+ */
+function mapDataValue(action: Raw, path: string, visit: FieldVisitor): unknown {
+  const value = record(action.value);
+  const members = value && Object.hasOwn(value, "object") ? record(value.object) : undefined;
+  if (!members) {
+    return mapBinding(action.value, `${path}.value`, visit);
+  }
+  visit(action, path, "objectData");
+  return {
+    ...value,
+    object: Object.fromEntries(
+      Object.entries(members).map(([name, member]) => [
+        name,
+        mapBinding(member, memberPath(`${path}.value.object`, name), visit),
+      ]),
+    ),
+  };
 }
 
 function mapTimerAction(action: Raw, path: string, visit: FieldVisitor): void {

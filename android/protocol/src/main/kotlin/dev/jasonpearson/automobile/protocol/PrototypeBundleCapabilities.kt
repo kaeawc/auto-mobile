@@ -115,6 +115,7 @@ internal object PrototypeBundleCapabilities {
     if (type in PrototypeDataRules.dataActionTypes) caps.add("prototype_data_actions_v1")
     if (type == "prependData") caps.add("prototype_lazy_list_v1")
     if (PrototypeDataRules.isKeyedAction(action)) caps.add("prototype_data_actions_v2")
+    if (PrototypeObjectDataValue.isObjectValueAction(action)) caps.add("prototype_data_actions_v3")
   }
 
   private fun fields(node: JsonObject, caps: MutableSet<String>) {

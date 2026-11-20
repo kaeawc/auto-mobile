@@ -96,6 +96,8 @@ export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
 /** setData/appendData/prependData/removeData on `/data`, each write reported as a `change` event. */
 export const PROTOTYPE_DATA_ACTIONS_CAPABILITY = "prototype_data_actions_v1";
 export const PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY = "prototype_data_actions_v2";
+/** A data action `value` of `{object: {member: binding}}` built from flat bindings (#18826). */
+export const PROTOTYPE_DATA_ACTIONS_V3_CAPABILITY = "prototype_data_actions_v3";
 /** The `request` action (#12523); see prototypeRequest.ts. A `via: "device"` one also needs the second. */
 export const PROTOTYPE_NETWORK_CAPABILITY = "prototype_network_v1";
 export const PROTOTYPE_NETWORK_DEVICE_CAPABILITY = "prototype_network_device_v1";

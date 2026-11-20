@@ -1428,7 +1428,11 @@ class PrototypeRuntime(
     }
   }
 
+  /** A `{state}` binding of a secure key, or an `{object}` (#18826) with such a member. */
   private fun isSecureStateBinding(binding: JsonObject?): Boolean {
+    (binding?.get("object") as? JsonObject)?.let { members ->
+      return members.values.any { isSecureStateBinding(it as? JsonObject) }
+    }
     val key = (binding?.get("state") as? JsonPrimitive)?.content ?: return false
     return "state:$key" in current.spec.storage?.secure.orEmpty()
   }

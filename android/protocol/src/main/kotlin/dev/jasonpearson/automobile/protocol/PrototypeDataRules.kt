@@ -78,6 +78,9 @@ internal object PrototypeDataRules {
   }
 
   private fun dataLiteralError(value: JsonObject, path: String): PrototypeSpecError? {
+    ((value["value"] as? JsonObject)?.get("object") as? JsonObject)?.let {
+      return PrototypeObjectDataValue.literalError(value, it, path)
+    }
     val type = value.text("type")
     val literal = (value["value"] as? JsonObject)?.get("value")
     if (type == "upsertData" && literal != null) {

@@ -14,6 +14,7 @@ map.
 | --------------------------------------- | --------------------------------------------------------- | ----------------- | ------------- |
 | `prototype_data_actions_v1`             | `setData`, `appendData`, `prependData`, `removeData`      | Advertised        | Advertised    |
 | `prototype_data_actions_v2`             | Keyed `setData` and `removeData`                          | Advertised        | Advertised    |
+| `prototype_data_actions_v3`             | `{object}` data-action values                             | Advertised        | Advertised    |
 | `prototype_storage_v1`                  | root `storage` block, `inspect` `storage`, `clearStorage` | Advertised        | Advertised    |
 | `prototype_network_v1`                  | the `request` action with `via: "host"`                   | Advertised        | Advertised    |
 | `prototype_platform_realtime_v1`        | channels, realtime calls, upsertData, appendData.maxItems | Contract only     | Contract only |

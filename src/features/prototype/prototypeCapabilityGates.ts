@@ -100,6 +100,7 @@ import {
   PROTOTYPE_EMIT_CONTEXT_CAPABILITY,
   PROTOTYPE_CHECKS_CAPABILITY,
   PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY,
+  PROTOTYPE_DATA_ACTIONS_V3_CAPABILITY,
   PROTOTYPE_DATA_ACTIONS_CAPABILITY,
   PROTOTYPE_STORAGE_CAPABILITY,
   PROTOTYPE_NETWORK_CAPABILITY,
@@ -118,6 +119,8 @@ import {
 import {
   prototypeKeyedDataActionFields,
   prototypeKeyedDataActionsUnsupportedMessage,
+  prototypeObjectDataActionFields,
+  prototypeObjectDataActionsUnsupportedMessage,
   prototypeDataActionFields,
   prototypeDataActionsUnsupportedMessage,
 } from "./prototypeDataActions";
@@ -569,6 +572,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_CHECKS_CAPABILITY,
     fields: prototypeChecksFields,
     unsupportedMessage: prototypeChecksUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_DATA_ACTIONS_V3_CAPABILITY,
+    fields: prototypeObjectDataActionFields,
+    unsupportedMessage: prototypeObjectDataActionsUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY,

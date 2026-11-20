@@ -323,11 +323,18 @@ export function applyPrototypeDataWrite(
   return { success: true, data: next as PrototypeData, trimmed };
 }
 
-/** The binding forms a device resolves at the action; `item` and `index` are bound by repeat first. */
-export type PrototypeRuntimeDataActionValue = Exclude<
+type PrototypeRuntimeFlatValue = Exclude<
   PrototypeDataActionValue,
   { item: string } | { index: true }
 >;
+
+/**
+ * The binding forms a device resolves at the action; `item` and `index` are bound by repeat first,
+ * including inside an `{object}` value (#18826), whose members are flat forms.
+ */
+export type PrototypeRuntimeDataActionValue =
+  | PrototypeRuntimeFlatValue
+  | { object: Record<string, PrototypeRuntimeFlatValue> };
 
 export interface PrototypeDataWriteInputs {
   state: Readonly<Record<string, PrototypeJson>>;
@@ -343,6 +350,9 @@ export function resolvePrototypeDataWriteValue(
   binding: PrototypeRuntimeDataActionValue,
   inputs: PrototypeDataWriteInputs,
 ): PrototypeDataWriteValueResult {
+  if ("object" in binding) {
+    return resolveObjectValue(binding.object, inputs);
+  }
   if ("value" in binding) {
     return { success: true, value: binding.value };
   }
@@ -354,6 +364,12 @@ export function resolvePrototypeDataWriteValue(
           error: { code: "invalid_value", message: `State key ${binding.state} is not set` },
         };
   }
+  if (!("data" in binding)) {
+    return {
+      success: false,
+      error: { code: "invalid_value", message: "Unknown data write value binding" },
+    };
+  }
   const value = resolvePrototypeDataPointer(inputs.data, binding.data);
   return value === undefined
     ? {
@@ -361,4 +377,25 @@ export function resolvePrototypeDataWriteValue(
         error: { code: "not_found", message: `Data pointer ${binding.data} does not exist` },
       }
     : { success: true, value: value as PrototypeJson };
+}
+
+/** Each member resolves like a top-level value, in authored order; the first unresolved one fails the write. */
+function resolveObjectValue(
+  members: Record<string, PrototypeRuntimeFlatValue>,
+  inputs: PrototypeDataWriteInputs,
+): PrototypeDataWriteValueResult {
+  const value: Record<string, PrototypeJson> = {};
+  for (const name of Object.keys(members)) {
+    const member = resolvePrototypeDataWriteValue(members[name], inputs);
+    if (!member.success) {
+      return member;
+    }
+    Object.defineProperty(value, name, {
+      value: member.value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return { success: true, value };
 }

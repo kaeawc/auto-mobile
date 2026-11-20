@@ -292,10 +292,22 @@ internal object PrototypeBindableFields {
       return it
     }
     if (hasValue)
-      binding(action["value"], "$path.value")?.let {
+      dataValue(action["value"], "$path.value")?.let {
         return it
       }
     return binding((action["where"] as? JsonObject)?.get("equals"), "$path.where.equals")
+  }
+
+  /** A data action's value; an `{object}` value (#18826) binds each member like a value. */
+  private fun <T : Any> Visitor<T>.dataValue(value: JsonElement?, path: String): T? {
+    val members =
+      (value as? JsonObject)?.get("object") as? JsonObject ?: return binding(value, path)
+    for ((name, member) in members) {
+      binding(member, memberPath("$path.object", name))?.let {
+        return it
+      }
+    }
+    return null
   }
 
   private fun <T : Any> Visitor<T>.requestBody(value: JsonElement?, path: String): T? {

@@ -295,6 +295,8 @@ object PrototypeDataWriter {
     fun fail(code: PrototypeDataWriteErrorCode, message: String) =
       PrototypeDataValue.Failure(PrototypeDataWriteError(code, message))
     return when {
+      "object" in binding ->
+        PrototypeObjectDataValue.resolve(binding.getValue("object") as? JsonObject, inputs)
       "value" in binding -> PrototypeDataValue.Resolved(binding.getValue("value"))
       "state" in binding -> {
         val key = binding.getValue("state").jsonPrimitive.content

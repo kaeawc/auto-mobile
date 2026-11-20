@@ -26,6 +26,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=scripts/lib/spotlight-exclude.sh
 source "${PROJECT_ROOT}/scripts/lib/spotlight-exclude.sh"
+# Build with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+if [[ -f "${PROJECT_ROOT}/scripts/ios/xcode_version.sh" ]]; then
+    # shellcheck source=scripts/ios/xcode_version.sh
+    source "${PROJECT_ROOT}/scripts/ios/xcode_version.sh"
+    select_pinned_xcode
+fi
 CTRL_PROXY_IOS_DIR="${PROJECT_ROOT}/ios/control-proxy"
 DERIVED_DATA="${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-/tmp/automobile-ctrl-proxy}"
 spotlight_exclude_dir "${DERIVED_DATA}"
@@ -547,7 +553,7 @@ else
     echo "    xcrun simctl list devices available"
     echo ""
     echo "    # Boot a simulator (if not already running)"
-    echo "    xcrun simctl boot 'iPhone 16 Pro'"
+    echo "    xcrun simctl boot 'iPhone 17 Pro'   # on the iOS 27.2 runtime"
     echo ""
     echo "    # Get the booted simulator ID"
     echo "    DEVICE_ID=\$(xcrun simctl list devices booted -j | grep -o '\"udid\" : \"[^\"]*\"' | head -1 | sed 's/\"udid\" : \"//;s/\"\$//')"
@@ -585,7 +591,7 @@ echo ""
 if [ "$SERVICE_RUNNING" = false ]; then
     echo -e "${YELLOW}Quick Start:${NC}"
     echo ""
-    echo "  # Get booted simulator ID (or boot one first with: xcrun simctl boot 'iPhone 16 Pro')"
+    echo "  # Get booted simulator ID (or boot one first with: xcrun simctl boot 'iPhone 17 Pro')"
     echo "  DEVICE_ID=\$(xcrun simctl list devices booted -j | grep -o '\"udid\" : \"[^\"]*\"' | head -1 | sed 's/\"udid\" : \"//;s/\"\$//')"
     echo ""
     echo "  # Start CtrlProxy iOS on simulator"

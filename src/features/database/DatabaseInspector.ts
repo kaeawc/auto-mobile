@@ -2,6 +2,7 @@ import { toActionableError } from "../../models/ActionableError";
 import { ActionableError, BootedDevice } from "../../models";
 import { AppNotRunningError } from "../../models/AppNotRunningError";
 import { MINIMUM_READ_ONLY_SDK_VERSION, SdkTooOldError } from "../../models/SdkTooOldError";
+import { isPidofNoMatch } from "../../utils/android-cmdline-tools/adbFailureOutput";
 import { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
@@ -503,14 +504,4 @@ const DISABLED_ERROR_PREFIX = "Database error (DISABLED):";
 
 function isInspectionDisabled(error: unknown): boolean {
   return error instanceof Error && error.message.startsWith(DISABLED_ERROR_PREFIX);
-}
-
-/** A clean `pidof` miss: exit status 1 and nothing on either stream, as node's execFile rejects. */
-function isPidofNoMatch(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) {
-    return false;
-  }
-  const { code, stdout, stderr } = error as { code?: unknown; stdout?: unknown; stderr?: unknown };
-  const empty = (value: unknown) => value === undefined || String(value).trim().length === 0;
-  return code === 1 && empty(stdout) && empty(stderr);
 }

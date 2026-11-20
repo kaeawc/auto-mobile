@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
-  bootDataMissingError,
+  bootFailureGuidanceError,
   classifySimctlFailure,
   planSimctlRecovery,
   runSimctlWithRecovery,
@@ -22,6 +22,13 @@ const SHUTDOWN_ON_SHUTDOWN = captured("shutdown-already-shutdown-405.stderr.txt"
 const ERASE_ON_BOOTED = captured("erase-booted-405.stderr.txt");
 const INVALID_DEVICE = captured("boot-invalid-device.stderr.txt");
 const DATA_MISSING = captured("boot-data-missing-on-disk.stderr.txt");
+
+// Not captured on a host (#14116): inducing these is host-wide or impossible. The resource
+// exhaustion line is the text cited from Apple Developer Forums thread 675824; the launchd_sim
+// line carries the stable "could not bind to session" phrase the issue classifies by.
+const RESOURCE_EXHAUSTION =
+  "The current system settings are not sufficient to allow booting additional simulators: maxFiles";
+const LAUNCHD_SIM_BIND = "launchd_sim could not bind to session";
 
 const UDID = "11111111-2222-3333-4444-555555555555";
 
@@ -87,6 +94,18 @@ describe("classifySimctlFailure (captured Xcode 26.6 text)", () => {
     expect(classifySimctlFailure("boot", INVALID_DEVICE)).toEqual({ kind: "unknown-device" });
   });
 
+  test("host resource exhaustion is classified by text", () => {
+    expect(classifySimctlFailure("boot", RESOURCE_EXHAUSTION)).toEqual({
+      kind: "resource-exhaustion",
+    });
+  });
+
+  test("a launchd_sim bind failure is detected by text", () => {
+    expect(classifySimctlFailure("boot", `Failed to boot: ${LAUNCHD_SIM_BIND}`)).toEqual({
+      kind: "launchd-sim-bind-failure",
+    });
+  });
+
   test("other text is unclassified", () => {
     expect(classifySimctlFailure("boot", "Command failed").kind).toBe("unclassified");
   });
@@ -112,10 +131,12 @@ describe("planSimctlRecovery", () => {
     expect(refused.action).toBe("fail");
   });
 
-  test("a state conflict and an unknown device never erase", () => {
+  test("a state conflict, unknown device or host-level failure never recovers", () => {
     for (const failure of [
       classifySimctlFailure("erase", ERASE_ON_BOOTED),
       classifySimctlFailure("boot", INVALID_DEVICE),
+      classifySimctlFailure("boot", RESOURCE_EXHAUSTION),
+      classifySimctlFailure("boot", LAUNCHD_SIM_BIND),
     ]) {
       expect(planSimctlRecovery(failure, optIn).action).toBe("fail");
     }
@@ -133,19 +154,38 @@ describe("simctlFailureText", () => {
   });
 });
 
-describe("bootDataMissingError", () => {
+describe("bootFailureGuidanceError", () => {
   test("names the erase recovery for missing on-disk data and keeps the cause", () => {
     const failure = execFailure(2, DATA_MISSING);
-    const error = bootDataMissingError(UDID, failure);
+    const error = bootFailureGuidanceError(UDID, failure);
     expect(error).toBeInstanceOf(ActionableError);
     expect(error?.message).toContain(`xcrun simctl erase ${UDID}`);
     expect(error?.message).toContain("data is missing on disk");
     expect(error?.cause).toBe(failure);
   });
 
+  test("names the host-wide service relaunch for resource exhaustion, without erase", () => {
+    const failure = execFailure(1, RESOURCE_EXHAUSTION);
+    const error = bootFailureGuidanceError(UDID, failure);
+    expect(error?.message).toContain("launchctl limit maxfiles");
+    expect(error?.message).toContain("killall -9 com.apple.CoreSimulator.CoreSimulatorService");
+    expect(error?.message).toContain("every simulator on the host");
+    expect(error?.message).not.toContain("simctl erase");
+    expect(error?.cause).toBe(failure);
+  });
+
+  test("reports a launchd_sim bind failure as a runtime timeout, without erase", () => {
+    const failure = new Error(LAUNCHD_SIM_BIND);
+    const error = bootFailureGuidanceError(UDID, failure);
+    expect(error?.message).toContain("launchd_sim could not bind to its session");
+    expect(error?.message).toContain(`xcrun simctl shutdown ${UDID}`);
+    expect(error?.message).not.toContain("simctl erase");
+    expect(error?.cause).toBe(failure);
+  });
+
   test("leaves every other boot failure to the caller", () => {
     for (const stderr of [BOOT_ON_BOOTED, INVALID_DEVICE, "something else"]) {
-      expect(bootDataMissingError(UDID, execFailure(149, stderr))).toBeUndefined();
+      expect(bootFailureGuidanceError(UDID, execFailure(149, stderr))).toBeUndefined();
     }
   });
 });
@@ -195,6 +235,13 @@ describe("runSimctlWithRecovery", () => {
     const run = runSimctlWithRecovery(port, "boot", UDID, { allowDestructive: true });
     await expect(run).rejects.toBeInstanceOf(ActionableError);
     expect(port.calls).toEqual([`boot ${UDID}`, `erase ${UDID}`, `boot ${UDID}`]);
+  });
+
+  test("resource exhaustion fails without recovery even with the destructive opt-in", async () => {
+    const port = new FakeSimctlRecoveryPort([execFailure(1, RESOURCE_EXHAUSTION)]);
+    const run = runSimctlWithRecovery(port, "boot", UDID, { allowDestructive: true });
+    await expect(run).rejects.toThrow(/never done automatically/);
+    expect(port.calls).toEqual([`boot ${UDID}`]);
   });
 
   test("an unknown device (exit 148) fails without recovery", async () => {

@@ -290,7 +290,13 @@ internal object PrototypeDataText {
       append(literal(text.substring(cursor)))
     }
 
-  fun bindSources(text: String, data: JsonObject?, platform: JsonObject?): String {
+  /** With [shield], each inserted value is shielded from later placeholder scans (#18628). */
+  fun bindSources(
+    text: String,
+    data: JsonObject?,
+    platform: JsonObject?,
+    shield: Boolean = false,
+  ): String {
     val sources =
       placeholders(text).map { it to data } + placeholders(text, "platform").map { it to platform }
     return buildString {
@@ -298,7 +304,8 @@ internal object PrototypeDataText {
       for ((span, source) in sources.sortedBy { it.first.start }) {
         if (span.start < cursor) continue
         append(text.substring(cursor, span.start))
-        append(PrototypeDataValues.rendered(PrototypeDataPointer.resolve(source, span.pointer)))
+        val value = PrototypeDataValues.rendered(PrototypeDataPointer.resolve(source, span.pointer))
+        append(if (shield) PrototypeTextShield.shield(value) else value)
         cursor = span.end
       }
       append(text.substring(cursor))
@@ -320,18 +327,23 @@ internal object PrototypeDataText {
   }
 }
 
-/** Pure, one-time resolution before repeat expansion and state interpolation. */
+/**
+ * Pure, one-time resolution before repeat expansion and state interpolation. A renderer passes
+ * `shield` so the data and platform values it inserts stay literal through its later state, derived
+ * and row passes (#18628); the default output is the shared cross-platform resolution contract.
+ */
 object PrototypeDataResolver {
   fun resolveRoot(root: JsonObject, data: JsonObject?, platform: JsonObject? = null): JsonObject =
-    resolveRoot(root, data, PrototypeRepeatData(data), platform)
+    resolveRoot(root, data, PrototypeRepeatData(data), platform, shield = false)
 
   private fun resolveRoot(
     root: JsonObject,
     data: JsonObject?,
     repeats: PrototypeRepeatData,
     platform: JsonObject?,
+    shield: Boolean,
   ): JsonObject {
-    val own = textFields(root, data, platform)
+    val own = textFields(root, data, platform, shield)
     val resolved =
       JsonObject(
         own.mapValues { (key, value) ->
@@ -347,14 +359,21 @@ object PrototypeDataResolver {
           }
         },
       )
-    return mapChildren(resolved) { resolveRoot(it, data, repeats, platform) }
+    return mapChildren(resolved) { resolveRoot(it, data, repeats, platform, shield) }
   }
 
-  fun resolve(spec: PrototypeSpec, platform: JsonObject? = null): PrototypeSpec {
+  fun resolve(
+    spec: PrototypeSpec,
+    platform: JsonObject? = null,
+    shield: Boolean = false,
+  ): PrototypeSpec {
     val json = PrototypeSpecValidator.json
     val root = json.encodeToJsonElement(PrototypeNode.serializer(), spec.root).jsonObject
     if (!PrototypeBindingScan.hasBindings(root)) return spec
-    val resolved = json.decodeFromJsonElement<PrototypeNode>(resolveRoot(root, spec.data, platform))
+    val resolved =
+      json.decodeFromJsonElement<PrototypeNode>(
+        resolveRoot(root, spec.data, PrototypeRepeatData(spec.data), platform, shield),
+      )
     return spec.copy(root = resolved)
   }
 
@@ -407,12 +426,18 @@ object PrototypeDataResolver {
       },
     )
 
-  private fun textFields(node: JsonObject, data: JsonObject?, platform: JsonObject?): JsonObject {
+  private fun textFields(
+    node: JsonObject,
+    data: JsonObject?,
+    platform: JsonObject?,
+    shield: Boolean,
+  ): JsonObject {
     val replacements = mutableMapOf<String, JsonElement>()
     PrototypeBindableFields.first<Boolean>(node, "") { value, path, kind ->
       val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
       if (kind == PrototypeBindableKind.TEXT && text != null) {
-        replacements[path] = JsonPrimitive(PrototypeDataText.bindSources(text, data, platform))
+        replacements[path] =
+          JsonPrimitive(PrototypeDataText.bindSources(text, data, platform, shield))
       }
       null
     }

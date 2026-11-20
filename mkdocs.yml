@@ -315,6 +315,7 @@ nav:
           - "Apple Watch": using/apple-watch.md
           - "Apple Watch tool behavior": using/apple-watch-tools.md
           - "Apple Vision Pro simulator": using/visionos-simulator.md
+          - "CarPlay on iOS simulators": using/carplay.md
       - "Prototyping":
           - "Embedding prototypes in an app": using/prototype-embedding.md
           - "Prototype web preview": using/prototype-web-preview.md

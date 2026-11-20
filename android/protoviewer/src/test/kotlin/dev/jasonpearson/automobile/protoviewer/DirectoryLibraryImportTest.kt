@@ -25,7 +25,15 @@ class DirectoryLibraryImportTest {
   private val files = FakeCommitFiles()
   private val blocklist = FakeContentBlocklist()
   private val commit =
-    DirectoryLibraryImport(repository, Path.of("/import"), files, IdGenerator { SECOND }, blocklist)
+    DirectoryLibraryImport(
+      repository,
+      Path.of("/import"),
+      files,
+      IdGenerator { SECOND },
+      blocklist,
+    ) {
+      TEST_LABEL
+    }
   private val bundle =
     (PrototypeBundleReader.read(ImportBundleFixtures.minimal) as PrototypeBundleReadResult.Success)
       .bundle
@@ -35,6 +43,7 @@ class DirectoryLibraryImportTest {
     val entry =
       (commit.commit(bundle, LibrarySource.share, null, null) as LibraryResult.Success).value
     assertEquals(FIRST, entry.libraryId)
+    assertEquals(TEST_LABEL, entry.label)
     assertNull(entry.sourceHost)
     assertEquals(LibrarySource.share, entry.source)
     assertEquals(42L, entry.importedAt)
@@ -80,7 +89,9 @@ class DirectoryLibraryImportTest {
         files,
         IdGenerator { SECOND },
         blocklist,
-      )
+      ) {
+        TEST_LABEL
+      }
     assertEquals(
       LibraryResult.Failure(LibraryError.Storage),
       target.commit(bundle, LibrarySource.file, null, null),

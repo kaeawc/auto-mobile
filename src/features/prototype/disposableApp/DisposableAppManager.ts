@@ -291,7 +291,11 @@ export class DisposableAppManager {
       input.app.permissions ?? "prompt",
       declarations.permissions,
     );
-    const template = selectDisposableAppTemplate(input.spec, await stamper.templates());
+    const template = selectDisposableAppTemplate(
+      input.spec,
+      await stamper.templates(),
+      input.platform,
+    );
     const existing = (await this.deps.registry.list(input.deviceId)).find(
       (record) => record.appId === appId,
     );

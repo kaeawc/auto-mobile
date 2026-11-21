@@ -125,6 +125,35 @@ describe("ProtoViewer routing decision", () => {
 });
 
 describe("save through ProtoViewer", () => {
+  test("iOS authorization-only reads pass a permissions-only capability report", async () => {
+    const device = new FakeProtoViewerDevice();
+    device.reports = [
+      { capabilities: new Set(["prototype_platform_v1", "prototype_platform_permissions_v1"]) },
+    ];
+    const authorization: PrototypeSpec = {
+      ...spec,
+      requires: {
+        platform: ["notifications"],
+        permissions: [{ name: "notifications", purpose: "Send updates" }],
+      },
+      root: { type: "text", text: "{platform:/notifications/authorization}" },
+    };
+    const output = await routeToProtoViewer(
+      { action: "save", spec: authorization },
+      { ...deps(device), platform: "ios" },
+    );
+    expect(output?.success).toBe(true);
+    expect(device.imports).toHaveLength(1);
+    const android = new FakeProtoViewerDevice();
+    android.reports = device.reports;
+    const refused = await routeToProtoViewer(
+      { action: "save", spec: authorization },
+      { ...deps(android), platform: "android" },
+    );
+    expect(refused).toMatchObject({ success: false, errorCode: "unsupported_capability" });
+    expect(android.imports).toHaveLength(0);
+  });
+
   test("pushes a canonical bundle with the label and reports the viewer entry", async () => {
     const device = new FakeProtoViewerDevice();
     const output = await routeToProtoViewer(

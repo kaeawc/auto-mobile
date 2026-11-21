@@ -2114,7 +2114,8 @@ class PrototypeRuntime(
     )
     val followUps = (if (result.succeeded) request.onSuccess else request.onError).orEmpty()
     if (followUps.isEmpty() || !current.active || !requireValid(followUps)) return
-    // Planning binds `{event}` setState values too, so the captured event is set before it.
+    // The request's event is restored before planning, so an event-bound write is planned (and
+    // refused) with the value it will write, before any follow-up runs.
     val previousEvent = eventData
     eventData = request.eventContext
     try {

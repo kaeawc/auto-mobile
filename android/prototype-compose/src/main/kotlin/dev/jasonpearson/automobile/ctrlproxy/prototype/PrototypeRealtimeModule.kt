@@ -7,8 +7,8 @@ import dev.jasonpearson.automobile.prototype.PlatformError
 import dev.jasonpearson.automobile.prototype.PlatformErrorCode
 import dev.jasonpearson.automobile.prototype.PlatformEvent
 import dev.jasonpearson.automobile.prototype.PrototypePlatformModule
-import kotlin.coroutines.cancellation.CancellationException
 import kotlin.random.Random
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -148,6 +148,9 @@ internal class PrototypeRealtimeModule(
       ?: PlatformCallResult.Success(JsonObject(emptyMap()))
   }
 
+  private fun failed(call: String, error: Exception) =
+    PrototypeChannelError(PLATFORM_ERROR, error.message ?: "$call failed")
+
   private fun unsupported(call: String) =
     PrototypeChannelError(PrototypeChannelError.INVALID_REQUEST, "$call is not a realtime call")
 
@@ -162,6 +165,7 @@ internal class PrototypeRealtimeModule(
     const val CONNECT = "realtime.connect"
     const val DISCONNECT = "realtime.disconnect"
     const val SEND = "realtime.send"
+    private const val PLATFORM_ERROR = "platform_error"
 
     /** A string body goes on the wire as written and any other JSON as compact JSON text. */
     internal fun sendText(args: JsonObject): String? =

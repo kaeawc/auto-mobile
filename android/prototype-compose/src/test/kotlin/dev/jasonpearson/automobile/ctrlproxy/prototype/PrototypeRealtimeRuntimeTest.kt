@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.prototype.PlatformCallResult
 import kotlin.random.Random
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -476,13 +477,103 @@ class PrototypeRealtimeRuntimeTest {
 
     runtime.finishDismissal(PrototypeDismissReason.USER)
     runCurrent()
+    val chatAfterDismissal = runtime.chat()
     connection.listener.onFrame("""{"id":9,"text":"late"}""", null, null)
     advanceTimeBy(PrototypeChannelLimits.flushMs + 1L)
     runCurrent()
 
     assertEquals(PrototypeChannelController.GOING_AWAY, connection.closedWith)
     assertEquals(emptyList<String>(), runtime.messages())
-    assertNull(runtime.current.platformState["realtime"]?.jsonObject?.get("late"))
+    assertEquals(chatAfterDismissal, runtime.chat())
+  }
+
+  private class ThrowingStateSink : PrototypeChannelSink {
+    var failNextState = false
+
+    override suspend fun state(channel: String, state: JsonObject) {
+      if (failNextState) {
+        failNextState = false
+        throw IllegalStateException("sink down")
+      }
+    }
+
+    override suspend fun event(name: String, data: JsonObject) = Unit
+
+    override suspend fun run(channel: String, actions: JsonArray, event: JsonElement) = Unit
+
+    val warnings = mutableListOf<String>()
+
+    override fun warn(message: String) {
+      warnings += message
+    }
+  }
+
+  private val chatDeclaration =
+    mapOf(
+      "chat" to PrototypeChannelDeclaration(PrototypeChannelKind.WEBSOCKET, "wss://example.test"),
+    )
+
+  @Test
+  fun `a call whose sink throws ends alone and later calls still run`() = runTest {
+    val transport = FakeTransport()
+    val sink = ThrowingStateSink()
+    val module =
+      PrototypeRealtimeModule(
+        "realtime",
+        PrototypeRealtimeConfig(PrototypeChannelTransports(transport, transport), Random(0)),
+        sink,
+        backgroundScope,
+        { "id" },
+      )
+    module.update(chatDeclaration)
+    module.show()
+    runCurrent()
+    transport.last.listener.onOpen(null)
+    runCurrent()
+    fun channelCall(name: String) =
+      PlatformCall("call", name, obj("channel" to JsonPrimitive("chat")))
+
+    sink.failNextState = true
+    val disconnected = backgroundScope.async {
+      module.call(channelCall(PrototypeRealtimeModule.DISCONNECT))
+    }
+    runCurrent()
+    val reconnected = backgroundScope.async {
+      module.call(channelCall(PrototypeRealtimeModule.CONNECT))
+    }
+    runCurrent()
+
+    assertTrue(disconnected.isCompleted)
+    assertTrue(sink.warnings.toString(), sink.warnings.any { "sink down" in it })
+    assertEquals(PlatformCallResult.Success(JsonObject(emptyMap())), reconnected.await())
+    assertEquals(2, transport.opened.size)
+  }
+
+  @Test
+  fun `a send whose caller gave up while waiting for the lock sends nothing`() = runTest {
+    val transport = FakeTransport()
+    val controller =
+      PrototypeChannelController(
+        "realtime",
+        PrototypeChannelTransports(transport, transport),
+        ThrowingStateSink(),
+        backgroundScope,
+        Random(0),
+        { error(it) },
+        { "id" },
+      )
+    controller.update(chatDeclaration)
+    controller.show()
+    runCurrent()
+    transport.last.listener.onOpen(null)
+    runCurrent()
+
+    val refused = controller.send("chat", "late") { false }
+
+    assertEquals(PrototypeChannelError.NETWORK, refused?.code)
+    assertEquals(emptyList<String>(), transport.last.sent)
+    assertNull(controller.send("chat", "wanted"))
+    assertEquals(listOf("wanted"), transport.last.sent)
   }
 
   @Test

@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 private final class FakePlatformModule: PrototypePlatformModule {
-    let name = "test"
+    let name: String
     let capability = "prototype_platform_test_v1"
     var requiredInfoPlistKeys: [String] = []
     var available: PlatformAvailability = .ready
@@ -15,7 +15,8 @@ private final class FakePlatformModule: PrototypePlatformModule {
     var result: PlatformCallResult?
     var suspended: CheckedContinuation<PlatformCallResult, Never>?
 
-    init() {
+    init(name: String = "test") {
+        self.name = name
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(16))
     }
 
@@ -82,6 +83,15 @@ private final class PlatformClock: PrototypeClock {
 }
 
 final class PrototypePlatformRegistryTests: XCTestCase {
+    @MainActor
+    func testSnapshotPreservesRegisteredNotificationsModule() {
+        let module = FakePlatformModule(name: "notifications")
+        module.state = ["authorization": .string("blocked"), "badge": .number(2)]
+        let registry = PrototypePlatformRegistry(modules: [module])
+        XCTAssertEqual(registry.snapshot["notifications"], .object(module.state))
+        XCTAssertNil(PrototypePlatformRegistry().snapshot["notifications"])
+    }
+
     private func spec() throws -> PrototypeSpec {
         try JSONDecoder().decode(PrototypeSpec.self, from: Data("""
         {"id":"p","window":{"placement":{"type":"fullscreen"}},"requires":{"platform":["test"]},
@@ -383,6 +393,7 @@ final class PrototypePlatformRegistryTests: XCTestCase {
             module.onCall = { continuation.resume() }
             driver.perform([.start(job)])
         }
+        XCTAssertEqual(clock.timers.count, 1)
         clock.expire()
         module.answer(.success(.string("late")))
         await driver.settled()

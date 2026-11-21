@@ -453,7 +453,8 @@ final class DisplayTargetedGestureTests: XCTestCase {
                 XCTAssertEqual(factory.target.reason, "nonPhoneIdiom")
                 XCTAssertEqual(delivery.selection.strategy, .legacy)
                 XCTAssertEqual(delivery.selection.reason, "mappingUndefined(rotation=0,geometryOrPoint)")
-                XCTAssertEqual(delivery.selection.windowTranslation(translation), translation)
+                // Observed points are already screen points (#18830): the offset is unchanged.
+                XCTAssertEqual(delivery.selection.offset, .zero)
                 XCTAssertTrue(provider.touches.isEmpty)
             }
         }

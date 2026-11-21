@@ -52,11 +52,20 @@ enum PrototypeStrictCapabilities {
         }
         if let colors = spec["theme"]?.objectFields?["colors"]?.objectFields,
            colors["light"] != nil || colors["dark"] != nil { need("theme_modes") }
-        func scan(_ value: JSONValue, field: String = "", routeAlias: Bool = false) {
+        func scan(_ value: JSONValue, field: String = "", routeAlias: Bool = false, remoteOnly: Bool = false) {
             if case let .array(items) = value { for item in items {
-                scan(item, routeAlias: routeAlias)
+                scan(item, routeAlias: routeAlias, remoteOnly: remoteOnly)
             }; return }
             guard let fields = value.objectFields else { return }
+            if let accessory = fields["ios"]?.objectFields?["bottomAccessory"] { scan(accessory, remoteOnly: true) }
+            if remoteOnly {
+                if fields["type"] == .string("image"),
+                   ["url", "placeholder", "error", "crossfade", "via"]
+                   .contains(where: { fields[$0] != nil }) { need("remote_image") }
+                for child in PrototypeStrictRepeats
+                    .children(fields, path: "") { scan(.object(child.value), remoteOnly: true) }
+                return
+            }
             if fields.count == 1, fields["value"] != nil { return }
             func textBinding(_ text: String) {
                 if text.contains("{t:") { need("strings") }
@@ -71,10 +80,14 @@ enum PrototypeStrictCapabilities {
             if PrototypeStylePolishV2.themedBorder(fields) { need("theme_modes") }
             if PrototypeStylePolishV2.required(fields) { result.insert(PrototypeStylePolishV2.capability) }
             if fields["semantics"] != nil { need("semantics") }
+            if fields["type"] == .string("image"),
+               ["url", "placeholder", "error", "crossfade", "via"]
+               .contains(where: { fields[$0] != nil }) { need("remote_image") }
             if fields["onAppear"] != nil { need("timers") }
             if fields["scrollLinked"] != nil || fields["scrollTransition"] != nil { need("scroll_motion") }
             if PrototypeMotionV3.required(fields) { result.insert(PrototypeMotionV3.capability) }
             let type = fields["type"]?.stringValue ?? ""
+            if !PrototypeDerivedValidator.conditionReferences(fields, path: "").isEmpty { need("derive") }
             if PrototypeStringConditions.uses(fields) { need("string_conditions") }
             let types = [
                 "startTimer": "timers",
@@ -159,8 +172,7 @@ enum PrototypeStrictCapabilities {
             }
             if ["setData", "appendData", "prependData", "upsertData", "removeData"]
                 .contains(type) { need("data_actions") }
-            if ["setData", "removeData"].contains(type),
-               fields["where"] != nil || fields["member"] != nil { result.insert("prototype_data_actions_v2") }
+            if PrototypeGeneratedValues.needsDataV2(fields) { result.insert("prototype_data_actions_v2") }
             if type == "upsertData" || (type == "appendData" && fields["maxItems"] != nil) || PrototypeChannels
                 .needsValueCapability(fields) { need("platform_realtime") }
             if type == "prependData" { need("lazy_list") }
@@ -173,6 +185,12 @@ enum PrototypeStrictCapabilities {
                 }
             }
             for (key, child) in fields where !["ios", "android"].contains(key) {
+                if key == "screens" {
+                    for screen in (child.objectFields ?? [:]).values {
+                        scan(screen, routeAlias: routeAlias)
+                    }
+                    continue
+                }
                 if key == "form", field == "body" {
                     for binding in (child.objectFields ?? [:]).values {
                         scan(binding)

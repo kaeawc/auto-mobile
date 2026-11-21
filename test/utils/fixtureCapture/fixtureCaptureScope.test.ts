@@ -134,6 +134,33 @@ describe("fixture capture scope", () => {
     ]);
   });
 
+  test("fills the device's missing OS and model facts from the admitted image", async () => {
+    const { deps, writer } = captureDeps();
+    await runWithFixtureCapture("rotate", deps, async () => {
+      noteFixtureCaptureDevice(
+        { platform: "android", deviceId: "emulator-5582", name: "fold", formFactor: "foldable" },
+        {
+          name: "fold",
+          platform: "android",
+          isRunning: true,
+          apiLevel: 36,
+          osVersion: "16",
+          formFactor: "phone",
+          model: "sdk_gphone64_arm64",
+        },
+      );
+    });
+    expect(writer.captures[0]?.provenance.device).toEqual({
+      platform: "android",
+      deviceId: "emulator-5582",
+      name: "fold",
+      formFactor: "foldable",
+      apiLevel: 36,
+      osVersion: "16",
+      model: "sdk_gphone64_arm64",
+    });
+  });
+
   test("records a failed command's exit code and output, and the seam still throws", async () => {
     const { deps, writer, timer } = captureDeps();
     const failure = execError({ code: 1, stdout: "partial", stderr: "error: closed" });
@@ -262,6 +289,42 @@ describe("fixture capture scope", () => {
       { stdout: "", stderr: "", truncated: undefined },
     ]);
     expect(commands?.[2]?.argv).toEqual(["adb", "c"]);
+  });
+
+  test("spends the per-call limit in issue order when commands finish out of order", async () => {
+    const { deps, writer } = captureDeps();
+    const limited = { ...deps, limits: { streamChars: 10, callChars: 6 } };
+    await runWithFixtureCapture("listApps", limited, async () => {
+      const first = beginCapturedCommand(["adb", "first"]);
+      const second = beginCapturedCommand(["adb", "second"]);
+      second?.finish({ stdout: "22222", stderr: "" });
+      first?.finish({ stdout: "11111", stderr: "" });
+    });
+    expect(
+      writer.captures[0]?.commands.map(({ argv, stdout, truncated }) => ({
+        arg: argv[1],
+        stdout,
+        truncated,
+      })),
+    ).toEqual([
+      { arg: "first", stdout: "11111", truncated: undefined },
+      { arg: "second", stdout: `2${TRUNCATED_OUTPUT_MARKER}`, truncated: true },
+    ]);
+  });
+
+  test("marks a command that overflowed node's maxBuffer truncated at any output length", async () => {
+    const { deps, writer, timer } = captureDeps();
+    const limited = { ...deps, limits: { streamChars: 4, callChars: 100 } };
+    const overflow = execError({ code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER", stdout: "abcd" });
+    await runWithFixtureCapture("observe", limited, async () => {
+      await expect(seamCommand(timer, ["shell", "dumpsys"], overflow)).rejects.toBe(overflow);
+    });
+    expect(writer.captures[0]?.commands[0]).toMatchObject({
+      exitCode: null,
+      errorCode: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+      stdout: "abcd",
+      truncated: true,
+    });
   });
 
   test("applies a caller's scrubber before truncation and marks the command redacted", async () => {

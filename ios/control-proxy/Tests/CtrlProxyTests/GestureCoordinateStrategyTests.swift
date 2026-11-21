@@ -144,7 +144,7 @@ final class GestureCoordinateStrategyTests: XCTestCase {
         XCTAssertTrue(windowed.multiPanelMismatch)
         XCTAssertEqual(selection.strategy, .legacy)
         XCTAssertEqual(selection.reason, "mappingUndefined(rotation=0,geometryOrPoint)")
-        XCTAssertEqual(selection.windowTranslation(translation), translation)
+        XCTAssertEqual(selection.offset, .zero)
         for origin in [GesturePoint?.none, GesturePoint(x: 10, y: 20), GesturePoint(x: .nan, y: 0)] {
             let geometry = GestureCoordinateGeometry(
                 app: size, screen: folded.screen, observation: size, rotation: 0, appOrigin: origin

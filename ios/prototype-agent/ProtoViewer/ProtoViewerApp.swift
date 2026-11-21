@@ -2,7 +2,7 @@ import OSLog
 import SwiftUI
 
 extension PrototypePlatformRegistry {
-    static let viewer = makeSystem(webView: PrototypeWebViewModule())
+    static let viewer = makeSystemRegistry(webView: PrototypeWebViewModule())
 
     static var viewerReportCapabilities: [String] {
         Set(AutoMobilePrototypeCapabilities.supported + viewer.capabilities.filter {

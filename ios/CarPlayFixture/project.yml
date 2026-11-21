@@ -6,7 +6,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5"
-    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_ALLOWED: YES
+    CODE_SIGN_IDENTITY: "-"
 packages:
   AutoMobileHighlightCore:
     path: ../highlight-core

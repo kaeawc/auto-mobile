@@ -22,6 +22,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeCheckboxNode
 import dev.jasonpearson.automobile.protocol.PrototypeChipNode
 import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
 import dev.jasonpearson.automobile.protocol.PrototypeCondition
+import dev.jasonpearson.automobile.protocol.PrototypeDataWhere
 import dev.jasonpearson.automobile.protocol.PrototypeDatePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeDecrementAction
 import dev.jasonpearson.automobile.protocol.PrototypeDerivedRows
@@ -869,18 +870,21 @@ private fun PrototypeSwipeAction.bound(instance: RepeatInstance) =
 private fun PrototypeAppBarAction.bound(instance: RepeatInstance) =
   copy(label = instance.display(label), onTap = onTap?.map { it.bound(instance) })
 
-private fun PrototypeRequestAction.boundRequest(instance: RepeatInstance) =
-  copy(
+private fun PrototypeRequestAction.boundRequest(instance: RepeatInstance): PrototypeRequestAction {
+  val where = where
+  return copy(
     url = instance.interpolate(url),
     headers = headers?.mapValues { (_, entry) -> instance.requestEntry(entry) },
     query = query?.mapValues { (_, entry) -> instance.requestEntry(entry) },
     body = body?.let(instance::dataValue),
     into = into?.let(instance::dataPath),
+    where = where?.boundWhere(instance),
     append = append?.let { it.copy(to = instance.dataPath(it.to)) },
     statusKey = statusKey?.let(instance::interpolate),
     onSuccess = onSuccess?.map { it.bound(instance) },
     onError = onError?.map { it.bound(instance) },
   )
+}
 
 private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
   when (this) {
@@ -935,14 +939,23 @@ private fun RepeatInstance.routeParams(params: Map<String, JsonElement>): Map<St
 private fun PrototypeAction.boundDataAction(instance: RepeatInstance): PrototypeAction? =
   when (this) {
     is PrototypeSetDataAction ->
-      copy(path = instance.dataPath(path), value = instance.dataValue(value))
+      copy(
+        path = instance.dataPath(path),
+        value = instance.dataValue(value),
+        where = where?.boundWhere(instance),
+      )
     is PrototypePrependDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
     is PrototypeAppendDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
-    is PrototypeRemoveDataAction -> copy(path = instance.dataPath(path))
+    is PrototypeRemoveDataAction ->
+      copy(path = instance.dataPath(path), where = where?.boundWhere(instance))
     else -> null
   }
+
+/** A keyed selector binds `{item}` / `{index}` like a request's `where`. */
+private fun PrototypeDataWhere.boundWhere(instance: RepeatInstance) =
+  copy(equals = instance.dataValue(equals))
 
 /** Only a whole `{index}` segment binds in a data path; the validator refuses anything else. */
 private fun RepeatInstance.dataPath(path: String): String =

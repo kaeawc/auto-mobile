@@ -1,0 +1,438 @@
+{
+  "_comment": "Shared prototype media transport cases (#14254). TypeScript reads signatures and begins; Kotlin reads all three. A stream's sha256 is the content digest unless the case sets one. Regenerate by hand; keep codes in sync with prototypeMediaAssets.ts and PrototypeMediaContract.kt.",
+  "rejectionCodes": [
+    "invalid_id",
+    "unsupported_mime_type",
+    "empty",
+    "too_large",
+    "invalid_sha256",
+    "count_limit",
+    "total_limit",
+    "unknown_upload",
+    "offset_mismatch",
+    "empty_chunk",
+    "chunk_too_large",
+    "invalid_base64",
+    "overflow",
+    "truncated",
+    "sha256_mismatch",
+    "content_mismatch",
+    "not_utf8",
+    "storage_failure"
+  ],
+  "signatures": [
+    {
+      "name": "mp4 ftyp box",
+      "mimeType": "video/mp4",
+      "hex": "000000186674797069736f6d0000000000000000000000006d6f6f760000000000000000",
+      "matches": true
+    },
+    {
+      "name": "m4a ftyp box as audio/mp4",
+      "mimeType": "audio/mp4",
+      "hex": "0000001c667479704d3441200000000000000000000000000000000000000000",
+      "matches": true
+    },
+    {
+      "name": "webm EBML header",
+      "mimeType": "video/webm",
+      "hex": "1a45dfa300000000000000000000000000000000000000000000000000000000",
+      "matches": true
+    },
+    {
+      "name": "mp3 ID3 tag",
+      "mimeType": "audio/mpeg",
+      "hex": "49443304000000000000000000000000",
+      "matches": true
+    },
+    {
+      "name": "mp3 frame sync",
+      "mimeType": "audio/mpeg",
+      "hex": "fffb9064000000000000000000000000",
+      "matches": true
+    },
+    {
+      "name": "ogg page",
+      "mimeType": "audio/ogg",
+      "hex": "4f6767530000000000000000000000000000000000000000",
+      "matches": true
+    },
+    {
+      "name": "vtt header",
+      "mimeType": "text/vtt",
+      "hex": "5745425654540a0a30303a30302e303030202d2d3e2030303a30312e3030300a48656c6c6f0a",
+      "matches": true
+    },
+    {
+      "name": "vtt header after BOM",
+      "mimeType": "text/vtt",
+      "hex": "efbbbf574542565454202d2063617074696f6e730a0a",
+      "matches": true
+    },
+    {
+      "name": "vtt header only",
+      "mimeType": "text/vtt",
+      "hex": "574542565454",
+      "matches": true
+    },
+    {
+      "name": "mp4 declared for webm bytes",
+      "mimeType": "video/mp4",
+      "hex": "1a45dfa300000000000000000000000000000000000000000000000000000000",
+      "matches": false
+    },
+    {
+      "name": "webm declared for mp4 bytes",
+      "mimeType": "video/webm",
+      "hex": "000000186674797069736f6d0000000000000000000000006d6f6f760000000000000000",
+      "matches": false
+    },
+    {
+      "name": "ftyp at offset 0 is not mp4",
+      "mimeType": "video/mp4",
+      "hex": "66747970000000000000000000000000",
+      "matches": false
+    },
+    {
+      "name": "png bytes as mp4",
+      "mimeType": "video/mp4",
+      "hex": "89504e470d0a1a0a0000000d49484452",
+      "matches": false
+    },
+    {
+      "name": "mp3 without sync",
+      "mimeType": "audio/mpeg",
+      "hex": "ff1b0000000000000000000000000000",
+      "matches": false
+    },
+    {
+      "name": "ogg lowercase",
+      "mimeType": "audio/ogg",
+      "hex": "6f676773000000000000000000000000",
+      "matches": false
+    },
+    {
+      "name": "vtt prefix glued to text",
+      "mimeType": "text/vtt",
+      "hex": "574542565454580a",
+      "matches": false
+    },
+    {
+      "name": "vtt lowercase header",
+      "mimeType": "text/vtt",
+      "hex": "7765627674740a",
+      "matches": false
+    },
+    {
+      "name": "too short for mp4",
+      "mimeType": "video/mp4",
+      "hex": "00000018667479",
+      "matches": false
+    }
+  ],
+  "begins": [
+    {
+      "name": "valid mp4",
+      "id": "clip",
+      "mimeType": "video/mp4",
+      "size": 20971520,
+      "sha256": "2e9b71f3dc324b1375db8185cdd88e11ec85deb365eb35817fc671dcf504a08d",
+      "problem": null
+    },
+    {
+      "name": "largest media asset",
+      "id": "clip",
+      "mimeType": "video/webm",
+      "size": 67108864,
+      "sha256": "2e9b71f3dc324b1375db8185cdd88e11ec85deb365eb35817fc671dcf504a08d",
+      "problem": null
+    },
+    {
+      "name": "one byte over media cap",
+      "id": "clip",
+      "mimeType": "audio/mp4",
+      "size": 67108865,
+      "sha256": "2e9b71f3dc324b1375db8185cdd88e11ec85deb365eb35817fc671dcf504a08d",
+      "problem": "too_large"
+    },
+    {
+      "name": "largest vtt",
+      "id": "captions",
+      "mimeType": "text/vtt",
+      "size": 262144,
+      "sha256": "2e9b71f3dc324b1375db8185cdd88e11ec85deb365eb35817fc671dcf504a08d",
+      "problem": null
+    },
+    {
+      "name": "vtt over its own cap",
+      "id": "captions",
+      "mimeType": "text/vtt",
+      "size": 262145,
+      "sha256": "2e9b71f3dc324b1375db8185cdd88e11ec85deb365eb35817fc671dcf504a08d",
+      "problem": "too_large"
+    },
+    {
+      "name": "empty asset",
+      "id": "clip",
+      "mimeType": "audio/ogg",
+      "size": 0,
+      "sha256": "2e9b71f3dc324b1375db8185cdd88e11ec85deb365eb35817fc671dcf504a08d",
+      "problem": "empty"
+    },
+    {
+      "name": "image mime is not media",
+      "id": "clip",
+      "mimeType": "image/png",
+      "size": 10,
+      "sha256": "2e9b71f3dc324b1375db8185cdd88e11ec85deb365eb35817fc671dcf504a08d",
+      "problem": "unsupported_mime_type"
+    },
+    {
+      "name": "mime is case sensitive",
+      "id": "clip",
+      "mimeType": "Video/MP4",
+      "size": 10,
+      "sha256": "2e9b71f3dc324b1375db8185cdd88e11ec85deb365eb35817fc671dcf504a08d",
+      "problem": "unsupported_mime_type"
+    },
+    {
+      "name": "quicktime is not accepted",
+      "id": "clip",
+      "mimeType": "video/quicktime",
+      "size": 10,
+      "sha256": "2e9b71f3dc324b1375db8185cdd88e11ec85deb365eb35817fc671dcf504a08d",
+      "problem": "unsupported_mime_type"
+    },
+    {
+      "name": "empty id",
+      "id": "",
+      "mimeType": "video/mp4",
+      "size": 10,
+      "sha256": "2e9b71f3dc324b1375db8185cdd88e11ec85deb365eb35817fc671dcf504a08d",
+      "problem": "invalid_id"
+    },
+    {
+      "name": "device media id prefix",
+      "id": "media:1",
+      "mimeType": "video/mp4",
+      "size": 10,
+      "sha256": "2e9b71f3dc324b1375db8185cdd88e11ec85deb365eb35817fc671dcf504a08d",
+      "problem": "invalid_id"
+    },
+    {
+      "name": "id over length cap",
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "mimeType": "video/mp4",
+      "size": 10,
+      "sha256": "2e9b71f3dc324b1375db8185cdd88e11ec85deb365eb35817fc671dcf504a08d",
+      "problem": "invalid_id"
+    },
+    {
+      "name": "uppercase sha256",
+      "id": "clip",
+      "mimeType": "video/mp4",
+      "size": 10,
+      "sha256": "2E9B71F3DC324B1375DB8185CDD88E11EC85DEB365EB35817FC671DCF504A08D",
+      "problem": "invalid_sha256"
+    },
+    {
+      "name": "short sha256",
+      "id": "clip",
+      "mimeType": "video/mp4",
+      "size": 10,
+      "sha256": "2e9b71f3dc324b1375db8185cdd88e11ec85deb365eb35817fc671dcf504a08",
+      "problem": "invalid_sha256"
+    }
+  ],
+  "streams": [
+    {
+      "name": "mp4 in three chunks",
+      "mimeType": "video/mp4",
+      "contentHex": "000000186674797069736f6d0000000000000000000000006d6f6f760000000000000000",
+      "chunks": [
+        {
+          "offset": 0,
+          "hex": "000000186674797069736f6d"
+        },
+        {
+          "offset": 12,
+          "hex": "000000000000000000000000"
+        },
+        {
+          "offset": 24,
+          "hex": "6d6f6f760000000000000000"
+        }
+      ],
+      "expect": "stored"
+    },
+    {
+      "name": "vtt in one chunk",
+      "mimeType": "text/vtt",
+      "contentHex": "5745425654540a0a30303a30302e303030202d2d3e2030303a30312e3030300a48656c6c6f0a",
+      "chunks": [
+        {
+          "offset": 0,
+          "hex": "5745425654540a0a30303a30302e303030202d2d3e2030303a30312e3030300a48656c6c6f0a"
+        }
+      ],
+      "expect": "stored"
+    },
+    {
+      "name": "truncated stream",
+      "mimeType": "video/mp4",
+      "contentHex": "000000186674797069736f6d0000000000000000000000006d6f6f760000000000000000",
+      "chunks": [
+        {
+          "offset": 0,
+          "hex": "000000186674797069736f6d"
+        },
+        {
+          "offset": 12,
+          "hex": "000000000000000000000000"
+        }
+      ],
+      "expect": "truncated"
+    },
+    {
+      "name": "sha256 mismatch",
+      "mimeType": "video/mp4",
+      "contentHex": "000000186674797069736f6d0000000000000000000000006d6f6f760000000000000000",
+      "sha256": "d9298a10d1b0735837dc4bd85dac641b0f3cef27a47e5d53a54f2f3f5b2fcffa",
+      "chunks": [
+        {
+          "offset": 0,
+          "hex": "000000186674797069736f6d"
+        },
+        {
+          "offset": 12,
+          "hex": "000000000000000000000000"
+        },
+        {
+          "offset": 24,
+          "hex": "6d6f6f760000000000000000"
+        }
+      ],
+      "expect": "sha256_mismatch"
+    },
+    {
+      "name": "chunk skips ahead",
+      "mimeType": "video/mp4",
+      "contentHex": "000000186674797069736f6d0000000000000000000000006d6f6f760000000000000000",
+      "chunks": [
+        {
+          "offset": 0,
+          "hex": "000000186674797069736f6d"
+        },
+        {
+          "offset": 24,
+          "hex": "6d6f6f760000000000000000"
+        }
+      ],
+      "expect": "offset_mismatch"
+    },
+    {
+      "name": "chunk repeats an offset",
+      "mimeType": "video/mp4",
+      "contentHex": "000000186674797069736f6d0000000000000000000000006d6f6f760000000000000000",
+      "chunks": [
+        {
+          "offset": 0,
+          "hex": "000000186674797069736f6d"
+        },
+        {
+          "offset": 0,
+          "hex": "000000186674797069736f6d"
+        }
+      ],
+      "expect": "offset_mismatch"
+    },
+    {
+      "name": "chunk runs past declared size",
+      "mimeType": "video/mp4",
+      "contentHex": "000000186674797069736f6d0000000000000000000000006d6f6f760000000000000000",
+      "chunks": [
+        {
+          "offset": 0,
+          "hex": "000000186674797069736f6d"
+        },
+        {
+          "offset": 12,
+          "hex": "000000000000000000000000"
+        },
+        {
+          "offset": 24,
+          "hex": "6d6f6f76000000000000000000"
+        }
+      ],
+      "expect": "overflow"
+    },
+    {
+      "name": "empty chunk",
+      "mimeType": "video/mp4",
+      "contentHex": "000000186674797069736f6d0000000000000000000000006d6f6f760000000000000000",
+      "chunks": [
+        {
+          "offset": 0,
+          "hex": ""
+        }
+      ],
+      "expect": "empty_chunk"
+    },
+    {
+      "name": "webm bytes declared as mp4",
+      "mimeType": "video/mp4",
+      "contentHex": "1a45dfa300000000000000000000000000000000000000000000000000000000",
+      "chunks": [
+        {
+          "offset": 0,
+          "hex": "1a45dfa3000000000000000000000000"
+        },
+        {
+          "offset": 16,
+          "hex": "00000000000000000000000000000000"
+        }
+      ],
+      "expect": "content_mismatch"
+    },
+    {
+      "name": "vtt with invalid utf-8",
+      "mimeType": "text/vtt",
+      "contentHex": "5745425654540a0ac3280a",
+      "chunks": [
+        {
+          "offset": 0,
+          "hex": "5745425654540a0ac3280a"
+        }
+      ],
+      "expect": "not_utf8"
+    },
+    {
+      "name": "vtt utf-8 split across chunks",
+      "mimeType": "text/vtt",
+      "contentHex": "5745425654540a0a636166c3a90a",
+      "chunks": [
+        {
+          "offset": 0,
+          "hex": "5745425654540a0a636166c3"
+        },
+        {
+          "offset": 12,
+          "hex": "a90a"
+        }
+      ],
+      "expect": "stored"
+    },
+    {
+      "name": "vtt ending mid code point",
+      "mimeType": "text/vtt",
+      "contentHex": "5745425654540ac3",
+      "chunks": [
+        {
+          "offset": 0,
+          "hex": "5745425654540ac3"
+        }
+      ],
+      "expect": "not_utf8"
+    }
+  ]
+}

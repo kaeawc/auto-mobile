@@ -101,19 +101,20 @@ enum PrototypeDataValues {
         }
     }
 
+    static func equal(_ value: JSONValue?, _ operand: JSONValue) -> Bool {
+        guard let value, isScalar(value), isScalar(operand) else { return false }
+        if case let .string(left) = value, case let .string(right) = operand {
+            return left.utf16.elementsEqual(right.utf16)
+        }
+        return value == operand
+    }
+
     static func holds(_ condition: [String: JSONValue], data: [String: JSONValue]?) -> Bool {
         let value = condition["data"]?.stringValue.flatMap {
             PrototypeDataPointer.resolve(data, pointer: $0)
         }
-        func equal(_ operand: JSONValue) -> Bool {
-            guard let value, isScalar(value), isScalar(operand) else { return false }
-            if case let .string(left) = value, case let .string(right) = operand {
-                return left.utf16.elementsEqual(right.utf16)
-            }
-            return value == operand
-        }
-        if let operand = condition["equals"] { return equal(operand) }
-        if let operand = condition["notEquals"] { return !equal(operand) }
+        if let operand = condition["equals"] { return equal(value, operand) }
+        if let operand = condition["notEquals"] { return !equal(value, operand) }
         if case let .bool(empty)? = condition["empty"] { return isEmpty(value) == empty }
         guard case let .number(left)? = value, left.isFinite else { return false }
         if case let .number(right)? = condition["gt"], right.isFinite { return left > right }
@@ -213,23 +214,48 @@ enum PrototypeDataText {
         return value.displayString
     }
 
+    static func stateKeys(_ text: String) -> [String] {
+        var consumed: [Range<Int>] = []
+        scan(Array(text.utf16), includePlatform: true) { open, close, _, _ in
+            consumed.append(open ..< close + 1)
+            return true
+        }
+        var keys: [String] = []
+        scan(Array(text.utf16), prefixOverride: "", valid: PrototypeRepeat.isFieldName) { open, _, key, _ in
+            if !consumed.contains(where: { $0.contains(open) }) { keys.append(key) }
+            return true
+        }
+        return keys
+    }
+
+    static func platformPointers(_ text: String) -> [String] {
+        var pointers: [String] = []
+        scan(Array(text.utf16), includePlatform: true) { _, _, pointer, isPlatform in
+            if isPlatform { pointers.append(pointer) }
+            return true
+        }
+        return pointers
+    }
+
     /// Returning false stops the shared scanner before any oversized binding is constructed.
     private static func scan(
         _ units: [UInt16],
         includePlatform: Bool = false,
+        prefixOverride: String? = nil,
+        valid: (String) -> Bool = PrototypeDataPointer.isValid,
         visit: (Int, Int, String, Bool) -> Bool
     ) {
         var cursor = 0
         while cursor < units.count {
             let isPlatform = includePlatform && units.dropFirst(cursor + 1).starts(with: Array("platform:".utf16))
-            let prefix = Array((isPlatform ? "platform:" : "data:").utf16)
+            let prefix = Array((prefixOverride ?? (isPlatform ? "platform:" : "data:")).utf16)
             let end = min(units.count, cursor + 2 + prefix.count + PrototypeLimits.maxDataPointerLength)
             if units[cursor] == 123,
                units[(cursor + 1) ..< end].starts(with: prefix),
                let close = units[(cursor + 1) ..< end].firstIndex(of: 125)
             {
                 let pointer = String(decoding: units[(cursor + 1 + prefix.count) ..< close], as: UTF16.self)
-                if PrototypeDataPointer.isValid(pointer) {
+                if valid(pointer) {
                     guard visit(cursor, close, pointer, isPlatform) else { return }
                     cursor = close + 1
                     continue
@@ -245,17 +271,18 @@ enum PrototypeDataResolver {
     static func resolveRoot(
         _ root: JSONValue,
         data: [String: JSONValue]?,
-        platform: [String: JSONValue]? = nil
+        platform: [String: JSONValue]? = nil,
+        derived: [String: JSONValue] = [:]
     )
         -> JSONValue
     {
         var repeats = PrototypeRepeatData(data: data)
-        return resolveRoot(root, data: data, platform: platform, repeats: &repeats)
+        return resolveRoot(root, data: data, platform: platform, derived: derived, repeats: &repeats)
     }
 
     private static func resolveRoot(
         _ root: JSONValue, data: [String: JSONValue]?, platform: [String: JSONValue]?,
-        repeats: inout PrototypeRepeatData
+        derived: [String: JSONValue], repeats: inout PrototypeRepeatData
     )
         -> JSONValue
     {
@@ -264,41 +291,48 @@ enum PrototypeDataResolver {
         let lazy = fields["type"] == .string("list")
         if !lazy, let value = fields["repeat"] { fields["repeat"] = resolveRepeat(value, repeats: &repeats) }
         for key in ["visibleWhen", "enabledWhen", "errorWhen"] {
-            if let value = fields[key] { fields[key] = resolveCondition(value, data: data, platform: platform) }
+            if let value = fields[key] { fields[key] = resolveCondition(
+                value,
+                data: data,
+                platform: platform,
+                derived: derived
+            ) }
         }
         if case let .array(styles)? = fields["styleWhen"] {
             fields["styleWhen"] = .array(styles.map { entry in
                 guard case var .object(style) = entry, let condition = style["when"] else { return entry }
-                style["when"] = resolveCondition(condition, data: data, platform: platform)
+                style["when"] = resolveCondition(condition, data: data, platform: platform, derived: derived)
                 return .object(style)
             })
         }
         if let child = fields["child"] {
-            fields["child"] = resolveRoot(child, data: data, platform: platform, repeats: &repeats)
+            fields["child"] = resolveRoot(child, data: data, platform: platform, derived: derived, repeats: &repeats)
         } else if fields["type"] == .string("adaptive") {
             for slot in PrototypeAdaptive.slots {
                 if let child = fields[slot] { fields[slot] = resolveRoot(
                     child,
                     data: data,
                     platform: platform,
+                    derived: derived,
                     repeats: &repeats
                 ) }
             }
         } else if case let .array(children)? = fields["children"] {
             fields["children"] = .array(children
-                .map { resolveRoot($0, data: data, platform: platform, repeats: &repeats) })
+                .map { resolveRoot($0, data: data, platform: platform, derived: derived, repeats: &repeats) })
         }
         for name in ["header", "footer"] {
             if let child = fields[name] { fields[name] = resolveRoot(
                 child,
                 data: data,
                 platform: platform,
+                derived: derived,
                 repeats: &repeats
             ) }
         }
         if case let .object(screens)? = fields["screens"] {
             fields["screens"] = .object(screens
-                .mapValues { resolveRoot($0, data: data, platform: platform, repeats: &repeats) })
+                .mapValues { resolveRoot($0, data: data, platform: platform, derived: derived, repeats: &repeats) })
         }
         return .object(fields)
     }
@@ -314,21 +348,41 @@ enum PrototypeDataResolver {
     private static func resolveCondition(
         _ value: JSONValue,
         data: [String: JSONValue]?,
-        platform: [String: JSONValue]?
+        platform: [String: JSONValue]?,
+        derived: [String: JSONValue]
     )
         -> JSONValue
     {
         guard case var .object(fields) = value else { return value }
+        if let name = fields["derived"]?.stringValue {
+            let raw = derived[name]
+            let value = raw?.numberValue?.isFinite == false ? nil : raw
+            if case let .bool(empty)? = fields["empty"] {
+                let form = PrototypeDataValues.isEmpty(value) == empty ? "all" : "any"
+                return .object([form: .array([])])
+            }
+            // Keep a scalar operand through repeat binding, which can still substitute its comparator.
+            fields.removeValue(forKey: "derived")
+            fields["_derivedValue"] = value.flatMap { PrototypeDataValues.isScalar($0) ? $0 : nil } ?? .null
+            return .object(fields)
+        }
         if fields["data"] != nil || fields["platform"] != nil {
             let isPlatform = fields["platform"] != nil
             if isPlatform { fields["data"] = fields.removeValue(forKey: "platform") }
             let form = PrototypeDataValues.holds(fields, data: isPlatform ? platform : data) ? "all" : "any"
             return .object([form: .array([])])
         }
-        if let negated = fields["not"] { fields["not"] = resolveCondition(negated, data: data, platform: platform) }
+        if let negated = fields["not"] {
+            fields["not"] = resolveCondition(negated, data: data, platform: platform, derived: derived)
+        }
         for group in ["all", "any"] {
             if case let .array(conditions)? = fields[group] {
-                fields[group] = .array(conditions.map { resolveCondition($0, data: data, platform: platform) })
+                fields[group] = .array(conditions.map { resolveCondition(
+                    $0,
+                    data: data,
+                    platform: platform,
+                    derived: derived
+                ) })
             }
         }
         return .object(fields)

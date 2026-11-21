@@ -4055,13 +4055,14 @@ jobs:
     if: always() && !cancelled() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'
     # Same-repository owner PRs run on the Namespace macOS profile once
     # vars.AUTOMOBILE_NAMESPACE_MACOS_ENABLED == 'true' (opt-in until the profile
-    # exists; until then hosted macos-26) (#11012; one
+    # exists; until then hosted xcode-27) (#11012; one
     # macOS job at a time on the trial, and WHEP fires only on WebRTC changes).
     # Fallbacks, in order: vars.IOS_WEBRTC_HEAVY_LANE == 'true' or the
     # NAMESPACE_RUNNERS_DISABLED kill switch move it to the heavy self-hosted lane
     # when the Mac pools are enabled (#11011); otherwise, and for forks, hosted
-    # macos-26. No CircleCI copy runs.
-    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_NAMESPACE_MACOS_ENABLED == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.heavy != 'hosted') && fromJSON('["self-hosted","automobile-mac-heavy"]') || 'macos-26' }}
+    # xcode-27. No CircleCI copy runs. Every runner selects the Xcode 27.2 pin
+    # (scripts/ios/xcode_version.sh); the Namespace profile needs it installed.
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_NAMESPACE_MACOS_ENABLED == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.heavy != 'hosted') && fromJSON('["self-hosted","automobile-mac-heavy"]') || 'xcode-27' }}
     timeout-minutes: 30
     steps:
       - name: "Isolate self-hosted WHEP capture home"
@@ -4089,6 +4090,17 @@ jobs:
           bun-version: 1.4.4
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Select Xcode 27.2"
+        if: runner.environment == 'github-hosted'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "27.2"
+
+      - name: "Select self-hosted Xcode 27.2"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: bash scripts/ci/select-self-hosted-xcode.sh "27.2"
 
       - name: "Record Xcode version"
         id: webrtc-xcode-version

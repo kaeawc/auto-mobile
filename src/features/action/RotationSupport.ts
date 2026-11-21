@@ -24,11 +24,22 @@ export interface RotationRestoreState {
    * with `deviceStateRotationLock`. Restoring the map re-applies each posture's own auto-rotate
    * setting, so a release in a different posture leaves `accelerometer_rotation` to the map
    * instead of writing the captured posture's value over the current posture's entry.
+   * {@link UNSETTLED_DEVICE_STATE} records a posture that never settled during capture.
    */
   deviceStateRotationLockState?: number;
 }
 
 export const DEVICE_STATE_ROTATION_LOCK = "device_state_rotation_lock";
+
+/** Snapshots of (posture, auto-rotate, posture) taken before a moving posture is given up on. */
+export const DEVICE_STATE_SNAPSHOT_ATTEMPTS = 3;
+
+/**
+ * `deviceStateRotationLockState` when the posture changed during every capture snapshot, so the
+ * captured auto-rotate value belongs to no known posture: release restores the lock map only and
+ * never writes `accelerometer_rotation` over a posture's own entry.
+ */
+export const UNSETTLED_DEVICE_STATE = -1;
 // Values of a `device_state_rotation_lock` entry (Settings.Secure.DEVICE_STATE_ROTATION_LOCK_*).
 const DEVICE_STATE_ROTATION_LOCKED = "1";
 const DEVICE_STATE_ROTATION_UNLOCKED = "2";
@@ -53,7 +64,8 @@ export function unlockDeviceStateRotationEntry(map: string, deviceState: number)
 
 export interface RotationRestoreSlot {
   get(): RotationRestoreState | undefined;
-  record(state: RotationRestoreState): void;
+  /** May return the durable save of the originals, which the caller awaits before writing. */
+  record(state: RotationRestoreState): void | Promise<void>;
   clear(): void;
 }
 

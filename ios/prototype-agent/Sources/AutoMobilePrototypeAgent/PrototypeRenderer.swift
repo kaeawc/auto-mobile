@@ -796,7 +796,11 @@
         }
 
         @ViewBuilder private var imageView: some View {
-            if let id = palette.asset(node.asset), let image = model.assets[id] {
+            if node.url != nil, node.via == "host" {
+                EmptyView()
+            } else if let url = node.url {
+                PrototypeRemoteImageView(node: node, model: model, url: interpolated(url))
+            } else if let id = palette.asset(node.asset), let image = model.assets[id] {
                 let resizable = Image(uiImage: image).resizable()
                 switch node.contentScale {
                 case "crop": resizable.aspectRatio(contentMode: .fill).clipped()

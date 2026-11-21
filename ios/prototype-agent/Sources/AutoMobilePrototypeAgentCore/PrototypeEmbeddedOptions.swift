@@ -44,6 +44,7 @@ public struct PrototypeNetworkConfiguration: Sendable {
     /// The returned body is bounded by the renderer before it enters prototype data.
     public typealias Client = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
 
+    var remoteImages = PrototypeRemoteImageLoader.shared
     let device: any PrototypeHttpClient
     private let handler: (any PrototypeHttpClient)?
 
@@ -53,7 +54,13 @@ public struct PrototypeNetworkConfiguration: Sendable {
     #if canImport(Network)
         /// A transport that enforces the egress policy by dialing only checked IP addresses.
         public static func pinned(allowsCleartext: Bool = false) -> PrototypeNetworkConfiguration {
-            PrototypeNetworkConfiguration(device: PrototypePinnedHttpClient(allowsCleartext: allowsCleartext))
+            var configuration =
+                PrototypeNetworkConfiguration(device: PrototypePinnedHttpClient(allowsCleartext: allowsCleartext))
+            configuration.remoteImages = PrototypeRemoteImageLoader(
+                client: configuration.device,
+                development: PrototypeRemoteImages.developmentLoopback && allowsCleartext
+            )
+            return configuration
         }
     #endif
 
@@ -69,6 +76,9 @@ public struct PrototypeNetworkConfiguration: Sendable {
     public init(deviceClient: Client? = nil, hostHandler: Client? = nil) {
         device = deviceClient.map { EmbeddedHttpClient(client: $0) } ?? PrototypeURLSessionClient()
         handler = hostHandler.map { EmbeddedHttpClient(client: $0) }
+        if deviceClient != nil {
+            remoteImages = PrototypeRemoteImageLoader(client: device)
+        }
     }
 
     @MainActor

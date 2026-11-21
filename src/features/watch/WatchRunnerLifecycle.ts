@@ -3,6 +3,7 @@ import { defaultIdGenerator } from "../../utils/IdGenerator";
 import type { SessionManager } from "../../daemon/sessionManager";
 import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
+import { launchOnFreeRunnerPort, type RunnerPorts } from "../shared/RunnerPortRetry";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { combineAbortSignals } from "../../utils/AbortContext";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../utils/PortManager";
@@ -31,7 +32,7 @@ export class WatchRunnerLifecycle {
     private readonly dependencies: {
       artifacts: Pick<WatchRunnerArtifacts, "resolve">;
       launcher: WatchRunnerLauncher;
-      ports: { allocate(deviceId: string): number; release(deviceId: string, port: number): void };
+      ports: RunnerPorts;
     },
   ) {}
 
@@ -89,13 +90,24 @@ export class WatchRunnerLifecycle {
     try {
       const xctestrun = await this.dependencies.artifacts.resolve(signal);
       signal.throwIfAborted();
-      entry.port = this.dependencies.ports.allocate(deviceId);
-      const handle = await this.dependencies.launcher.launch({
+      // Another platform's runner on the allocated port moves startup to the next free one (#18924).
+      const handle = await launchOnFreeRunnerPort({
         deviceId,
-        bundleId: request.bundleId,
-        xctestrun,
-        port: entry.port,
+        ports: this.dependencies.ports,
         signal,
+        setPort: (port) => {
+          entry.port = port;
+        },
+        isCurrent: () => this.runners.get(deviceId) === entry,
+        launch: (port) =>
+          this.dependencies.launcher.launch({
+            deviceId,
+            bundleId: request.bundleId,
+            xctestrun,
+            port,
+            signal,
+          }),
+        logTag: "[WatchRunner]",
       });
       entry.stop = handle.stop;
       if (signal.aborted || this.runners.get(deviceId) !== entry) {
@@ -278,6 +290,7 @@ export function getWatchRunnerLifecycle(): WatchRunnerLifecycle {
             reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
           }),
         release: (deviceId, port) => PortManager.releaseIfAllocated(`watch:${deviceId}`, port),
+        quarantine: (port) => PortManager.quarantine(port),
       },
     });
     process.once("exit", () => defaultLifecycle?.stopAll());

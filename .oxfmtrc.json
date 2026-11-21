@@ -17,6 +17,7 @@
     "test/fixtures/visionos-settings/*.json",
     "test/fixtures/android-xr/*.json",
     "dist/**",
+    ".claude/briefs/**",
     "ios/**",
     "android/**",
     "scratch/**",

@@ -568,7 +568,12 @@ export function createPrototypeSavedPlatformDispatch(dependencies: IosSavedDepen
     ) {
       return routeToProtoViewer(
         args,
-        { ...dependencies, device: dependencies.protoViewer(device), displays: device.displays },
+        {
+          ...dependencies,
+          platform: device.platform,
+          device: dependencies.protoViewer(device),
+          displays: device.displays,
+        },
         signal,
       ).then((output) => {
         if (output || device.platform !== "ios" || !isPrototypeSavedAction(args.action)) {

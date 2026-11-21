@@ -1,0 +1,81 @@
+{
+  "spec": {
+    "id": "expressive",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "mode": "day"
+    },
+    "root": {
+      "type": "button",
+      "testTag": "send",
+      "label": "Send",
+      "onTap": [
+        {
+          "type": "emit",
+          "name": "send"
+        }
+      ],
+      "split": {
+        "menu": [
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          },
+          {
+            "label": "x"
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.split.menu",
+  "expectedMessage": "Array length out of range"
+}

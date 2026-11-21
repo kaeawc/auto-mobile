@@ -893,6 +893,7 @@ data class PrototypeButtonNode(
   val label: String,
   val variant: String = "filled",
   val icon: String? = null,
+  val split: PrototypeButtonSplit? = null,
   val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
@@ -1156,6 +1157,7 @@ data class PrototypeFabNode(
   val icon: String,
   val label: String? = null,
   val size: String = "regular",
+  val menu: PrototypeFabMenu? = null,
   val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
@@ -1188,6 +1190,7 @@ data class PrototypeSegmentedButtonNode(
   override val attentionLoop: PrototypeLoop? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
+  val variant: String? = null,
 ) : PrototypeNode()
 
 /** A Material top app bar with a title, an optional navigation icon and up to three actions. */
@@ -2101,6 +2104,35 @@ data class PrototypeCameraPreviewNode(
   val mode: String? = null,
 ) : PrototypeNode()
 
+@SerialName("loadingIndicator")
+@Serializable
+data class PrototypeLoadingIndicatorNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val shared: PrototypeShared? = null,
+  override val sharedKey: String? = null,
+  override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
+  override val onAppear: List<PrototypeAction>? = null,
+  override val semantics: PrototypeSemantics? = null,
+  override val ios: PrototypeIosNamespace? = null,
+  override val android: PrototypeAndroidNamespace? = null,
+  override val keyframes: JsonObject? = null,
+  override val attentionLoop: PrototypeLoop? = null,
+  val contained: Boolean? = null,
+) : PrototypeNode()
+
 @Serializable
 data class PrototypeRouteEntry(
   val screen: String,
@@ -2360,6 +2392,25 @@ data class PrototypeZoomable(
 data class PrototypeRadioOption(
   val value: String,
   val label: String,
+)
+
+/** An M3 Expressive split `button`: its trailing half opens [menu]. */
+@Serializable
+data class PrototypeButtonSplit(
+  val menu: List<PrototypeMenuItem>,
+)
+
+@Serializable
+data class PrototypeFabMenuItem(
+  val icon: String,
+  val label: String,
+  val onTap: List<PrototypeAction>,
+)
+
+/** An M3 Expressive FAB menu: tapping the `fab` toggles 2..6 [items] above it. */
+@Serializable
+data class PrototypeFabMenu(
+  val items: List<PrototypeFabMenuItem>,
 )
 
 /** A fixed y axis for a chart; `max` is above `min`. */

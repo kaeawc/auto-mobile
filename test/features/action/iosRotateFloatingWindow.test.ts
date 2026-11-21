@@ -47,7 +47,7 @@ const runnerRotation = (observation: ObserveResult, success = true): RotateResul
 });
 
 const UNCHANGED_SIZE_ERROR =
-  "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.";
+  "The foreground app or screen does not rotate on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.";
 
 describe("iPad floating window rotate verification (#18829)", () => {
   test("derives the display in points from the raster and native scale", () => {

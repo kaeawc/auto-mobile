@@ -5,6 +5,12 @@ dependencyResolutionManagement {
   @Suppress("UnstableApiUsage")
   repositories {
     google()
+    // Google's Maven Central mirror first (Maven Central rate-limits CI); mavenCentral() stays the
+    // fallback.
+    maven {
+      url = uri("https://maven-central.storage-download.googleapis.com/maven2/")
+      mavenContent { releasesOnly() }
+    }
     mavenCentral()
   }
 }
@@ -20,6 +26,10 @@ pluginManagement {
         includeGroupByRegex("com\\.google.*")
         includeGroupByRegex("androidx.*")
       }
+    }
+    maven {
+      url = uri("https://maven-central.storage-download.googleapis.com/maven2/")
+      mavenContent { releasesOnly() }
     }
     mavenCentral()
     gradlePluginPortal()

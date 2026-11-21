@@ -20,7 +20,7 @@ Payloads contain only `stack`, `screen`, `x` and `y`; coordinates are window-loc
 dp rounded to one decimal. The deepest stack supplies its id and top screen; ties pick the lexicographically lowest stack id. Both are null
 without stacks. The event uses normal sequence allocation, state, pages and
 stacks, never typed text. Authored emits cannot use the
-reserved `prototype_` prefix. Disabling it or closing the runtime stops reports.
+reserved `prototype_` prefix.
 
 ## Value formatters (#14227)
 
@@ -59,8 +59,7 @@ minFraction must not exceed maxFraction when both are supplied. Omitted numeric
 fraction options use Intl/CLDR defaults (currency respects minor units, including
 zero for JPY). Number grouping true/default respects the locale's minimum grouping
 digits; false disables grouping. Compact, currency, and percent do too. Locale and timeZone default to the device's. Overrides accept a simple BCP 47 tag of at most 35 characters and an
-IANA zone identifier of at most 128 characters. Shape validation does not prove
-engine support for a locale or zone.
+IANA zone identifier of at most 128 characters.
 
 Epoch milliseconds must be finite integers within the Date range. Strings are
 `YYYY-MM-DD` (midnight UTC) or `YYYY-MM-DDTHH:mm:ss[.fraction]Z` / a signed
@@ -164,7 +163,7 @@ but still refuses the motion v2/v3 features it lacks.
 ## Disposable apps
 
 A disposable app installs one spec as its own app, with its own package, label, icon, permissions
-and foreground-service types. The host core lives in `src/features/prototype/disposableApp/`.
+and foreground-service types.
 The Android stamper packages a spec into a signed APK. The `prototype` actions `installApp`,
 `listApps` and `uninstallApp` (`{appId}`, `{all: true}` or `{expired: true}`) run on the daemon's
 `DisposableAppManager`, built on the first such call. iOS runs them on
@@ -260,15 +259,15 @@ INTERNET), and explicitly enabled components in structured XML. App-owned resour
 references retain the template resource namespace with private-resource access.
 `aapt2 link` resolves those names back to binary resource ids, avoiding unsafe
 binary-manifest string replacement. The spec and assets are baked under
-`assets/prototype/` at stamp time. The adaptive icon and Android 12+ splash share
+`assets/prototype/` at stamp time.
+
+The adaptive icon and Android 12+ splash share
 `prototype_icon_background`. The host patches it in every configuration using
 `icon.backgroundColor`, the spec's authored `theme.colors.background` (with the
 selected mode's override, using light for system mode), or the template default.
 An `icon.asset` names a PNG or JPEG supplied with the install call. A colour-only
 icon uses a contrasting label monogram. The host places the artwork in the
-adaptive icon safe zone and uses its alpha as the themed icon silhouette.
-It resolves both drawable paths from the compiled resource table and fails
-if a requested resource is missing.
+adaptive icon safe zone and uses its alpha as the themed icon silhouette. A missing drawable resource fails the stamp.
 
 Template signatures are removed before assembly. The resource table stays stored;
 zipalign aligns it before apksigner signs with v2/v3 using a persistent host-owned

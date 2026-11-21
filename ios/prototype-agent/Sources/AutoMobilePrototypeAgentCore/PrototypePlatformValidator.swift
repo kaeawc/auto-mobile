@@ -233,7 +233,7 @@ enum PrototypePlatformValidator {
         commerce: JSONValue? = nil,
         storage: JSONValue? = nil, location: JSONValue? = nil, sensors: JSONValue? = nil,
         notifications: JSONValue? = nil,
-        media: JSONValue? = nil, root: JSONValue,
+        media: JSONValue? = nil, links: JSONValue? = nil, root: JSONValue,
         state: [String: JSONValue]
     )
         throws
@@ -266,6 +266,17 @@ enum PrototypePlatformValidator {
             ) }
             try scan(handler, path: path, context: ScanContext(inHandler: true), declared: declared, state: state)
         }
+        for (index, entry) in PrototypeStrictBindings.array(links).enumerated() {
+            if let actions = entry.objectFields?["actions"] {
+                try scan(
+                    actions,
+                    path: "links[\(index)].actions",
+                    context: ScanContext(),
+                    declared: declared,
+                    state: state
+                )
+            }
+        }
         try scan(root, path: "root", context: ScanContext(), declared: declared, state: state)
     }
 
@@ -284,17 +295,24 @@ enum PrototypePlatformValidator {
 
     // MARK: requires
 
+    static func capabilities(_ requires: JSONValue?) -> [String] {
+        PrototypeContractValidator.strings(requires?.objectFields?["capabilities"] ?? requires)
+    }
+
     private static func validateRequires(_ raw: JSONValue?) throws -> Declared {
         var declared = Declared()
         guard let raw else { return declared }
+        if case .array = raw { return declared }
         guard case let .object(fields) = raw else { throw fail("requires", "Expected object") }
-        for key in sorted(Set(fields.keys).union(["platform", "permissions", "background"])) {
+        for key in sorted(Set(fields.keys).union(["platform", "permissions", "background", "capabilities"])) {
             let path = "requires.\(key)"
-            guard ["platform", "permissions", "background"].contains(key) else {
+            guard ["platform", "permissions", "background", "capabilities"].contains(key) else {
                 throw fail(PrototypeLimits.dataMemberPath("requires", key: key), "Unknown property")
             }
             guard let value = fields[key] else { continue }
             switch key {
+            case "capabilities":
+                _ = try strings(value, path: path, range: 1 ... 128, unique: false) { _, _ in }
             case "platform":
                 let names = try strings(value, path: path, range: 1 ... 32, unique: true) { name, at in
                     guard name.utf16.count <= 64 else { throw fail(at, "Invalid string value") }

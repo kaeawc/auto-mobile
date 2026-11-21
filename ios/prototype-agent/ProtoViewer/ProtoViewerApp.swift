@@ -10,6 +10,10 @@ struct ProtoViewerApp: App {
     private let library: Result<(PrototypeLibraryStore, PrototypeLibraryImportService, PrototypeMcpInbox), Error>
 
     init() {
+        PrototypeURLDelivery.hookExistingDelegates()
+        let capabilities = PrototypeInboundLinkSchemes.rendererCapabilities(
+            registry: [], delivery: PrototypeURLDelivery.capabilities
+        )
         library = Result {
             let support = try FileManager.default.url(
                 for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
@@ -28,12 +32,20 @@ struct ProtoViewerApp: App {
             PrototypeLibraryStartupCleanup(
                 exporter: PrototypeLibraryExporter(store: store), inbox: PrototypeLibraryInbox(root: inbox)
             ).run { libraryLog.error("\($0, privacy: .public)") }
-            let imports = PrototypeLibraryImportService(root: root, storageRoot: storage, inbox: inbox) {
+            let imports = PrototypeLibraryImportService(
+                root: root,
+                storageRoot: storage,
+                inbox: inbox,
+                supportedCapabilities: Set(capabilities)
+            ) {
                 libraryLog.error("\($0, privacy: .public)")
             }
             let mcp = PrototypeMcpInbox(
                 root: support.appendingPathComponent("mcp", isDirectory: true), libraryRoot: root, storageRoot: storage,
-                report: Bundle.main.infoDictionary.flatMap { PrototypeMcpCapabilitiesReport(info: $0) }
+                report: Bundle.main.infoDictionary.flatMap { PrototypeMcpCapabilitiesReport(
+                    info: $0,
+                    capabilities: capabilities
+                ) }
             ) {
                 libraryLog.warning("\($0, privacy: .private)")
             }

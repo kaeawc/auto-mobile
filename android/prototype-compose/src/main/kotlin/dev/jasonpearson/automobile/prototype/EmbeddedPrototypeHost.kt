@@ -40,6 +40,8 @@ class EmbeddedPrototypeHost(
    * Checked under the interaction lock before opening, including a queued, obsolete composition.
    */
   var isCurrent: () -> Boolean = { true }
+  /** Awaited after shown and before the first rendered frame. */
+  var initializeRuntime: suspend (PrototypeRuntime) -> Unit = {}
   var onRuntime: (PrototypeRuntime) -> Unit = {}
   /** Called only after runtime content successfully composes, never while storage/fonts load. */
   var onReady: () -> Unit = {}

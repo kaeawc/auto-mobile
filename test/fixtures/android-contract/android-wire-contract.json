@@ -9326,20 +9326,6 @@
         "hasDefault": false
       }
     ],
-    "dev.jasonpearson.automobile.protocol.PrototypePermissionRequirement": [
-      {
-        "name": "name",
-        "type": "string",
-        "nullable": false,
-        "hasDefault": false
-      },
-      {
-        "name": "purpose",
-        "type": "string",
-        "nullable": false,
-        "hasDefault": false
-      }
-    ],
     "dev.jasonpearson.automobile.protocol.PrototypePlatformHandlers": [
       {
         "name": "on",
@@ -9388,26 +9374,6 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
-      }
-    ],
-    "dev.jasonpearson.automobile.protocol.PrototypeRequires": [
-      {
-        "name": "platform",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "permissions",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "background",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeRoute": [
@@ -9759,7 +9725,7 @@
       },
       {
         "name": "requires",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeRequires",
+        "type": "json",
         "nullable": true,
         "hasDefault": true
       },
@@ -9813,6 +9779,12 @@
       },
       {
         "name": "strings",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "links",
         "type": "json",
         "nullable": true,
         "hasDefault": true

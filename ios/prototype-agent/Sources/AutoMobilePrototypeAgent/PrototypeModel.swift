@@ -502,7 +502,8 @@
             syncSnackbarTimeouts()
             // An accepted show, including a same-id replace, is activity.
             if mode.expiresWhenIdle { idleTimer.arm() }
-            onVisibilityChange?(true)
+            PrototypeURLDelivery.inbox.flush(self)
+            onVisibilityChange?(session.isShown)
             viewCommandQueue.run(viewCommands, in: prototypeWindow)
             apply(activity: false) { _ in [] }
         }
@@ -669,6 +670,10 @@
 
         func paste(_ text: String, into: String) {
             apply { $0.pasteClipboard(text, into: into) }
+        }
+
+        func openLink(_ url: String, registeredSchemes: [String]) {
+            apply { $0.openLink(url, registeredSchemes: registeredSchemes) }
         }
 
         func run(_ actions: [PrototypeAction]) {

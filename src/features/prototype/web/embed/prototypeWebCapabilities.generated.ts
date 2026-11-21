@@ -33,6 +33,7 @@ export const PROTOTYPE_WEB_CAPABILITIES: readonly string[] = [
   "prototype_layout_direction_v1",
   "prototype_lazy_list_v1",
   "prototype_linkify_v1",
+  "prototype_links_v1",
   "prototype_loading_states_v1",
   "prototype_loops_v1",
   "prototype_menus_v1",

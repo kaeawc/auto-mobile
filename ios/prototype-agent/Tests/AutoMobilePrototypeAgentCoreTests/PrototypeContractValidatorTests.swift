@@ -14,6 +14,26 @@ final class PrototypeContractValidatorTests: XCTestCase {
         _ = try? JSONDecoder().decode(PrototypeSpec.self, from: data)
     }
 
+    func testExplicitCapabilityRequirementsAreEnforcedAlongsideInferredCapabilities() throws {
+        let data = Data(#"""
+        {"id":"requires","requires":["prototype_future_v1"],"data":{},
+        "window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hello"}}
+        """#.utf8)
+        // Without a host capability set, validation checks the contract only.
+        XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data))
+        let required: Set<String> = ["prototype_future_v1", "prototype_data_model_v1"]
+        XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data, supportedCapabilities: required))
+        for missing in required.sorted() {
+            XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(
+                data: data, supportedCapabilities: required.subtracting([missing])
+            )) { error in
+                XCTAssertEqual(error as? PrototypeLoadError, .invalidSpec(
+                    path: "$", message: "Unsupported capabilities: \(missing)"
+                ))
+            }
+        }
+    }
+
     func testOnAppearSharedFixtures() throws {
         for name in ["on-appear.json", "on-appear-repeat.json"] {
             let data = try Data(contentsOf: fixtures.appendingPathComponent("valid/\(name)"))

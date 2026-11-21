@@ -42,7 +42,7 @@ export interface ResolvedEmitContext {
 }
 type RuntimeBinding = Exclude<
   PrototypeEmitContextBinding,
-  { item: string } | { index: true } | { match: string }
+  { item: string } | { index: true } | { match: string } | { link: string }
 >;
 
 /**

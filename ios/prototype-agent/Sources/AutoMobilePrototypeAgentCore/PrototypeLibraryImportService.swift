@@ -24,13 +24,21 @@ actor PrototypeLibraryImportService {
         self.checkCancellation = checkCancellation
     }
 
-    init(root: URL, storageRoot: URL, inbox: URL, warning: @escaping @Sendable (String) -> Void) {
+    init(
+        root: URL,
+        storageRoot: URL,
+        inbox: URL,
+        supportedCapabilities: Set<String> = Set(AutoMobilePrototypeCapabilities.supported),
+        warning: @escaping @Sendable (String) -> Void
+    ) {
         read = { try PrototypeLibraryFileReader().read($0) }
         commit = { bytes, source in
             let store = try PrototypeLibraryStore(
                 root: root, storageRoot: storageRoot, blocklist: PrototypeDefaultsContentBlocklist()
             )
-            try PrototypeLibraryImporter(store: store).importData(bytes, source: source)
+            var importer = PrototypeLibraryImporter(store: store)
+            importer.supportedCapabilities = supportedCapabilities
+            try importer.importData(bytes, source: source)
         }
         cleanup = { try PrototypeLibraryInbox(root: inbox).cleanup($0) }
         self.warning = warning

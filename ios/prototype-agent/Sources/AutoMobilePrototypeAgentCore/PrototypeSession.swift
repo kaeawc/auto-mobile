@@ -507,6 +507,26 @@ struct PrototypeSession {
         return execute(actions, writes, context: context)
     }
 
+    /// Host registration is independent of the spec and of the outbound platform links module.
+    mutating func openLink(_ url: String, registeredSchemes: [String]) -> [PrototypeEvent] {
+        guard isShown, let spec, spec.requiredCapabilities.contains("prototype_links_v1") else { return [] }
+        let routing = PrototypeInboundRouting(entries: spec.links)
+        let safeURL = JSONValue.string(routing.redact(url))
+        guard let match = routing.resolve(url, schemes: registeredSchemes) else {
+            return emit(kind: "link_unmatched", name: nil, payload: .object(["url": safeURL]))
+        }
+        let accepted = emit(kind: "link_opened", name: nil, payload: .object([
+            "url": safeURL, "entry": .string(routing.path(match)),
+        ]))
+        do {
+            return try accepted + run(routing.actions(match))
+        } catch {
+            // An absent optional query binding refuses the complete action list. Never log URL values.
+            prototypeRoutesLog.warning("Refused actions for inbound link")
+            return accepted
+        }
+    }
+
     /// One interaction as one unit, as Android's `PrototypeRuntime.control`: the control's `own`
     /// writes (a flipped switch, a chosen option, a closed dialog; empty for a plain tap) and every
     /// state write of its `actions` are validated before anything is applied, so a rejected

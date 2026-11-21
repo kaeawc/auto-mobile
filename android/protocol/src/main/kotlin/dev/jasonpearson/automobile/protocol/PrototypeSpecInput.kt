@@ -146,7 +146,10 @@ internal object PrototypeSpecInput {
       PrototypeSpecValidation.Success(
         json.decodeFromJsonElement<PrototypeSpec>(
           stripPlatformNamespaces(
-            normalizeIntegers(value, definitions.getValue("spec").jsonObject),
+            normalizeIntegers(
+              value,
+              definitions.getValue("spec").jsonObject,
+            ),
           ),
         ),
       )
@@ -165,6 +168,7 @@ internal object PrototypeSpecInput {
     PrototypeLazyListRules.limitError(value)
       ?: walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
       ?: excludeAccessoryReferences(context)
+      ?: PrototypeInboundLinks.error(value.jsonObject, context)
       ?: PrototypeRouteRules.error(value.jsonObject, context)
       ?: PrototypeSharedElementRules.error(context)
       ?: gridSpanErrors(context)

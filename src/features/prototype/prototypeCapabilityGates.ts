@@ -1,3 +1,4 @@
+import { prototypeDeclaredCapabilities } from "./prototypeDeclaredCapabilities";
 import {
   PROTOTYPE_LOOPS_CAPABILITY,
   prototypeLoopFields,
@@ -278,6 +279,12 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_CONTENT_TRANSITION_CAPABILITY,
     fields: prototypeContentTransitionFields,
     unsupportedMessage: prototypeContentTransitionUnsupportedMessage,
+  },
+  {
+    capability: "prototype_links_v1",
+    fields: (spec) => (Object.hasOwn(record(spec) ?? {}, "links") ? ["links"] : []),
+    unsupportedMessage: (fields) =>
+      `The device does not advertise prototype_links_v1, required by ${fields[0]}. Nothing was shown.`,
   },
   {
     capability: PROTOTYPE_ROUTES_CAPABILITY,
@@ -622,12 +629,21 @@ export function prototypeRequiredCapabilities(
   fields: string[];
   unsupportedMessage: PrototypeSpecCapabilityGate["unsupportedMessage"];
 }[] {
-  return PROTOTYPE_SPEC_CAPABILITY_GATES.flatMap((gate) => {
+  const inferred = PROTOTYPE_SPEC_CAPABILITY_GATES.flatMap((gate) => {
     const fields = gate.fields(spec, platform);
     return fields.length === 0
       ? []
       : [{ capability: gate.capability, fields, unsupportedMessage: gate.unsupportedMessage }];
   });
+  const declared = prototypeDeclaredCapabilities(record(spec)?.requires)
+    .filter((capability) => !inferred.some((gate) => gate.capability === capability))
+    .map((capability) => ({
+      capability,
+      fields: ["requires"],
+      unsupportedMessage: () =>
+        `The device does not advertise ${capability}, required by requires. Nothing was shown.`,
+    }));
+  return [...inferred, ...declared];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

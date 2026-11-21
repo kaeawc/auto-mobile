@@ -332,7 +332,12 @@ final class PrototypeLibraryTests: XCTestCase {
         }
         var fields = try JSONDecoder().decode([String: JSONValue].self, from: spec)
         fields["requires"] = .array([.string("prototype_future_v1")])
-        XCTAssertThrowsError(try library.add(bundle(JSONEncoder().encode(fields)), label: "Future", source: .file))
+        XCTAssertThrowsError(try library.add(bundle(JSONEncoder().encode(fields)), label: "Future", source: .file)) {
+            XCTAssertEqual(
+                $0 as? PrototypeLibraryImportFailure,
+                .needsNewerViewer(missing: ["prototype_future_v1"])
+            )
+        }
         XCTAssertEqual(try library.list().entries.count, 0)
     }
 

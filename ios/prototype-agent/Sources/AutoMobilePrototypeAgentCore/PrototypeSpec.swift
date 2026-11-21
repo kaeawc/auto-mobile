@@ -84,6 +84,8 @@ public enum JSONValue: Codable, Equatable, Sendable {
 
 struct PrototypeSpec: Decodable {
     let id: String
+    let links: [JSONValue]
+    let requiredCapabilities: [String]
     let window: WindowSpec
     let state: [String: JSONValue]?
     let data: [String: JSONValue]?
@@ -119,7 +121,7 @@ struct PrototypeSpec: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case id, window, state, data, theme, motion, root, storage, requires, platform, strings, derive, channels, auth
-        case commerce, location, media, notifications, sensors
+        case commerce, location, media, notifications, sensors, links
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -148,6 +150,10 @@ struct PrototypeSpec: Decodable {
         media = try container.decodeIfPresent(JSONValue.self, forKey: .media)
         locationBlock = try container.decodeIfPresent(JSONValue.self, forKey: .location)
         sensorsBlock = try container.decodeIfPresent(JSONValue.self, forKey: .sensors)
+        links = try container.decodeIfPresent([JSONValue].self, forKey: .links) ?? []
+        requiredCapabilities = try PrototypePlatformValidator.capabilities(
+            container.decodeIfPresent(JSONValue.self, forKey: .requires)
+        )
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         // The host validator owns the strict shape; a malformed block means "no storage" here.
@@ -281,6 +287,8 @@ struct PrototypeSpec: Decodable {
         authoredRoot: JSONValue? = nil, state: [String: JSONValue]? = nil,
         derivedValues: [String: JSONValue]? = nil
     ) {
+        links = spec.links
+        requiredCapabilities = spec.requiredCapabilities
         channels = spec.channels
         media = spec.media
         locationBlock = spec.locationBlock

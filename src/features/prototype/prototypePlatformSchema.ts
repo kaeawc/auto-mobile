@@ -73,8 +73,12 @@ const permissionNames = contract.definitions.platformPermission.fields.name.rule
 const backgroundNames = contract.definitions.platformRequires.fields.background.rule.item
   .values as [string, ...string[]];
 
-export const prototypeRequiresSchema = z
+// Separate instances keep the legacy array inline in the terse JSON schema.
+const capabilityNamesSchema = () => z.array(z.string().min(1)).min(1).max(128);
+
+const prototypeModuleRequiresSchema = z
   .object({
+    capabilities: capabilityNamesSchema().optional(),
     platform: z.array(z.string().min(1).max(64)).min(1).max(32).optional(),
     permissions: z
       .array(
@@ -105,3 +109,8 @@ export const prototypePlatformHandlersSchema = z
       ),
   })
   .strict();
+
+export const prototypeRequiresSchema = z.union([
+  prototypeModuleRequiresSchema,
+  capabilityNamesSchema(),
+]);

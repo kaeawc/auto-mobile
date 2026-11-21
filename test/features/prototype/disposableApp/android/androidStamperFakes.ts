@@ -63,6 +63,7 @@ export function stampInput(): AndroidDisposableAppStampInput {
     },
     appId: "dev.jasonpearson.automobile.app.feedly",
     label: "Feedly",
+    slug: "feedly",
     spec: '{"root":{"type":"column"}}',
     permissions: [],
     enabledComponents: [],

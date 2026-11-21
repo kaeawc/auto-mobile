@@ -127,6 +127,19 @@ describe("artifact capability parsers", () => {
     expect(parsePrototypeAgentAdvertised(swift)).toEqual(["prototype_persistence_replay_v1"]);
   });
 
+  test("iOS inbound links are advertised without an unimplemented exemption", () => {
+    const source = ADVERTISING_SOURCES["prototype-agent-dylib"]
+      .map((file) => readFileSync(path.resolve(import.meta.dir, "../..", file), "utf8"))
+      .join("\n");
+    expect(parsePrototypeAgentAdvertised(source)).toContain("prototype_links_v1");
+    expect(UNIMPLEMENTED_BY_ARTIFACT["prototype-agent-dylib"]).not.toHaveProperty(
+      "prototype_links_v1",
+    );
+    expect(UNIMPLEMENTED_BY_ARTIFACT["prototype-agent-dylib"]).toHaveProperty(
+      "prototype_event_ack_v1",
+    );
+  });
+
   test("real advertising sources yield the capabilities the 0.0.88 gaps named (#15347)", () => {
     const repoRoot = path.resolve(import.meta.dir, "../..");
     const read = (artifact: keyof typeof ADVERTISING_SOURCES): string =>

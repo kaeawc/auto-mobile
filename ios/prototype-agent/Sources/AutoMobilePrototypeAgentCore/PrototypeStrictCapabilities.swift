@@ -8,6 +8,8 @@ enum PrototypeStrictCapabilities {
 
     static func required(_ spec: [String: JSONValue], includeAgentGates: Bool = false) -> Set<String> {
         var result = PrototypePlatformValidator.backendCapabilities(spec)
+        // Array requirements name capabilities directly; the object form declares platform needs below.
+        result.formUnion(PrototypePlatformValidator.capabilities(spec["requires"]))
         func need(_ feature: String) { result.insert("prototype_\(feature)_v1") }
         if PrototypeContractValidator.locatedActionTypes(.object(spec)).contains("hideKeyboard") {
             need("hide_keyboard")
@@ -17,6 +19,7 @@ enum PrototypeStrictCapabilities {
             if spec["window"]?.objectFields?["chrome"] != nil { need("window_chrome") }
             if spec["window"]?.objectFields?["transition"] != nil { need("window_motion") }
         }
+        if spec["links"] != nil { need("links") }
         if spec["strings"] != nil { need("strings") }
         for key in ["window", "theme"] {
             if let block = spec[key]?.objectFields, block["ios"] != nil || block["android"] != nil {
@@ -245,6 +248,7 @@ enum PrototypeStrictCapabilities {
             }
         }
         if let root = spec["root"] { scan(root) }
+        if let links = spec["links"] { scan(links) }
         if let handlers = spec["platform"] { scan(handlers) }
         for event in (spec["platform"]?.objectFields?["on"]?.objectFields ?? [:]).keys {
             if let capability = PrototypePlatformValidator.eventCapability(event) { result.insert(capability) }

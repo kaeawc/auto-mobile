@@ -669,6 +669,40 @@ class PrototypeRuntime(
     }
   }
 
+  /** Host registration, never supplied by spec content. Hosts serialize calls with interactions. */
+  var registeredLinkSchemes: List<String> = emptyList()
+
+  suspend fun openLink(url: String) {
+    if (!current.active || "prototype_links_v1" !in current.spec.requires?.capabilities.orEmpty())
+      return
+    val routing = PrototypeInboundRouting(current.spec.links)
+    val match = routing.resolve(url, registeredLinkSchemes)
+    if (match == null) {
+      emit(
+        kind = PrototypeEventKind.LINK_UNMATCHED,
+        payload = buildJsonObject { put("url", routing.redact(url)) },
+      )
+      return
+    }
+    emit(
+      kind = PrototypeEventKind.LINK_OPENED,
+      payload =
+        buildJsonObject {
+          put("url", routing.redact(url))
+          put("entry", routing.path(match))
+        },
+    )
+    // Acceptance precedes actions so a dismiss action still delivers the final runtime event.
+    try {
+      handle(PrototypeInteraction.Tap(routing.actions(match)))
+    } catch (error: IllegalArgumentException) {
+      // Optional query bindings can be absent. Refuse invalid actions without logging URL values.
+      warn(
+        "Refused actions for inbound link ${routing.path(match)} (${error.javaClass.simpleName})",
+      )
+    }
+  }
+
   /** Writes any stored value not yet on disk: the dismissal and replacement path. */
   suspend fun flushStorage() {
     storage?.flush()

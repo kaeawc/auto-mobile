@@ -126,8 +126,10 @@ Each shot:
 3. clears the app and imports a fixed sample library from the shared valid prototype corpus
    with `prototype` `save` (no `pin` or `icon`), which routes each spec into the installed
    ProtoViewer library;
-4. drives the screen with `tapOn` and `launchApp`;
-5. captures with `observe` (`screenshot: "settled"`).
+4. drives the screen with `tapOn` and `launchApp`. The import shot opens Settings on iOS and
+   Import on Android to show the imported-prototype network switch and policy;
+5. reapplies the same `statusBar` override on Android immediately before capturing with `observe`
+   (`screenshot: "settled"`).
 
 ```bash
 bun scripts/store-listing/capture-screenshots.ts --list

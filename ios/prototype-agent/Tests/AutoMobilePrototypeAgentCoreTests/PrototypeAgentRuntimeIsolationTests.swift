@@ -103,4 +103,38 @@ final class PrototypeAgentRuntimeIsolationTests: XCTestCase {
         XCTAssertFalse(advertised.contains(PrototypeAgentProtocol.simulatePlatformRequest))
         XCTAssertTrue(Set(advertised).isDisjoint(with: forbidden), "Permissioned capability advertised")
     }
+
+    func testOnlyViewerRegistrySupportsNotificationsAndRefusalNamesViewer() throws {
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data("""
+        {
+          "id": "viewer", "window": {"placement": {"type": "fullscreen"}},
+          "requires": {"platform": ["notifications"]}, "root": {"type": "spacer"}
+        }
+        """.utf8))
+        let services = Services()
+        let injected = PrototypePlatformRegistry.feedbackModules(
+            haptics: services, sound: services, connectivity: services, links: services, settings: services
+        )
+        let viewer = PrototypePlatformRegistry.systemModules(
+            clipboard: FakePrototypeClipboard(), connectivity: services, links: services, settings: services,
+            notifications: FakeNotificationCenterClient()
+        )
+        let capability = "prototype_platform_notifications_v1"
+        XCTAssertFalse(PrototypeAgentProtocol.advertisedCapabilities(
+            registryCapabilities: injected.capabilities
+        ).contains(capability))
+        XCTAssertTrue(
+            try XCTUnwrap(injected.notificationRefusal(for: spec))
+                .contains("standalone iOS Prototype Viewer")
+        )
+        XCTAssertNil(viewer.notificationRefusal(for: spec))
+        XCTAssertTrue(viewer.capabilities.contains(capability))
+        // A `notifications.schedule` spec is gated on this one; without it show preflight refuses it.
+        let scheduled = "prototype_platform_notifications_scheduled_v1"
+        XCTAssertTrue(viewer.capabilities.contains(scheduled))
+        XCTAssertTrue(PrototypeAgentProtocol.advertisedCapabilities(
+            registryCapabilities: viewer.capabilities
+        ).contains(scheduled))
+        XCTAssertFalse(injected.capabilities.contains(scheduled))
+    }
 }

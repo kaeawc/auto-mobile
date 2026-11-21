@@ -246,8 +246,11 @@ overflow or blocked writes close the peer, and events and requests continue with
   a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
   uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs
   from the host's disposable-app key: one requested id is refused with an error, and in a bulk
-  removal the package is reported under `skipped`. Each removal is logged at `warn`. An app that
-  is already gone from the device still has its registry record cleared.
+  removal the package is reported under `skipped`. When the session broker acquires an Android
+  device, it sweeps expired apps within the preparation deadline. The acquisition result reports
+  the removed app IDs, and each removal is logged at `warn`. An app that is already gone from the
+  device still has its registry record cleared. Doctor reports expired apps that are still installed
+  or registered on each connected Android device.
 - **Device commands.** The Android installer runs `adb install -r` (then `pm clear` for `reset`),
   `pm grant` per granted manifest permission, and `pm revoke` plus the `user-set user-fixed` flags
   per denied one, so a denial reads as blocked with no dialog. It refuses a grant and a deny that

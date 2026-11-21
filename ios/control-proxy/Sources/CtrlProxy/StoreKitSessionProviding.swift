@@ -31,6 +31,11 @@ protocol StoreKitTestSessioning: AnyObject {
     func allTransactions() -> [StoreKitTransaction]
 }
 
+struct StoreKitErrorShape: Hashable, Sendable {
+    let domain: String
+    let code: Int
+}
+
 protocol StoreKitSessionProviding: Sendable {
     @MainActor
     func execute(_ request: RequestStoreKit) async throws -> [StoreKitTransaction]?
@@ -103,17 +108,25 @@ final class StoreKitSessionStore: StoreKitSessionProviding {
         }
     }
 
-    /// iOS 26's storekitd rejects the runner's bundle ("not installed for development") for
-    /// purchases and expiries the runner starts, which surfaces as SKInternalErrorDomain 3.
+    /// The two shapes iOS 26+ storekitd gives purchases and expiries the runner starts:
+    /// SKInternalErrorDomain 3 when it rejects the runner as "not installed for development"
+    /// (runners without embedded entitlements), and SKServiceErrorDomain 2 when it cannot read
+    /// the entitlements of the runner's target app (-10814, the target app is not installed).
+    private static let iosTwentySixRejections: Set<StoreKitErrorShape> = [
+        StoreKitErrorShape(domain: "SKInternalErrorDomain", code: 3),
+        StoreKitErrorShape(domain: "SKServiceErrorDomain", code: 2),
+    ]
+
     private func actionable(_ error: any Error, action: String) -> any Error {
         let nsError = error as NSError
+        let shape = StoreKitErrorShape(domain: nsError.domain, code: nsError.code)
         guard osMajorVersion >= 26, action == "buy" || action == "expire",
-              nsError.domain == "SKInternalErrorDomain", nsError.code == 3
+              Self.iosTwentySixRejections.contains(shape)
         else { return error }
         return VerbatimLocalizedError(
-            message: "unsupported: StoreKit Testing cannot \(action) on iOS \(osMajorVersion) simulators: "
-                + "the system rejects the runner as not installed for development "
-                + "(SKInternalErrorDomain 3). Use an iOS 18 simulator."
+            message: "unsupported: StoreKit Testing cannot \(action) on this iOS \(osMajorVersion) simulator: "
+                + "the system rejected the runner's StoreKit request (\(shape.domain) \(shape.code)) "
+                + "because the runner host app (AutoMobileTest) is missing. Restart the daemon to reinstall it."
         )
     }
 

@@ -349,9 +349,26 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 windowFrames: snapshot.children.filter { $0.elementType == .window }.map(\.frame)
             )
 
+            // An inset iPadOS window is captured relative to itself, except its keyboard, which
+            // XCTest reports in screen space. Observe reports both in screen space (#18830).
+            let windowTranslation = panel != nil ? nil : tracked("windowTranslation") {
+                Self.windowScreenTranslation(
+                    appFrame: snapshot.frame,
+                    screenFrame: CGRect(
+                        x: 0, y: 0, width: screenMetrics.fallbackWidth, height: screenMetrics.fallbackHeight
+                    ),
+                    windowFrame: { self.observedAppWindowFrame() }
+                )
+            }
+            let windowedScreenFrame = windowTranslation.map { _ in
+                springBoardScreenFrame() ?? CGRect(
+                    x: 0, y: 0, width: screenMetrics.fallbackWidth, height: screenMetrics.fallbackHeight
+                )
+            }
+
             // Build hierarchy from snapshot (no more IPC calls - all data is local)
             var truncationReasons: Set<String> = []
-            let rawElement = tracked("buildHierarchy") {
+            let builtElement = tracked("buildHierarchy") {
                 buildElementInfoFromSnapshot(
                     snapshot,
                     depth: 0,
@@ -359,15 +376,20 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                     truncationReasons: &truncationReasons,
                     keyboardFocus: keyboardFocus,
                     disableAllFiltering: disableAllFiltering,
+                    keyboardScreenBounds: windowedScreenFrame,
                     rootChildFilter: panel.map { selected in
                         { Self.displayId(of: $0) == selected.displayId }
                     }
                 )
             }
+            // A landscape iPad home screen can frame SpringBoard's windows in portrait (#18827).
+            let (rawElement, portraitSpringBoard) = bundleId == "com.apple.springboard" && panel == nil
+                ? Self.portraitSpringBoardWindowsInRootSpace(builtElement, deviceRotation: screenMetrics.rotation)
+                : (builtElement, nil)
 
             let hierarchyWithTypedTextInputs = tracked("mergeTypedTextInputs") {
                 let candidates = typedTextInputSnapshots.enumerated().map { index, textInputSnapshot in
-                    buildElementInfoFromSnapshot(
+                    let candidate = buildElementInfoFromSnapshot(
                         textInputSnapshot,
                         depth: 1,
                         screenBounds: screenBounds,
@@ -377,11 +399,17 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                         keyboardFocus: keyboardFocus,
                         disableAllFiltering: disableAllFiltering
                     )
+                    return portraitSpringBoard.map {
+                        Self.rotatedIntoLandscape(candidate, portraitSpringBoard: $0)
+                    } ?? candidate
                 }
-                return ElementLocator.mergeMissingTextInputCandidates(
+                let merged = ElementLocator.mergeMissingTextInputCandidates(
                     into: rawElement,
                     candidates: candidates
                 )
+                // Report the inset window's nodes in screen space so bounds line up with the
+                // screenshot (#18830). The windows still exist here, before the optimizer.
+                return windowTranslation.map { Self.translatedToScreen(merged, by: $0) } ?? merged
             }
 
             // Apply optimization - flatten structural wrappers and filter empty nodes
@@ -408,15 +436,6 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 )
             } ?? panelRootElement
 
-            // Get window info from snapshot
-            let windowInfo = WindowInfo(
-                id: 0,
-                type: 1, // Application window
-                isActive: true,
-                isFocused: true,
-                bounds: ElementBounds(clamping: frame)
-            )
-
             // Check for system alerts from multiple sources:
             // 1. Alerts in the app's own snapshot tree (permission dialogs presented within the app)
             // 2. Alerts in SpringBoard's tree (system dialogs managed by SpringBoard)
@@ -425,22 +444,26 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 try getSystemAlerts(
                     appSnapshot: snapshot,
                     truncationReasons: &truncationReasons,
-                    keyboardFocus: keyboardFocus
+                    keyboardFocus: keyboardFocus,
+                    portraitSpringBoard: portraitSpringBoard
                 )
             }
 
             // If there are system alerts, include them in the hierarchy
-            let finalHierarchy: UIElementInfo
+            let screenSpaceHierarchy: UIElementInfo
             if !systemAlertCapture.alerts.isEmpty {
                 // Create a wrapper that contains both the app hierarchy and alerts
                 var children = rootElement.node ?? []
-                children.append(
-                    contentsOf: Self.alertsInObservedSpace(
-                        systemAlertCapture.alerts,
-                        innerPanelPortraitHeight: innerPanelFrame.map { ElementBounds.clampedInt($0.height) }
-                    )
+                let alerts = Self.alertsInObservedSpace(
+                    systemAlertCapture.alerts,
+                    innerPanelPortraitHeight: innerPanelFrame.map { ElementBounds.clampedInt($0.height) }
                 )
-                finalHierarchy = UIElementInfo(
+                children.append(
+                    contentsOf: windowTranslation.map { translation in
+                        alerts.map { Self.translatedToScreen($0, by: translation) }
+                    } ?? alerts
+                )
+                screenSpaceHierarchy = UIElementInfo(
                     text: rootElement.text,
                     resourceId: rootElement.resourceId,
                     className: rootElement.className,
@@ -453,8 +476,19 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                     node: children
                 )
             } else {
-                finalHierarchy = rootElement
+                screenSpaceHierarchy = rootElement
             }
+
+            let finalHierarchy = windowedScreenFrame.map {
+                Self.withRootBounds(screenSpaceHierarchy, ElementBounds(clamping: $0))
+            } ?? screenSpaceHierarchy
+            let windowInfo = WindowInfo(
+                id: 0,
+                type: 1, // Application window
+                isActive: true,
+                isFocused: true,
+                bounds: ElementBounds(clamping: windowTranslation.map { frame.offsetBy(dx: $0.x, dy: $0.y) } ?? frame)
+            )
 
             // Get screen scale and dimensions for coordinate conversion
             // iOS reports bounds in points, but screenshots are in pixels
@@ -506,7 +540,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 rootBounds: finalHierarchy.bounds,
                 fallbackWidth: currentScreenMetrics.fallbackWidth,
                 fallbackHeight: currentScreenMetrics.fallbackHeight,
-                elements: finalHierarchy.node ?? []
+                // A windowed app's nodes say nothing about the screen frame read above.
+                elements: windowTranslation == nil ? finalHierarchy.node ?? [] : []
             )
             let pixelDimensions = ElementLocator.computePixelDimensions(
                 pointWidth: screenWidth,

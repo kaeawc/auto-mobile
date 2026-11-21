@@ -38,8 +38,8 @@ fails the call before anything reaches the device.
    `unknown`) and `originalIdentifier` for renewals.
 3. `setSimulatedError` makes the next `buy` fail with that error, and is cleared after it.
    Purchases the app starts itself keep failing until the next `buy`, `clear` or another `load`.
-   On an iOS 26 or newer simulator `buy` and `expire` return `unsupported_device` (the system
-   rejects the runner's bundle), so use an iOS 18 simulator for them.
+   On an iOS 26 or newer simulator the runner's host app must be installed before `load`;
+   AutoMobile installs it when it starts the runner.
 4. `clear` resets the session, returns the final transactions and ends the session.
 
 The session lasts as long as the runner, until `clear` or until your device session is released.
@@ -64,8 +64,8 @@ still apply. A timed-out `buy` can still complete. Call `list` before you retry 
 
 `unsupported` is set, with nothing changed on the device, when StoreKit Testing cannot run:
 
-| `unsupported`            | When                                                                     | What to do                                                          |
-| ------------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| `unsupported_platform`   | Android, Apple TV, Apple Watch or Apple Vision Pro                       | Use an iOS simulator                                                |
-| `unsupported_device`     | A physical iPhone, or `buy` and `expire` on an iOS 26 or newer simulator | Use an iOS simulator, or an iOS 18 simulator for `buy` and `expire` |
-| `unsupported_capability` | The connected iOS runner predates StoreKit Testing                       | Restart the daemon to update it                                     |
+| `unsupported`            | When                                                                                                                                                | What to do                                                                           |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `unsupported_platform`   | Android, Apple TV, Apple Watch or Apple Vision Pro                                                                                                  | Use an iOS simulator                                                                 |
+| `unsupported_device`     | A physical iPhone, or `buy` and `expire` on an iOS 26 or newer simulator whose runner host app is missing (StoreKit error `SKServiceErrorDomain 2`) | Use an iOS simulator; for a missing host app, restart the daemon so it reinstalls it |
+| `unsupported_capability` | The connected iOS runner predates StoreKit Testing                                                                                                  | Restart the daemon to update it                                                      |

@@ -1,6 +1,16 @@
 import OSLog
 import SwiftUI
 
+extension PrototypePlatformRegistry {
+    static let viewer = makeSystemRegistry(webView: PrototypeWebViewModule())
+
+    static var viewerReportCapabilities: [String] {
+        Set(AutoMobilePrototypeCapabilities.supported + viewer.capabilities.filter {
+            $0 == PrototypeWebViewModule.capabilityName
+        }).sorted()
+    }
+}
+
 let libraryLog = Logger(subsystem: "dev.jasonpearson.automobile.protoviewer", category: "library")
 
 @main
@@ -19,8 +29,11 @@ struct ProtoViewerApp: App {
             let inbox = try FileManager.default.url(
                 for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true
             ).appendingPathComponent("Inbox", isDirectory: true)
+            let capabilities = PrototypePlatformRegistry.viewerReportCapabilities
+            let supported = Set(capabilities)
             let store = try PrototypeLibraryStore(
-                root: root, storageRoot: storage, blocklist: PrototypeDefaultsContentBlocklist()
+                root: root, storageRoot: storage, blocklist: PrototypeDefaultsContentBlocklist(),
+                supportedCapabilities: supported
             )
             // Retry deletes of hidden content that failed earlier, so it never holds library quota.
             do { try store.purgeHidden() }
@@ -28,12 +41,18 @@ struct ProtoViewerApp: App {
             PrototypeLibraryStartupCleanup(
                 exporter: PrototypeLibraryExporter(store: store), inbox: PrototypeLibraryInbox(root: inbox)
             ).run { libraryLog.error("\($0, privacy: .public)") }
-            let imports = PrototypeLibraryImportService(root: root, storageRoot: storage, inbox: inbox) {
+            let imports = PrototypeLibraryImportService(
+                root: root, storageRoot: storage, inbox: inbox, supportedCapabilities: supported
+            ) {
                 libraryLog.error("\($0, privacy: .public)")
+            }
+            let report = Bundle.main.infoDictionary.flatMap {
+                PrototypeMcpCapabilitiesReport(info: $0, capabilities: capabilities)
             }
             let mcp = PrototypeMcpInbox(
                 root: support.appendingPathComponent("mcp", isDirectory: true), libraryRoot: root, storageRoot: storage,
-                report: Bundle.main.infoDictionary.flatMap { PrototypeMcpCapabilitiesReport(info: $0) }
+                supportedCapabilities: supported,
+                report: report
             ) {
                 libraryLog.warning("\($0, privacy: .private)")
             }

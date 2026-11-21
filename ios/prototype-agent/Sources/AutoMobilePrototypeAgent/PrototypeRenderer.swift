@@ -516,6 +516,12 @@
                 PrototypeAdaptiveView(node: node, model: model)
             case "map":
                 PrototypeMapView(node: node, model: model)
+            case "webView":
+                if let module = model.platformRegistry.modules["webview"] as? PrototypeWebViewModule {
+                    PrototypeWebViewView(node: node, url: interpolated(node.webViewURL), module: module, model: model)
+                        .id([node.id ?? ""] + node.webViewOrigins)
+                        .frame(minHeight: 0, idealHeight: 360)
+                }
             case "chart":
                 PrototypeChartView(node: node, model: model)
             case "timePicker":

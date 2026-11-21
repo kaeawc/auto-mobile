@@ -27,6 +27,7 @@ internal fun PrototypeEgressDecision.requireAllowed() {
 /** Device-side egress policy. Address parsing never performs a DNS lookup. */
 class PrototypeEgressPolicy(
   private val daemonPorts: Set<Int> = (3000..3010).toSet() + 8765,
+  private val blockPrivateAddresses: Boolean = false,
 ) : PrototypeDestinationPolicy {
   override fun check(
     host: String,
@@ -45,10 +46,13 @@ class PrototypeEgressPolicy(
     if (addresses.any { blockedAddress(it) }) {
       return PrototypeEgressDecision.Blocked("Blocked destination address")
     }
-    if (port in daemonPorts && addresses.any { privateAddress(it) }) {
-      return PrototypeEgressDecision.Blocked("Blocked destination port on a non-public address")
+    return when {
+      !(blockPrivateAddresses || port in daemonPorts) || addresses.none(::privateAddress) ->
+        PrototypeEgressDecision.Allow
+      blockPrivateAddresses ->
+        PrototypeEgressDecision.Blocked("Blocked private destination address")
+      else -> PrototypeEgressDecision.Blocked("Blocked destination port on a non-public address")
     }
-    return PrototypeEgressDecision.Allow
   }
 
   private fun blockedAddress(bytes: ByteArray): Boolean {

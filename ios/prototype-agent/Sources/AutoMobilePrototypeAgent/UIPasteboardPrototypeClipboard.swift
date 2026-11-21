@@ -30,7 +30,10 @@
     extension PrototypePlatformRegistry {
         public static let system = makeSystemRegistry()
 
-        static func makeSystemRegistry(notifications: (any NotificationCenterClient)? = nil)
+        static func makeSystemRegistry(
+            notifications: (any NotificationCenterClient)? = nil,
+            webView: PrototypeWebViewModule? = nil
+        )
             -> PrototypePlatformRegistry
         {
             systemModules(
@@ -47,7 +50,8 @@
                 sensors: CoreMotionPrototypeSensorSource(),
                 permissions: UNUserNotificationCenterPrototypePermissionsSource(),
                 biometric: LAContextPrototypeBiometricSource(),
-                notifications: notifications
+                notifications: notifications,
+                webView: webView
             )
         }
     }

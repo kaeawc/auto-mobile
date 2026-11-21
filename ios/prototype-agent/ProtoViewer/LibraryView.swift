@@ -7,6 +7,7 @@ struct LibraryView: View {
     let importService: PrototypeLibraryImportService
     let mcpInbox: PrototypeMcpInbox
     let networkSwitch: PrototypeLibraryNetworkSwitch
+    var webDataWiper: any PrototypeWebDataWiper = ViewerWebDataWiper()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var navigation = PrototypeLibraryNavigation()
@@ -194,16 +195,30 @@ struct LibraryView: View {
                 description: Text("Choose a prototype from the library to open it.")
             )
         case let .entry(entry):
-            PrototypeScreen(store: store, entry: entry, networkSwitch: networkSwitch, onClose: closePrototype)
-                .id(PrototypeLibraryDestination.entry(entry).id)
+            PrototypeScreen(
+                store: store,
+                entry: entry,
+                networkSwitch: networkSwitch,
+                webDataWiper: webDataWiper,
+                onClose: closePrototype
+            )
+            .id(PrototypeLibraryDestination.entry(entry).id)
         case let .mcp(entry, command):
-            PrototypeScreen(store: store, entry: entry, networkSwitch: networkSwitch, onLoaded: {
-                reportMcpOpen(command, entry: entry, success: true)
-            }, onLoadFailed: {
-                reportMcpOpen(command, entry: entry, success: false)
-            }, onClose: closePrototype)
-                .id(PrototypeLibraryDestination.mcp(entry: entry, command: command).id)
-                .onDisappear { reportMcpOpen(command, entry: entry, success: false) }
+            PrototypeScreen(
+                store: store,
+                entry: entry,
+                networkSwitch: networkSwitch,
+                webDataWiper: webDataWiper,
+                onLoaded: {
+                    reportMcpOpen(command, entry: entry, success: true)
+                },
+                onLoadFailed: {
+                    reportMcpOpen(command, entry: entry, success: false)
+                },
+                onClose: closePrototype
+            )
+            .id(PrototypeLibraryDestination.mcp(entry: entry, command: command).id)
+            .onDisappear { reportMcpOpen(command, entry: entry, success: false) }
         }
     }
 
@@ -318,12 +333,13 @@ struct LibraryView: View {
 
     private func delete() {
         guard let deletion else { return }
-        do {
-            try store.delete(deletion.libraryId)
-            navigation.didDelete(libraryId: deletion.libraryId)
-        } catch { report(error) }
         self.deletion = nil
-        refresh()
+        navigation.didDelete(libraryId: deletion.libraryId)
+        Task { @MainActor in
+            do { try await store.delete(deletion.libraryId, webDataWiper: webDataWiper) }
+            catch { report(error) }
+            refresh()
+        }
     }
 
     private func hide() {

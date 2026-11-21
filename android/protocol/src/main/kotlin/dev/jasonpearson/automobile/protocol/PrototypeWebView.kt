@@ -17,8 +17,7 @@ import kotlinx.serialization.json.contentOrNull
  * Rules for the `webView` node (#14312) that the contract cannot express, the twin of TypeScript's
  * `prototypeWebView.ts`: `webview` in `requires.platform`; allowed origins that name a DNS host,
  * never an IP literal or `localhost`; a literal URL authority that is one of the allowed origins;
- * and navigation, title and back keys that name declared state of the right type. Contract only: no
- * runtime draws a web view.
+ * and navigation, title and back keys that name declared state of the right type.
  */
 object PrototypeWebView {
   /** An imported page cannot load subresources while the library's network switch is off. */
@@ -94,7 +93,7 @@ object PrototypeWebView {
   }
 
   /** `localhost`, a `.localhost` name, or a host a URL parser would read as an IP address. */
-  internal fun privateHost(host: String): Boolean =
+  fun privateHost(host: String): Boolean =
     host == "localhost" ||
       host.endsWith(".localhost") ||
       ipLikeLabel.matches(host.substringAfterLast('.'))

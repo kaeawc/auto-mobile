@@ -301,6 +301,7 @@ enum PrototypeRepeat {
         case .string("image")?:
             string("asset", &fields)
             string("url", &fields)
+        case .string("webView")?: string("url", &fields)
         case .string("listItem")?:
             string("headline", &fields)
             string("supporting", &fields)
@@ -428,7 +429,15 @@ extension PrototypeRepeat {
         throws
     {
         guard case let .object(fields) = node else { return }
-        for name in ["onTap", "onLongPress", "onDoubleTap", "onEndReached", "onAppear"] {
+        for name in [
+            "onTap",
+            "onLongPress",
+            "onDoubleTap",
+            "onEndReached",
+            "onAppear",
+            "onNavigate",
+            "onBlockedNavigation",
+        ] {
             try validateEmitActions(fields[name], path: "\(path).\(name)", scope: scope)
         }
         if let linkify = fields["linkify"]?.objectFields {

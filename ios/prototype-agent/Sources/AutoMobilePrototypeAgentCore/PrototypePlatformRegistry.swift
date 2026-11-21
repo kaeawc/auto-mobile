@@ -159,6 +159,11 @@ public final class PrototypePlatformRegistry {
             scoped[module.name] = module
             owned.append(module)
         }
+        if modules["webview"] is PrototypeWebViewModule {
+            let module = PrototypeWebViewModule()
+            scoped[module.name] = module
+            owned.append(module)
+        }
         return PrototypePlatformRegistry(modules: scoped, parent: self, presentationModules: owned)
     }
 
@@ -248,7 +253,8 @@ public final class PrototypePlatformRegistry {
         sensors: (any PrototypeSensorSource)? = nil,
         permissions: (any PrototypeNotificationAuthorizationSource)? = nil,
         biometric: (any PrototypeBiometricSource)? = nil,
-        notifications: (any NotificationCenterClient)? = nil
+        notifications: (any NotificationCenterClient)? = nil,
+        webView: PrototypeWebViewModule? = nil
     )
         -> PrototypePlatformRegistry
     {
@@ -263,6 +269,7 @@ public final class PrototypePlatformRegistry {
         if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
         if let permissions { modules.append(PrototypePermissionsModule(source: permissions)) }
         if let notifications { modules.append(PrototypeNotificationsModule(client: notifications)) }
+        if let webView { modules.append(webView) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 

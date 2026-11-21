@@ -22,6 +22,12 @@
 
 # shellcheck source=scripts/lib/spotlight-exclude.sh
 source "${PROJECT_ROOT}/scripts/lib/spotlight-exclude.sh"
+# Build and run with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+if [[ -f "${PROJECT_ROOT}/scripts/ios/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${PROJECT_ROOT}/scripts/ios/xcode_version.sh"
+  select_pinned_xcode
+fi
 
 # Runtime state
 XCODEBUILD_PID=""

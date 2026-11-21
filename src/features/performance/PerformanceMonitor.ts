@@ -25,6 +25,7 @@ import {
 import type { FrameTimePercentiles, MemoryBreakdownMb } from "../../models/PerfSnapshot";
 
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
+import { outsideFixtureCapture } from "../../utils/fixtureCapture/fixtureCaptureScope";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -141,8 +142,10 @@ export class PerformanceMonitor {
       return;
     }
 
+    // The interval outlives the tool call that armed it: keep its commands out of that call's
+    // fixture capture (#18770).
     this.intervalHandle = this.timer.setInterval(() => {
-      void this.trigger();
+      void outsideFixtureCapture(() => this.trigger());
     }, PerformanceMonitor.TICK_INTERVAL_MS);
 
     logger.info("[PerformanceMonitor] Started background monitoring");

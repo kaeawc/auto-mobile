@@ -30,6 +30,7 @@
 		0EB7418FDE9A1FEDA2F30FDA /* ConnectedEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48DEED5C2D528F921F904360 /* ConnectedEvent.swift */; };
 		0F18CF79A1D6FB34EA0ED2E7 /* RotationChangeMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4DB0F5963FB13B4552C5079 /* RotationChangeMonitor.swift */; };
 		0F48E1990B21454EB820546C /* ViewHierarchy.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABEF72502BFE48448E90630D /* ViewHierarchy.swift */; };
+		1048F0A680D85998CE9A1DD7 /* GesturePerformer+SpringBoardIconDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B117F8F28C36C28E9A2010 /* GesturePerformer+SpringBoardIconDrag.swift */; };
 		10C7B84A471BF208EC366B81 /* WatchHierarchyPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C49908E04BEECDE21682536 /* WatchHierarchyPolicy.swift */; };
 		11354BBB04E7256850D21CC2 /* SdkKeychainClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84BD14DE24A3F18128896619 /* SdkKeychainClient.swift */; };
 		128DD95A52035815F9F19CAC /* NWByteChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DD2EDC3CEC352F034F617F2 /* NWByteChannel.swift */; };
@@ -202,6 +203,7 @@
 		8205722625176FF5AF3ECD65 /* CommandHandler+DeviceControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87BF50949E1F545C8F299839 /* CommandHandler+DeviceControl.swift */; };
 		826D3410D77D149008449B38 /* RequestSetHierarchyPollInterval.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C72F11AA41062CDEBE6E /* RequestSetHierarchyPollInterval.swift */; };
 		85F95378FB38A5BFEBC9E1CE /* WindowInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23F8C19D28AB79883D06FA84 /* WindowInfo.swift */; };
+		862AB6C5087B8707B9C03033 /* SpringBoardIconHit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57D94BC4A794CE8F31293E06 /* SpringBoardIconHit.swift */; };
 		881D80A9A2E56F1790F4132F /* RequestExecuteSql.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636BAFCBC24251336C417FA0 /* RequestExecuteSql.swift */; };
 		8AC18133C075D1909F9D04E6 /* ObjCExceptionCatcher.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; };
 		8B27AB33DC8F35BD6DA98BE8 /* HierarchyUpdateResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 526225EAE65865E6D7A3739C /* HierarchyUpdateResponse.swift */; };
@@ -539,6 +541,7 @@
 		56C8A075A731AEC8F43CDBA4 /* SdkHighlightOutcome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHighlightOutcome.swift; sourceTree = "<group>"; };
 		576404FB7E788CC81A26EBC7 /* RunnerFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerFeature.swift; sourceTree = "<group>"; };
 		57BB94CEC26AEC6E5B42BB91 /* RequestLaunchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestLaunchApp.swift; sourceTree = "<group>"; };
+		57D94BC4A794CE8F31293E06 /* SpringBoardIconHit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpringBoardIconHit.swift; sourceTree = "<group>"; };
 		57E534D2556C179C9A7F6EBD /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		582B73B92C7B4BF324B5EEFF /* VoiceOverStateResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOverStateResponse.swift; sourceTree = "<group>"; };
 		583829B37014D7958A391BB0 /* RequestSetNetworkErrorSimulation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestSetNetworkErrorSimulation.swift; sourceTree = "<group>"; };
@@ -718,6 +721,7 @@
 		F0845E1CBF4B29041A3BC745 /* SdkStorageDiagnostic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkStorageDiagnostic.swift; sourceTree = "<group>"; };
 		F2144B84CD70DB35A1030624 /* GesturePerformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GesturePerformer.swift; sourceTree = "<group>"; };
 		F237EFFB7401B5094BD7B589 /* VisionWebSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionWebSocketServer.swift; sourceTree = "<group>"; };
+		F2B117F8F28C36C28E9A2010 /* GesturePerformer+SpringBoardIconDrag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GesturePerformer+SpringBoardIconDrag.swift"; sourceTree = "<group>"; };
 		F2EC65A82AE485F2F268665A /* TapDiagnosticsSampling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TapDiagnosticsSampling.swift; sourceTree = "<group>"; };
 		F36FC3294B64B94A73C25E47 /* sdk-wire */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "sdk-wire"; path = "../sdk-wire"; sourceTree = SOURCE_ROOT; };
 		F482E79EF7CA0F56BEAE434B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -1145,6 +1149,7 @@
 				8B25B2BB274C7595409614D8 /* GesturePerformer+PrivacyResourceNames.swift */,
 				F937FF6E5A1C71CF64BC87EA /* GesturePerformer+Screenshots.swift */,
 				6F0FD212F530D385CEE727EB /* GesturePerformer+SemanticLinks.swift */,
+				F2B117F8F28C36C28E9A2010 /* GesturePerformer+SpringBoardIconDrag.swift */,
 				AA0DC26DB7CFFAD3674AFC4F /* GesturePerformer+Swipes.swift */,
 				FB766FEEC42FAB6EE6088B12 /* GesturePerformer+Taps.swift */,
 				CE97AFCE4021EDDD801752CB /* GesturePerformer+TextInput.swift */,
@@ -1197,6 +1202,7 @@
 				86E304C3C42FE1AECFDB293B /* SemanticLinkActivation.swift */,
 				D7073280136076204B2B9D82 /* ServerListening.swift */,
 				7C751DAF828D18404BB00C71 /* SplitViewBackGesture.swift */,
+				57D94BC4A794CE8F31293E06 /* SpringBoardIconHit.swift */,
 				85FF0A05F82D34309527733C /* SpringBoardPanel.swift */,
 				A49030ABC56E34792661140F /* StorageError.swift */,
 				552802872757334DFA2A73A4 /* StoreKitSessionProviding.swift */,
@@ -1688,6 +1694,7 @@
 				F08FB711A8C0E33E5CF052E7 /* GesturePerformer+PrivacyResourceNames.swift in Sources */,
 				66DC835A0FCC2E9805E77E30 /* GesturePerformer+Screenshots.swift in Sources */,
 				E643A200C2FBC8198095EF58 /* GesturePerformer+SemanticLinks.swift in Sources */,
+				1048F0A680D85998CE9A1DD7 /* GesturePerformer+SpringBoardIconDrag.swift in Sources */,
 				E93197831C865702BEE30C3D /* GesturePerformer+Swipes.swift in Sources */,
 				CDEE3971788B5BF35483E89D /* GesturePerformer+Taps.swift in Sources */,
 				8E3E3EAC0260389B4050D402 /* GesturePerformer+TextInput.swift in Sources */,
@@ -1819,6 +1826,7 @@
 				803D552FCC00B338D16F4274 /* SetNetworkFaultRulesResponse.swift in Sources */,
 				C1DD9EBCA26225DD336B6F6E /* SetNetworkMockRulesResponse.swift in Sources */,
 				8F2921D2B759843763DBDECF /* SplitViewBackGesture.swift in Sources */,
+				862AB6C5087B8707B9C03033 /* SpringBoardIconHit.swift in Sources */,
 				71ADCEA9A7423E30D120DFFF /* SpringBoardPanel.swift in Sources */,
 				7A98DF087CB10423B614E2B0 /* StorageCapabilitiesResponse.swift in Sources */,
 				23BC1F0B23CAE51C3A878B0F /* StorageEntriesResponse.swift in Sources */,

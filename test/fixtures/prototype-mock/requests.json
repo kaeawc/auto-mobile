@@ -1,5 +1,5 @@
 {
-  "note": "Sequential requests against one backend per case; each step names the expected status and JSON body (and headers when listed). The engine ids come from a generator that yields fake-1, fake-2, ... A future Kotlin/Swift twin replays these.",
+  "note": "Sequential requests against one backend per case; each step names the expected status and JSON body (and headers when listed). A step's collections lists every collection the step changed, with its full contents afterwards; a step without it changes nothing. The engine ids come from a generator that yields fake-1, fake-2, ... A future Kotlin/Swift twin replays these.",
   "cases": [
     {
       "name": "list, filter, search and sort",
@@ -529,6 +529,20 @@
             "text": "two",
             "done": false,
             "id": "fake-1"
+          },
+          "collections": {
+            "todos": [
+              {
+                "id": "t1",
+                "text": "one",
+                "done": false
+              },
+              {
+                "text": "two",
+                "done": false,
+                "id": "fake-1"
+              }
+            ]
           }
         },
         {
@@ -542,6 +556,24 @@
           "expect": {
             "id": "mine",
             "text": "three"
+          },
+          "collections": {
+            "todos": [
+              {
+                "id": "t1",
+                "text": "one",
+                "done": false
+              },
+              {
+                "text": "two",
+                "done": false,
+                "id": "fake-1"
+              },
+              {
+                "id": "mine",
+                "text": "three"
+              }
+            ]
           }
         },
         {
@@ -630,6 +662,24 @@
             "id": "t1",
             "text": "one",
             "done": true
+          },
+          "collections": {
+            "todos": [
+              {
+                "id": "t1",
+                "text": "one",
+                "done": true
+              },
+              {
+                "text": "two",
+                "done": false,
+                "id": "fake-1"
+              },
+              {
+                "id": "mine",
+                "text": "three"
+              }
+            ]
           }
         },
         {
@@ -653,6 +703,23 @@
           "expect": {
             "id": "t1",
             "text": "replaced"
+          },
+          "collections": {
+            "todos": [
+              {
+                "id": "t1",
+                "text": "replaced"
+              },
+              {
+                "text": "two",
+                "done": false,
+                "id": "fake-1"
+              },
+              {
+                "id": "mine",
+                "text": "three"
+              }
+            ]
           }
         },
         {
@@ -670,7 +737,20 @@
           "method": "DELETE",
           "path": "/todos/t1",
           "status": 200,
-          "expect": {}
+          "expect": {},
+          "collections": {
+            "todos": [
+              {
+                "text": "two",
+                "done": false,
+                "id": "fake-1"
+              },
+              {
+                "id": "mine",
+                "text": "three"
+              }
+            ]
+          }
         },
         {
           "method": "DELETE",
@@ -902,6 +982,16 @@
           "body": {},
           "expect": {
             "id": "fake-1"
+          },
+          "collections": {
+            "posts": [
+              {
+                "id": 1
+              },
+              {
+                "id": "fake-1"
+              }
+            ]
           }
         }
       ]

@@ -97,6 +97,19 @@ describe("iOS wire deadline (#10084)", () => {
     expect((await pending).success).toBe(false);
   });
 
+  test("a foldable rotate carries its panel; others omit the field (#17047)", async () => {
+    const h = createIosDelegateHarness();
+    const navigation = new CtrlProxyNavigation(h.context);
+    const folded = navigation.requestRotate("landscape", 4000, undefined, "cover");
+    const plain = navigation.requestRotate("landscape", 4000);
+    await flushMicrotasks();
+
+    expect(h.sentMessages[0]).toMatchObject({ type: "request_rotate", panel: "cover" });
+    expect(h.sentMessages[1]).not.toHaveProperty("panel");
+    h.advanceTime(5000);
+    await Promise.all([folded, plain]);
+  });
+
   test("a context without the hook keeps the legacy wire shape", async () => {
     const h = createIosDelegateHarness();
     const pending = new CtrlProxyNavigation(h.context).requestRotate("landscape", 4000);

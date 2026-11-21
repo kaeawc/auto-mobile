@@ -42,6 +42,12 @@ enum PrototypeDerivedValidator {
         throws
     {
         guard let fields = root.objectFields else { return }
+        for reference in conditionReferences(fields, path: path) where entries[reference.name] == nil {
+            throw PrototypeContractValidator.invalid(
+                reference.path,
+                "Unknown derived value \(PrototypeContractValidator.quoted(reference.name))"
+            )
+        }
         // Reuse the text-field mapper, so payloads, action operands and child nodes remain opaque.
         var textFields = fields
         PrototypeRepeat.bindTextFields(&textFields) { _ in "" }
@@ -99,6 +105,32 @@ enum PrototypeDerivedValidator {
         for child in PrototypeStrictRepeats.children(fields, path: path) {
             try visit(.object(child.value), path: child.path, entries: entries, data: data, values: values)
         }
+    }
+
+    static func conditionReferences(
+        _ node: [String: JSONValue],
+        path: String
+    )
+        -> [(name: String, path: String)]
+    {
+        var references: [(name: String, path: String)] = []
+        func visit(_ condition: JSONValue?, at: String) {
+            guard let fields = condition?.objectFields else { return }
+            if let name = fields["derived"]?.stringValue { references.append((name, "\(at).derived")) }
+            visit(fields["not"], at: "\(at).not")
+            for group in ["all", "any"] {
+                for (index, child) in PrototypeStrictBindings.array(fields[group]).enumerated() {
+                    visit(child, at: "\(at).\(group)[\(index)]")
+                }
+            }
+        }
+        for key in ["errorWhen", "enabledWhen", "visibleWhen"] {
+            visit(node[key], at: "\(path).\(key)")
+        }
+        for (index, style) in PrototypeStrictBindings.array(node["styleWhen"]).enumerated() {
+            visit(style.objectFields?["when"], at: "\(path).styleWhen[\(index)].when")
+        }
+        return references
     }
 
     /// Request URLs are render-time text too; opaque action values and payloads are not.

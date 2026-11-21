@@ -13,8 +13,14 @@ enum SdkContractRunner {
     static let scenarioTimeoutSeconds: UInt64 = 30
     /// How long the fault scenario waits for the harness to install its rules through CtrlProxy.
     static let rulesReadyWaitSeconds: Double = 60
-    /// How long the observation scenario keeps its bridge for the harness's observe/act cases.
-    static let actionsDoneWaitSeconds: Double = 180
+    /// The harness's per-tool-call budget (`TOOL_TIMEOUT_MS` in `scripts/ios/sdk-contract/run.ts`).
+    static let toolCallBudgetSeconds: Double = 180
+    /// Most sequential tool calls any observation/web-view case sequence makes (observe, tap, input,
+    /// navigate, observe again, stale-handle tap, with headroom).
+    static let maxHarnessToolCalls: Double = 8
+    /// How long the observation scenario keeps its bridge for the harness's observe/act cases. It
+    /// spans the whole call sequence, so it is derived from the per-call budget, not equal to it.
+    static let actionsDoneWaitSeconds: Double = toolCallBudgetSeconds * maxHarnessToolCalls
     /// The SDK buffer flushes every 500 ms; allow several flushes before giving up.
     static let captureWaitSeconds: Double = 10
     static let capturePollNanoseconds: UInt64 = 100_000_000

@@ -57,4 +57,5 @@ serves all of them, so there is no per-simulator separation on this route.
 - A capture hears every simulator on the host.
 
 Per-simulator isolation needs a device pair per simulator, pinned through CoreSimulator's per-device
-audio routing (#13631-#13633). That is not built yet.
+audio routing (#13631-#13633). That is not built yet; the routing interfaces, their measured
+behavior and failure modes are in [iOS Simulator audio isolation](simulator-audio-isolation.md).

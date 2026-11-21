@@ -92,6 +92,10 @@ Observe before each tap. `tapOn` with `text` or `elementId` is the most reliable
 panel; use `tapAt` only for points you read from a screenshot. When an app draws a Compose
 `SpatialPanel` that does not receive display touches, `tapAt` refuses; use `tapOn` or `tapAny`.
 
+`rotate` is not supported on headsets or glasses: the XR display ignores rotation settings. It
+fails at once with an error that says so and changes no setting. Use a phone, tablet or foldable
+for orientation tests.
+
 ## Navigating a glasses app
 
 Glasses apps are driven by focus. Enable `glassesInput` and use it to move focus and click the

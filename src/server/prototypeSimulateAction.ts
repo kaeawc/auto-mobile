@@ -33,7 +33,10 @@ export interface PrototypeSimulateTarget {
     AndroidPrototypeTransport,
     "supportsCommand" | "advanceClock" | "simulatePlatformEvent"
   >;
-  ios?: Pick<IosPrototypeTransport, "supportsCapability" | "advanceClock">;
+  ios?: Pick<
+    IosPrototypeTransport,
+    "supportsCapability" | "advanceClock" | "simulatePlatformEvent"
+  >;
   /** Push delivery routes; no runtime accepts a simulated push yet, so devices supply none. */
   push?: PrototypePushRoutes;
   /** The shown prototype's media module; no runtime exposes one to simulate yet. */
@@ -91,16 +94,17 @@ async function simulatePlatformEvent(
     return { success: false, error: issue[1] };
   }
   try {
-    if (
-      !target.android ||
-      !(await target.android.supportsCommand(PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY))
-    ) {
+    const supported = target.android
+      ? await target.android.supportsCommand(PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY)
+      : target.ios?.supportsCapability(PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY);
+    if (!supported) {
       return { success: false, error: prototypePlatformSimulationUnsupportedMessage() };
     }
-    const reply = await target.android.simulatePlatformEvent(
+    const runtime = target.android ?? target.ios!;
+    const reply = await runtime.simulatePlatformEvent(
       args.id!,
       args.event!,
-      args.data as SimulatePrototypePlatformMessage["data"] /* validated by prototypePlatformSimulationIssue */,
+      args.data as SimulatePrototypePlatformMessage["data"],
       args.timeoutMs,
     );
     return reply.success

@@ -147,6 +147,7 @@ export type FieldKind =
   | "text"
   | "operand"
   | "substring"
+  | "derivedCondition"
   | "emitName"
   | "key"
   | "emitBinding"
@@ -225,11 +226,12 @@ function mapKeyList(data: Raw, key: string, path: string, visit: FieldVisitor): 
 }
 
 function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
+  mapField(condition, "derived", path, { kind: "derivedCondition", visit });
   mapField(condition, "data", path, { kind: "routePointer", visit });
   mapField(condition, "key", path, { kind: "key", visit });
   mapKeyList(condition, "valid", path, visit);
   const operandVisit: FieldVisitor = (value, fieldPath, kind) =>
-    visit(value, fieldPath, kind, Object.hasOwn(condition, "data"));
+    visit(value, fieldPath, kind, "data" in condition);
   mapField(condition, "equals", path, { kind: "operand", visit: operandVisit });
   mapField(condition, "notEquals", path, { kind: "operand", visit: operandVisit });
   mapField(condition, "contains", path, { kind: "substring", visit: operandVisit });
@@ -509,7 +511,10 @@ function mapPart(part: Raw, path: string, visit: FieldVisitor): Raw {
 /** Component fields that take placeholders besides a text node's `text`. */
 const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVisitor) => void> = {
   // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
-  image: (node, path, visit) => mapField(node, "asset", path, { kind: "text", visit }),
+  image: (node, path, visit) => {
+    mapField(node, "asset", path, { kind: "text", visit });
+    mapField(node, "url", path, { kind: "text", visit });
+  },
   button: (node, path, visit) => mapField(node, "label", path, { kind: "text", visit }),
   fab: (node, path, visit) => mapField(node, "label", path, { kind: "text", visit }),
   segmentedButton: (node, path, visit) =>

@@ -126,6 +126,48 @@ extension ElementLocator {
         }
     }
 
+    /// An iPad home screen rotated to landscape can keep SpringBoard's windows in the portrait
+    /// raster while the root frame turns landscape (#18827): the icons are framed in portrait
+    /// space, so `tapOn` aimed at a portrait point on the landscape screen. Rotate every root child
+    /// framed as the root's portrait transpose (a window) into the root's space; a window that
+    /// already matches the root, and every portrait or iPhone home screen, is left alone.
+    nonisolated static func portraitSpringBoardWindowsInRootSpace(
+        _ root: UIElementInfo,
+        deviceRotation: Int?
+    )
+        -> (root: UIElementInfo, rotation: PortraitSpringBoardRotation?)
+    {
+        guard let rootBounds = root.bounds, let children = root.node else { return (root, nil) }
+        func frame(_ bounds: ElementBounds) -> CGRect {
+            CGRect(x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height)
+        }
+        func portraitRotation(of child: UIElementInfo) -> PortraitSpringBoardRotation? {
+            child.bounds.flatMap {
+                PortraitSpringBoardRotation.resolve(
+                    alertWindowFrame: frame($0), appFrame: frame(rootBounds), deviceRotation: deviceRotation
+                )
+            }
+        }
+        guard let rotation = children.lazy.compactMap(portraitRotation(of:)).first else { return (root, nil) }
+        let rotated = children.map { child in
+            portraitRotation(of: child) == rotation ? rotatedIntoLandscape(child, portraitSpringBoard: rotation) : child
+        }
+        return (copying(root, node: rotated), rotation)
+    }
+
+    /// Alerts read from SpringBoard's own snapshot sit in the same portrait-framed windows as its
+    /// main tree (#18827), so they take the tree's rotation; otherwise the top-level alert copy
+    /// would keep portrait bounds beside its rotated in-tree copy.
+    nonisolated static func appSnapshotAlertsInRootSpace(
+        _ alerts: [UIElementInfo],
+        portraitSpringBoard: PortraitSpringBoardRotation?
+    )
+        -> [UIElementInfo]
+    {
+        guard let portraitSpringBoard else { return alerts }
+        return alerts.map { rotatedIntoLandscape($0, portraitSpringBoard: portraitSpringBoard) }
+    }
+
     /// Rotate a portrait SpringBoard alert subtree into the rotated app's landscape space (#18858).
     nonisolated static func rotatedIntoLandscape(
         _ element: UIElementInfo,
@@ -136,14 +178,17 @@ extension ElementLocator {
         mappingBounds(element, rootBounds: nil) { portraitSpringBoard.landscapeBounds($0) }
     }
 
-    private nonisolated static func mappingBounds(
+    /// `skipSubtree` keeps a matching node and its descendants exactly as captured.
+    nonisolated static func mappingBounds(
         _ element: UIElementInfo,
         rootBounds: ElementBounds?,
+        skipSubtree: (UIElementInfo) -> Bool = { _ in false },
         _ transform: (ElementBounds) -> ElementBounds
     )
         -> UIElementInfo
     {
-        UIElementInfo(
+        if skipSubtree(element) { return element }
+        return UIElementInfo(
             text: element.text,
             value: element.value,
             textSize: element.textSize,
@@ -171,7 +216,7 @@ extension ElementLocator {
             viewId: element.viewId,
             extras: element.extras,
             actions: element.actions,
-            node: element.node?.map { mappingBounds($0, rootBounds: nil, transform) }
+            node: element.node?.map { mappingBounds($0, rootBounds: nil, skipSubtree: skipSubtree, transform) }
         )
     }
 }

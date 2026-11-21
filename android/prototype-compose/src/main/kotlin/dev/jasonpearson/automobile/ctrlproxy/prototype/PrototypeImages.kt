@@ -225,7 +225,7 @@ private fun PrototypeImageBody(
   val background =
     prototypeThemedColor(node.style.background, node.style.source.background)
       ?: prototypePlaceholderColor(MaterialTheme.colorScheme)
-  val asset = prototypeModeValue(source.asset, LocalPrototypeDark.current)
+  val asset = source.asset?.let { prototypeModeValue(it, LocalPrototypeDark.current) }.orEmpty()
   val state = rememberPrototypeImage(asset, target)
   val image = (state as? PrototypeImageState.Ready)?.image as? BitmapPrototypeImage
   if (image != null) {

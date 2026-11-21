@@ -68,7 +68,7 @@ export const APP_IDS = {
 
 /** Valid prototypes from the shared corpus; the library is imported fresh and identical every run. */
 export const SAMPLE_LIBRARY = [
-  { file: "test/fixtures/prototype-spec/valid/chat-scroll.json", label: "chat-scroll" },
+  { file: "test/fixtures/prototype-spec/valid/template-chat.json", label: "chat" },
   { file: "test/fixtures/prototype-spec/valid/chart-variants.json", label: "chart-variants" },
   { file: "test/fixtures/prototype-spec/valid/carousel-multi-browse.json", label: "carousel" },
 ] as const;
@@ -114,6 +114,10 @@ const STATUS_BAR = {
   dataNetwork: "wifi",
   hideNotifications: true,
 } as const;
+
+function statusBarStep(platform: DeviceProfile["platform"]): McpStep {
+  return { kind: "mcp", tool: "statusBar", args: { ...STATUS_BAR, platform } };
+}
 
 function acquire(profile: DeviceProfile, pins: PlanPins): McpStep {
   return profile.platform === "android"
@@ -203,21 +207,21 @@ function screenSteps(profile: DeviceProfile, screen: ScreenId, pins: PlanPins): 
     tool: "tapOn",
     args: { selector: { text: FEATURED.label } },
   };
-  const capture: McpStep = {
-    kind: "mcp",
-    tool: "observe",
-    args: { screenshot: "settled" },
-  };
   switch (screen) {
     case "library":
-      return [launch, capture];
+      return [launch];
     case "viewer":
-      return [launch, open, capture];
+      return [launch, open];
     case "import":
+      // iOS Import opens an empty Files picker. Use Settings for the network policy and change
+      // the iOS selector below back to "Import" when the picker has a sample to show.
       return [
         launch,
-        { kind: "mcp", tool: "tapOn", args: { selector: { text: "Import" } } },
-        capture,
+        {
+          kind: "mcp",
+          tool: "tapOn",
+          args: { selector: { text: profile.platform === "ios" ? "Settings" : "Import" } },
+        },
       ];
     case "share":
       return [
@@ -231,7 +235,6 @@ function screenSteps(profile: DeviceProfile, screen: ScreenId, pins: PlanPins): 
               : { selector: { text: `More options for ${FEATURED.label}` } },
         },
         { kind: "mcp", tool: "tapOn", args: { selector: { text: "Share" } } },
-        capture,
       ];
   }
 }
@@ -272,13 +275,13 @@ export function buildScreenshotPlan(
         steps: [
           acquire(profile, pins),
           appearanceStep(profile, appearance, pins),
-          {
-            kind: "mcp" as const,
-            tool: "statusBar",
-            args: { ...STATUS_BAR, platform: profile.platform },
-          },
+          statusBarStep(profile.platform),
           ...seedSteps(profile, pins, specs),
           ...screenSteps(profile, screen, pins),
+          // Fresh Android SystemUI can drop or lag the early demo broadcasts (#18741).
+          ...(profile.platform === "android" ? [statusBarStep("android")] : []),
+          // Keep observe last so screenshotFromOutput reads the final capture.
+          { kind: "mcp", tool: "observe", args: { screenshot: "settled" } },
         ],
       })),
     ),

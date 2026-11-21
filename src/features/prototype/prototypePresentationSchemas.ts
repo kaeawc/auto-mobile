@@ -532,3 +532,26 @@ export const placementSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 ]);
+
+/** Text and image nodes each choose exactly one content source. */
+export function prototypeContentSourceIssue(
+  node: { type: string; asset?: unknown; url?: unknown; text?: unknown; spans?: unknown },
+  context: z.RefinementCtx,
+): void {
+  if (node.type === "image" && (node.asset !== undefined) === (node.url !== undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "image requires exactly one of asset or url",
+    });
+  }
+  if (node.type === "text" && (node.text !== undefined) === (node.spans !== undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [node.spans !== undefined ? "spans" : "text"],
+      message:
+        node.spans !== undefined
+          ? "text and spans cannot both be set"
+          : "text node needs text or spans",
+    });
+  }
+}

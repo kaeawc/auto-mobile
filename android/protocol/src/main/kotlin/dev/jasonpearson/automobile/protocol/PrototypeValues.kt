@@ -268,7 +268,10 @@ internal fun prototypeImageSlotUses(value: JsonElement?): Int {
 /** The node's own image slots: an `image` costs at least 1, a `videoPlayer` its `poster`. */
 internal fun prototypeNodeImageUses(node: JsonObject): Int =
   when ((node["type"] as? JsonPrimitive)?.takeIf { it.isString }?.content) {
-    "image" -> maxOf(1, prototypeImageSlotUses(node["asset"]))
+    "image" ->
+      (if (node["url"] == null) maxOf(1, prototypeImageSlotUses(node["asset"])) else 0) +
+        prototypeImageSlotUses((node["placeholder"] as? JsonObject)?.get("asset")) +
+        prototypeImageSlotUses((node["error"] as? JsonObject)?.get("asset"))
     "videoPlayer" -> prototypeImageSlotUses(node["poster"])
     else -> 0
   }

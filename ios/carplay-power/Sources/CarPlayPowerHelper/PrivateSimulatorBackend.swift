@@ -34,9 +34,11 @@ private final class CallbackResult: @unchecked Sendable {
     }
 }
 
-final class PrivateSimulatorBackend: SimulatorScreenBackend {
+final class PrivateSimulatorBackend: SimulatorScreenBackend, CarPlayHIDBackend {
     private var device: NSObject?
     private var screenObjects: [UInt32: NSObject] = [:]
+    private var simulatorKit: UnsafeMutableRawPointer?
+    private var hidClient: NSObject?
     private let queue = DispatchQueue(label: "auto-mobile.carplay-power.callback")
 
     private func implementation(_ object: NSObject, _ name: String) throws -> IMP {
@@ -223,5 +225,92 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend {
             queue as AnyObject, completion as AnyObject
         )
         _ = try result.wait(code: .powerOnFailed, timeout: 20)
+    }
+
+    // MARK: CarPlay HID (#18730)
+
+    private func simulatorKitSymbol(_ name: String) throws -> UnsafeMutableRawPointer {
+        if simulatorKit == nil {
+            let path = try (developerDirectory() as NSString)
+                .appendingPathComponent("Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit")
+            guard let handle = dlopen(path, RTLD_NOW) else { throw unavailable("SimulatorKit at \(path)") }
+            simulatorKit = handle
+        }
+        guard let symbol = dlsym(simulatorKit, name) else { throw unavailable(name) }
+        return symbol
+    }
+
+    /// SimDeviceLegacyHIDClient for the selected device, opened once per helper run.
+    private func legacyHIDClient() throws -> NSObject {
+        if let hidClient { return hidClient }
+        _ = try simulatorKitSymbol("IndigoHIDMessageForMouseNSEvent")
+        let className = "_TtC12SimulatorKit24SimDeviceLegacyHIDClient"
+        let allocName = "alloc"
+        let initName = "initWithDevice:error:"
+        guard let hidClass = NSClassFromString(className),
+              let allocMethod = class_getClassMethod(hidClass, NSSelectorFromString(allocName)),
+              let initMethod = class_getInstanceMethod(hidClass, NSSelectorFromString(initName))
+        else { throw unavailable("\(className).\(initName)") }
+        typealias AllocCall = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>?
+        typealias InitCall = @convention(c) (
+            AnyObject, Selector, AnyObject, AutoreleasingUnsafeMutablePointer<NSError?>
+        )
+            -> Unmanaged<AnyObject>?
+        let alloc = unsafeBitCast(method_getImplementation(allocMethod), to: AllocCall.self)
+        guard let allocated = alloc(hidClass as AnyObject, NSSelectorFromString(allocName)) else {
+            throw unavailable("\(className).\(allocName)")
+        }
+        var error: NSError?
+        let initialize = unsafeBitCast(method_getImplementation(initMethod), to: InitCall.self)
+        // init consumes the +1 from alloc and returns a +1 reference.
+        guard let client = try initialize(
+            allocated.takeUnretainedValue(), NSSelectorFromString(initName), selectedDevice(), &error
+        )?.takeRetainedValue() as? NSObject else {
+            throw CarPlayPowerError(
+                .hidFailed,
+                "Cannot open the simulator HID client (\(error?.localizedDescription ?? "no error")); reboot the simulator and retry."
+            )
+        }
+        hidClient = client
+        return client
+    }
+
+    private func send(_ message: UnsafeMutableRawPointer?, _ what: String) throws {
+        guard let message else {
+            throw CarPlayPowerError(.hidFailed, "SimulatorKit built no \(what) message; check DEVELOPER_DIR.")
+        }
+        let client = try legacyHIDClient()
+        let name = "sendWithMessage:freeWhenDone:completionQueue:completion:"
+        typealias Call = @convention(c) (AnyObject, Selector, UnsafeMutableRawPointer, ObjCBool, AnyObject, AnyObject)
+            -> Void
+        let call = try unsafeBitCast(implementation(client, name), to: Call.self)
+        let result = CallbackResult()
+        let completion: @convention(block) (NSError?) -> Void = { error in result.finish(error: error) }
+        call(client, NSSelectorFromString(name), message, ObjCBool(true), queue as AnyObject, completion as AnyObject)
+        _ = try result.wait(code: .hidFailed)
+    }
+
+    func createCarPlayService() throws {
+        typealias Create = @convention(c) (ObjCBool) -> UnsafeMutableRawPointer?
+        let create = try unsafeBitCast(simulatorKitSymbol("IndigoHIDMessageToCreateCarPlayService"), to: Create.self)
+        try send(create(ObjCBool(true)), "create CarPlay service")
+    }
+
+    func sendTouch(_ phase: CarPlayTouchPhase, target: UInt32, x: Double, y: Double, width: Double, height: Double)
+        throws
+    {
+        typealias Mouse = @convention(c) (
+            UnsafeMutablePointer<CGPoint>, UnsafeMutablePointer<CGPoint>?, UInt32, UInt, CGSize, UInt32
+        ) -> UnsafeMutableRawPointer?
+        let mouse = try unsafeBitCast(simulatorKitSymbol("IndigoHIDMessageForMouseNSEvent"), to: Mouse.self)
+        var point = CGPoint(x: x, y: y)
+        // NSEventTypeLeftMouseDown is 1 and NSEventTypeLeftMouseUp is 2; the message divides the
+        // point by the size, so both are car-screen pixels.
+        let eventType: UInt = phase == .down ? 1 : 2
+        try send(mouse(&point, nil, target, eventType, CGSize(width: width, height: height), 0), "touch \(phase)")
+    }
+
+    func hold(milliseconds: Int) {
+        usleep(UInt32(milliseconds) * 1000)
     }
 }

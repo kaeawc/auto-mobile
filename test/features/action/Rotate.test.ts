@@ -17,6 +17,7 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { ExecResult, BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { WINDOW_MANAGER_ROTATION_TIMEOUT_MS } from "../../../src/utils/android-cmdline-tools/readWindowManagerRotation";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -102,6 +103,7 @@ describe("Rotate", () => {
     rotate = new Rotate(mockDevice, {
       adb: fakeAdb,
       timer: fakeTimer,
+      options: { xrDetector: new FakeAndroidXrDetector() },
       collaborators: {
         awaitIdle: fakeAwaitIdle,
         observeScreen: fakeObserveScreen,
@@ -2345,7 +2347,7 @@ describe("Rotate", () => {
         const result = await iosRotate.execute("landscape");
         expect(result.success).toBe(false);
         expect(result.error).toBe(
-          "Rotation is not supported on this display (the screen size did not change)",
+          "The foreground app or screen does not rotate on this display (the screen size did not change)",
         );
       } finally {
         getInstanceSpy.mockRestore();

@@ -61,6 +61,7 @@ class CommandAdvertisementTest {
       "prototype_network_v1",
       "prototype_network_device_v1",
       "prototype_network_upload_v1",
+      "prototype_remote_image_v1",
       "prototype_platform_clipboard_v1",
       "prototype_platform_device_v1",
       "prototype_platform_test_v1",

@@ -12,16 +12,15 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.DefaultPrototypeHost
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdropSupport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdrops
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDeviceNetwork
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClients
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeInset
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
-import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 
 // The service's log tag, so the moved setup keeps logging under it.
 private const val TAG = "CtrlProxy"
@@ -87,7 +86,8 @@ internal fun CtrlProxy.createPrototypeController(): PrototypeController {
     httpClients =
       PrototypeHttpClients(
         host = hostPrototypeHttp,
-        device = RetrofitPrototypeHttpClient(OkHttpClient()),
+        device = PrototypeDeviceNetwork.device,
+        remoteImages = PrototypeDeviceNetwork.images(this),
       ),
     requestScope = serviceScope,
     platform = prototypePlatform,

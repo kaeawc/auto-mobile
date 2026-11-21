@@ -9376,6 +9376,26 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeRemoteImageCounts": [
+      {
+        "name": "loaded",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "failed",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "pending",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeRequestAppend": [
       {
         "name": "from",
@@ -10248,6 +10268,12 @@
       {
         "name": "statusBar",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "images",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeRemoteImageCounts",
         "nullable": true,
         "hasDefault": true
       }

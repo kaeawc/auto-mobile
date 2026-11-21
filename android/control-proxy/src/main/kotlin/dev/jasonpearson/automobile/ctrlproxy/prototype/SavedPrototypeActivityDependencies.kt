@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import okhttp3.OkHttpClient
 
 /** Credential-encrypted app-private root shared by saving and shortcut publishing. */
 fun savedPrototypeRoot(context: Context): File = File(context.filesDir, "saved-prototypes")
@@ -84,6 +85,14 @@ internal object SavedPrototypeActivityDependencies {
   private fun defaultHttpClients(): PrototypeHttpClients =
     PrototypeHttpClients.forSavedPrototype(PrototypeDeviceNetwork.device)
 
+  /** The transports behind a saved prototype's `channels` (#14269): device only. */
+  @Volatile var realtime: () -> PrototypeRealtimeConfig? = ::defaultRealtime
+
+  private fun defaultRealtime(): PrototypeRealtimeConfig =
+    PrototypeRealtimeConfig(
+      PrototypeChannelTransports.forSavedPrototype(OkHttpPrototypeChannelTransport(OkHttpClient())),
+    )
+
   /** Both public routes adapt the saved transports, including the typed host refusal. */
   fun network(context: Context): PrototypeNetwork {
     val clients = httpClients()
@@ -134,5 +143,6 @@ internal object SavedPrototypeActivityDependencies {
     clock = System::currentTimeMillis
     eventSink = defaultEventSink
     httpClients = ::defaultHttpClients
+    realtime = ::defaultRealtime
   }
 }

@@ -472,6 +472,8 @@ class PrototypeRuntime(
         exclusively {
           if (channelLive(channel)) runChannelActions(channel, actions, event)
         }
+
+      override fun warn(message: String) = this@PrototypeRuntime.warn(message)
     }
 
   /**
@@ -483,14 +485,7 @@ class PrototypeRuntime(
     current.active && channel in current.spec.channels.orEmpty()
 
   private val realtimeModule = realtime?.let {
-    PrototypeRealtimeModule(
-      spec.id,
-      it,
-      realtimeSink,
-      requestScope,
-      { error -> Log.w("PrototypeRuntime", "Realtime sink failed", error) },
-      newRequestId,
-    )
+    PrototypeRealtimeModule(spec.id, it, realtimeSink, requestScope, newRequestId)
   }
 
   val platformRegistry =

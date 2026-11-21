@@ -3,6 +3,7 @@ import { defaultIdGenerator } from "../../utils/IdGenerator";
 import type { SessionManager } from "../../daemon/sessionManager";
 import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
+import { launchOnFreeRunnerPort, type RunnerPorts } from "../shared/RunnerPortRetry";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { combineAbortSignals } from "../../utils/AbortContext";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../utils/PortManager";
@@ -10,6 +11,12 @@ import { WatchRunnerArtifacts } from "./WatchRunnerArtifacts";
 import { WatchRunnerReleaseProvider } from "./WatchRunnerReleaseProvider";
 import { XcodebuildWatchRunnerLauncher, type WatchRunnerLauncher } from "./WatchRunnerLauncher";
 import { watchRunners } from "./WatchRunnerRegistry";
+import { SingleFlight } from "../../utils/cache/SingleFlight";
+
+/** The refusal for a dead runner AutoMobile did not launch, so it cannot restart it. */
+export function unownedWatchRunnerMessage(deviceId: string): string {
+  return `The watch runner for ${deviceId} is disconnected and was not started by AutoMobile; restart it before trying again.`;
+}
 
 type WatchRunnerSessions = Pick<
   SessionManager,
@@ -27,11 +34,12 @@ interface OwnedRunner {
 export class WatchRunnerLifecycle {
   private readonly runners = new Map<string, OwnedRunner>();
   private readonly observedSessions = new WeakSet<WatchRunnerSessions>();
+  private readonly restarts = new SingleFlight<string, string | undefined>();
   constructor(
     private readonly dependencies: {
       artifacts: Pick<WatchRunnerArtifacts, "resolve">;
       launcher: WatchRunnerLauncher;
-      ports: { allocate(deviceId: string): number; release(deviceId: string, port: number): void };
+      ports: RunnerPorts;
     },
   ) {}
 
@@ -75,9 +83,7 @@ export class WatchRunnerLifecycle {
     }
     this.stop(deviceId);
     if (watchRunners.get(deviceId)) {
-      return {
-        runnerUnavailable: `The watch runner for ${deviceId} is disconnected and was not started by AutoMobile; restart it before trying again.`,
-      };
+      return { runnerUnavailable: unownedWatchRunnerMessage(deviceId) };
     }
     const entry: OwnedRunner = {
       controller: new AbortController(),
@@ -89,13 +95,24 @@ export class WatchRunnerLifecycle {
     try {
       const xctestrun = await this.dependencies.artifacts.resolve(signal);
       signal.throwIfAborted();
-      entry.port = this.dependencies.ports.allocate(deviceId);
-      const handle = await this.dependencies.launcher.launch({
+      // Another platform's runner on the allocated port moves startup to the next free one (#18924).
+      const handle = await launchOnFreeRunnerPort({
         deviceId,
-        bundleId: request.bundleId,
-        xctestrun,
-        port: entry.port,
+        ports: this.dependencies.ports,
         signal,
+        setPort: (port) => {
+          entry.port = port;
+        },
+        isCurrent: () => this.runners.get(deviceId) === entry,
+        launch: (port) =>
+          this.dependencies.launcher.launch({
+            deviceId,
+            bundleId: request.bundleId,
+            xctestrun,
+            port,
+            signal,
+          }),
+        logTag: "[WatchRunner]",
       });
       entry.stop = handle.stop;
       if (signal.aborted || this.runners.get(deviceId) !== entry) {
@@ -153,6 +170,41 @@ export class WatchRunnerLifecycle {
       );
       return reason;
     }
+  }
+
+  /** Whether this lifecycle launched the device's runner, even if its client has since dropped. */
+  ownsRunner(deviceId: string): boolean {
+    return this.runners.has(deviceId);
+  }
+
+  /**
+   * Restart a disconnected lifecycle-owned runner for its last bundle and owner session; a usable
+   * runner is kept. Concurrent callers share one restart. Returns the failure reason, if any.
+   */
+  async restartOwned(deviceId: string, signal?: AbortSignal): Promise<string | undefined> {
+    return this.restarts.run(
+      deviceId,
+      async (flightSignal) => {
+        if (watchRunners.get(deviceId)?.isUsable()) {
+          return undefined;
+        }
+        const entry = this.runners.get(deviceId);
+        if (!entry) {
+          return unownedWatchRunnerMessage(deviceId);
+        }
+        const { bundleId, ownerSession } = entry;
+        this.stop(deviceId);
+        const started = await this.launchEntry({
+          deviceId,
+          bundleId,
+          ownerSession,
+          signal: flightSignal,
+        });
+        return started.runnerUnavailable;
+      },
+      signal,
+      { cancelWhenAllWaitersAbort: true },
+    );
   }
 
   /** Transfer only lifecycle-owned runners to the newly bound session. */
@@ -278,6 +330,7 @@ export function getWatchRunnerLifecycle(): WatchRunnerLifecycle {
             reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
           }),
         release: (deviceId, port) => PortManager.releaseIfAllocated(`watch:${deviceId}`, port),
+        quarantine: (port) => PortManager.quarantine(port),
       },
     });
     process.once("exit", () => defaultLifecycle?.stopAll());

@@ -430,3 +430,53 @@ test("iOS refuses stack navigation unsent without its capability", async () => {
   ).rejects.toThrow("prototype_stack_v1");
   expect(calls).toEqual([]);
 });
+
+describe("IosPrototypeTransport.simulatePlatformEvent", () => {
+  test("refuses a capability without request support before dispatch", async () => {
+    const calls: string[] = [];
+    const transport = new IosPrototypeTransport(
+      fakeAgent(["prototype_platform_simulation_v1"], calls, () => {
+        throw new Error("agent-level rejection");
+      }),
+    );
+    const result = transport.simulatePlatformEvent("p", "test.tick", {});
+    await expect(result).rejects.toBeInstanceOf(ActionableError);
+    await expect(result).rejects.toThrow("prototype_platform_simulation_v1");
+    expect(calls).toEqual([]);
+  });
+
+  test("refuses missing capability without dispatch", async () => {
+    const calls: string[] = [];
+    const transport = new IosPrototypeTransport(fakeAgent([], calls));
+    await expect(transport.simulatePlatformEvent("p", "test.tick", {})).rejects.toThrow(
+      "prototype_platform_simulation_v1",
+    );
+    expect(calls).toEqual([]);
+  });
+
+  test("validates and sends the shared wire body with the timeout", async () => {
+    const requests: Parameters<PrototypeAgentClient["request"]>[] = [];
+    const transport = new IosPrototypeTransport(
+      fakeAgent(
+        ["prototype_platform_simulation_v1", "simulate_prototype_platform"],
+        [],
+        undefined,
+        requests,
+      ),
+    );
+    const data = { count: 7, nested: { label: "tick", values: [true, null] } };
+    expect(await transport.simulatePlatformEvent("p", "test.tick", data, 200)).toMatchObject({
+      success: true,
+    });
+    expect(requests).toEqual([
+      ["simulate_prototype_platform", { id: "p", event: "test.tick", data }, { timeoutMs: 200 }],
+    ]);
+    await expect(transport.simulatePlatformEvent("p", "test.missing", {})).rejects.toThrow(
+      "Unknown platform event",
+    );
+    await expect(
+      transport.simulatePlatformEvent("p", "test.tick", { text: "😀".repeat(1024) }),
+    ).rejects.toThrow("4096-byte");
+    expect(requests).toHaveLength(1);
+  });
+});

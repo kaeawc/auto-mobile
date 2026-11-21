@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "remote",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "image",
+      "url": "https://example.com/a",
+      "placeholder": {
+        "asset": "loading"
+      },
+      "error": {
+        "color": "#123456"
+      },
+      "crossfade": true,
+      "via": "host"
+    }
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_remote_image_v1",
+  "options": {
+    "supportedCapabilities": []
+  }
+}

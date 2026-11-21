@@ -43,6 +43,10 @@ internal object PrototypeBundleNodeCapabilities {
     mark("keyframes_v1", "keyframes" in n)
     mark("loops_v1", "attentionLoop" in n)
     mark("semantics_v1", "semantics" in n)
+    mark(
+      "remote_image_v1",
+      type == "image" && listOf("url", "placeholder", "error", "crossfade", "via").any { it in n },
+    )
     mark("platform_namespace_v1", PrototypeGlassRules.needsNamespace(n))
     mark("window_motion_v1", (n["repeat"] as? JsonObject)?.get("stagger") != null)
     mark("platform_media_items_v1", PrototypeMediaItemBindings.usedBy(n))

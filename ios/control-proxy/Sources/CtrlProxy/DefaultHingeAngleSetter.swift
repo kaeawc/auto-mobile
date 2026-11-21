@@ -176,6 +176,24 @@ import Foundation
         }
 
         func setHingeAngle(_ degrees: Double) async throws {
+            try await dispatchDeviceStatePayload(NSDictionary(dictionary: [
+                "source": "hinge-slider-control",
+                "type": "range",
+                "value": NSNumber(value: degrees),
+            ]))
+        }
+
+        /// The guest's CoreMotion device-state relay (locationd) reads this as the device
+        /// orientation and reports it to SpringBoard as the per-panel pose orientation (#17047).
+        func setDeviceOrientation(_ orientation: SimulatedDeviceOrientation) async throws {
+            try await dispatchDeviceStatePayload(NSDictionary(dictionary: [
+                "source": "orientation-picker-control",
+                "type": "enum",
+                "value": orientation.rawValue,
+            ]))
+        }
+
+        private func dispatchDeviceStatePayload(_ payload: NSDictionary) async throws {
             try start()
             if !settled {
                 // The event system needs time to match the newly registered virtual service.
@@ -183,11 +201,6 @@ import Foundation
                 settled = true
             }
 
-            let payload = NSDictionary(dictionary: [
-                "source": "hinge-slider-control",
-                "type": "range",
-                "value": NSNumber(value: degrees),
-            ])
             let serialize = try symbol("IOCFSerialize", as: Serialize.self)
             let payloadPointer = Unmanaged.passUnretained(payload).toOpaque()
             let dataPointer = serialize(payloadPointer, 0)
@@ -240,6 +253,18 @@ public struct DefaultHingeAngleSetter: HingeAngleSetting {
     public func setHingeAngle(_ degrees: Double) async throws {
         #if os(iOS) && targetEnvironment(simulator)
             try await HingeService.shared.setHingeAngle(degrees)
+        #else
+            throw HingeAngleError.unsupportedPlatform
+        #endif
+    }
+}
+
+public struct DefaultSimulatedOrientationSetter: SimulatedOrientationSetting {
+    public init() {}
+
+    public func setDeviceOrientation(_ orientation: SimulatedDeviceOrientation) async throws {
+        #if os(iOS) && targetEnvironment(simulator)
+            try await HingeService.shared.setDeviceOrientation(orientation)
         #else
             throw HingeAngleError.unsupportedPlatform
         #endif

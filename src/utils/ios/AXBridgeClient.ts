@@ -1,4 +1,4 @@
-import { ActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
 import type { IdGenerator } from "../IdGenerator";
@@ -62,7 +62,10 @@ export class TransportAXBridgeClient implements AXBridgeClient {
     private readonly timeoutMs: number = AX_BRIDGE_DEFAULT_TIMEOUT_MS,
   ) {
     transport.onLine((line) => this.handleLine(line));
-    transport.onClose(() => this.failAll("AXBridge process exited before replying."));
+    transport.onClose(() => {
+      this.closed = true;
+      this.failAll("AXBridge process exited before replying.");
+    });
   }
 
   invokeAction(request: AXBridgeInvokeActionRequest): Promise<void> {
@@ -76,7 +79,13 @@ export class TransportAXBridgeClient implements AXBridgeClient {
         reject(new ActionableError(`AXBridge did not reply within ${this.timeoutMs} ms.`));
       }, this.timeoutMs);
       this.pending.set(id, { resolve, reject, timeout });
-      this.transport.send(JSON.stringify({ id, command: "invoke-action", ...request }));
+      try {
+        this.transport.send(JSON.stringify({ id, command: "invoke-action", ...request }));
+      } catch (error) {
+        this.pending.delete(id);
+        this.timer.clearTimeout(timeout);
+        reject(toActionableError(error, "Could not send the AXBridge action"));
+      }
     });
   }
 

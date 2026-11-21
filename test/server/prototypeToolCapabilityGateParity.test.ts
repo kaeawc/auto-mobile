@@ -1,3 +1,4 @@
+import specCapabilities from "../fixtures/prototype-capabilities/spec-capabilities.json";
 import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -63,7 +64,13 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     name: "home",
     effect: { type: "bounce" },
   }),
+  prototype_remote_image_v1: fixture({
+    type: "image",
+    id: "label",
+    url: "https://example.com/a",
+  }),
   prototype_style_polish_v2: fixture({ ...label, style: { cornerStyle: "continuous" } }),
+  prototype_m3_expressive_v1: fixture({ type: "loadingIndicator", id: "label" }),
   prototype_tooltip_v1: fixture({
     type: "column",
     id: "label",
@@ -1529,3 +1536,40 @@ for (const platform of ["android", "ios"] as const) {
     );
   });
 }
+
+test.each(["android", "ios"] as const)(
+  "%s refuses remote images when the capability is absent",
+  async (platform) => {
+    advertise(
+      ...specCapabilities.filter((capability) => capability !== "prototype_remote_image_v1"),
+    );
+    const device: BootedDevice = { platform, deviceId: `remote-${platform}`, name: "Fake" };
+    const { minimalSpec, ops } = fixtures.prototype_remote_image_v1;
+    const showCount = () =>
+      platform === "android"
+        ? proxy.getPrototypeHistory().filter(({ method }) => method === "show").length
+        : agent.requests.filter(({ type }) => type === "show_prototype").length;
+    const before = showCount();
+    const refused = await show(device, minimalSpec);
+    expect(showCount()).toBe(before);
+    expect(refused.success).toBe(false);
+    expect(refused.error).toContain("does not advertise prototype_remote_image_v1");
+    expect(refused.error).toContain("bundled asset");
+    expect(refused.error).not.toContain("updated agent");
+    expect((await show(device, base)).success).toBe(true);
+    expect(await patch(device, ops)).toEqual({ success: false, error: refused.error });
+    expect(requests(device)).toEqual([]);
+  },
+);
+
+test("Android remote image capability accepts show and patch", async () => {
+  advertise(...specCapabilities);
+  agent.handshake.capabilities = agent.handshake.capabilities.filter(
+    (capability) => capability !== "prototype_remote_image_v1",
+  );
+  const device: BootedDevice = { platform: "android", deviceId: "remote-android", name: "Fake" };
+  const { minimalSpec, ops } = fixtures.prototype_remote_image_v1;
+  expect((await show(device, minimalSpec)).success).toBe(true);
+  expect((await patch(device, ops)).success).toBe(true);
+  expect(agent.requests).toEqual([]);
+});

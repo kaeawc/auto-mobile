@@ -15,6 +15,7 @@ import dev.chrisbanes.haze.blur.hazeBlur
 import dev.chrisbanes.haze.hazeSource
 import dev.jasonpearson.automobile.protocol.PrototypeGlass
 import dev.jasonpearson.automobile.protocol.PrototypeModeValue
+import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypeStyle
 
 private val defaultGlass = PrototypeGlass()
@@ -61,7 +62,7 @@ internal fun prototypeGlassLayers(
   fun visit(node: PrototypeRenderNode) {
     if (node.style.source.glassMaterial() != null) behind[node.identity] = earlier.toSet()
     val originalSize = earlier.size
-    for (child in node.children) {
+    for (child in node.children + glassListRows(node)) {
       visit(child)
       earlier.add(child.identity)
       paintOrder.add(child.identity)
@@ -75,6 +76,21 @@ internal fun prototypeGlassLayers(
     paintOrder.filter(sources::contains).mapIndexed { index, key -> key to (index + 1f) }.toMap()
   return PrototypeGlassLayers(state, behind, sourceOrder)
 }
+
+/**
+ * Lazy rows are absent from `children`. Map them only when the row template can draw glass, so a
+ * spec whose only glass is inside rows still registers its layers.
+ */
+private fun glassListRows(node: PrototypeRenderNode): List<PrototypeRenderNode> {
+  val model = node.list ?: return emptyList()
+  if (model.source.children.none(::hasPrototypeTemplateGlass)) return emptyList()
+  return model.rows.mapIndexed { index, item -> model.render(item, index) }
+}
+
+private fun hasPrototypeTemplateGlass(node: PrototypeNode): Boolean =
+  node.style?.glassMaterial() != null ||
+    node.styleWhen.orEmpty().any { it.style.glassMaterial() != null } ||
+    prototypeDescendants(node).any(::hasPrototypeTemplateGlass)
 
 /** A transparent source at the root supplies bounds for a tint or scrim even without siblings. */
 @Composable

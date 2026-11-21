@@ -33,8 +33,8 @@ and runtimes, and they disagree on whether a pin outlives the client that made i
 | Pin seen by a later process | yes, and the plist flag is updated before the next read                                                                          | no: a second process reads the host default, and the plist changed in one of several attempts                      |
 | Survives a simulator reboot | not measured                                                                                                                     | no                                                                                                                 |
 
-Settling which persistence result holds needs both interfaces run against the same simulator on one
-host and runtime, read back from a second process and again after a reboot.
+The measurements that would settle this, and the other unmeasured behavior, are in
+[iOS Simulator audio routing open questions](../../../devlog/2026-11-21-ios-simulator-audio-routing-open-questions.md).
 
 ### Failure modes
 
@@ -48,18 +48,11 @@ No rejected route fails loudly, and nothing relevant is logged at the default le
   `true`. A `nil` UID does not restore "use host default".
 - A combined input+output virtual device (BlackHole 2ch) is listed in `SimDeviceAudioClient`'s
   `inputDevices` and `outputDevices` with `scope` 3 and `isDefaultInScopes` 0, and every route or
-  pre-boot pin to it is dropped. Built-ins have scope 1 (input) or 2 (output). That the router
-  accepts only a device whose scope equals the requested scope is a hypothesis; it needs an
-  input-only or output-only virtual device to confirm.
+  pre-boot pin to it is dropped. Built-ins have scope 1 (input) or 2 (output).
 
 So a `false` "use host default" flag does not prove the pin held. Validate the UID against the host
 device list before routing, route after every boot from a long-lived client (the daemon), and
 compare the read-back UID to the requested one.
-
-Not measured: two simulators pinned to two different non-default devices (needs a second host input
-or a single-scope virtual device), whether a pin survives a `coreaudiod` restart (needs sudo and
-interrupts every booted simulator), and whether the guest hears the pinned device (needs an
-in-simulator audio client).
 
 ## Headless host constraints
 

@@ -150,6 +150,8 @@ describe("CtrlProxy command support", () => {
         "prototype_persistence_replay_v1",
         "prototype_show_in_place_v1",
         "prototype_custom_shaders_v1",
+        // Newer than the old-APK fixture: remote prototype image assets.
+        "prototype_remote_image_v1",
         "prototype_stack_v1",
         "prototype_multi_surface_v1",
         "prototype_saved_v1",

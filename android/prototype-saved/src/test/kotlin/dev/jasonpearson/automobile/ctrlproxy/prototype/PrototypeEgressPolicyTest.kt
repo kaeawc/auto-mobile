@@ -68,6 +68,83 @@ class PrototypeEgressPolicyTest {
   }
 
   @Test
+  fun `image policy blocks CGNAT mapped IPv4 and link local literals and resolved addresses`() {
+    val strict = PrototypeEgressPolicy(blockPrivateNetworks = true)
+    val mappedPrivate =
+      java.net.Inet6Address.getByAddress(
+        null,
+        byteArrayOf(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 10, 0, 0, 1),
+        -1,
+      )
+    val mappedLocal =
+      java.net.Inet6Address.getByAddress(
+        null,
+        byteArrayOf(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 127, 0, 0, 1),
+        -1,
+      )
+    val cases =
+      listOf(
+        "100.64.0.0" to address(100, 64, 0, 0),
+        "100.127.255.255" to address(100, 127, 255, 255),
+        "::ffff:10.0.0.1" to mappedPrivate,
+        "::ffff:127.0.0.1" to mappedLocal,
+        "fe80::1" to address(254, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1),
+      )
+    for ((host, resolved) in cases) {
+      assertEquals(
+        host,
+        PrototypeEgressDecision.Blocked("Blocked destination address"),
+        strict.check(host, 443, emptyList()),
+      )
+      val dns = PrototypePolicyDns(Dns { listOf(resolved) }, strict, 443)
+      val error =
+        assertThrows(PrototypeBlockedDestinationException::class.java) {
+          dns.lookup("images.example")
+        }
+      assertEquals("Blocked destination address", error.message)
+    }
+    for (host in listOf("100.63.255.255", "100.128.0.0")) {
+      assertEquals(PrototypeEgressDecision.Allow, strict.check(host, 443, emptyList()))
+    }
+  }
+
+  @Test
+  fun `numeric loopback forms normalize to the address that is specifically refused`() {
+    val strict = PrototypeEgressPolicy(blockPrivateNetworks = true)
+    for (host in listOf("2130706433", "0x7f000001", "127.1", "0177.0.0.1")) {
+      val url = PrototypeEgressPolicy.normalize("https://$host/i".toHttpUrl())
+      assertEquals("127.0.0.1", url.host)
+      assertEquals(
+        PrototypeEgressDecision.Blocked("Blocked destination address"),
+        strict.check(url.host, url.port, emptyList()),
+      )
+    }
+    assertEquals(
+      PrototypeEgressDecision.Blocked("Ambiguous numeric destination"),
+      strict.check("09.0.0.1", 443, emptyList()),
+    )
+  }
+
+  @Test
+  fun `remote image debug policy keeps both standard and host protected ports`() {
+    val strict = PrototypeEgressPolicy(setOf(8123)).forRemoteImages(allowLoopback = true)
+    for (port in (3000..3010).toList() + listOf(8765, 8123)) {
+      assertEquals(
+        PrototypeEgressDecision.Blocked("Blocked destination hostname"),
+        strict.check("localhost", port, listOf(address(127, 0, 0, 1))),
+      )
+      assertEquals(
+        PrototypeEgressDecision.Blocked("Blocked destination address"),
+        strict.check("127.0.0.1", port, listOf(address(127, 0, 0, 1))),
+      )
+    }
+    assertEquals(
+      PrototypeEgressDecision.Allow,
+      strict.check("localhost", 8080, listOf(address(127, 0, 0, 1))),
+    )
+  }
+
+  @Test
   fun `ambiguous numeric destinations are refused`() {
     listOf(
         "09.0.0.1",

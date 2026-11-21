@@ -39,6 +39,11 @@ const HOUR_MS = 60 * 60 * 1000;
 
 export type DisposableAppIcon = { asset: string } | { backgroundColor: string };
 
+export interface DisposableAppAsset {
+  id: string;
+  bytes: Uint8Array;
+}
+
 export interface DisposableAppStampInput {
   appId: string;
   attachToken?: string;
@@ -47,6 +52,7 @@ export interface DisposableAppStampInput {
   slug: string;
   label: string;
   icon?: DisposableAppIcon;
+  assets?: readonly DisposableAppAsset[];
   spec: PrototypeJson;
   template: DisposableAppTemplate;
   declarations: DisposableAppDeclarations;
@@ -113,6 +119,7 @@ export interface DisposableAppManagerDependencies {
 export interface DisposableAppInstallInput {
   deviceId: string;
   platform: DisposableAppPlatform;
+  assets?: readonly DisposableAppAsset[];
   spec: PrototypeJson;
   app: {
     slug: string;
@@ -300,6 +307,7 @@ export class DisposableAppManager {
       slug: input.app.slug,
       label: input.app.label,
       icon: input.app.icon,
+      assets: input.assets,
       spec: input.spec,
       template,
       declarations,

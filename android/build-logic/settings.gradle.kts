@@ -1,5 +1,9 @@
 pluginManagement {
   repositories {
+    maven {
+      url = uri("https://maven-central.storage-download.googleapis.com/maven2/")
+      mavenContent { releasesOnly() }
+    }
     gradlePluginPortal()
     google()
     mavenCentral()
@@ -9,6 +13,10 @@ pluginManagement {
 dependencyResolutionManagement {
   repositories {
     google()
+    maven {
+      url = uri("https://maven-central.storage-download.googleapis.com/maven2/")
+      mavenContent { releasesOnly() }
+    }
     mavenCentral()
     gradlePluginPortal()
   }

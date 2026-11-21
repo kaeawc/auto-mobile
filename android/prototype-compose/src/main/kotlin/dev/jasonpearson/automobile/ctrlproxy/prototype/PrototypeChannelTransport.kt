@@ -99,6 +99,21 @@ class PrototypeChannelTransports(
     if (via == PrototypeHttpClients.VIA_DEVICE) device else host
 
   companion object {
+    /** Why a saved prototype cannot open a `via: "host"` channel: it runs without a host. */
+    const val SAVED_HOST_UNAVAILABLE_MESSAGE =
+      "Channels via \"host\" are not available in saved prototypes, which run without a host " +
+        "connection. Use via \"device\" instead."
+
+    /** A saved prototype's channels: `device` opens on the device and `host` fails at once. */
+    fun forSavedPrototype(device: PrototypeChannelTransport): PrototypeChannelTransports =
+      PrototypeChannelTransports(
+        host =
+          failing(
+            PrototypeChannelError(PrototypeChannelError.NETWORK, SAVED_HOST_UNAVAILABLE_MESSAGE),
+          ),
+        device = device,
+      )
+
     /** A transport that fails every connection at once with [error]. */
     fun failing(error: PrototypeChannelError): PrototypeChannelTransport =
       PrototypeChannelTransport { _, listener ->

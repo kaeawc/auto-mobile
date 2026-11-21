@@ -368,7 +368,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
             // Build hierarchy from snapshot (no more IPC calls - all data is local)
             var truncationReasons: Set<String> = []
-            let rawElement = tracked("buildHierarchy") {
+            let builtElement = tracked("buildHierarchy") {
                 buildElementInfoFromSnapshot(
                     snapshot,
                     depth: 0,
@@ -382,10 +382,14 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                     }
                 )
             }
+            // A landscape iPad home screen can frame SpringBoard's windows in portrait (#18827).
+            let (rawElement, portraitSpringBoard) = bundleId == "com.apple.springboard" && panel == nil
+                ? Self.portraitSpringBoardWindowsInRootSpace(builtElement, deviceRotation: screenMetrics.rotation)
+                : (builtElement, nil)
 
             let hierarchyWithTypedTextInputs = tracked("mergeTypedTextInputs") {
                 let candidates = typedTextInputSnapshots.enumerated().map { index, textInputSnapshot in
-                    buildElementInfoFromSnapshot(
+                    let candidate = buildElementInfoFromSnapshot(
                         textInputSnapshot,
                         depth: 1,
                         screenBounds: screenBounds,
@@ -395,6 +399,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                         keyboardFocus: keyboardFocus,
                         disableAllFiltering: disableAllFiltering
                     )
+                    return portraitSpringBoard.map {
+                        Self.rotatedIntoLandscape(candidate, portraitSpringBoard: $0)
+                    } ?? candidate
                 }
                 let merged = ElementLocator.mergeMissingTextInputCandidates(
                     into: rawElement,
@@ -437,7 +444,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 try getSystemAlerts(
                     appSnapshot: snapshot,
                     truncationReasons: &truncationReasons,
-                    keyboardFocus: keyboardFocus
+                    keyboardFocus: keyboardFocus,
+                    portraitSpringBoard: portraitSpringBoard
                 )
             }
 

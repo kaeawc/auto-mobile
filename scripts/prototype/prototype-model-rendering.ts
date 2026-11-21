@@ -237,8 +237,10 @@ export function renderFields(
         context,
         visiting,
       );
-    if (context.language === "kotlin" && /\bJsonElement\b/.test(type)) {
-      context.kotlinImports.add("kotlinx.serialization.json.JsonElement");
+    if (context.language === "kotlin") {
+      for (const jsonType of type.match(/\b(?:JsonArray|JsonElement)\b/g) ?? []) {
+        context.kotlinImports.add(`kotlinx.serialization.json.${jsonType}`);
+      }
     }
     return {
       name: fieldName,
@@ -292,6 +294,11 @@ export function renderObject(
   const type = modelName(name, options, context.language);
   context.output.push("", ...docLines(options.doc, context.language));
   if (context.language === "kotlin") {
+    if (options.kotlinFieldOrder) {
+      const positions = new Map(options.kotlinFieldOrder.map((field, index) => [field, index]));
+      const position = (field: RenderField) => positions.get(field.name) ?? positions.size;
+      fields.sort((left, right) => position(left) - position(right));
+    }
     const body = kotlinBody(fields, options);
     // Existing scalar model output is deliberately stable, including one-field objects.
     context.output.push(

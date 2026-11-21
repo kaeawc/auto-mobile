@@ -125,6 +125,8 @@ simulator the host grants and denies with `simctl privacy grant|revoke` before l
 `notGrantableOnSimulator` with `verified: false` and leaves them to the system-alert policy. No Viewer
 advertises the module yet (#14299). See the permission table in `prototype-ux.md`.
 
+The per-prototype iOS Viewer registers the `notifications` module; its behavior is documented in `../android/prototype-ux-platform-services.md`.
+
 ## Platform namespaces (#15257)
 
 Prefer portable fields, portable theme tokens, then `theme.design`; reserve `ios`/`android`

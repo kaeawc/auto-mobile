@@ -242,8 +242,18 @@ The bounds are named contract limits (`MAX_PROTOTYPE_NOTIFICATION_*`,
 `MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE`) that the call, state and channel rules repeat. Spec validation
 checks literal values only. The limits that apply after placeholders resolve belong to the device
 runtime that posts the notification. They are a reply of at most 1 KiB, a resolved notification of at
-most 5 KiB, and at most 4 updates per second per notification, coalesced to the latest. No runtime
-posts notifications yet, so none of these is enforced today; the host never posts one.
+most 5 KiB, and at most 4 updates per second per notification, coalesced to the latest. The per-prototype
+iOS Viewer is the only runtime that posts notifications; no other host posts one, so these limits are not
+enforced elsewhere.
+
+The iOS Viewer posts local notifications under its own bundle identity and advertises both
+`prototype_platform_notifications_v1` and `prototype_platform_notifications_scheduled_v1`, so
+`notifications.schedule` specs pass preflight. It uses one request identifier per prototype and notification
+id, and cancels matching delivered and scheduled requests by id, group, or all. Pending requests reserve
+space in the active limit because iOS can deliver them while the Viewer is suspended. The module reports the
+Viewer's authorization state. The launch delegate presents foreground notifications and routes taps, buttons
+and replies to the prototype, queuing cold-start responses until its event stream is ready. The injected
+agent directs specs that require notifications to the standalone Viewer.
 
 The module's report (#14277) is `{permission, badge, channels, active, pending}`.
 `prototypeNotificationsReport` builds it from a platform snapshot: Android's active notifications, or

@@ -111,7 +111,10 @@ export function prototypeBindingSpans(text: string): { start: number; end: numbe
 
 /** `{platform:/pointer}` placeholders (#14294), scanned exactly as `{data:/pointer}` ones. */
 export function prototypePlatformPlaceholders(text: string): string[] {
-  return Array.from(dataPlaceholderSpans(text, "platform:"), ({ pointer }) => pointer);
+  const consumed = Array.from(dataPlaceholderSpans(text));
+  return Array.from(dataPlaceholderSpans(text, "platform:"))
+    .filter(({ start }) => !consumed.some((span) => span.start <= start && start < span.end))
+    .map(({ pointer }) => pointer);
 }
 
 /** Replacements are inserted once and never scanned again for data placeholders. */

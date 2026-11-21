@@ -88,6 +88,10 @@ final class PrototypePlatformDriver {
         }
     }
 
+    func resetNotificationEvents() {
+        subscriptions.removeValue(forKey: "notifications")?.cancel()
+    }
+
     func stopEvents() {
         guard observing else { return }
         observing = false

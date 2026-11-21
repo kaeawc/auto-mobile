@@ -117,6 +117,31 @@ export function prototypePlatformModuleFields(
   );
 }
 
+/** Authored fields the standalone iOS Viewer degrades to plain local notification content. */
+export function prototypeIosNotificationFallbackPaths(spec: unknown): string[] {
+  const paths = authoredUses(spec).flatMap((use) => {
+    if (
+      use.kind !== "call" ||
+      (use.action.call !== "notifications.post" && use.action.call !== "notifications.schedule")
+    ) {
+      return [];
+    }
+    const args = record(use.action.args);
+    if (!args) {
+      return [];
+    }
+    const style = record(args.style);
+    const styleKind = record(style?.value)?.type;
+    return [
+      ...["largeImage", "progress", "ongoing"]
+        .filter((key) => Object.hasOwn(args, key))
+        .map((key) => `${use.path}.args.${key}`),
+      ...(style && styleKind !== "bigText" ? [`${use.path}.args.style`] : []),
+    ];
+  });
+  return unique(paths);
+}
+
 function unsupported(
   fields: readonly string[],
   platform: "android" | "ios",
@@ -228,7 +253,9 @@ const PROTOTYPE_PLATFORM_MODULE_ONLY_GATES = Object.entries(PROTOTYPE_PLATFORM_M
       fields: (spec: unknown, platform?: "android" | "ios") =>
         prototypePlatformModuleFields(spec, name, platform),
       unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
-        unsupported(fields, platform, definition.capability, `the ${name} platform module`),
+        platform === "ios" && name === "notifications"
+          ? `The notifications platform module at ${fields[0]} needs ${definition.capability}, which only the standalone iOS Prototype Viewer advertises. Use prototype save with an icon to install the per-prototype Viewer app.`
+          : unsupported(fields, platform, definition.capability, `the ${name} platform module`),
     },
     ...Object.entries(definition.backends ?? {}).map(([backend, { capability }]) => ({
       capability,

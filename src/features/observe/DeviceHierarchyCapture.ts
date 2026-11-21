@@ -8,7 +8,7 @@ import { UntrackedAndroidDisplayError } from "./UntrackedAndroidDisplayError";
 import { normalizeTvosHierarchy } from "../tvos/TvosHierarchy";
 import { requireTvosRunner } from "../tvos/TvosRunnerRecovery";
 import { normalizeWatchHierarchy } from "../watch/WatchHierarchy";
-import { watchRunners } from "../watch/WatchRunnerRegistry";
+import { requireWatchRunner } from "../watch/WatchRunnerRecovery";
 import { holderOf } from "../../daemon/deviceBinding";
 import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../models";
@@ -500,7 +500,9 @@ export function createDeviceHierarchyCapture(
               ).hierarchy(request.signal),
             )
           : normalizeWatchHierarchy(
-              await watchRunners.require(device.deviceId).hierarchy(request.signal),
+              await (
+                await requireWatchRunner(device.deviceId, request.signal)
+              ).hierarchy(request.signal),
             );
     // Apple runner trees use the iOS bounds/attribute projection, without routing iOS commands.
     return new DefaultHierarchyCapture(

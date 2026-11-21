@@ -176,6 +176,7 @@ const fixtures: Record<string, Node> = {
     child: { type: "spacer" },
   },
   prototype_strings_v1: { ...label, text: "{t:title}" },
+  prototype_remote_image_v1: { type: "image", url: "https://example.com/image.png" },
   prototype_semantics_v1: { ...label, semantics: { heading: true } },
   prototype_derive_v1: {
     type: "column",

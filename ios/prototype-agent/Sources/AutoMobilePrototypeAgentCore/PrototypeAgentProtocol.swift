@@ -225,6 +225,7 @@ enum PrototypeAgentProtocol {
     /// Locale string tables and integer plural resolution (#14210).
     static let stringsCapability = "prototype_strings_v1"
     /// Authored accessibility semantics and live announcements (#14210).
+    static let remoteImageCapability = "prototype_remote_image_v1"
     static let semanticsCapability = "prototype_semantics_v1"
     /// `{data, empty}` conditions and style `shimmer` on box, row, column and card (#14207, #14689).
     static let loadingStatesCapability = "prototype_loading_states_v1"

@@ -677,11 +677,16 @@ data class PrototypeImageNode(
   override val keyframes: JsonObject? = null,
   override val attentionLoop: PrototypeLoop? = null,
   /** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
-  val asset: PrototypeModeValue,
+  val asset: PrototypeModeValue? = null,
   val contentScale: String = "fit",
   /** Pinch, double-tap and pan zoom up to `maxScale` (#14208). */
   val zoomable: PrototypeZoomable? = null,
   val filter: PrototypeImageFilter? = null,
+  val url: String? = null,
+  val crossfade: Boolean? = null,
+  val via: String? = null,
+  val placeholder: JsonObject? = null,
+  val error: JsonObject? = null,
 ) : PrototypeNode()
 
 @SerialName("icon")

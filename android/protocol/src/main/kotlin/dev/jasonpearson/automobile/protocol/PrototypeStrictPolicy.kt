@@ -301,6 +301,7 @@ internal object PrototypeStrictPolicy {
   // Each feature applies when its node type has any of the listed fields.
   private val typeFieldFeatures =
     mapOf(
+      "image" to mapOf("remote_image" to listOf("url", "placeholder", "error", "crossfade", "via")),
       "text" to mapOf("rich_text" to listOf("spans")),
       "textField" to
         mapOf(
@@ -396,12 +397,30 @@ internal object PrototypeStrictPolicy {
       if (spec["platform"] != null) need("platform")
     }
 
-    fun scan(value: JsonElement, field: String = "", routeAlias: Boolean = false) {
+    fun scan(
+      value: JsonElement,
+      field: String = "",
+      routeAlias: Boolean = false,
+      remoteOnly: Boolean = false,
+    ) {
       if (value is JsonArray) {
-        value.forEach { scan(it, routeAlias = routeAlias) }
+        value.forEach { scan(it, routeAlias = routeAlias, remoteOnly = remoteOnly) }
         return
       }
       val fields = value as? JsonObject ?: return
+      if (remoteOnly) {
+        for (entry in PrototypePatchNodes.tree(fields, emptyList(), "")) {
+          val node = entry.node
+          if (
+            node.text("type") == "image" &&
+              listOf("url", "placeholder", "error", "crossfade", "via").any { it in node }
+          )
+            need("remote_image")
+          (node["ios"] as? JsonObject)?.get("bottomAccessory")?.let { scan(it, remoteOnly = true) }
+        }
+        return
+      }
+      (fields["ios"] as? JsonObject)?.get("bottomAccessory")?.let { scan(it, remoteOnly = true) }
       if (fields.size == 1 && fields.containsKey("value")) return
       if (PrototypeStringConditions.uses(fields)) need("string_conditions")
       val alias = routeAlias || (fields["repeat"] as? JsonObject)?.text("as") == "route"
@@ -643,7 +662,7 @@ private fun typeNamespaceFeatures(type: String, fields: JsonObject, need: (Strin
 private val freeFormMaps = setOf("headers", "query", "params", "args")
 
 private fun scansValuesOnly(key: String, field: String): Boolean =
-  (key == "form" && field == "body") || key in freeFormMaps
+  (key == "form" && field == "body") || key == "screens" || key in freeFormMaps
 
 // Only the contract's action slots hold actions. Arbitrary JSON, such as a channel route's
 // equality literal, may carry the same type string, so this gate reads located actions only.

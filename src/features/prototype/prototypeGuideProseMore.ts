@@ -241,6 +241,40 @@ finite numbers, arrays and objects, without null. Inside a repeat, a whole \`{in
 \`path\`, as in \`/data/cart/{index}\`, is bound to the current row; \`{index}\` anywhere else, or
 \`{alias.field}\`, is rejected.
 
+With \`prototype_data_actions_v2\`, values also accept \`{generate:"id"}\`,
+\`{now:"epochMs"}\`, \`{now:"iso"}\` and \`{lastGenerated:true}\`. Exact generated objects
+inside literal \`{value:json}\` expand too. Each occurrence resolves once when its action runs;
+only generate changes lastGenerated. A fresh action list starts unset. Requests capture its value
+at dispatch for their onSuccess/onError lists. An unset read is \`lastGenerated_unset\`.
+
+Canonical send pattern (declare \`data.messages: []\`):
+
+\`\`\`json
+[
+  {"type":"appendData","path":"/data/messages","value":{"value":{"id":{"generate":"id"},"status":"sending","at":{"now":"epochMs"}}}},
+  {"type":"request","method":"POST","url":"https://example.test/messages","body":{"lastGenerated":true},
+   "onSuccess":[{"type":"setData","path":"/data/messages","where":{"field":"id","equals":{"lastGenerated":true}},"member":"status","value":{"value":"sent"}}],
+   "onError":[{"type":"setData","path":"/data/messages","where":{"field":"id","equals":{"lastGenerated":true}},"member":"status","value":{"value":"failed"}}]}
+]
+\`\`\`
+
+Show a Retry button on failed rows. Its onTap sets that row's status to sending, then repeats the
+POST with \`{item:"id"}\` as body and selector in both callbacks; retry keeps the existing id.
+For a retry button inside the messages repeat, use this onTap list (onError restores failed):
+
+\`\`\`json
+[
+  {"type":"setData","path":"/data/messages","where":{"field":"id","equals":{"item":"id"}},"member":"status","value":{"value":"sending"}},
+  {"type":"request","method":"POST","url":"https://example.test/messages","body":{"item":"id"},
+   "onSuccess":[{"type":"setData","path":"/data/messages","where":{"field":"id","equals":{"item":"id"}},"member":"status","value":{"value":"sent"}}],
+   "onError":[{"type":"setData","path":"/data/messages","where":{"field":"id","equals":{"item":"id"}},"member":"status","value":{"value":"failed"}}]}
+]
+\`\`\`
+
+Like/unlike uses the same optimistic keyed write, with onError restoring the previous boolean.
+A keyed request may instead use \`into:"/data/messages"\`, \`where:{field:"id",equals:{lastGenerated:true}}\`
+and optional \`member\` to write the response to one matching row; metadata stays at messages__meta.
+
 The host validates pointer syntax and \`{index}\` use, rejects a literal value data cannot hold, and
 rejects an \`appendData\` or \`prependData\` whose target resolves in the spec's own \`data\` to something other than an
 array. A target that only exists after earlier writes is checked by the device. A write that would

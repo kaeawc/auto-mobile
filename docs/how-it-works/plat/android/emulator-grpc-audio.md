@@ -60,6 +60,11 @@ prove that voice is healthy. Host-mic passthrough (`-allow-host-audio`) is not u
   endpoint PID incarnation with `audio_repeat_injection_unsafe`. Both host safety errors carry
   `retryable: false` and a remedy to grant macOS Microphone permission to the emulator's host app
   (System Settings > Privacy and Security > Microphone) or restart the emulator.
+- Opening `injectAudio` while the guest has no open recorder crashes the emulator (#18687), so
+  every client of the RPC must hold this lease. After authorization, immediately before the stream
+  opens, one more status broadcast must answer `running`. Otherwise injection is refused with
+  `audio_guest_capture_unavailable` and no stream opens. This refusal does not count as an
+  injection start for the repeat rule.
 - Permission alone
   does not clear repeat history: a serial with a new PID starts with no repeat history. The host-voice
   check also runs after authorization, immediately before the stream opens. No reliable
@@ -194,6 +199,27 @@ A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCa
     a valid signature. The key file is removed on close; the emulator also deletes the directory
     on exit.
   - Neither: no `authorization` header.
+
+## Verified on real emulators
+
+Measured on `emulator 37.2.13.0` (build 16740729) with two concurrent headless AVDs (API 36 and
+API 35 google_apis arm64), one launched with `-grpc-use-token` and one with the default JWT mode.
+
+- **Isolation holds.** With a 1 kHz tone playing in B's guest, `streamAudio` for 6 s on both at
+  once gave B `silent: false` (RMS -38 dBFS) and A `silent: true`, `timedOut: true`. Injecting
+  into either emulator left the other's endpoint untouched: each has its own port and credential.
+- **`-no-audio` does not fail injection.** The emulator accepts and consumes the packets
+  (`framesPlayed` about 94% of `framesQueued`) and capture still works, so the host cannot detect
+  the flag from an RPC error. It needs no host audio stack, which suits Linux CI hosts.
+- **A second concurrent `injectAudio` is rejected by the emulator** with `FAILED_PRECONDITION`.
+  Through the tools the service's own reservation answers first.
+- **`injectAudio` without an open guest `AudioRecord` crashes the emulator** (SIGSEGV, null
+  dereference in `QemuAudioInputEngine::start`). The guest-capture lease above is therefore a
+  hard precondition for every client of the RPC, not an optimization.
+- **Token, JWT and plain `-grpc` all work** for both RPCs on this build.
+- **Not shown:** injected content arriving in the guest. The CtrlProxy recorder discards PCM, so
+  only "the emulator consumed the packets" is observable. **Open:** the minimum emulator build that
+  ships both RPCs; it needs older emulator packages.
 
 ## Errors
 

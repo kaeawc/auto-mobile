@@ -91,6 +91,57 @@
       { "state": { "query": "Apple" }, "visible": [true, true] }
     ]
   },
+  "lazyRowModal": {
+    "spec": {
+      "id": "cart-lazy-row-modal-conditions",
+      "window": { "placement": { "type": "fullscreen" } },
+      "state": { "query": "", "open_Apple": true, "open_Apricot": true },
+      "data": { "rows": [{ "name": "Apple" }, { "name": "Apricot" }] },
+      "derive": {
+        "cartCount": {
+          "collection": {
+            "of": { "data": "/rows" },
+            "where": [{ "field": "name", "op": "contains", "value": { "state": "query" } }]
+          },
+          "reduce": { "op": "count" }
+        }
+      },
+      "root": {
+        "type": "list",
+        "repeat": { "items": { "path": "/rows" }, "as": "row", "key": "name" },
+        "children": [
+          {
+            "type": "bottomSheet",
+            "detents": ["half"],
+            "openWhen": { "key": "open_{row.name}", "equals": true },
+            "visibleWhen": { "derived": "cartCount", "gt": 0 },
+            "child": {
+              "type": "button",
+              "label": "{row.name}",
+              "enabledWhen": { "derived": "cartCount", "gt": 1 }
+            }
+          }
+        ]
+      }
+    },
+    "changes": [
+      {
+        "state": { "query": "", "open_Apple": true, "open_Apricot": true },
+        "sheets": 2,
+        "enabled": [true, true]
+      },
+      {
+        "state": { "query": "Apple", "open_Apple": true, "open_Apricot": true },
+        "sheets": 2,
+        "enabled": [false, false]
+      },
+      {
+        "state": { "query": "pear", "open_Apple": true, "open_Apricot": true },
+        "sheets": 0,
+        "enabled": []
+      }
+    ]
+  },
   "unknownCondition": { "not": { "all": [{ "derived": "missing", "gt": 0 }] } },
   "error": {
     "path": "root.children[0].visibleWhen.not.all[0].derived",

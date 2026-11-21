@@ -478,7 +478,7 @@ internal object PrototypeStrictPolicy {
           } != null
       )
         need("derive")
-      if (PrototypeDataRules.isKeyedAction(fields)) result.add("prototype_data_actions_v2")
+      if (PrototypeGeneratedValues.needsDataV2(fields)) result.add("prototype_data_actions_v2")
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)
       }

@@ -352,7 +352,7 @@ export const rotateInput = z.object({
     .boolean()
     .optional()
     .describe(
-      "Android only. true keeps automatic rotation off to hold the requested orientation. Omission restores the prior automatic-rotation setting after orientation confirmation, including in a device session; an unreadable initial setting is left unchanged. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
+      "Android only. true keeps automatic rotation off to hold the requested orientation. Omission in a device session does the same, and releasing the session restores the original automatic-rotation setting; a direct call without a session restores it before returning. An unreadable initial setting is left unchanged by omission. false enables automatic rotation right after rotating, even if originally locked, so the sensor may revert the orientation; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
     ),
   display: z
     .number()

@@ -190,6 +190,24 @@ final class PrototypeDerivedCollectionsMappingTests: XCTestCase {
         }
     }
 
+    func testSharedDerivedConditionOnLazyRowModalFollowsDerivedValues() throws {
+        let fixture = try XCTUnwrap(conditionFixture()["lazyRowModal"]?.objectFields)
+        let data = try JSONEncoder().encode(XCTUnwrap(fixture["spec"]))
+        try PrototypeSpecStrictValidator.validate(data: data)
+        var session = PrototypeSession()
+        try session.show(JSONDecoder().decode(PrototypeSpec.self, from: data))
+        for entry in PrototypeStrictBindings.array(fixture["changes"]) {
+            let change = try XCTUnwrap(entry.objectFields)
+            let state = try XCTUnwrap(change["state"]?.objectFields)
+            _ = session.setStates(state.map { ($0.key, $0.value) })
+            let spec = try XCTUnwrap(session.spec)
+            let sheets = spec.root.openModals(state: session.state, pages: [:], data: spec.data)
+            XCTAssertEqual(sheets.count, change["sheets"]?.intValue)
+            let enabled = sheets.map { $0.child?.enabledWhen?.holds([:]) ?? true }
+            XCTAssertEqual(enabled, PrototypeStrictBindings.array(change["enabled"]).map { $0 == .bool(true) })
+        }
+    }
+
     func testDerivedStringConditionSurvivesLazyRowBinding() throws {
         var raw = try XCTUnwrap(conditionFixture()["spec"]?.objectFields)
         raw["state"] = .object(["query": .string("Apple")])

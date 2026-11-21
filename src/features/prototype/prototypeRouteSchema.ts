@@ -4,23 +4,20 @@ import contract from "../../../schemas/prototype-spec-contract.json";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import {
   buildPrototypeActionListSchema,
-  prototypeValueBindingSchema,
-  type PrototypeDataActionValue,
+  prototypeReadBindingSchema,
 } from "./prototypeActionValues";
 
 // Reuse the neighbouring value bindings; routes accept flat scalar literals, never {value: JSON}.
-type RouteParams = Record<string, string | number | boolean | PrototypeDataActionValue>;
+type RouteParams = Record<
+  string,
+  string | number | boolean | z.infer<typeof prototypeReadBindingSchema>
+>;
 
 // Preserve the parsed union without copying every binding schema into navigation actions.
 export const routeParamsSchema: z.ZodType<RouteParams, z.ZodTypeDef, unknown> =
   prototypeOwnKeyRecordV3(
     z.string().regex(prototypeContractPatterns.pathKey),
-    z.union([
-      z.string(),
-      z.number().finite(),
-      z.boolean(),
-      ...prototypeValueBindingSchema.options.slice(0, 4),
-    ]),
+    z.union([z.string(), z.number().finite(), z.boolean(), ...prototypeReadBindingSchema.options]),
   ).refine((value) => Object.keys(value).length <= 16);
 
 export const setStackActionSchema = z

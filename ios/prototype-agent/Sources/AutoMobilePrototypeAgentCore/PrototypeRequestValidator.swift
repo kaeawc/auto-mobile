@@ -60,9 +60,25 @@ enum PrototypeRequestValidator {
     }
 
     /// Contract-located actions include channel callbacks and platform handlers, in host order.
-    static func validateActions(_ actions: [PrototypeLocatedValue], state: [String: JSONValue]) throws {
+    static func validateActions(
+        _ actions: [PrototypeLocatedValue],
+        state: [String: JSONValue],
+        data: [String: JSONValue]? = nil
+    )
+        throws
+    {
         for action in actions {
             try validateAction(action.value, path: action.path, depth: 1, state: state)
+            if action.value["type"] == .string("request"), action.value["where"] != nil,
+               let into = action.value["into"]?.stringValue, !into.contains("{index}"),
+               let pointer = PrototypeDataWrite.pointer(ofPath: into),
+               let target = PrototypeDataPointer.resolve(data, pointer: pointer)
+            {
+                guard case .array = target else { throw fail(
+                    "\(action.path).into",
+                    "Keyed request into target is not an array"
+                ) }
+            }
         }
     }
 
@@ -241,6 +257,7 @@ enum PrototypeRequestValidator {
 
     /// One structured value binding, including platform state and handler-scoped event data.
     private static func binding(_ raw: JSONValue, path: String, allowDerived: Bool) throws {
+        if PrototypeGeneratedValues.form(raw) != nil { return }
         if allowDerived, raw.objectFields?.count == 1,
            let name = raw.objectFields?["derived"]?.stringValue, PrototypeRepeat.isFieldName(name) { return }
         guard case let .object(form) = raw, form.count == 1, let key = form.keys.first,

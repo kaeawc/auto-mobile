@@ -14,5 +14,15 @@
     "font/ttf",
     "font/otf",
     "application/vnd.automobile.agsl"
-  ]
+  ],
+  "media": {
+    "limits": {
+      "MAX_PROTOTYPE_MEDIA_ASSET_BYTES": 67108864,
+      "MAX_PROTOTYPE_VTT_ASSET_BYTES": 262144,
+      "MAX_PROTOTYPE_MEDIA_ASSET_COUNT": 16,
+      "MAX_PROTOTYPE_MEDIA_ASSET_TOTAL_BYTES": 134217728,
+      "MAX_PROTOTYPE_MEDIA_CHUNK_BYTES": 1048576
+    },
+    "mimeTypes": ["video/mp4", "video/webm", "audio/mp4", "audio/mpeg", "audio/ogg", "text/vtt"]
+  }
 }

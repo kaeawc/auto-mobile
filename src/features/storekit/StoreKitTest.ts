@@ -181,9 +181,11 @@ export class StoreKitTest {
   ): Promise<CtrlProxyStoreKitResult> {
     const untouched = !this.clearedSessions.isTouched(device.deviceId, input.appId);
     // list changes nothing and clear only ever cleans; every other action may leave state behind.
-    if (input.action !== "list" && input.action !== "clear") {
-      this.clearedSessions.markTouched(device.deviceId, input.appId);
-    }
+    // The generation taken here lets a late reply skip marking clean after an overlapping touch.
+    const generation =
+      input.action !== "list" && input.action !== "clear"
+        ? this.clearedSessions.markTouched(device.deviceId, input.appId)
+        : this.clearedSessions.generation(device.deviceId, input.appId);
     const result = await this.senderFactory(device).requestStoreKit(toRunnerRequest(input), {
       ...(input.signal ? { signal: input.signal } : {}),
       ...(input.connectOnly ? { requireExistingConnection: true } : {}),
@@ -194,7 +196,7 @@ export class StoreKitTest {
     const refusedUntouched =
       input.action === "load" && untouched && isStoreKitOtherBundleActiveError(result.error);
     if (clearedNow || refusedUntouched) {
-      this.clearedSessions.markCleared(device.deviceId, input.appId);
+      this.clearedSessions.markCleared(device.deviceId, input.appId, generation);
     }
     return result;
   }

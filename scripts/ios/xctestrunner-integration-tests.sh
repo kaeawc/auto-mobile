@@ -69,7 +69,7 @@ echo -e "  ${GREEN}✓${NC} CtrlProxy iOS artifacts found"
 BOOTED_DEVICE=$(xcrun simctl list devices booted -j | grep -o '"udid" : "[^"]*"' | head -1 | sed 's/"udid" : "\(.*\)"/\1/')
 if [ -z "$BOOTED_DEVICE" ]; then
     echo -e "  ${RED}✗${NC} No booted simulator found"
-    echo -e "${YELLOW}Boot a simulator first: xcrun simctl boot 'iPhone 15'${NC}"
+    echo -e "${YELLOW}Boot a simulator first: xcrun simctl boot 'iPhone 17 Pro' (iOS 27.2 runtime)${NC}"
     exit 1
 fi
 echo -e "  ${GREEN}✓${NC} Simulator booted: ${BOOTED_DEVICE}"

@@ -3,6 +3,8 @@ import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
   keySchema,
+  dataWhereSchema,
+  dataMemberSchema,
   prototypeDataActionValueSchema,
   prototypeValueBindingSchema,
   pointerSchema,
@@ -88,6 +90,8 @@ export const requestActionSchema = z
           .strict(),
       ])
       .optional(),
+    where: dataWhereSchema.optional(),
+    member: dataMemberSchema.optional(),
     progressKey: keySchema.optional(),
     into: z
       .string()

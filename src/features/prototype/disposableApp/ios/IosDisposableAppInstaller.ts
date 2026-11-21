@@ -46,12 +46,24 @@ export class IosDisposableAppInstaller implements DisposableAppInstaller {
     assertDisposableAppId(appId);
     requireDisposableAppSimulator(deviceId);
     try {
-      const spec = await this.readSpec(artifactPath);
+      // Parse the bundled spec first, so a bad artifact never replaces the installed app.
+      await this.readSpec(artifactPath);
       await this.deps.simctl.install(deviceId, artifactPath);
+    } catch (error) {
+      throw toActionableError(error, `Cannot install iOS disposable app ${appId}`);
+    }
+  }
+
+  /** Writes the bundled spec as the saved Viewer layout after the host recorded the install. */
+  async seedStorage(deviceId: string, appId: string, artifactPath: string): Promise<void> {
+    assertDisposableAppId(appId);
+    requireDisposableAppSimulator(deviceId);
+    try {
+      const spec = await this.readSpec(artifactPath);
       const container = await this.dataContainer(deviceId, appId);
       await this.deps.data.write(container, spec);
     } catch (error) {
-      throw toActionableError(error, `Cannot install iOS disposable app ${appId}`);
+      throw toActionableError(error, `Cannot seed storage for iOS disposable app ${appId}`);
     }
   }
 

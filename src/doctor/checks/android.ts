@@ -31,6 +31,7 @@ import {
 } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import type { AdbDeviceState } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { awaitDoctorProbe, remainingDoctorProbe } from "../deadline";
+import { checkExpiredDisposableApps, type DisposableAppDoctorDependencies } from "./disposableApps";
 import { checkAndroidIntegritySignals } from "./androidIntegrity";
 import {
   detectSoftwareRenderingFallback,
@@ -764,7 +765,10 @@ async function checkAvailableAvds(probe: DoctorProbeOptions = {}): Promise<Check
 /**
  * Run all Android checks
  */
-export async function runAndroidChecks(options: DoctorOptions = {}): Promise<CheckResult[]> {
+export async function runAndroidChecks(
+  options: DoctorOptions = {},
+  disposableApps?: DisposableAppDoctorDependencies,
+): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   const run = async (check: () => Promise<CheckResult>): Promise<void> => {
     remainingDoctorProbe(options);
@@ -780,6 +784,7 @@ export async function runAndroidChecks(options: DoctorOptions = {}): Promise<Che
   await run(() => checkAdbVersion(defaultAdbClientFactory, options));
   await run(() => checkEmulator(options));
   await run(() => checkConnectedDevices(defaultAdbClientFactory, options));
+  results.push(...(await checkExpiredDisposableApps(options, disposableApps)));
   await run(() => checkAndroidIntegritySignals(defaultAdbClientFactory, options));
   await run(() => checkAvailableAvds(options));
   await run(() => checkAvdMemory(createAndroidDoctorDependencies(), options));

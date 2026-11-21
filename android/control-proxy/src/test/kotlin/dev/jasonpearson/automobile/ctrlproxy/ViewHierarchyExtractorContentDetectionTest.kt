@@ -325,6 +325,87 @@ internal class ViewHierarchyExtractorContentDetectionTest : ViewHierarchyExtract
     assertEquals(bounds(0, 1500, 1440, 2752), regions[1].bounds)
   }
 
+  @Test
+  fun `detectContentHiddenRegions clips a region to its ComposeView host and the screen`() {
+    // Geometry of the Contacts capture (test/fixtures/observe-output/compose-interop-3183/
+    // composeview-in-views-contacts.json, 1080x2424): the flagged Compose child [0,478,1080,2486]
+    // overflows its ComposeView host [0,478,1080,2150] and the screen, over the navigation bar.
+    val hostBounds = bounds(0, 478, 1080, 2150)
+    val flagged =
+      elementWithBounds(
+        bounds = bounds(0, 478, 1080, 2486),
+        content = ElementContent(actions = listOf("accessibility_focus")),
+      )
+    val composeHost =
+      elementWithBounds(
+        resourceId = "com.google.android.contacts:id/contact_list_compose_view",
+        bounds = hostBounds,
+        children = listOf(flagged),
+        content = ElementContent(className = "androidx.compose.ui.platform.ComposeView"),
+      )
+    val root =
+      elementWithBounds(
+        bounds = bounds(0, 0, 1080, 2424),
+        children = listOf(composeHost),
+        content = ElementContent(className = "android.widget.FrameLayout"),
+      )
+
+    val regions = extractor.detectContentHiddenRegionsForTest(root, 1080, 2424)
+
+    assertEquals(1, regions.size)
+    assertEquals(hostBounds, regions[0].bounds)
+    assertEquals(68, regions[0].areaPercent)
+    assertEquals(hostBounds, regions[0].hostBounds)
+  }
+
+  @Test
+  fun `detectContentHiddenRegions names the owning host, not a nested ComposeView sharing its corner`() {
+    val outerHost = bounds(0, 0, 1000, 2000)
+    val nestedHost =
+      elementWithBounds(
+        bounds = bounds(0, 0, 1000, 200),
+        content = ElementContent(className = "androidx.compose.ui.platform.ComposeView"),
+      )
+    val flagged =
+      elementWithBounds(
+        bounds = bounds(0, 0, 1000, 1600),
+        children = listOf(nestedHost),
+        content = ElementContent(actions = listOf("accessibility_focus")),
+      )
+    val root =
+      elementWithBounds(
+        bounds = outerHost,
+        children = listOf(flagged),
+        content = ElementContent(className = "androidx.compose.ui.platform.ComposeView"),
+      )
+
+    val regions = extractor.detectContentHiddenRegionsForTest(root, 1000, 2000)
+
+    assertEquals(1, regions.size)
+    assertEquals(bounds(0, 0, 1000, 1600), regions[0].bounds)
+    assertEquals(80, regions[0].areaPercent)
+    assertEquals(outerHost, regions[0].hostBounds)
+  }
+
+  @Test
+  fun `detectContentHiddenRegions drops a region its host clips to the reporting floor`() {
+    val flagged =
+      elementWithBounds(
+        bounds = bounds(0, 0, 1000, 1500),
+        content = ElementContent(actions = listOf("accessibility_focus")),
+      )
+    val composeHost =
+      elementWithBounds(
+        bounds = bounds(0, 0, 1000, 500),
+        children = listOf(flagged),
+        content = ElementContent(className = "androidx.compose.ui.platform.ComposeView"),
+      )
+
+    val regions = extractor.detectContentHiddenRegionsForTest(composeHost, 1000, 2000)
+
+    assertTrue(regions.isEmpty())
+  }
+
   private fun composeRootWithHiddenBoundary(boundaryBounds: ElementBounds): UIElementInfo {
     val hiddenBoundary =
       elementWithBounds(

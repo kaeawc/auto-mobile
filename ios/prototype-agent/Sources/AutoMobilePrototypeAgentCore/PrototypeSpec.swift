@@ -110,7 +110,10 @@ struct PrototypeSpec: Decodable {
     let media: JSONValue?
     let locationBlock: JSONValue?
     let sensorsBlock: JSONValue?
+    let notificationsBlock: JSONValue?
+    let requiresNotifications: Bool
     let platformHandlers: [String: JSONValue]
+    let declaredPlatform: Set<String>
     let declaredPermissions: Set<String>
     private(set) var platformState: [String: JSONValue] = [:]
     /// The route params `{route.<name>}` placeholders are bound to in `root` (#14188); empty at decode.
@@ -147,6 +150,7 @@ struct PrototypeSpec: Decodable {
         media = try container.decodeIfPresent(JSONValue.self, forKey: .media)
         locationBlock = try container.decodeIfPresent(JSONValue.self, forKey: .location)
         sensorsBlock = try container.decodeIfPresent(JSONValue.self, forKey: .sensors)
+        notificationsBlock = try container.decodeIfPresent(JSONValue.self, forKey: .notifications)
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         // The host validator owns the strict shape; a malformed block means "no storage" here.
@@ -161,11 +165,16 @@ struct PrototypeSpec: Decodable {
         // key order; a state that does not decode is reported at its own turn below.
         let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state))
         let requires = try container.decodeIfPresent(JSONValue.self, forKey: .requires)
+        if case let .array(platform)? = requires?.objectFields?["platform"] {
+            declaredPlatform = Set(platform.compactMap(\.stringValue))
+        } else { declaredPlatform = [] }
         if case let .array(permissions)? = requires?.objectFields?["permissions"] {
             declaredPermissions = Set(permissions.compactMap { $0.objectFields?["name"]?.stringValue })
         } else {
             declaredPermissions = []
         }
+        requiresNotifications = PrototypeContractValidator.strings(requires?.objectFields?["platform"])
+            .contains("notifications")
         // Validate platform vocabulary before resolving device-owned reads.
         try PrototypePlatformValidator.validate(
             requires: requires,
@@ -176,7 +185,7 @@ struct PrototypeSpec: Decodable {
             storage: container.decodeIfPresent(JSONValue.self, forKey: .storage),
             location: container.decodeIfPresent(JSONValue.self, forKey: .location),
             sensors: container.decodeIfPresent(JSONValue.self, forKey: .sensors),
-            notifications: container.decodeIfPresent(JSONValue.self, forKey: .notifications),
+            notifications: notificationsBlock,
             media: media,
             root: raw,
             state: menuState ?? [:]
@@ -245,7 +254,7 @@ struct PrototypeSpec: Decodable {
         try PrototypeLimits.guardSubstitutedText(collections, data: data, derived: formatContext, state: menuState)
         // Route params bind before data resolution, so `{data:/posts/{route.id}/title}` resolves (#14188).
         let routed = PrototypeRouteBinder.bind(collections, scope: routes)
-        let bound = PrototypeDataResolver.resolveRoot(routed, data: data, platform: platform)
+        let bound = PrototypeDataResolver.resolveRoot(routed, data: data, platform: platform, derived: values)
         let resolved = strings
             .map { PrototypeStrings.resolve(bound, strings: $0, locales: locales, data: data) } ?? bound
         try PrototypeLimits.guardTree(resolved)
@@ -281,10 +290,13 @@ struct PrototypeSpec: Decodable {
         media = spec.media
         locationBlock = spec.locationBlock
         sensorsBlock = spec.sensorsBlock
+        notificationsBlock = spec.notificationsBlock
+        requiresNotifications = spec.requiresNotifications
         platformHandlers = spec.platformHandlers
         platformState = spec.platformState
         routeScope = spec.routeScope
         id = spec.id
+        declaredPlatform = spec.declaredPlatform
         declaredPermissions = spec.declaredPermissions
         strings = spec.strings
         locales = spec.locales
@@ -756,6 +768,7 @@ indirect enum Condition: Decodable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case key, equals, notEquals, contains, startsWith, lengthGt, lengthLt, all, any, not, valid
+        case derived = "_derivedValue"
         case greaterThan = "gt"
         case lessThan = "lt"
     }
@@ -777,7 +790,9 @@ indirect enum Condition: Decodable, Equatable {
         } else if let not = try container.decodeIfPresent(Condition.self, forKey: .not) {
             self = .not(not)
         } else {
-            let key = try container.decode(String.self, forKey: .key)
+            let isDerived = container.contains(.derived)
+            let derived = isDerived ? try container.decode(JSONValue.self, forKey: .derived) : nil
+            let key = isDerived ? "" : try container.decode(String.self, forKey: .key)
             if let value = try container.decodeIfPresent(JSONValue.self, forKey: .equals) {
                 self = .equals(key: key, value: value)
             } else if let value = try container.decodeIfPresent(JSONValue.self, forKey: .notEquals) {
@@ -801,8 +816,18 @@ indirect enum Condition: Decodable, Equatable {
                     debugDescription: "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt is required"
                 )
             }
+            if let derived {
+                let match: Bool = switch self {
+                case let .equals(_, operand): PrototypeDataValues.equal(derived, operand)
+                case let .notEquals(_, operand): !PrototypeDataValues.equal(derived, operand)
+                default: holds([key: derived])
+                }
+                self = Self.constant(match)
+            }
         }
     }
+
+    private static func constant(_ value: Bool) -> Self { value ? .all([]) : .any([]) }
 
     /// A missing key fails `equals`, `gt` and `lt` and satisfies `notEquals`; a non-numeric value
     /// fails the numeric comparisons instead of throwing.
@@ -895,6 +920,11 @@ final class PrototypeNode: Decodable {
     let contentDescription: String?
     /// An uploaded image asset id, or a `{light, dark}` pair of ids (#11218).
     let asset: PrototypeModeValue?
+    let url: String?
+    let crossfade: Bool?
+    let via: String?
+    let imagePlaceholder: JSONValue?
+    let imageError: JSONValue?
     let filter: ImageFilter?
     let fadeEdges: FadeEdges?
     let edgeEffect: String?
@@ -1047,7 +1077,7 @@ final class PrototypeNode: Decodable {
         case into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey,
              transition, attentionLoop, keyframes, animate
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, zoomable,
-             semantics
+             semantics, error, url, crossfade, via
         case kind, selectionKey, openKey, list, detail, content, main
         case effect, name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
@@ -1108,6 +1138,12 @@ final class PrototypeNode: Decodable {
         semantics = try container.decodeIfPresent(PrototypeSemantics.self, forKey: .semantics)
         contentDescription = try container.decodeIfPresent(String.self, forKey: .contentDescription)
         asset = try container.decodeIfPresent(PrototypeModeValue.self, forKey: .asset)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        crossfade = try container.decodeIfPresent(Bool.self, forKey: .crossfade)
+        via = try container.decodeIfPresent(String.self, forKey: .via)
+        imagePlaceholder = decodedType == "image" ? try container
+            .decodeIfPresent(JSONValue.self, forKey: .placeholder) : nil
+        imageError = decodedType == "image" ? try container.decodeIfPresent(JSONValue.self, forKey: .error) : nil
         filter = try container.decodeIfPresent(ImageFilter.self, forKey: .filter)
         fadeEdges = try container.decodeIfPresent(FadeEdges.self, forKey: .fadeEdges)
         edgeEffect = try container.decodeIfPresent(String.self, forKey: .edgeEffect)
@@ -1129,7 +1165,7 @@ final class PrototypeNode: Decodable {
             .decodeIfPresent(PrototypeNode.self, forKey: .supporting) : nil
         adaptiveItems = type == "adaptive" ? try container.decodeIfPresent([RadioOption].self, forKey: .items) : nil
         stateKey = try container.decodeIfPresent(String.self, forKey: .stateKey)
-        placeholder = try container.decodeIfPresent(String.self, forKey: .placeholder)
+        placeholder = decodedType == "image" ? nil : try container.decodeIfPresent(String.self, forKey: .placeholder)
         reverse = try container.decodeIfPresent(Bool.self, forKey: .reverse)
         stickToEnd = try container.decodeIfPresent(Bool.self, forKey: .stickToEnd)
         atEndKey = try container.decodeIfPresent(String.self, forKey: .atEndKey)
@@ -1290,6 +1326,9 @@ final class PrototypeNode: Decodable {
     func collectAssets(into ids: inout Set<String>) {
         // A {light, dark} pair references both ids, whichever mode is drawn.
         ids.formUnion(asset?.values ?? [])
+        for fallback in [imagePlaceholder, imageError] {
+            if let asset = fallback?.objectFields?["asset"]?.stringValue { ids.insert(asset) }
+        }
         ids.formUnion(fontAssetIds())
         items?.compactMap(\.image).forEach { ids.formUnion($0.values) }
         children?.forEach { $0.collectAssets(into: &ids) }

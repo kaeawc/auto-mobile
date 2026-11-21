@@ -6,6 +6,7 @@ import { defaultIdGenerator } from "../../utils/IdGenerator";
 import type { SessionManager } from "../../daemon/sessionManager";
 import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
+import { launchOnFreeRunnerPort, type RunnerPorts } from "../shared/RunnerPortRetry";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { combineAbortSignals } from "../../utils/AbortContext";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../utils/PortManager";
@@ -50,7 +51,7 @@ export class VisionosRunnerLifecycle {
       launcher: VisionosRunnerLauncher;
       /** The device's window app, when known; absent keeps the runner on its demo app. */
       targetBundleId?: (deviceId: string) => string | undefined;
-      ports: { allocate(deviceId: string): number; release(deviceId: string, port: number): void };
+      ports: RunnerPorts;
       /** Uninstall notifications; an uninstalled automated app marks its runner for restart. */
       appUninstalls?: VisionosAppUninstalls;
     },
@@ -118,13 +119,24 @@ export class VisionosRunnerLifecycle {
     try {
       const xctestrun = await this.dependencies.artifacts.resolve(signal);
       signal.throwIfAborted();
-      entry.port = this.dependencies.ports.allocate(deviceId);
-      const handle = await this.dependencies.launcher.launch({
+      // Another platform's runner on the allocated port moves startup to the next free one (#18924).
+      const handle = await launchOnFreeRunnerPort({
         deviceId,
-        xctestrun,
-        port: entry.port,
-        bundleId,
+        ports: this.dependencies.ports,
         signal,
+        setPort: (port) => {
+          entry.port = port;
+        },
+        isCurrent: () => this.runners.get(deviceId) === entry,
+        launch: (port) =>
+          this.dependencies.launcher.launch({
+            deviceId,
+            xctestrun,
+            port,
+            bundleId,
+            signal,
+          }),
+        logTag: "[VisionosRunner]",
       });
       entry.stop = handle.stop;
       if (signal.aborted || this.runners.get(deviceId) !== entry) {
@@ -295,6 +307,7 @@ export function getVisionosRunnerLifecycle(): VisionosRunnerLifecycle {
             reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
           }),
         release: (deviceId, port) => PortManager.releaseIfAllocated(`visionos:${deviceId}`, port),
+        quarantine: (port) => PortManager.quarantine(port),
       },
     });
     process.once("exit", () => defaultLifecycle?.stopAll());

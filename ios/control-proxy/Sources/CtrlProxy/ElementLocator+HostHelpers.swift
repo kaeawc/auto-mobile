@@ -113,12 +113,10 @@ extension ElementLocator {
     /// Offset that moves SpringBoard alert frames into the observed app's coordinate space (#6635).
     ///
     /// SpringBoard reports alert frames in screen space, while an iPadOS windowed app's
-    /// snapshot is relative to its window. Observe merges both into one hierarchy, and the
-    /// gesture path adds `windowedAppTranslation` to every automatic point offset when the app
-    /// frame is not screen-sized. Subtracting that same translation here keeps observe output in
-    /// one space, so the gesture rule lands SpringBoard alert taps back on their screen points.
-    /// `windowFrame` is a live query and only runs when the app frame is not screen-sized, using
-    /// the same mismatch test the gesture path uses before it reads the window.
+    /// snapshot is relative to its window. Observe merges both into one window-relative
+    /// hierarchy, then moves the whole hierarchy into screen space with `translatedToScreen`,
+    /// which lands SpringBoard alerts back on their screen frames.
+    /// `windowFrame` is a live query and only runs when the app frame is not screen-sized.
     nonisolated static func springboardAlertOffset(
         appFrame: CGRect,
         springboardFrame: CGRect,
@@ -126,8 +124,24 @@ extension ElementLocator {
     )
         -> CGPoint
     {
+        guard let translation = windowScreenTranslation(
+            appFrame: appFrame, screenFrame: springboardFrame, windowFrame: windowFrame
+        ) else { return .zero }
+        return CGPoint(x: -translation.x, y: -translation.y)
+    }
+
+    /// Screen offset of an inset iPadOS app window (#6635, #18830), or nil for a screen-sized app.
+    ///
+    /// `windowFrame` is a live query and only runs when the app frame is not screen-sized.
+    nonisolated static func windowScreenTranslation(
+        appFrame: CGRect,
+        screenFrame: CGRect,
+        windowFrame: () -> CGRect?
+    )
+        -> CGPoint?
+    {
         let appSize = GestureSize(width: Double(appFrame.width), height: Double(appFrame.height))
-        let screenSize = GestureSize(width: Double(springboardFrame.width), height: Double(springboardFrame.height))
+        let screenSize = GestureSize(width: Double(screenFrame.width), height: Double(screenFrame.height))
         guard hasMultiPanelMismatch(app: appSize, screen: screenSize),
               let window = windowFrame(),
               let translation = windowedAppTranslation(
@@ -135,8 +149,54 @@ extension ElementLocator {
                   appSize: appSize,
                   windowOrigin: GesturePoint(x: Double(window.minX), y: Double(window.minY)),
                   windowSize: GestureSize(width: Double(window.width), height: Double(window.height))
-              ) else { return .zero }
-        return CGPoint(x: -translation.x, y: -translation.y)
+              ) else { return nil }
+        return CGPoint(x: translation.x, y: translation.y)
+    }
+
+    /// Move an observed inset-window hierarchy into screen space (#18830).
+    ///
+    /// The app snapshot, and the SpringBoard alerts merged into it, are relative to the app
+    /// window. The keyboard is the exception: XCTest already reports it in screen space, and so
+    /// does the separate window that hosts it with its input assistant bar, so those keep their
+    /// bounds. With every node in screen space the bounds line up with the full-screen
+    /// screenshot, and the gesture path delivers point offsets without adding the window origin
+    /// again. Run it before the optimizer flattens the windows away.
+    nonisolated static func translatedToScreen(_ element: UIElementInfo, by translation: CGPoint) -> UIElementInfo {
+        let dx = ElementBounds.clampedInt(translation.x)
+        let dy = ElementBounds.clampedInt(translation.y)
+        guard dx != 0 || dy != 0 else { return element }
+        let appBounds = element.bounds
+        return mappingBounds(
+            element,
+            rootBounds: nil,
+            skipSubtree: { isScreenSpaceSubtree($0, appBounds: appBounds) }
+        ) {
+            ElementBounds(left: $0.left + dx, top: $0.top + dy, right: $0.right + dx, bottom: $0.bottom + dy)
+        }
+    }
+
+    /// A keyboard, or a keyboard-hosting window that is not the app's own window.
+    nonisolated static func isScreenSpaceSubtree(_ element: UIElementInfo, appBounds: ElementBounds?) -> Bool {
+        func isKeyboard(_ node: UIElementInfo) -> Bool { node.className?.hasPrefix(keyboardClassName) == true }
+        func containsKeyboard(_ node: UIElementInfo) -> Bool {
+            isKeyboard(node) || (node.node ?? []).contains(where: containsKeyboard)
+        }
+        if isKeyboard(element) { return true }
+        guard element.className == windowClassName, let bounds = element.bounds else { return false }
+        let isAppWindow = appBounds.map {
+            bounds.left == $0.left && bounds.top == $0.top && bounds.right == $0.right && bounds.bottom == $0.bottom
+        } ?? false
+        return !isAppWindow && containsKeyboard(element)
+    }
+
+    /// Observe's class for `.keyboard`; its keys are `UIKeyboardKey`.
+    nonisolated static let keyboardClassName = "UIKeyboard"
+    nonisolated static let windowClassName = "UIWindow"
+
+    /// Report the screen as an inset window's root bounds: hosts read the screen size from the
+    /// root, and the window's own frame stays on its window node and in `windows` (#18830).
+    nonisolated static func withRootBounds(_ element: UIElementInfo, _ bounds: ElementBounds) -> UIElementInfo {
+        mappingBounds(element, rootBounds: bounds) { $0 }
     }
 
     /// Treat invalid snapshot frames as zero-area so only usable descendants keep their wrappers.
@@ -177,6 +237,13 @@ extension ElementLocator {
             return nil
         }
         return "com.apple.Spotlight"
+    }
+
+    /// Only an iPad keeps a parked app window `.runningForeground` behind its home screen (#18828).
+    /// Spotlight floats over the iPad home screen, so the icon list must not displace it.
+    nonisolated static func canParkForegroundApp(trackedBundleId: String?, isPad: Bool) -> Bool {
+        guard isPad, let trackedBundleId else { return false }
+        return trackedBundleId != "com.apple.springboard" && trackedBundleId != "com.apple.Spotlight"
     }
 
     /// Choose SpringBoard for a visible switcher before considering its app cards.

@@ -447,6 +447,23 @@ export function focusedFieldLayerRefusal(
         'Focus the prototype\'s field first (tapOn with layer "prototype"), or omit layer.';
 }
 
+/**
+ * `"prototype"` when CtrlProxy's prototype window is the input-focused window and holds a focused
+ * node; otherwise `undefined`. The device delivers text to the focused window, while the app's
+ * window keeps its own focused field underneath, so an unscoped focused-field read would see the
+ * app's field instead of the one that received the text (#18895).
+ */
+export function inputFocusedPrototypeLayer(
+  hierarchy: ViewHierarchyResult | undefined,
+): "prototype" | undefined {
+  if (!hierarchy || !ownPrototypeWindows(hierarchy).some((window) => window.isFocused === true)) {
+    return undefined;
+  }
+  return findFlaggedElement(scopeHierarchyToLayer(hierarchy, "prototype"), "focused") === undefined
+    ? undefined
+    : "prototype";
+}
+
 function findFlaggedElement(
   hierarchy: ViewHierarchyResult,
   flag: "focused" | "accessibility-focused",

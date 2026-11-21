@@ -20,6 +20,10 @@ import { getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { combineAbortSignals, combineWithAmbientAbort } from "../../utils/AbortContext";
 import { logger } from "../../utils/logger";
 import { isIosKeyboardVisible } from "../observe/ios/IosScreenIdentity";
+import {
+  findIosKeyboardIntroduction,
+  type IosKeyboardIntroduction,
+} from "./iosKeyboardIntroduction";
 
 /** Keep secure values out of the shared focused-field reader, including its property copies. */
 class SecureValueOmittingParser extends DefaultElementParser {
@@ -323,6 +327,8 @@ export type IosTypedTextFocusRead =
       field: FocusedTextField | undefined;
       hasFocusedTextInput: boolean;
       keyboardVisible: boolean;
+      /** The one-time "slide to type" introduction covering the keyboard, when shown. */
+      keyboardIntroduction?: IosKeyboardIntroduction;
     };
 
 /** Preserve the focused-field-only contract for verification callers. */
@@ -372,6 +378,7 @@ export async function readIosTypedTextFocus(
     if (observation.freshness?.isFresh === false || !hierarchy || hierarchy.hierarchy.error) {
       return { kind: "unavailable" };
     }
+    const keyboardIntroduction = findIosKeyboardIntroduction(hierarchy);
     return {
       kind: "read",
       field: getFocusedTextField(hierarchy, new SecureValueOmittingParser(), {
@@ -381,6 +388,7 @@ export async function readIosTypedTextFocus(
       // Real focus does not require a readable value or a native editable snapshot.
       hasFocusedTextInput: hasFocusedTextInput(hierarchy, new SecureValueOmittingParser()),
       keyboardVisible: isIosKeyboardVisible(observation.viewHierarchy, observation.screenSize),
+      ...(keyboardIntroduction === undefined ? {} : { keyboardIntroduction }),
     };
   } catch {
     // Best-effort verification must preserve a confirmed delivery; never log field/transport values.

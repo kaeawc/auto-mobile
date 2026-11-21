@@ -2,6 +2,29 @@ import { expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 import { prototypeGateCapabilities } from "../../../src/features/prototype/prototypeCapabilityGates";
+import { routeParamsSchema } from "../../../src/features/prototype/prototypeRouteSchema";
+
+test("route params accept read bindings and exclude generated and JSON literal bindings", () => {
+  const params = {
+    state: { state: "selected" },
+    item: { item: "id" },
+    index: { index: true },
+    data: { data: "/selected" },
+    text: "id",
+    number: 1,
+    boolean: true,
+  } as const;
+  expect(routeParamsSchema.parse(params)).toEqual(params);
+  for (const binding of [
+    { generate: "id" },
+    { now: "epochMs" },
+    { now: "iso" },
+    { lastGenerated: true },
+    { value: "literal" },
+  ]) {
+    expect(routeParamsSchema.safeParse({ id: binding }).success).toBe(false);
+  }
+});
 
 const directory = new URL("../../fixtures/prototype-spec/", import.meta.url);
 const invalid = readdirSync(new URL("invalid/", directory))

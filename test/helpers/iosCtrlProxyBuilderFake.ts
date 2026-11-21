@@ -34,6 +34,8 @@ export function fakeIosCtrlProxyBuilder(
 ): IosCtrlProxyBuilderSurface {
   return {
     build: members.build ?? (async () => unsupported("build")),
+    // Default: the build has no host app, so the launch skips installing it.
+    getAppBundlePath: members.getAppBundlePath ?? (async () => null),
     getExpectedAppHash: members.getExpectedAppHash ?? (() => unsupported("getExpectedAppHash")),
     getInstalledBundleVersion:
       members.getInstalledBundleVersion ?? (async () => unsupported("getInstalledBundleVersion")),

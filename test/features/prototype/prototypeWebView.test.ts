@@ -7,6 +7,7 @@ import {
   prototypeWebViewCallError,
   prototypeWebViewError,
   prototypeWebViewIds,
+  prototypeWebViewNodePath,
   prototypeWebViewPrivateHost,
 } from "../../../src/features/prototype/prototypeWebView";
 
@@ -96,6 +97,11 @@ test("navigation and title keys are string state, the back key is boolean state"
   expect(at({ canGoBackKey: "nav" })?.message).toBe(
     "canGoBackKey must name a declared boolean state key",
   );
+});
+
+test("the first webView node path is found, with or without an id", () => {
+  expect(prototypeWebViewNodePath(spec(webView()))).toBe("root.children[0]");
+  expect(prototypeWebViewNodePath({ root: { type: "text", text: "Hi" } })).toBeUndefined();
 });
 
 test("webview calls must name a webView node", () => {

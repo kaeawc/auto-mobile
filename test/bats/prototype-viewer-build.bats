@@ -14,6 +14,8 @@ setup() {
     "${REPO_ROOT}/ios/prototype-agent/Viewer/Viewer.entitlements" "${FIXTURE}/ios/prototype-agent/Viewer/"
   touch "${FIXTURE}/ios/prototype-agent/Viewer/ViewerApp.swift"
   export BUILD_LOG="${BATS_TEST_TMPDIR}/build.log"
+  export LINKED_ENTITLEMENTS="${BATS_TEST_TMPDIR}/linked.entitlements"
+  export CODESIGN_TARGET_LOG="${BATS_TEST_TMPDIR}/codesign-target.log"
   export VIEWER_ENTITLEMENTS="${FIXTURE}/ios/prototype-agent/Viewer/Viewer.entitlements"
   cat > "${FIXTURE}/scripts/ios/prototype-effects-metallib.sh" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -33,6 +35,7 @@ elif [[ "$1 $2 $3" == '--sdk iphonesimulator swiftc' ]]; then
   while [[ "$1" != -Xlinker ]]; do shift; done
   [[ "$1 $2 $3 $4 $5 $6 $7" == '-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker' ]]
   [[ "$8" == "$VIEWER_ENTITLEMENTS" && -s "$8" ]]
+  cp "$8" "$LINKED_ENTITLEMENTS"
   while [[ "$1" != -o ]]; do shift; done
   printf 'slice\n' > "$2"
 else
@@ -58,6 +61,9 @@ SCRIPT
 set -euo pipefail
 # Entitlements must be linked, never supplied to codesign.
 [[ $# -eq 4 && "$1 $2 $3" == '--force --sign -' ]]
+# The target must be the completed bundle: binary and Info.plist already in place.
+[[ -d "$4" && -s "$4/PrototypeViewer" && -s "$4/Info.plist" ]]
+printf '%s\n' "$4" >> "$CODESIGN_TARGET_LOG"
 printf 'codesign %s\n' "$*" >> "$BUILD_LOG"
 SCRIPT
   chmod +x "${FIXTURE}/scripts/ios/prototype-effects-metallib.sh" "${MOCK_BIN}/"*
@@ -77,4 +83,21 @@ SCRIPT
   done
   run tail -n 1 "$BUILD_LOG"
   [[ "$output" == 'codesign --force --sign - '* ]]
+  [ "$(cat "$CODESIGN_TARGET_LOG")" == "${BATS_TEST_TMPDIR}/out space/PrototypeViewer.app" ]
+}
+
+@test "linked entitlements name the viewer bundle as application id and first keychain access group" {
+  run bash "${FIXTURE}/scripts/ios/prototype-viewer-build.sh" "${BATS_TEST_TMPDIR}/out space"
+  [ "$status" -eq 0 ]
+  run python3 - "$LINKED_ENTITLEMENTS" <<'PY'
+import plistlib, sys
+entitlements = plistlib.load(open(sys.argv[1], "rb"))
+groups = entitlements["keychain-access-groups"]
+print(entitlements["application-identifier"], groups[0], len(groups))
+PY
+  [ "$status" -eq 0 ]
+  # Matches the template's CFBundleIdentifier, the Keychain group the viewer writes to.
+  [ "$output" == "dev.jasonpearson.automobile.prototype-viewer dev.jasonpearson.automobile.prototype-viewer 1" ]
+  grep -F '<key>CFBundleIdentifier</key><string>dev.jasonpearson.automobile.prototype-viewer</string>' \
+    "${FIXTURE}/ios/prototype-agent/Viewer/Info.plist"
 }

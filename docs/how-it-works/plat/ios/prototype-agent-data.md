@@ -104,6 +104,8 @@ Storage reset (`clear_prototype_storage`) removes both stores; dismissal retains
 `clear_prototype_storage` for explicit erasure.
 
 The iOS saved prototype is its own app, so `deleteSaved` uninstalls it and its sandbox.
+Uninstall does not remove its Keychain items, and the app's clear endpoint is gone afterwards, so call
+`clear_prototype_storage` on the saved app before `deleteSaved` when its spec declares `storage.secure` keys.
 
 ## Request action capability
 

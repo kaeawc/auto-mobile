@@ -19,16 +19,18 @@ A condition is exactly one of these forms. `visibleWhen` takes any of them;
 | `{key, lengthLt: integer}`  | A string state value has UTF-16 length strictly less than the operand.                |
 | `{valid: key or keys}`      | All referenced keys pass their checks.                                                |
 | `{data \| platform, ...}`   | `equals`, `notEquals`, `gt`, `lt` on `/data` or `/platform`; `empty` only on `/data`. |
+| `{derived, ...}`            | A raw top-level derived value passes a scalar, string or emptiness comparison.        |
 | `{all: [condition, ...]}`   | Every member holds. One to 16 members.                                                |
 | `{any: [condition, ...]}`   | At least one member holds. One to 16 members.                                         |
 | `{not: condition}`          | The member does not hold.                                                             |
 
-String comparisons require `prototype_string_conditions_v1` and are key-only. Missing and non-string values fail all four. The `contains`/`startsWith` literals are nonempty, at most 256 UTF-16 units. Operands bind repeat `{item.x}`/`{index}` placeholders as text (a numeric item renders as its text, unlike `equals`). An empty substituted operand holds for every string. The runtime performs no Unicode normalization. The `lengthGt`/`lengthLt` operands are literal integers in 0..100000; equality to the length fails both, and `😀` has length 2.
+String comparisons require `prototype_string_conditions_v1` and use `key` or `derived`. Missing and non-string values fail all four. The `contains`/`startsWith` literals are nonempty, at most 256 UTF-16 units. Operands bind repeat `{item.x}`/`{index}` placeholders as text (a numeric item renders as its text, unlike `equals`). An empty substituted operand holds for every string. The runtime performs no Unicode normalization. The `lengthGt`/`lengthLt` operands are literal integers in 0..100000; equality to the length fails both, and `😀` has length 2.
 
 Numbers compare by value, so a state of `-0` equals `0` on every platform (#11408).
 
 Conditions nest to a depth of 8 (`MAX_PROTOTYPE_CONDITION_DEPTH` in the shared
-contract). Every key/data/platform form takes exactly one comparison, and string comparisons require `key`.
+contract). The `key`, `data`, `platform` and `derived` forms each take one comparison. Derived conditions require
+`prototype_derive_v1` and update when the named entry recomputes.
 Errors point at the offending field (for example `root.visibleWhen.gt`).
 The `toggle`, `increment` and `decrement` actions validate their `key` against the declared `state`
 (`root.onTap[0].key`). They are no-ops at runtime if other means changed the key's type.

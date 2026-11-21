@@ -12,6 +12,7 @@ import { prototypeSavedUnsupportedMessage } from "../features/observe/android/Ct
 import type { AndroidPrototypeTransport } from "../features/prototype/androidPrototypeTransport";
 import type { PrototypeSpec, PrototypeJson } from "../features/prototype/prototypeSpec";
 import { hasElementAnchors } from "../features/prototype/prototypeAnchors";
+import { prototypeWebViewNodePath } from "../features/prototype/prototypeWebView";
 import {
   preparePrototypeAssets,
   type PrototypeAssetSource,
@@ -631,6 +632,15 @@ async function saveIosPrototype(
   }
   if (hasElementAnchors(args.spec!)) {
     return savedElementAnchorFailure();
+  }
+  const webViewPath = prototypeWebViewNodePath(args.spec!);
+  if (webViewPath !== undefined) {
+    // The per-prototype viewer template has no web view module (#18814); only ProtoViewer draws one.
+    return {
+      success: false,
+      errorCode: "unsupported_capability",
+      error: `The webView node at ${webViewPath} is not supported by the saved prototype viewer. Install ProtoViewer on the simulator and save again, or remove the webView node. Nothing was saved.`,
+    };
   }
   const prepared = await preparePrototypeAssets(
     args.assets ?? [],

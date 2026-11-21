@@ -134,6 +134,33 @@ describe("fixture capture scope", () => {
     ]);
   });
 
+  test("fills the device's missing OS and model facts from the admitted image", async () => {
+    const { deps, writer } = captureDeps();
+    await runWithFixtureCapture("rotate", deps, async () => {
+      noteFixtureCaptureDevice(
+        { platform: "android", deviceId: "emulator-5582", name: "fold", formFactor: "foldable" },
+        {
+          name: "fold",
+          platform: "android",
+          isRunning: true,
+          apiLevel: 36,
+          osVersion: "16",
+          formFactor: "phone",
+          model: "sdk_gphone64_arm64",
+        },
+      );
+    });
+    expect(writer.captures[0]?.provenance.device).toEqual({
+      platform: "android",
+      deviceId: "emulator-5582",
+      name: "fold",
+      formFactor: "foldable",
+      apiLevel: 36,
+      osVersion: "16",
+      model: "sdk_gphone64_arm64",
+    });
+  });
+
   test("records a failed command's exit code and output, and the seam still throws", async () => {
     const { deps, writer, timer } = captureDeps();
     const failure = execError({ code: 1, stdout: "partial", stderr: "error: closed" });

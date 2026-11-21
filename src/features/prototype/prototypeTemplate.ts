@@ -511,7 +511,10 @@ function mapPart(part: Raw, path: string, visit: FieldVisitor): Raw {
 /** Component fields that take placeholders besides a text node's `text`. */
 const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVisitor) => void> = {
   // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
-  image: (node, path, visit) => mapField(node, "asset", path, { kind: "text", visit }),
+  image: (node, path, visit) => {
+    mapField(node, "asset", path, { kind: "text", visit });
+    mapField(node, "url", path, { kind: "text", visit });
+  },
   button: (node, path, visit) => {
     mapField(node, "label", path, { kind: "text", visit });
     // An M3 Expressive split button's menu entries bind like `menu.items` (#15258).

@@ -617,7 +617,10 @@ internal object PrototypeBindableFields {
               visitor.action(entry, at)
             }
         // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
-        "image" -> visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
+        "image" -> {
+          visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
+            ?: visitor.field(node, "url", path, PrototypeBindableKind.TEXT)
+        }
         // An M3 Expressive split button's menu entries bind like `menu.items` (#15258).
         "button" ->
           visitor.field(node, "label", path, PrototypeBindableKind.TEXT)

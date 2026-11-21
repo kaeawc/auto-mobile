@@ -835,6 +835,17 @@ export abstract class SessionManagerForwarders {
     return this.forwardersHost.cache.getRotation(sessionId);
   }
 
+  recordRotationOriginals(
+    session: Session,
+    state: RotationSessionState,
+  ): Promise<void> | undefined {
+    return this.forwardersHost.cache.recordRotationOriginals(session, state);
+  }
+
+  forgetRotationOriginals(session: Session, state: RotationSessionState): void {
+    this.forwardersHost.cache.forgetRotationOriginals(session, state);
+  }
+
   trackRotationSessionSetup(
     session: Session,
     createSetup: (assertCurrentDevice: () => void) => Promise<void>,

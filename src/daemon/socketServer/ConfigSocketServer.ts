@@ -1,7 +1,7 @@
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { RequestResponseSocketServer } from "./RequestResponseSocketServer";
 import { SocketRequest, SocketResponse } from "./SocketServerTypes";
-import type { StreamSocketAuthenticator } from "../streamSocketAuth";
+import type { StreamSocketAuthenticator } from "../streams/streamSocketAuth";
 
 export type ConfigSocketMethod = "config/get" | "config/set";
 

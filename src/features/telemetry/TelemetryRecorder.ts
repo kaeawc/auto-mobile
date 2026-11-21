@@ -12,7 +12,7 @@ import {
 } from "../../db/navigationEventRepository";
 import { recordStorageEvent, type RecordStorageEventInput } from "../../db/storageEventRepository";
 import { recordLayoutEvent, type RecordLayoutEventInput } from "../../db/layoutEventRepository";
-import { getTelemetryPushServer } from "../../daemon/telemetryPushSocketServer";
+import { getTelemetryPushServer } from "../../daemon/streams/telemetryPushSocketServer";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import type { TelemetryEventBuffer } from "./TelemetryEventBuffer";
 import { testOverrides } from "../../utils/testOverrides";

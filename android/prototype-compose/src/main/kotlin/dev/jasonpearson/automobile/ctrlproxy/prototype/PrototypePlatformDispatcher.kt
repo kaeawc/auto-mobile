@@ -53,8 +53,9 @@ internal class PrototypePlatformDispatcher(
     if (subscribed || closed) return
     subscribed = true
     for (module in registry.modules) {
-      // The host already publishes measured device state and debounced events under this lock.
-      if (module is PrototypeDeviceModule) continue
+      // The host already publishes measured device state and debounced events under this lock;
+      // the realtime sink publishes its own state and events inside the same lock (#14269).
+      if (module is PrototypeDeviceModule || module is PrototypeRealtimeModule) continue
       subscriptions +=
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
           module.state.collect { state -> exclusively { if (!closed) publish(module.name, state) } }

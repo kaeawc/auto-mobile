@@ -7,6 +7,7 @@ import {
 import { isPhysicalAndroidUsbSerial } from "../utils/androidSerial";
 import type { AdbTransportRestartLookup } from "../utils/android-cmdline-tools/AdbTransportRestartRegistry";
 import { MISSING_DEVICE_MISS_THRESHOLD, type DeviceLossMisses } from "./deviceLossMisses";
+import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 
 export type DisconnectCandidateIncarnation = number | string;
 
@@ -246,6 +247,30 @@ export function selectOfflineRecoveryCandidates(
       candidateDeviceIds.has(deviceId) &&
       !alreadyAttempted.has(deviceId) &&
       !inFlightStartupDeviceIds.has(deviceId),
+  );
+}
+
+/**
+ * Offline serials this daemon must never send `adb -s <serial> reconnect` to
+ * (#18911): devices it does not hold (no session, recording or startup lease
+ * of its own, so an idle pooled emulator another daemon may be booting or
+ * killing), and emulators on an excluded console port
+ * (`AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS`), which belong to another
+ * daemon whatever this pool's binding says. `excludedConsolePorts` is `"all"`
+ * when the exclusion could not be resolved, which withholds every emulator.
+ */
+export function selectUnownedOfflineRecoveryIds(
+  offlineDeviceIds: Iterable<string>,
+  isHeldByThisDaemon: (deviceId: string) => boolean,
+  excludedConsolePorts: ReadonlySet<number> | "all",
+): Set<string> {
+  return new Set(
+    [...offlineDeviceIds].filter((deviceId) => {
+      const port = consolePortFromSerial(deviceId);
+      const excluded =
+        port !== null && (excludedConsolePorts === "all" || excludedConsolePorts.has(port));
+      return excluded || !isHeldByThisDaemon(deviceId);
+    }),
   );
 }
 

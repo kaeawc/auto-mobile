@@ -170,7 +170,10 @@ describe("prototype simulate and timer reports", () => {
     ]);
     expect(
       await call(ios, { action: "simulate", id: "panel", event: "test.tick", data: {} }),
-    ).toMatchObject({ success: false, error: expect.stringContaining("Android") });
+    ).toMatchObject({
+      success: false,
+      error: expect.stringContaining("the connected prototype runtime"),
+    });
     expect(agent.requests).toEqual([]);
   });
 
@@ -390,6 +393,33 @@ describe("prototype simulate and timer reports", () => {
     expect(patched).toMatchObject({ success: true });
     expect(patched.warning).toContain('cancelTimer id "unknown"');
   });
+  test("simulate platform routes to the capable iOS agent", async () => {
+    agent.handshake.capabilities.push(
+      "prototype_platform_simulation_v1",
+      "simulate_prototype_platform",
+    );
+    expect(
+      await call(ios, { action: "simulate", id: "p", event: "test.tick", data: { count: 7 } }),
+    ).toMatchObject({ success: true });
+    expect(agent.requests).toContainEqual({
+      type: "simulate_prototype_platform",
+      body: { id: "p", event: "test.tick", data: { count: 7 } },
+    });
+    expect(proxy.simulatePlatformRequests).toEqual([]);
+  });
+
+  test("simulate platform refuses an iOS agent without the capability", async () => {
+    expect(
+      await call(ios, { action: "simulate", id: "p", event: "test.tick", data: {} }),
+    ).toMatchObject({
+      success: false,
+      error: expect.stringContaining("prototype_platform_simulation_v1"),
+    });
+    expect(agent.requests.some((request) => request.type === "simulate_prototype_platform")).toBe(
+      false,
+    );
+  });
+
   test("simulate push input: event needs data, and excludes advanceTimeMs (#14285)", () => {
     const push = { type: "message", data: { text: "Hi" } };
     const accepted = [

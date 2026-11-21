@@ -250,6 +250,7 @@
     ]
   },
   "conditionFilled": {
+    "derived": "cartCount",
     "key": "enabled",
     "equals": true,
     "notEquals": false,

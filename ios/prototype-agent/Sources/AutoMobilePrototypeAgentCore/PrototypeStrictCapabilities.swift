@@ -76,6 +76,7 @@ enum PrototypeStrictCapabilities {
             if PrototypeMotionV3.required(fields) { result.insert(PrototypeMotionV3.capability) }
             if PrototypeM3Expressive.required(fields) { result.insert(PrototypeM3Expressive.capability) }
             let type = fields["type"]?.stringValue ?? ""
+            if !PrototypeDerivedValidator.conditionReferences(fields, path: "").isEmpty { need("derive") }
             if PrototypeStringConditions.uses(fields) { need("string_conditions") }
             let types = [
                 "startTimer": "timers",

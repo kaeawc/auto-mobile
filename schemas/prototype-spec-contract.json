@@ -377,9 +377,10 @@
     },
     "condition": {
       "kind": "object",
-      "exactlyOne": ["key", "data", "platform", "all", "any", "not", "valid"],
+      "exactlyOne": ["key", "data", "platform", "all", "any", "not", "valid", "derived"],
+      "optionalDependentGroups": ["key|derived"],
       "dependents": {
-        "key|data|platform": [
+        "key|data|platform|derived": [
           "equals",
           "notEquals",
           "gt",
@@ -390,7 +391,7 @@
           "lengthGt",
           "lengthLt"
         ],
-        "key": ["contains", "startsWith", "lengthGt", "lengthLt"]
+        "key|derived": ["contains", "startsWith", "lengthGt", "lengthLt"]
       },
       "fields": {
         "key": {
@@ -525,6 +526,10 @@
             "min": 0,
             "max": 100000
           },
+          "optional": true
+        },
+        "derived": {
+          "rule": { "kind": "key" },
           "optional": true
         }
       }

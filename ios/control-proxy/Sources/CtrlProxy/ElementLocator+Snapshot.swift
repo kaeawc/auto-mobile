@@ -107,21 +107,25 @@ extension ElementLocator {
         func getSystemAlerts(
             appSnapshot: XCUIElementSnapshot,
             truncationReasons: inout Set<String>,
-            keyboardFocus: KeyboardFocus? = nil
+            keyboardFocus: KeyboardFocus? = nil,
+            portraitSpringBoard: PortraitSpringBoardRotation? = nil
         )
             throws -> (alerts: [UIElementInfo], rotation: Int?)
         {
             // Check for alerts in the app's own snapshot tree
             let appAlertSnapshots = collectAlertElements(from: appSnapshot)
-            let appAlerts = appAlertSnapshots.map { snapshot in
-                buildElementInfoFromSnapshot(
-                    snapshot,
-                    depth: 0,
-                    screenBounds: snapshot.frame,
-                    truncationReasons: &truncationReasons,
-                    keyboardFocus: keyboardFocus
-                )
-            }
+            let appAlerts = Self.appSnapshotAlertsInRootSpace(
+                appAlertSnapshots.map { snapshot in
+                    buildElementInfoFromSnapshot(
+                        snapshot,
+                        depth: 0,
+                        screenBounds: snapshot.frame,
+                        truncationReasons: &truncationReasons,
+                        keyboardFocus: keyboardFocus
+                    )
+                },
+                portraitSpringBoard: portraitSpringBoard
+            )
 
             // Also check SpringBoard for alerts not in the app's tree. A system-owned
             // sheet can cover a still-foreground app without appearing anywhere in the
@@ -223,7 +227,8 @@ extension ElementLocator {
             )
             let alerts = capture.alertSnapshots.map { entry in
                 // This path is skipped for foreground SpringBoard, whose app-snapshot alerts
-                // are rotated later with its main tree. App-snapshot alerts never enter here.
+                // take its main tree's rotation in getSystemAlerts. App-snapshot alerts never
+                // enter here, so no alert is rotated twice.
                 let alertOffset = entry.portraitHeight == nil ? offset : .zero
                 let alert = buildElementInfoFromSnapshot(
                     entry.snapshot,

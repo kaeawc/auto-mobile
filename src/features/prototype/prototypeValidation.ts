@@ -1,5 +1,5 @@
-import { prototypeGeneratedValuesError } from "./prototypeGeneratedBindings";
 import { prototypeRemoteImageError } from "./prototypeRemoteImages";
+import { prototypeGeneratedValuesError } from "./prototypeGeneratedBindings";
 import { prototypeGlassObjectError } from "./prototypeGlass";
 import { iconNames, prototypeIconNameError } from "./prototypeIconNames";
 import { excludeAccessoryReferences } from "./prototypeBindingValidation";

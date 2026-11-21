@@ -11,7 +11,9 @@ import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,9 +48,8 @@ class PrototypeRealtimeConfig(
 internal class PrototypeRealtimeModule(
   prototypeId: String,
   config: PrototypeRealtimeConfig,
-  sink: PrototypeChannelSink,
-  scope: CoroutineScope,
-  private val onError: (Throwable) -> Unit,
+  private val sink: PrototypeChannelSink,
+  private val scope: CoroutineScope,
   newId: () -> String,
 ) : PrototypePlatformModule {
   override val name = NAME
@@ -61,17 +62,19 @@ internal class PrototypeRealtimeModule(
 
   private val controller =
     PrototypeChannelController(
-      prototypeId,
-      config.transports,
-      sink,
-      scope,
-      config.random,
-      onError,
-      newId,
+      prototypeId = prototypeId,
+      transports = config.transports,
+      sink = sink,
+      scope = scope,
+      random = config.random,
+      // A sink or transport throw is isolated by the controller; surface it as a warning.
+      onError = { sink.warn("Realtime channel work failed: ${it.message}") },
+      newId = newId,
     )
   private val inbox = Channel<suspend () -> Unit>(Channel.UNLIMITED)
 
   init {
+    // Each entry is isolated: a throw ends that entry only, so a later close() still runs.
     scope.launch {
       for (work in inbox) {
         try {
@@ -79,8 +82,8 @@ internal class PrototypeRealtimeModule(
         } catch (cancelled: CancellationException) {
           throw cancelled
         } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
-          // One failed operation must not stop the inbox: later calls and close() still run.
-          onError(error)
+          // The controller isolates its own work; this catches what escapes a lifecycle call.
+          sink.warn("Realtime inbox work failed: ${error.message}")
         }
       }
     }
@@ -96,11 +99,15 @@ internal class PrototypeRealtimeModule(
     inbox.trySend { controller.show() }
   }
 
-  /** Dismissal or replacement: closes every connection, then stops the inbox. */
+  /**
+   * Dismissal, replacement or a destroyed host: stops the inbox and closes every connection. The
+   * close does not go through the inbox and cannot be cancelled, because a host may cancel [scope]
+   * before closing its runtime (an activity's `onDestroy`), and the connections must still close.
+   */
   override fun close() {
     controller.beginClose()
-    inbox.trySend { controller.close() }
     inbox.close()
+    scope.launch(NonCancellable, start = CoroutineStart.UNDISPATCHED) { controller.close() }
   }
 
   override suspend fun call(call: PlatformCall): PlatformCallResult {
@@ -108,27 +115,27 @@ internal class PrototypeRealtimeModule(
     val body = if (call.call == SEND) sendText(call.args) ?: return invalid("body") else null
     val result = CompletableDeferred<PrototypeChannelError?>()
     val caller = currentCoroutineContext()[Job]
+    // A call cancelled (timed out or dismissed) while it waited does nothing: checked when it
+    // leaves the inbox and again under the controller lock, where a blocked flush may hold it.
+    val wanted = { caller?.isActive != false }
     val queued =
       inbox
         .trySend {
-          // A call cancelled (timed out or dismissed) while it waited in the inbox does nothing.
-          if (caller?.isActive == false) return@trySend
+          if (!wanted()) return@trySend
           try {
             result.complete(
               when (call.call) {
-                CONNECT -> controller.connect(channel)
+                CONNECT -> controller.connect(channel, wanted)
                 DISCONNECT -> controller.disconnect(channel)
-                // Checked again under the controller lock: the caller may time out waiting for it.
-                SEND -> controller.send(channel, checkNotNull(body)) { caller?.isActive != false }
+                SEND -> controller.send(channel, checkNotNull(body), wanted)
                 else -> unsupported(call.call)
               },
             )
-          } catch (cancelled: CancellationException) {
-            result.cancel(cancelled)
-            throw cancelled
-          } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
-            result.complete(failed(call.call, error))
-            throw error
+          } finally {
+            // Whatever the controller threw, the caller is answered instead of waiting it out.
+            result.complete(
+              PrototypeChannelError(PrototypeChannelError.NETWORK, "The realtime call failed"),
+            )
           }
         }
         .isSuccess

@@ -9,18 +9,22 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceApp
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceLocale
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
 import dev.jasonpearson.automobile.ctrlproxy.prototype.DefaultPrototypeHost
+import dev.jasonpearson.automobile.ctrlproxy.prototype.OkHttpPrototypeChannelTransport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdropSupport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdrops
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeChannelTransports
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDeviceNetwork
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClients
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeInset
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRealtimeConfig
 import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
 
 // The service's log tag, so the moved setup keeps logging under it.
 private const val TAG = "CtrlProxy"
@@ -83,16 +87,29 @@ internal fun CtrlProxy.createPrototypeController(): PrototypeController {
     deviceAppearance = AndroidPrototypeDeviceAppearance(this),
     deviceLocale = AndroidPrototypeDeviceLocale(this),
     hostFactory = createPrototypeHost,
-    httpClients =
-      PrototypeHttpClients(
-        host = hostPrototypeHttp,
-        device = PrototypeDeviceNetwork.device,
-        remoteImages = PrototypeDeviceNetwork.images(this),
-      ),
+    httpClients = prototypeHttpClients(),
+    realtime = prototypeRealtime(),
     requestScope = serviceScope,
     platform = prototypePlatform,
   )
 }
+
+/** `via: "host"` relays over the host socket; `via: "device"` and remote images use the device. */
+private fun CtrlProxy.prototypeHttpClients() =
+  PrototypeHttpClients(
+    host = hostPrototypeHttp,
+    device = PrototypeDeviceNetwork.device,
+    remoteImages = PrototypeDeviceNetwork.images(this),
+  )
+
+/** `via: "host"` relays over the host socket; `via: "device"` opens OkHttp's WebSocket or SSE. */
+private fun CtrlProxy.prototypeRealtime() =
+  PrototypeRealtimeConfig(
+    PrototypeChannelTransports(
+      host = hostPrototypeChannels,
+      device = OkHttpPrototypeChannelTransport(OkHttpClient()),
+    ),
+  )
 
 /**
  * The prototype lifecycle, fed the lock gate, observer session and client count from the service.

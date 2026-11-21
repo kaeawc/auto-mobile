@@ -214,6 +214,11 @@ class PrototypeController(
   private val storage: PrototypeStoragePersistence? = null,
   /** The transports behind `request` actions (#12528). */
   private val httpClients: PrototypeHttpClients = PrototypeHttpClients.Unavailable,
+  /**
+   * The transports behind `channels` (#14269); each shown prototype gets its own `realtime` module.
+   * Null leaves `channels` without a module.
+   */
+  private val realtime: PrototypeRealtimeConfig? = null,
   /** Where requests wait for their response; they are cancelled when their prototype ends. */
   private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
   /** Device-compiled uniform declarations, checked even for hidden/styleWhen nodes. */
@@ -690,6 +695,7 @@ class PrototypeController(
           if (preservePages) previous?.runtime?.current?.stacks.orEmpty() else emptyMap(),
         storage = opened.session,
         httpClients = httpClients,
+        realtime = realtime,
         uploadAssets = uploadAssets,
         platform = platform,
         platformLimiter = platformLimiter,

@@ -98,7 +98,7 @@ describe("platform event simulation", () => {
     expect(Object.hasOwn(proxy.simulatePlatformRequests[0]!.data, "__proto__")).toBe(true);
     expect(proxy.simulatePlatformRequests[0]!.data).toEqual(data);
   });
-  test("device unsupported result is preserved and iOS has an Android hint", async () => {
+  test("device unsupported result is preserved and missing runtimes have an update hint", async () => {
     const { proxy, target } = harness();
     proxy.setSimulatePlatformResult({
       success: false,
@@ -110,7 +110,7 @@ describe("platform event simulation", () => {
     });
     expect(await performPrototypeSimulate({}, prototypeSchema.parse(input))).toMatchObject({
       success: false,
-      error: expect.stringContaining("Android"),
+      error: expect.stringContaining("the connected prototype runtime"),
     });
   });
 });

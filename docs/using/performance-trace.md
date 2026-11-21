@@ -9,6 +9,24 @@ Call it with `action: "start"` and a `template` to begin recording. It returns a
 it with `action: "stop"` and that `traceId` to stop the recorder and get the artifact path and a
 summary.
 
+## Android: record chosen Perfetto categories
+
+On Android, `start` can take `categories` instead of a `template`. Pass exactly one of the two;
+passing both or neither is refused.
+
+| Parameter    | Values                                                                              | Default |
+| ------------ | ----------------------------------------------------------------------------------- | ------- |
+| `categories` | One or more of `sched`, `gfx`, `view`, `am`, `wm`, `binder_driver`, `memory`, `app` | —       |
+| `bufferMb`   | Perfetto ring buffer size, 1 to 256 MB; only valid with `categories`                | 32      |
+
+- `app` records the app's own atrace tags and needs an `appId`. Passing an `appId` adds `app` to
+  the categories.
+- `timeLimitMs` bounds the recording on the device, as it does for a template.
+- The start and stop results list the resolved `categories` and `bufferMb`.
+- A categories trace has no summary: `stop` returns the `.perfetto-trace` artifact path, an empty
+  `summary` and a warning. Open the artifact in the Perfetto UI or `trace_processor`.
+- iOS refuses `categories`; use a `template` there.
+
 ## iOS: unsupported Xcode and simulator combinations
 
 With some Xcode versions, `xctrace` never finishes saving a trace on some simulator runtimes.

@@ -205,6 +205,7 @@ docs/img/favicon.ico -filter -diff -merge -text
 # Launcher / app icons consumed by the Android, iOS, and desktop builds — must be
 # direct git blobs, since build & packaging jobs check out with lfs: false.
 android/playground/app/src/main/res/mipmap-*/ic_launcher*.png -filter -diff -merge -text
+android/prototype-app-shell/src/main/res/drawable-nodpi/prototype_icon_*.png -filter -diff -merge -text
 ios/Playground/Sources/Assets.xcassets/AppIcon.appiconset/AppIcon.png -filter -diff -merge -text
 android/desktop-app/src/main/resources/icons/app-icon.png -filter -diff -merge -text
 # Read from a marketplace clone, which does not fetch LFS objects.

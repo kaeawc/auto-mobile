@@ -2043,137 +2043,6 @@
     }
   },
   {
-    "name": "captureTrace",
-    "title": "Capture Trace",
-    "annotations": {
-      "destructiveHint": true
-    },
-    "description": "Android: record a Perfetto trace from typed categories (sched, gfx, view, am, wm, binder_driver, memory, app). start returns a traceId; drive the flow; stop pulls the .perfetto-trace to the host. Released sessions stop their trace.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "action": {
-          "type": "string",
-          "enum": ["start", "stop"],
-          "description": "start a recorder, or stop one by traceId"
-        },
-        "traceId": {
-          "description": "stop: the id start returned",
-          "type": "string",
-          "minLength": 1
-        },
-        "appId": {
-          "description": "start: enables the app's atrace tags (Choreographer, RenderThread, custom slices)",
-          "type": "string",
-          "pattern": "^[A-Za-z0-9._-]+$",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "categories": {
-          "description": "start: what to record; default sched, gfx, view. app needs an appId",
-          "minItems": 1,
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["sched", "gfx", "view", "am", "wm", "binder_driver", "memory", "app"]
-          }
-        },
-        "bufferMb": {
-          "description": "start: ring buffer size; default 32",
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 256
-        },
-        "maxDurationMs": {
-          "description": "start: the recorder stops itself after this; default 30000",
-          "type": "integer",
-          "minimum": 1000,
-          "maximum": 300000
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label",
-          "type": "string"
-        }
-      },
-      "required": ["action"],
-      "additionalProperties": false
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "success": {
-          "type": "boolean",
-          "const": true
-        },
-        "action": {
-          "type": "string",
-          "enum": ["start", "stop"]
-        },
-        "traceId": {
-          "type": "string"
-        },
-        "path": {
-          "type": "string"
-        },
-        "sizeBytes": {
-          "type": "number"
-        },
-        "durationMs": {
-          "type": "number"
-        },
-        "deviceId": {
-          "type": "string"
-        },
-        "appId": {
-          "type": "string"
-        },
-        "categories": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["sched", "gfx", "view", "am", "wm", "binder_driver", "memory", "app"]
-          }
-        },
-        "bufferMb": {
-          "type": "number"
-        },
-        "maxDurationMs": {
-          "type": "number"
-        },
-        "startedAt": {
-          "type": "string"
-        },
-        "warnings": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "message": {
-          "type": "string"
-        }
-      },
-      "required": ["success", "action", "traceId", "deviceId", "warnings", "message"],
-      "additionalProperties": {}
-    },
-    "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
-    }
-  },
-  {
     "name": "changeLocalization",
     "title": "Change Locale",
     "annotations": {
@@ -10290,7 +10159,6 @@
               "blePeripheral",
               "buildApp",
               "captureAudio",
-              "captureTrace",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -10464,7 +10332,6 @@
               "blePeripheral",
               "buildApp",
               "captureAudio",
-              "captureTrace",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -27532,7 +27399,7 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Pass/fail performance checks of an app on the current screen, against the configured thresholds. kinds: performance (UI jank, frame time and Android-only touch latency of the foreground app; appId must be in the foreground) and memory (memory usage of appId); default both. Each reports passed with its metrics and violations. failOn error|warning makes the call fail when a check does not pass or cannot run (performance of an appId not in the foreground is listed under unsupported), for plan assertions; default never. For raw captures use performanceTrace, captureTrace, measureStartup or heapDump. Android and iOS Simulator. On iOS Simulator, performance requires an app instrumented with auto-mobile-sdk.",
+    "description": "Pass/fail performance checks of an app on the current screen, against the configured thresholds. kinds: performance (UI jank, frame time and Android-only touch latency of the foreground app; appId must be in the foreground) and memory (memory usage of appId); default both. Each reports passed with its metrics and violations. failOn error|warning makes the call fail when a check does not pass or cannot run (performance of an appId not in the foreground is listed under unsupported), for plan assertions; default never. For raw captures use performanceTrace, measureStartup or heapDump. Android and iOS Simulator. On iOS Simulator, performance requires an app instrumented with auto-mobile-sdk.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -27633,7 +27500,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Record a native performance trace (xctrace on iOS, Perfetto on Android): start with a template, drive the flow, then stop for the artifact path and a bounded summary.",
+    "description": "Record a native performance trace (xctrace on iOS, Perfetto on Android): start with a template, drive the flow, then stop for the artifact path and a bounded summary. On Android, start with categories (and bufferMb) instead of a template to record chosen Perfetto categories; that trace has no summary.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -27644,16 +27511,31 @@
           "description": "start a recorder, or stop one by traceId. iOS stop waits for finalisation: 60 seconds without output or artifact growth, at most 180 seconds total; a timeout reports an incomplete trace that cannot be summarised. Retry with a shorter timeLimitMs or on a quieter host."
         },
         "appId": {
-          "description": "App to trace (required for appLaunch and allocations)",
+          "description": "App to trace (required for appLaunch, allocations and the app category; adds app to categories)",
           "type": "string",
           "pattern": "^[A-Za-z0-9._-]+$",
           "minLength": 1,
           "maxLength": 256
         },
         "template": {
-          "description": "start: what to record",
+          "description": "start: what to record, with a bounded summary; or set categories",
           "type": "string",
           "enum": ["appLaunch", "hitches", "hangs", "timeProfiler", "allocations"]
+        },
+        "categories": {
+          "description": "start, Android only: Perfetto categories to record instead of a template; the trace has no summary",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["sched", "gfx", "view", "am", "wm", "binder_driver", "memory", "app"]
+          }
+        },
+        "bufferMb": {
+          "description": "start, with categories: ring buffer size (default 32)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
         },
         "timeLimitMs": {
           "description": "start: recorder stops itself after this (default 30000)",
@@ -27714,6 +27596,16 @@
         "template": {
           "type": "string",
           "enum": ["appLaunch", "hitches", "hangs", "timeProfiler", "allocations"]
+        },
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["sched", "gfx", "view", "am", "wm", "binder_driver", "memory", "app"]
+          }
+        },
+        "bufferMb": {
+          "type": "number"
         },
         "appId": {
           "type": "string"
@@ -27873,7 +27765,6 @@
         "state",
         "deviceId",
         "platform",
-        "template",
         "startedAt",
         "timeLimitMs",
         "artifactPath",
@@ -33084,7 +32975,7 @@
           "minLength": 1
         },
         "assets": {
-          "description": "show, save or share only: images to upload before the prototype is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the prototype changes and names the assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
+          "description": "Assets for show, save, share or installApp. Supply {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Device uploads are sequential. If an upload fails, the prototype stays unchanged and the result names any assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
           "minItems": 1,
           "maxItems": 32,
           "type": "array",
@@ -33172,16 +33063,33 @@
               "description": "The launcher label, such as Feedly"
             },
             "icon": {
-              "type": "object",
-              "properties": {
-                "backgroundColor": {
-                  "type": "string",
-                  "pattern": "^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
-                  "description": "#RRGGBB or #AARRGGBB behind the adaptive icon and splash screen"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "backgroundColor": {
+                      "type": "string",
+                      "pattern": "^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+                      "description": "#RRGGBB or #AARRGGBB behind the adaptive icon monogram and splash screen"
+                    }
+                  },
+                  "required": ["backgroundColor"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "asset": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "description": "Id of a PNG or JPEG supplied in assets in this installApp call"
+                    }
+                  },
+                  "required": ["asset"],
+                  "additionalProperties": false
                 }
-              },
-              "required": ["backgroundColor"],
-              "additionalProperties": false
+              ]
             },
             "ttlHours": {
               "description": "Hours until the app expires and uninstallApp {expired: true} removes it; default 72, 0 keeps it until uninstallApp",
@@ -36068,7 +35976,6 @@
               "blePeripheral",
               "buildApp",
               "captureAudio",
-              "captureTrace",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -49701,7 +49608,6 @@
             "blePeripheral",
             "buildApp",
             "captureAudio",
-            "captureTrace",
             "changeLocalization",
             "clearKeyValueFile",
             "clearMockNetwork",
@@ -49834,7 +49740,6 @@
               "blePeripheral",
               "buildApp",
               "captureAudio",
-              "captureTrace",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",

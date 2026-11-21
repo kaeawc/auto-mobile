@@ -109,6 +109,7 @@ export const TOOL_EMOJI: Readonly<Record<string, ToolEmojiEntry>> = Object.freez
   openLink: tool("🌍"),
   homeScreen: tool("🏠"),
   recentApps: tool("🕘"),
+  shareSheet: tool("🫱", "docs/using/share-sheet.md"),
   systemTray: tool("🔔"),
   wakeAndUnlock: tool("🔓"),
   changeLocalization: tool("🌐"),

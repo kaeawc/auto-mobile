@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": [
+    "test/fixtures/shareSheet/*.json",
     "test/fixtures/observe-output/swipeon-container-floating-bar-18338/*.json",
     "test/fixtures/observe-output/compose-control-shapes-17955/*.json",
     "test/fixtures/observe-output/compose-interop-3183/*.json",

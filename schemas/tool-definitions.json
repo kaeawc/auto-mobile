@@ -10383,6 +10383,7 @@
               "setSensor",
               "setUIState",
               "shake",
+              "shareSheet",
               "siri",
               "snapshotOf",
               "sqlQuery",
@@ -10557,6 +10558,7 @@
               "setSensor",
               "setUIState",
               "shake",
+              "shareSheet",
               "siri",
               "snapshotOf",
               "sqlQuery",
@@ -36129,6 +36131,7 @@
               "setSensor",
               "setUIState",
               "shake",
+              "shareSheet",
               "siri",
               "snapshotOf",
               "sqlQuery",
@@ -49762,6 +49765,7 @@
             "setSensor",
             "setUIState",
             "shake",
+            "shareSheet",
             "siri",
             "snapshotOf",
             "sqlQuery",
@@ -49895,6 +49899,7 @@
               "setSensor",
               "setUIState",
               "shake",
+              "shareSheet",
               "siri",
               "snapshotOf",
               "sqlQuery",
@@ -54106,6 +54111,140 @@
       }
     },
     "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
+    }
+  },
+  {
+    "name": "shareSheet",
+    "title": "Control Share Sheet",
+    "annotations": {
+      "destructiveHint": false
+    },
+    "description": "List visible targets, select a target, or dismiss the share sheet after the app opens it. The iOS activity view controller reports sheetKind ios-activity-view-controller and requires an exact label for select. Android select requires an exact label or verified appId.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos", "visionos"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["list", "select", "dismiss"]
+        },
+        "label": {
+          "description": "Exact target label for select",
+          "type": "string",
+          "minLength": 1
+        },
+        "appId": {
+          "description": "Verified Android package for select",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "action": {
+          "type": "string",
+          "enum": ["list", "select", "dismiss"]
+        },
+        "sheetKind": {
+          "type": "string",
+          "enum": ["android-intentresolver", "android-legacy", "ios-activity-view-controller"]
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "selected": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success", "action", "sheetKind"],
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "appId": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": ["app", "direct", "action"]
+            }
+          },
+          "required": ["label", "kind"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["list"]
+        }
+      ],
       "automobile/requires": ["platform:android", "platform:ios"]
     }
   },

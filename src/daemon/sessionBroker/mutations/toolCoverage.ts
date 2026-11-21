@@ -198,6 +198,11 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "notJournaled",
   ),
   ...tools(
+    ["shareSheet"],
+    "Selection by label can invoke the system Copy action, so it records the clipboard prior. Listing, dismissal and selection by verified package dispatch no clipboard action.",
+    "journaled",
+  ),
+  ...tools(
     ["terminateApp", "crashApp", "appLifecycle"],
     "Acts on the app process only (force-stop, crash, trim memory, background kill); process state does not survive the next launch.",
     "notJournaled",

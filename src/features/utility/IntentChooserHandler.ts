@@ -19,9 +19,10 @@ import {
 import {
   type ChooserActivityLabelResult,
   type ChooserAppMetadata,
+  chooserRowPackages,
   defaultChooserAppMetadata,
 } from "./chooserAppMetadata";
-import { detectIntentChooser } from "./chooserHierarchy";
+import { CHOOSER_SCAN_PAGES, detectIntentChooser, swipeChooserList } from "./chooserHierarchy";
 import { ChooserRowMissingError } from "./ChooserRowMissingError";
 import type { DeepLinkManagerDependencies } from "./DeepLinkManagerDependencies";
 import { resolveElementServices } from "./DeepLinkElementServices";
@@ -64,8 +65,6 @@ interface PostTapFreshness {
 const POST_TAP_VERIFY_BUDGET_MS = 200;
 
 const POST_TAP_VERIFY_INTERVAL_MS = 50;
-
-const CHOOSER_SCAN_PAGES = 4;
 
 const CHOOSER_ANCHOR_DELTA_TOLERANCE_PX = 2;
 
@@ -440,22 +439,10 @@ export class IntentChooserHandler {
         if (!row) {
           return;
         }
-        const resourceId = searchableNativeId(properties) ?? "";
-        const separator = resourceId.indexOf(":id/");
-        const namespace = separator > 0 ? resourceId.slice(0, separator) : undefined;
         const inAppList = ancestors.some((ancestor) =>
           this.isChooserListNode(this.parser.extractNodeProperties(ancestor)),
         );
-        // Framework-owned chooser widgets are not metadata for the represented app.
-        const packages = [properties.package, properties.packageName, namespace].filter(
-          (value): value is string =>
-            typeof value === "string" &&
-            value.length > 0 &&
-            value !== hostPackage &&
-            value !== "android" &&
-            value !== "com.android.intentresolver" &&
-            value !== "com.android.systemui",
-        );
+        const packages = chooserRowPackages(properties, hostPackage);
         if (packages.length > 0) {
           rowsWithPackageMetadata.add(row);
         }
@@ -764,36 +751,18 @@ export class IntentChooserHandler {
     }: { appPackage: string; capturedAt?: number; direction?: "up" | "down" },
   ): Promise<{ hierarchy: ViewHierarchyResult } | null> {
     const list = this.findChooserList(roots);
-    if (!list || list.bounds.bottom - list.bounds.top < 40) {
-      return null;
-    }
-    const centerX = Math.round((list.bounds.left + list.bounds.right) / 2);
-    const height = list.bounds.bottom - list.bounds.top;
-    const lowerY = Math.round(list.bounds.bottom - height / 4);
-    const upperY = Math.round(list.bounds.top + height / 4);
-    const [fromY, toY] = direction === "up" ? [lowerY, upperY] : [upperY, lowerY];
-    throwIfAborted(this.chooserSignal);
-    const swipe = await awaitWhileRequestIsLive(
-      this.adbUtils.executeCommand(`shell input swipe ${centerX} ${fromY} ${centerX} ${toY} 350`, {
-        signal: this.chooserSignal,
-      }),
-      this.chooserSignal,
-    );
-    if (swipe.stderr?.trim()) {
-      throw new Error(`Could not scroll chooser app list: ${swipe.stderr.trim()}`);
-    }
-    const nextTimestamp = Math.max(hierarchy.updatedAt ?? 0, capturedAt ?? 0) + 1;
-    throwIfAborted(this.chooserSignal);
-    const fresh = await awaitWhileRequestIsLive(
-      metadata.getFreshHierarchy(this.device!, this.adbFactory, nextTimestamp, {
-        signal: this.chooserSignal,
-      }),
-      this.chooserSignal,
-    );
-    this.validateScrolledChooser(fresh, nextTimestamp, appPackage);
-    return JSON.stringify(fresh.hierarchy) === JSON.stringify(hierarchy.hierarchy)
-      ? null
-      : { hierarchy: fresh };
+    const fresh = await swipeChooserList(hierarchy, list?.bounds, {
+      direction,
+      capturedAt,
+      signal: this.chooserSignal,
+      swipe: (args, signal) =>
+        this.adbUtils.executeCommand(`shell input ${args.join(" ")}`, { signal }),
+      read: (minTimestamp, signal) =>
+        metadata.getFreshHierarchy(this.device!, this.adbFactory, minTimestamp, { signal }),
+      validate: (next, minTimestamp) =>
+        this.validateScrolledChooser(next, minTimestamp, appPackage),
+    });
+    return fresh ? { hierarchy: fresh } : null;
   }
 
   private validateScrolledChooser(

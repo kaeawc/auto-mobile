@@ -117,6 +117,7 @@ import {
   tapOnResultSchema,
   wakeAndUnlockResultSchema,
 } from "./toolOutputSchemas";
+import { registerShareSheetTool } from "./shareSheetTool";
 import { ToolRegistry } from "./toolRegistry";
 import { ANSWERS_SYSTEM_ALERTS, PLAN_RELEVANT, PLAN_SKELETON } from "./toolRegistryTypes";
 
@@ -514,6 +515,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
   );
 
   recentAppsTool.register(ToolRegistry, createRecentAppsHandler(deps));
+  registerShareSheetTool(deps.iosShareSheet);
 
   homeScreenTool.register(ToolRegistry, withTvosHomeScreen(homeScreenHandler));
 

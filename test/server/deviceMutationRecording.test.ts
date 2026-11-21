@@ -518,10 +518,13 @@ describe("broker tool-surface mutation recording", () => {
     expect(reader.calls).toBe(0);
   });
 
-  test("read-only clipboard, display, network, accessibility and keyboard calls create no journal entries", async () => {
+  test("actions with no journaled mutation create no entries or prior-value reads", async () => {
     const { recording, journal, reader } = harness();
     for (const [name, args] of [
       ["clipboard", { action: "get" }],
+      ["shareSheet", { action: "list" }],
+      ["shareSheet", { action: "dismiss" }],
+      ["shareSheet", { action: "select", appId: "com.example" }],
       ["displayConfig", {}],
       ["network", {}],
       ["accessibility", {}],

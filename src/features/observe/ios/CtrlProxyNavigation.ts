@@ -21,6 +21,7 @@ import type {
   CtrlProxyRecentAppsResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyRotateResult,
+  IosRotatePanel,
   CtrlProxyHingeAngleResult,
   CtrlProxyRefreshGeometryResult,
   CtrlProxyLocationRequest,
@@ -140,18 +141,20 @@ export class CtrlProxyNavigation {
   }
 
   /**
-   * Request to rotate device orientation.
+   * Request to rotate device orientation. `panel` names a foldable's active panel, so the runner
+   * rotates through the simulator's device pose instead of XCUIDevice (#17047).
    */
   async requestRotate(
     orientation: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    panel?: IosRotatePanel,
   ): Promise<CtrlProxyRotateResult> {
     return sendCommand<CtrlProxyRotateResult>(this.context, {
       idPrefix: "rotate",
       responseType: "rotate",
       messageType: "request_rotate",
-      params: { orientation },
+      params: panel ? { orientation, panel } : { orientation },
       timeoutMs,
       perf,
       cancelScreenshotBackoff: false,

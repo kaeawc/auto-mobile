@@ -29,6 +29,7 @@ import { normalizeWatchHierarchy, rejectWatchAlertCoveredTap } from "./WatchHier
 import { type WatchCommand, type WatchRunnerClient } from "./WatchRunnerClient";
 import { WatchRunnerError } from "./WatchRunnerError";
 import { watchRunners } from "./WatchRunnerRegistry";
+import { requireWatchRunner } from "./WatchRunnerRecovery";
 
 export function unsupportedWatchAction(action: string): never {
   throw new ActionableError(
@@ -263,7 +264,7 @@ export async function watchTapOn(
 ): Promise<TapOnElementResult> {
   validateWatchTapOn(options);
   signal?.throwIfAborted();
-  const client = watchRunners.require(deviceId);
+  const client = await requireWatchRunner(deviceId, signal);
   const stack = await readOpenSmartStack(client, () => timer.now(), signal);
   if (stack) {
     return tapSmartStackOn(client, stack, options, signal);
@@ -310,7 +311,7 @@ export async function watchTapAt(
 ): Promise<TapAtResult> {
   validateWatchTapAt(options);
   signal?.throwIfAborted();
-  const client = watchRunners.require(deviceId);
+  const client = await requireWatchRunner(deviceId, signal);
   const stack = await readOpenSmartStack(client, () => timer.now(), signal);
   if (stack) {
     await tapSmartStackAt(client, stack.hierarchy, options, signal);
@@ -360,7 +361,7 @@ export async function watchSwipeOn(
     throw new ActionableError("Invalid watch swipe direction.");
   }
   signal?.throwIfAborted();
-  const client = watchRunners.require(deviceId);
+  const client = await requireWatchRunner(deviceId, signal);
   let count = 0;
   let found: Element | undefined;
   for (;;) {
@@ -398,6 +399,6 @@ export async function watchPress(deviceId: string, button: string, signal?: Abor
     unsupportedWatchAction(`press ${button}`);
   }
   signal?.throwIfAborted();
-  await watchRunners.require(deviceId).request({ type: "home" }, signal);
+  await (await requireWatchRunner(deviceId, signal)).request({ type: "home" }, signal);
   return { success: true, button, keyCode: 0 };
 }

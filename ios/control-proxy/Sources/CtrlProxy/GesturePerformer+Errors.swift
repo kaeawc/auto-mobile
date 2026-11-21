@@ -25,6 +25,9 @@ extension GesturePerformer {
         case clipboardEmpty
         case clipboardReadUnavailable
         case unsupportedAction(String)
+        /// The stroke starts on a SpringBoard icon, which synthesized touches cannot lift (#18859).
+        /// Refused before any input.
+        case springBoardIconDrag(icon: String)
 
         /// Machine-readable code for the wire's additive `errorCode` field (see
         /// `CommandError.wireCode`); `nil` for errors the host tells apart by wording alone.
@@ -35,6 +38,9 @@ extension GesturePerformer {
             case .focusQueryFailed:
                 // The key was never sent: a definite non-delivery, safe to retry after re-observing.
                 return "focus_query_failed"
+            case .springBoardIconDrag:
+                // Refused before any input: a definite non-delivery, and retrying cannot help.
+                return "springboard_icon_drag"
             case .noApplication, .elementNotFound, .gestureFailed, .arrowNoEffect, .arrowBudgetExhausted,
                  .nothingToGoBack, .backNoEffect,
                  .notSupported, .missingParameter, .clipboardEmpty, .clipboardReadUnavailable, .unsupportedAction:
@@ -70,6 +76,8 @@ extension GesturePerformer {
                 return "Clipboard read unavailable; live pasteboard access may be restricted, so shadow clipboard content was not returned"
             case let .unsupportedAction(action):
                 return "Unsupported action: \(action)"
+            case let .springBoardIconDrag(icon):
+                return "drag not supported: the stroke starts on the SpringBoard icon \"\(icon)\", and synthesized touches open its context menu but never lift it; no input was sent"
             }
         }
     }

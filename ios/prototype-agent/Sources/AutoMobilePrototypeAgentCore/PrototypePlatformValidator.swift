@@ -466,7 +466,8 @@ enum PrototypePlatformValidator {
                 guard !opaqueKeys.contains(key) else { continue }
                 let memberPath = PrototypeLimits.dataMemberPath(path, key: key)
                 // A webView url binds placeholders like the host's webView visitor (#16573).
-                let webViewURL = key == "url" && fields["type"] == .string("webView")
+                let webViewURL = key == "url" && [JSONValue.string("webView"), .string("image")]
+                    .contains(fields["type"] ?? .null)
                 if textKeys.contains(key) || webViewURL, case let .string(text) = member {
                     for pointer in placeholders(text) {
                         try read(pointer, path: memberPath, declared: declared)
@@ -738,30 +739,7 @@ enum PrototypePlatformValidator {
 
     /// `{platform:/pointer}` placeholders, scanned exactly as `{data:/pointer}` ones.
     static func placeholders(_ text: String) -> [String] {
-        let units = Array(text.utf16)
-        let prefix = Array("platform:".utf16)
-        var found: [String] = []
-        var cursor = 0
-        while cursor < units.count {
-            guard units[cursor] == 123, units.count > cursor + prefix.count,
-                  Array(units[(cursor + 1) ... (cursor + prefix.count)]) == prefix
-            else {
-                cursor += 1
-                continue
-            }
-            let end = min(units.count, cursor + 2 + prefix.count + PrototypeLimits.maxDataPointerLength)
-            let close = (cursor + 1 ..< end).first { units[$0] == 125 }
-            let pointer = close.map {
-                String(decoding: units[(cursor + 1 + prefix.count) ..< $0], as: UTF16.self)
-            } ?? ""
-            if let close, PrototypeDataPointer.isValid(pointer) {
-                found.append(pointer)
-                cursor = close + 1
-            } else {
-                cursor += 1
-            }
-        }
-        return found
+        PrototypeDataText.platformPointers(text)
     }
 
     private static func sorted(_ keys: Set<String>) -> [String] {

@@ -28,7 +28,11 @@
     }
 
     extension PrototypePlatformRegistry {
-        public static let system =
+        public static let system = makeSystemRegistry()
+
+        static func makeSystemRegistry(notifications: (any NotificationCenterClient)? = nil)
+            -> PrototypePlatformRegistry
+        {
             systemModules(
                 clipboard: UIPasteboardPrototypeClipboard(),
                 connectivity: NWPathConnectivitySource(),
@@ -43,7 +47,9 @@
                 sensors: CoreMotionPrototypeSensorSource(),
                 permissions: UNUserNotificationCenterPrototypePermissionsSource(),
                 biometric: LAContextPrototypeBiometricSource(),
-                secureStorage: KeychainPrototypeSecureValueStore()
+                secureStorage: KeychainPrototypeSecureValueStore(),
+                notifications: notifications
             )
+        }
     }
 #endif

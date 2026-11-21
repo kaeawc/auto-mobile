@@ -195,6 +195,11 @@ export interface ContentHiddenRegion {
   bounds: ElementBounds;
   reason: "compose-interop-no-hide-descendants" | string;
   areaPercent: number;
+  /**
+   * Bounds of the ComposeView that owns the region, sent by CtrlProxy APKs that already clip the
+   * region to it (#18879). Consumed by the server's clip and not passed on to clients.
+   */
+  hostBounds?: ElementBounds;
 }
 
 export type Hierarchy = {

@@ -26,6 +26,13 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
 cd "${repo_root}"
+# Test with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+# Shell-test fixtures that copy this script without the helper keep the active Xcode.
+if [[ -f "${repo_root}/scripts/ios/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${repo_root}/scripts/ios/xcode_version.sh"
+  select_pinned_xcode
+fi
 # shellcheck source=scripts/ios/xctestrunner_test_filter.sh
 source "${repo_root}/scripts/ios/xctestrunner_test_filter.sh"
 # shellcheck source=scripts/ios/swift_test_counts.sh

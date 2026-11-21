@@ -361,7 +361,7 @@ class PrototypeRealtimeRuntimeTest {
   }
 
   @Test
-  fun `a refused platform-on frame handler leaves later frames flowing`() = runTest {
+  fun `an unresolved platform-on frame binding leaves later frames flowing`() = runTest {
     val base = spec()
     val handled =
       base.copy(
@@ -389,8 +389,8 @@ class PrototypeRealtimeRuntimeTest {
     advanceTimeBy(PrototypeChannelLimits.flushMs + 1L)
     runCurrent()
 
-    assertEquals(1, warnings.size)
-    assertTrue(warnings.single(), warnings.single().startsWith("Refused realtime.frame handler"))
+    // A setState whose binding does not resolve is skipped, not refused, so nothing warns.
+    assertEquals(emptyList<String>(), warnings)
     assertEquals(PrototypeScalar.Text("after"), runtime.current.state["last"])
     assertEquals(2, runtime.chat()?.get("framesIn")?.jsonPrimitive?.content?.toInt())
   }

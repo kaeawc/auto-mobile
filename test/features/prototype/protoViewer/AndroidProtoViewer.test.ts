@@ -704,6 +704,7 @@ describe("AndroidProtoViewer", () => {
 
       expect(await viewer.capabilities({ timeoutMs: 5000 })).toEqual({
         version: "0.0.88",
+        versionCode: 88,
         capabilities: new Set(["prototype_routes_v1"]),
         updateUrl: PLAY,
       });

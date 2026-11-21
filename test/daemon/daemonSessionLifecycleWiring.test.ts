@@ -116,6 +116,11 @@ describe("wireSessionLifecycle", () => {
       "onSessionDeviceUnbound",
       "onSessionRelease",
       "onSessionDeviceUnbound",
+      // AXBridge follows the existing feature hooks without reordering them.
+      "onSessionCreated",
+      "onDeviceOwnershipChange",
+      "onSessionRelease",
+      "onSessionDeviceUnbound",
       "onDeviceOwnershipChange",
       "setManagedExecutionRecoveryListener",
       "setLateRehydrationListener",

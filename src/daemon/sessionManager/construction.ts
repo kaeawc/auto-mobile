@@ -18,6 +18,7 @@ import {
   defaultScreenReaderRestorer,
 } from "../sessionDefaultRestorers";
 import { SessionDeviceStateRestore } from "../sessionDeviceStateRestore";
+import { RotationOriginalsPersistence } from "../rotationOriginalsPersistence";
 import { SessionLivenessController } from "../sessionLivenessLease";
 import { ForcedStuckRelease } from "./forcedStuckRelease";
 import { type SessionManagerCollaboratorHost } from "./host";
@@ -101,6 +102,11 @@ export class SessionManagerConstruction {
     const biometricEnrollment =
       options.biometricEnrollmentRestorer ?? defaultBiometricEnrollmentRestorer;
     const resolved = resolveDeviceStateRestorers(timer, restorers);
+    const rotationOriginals = options.rotationOriginalsLedger
+      ? new RotationOriginalsPersistence(options.rotationOriginalsLedger)
+      : undefined;
+    // Never rejects; a session start before it settles leaves an orphan for the next one.
+    void rotationOriginals?.preload();
     return new SessionDeviceStateRestore(
       {
         timer,
@@ -146,6 +152,7 @@ export class SessionManagerConstruction {
         screenReaderBackoff: resolved.screenReaderBackoff,
         rotation: resolved.rotation,
         rotationBackoff: resolved.rotationBackoff,
+        rotationOriginals,
         clock: resolved.clock,
         iosAppNetworkRuleRestorer: resolved.iosAppNetworkRule,
         defaultIosAppNetworkRuleRestorer,

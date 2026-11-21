@@ -1,3 +1,4 @@
+import { registerAXBridgeSessionLifecycle } from "./axBridgeSessionLifecycle";
 import { lazySessionReleasePool } from "./releaseSessionAndDevice";
 import { logger } from "../utils/logger";
 import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
@@ -143,14 +144,10 @@ function registerDeviceStateSessionCleanups(sessionManager: SessionManager): voi
   registerSystemAlertSessionCleanup(sessionManager);
 }
 
-/**
- * Registers every SessionManager listener/setter the daemon needs for session-scoped cleanup,
- * in the order the daemon has always registered them (release listeners fire in that order).
- */
-export function wireSessionLifecycle(
+function registerFeatureSessionLifecycle(
   sessionManager: SessionManager,
   timer: Timer,
-  host: DaemonSessionLifecycleHost,
+  host: Pick<DaemonSessionLifecycleHost, "markMutationUnrecorded">,
 ): void {
   registerLocationRouteSessionCleanup(sessionManager);
   registerNetworkStateSessionCleanup(sessionManager, {
@@ -162,6 +159,19 @@ export function wireSessionLifecycle(
     ...defaultRecordingSessionCleanupDeps,
     markDeviceNeedsRecorderRecovery: createRecorderTeardownRecoveryMarker(sessionManager),
   });
+  registerAXBridgeSessionLifecycle(sessionManager);
+}
+
+/**
+ * Registers every SessionManager listener/setter the daemon needs for session-scoped cleanup,
+ * in the order the daemon has always registered them (release listeners fire in that order).
+ */
+export function wireSessionLifecycle(
+  sessionManager: SessionManager,
+  timer: Timer,
+  host: DaemonSessionLifecycleHost,
+): void {
+  registerFeatureSessionLifecycle(sessionManager, timer, host);
   sessionManager.onDeviceOwnershipChange((deviceId, frameInvalidation) => {
     // Generation only for unchanged-screen acquire/release; full for runtime-changing rebinds.
     if (frameInvalidation === "full") {

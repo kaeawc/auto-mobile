@@ -37,10 +37,13 @@ export async function runSessionRotationMutation<T>(
           assertCurrentDevice();
           manager.setRotation(session, value);
           ownedState = session.cacheData.rotation;
+          // Durable before the first write, so a restart still restores it (#18847).
+          return ownedState ? manager.recordRotationOriginals(session, ownedState) : undefined;
         },
         clear: () => {
           if (ownedState && session.cacheData.rotation === ownedState) {
             delete session.cacheData.rotation;
+            manager.forgetRotationOriginals(session, ownedState);
           }
         },
       });

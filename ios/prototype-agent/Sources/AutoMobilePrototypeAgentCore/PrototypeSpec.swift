@@ -111,6 +111,7 @@ struct PrototypeSpec: Decodable {
     let locationBlock: JSONValue?
     let sensorsBlock: JSONValue?
     let platformHandlers: [String: JSONValue]
+    let declaredPlatform: Set<String>
     let declaredPermissions: Set<String>
     private(set) var platformState: [String: JSONValue] = [:]
     /// The route params `{route.<name>}` placeholders are bound to in `root` (#14188); empty at decode.
@@ -161,6 +162,9 @@ struct PrototypeSpec: Decodable {
         // key order; a state that does not decode is reported at its own turn below.
         let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state))
         let requires = try container.decodeIfPresent(JSONValue.self, forKey: .requires)
+        if case let .array(platform)? = requires?.objectFields?["platform"] {
+            declaredPlatform = Set(platform.compactMap(\.stringValue))
+        } else { declaredPlatform = [] }
         if case let .array(permissions)? = requires?.objectFields?["permissions"] {
             declaredPermissions = Set(permissions.compactMap { $0.objectFields?["name"]?.stringValue })
         } else {
@@ -285,6 +289,7 @@ struct PrototypeSpec: Decodable {
         platformState = spec.platformState
         routeScope = spec.routeScope
         id = spec.id
+        declaredPlatform = spec.declaredPlatform
         declaredPermissions = spec.declaredPermissions
         strings = spec.strings
         locales = spec.locales

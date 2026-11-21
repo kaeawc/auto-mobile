@@ -1220,6 +1220,7 @@ class PrototypeController(
     val runtime = surface.runtime
     val id = runtime.current.spec.id
     return PrototypeStatusEntry(
+      images = runtime.remoteImageActivity.counts(),
       id = id,
       persistent = runtime.persistent,
       state = runtime.publicState,

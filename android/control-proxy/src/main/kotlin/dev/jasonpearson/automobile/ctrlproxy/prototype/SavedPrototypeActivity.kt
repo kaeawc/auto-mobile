@@ -189,7 +189,7 @@ class SavedPrototypeActivity : ComponentActivity() {
         Json.encodeToString(loaded.spec),
         PrototypeAssets(image = source::read, font = source::read).withUploadFiles(source::file),
         prototypeHostStorage(SavedPrototypeActivityDependencies.storageStore(this)),
-        SavedPrototypeActivityDependencies.network(),
+        SavedPrototypeActivityDependencies.network(this),
         host,
       )
   }

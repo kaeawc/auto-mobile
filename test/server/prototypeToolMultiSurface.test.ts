@@ -203,6 +203,21 @@ describe("prototype multiple surfaces", () => {
     client.setInspectReply({ success: true, prototypes: [reported("b")], droppedEvents: 0 });
     expect((await call({ action: "inspect" })).prototypes?.map((entry) => entry.id)).toEqual(["b"]);
   });
+  test("inspect carries aggregate remote image states into output and status", async () => {
+    const images = { loaded: 2, failed: 1, pending: 3 };
+    client.setInspectReply({
+      success: true,
+      prototypes: [{ ...reported("images"), images }],
+      droppedEvents: 0,
+    });
+    const inspected = await call({ action: "inspect" });
+    expect(inspected.prototypes?.[0]?.images).toEqual(images);
+    expect(prototypeOutputSchema.parse(inspected).prototypes?.[0]?.images).toEqual(images);
+    expect((await status()).prototypes?.[0]?.images).toEqual(images);
+    client.setInspectReply({ success: true, prototypes: [reported("images")], droppedEvents: 0 });
+    await call({ action: "inspect" });
+    expect((await status()).prototypes?.[0]?.images).toBeUndefined();
+  });
   test("inspect carries shader fallback reasons into host status and output", async () => {
     const shaderFailures = {
       "root/node": "Shader disabled: 8 consecutive frame intervals exceeded 24 ms.",

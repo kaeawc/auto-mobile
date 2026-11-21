@@ -23261,7 +23261,7 @@
           "type": "boolean"
         },
         "display": {
-          "description": "Panel key, role (inner, cover, rear, external, cluster, overlay, virtual), active, or opt-in Android all. All adds per-panel displays (never overlay or virtual displays) while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true.",
+          "description": "Panel key, role (inner, cover, rear, external, cluster, overlay, virtual), active, or opt-in Android all. All adds per-panel displays (never overlay or virtual displays) while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true. CarPlay selector 'carplay' is screenshot-only and requires a projecting CarPlay screen on an iOS simulator.",
           "type": "string"
         },
         "project": {
@@ -24927,7 +24927,7 @@
           "enum": ["tile", "watchface", "launcher", "app"]
         },
         "hierarchyUnavailable": {
-          "description": "Apple Watch, Apple TV and Apple Vision Pro simulators: this observation is a screenshot with screenSize; the view hierarchy is not available without a connected watchOS, tvOS or visionOS window-app runner. viewHierarchy, skeleton, context, elements and the other element fields are absent, not empty: their absence does not mean an empty screen.",
+          "description": "Apple Watch, Apple TV and Apple Vision Pro simulators: this observation is a screenshot with screenSize; the view hierarchy is not available without a connected watchOS, tvOS or visionOS window-app runner. viewHierarchy, skeleton, context, elements and the other element fields are absent, not empty: their absence does not mean an empty screen. On iOS, this field identifies a screenshot-only CarPlay observation.",
           "type": "object",
           "properties": {
             "platform": {
@@ -24943,6 +24943,10 @@
                 {
                   "type": "string",
                   "const": "visionos"
+                },
+                {
+                  "type": "string",
+                  "const": "ios"
                 }
               ]
             },
@@ -33953,32 +33957,35 @@
               "storage": {
                 "$ref": "#/$defs/__schema68"
               },
-              "shaderFailures": {
+              "images": {
                 "$ref": "#/$defs/__schema72"
               },
-              "timers": {
+              "shaderFailures": {
                 "$ref": "#/$defs/__schema73"
               },
-              "success": {
-                "$ref": "#/$defs/__schema75"
+              "timers": {
+                "$ref": "#/$defs/__schema74"
               },
-              "error": {
+              "success": {
                 "$ref": "#/$defs/__schema76"
               },
-              "totalTimeMs": {
+              "error": {
                 "$ref": "#/$defs/__schema77"
               },
-              "timestamp": {
+              "totalTimeMs": {
                 "$ref": "#/$defs/__schema78"
               },
-              "pendingCount": {
+              "timestamp": {
                 "$ref": "#/$defs/__schema79"
               },
+              "pendingCount": {
+                "$ref": "#/$defs/__schema80"
+              },
               "lastSequence": {
-                "$ref": "#/$defs/__schema81"
+                "$ref": "#/$defs/__schema82"
               },
               "droppedCount": {
-                "$ref": "#/$defs/__schema83"
+                "$ref": "#/$defs/__schema84"
               },
               "pages": {
                 "type": "object",
@@ -34073,14 +34080,14 @@
                   "type": "string"
                 },
                 "additionalProperties": {
-                  "$ref": "#/$defs/__schema90"
+                  "$ref": "#/$defs/__schema91"
                 }
               },
               "context": {
-                "$ref": "#/$defs/__schema91"
+                "$ref": "#/$defs/__schema92"
               },
               "contextTruncated": {
-                "$ref": "#/$defs/__schema95"
+                "$ref": "#/$defs/__schema96"
               },
               "lastKnown": {
                 "description": "Pages, stacks and state are the last reported device snapshot, not a live device query",
@@ -34149,23 +34156,26 @@
             "storage": {
               "$ref": "#/$defs/__schema68"
             },
-            "shaderFailures": {
+            "images": {
               "$ref": "#/$defs/__schema72"
             },
-            "timers": {
+            "shaderFailures": {
               "$ref": "#/$defs/__schema73"
             },
-            "success": {
-              "$ref": "#/$defs/__schema75"
+            "timers": {
+              "$ref": "#/$defs/__schema74"
             },
-            "error": {
+            "success": {
               "$ref": "#/$defs/__schema76"
             },
-            "totalTimeMs": {
+            "error": {
               "$ref": "#/$defs/__schema77"
             },
-            "timestamp": {
+            "totalTimeMs": {
               "$ref": "#/$defs/__schema78"
+            },
+            "timestamp": {
+              "$ref": "#/$defs/__schema79"
             }
           },
           "required": ["lastAction", "success", "timestamp"],
@@ -34176,17 +34186,17 @@
           "type": "object",
           "properties": {
             "battery": {
-              "$ref": "#/$defs/__schema98"
+              "$ref": "#/$defs/__schema99"
             },
             "power": {
-              "$ref": "#/$defs/__schema98"
+              "$ref": "#/$defs/__schema99"
             },
             "audio": {
-              "$ref": "#/$defs/__schema98"
+              "$ref": "#/$defs/__schema99"
             },
             "location": {
               "description": "The last location.updated as {accuracyM, approximate} only: a fix is present and how accurate it is, never its coordinates",
-              "$ref": "#/$defs/__schema98"
+              "$ref": "#/$defs/__schema99"
             }
           },
           "additionalProperties": false
@@ -34376,13 +34386,13 @@
               ]
             },
             "payload": {
-              "$ref": "#/$defs/__schema109"
+              "$ref": "#/$defs/__schema110"
             },
             "context": {
-              "$ref": "#/$defs/__schema91"
+              "$ref": "#/$defs/__schema92"
             },
             "contextTruncated": {
-              "$ref": "#/$defs/__schema95"
+              "$ref": "#/$defs/__schema96"
             },
             "state": {
               "type": "object",
@@ -34836,13 +34846,13 @@
           "maximum": 9007199254740991
         },
         "pendingCount": {
-          "$ref": "#/$defs/__schema79"
+          "$ref": "#/$defs/__schema80"
         },
         "lastSequence": {
-          "$ref": "#/$defs/__schema81"
+          "$ref": "#/$defs/__schema82"
         },
         "droppedCount": {
-          "$ref": "#/$defs/__schema83"
+          "$ref": "#/$defs/__schema84"
         },
         "artifact": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -35130,6 +35140,28 @@
         },
         "__schema72": {
           "type": "object",
+          "properties": {
+            "loaded": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "failed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "pending": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["loaded", "failed", "pending"],
+          "additionalProperties": false
+        },
+        "__schema73": {
+          "type": "object",
           "propertyNames": {
             "type": "string"
           },
@@ -35137,7 +35169,7 @@
             "type": "string"
           }
         },
-        "__schema73": {
+        "__schema74": {
           "maxItems": 8,
           "type": "array",
           "items": {
@@ -35163,38 +35195,38 @@
             "additionalProperties": false
           }
         },
-        "__schema75": {
+        "__schema76": {
           "type": "boolean"
         },
-        "__schema76": {
+        "__schema77": {
           "type": "string"
         },
-        "__schema77": {
+        "__schema78": {
           "type": "number"
         },
-        "__schema78": {
+        "__schema79": {
           "type": "number",
           "description": "Host clock milliseconds when the request completed"
         },
-        "__schema79": {
+        "__schema80": {
           "description": "Unconsumed events, including events excluded by filters or cursor",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema81": {
+        "__schema82": {
           "description": "Highest sequence accepted for this prototype",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema83": {
+        "__schema84": {
           "description": "Cumulative events dropped by buffer overflow in this scope",
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "__schema90": {
+        "__schema91": {
           "anyOf": [
             {
               "type": "string"
@@ -35211,7 +35243,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema90"
+                "$ref": "#/$defs/__schema91"
               }
             },
             {
@@ -35220,12 +35252,12 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema90"
+                "$ref": "#/$defs/__schema91"
               }
             }
           ]
         },
-        "__schema91": {
+        "__schema92": {
           "allOf": [
             {
               "type": "object",
@@ -35233,13 +35265,13 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema93"
+                "$ref": "#/$defs/__schema94"
               }
             },
             {}
           ]
         },
-        "__schema93": {
+        "__schema94": {
           "anyOf": [
             {
               "type": "string"
@@ -35256,7 +35288,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema93"
+                "$ref": "#/$defs/__schema94"
               }
             },
             {
@@ -35265,16 +35297,16 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema93"
+                "$ref": "#/$defs/__schema94"
               }
             }
           ]
         },
-        "__schema95": {
+        "__schema96": {
           "type": "boolean",
           "const": true
         },
-        "__schema98": {
+        "__schema99": {
           "type": "object",
           "properties": {
             "values": {
@@ -35311,7 +35343,7 @@
           "required": ["values", "timestamp", "receivedAt"],
           "additionalProperties": false
         },
-        "__schema109": {
+        "__schema110": {
           "anyOf": [
             {
               "type": "string"
@@ -35328,7 +35360,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema109"
+                "$ref": "#/$defs/__schema110"
               }
             },
             {
@@ -35337,7 +35369,7 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema109"
+                "$ref": "#/$defs/__schema110"
               }
             }
           ]

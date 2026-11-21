@@ -78,6 +78,7 @@ export interface ProtoViewerInput {
 }
 
 export interface ProtoViewerRouteDependencies {
+  platform?: "android" | "ios";
   device: ProtoViewerDevice;
   assetFileReader: PrototypeAssetFileReader;
   observationScreenshotReader: PrototypeObservationScreenshotReader;
@@ -168,7 +169,7 @@ async function saveInProtoViewer(
     return bundle.failure;
   }
   const timeoutMs = args.timeoutMs ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS;
-  const gate = await capabilityGate(spec, deps.device, timeoutMs, signal);
+  const gate = await capabilityGate(spec, deps, timeoutMs, signal);
   if (gate === UNREACHABLE) {
     return undefined;
   }
@@ -227,11 +228,12 @@ type CapabilityGateResult =
  */
 async function capabilityGate(
   spec: PrototypeSpec,
-  device: ProtoViewerDevice,
+  deps: Pick<ProtoViewerRouteDependencies, "device" | "platform">,
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<CapabilityGateResult> {
-  const required = requiredPrototypeCapabilities(spec);
+  const { device, platform } = deps;
+  const required = requiredPrototypeCapabilities(spec, platform);
   if (required.length === 0) {
     return { report: undefined };
   }

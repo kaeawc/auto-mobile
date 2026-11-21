@@ -19,8 +19,9 @@ export interface DisposableAppTemplate {
 export function selectDisposableAppTemplate(
   spec: PrototypeJson,
   templates: readonly DisposableAppTemplate[],
+  platform?: "android" | "ios",
 ): DisposableAppTemplate {
-  const required = requiredPrototypeCapabilities(spec);
+  const required = requiredPrototypeCapabilities(spec, platform);
   const ordered = [...templates].sort(
     (left, right) => left.size - right.size || left.name.localeCompare(right.name),
   );

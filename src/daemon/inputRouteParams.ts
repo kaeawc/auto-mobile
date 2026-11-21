@@ -1,9 +1,15 @@
 import { z } from "zod/v3";
 import {
+  INPUT_LETTER_KEYS,
   SUPPORTED_INPUT_KEYS,
   isInputKeyName,
   type InputKeyName,
 } from "../features/action/InputKey";
+
+const INPUT_KEY_NAMES_DISPLAY = [
+  ...SUPPORTED_INPUT_KEYS.filter((key) => !(INPUT_LETTER_KEYS as readonly string[]).includes(key)),
+  "a-z",
+].join(", ");
 
 /**
  * Param schemas for the control socket's `input/*` routes (#11813), replacing the hand-written
@@ -156,7 +162,7 @@ const keySchema = z
   .object({
     platform: platformField("input/key"),
     key: z.custom<string>(isString, { message: "input/key requires key" }).refine(isInputKeyName, {
-      message: `input/key key must be one of: ${SUPPORTED_INPUT_KEYS.join(", ")}`,
+      message: `input/key key must be one of: ${INPUT_KEY_NAMES_DISPLAY}`,
     }),
     deviceId: deviceIdField("input/key"),
     frameContext: frameContextField("input/key"),

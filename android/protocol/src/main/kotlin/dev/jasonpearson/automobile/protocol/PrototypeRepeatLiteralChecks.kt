@@ -31,7 +31,7 @@ internal object PrototypeRepeatLiteralChecks {
     fieldPath: String,
   ): PrototypeSpecError? =
     if (
-      kind == PrototypeBindableKind.KEY &&
+      kind.isStateKey() &&
         text != null &&
         !stateKeyPattern.matches(
           PrototypeRepeatTemplate.segments(text, "route").joinToString("") {

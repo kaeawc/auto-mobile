@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "cart-bindings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Checkout",
+      "onTap": [
+        {
+          "type": "emit",
+          "name": "checkout",
+          "context": {
+            "count": {
+              "derived": "missing"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].context.count.derived",
+  "expectedMessage": "Unknown derived value \"missing\""
+}

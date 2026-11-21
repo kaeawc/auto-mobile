@@ -37,7 +37,7 @@ extension PrototypeSpec {
         })
         guard !names.isEmpty, let root = authoredRoot.objectFields else { return false }
         func usesChangedCondition(_ node: [String: JSONValue]) -> Bool {
-            PrototypeDerivedValidator.conditionReferences(node, path: "").contains { names.contains($0.name) }
+            PrototypeDerivedValidator.conditionReads(node, path: "").derived.contains { names.contains($0.name) }
                 || PrototypeStrictRepeats.children(node, path: "").contains { usesChangedCondition($0.value) }
         }
         return usesChangedCondition(root)

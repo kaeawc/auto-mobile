@@ -1,3 +1,4 @@
+import { resolvePrototypeDerivedBinding } from "./prototypeDerive";
 import { prototypeGeneratedForms } from "./prototypeGeneratedBindings";
 import {
   resolvePrototypeGeneratedJson,
@@ -338,6 +339,7 @@ export type PrototypeRuntimeDataActionValue = Exclude<
 export interface PrototypeDataWriteInputs {
   state: Readonly<Record<string, PrototypeJson>>;
   data?: unknown;
+  derived?: Readonly<Record<string, unknown>>;
   context?: PrototypeActionContext;
 }
 
@@ -364,6 +366,15 @@ export function resolvePrototypeDataWriteValue(
           success: false,
           error: { code: "invalid_value", message: `State key ${binding.state} is not set` },
         };
+  }
+  if ("derived" in binding) {
+    const value = resolvePrototypeDerivedBinding(inputs.derived, binding.derived);
+    return value === undefined
+      ? {
+          success: false,
+          error: { code: "not_found", message: `Derived value ${binding.derived} is not set` },
+        }
+      : { success: true, value };
   }
   if (!("data" in binding)) {
     return { success: false, error: { code: "invalid_value", message: "Invalid binding" } };

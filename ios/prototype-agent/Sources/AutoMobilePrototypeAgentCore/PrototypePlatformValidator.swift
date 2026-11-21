@@ -220,6 +220,7 @@ enum PrototypePlatformValidator {
         var notificationChannels: Set<String> = []
         /// `state:` keys kept in secure storage, which an emit context may not carry (#14321).
         var secureKeys: [String] = []
+        var derive: [String: JSONValue] = [:]
         var players: Set<String> = []
         /// The root `sensors` block: the sensors the device listens to (#14327).
         var sensors: JSONValue?
@@ -233,7 +234,7 @@ enum PrototypePlatformValidator {
         commerce: JSONValue? = nil,
         storage: JSONValue? = nil, location: JSONValue? = nil, sensors: JSONValue? = nil,
         notifications: JSONValue? = nil,
-        media: JSONValue? = nil, root: JSONValue,
+        media: JSONValue? = nil, derive: JSONValue? = nil, root: JSONValue,
         state: [String: JSONValue]
     )
         throws
@@ -252,6 +253,7 @@ enum PrototypePlatformValidator {
         declared.products = PrototypeCommerceRules.products(commerce)
         declared.notificationChannels = PrototypeNotificationRules.channels(notifications)
         declared.secureKeys = PrototypeSecureStorageRules.secureKeys(storage)
+        declared.derive = derive?.objectFields ?? [:]
         declared.sensors = sensors
         declared.players = PrototypeMedia.players(media).union(PrototypeMedia.inlinePlayers(root))
         declared.previews = PrototypeCameraPreview.ids(root)
@@ -428,9 +430,16 @@ enum PrototypePlatformValidator {
                     "Emit names starting with \(reservedEmitPrefix) are reserved for runtime events"
                 )
             }
+            try PrototypeDerivedValidator.validateReferences(
+                PrototypeDerivedValidator.bindingReferences(fields, path: path), entries: declared.derive
+            )
             try PrototypeSecureStorageRules.validateDataAction(fields, path: path, secure: declared.secureKeys)
-            try PrototypeSecureStorageRules.validateEmit(fields, path: path, secure: declared.secureKeys)
-            try PrototypeSecureStorageRules.validateRequest(fields, path: path, secure: declared.secureKeys)
+            try PrototypeSecureStorageRules.validateEmit(
+                fields, path: path, secure: declared.secureKeys, derive: declared.derive
+            )
+            try PrototypeSecureStorageRules.validateRequest(
+                fields, path: path, secure: declared.secureKeys, derive: declared.derive
+            )
             if fields["type"] == nil {
                 if case let .string(pointer)? = fields["platform"] {
                     try read(pointer, path: "\(path).platform", declared: declared)

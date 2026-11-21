@@ -16,7 +16,7 @@ internal object PrototypeRepeatKeyBindings {
   fun checkedKeys(value: JsonObject): List<String> {
     val keys = mutableListOf<String>()
     PrototypeBindableFields.first<Boolean>(value, "") { field, _, kind ->
-      if (kind == PrototypeBindableKind.KEY) field.string()?.let(keys::add)
+      if (kind.isStateKey()) field.string()?.let(keys::add)
       null
     }
     keys.addAll((value["requireValid"] as? JsonArray).orEmpty().mapNotNull { it.string() })
@@ -76,7 +76,7 @@ internal object PrototypeRepeatKeyBindings {
   fun bindKeys(value: JsonObject, scope: Scope, item: JsonObject, index: Int): JsonObject {
     val replacements = mutableMapOf<String, JsonElement>()
     PrototypeBindableFields.first<Boolean>(value, "") { field, path, kind ->
-      if (kind == PrototypeBindableKind.KEY)
+      if (kind.isStateKey())
         field.string()?.let {
           replacements[path] =
             JsonPrimitive(PrototypeRepeatTemplate.bind(it, scope.alias, item, index))

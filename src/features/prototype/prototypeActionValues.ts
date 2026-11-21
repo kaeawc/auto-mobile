@@ -35,9 +35,15 @@ const prototypeExistingDataValueSchema = z.union([
   ...prototypeReadBindingSchema.options,
   z.object({ value: prototypeJsonSchema }).strict(),
 ]);
-export const prototypeDataActionValueSchema = z.union([
+/** Every value binding except `{derived}`: generated, read and the `{value}` literal forms. */
+export const prototypeValueBindingSchema = z.union([
   ...prototypeGeneratedValueSchema.options,
   ...prototypeExistingDataValueSchema.options,
+]);
+const prototypeDerivedBindingSchema = z.object({ derived: keySchema }).strict();
+export const prototypeDataActionValueSchema = z.union([
+  ...prototypeValueBindingSchema.options,
+  prototypeDerivedBindingSchema,
 ]);
 /** A single unescaped object member; never interpreted as a pointer. */
 export const dataMemberSchema = z
@@ -125,10 +131,12 @@ export const upsertDataActionSchema = z
 
 export type PrototypeEmitContextBinding =
   | z.infer<typeof prototypeExistingDataValueSchema>
+  | z.infer<typeof prototypeDerivedBindingSchema>
   | { page: string }
   | z.infer<typeof prototypeMatchBindingSchema>;
 export const prototypeEmitContextBindingSchema: z.ZodType<PrototypeEmitContextBinding> = z.union([
   ...prototypeExistingDataValueSchema.options,
+  prototypeDerivedBindingSchema,
   z.object({ page: z.string().min(1) }).strict(),
   prototypeMatchBindingSchema,
 ]);

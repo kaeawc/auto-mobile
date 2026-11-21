@@ -245,12 +245,12 @@ test.each([
   [
     { data: "/n" },
     "equals",
-    "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt is required",
+    "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt, equalsKey is required",
   ],
   [
     { data: "/n", equals: 1, gt: 0 },
     "gt",
-    "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt is required",
+    "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt, equalsKey is required",
   ],
   [{ all: [{ key: "n", equals: 1 }], gt: 0 }, "gt", "Requires key or data or platform or derived"],
 ])("condition rule %p", (condition, field, message) => {

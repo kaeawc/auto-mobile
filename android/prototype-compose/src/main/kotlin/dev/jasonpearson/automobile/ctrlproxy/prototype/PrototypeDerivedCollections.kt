@@ -14,6 +14,7 @@ internal class PrototypeDerivedValuesCache(
 
   fun evaluate(current: PrototypeSpec): Map<String, JsonElement?> {
     val old = spec
+    if (old === current) return values
     val before = old?.state.orEmpty()
     val after = current.state.orEmpty()
     val changedKeys =

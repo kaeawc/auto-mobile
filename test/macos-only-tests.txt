@@ -31,6 +31,7 @@ portable test/features/action/iosRotateFloatingWindow.test.ts           # pure r
 portable test/daemon/iosCameraPosterSessionCleanup.test.ts  # fake session manager and in-memory registry only
 
 portable test/utils/ios/carPlayProjection.test.ts                        # JSON contract and injected exec only; no host processes
+portable test/utils/ios/carPlayCapture.test.ts                           # injected probe and screenshot only
 portable test/utils/ios/carPlayScreenPower.test.ts                       # JSON contract and injected exec only; no host processes
 portable test/utils/ios/carPlayDisplay.test.ts                           # fake powerer, probe and timer only; no host processes
 portable test/utils/ios/healthKitSeeder*.test.ts                         # HealthKit seeder over fake runner, sheet, builder and FakeTimer; temp dirs only
@@ -133,3 +134,7 @@ macos test/utils/runtimeCompatibility.test.ts                            # impor
 macos test/devices/appleTvVisionRuntimeSupportedDeviceTypes.test.ts      # imports only the tvOS and visionOS provisioner checks
 
 portable test/features/observe/ios/CtrlProxyAccessibilityFocus.test.ts # delegate and decoder use the fake harness
+
+portable test/utils/ios/AXBridgeSessions.test.ts # injected preflight and launcher only
+portable test/utils/ios/AXBridgeProcessLauncher.test.ts # fake child streams and FakeTimer only
+portable test/utils/ios/AXBridgeClient.test.ts # fake transport and FakeTimer only

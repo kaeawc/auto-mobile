@@ -217,6 +217,28 @@ function finding(
   return [{ slice: WEB_VIEW_SLICE, caseName, boundary, message }];
 }
 
+/** Allowed-origin and child-frame policy, applied to every hierarchy the slice observes. */
+function judgeFramePolicy(
+  caseName: string,
+  outcome: WebViewOutcome,
+  log: WebViewHostLog,
+): ContractFinding[] {
+  const escaped = webNodes(outcome).some(
+    ({ attributes }) =>
+      attributes["web-origin"] !== log.origin ||
+      attributes[WEB_ELEMENT_ID_ATTRIBUTE] === WEB_VIEW_NODES.disallowed ||
+      attributes[WEB_ELEMENT_ID_ATTRIBUTE] === WEB_VIEW_NODES.allowed,
+  );
+  // The current bridge snapshots only the main document, including for an allowed child frame.
+  return escaped
+    ? finding(
+        caseName,
+        "sdk-adapter",
+        "a child-frame or disallowed-origin DOM element escaped the main-document policy",
+      )
+    : [];
+}
+
 function judgeObserve(outcome: WebViewOutcome, log: WebViewHostLog): ContractFinding[] {
   if (!webViewObservationReady(outcome)) {
     return finding(
@@ -225,21 +247,9 @@ function judgeObserve(outcome: WebViewOutcome, log: WebViewHostLog): ContractFin
       `observe did not expose DOM handles beneath the WKWebView in its full hierarchy (${observeDiagnostic(outcome)})${outcome.error ? `: ${outcome.error.slice(0, 160)}` : ""}`,
     );
   }
-  const entries = webNodes(outcome);
-  if (
-    entries.some(
-      ({ attributes }) =>
-        attributes["web-origin"] !== log.origin ||
-        attributes[WEB_ELEMENT_ID_ATTRIBUTE] === WEB_VIEW_NODES.disallowed ||
-        attributes[WEB_ELEMENT_ID_ATTRIBUTE] === WEB_VIEW_NODES.allowed,
-    )
-  ) {
-    // The current bridge snapshots only the main document, including for an allowed child frame.
-    return finding(
-      "observe",
-      "sdk-adapter",
-      "a child-frame or disallowed-origin DOM element escaped the main-document policy",
-    );
+  const escaped = judgeFramePolicy("observe", outcome, log);
+  if (escaped.length > 0) {
+    return escaped;
   }
   if (
     [WEB_VIEW_NODES.button, WEB_VIEW_NODES.input].some((id) => {
@@ -342,6 +352,12 @@ function judgeStale(
   }
   const before = node(outcomes.get("observe"), WEB_VIEW_NODES.button)?.attributes;
   const afterOutcome = outcomes.get("after-navigation");
+  if (afterOutcome && webViewObservationReady(afterOutcome)) {
+    const escaped = judgeFramePolicy("stale-handle", afterOutcome, log);
+    if (escaped.length > 0) {
+      return escaped;
+    }
+  }
   if (afterOutcome?.error && afterOutcome.artifactPointerSeen) {
     return finding(
       "stale-handle",

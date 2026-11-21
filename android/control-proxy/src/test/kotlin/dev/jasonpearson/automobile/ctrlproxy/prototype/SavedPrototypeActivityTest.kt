@@ -78,6 +78,10 @@ class SavedPrototypeActivityTest {
     SavedPrototypeActivityDependencies.store = { store }
     SavedPrototypeActivityDependencies.isUserUnlocked = { true }
     SavedPrototypeActivityDependencies.ioDispatcher = Dispatchers.Unconfined
+    // A replaced composition releases its assets on the flush scope under the interaction lock.
+    // On the default background dispatcher that can hold the lock while the replacement opens,
+    // whose resume then lands on the main looper after waitForIdle (#18898).
+    SavedPrototypeActivityDependencies.flushScope = CoroutineScope(Dispatchers.Unconfined)
     SavedPrototypeActivityDependencies.clock = { 42L }
     SavedPrototypeEvents.reset()
     store.stored["panel"] = savedPrototypeFixture()

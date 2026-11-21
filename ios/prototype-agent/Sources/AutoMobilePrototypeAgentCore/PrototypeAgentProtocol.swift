@@ -222,6 +222,7 @@ enum PrototypeAgentProtocol {
     /// Locale string tables and integer plural resolution (#14210).
     static let stringsCapability = "prototype_strings_v1"
     /// Authored accessibility semantics and live announcements (#14210).
+    static let remoteImageCapability = "prototype_remote_image_v1"
     static let semanticsCapability = "prototype_semantics_v1"
     /// `{data, empty}` conditions and style `shimmer` on box, row, column and card (#14207, #14689).
     static let loadingStatesCapability = "prototype_loading_states_v1"
@@ -263,6 +264,8 @@ enum PrototypeAgentProtocol {
     /// iOS 26+), a tonal fill where blur is unavailable, and `backdrop: blur|fallback` in the show reply.
     static let backdropCapability = "prototype_backdrop_v1"
     static let timersCapability = "prototype_timers_v1"
+    static let simulatePlatformRequest = "simulate_prototype_platform"
+    static let platformSimulationCapability = "prototype_platform_simulation_v1"
     static let advanceClockRequest = "advance_prototype_clock"
     /// Atomic in-place `/data`, `/state` and `replaceNode` patches with revisions and state conflicts
     /// (#11675). Same name as the CtrlProxy capability; the host sends `patch_prototype` only to an agent

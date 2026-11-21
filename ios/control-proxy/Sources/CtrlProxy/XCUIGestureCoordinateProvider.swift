@@ -13,8 +13,6 @@ import os
             let base: XCUICoordinate
             let resolved: XCUICoordinate
             let application: XCUIApplication
-            /// Screen origin of an inset app window added to a point offset (#6635).
-            let windowTranslation: GesturePoint?
         }
 
         private let app: XCUIApplication
@@ -193,10 +191,10 @@ import os
                 let anchor = target.coordinate(withNormalizedOffset: CGVector(
                     dx: selection.normalized.x, dy: selection.normalized.y
                 ))
-                let translation = selection.windowTranslation(windowTranslation)
-                let base = translation.map { anchor.withOffset(CGVector(dx: $0.x, dy: $0.y)) } ?? anchor
-                let resolved = selection.offset.map { base.withOffset(CGVector(dx: $0.x, dy: $0.y)) } ?? base
-                return Coordinate(base: base, resolved: resolved, application: target, windowTranslation: translation)
+                // Observe reports an inset window in screen space (#18830), so a point offset is
+                // already a screen point and needs no window origin added.
+                let resolved = selection.offset.map { anchor.withOffset(CGVector(dx: $0.x, dy: $0.y)) } ?? anchor
+                return Coordinate(base: anchor, resolved: resolved, application: target)
             }
         }
 

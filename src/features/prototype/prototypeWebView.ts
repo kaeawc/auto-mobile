@@ -33,6 +33,17 @@ export function prototypeWebViewIds(root: Raw): Set<string> {
   return ids;
 }
 
+/** The path of the spec's first `webView` node, or undefined when it has none. */
+export function prototypeWebViewNodePath(root: Raw): string | undefined {
+  let first: string | undefined;
+  walkPrototypeNodes(root, (node, path) => {
+    if (first === undefined && node.type === "webView") {
+      first = path;
+    }
+  });
+  return first;
+}
+
 /** The first `webView` node rule a spec breaks. */
 export function prototypeWebViewError(root: Raw): PrototypePlatformError | undefined {
   const requires = record(root.requires);

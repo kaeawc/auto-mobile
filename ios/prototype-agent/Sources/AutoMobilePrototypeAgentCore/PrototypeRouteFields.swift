@@ -143,7 +143,9 @@ enum PrototypeRouteFields {
                 walker.field(semantics, "hint", at)
             }
             switch type {
-            case "image": field(value, "asset", path)
+            case "image":
+                field(value, "asset", path)
+                field(value, "url", path)
             case "text":
                 field(value, "text", path)
                 object(value, "linkify", path) { $0.actions($1, $2) }

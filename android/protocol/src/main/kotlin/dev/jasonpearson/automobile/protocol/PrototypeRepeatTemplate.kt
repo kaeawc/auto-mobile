@@ -628,7 +628,10 @@ internal object PrototypeBindableFields {
               visitor.action(entry, at)
             }
         // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
-        "image" -> visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
+        "image" -> {
+          visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
+            ?: visitor.field(node, "url", path, PrototypeBindableKind.TEXT)
+        }
         else -> null
       }
 

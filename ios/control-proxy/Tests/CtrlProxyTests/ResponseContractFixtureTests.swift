@@ -411,6 +411,18 @@ final class ResponseContractFixtureTests: XCTestCase {
                                                                  success: false, totalTimeMs: 17,
                                                                  error: focusError.localizedDescription,
                                                                  errorCode: focusError.wireCode))
+        let iconDragError = GesturePerformer.GestureError.springBoardIconDrag(icon: "Safari")
+        commandErrors.append([
+            "name": "springboard_icon_drag",
+            "error": iconDragError.localizedDescription,
+            "errorCode": iconDragError.wireCode as Any? ?? NSNull(),
+        ])
+        try append("error_springboard_icon_drag", WebSocketResponse(type: ResponseType.pathGestureResult.rawValue,
+                                                                    timestamp: 1_700_000_000_000,
+                                                                    requestId: requestId,
+                                                                    success: false, totalTimeMs: 17,
+                                                                    error: iconDragError.localizedDescription,
+                                                                    errorCode: iconDragError.wireCode))
         try append(
             "runner_busy",
             WebSocketResponse(

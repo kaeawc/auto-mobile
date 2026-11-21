@@ -24,6 +24,9 @@ const DEFAULT_ACCESSIBILITY_CONFIG: AccessibilityAuditConfig = {
 
 export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
   apply(key: FeatureFlagKey, enabled: boolean, config?: FeatureFlagConfig | null): void {
+    if (this.applyIosBridgeFlags(key, enabled)) {
+      return;
+    }
     switch (key) {
       case "debug":
         setDebugModeEnabled(enabled);
@@ -52,12 +55,22 @@ export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
       case "navigation-screenshots":
         serverConfig.setNavigationScreenshotsEnabled(enabled);
         break;
-      case "ios-sdk-observation-bridge":
-        serverConfig.setIosSdkObservationBridgeEnabled(enabled);
-        break;
       default:
         this.applyOutputReduction(key, enabled);
         break;
+    }
+  }
+
+  private applyIosBridgeFlags(key: FeatureFlagKey, enabled: boolean): boolean {
+    switch (key) {
+      case "ios-axbridge":
+        serverConfig.setIosAxBridgeEnabled(enabled);
+        return true;
+      case "ios-sdk-observation-bridge":
+        serverConfig.setIosSdkObservationBridgeEnabled(enabled);
+        return true;
+      default:
+        return false;
     }
   }
 

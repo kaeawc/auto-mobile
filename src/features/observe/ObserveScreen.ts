@@ -24,7 +24,7 @@ import {
 } from "./ActiveWindowAttribution";
 export { hasUsableHierarchy } from "./ActiveWindowAttribution";
 import { publishScreenshotPaths } from "./ScreenshotRetention";
-import { resolveIosObserveRotation } from "./iosObserveRotation";
+import { hasMultiplePanels, resolveIosObserveRotation } from "./iosObserveRotation";
 import { type ScreenshotPathProtection } from "./ScreenshotPathProtection";
 import { type SelectedDisplayReadPolicy } from "./SelectedDisplayRead";
 import {
@@ -584,6 +584,7 @@ export class RealObserveScreen implements ObserveScreen {
               rotation: resolveIosObserveRotation(
                 stored.viewHierarchy?.rotation,
                 stored.screenSize,
+                hasMultiplePanels(this.device),
               ),
             }
           : stored;

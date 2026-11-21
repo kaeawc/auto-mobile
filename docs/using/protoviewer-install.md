@@ -42,7 +42,8 @@ When a spec needs something the installed ProtoViewer cannot show, `prototype sa
 before copying anything to the device. The result has `errorCode: "unsupported_capability"` and an
 `update` object with `missingCapabilities`, `installedVersion` and a `url` for a newer build.
 Update ProtoViewer as above and save again. AutoMobile supports the three most recent ProtoViewer
-releases.
+releases. On Android, a save to an older release that can still show the spec succeeds, and its
+`warning` names the installed version, the oldest supported release and where to update.
 
 ## iOS
 

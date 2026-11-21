@@ -51,6 +51,7 @@ export interface SessionBrokerDevicePort {
     sessionId: string;
     profile: SessionDeviceProfile;
     timing?: SessionPreparationTiming;
+    expiredDisposableAppsRemoved?: string[];
   }>;
   /** True only when all prior session work and restoration have settled. */
   release(sessionId: string): Promise<{ settled: boolean }>;

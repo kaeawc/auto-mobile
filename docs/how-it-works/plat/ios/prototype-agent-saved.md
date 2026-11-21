@@ -125,6 +125,8 @@ simulator the host grants and denies with `simctl privacy grant|revoke` before l
 `notGrantableOnSimulator` with `verified: false` and leaves them to the system-alert policy. No Viewer
 advertises the module yet (#14299). See the permission table in `prototype-ux.md`.
 
+The per-prototype iOS Viewer registers the `notifications` module; its behavior is documented in `../android/prototype-ux-platform-services.md`.
+
 ## Platform namespaces (#15257)
 
 Prefer portable fields, portable theme tokens, then `theme.design`; reserve `ios`/`android`
@@ -230,11 +232,13 @@ Reduce Transparency and Increase Contrast use system behaviour. Tests assert
 structure and bounds with pinned settings; group morphing and the visual result are not
 device-verified.
 
-## Disposable apps (#14184, host core only)
+## Disposable apps
 
-The host core in `src/features/prototype/disposableApp/` is shared with Android. See "Disposable
-apps" in `docs/how-it-works/plat/android/prototype-ux.md` for the registry, template choice, TTL and
-removal rules. The host does not wire iOS stamping (#14186) yet. The iOS-specific parts are:
+The host core in `src/features/prototype/disposableApp/` is shared with Android. See
+[Disposable apps](../android/prototype-ux-platform-extras.md#disposable-apps) for the registry,
+template choice, TTL and removal rules. On iOS, `installApp` copies the Viewer template, stamps it
+and ad-hoc signs it, then installs it on a simulator. Physical iPhones use ProtoViewer; wildcard
+provisioning for disposable apps on them is planned as a host setting. The iOS-specific parts are:
 
 - **Identity.** The bundle id is `dev.jasonpearson.automobile.app.<slug>-<sha256(slug) 8 hex>`. It
   keeps the slug's hyphens, the same pattern `prototypeBundleId` uses for saved Viewer copies under
@@ -247,3 +251,7 @@ removal rules. The host does not wire iOS stamping (#14186) yet. The iOS-specifi
   `processing` and `remoteNotification` to `remote-notification`. The `camera` value has no iOS background
   mode.
 - **Signer.** A simulator does not report a signer, so removal relies on the reserved prefix alone.
+- **Storage.** After the host records the install, it writes the bundled `prototype.json` into the
+  app's data container as the saved Viewer layout. If seeding fails, the error says the app is
+  installed but not seeded. The record and its expiry stay current. `reset`
+  clears the data container and writes the layout again from the installed bundle.

@@ -109,6 +109,7 @@ private fun DeviceColumnContent.PaneSplit(
             streamContent = streamContent,
             observationStreamFactory = observationStreamFactory,
             screenshotSaver = screenshotSaver,
+            captureDispatcher = captureDispatcher,
             externalCaptureRequest = externalCaptureRequest,
           ),
       )
@@ -158,6 +159,7 @@ internal fun PaneMainContent(
         modifier = modifier,
         options =
           StreamContent(
+            ioDispatcher = captureDispatcher,
             streamContent = streamContent,
             observationStreamFactory = observationStreamFactory,
             screenshotSaver = screenshotSaver,

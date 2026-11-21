@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { DragPath, type IosPathClient } from "../../../src/features/action/DragPath";
 import { SnapshotReferenceStore } from "../../../src/features/observe/SnapshotReferenceStore";
 import type { ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
@@ -274,5 +276,41 @@ describe("DragPath iOS fresh-frame retry", () => {
         .getExecuteOptions()
         .some((call) => call.freshness === "fresh" && call.display === "0"),
     ).toBe(true);
+  });
+});
+
+describe("DragPath iOS SpringBoard icon refusal (#18859)", () => {
+  // The runner's own wire reply, captured from the Swift encoder.
+  const fixture = JSON.parse(
+    readFileSync(
+      join(import.meta.dir, "../../fixtures/ios-contract/runner-responses.json"),
+      "utf8",
+    ),
+  ) as { commandErrors: { name: string; error: string; errorCode: string }[] };
+  const found = fixture.commandErrors.find((error) => error.name === "springboard_icon_drag");
+  if (!found) {
+    throw new Error("Missing springboard_icon_drag runner fixture");
+  }
+  const refusal = found;
+
+  test("a stroke starting on a SpringBoard icon is a typed unsupported result", async () => {
+    const h = harness([
+      { success: false, totalTimeMs: 17, dispatched: true, acknowledged: true, ...refusal },
+    ]);
+    const result = await h.drag.execute(options);
+    expect(result.success).toBe(false);
+    expect(result.unsupported).toBe("springboard_icon_drag");
+    expect(result.error).toContain("dragPath is not supported on iOS");
+    expect(result.error).toContain("No input was sent");
+    expect(result.error).toContain(refusal.error);
+    expect(h.requests).toHaveLength(1);
+  });
+
+  test("an in-app stroke still succeeds with no unsupported marker", async () => {
+    const h = harness([ok]);
+    const result = await h.drag.execute(options);
+    expect(result.success).toBe(true);
+    expect(result.unsupported).toBeUndefined();
+    expect(result.moveCount).toBeGreaterThan(0);
   });
 });

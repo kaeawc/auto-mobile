@@ -1,7 +1,11 @@
 import { prototypeDataPointerTokens, resolvePrototypeDataPointer } from "./prototypeData";
 import { record } from "./prototypeTemplate";
 import type { PrototypeData } from "./prototypeSpec";
-import { applyPrototypeDataWrite } from "./prototypeDataWrite";
+import {
+  type PrototypeDataMatch,
+  type PrototypeDataWriteErrorCode,
+  applyPrototypeDataWrite,
+} from "./prototypeDataWrite";
 import { prototypeRequestMetaPath, type PrototypeRequestStatus } from "./prototypeRequest";
 import {
   PROTOTYPE_REQUEST_ERROR_CODES,
@@ -24,7 +28,16 @@ import {
  */
 
 /** Errors the response handling adds to the host's transport codes. */
-export const PROTOTYPE_REQUEST_RESPONSE_ERROR_CODES = ["http_error"] as const;
+export const PROTOTYPE_REQUEST_RESPONSE_ERROR_CODES = [
+  "http_error",
+  "not_found",
+  "ambiguous_match",
+  "not_array",
+  "invalid_path",
+  "invalid_value",
+  "limit_exceeded",
+  "lastGenerated_unset",
+] as const;
 export const PROTOTYPE_REQUEST_META_ERROR_CODES = [
   ...PROTOTYPE_REQUEST_ERROR_CODES,
   ...PROTOTYPE_REQUEST_RESPONSE_ERROR_CODES,
@@ -96,6 +109,18 @@ export interface PrototypeRequestAppend {
   maxItems?: number;
 }
 
+export interface PrototypeRequestWriteOptions {
+  append?: PrototypeRequestAppend;
+  where?: PrototypeDataMatch;
+  member?: string;
+}
+
+function requestWriteOptions(
+  options?: PrototypeRequestAppend | PrototypeRequestWriteOptions,
+): PrototypeRequestWriteOptions {
+  return options && "from" in options ? { append: options } : (options ?? {});
+}
+
 /** Only object members can be extracted; removing array elements would shift response indices. */
 function appendSource(
   body: PrototypeRequestJson,
@@ -124,10 +149,11 @@ function writeResponse(
   data: PrototypeData,
   into: string | undefined,
   body: PrototypeRequestJson,
-  append?: PrototypeRequestAppend,
+  options: PrototypeRequestWriteOptions,
 ):
   | { success: true; data: PrototypeData; appended: number; wroteInto: boolean }
-  | { success: false; message: string } {
+  | { success: false; message: string; code?: PrototypeDataWriteErrorCode } {
+  const { append, where, member } = options;
   let next = data;
   let appended = 0;
   if (append !== undefined) {
@@ -156,9 +182,15 @@ function writeResponse(
       op: "set",
       path: into,
       value: body === null ? "" : body,
+      where,
+      member,
     });
     if (!written.success) {
-      return { success: false, message: written.error.message };
+      return {
+        success: false,
+        message: written.error.message,
+        ...(where ? { code: written.error.code } : {}),
+      };
     }
     next = written.data;
   }
@@ -176,20 +208,23 @@ export function applyPrototypeRequestOutcome(
   data: PrototypeData,
   into: string | undefined,
   response: PrototypeResponseMessage,
-  append?: PrototypeRequestAppend,
+  options?: PrototypeRequestAppend | PrototypeRequestWriteOptions,
 ): PrototypeRequestOutcomeResult {
   let meta = metaOf(response);
   let next = data;
   let wroteInto = false;
   let appended = 0;
   if (response.ok && meta.error === undefined) {
-    const written = writeResponse(data, into, response.body, append);
+    const written = writeResponse(data, into, response.body, requestWriteOptions(options));
     if (written.success) {
       next = written.data;
       appended = written.appended;
       wroteInto = written.wroteInto;
     } else {
-      meta = { ...meta, error: { code: "invalid_response", message: written.message } };
+      meta = {
+        ...meta,
+        error: { code: written.code ?? "invalid_response", message: written.message },
+      };
     }
   }
   if (into !== undefined) {

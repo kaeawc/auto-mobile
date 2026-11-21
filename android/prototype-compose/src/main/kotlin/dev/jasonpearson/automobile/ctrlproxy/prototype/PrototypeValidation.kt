@@ -23,6 +23,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeValidateOn
 import java.util.Locale
 import java.util.TimeZone
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 internal fun PrototypeNode.checks(): List<PrototypeCheck> =
@@ -119,6 +120,7 @@ internal fun prototypeShownError(
   state: Map<String, PrototypeScalar>,
   shown: Set<String>,
   validity: Map<String, Boolean> = emptyMap(),
+  derivedValues: Map<String, JsonElement?> = emptyMap(),
 ): String? {
   val checkMessage =
     node.checkedKeys().firstNotNullOfOrNull { key ->
@@ -127,7 +129,9 @@ internal fun prototypeShownError(
         PrototypeChecks.evaluate(state[key], node.checks(), prototypeNodeRole(node))
           .firstFailingMessage
     }
-  return if (node is PrototypeTextFieldNode && node.errorWhen?.holds(state, validity) == true)
+  return if (
+    node is PrototypeTextFieldNode && node.errorWhen?.holds(state, validity, derivedValues) == true
+  )
     node.errorText ?: checkMessage ?: node.supportingText
   else checkMessage
 }
@@ -137,9 +141,11 @@ internal fun prototypeIsError(
   state: Map<String, PrototypeScalar>,
   shown: Set<String>,
   validity: Map<String, Boolean> = emptyMap(),
+  derivedValues: Map<String, JsonElement?> = emptyMap(),
 ): Boolean =
-  (node is PrototypeTextFieldNode && node.errorWhen?.holds(state, validity) == true) ||
-    prototypeShownError(node, state, shown, validity) != null
+  (node is PrototypeTextFieldNode &&
+    node.errorWhen?.holds(state, validity, derivedValues) == true) ||
+    prototypeShownError(node, state, shown, validity, derivedValues) != null
 
 /** Skip binding rows entirely for the usual display-only list. */
 private fun hasPrototypeChecks(node: PrototypeNode): Boolean =

@@ -12,7 +12,7 @@ export const REPLAY_LIMIT = 256;
 /** Viewer replay is one-shot; acknowledged app streams also buffer between subscriptions. */
 export class BufferedViewerClient implements PrototypeAgentClient {
   private readonly events: PrototypeAgentMessage[] = [];
-  private readonly listeners = new Set<(event: PrototypeAgentMessage) => void>();
+  private readonly listeners = new Set<(event: PrototypeAgentMessage) => unknown>();
   private buffering = true;
   private replayDelivered = false;
   private closedError: Error | undefined;
@@ -34,9 +34,11 @@ export class BufferedViewerClient implements PrototypeAgentClient {
         }
         this.events.push(event);
       } else {
-        const listeners = [...this.listeners];
-        listeners.forEach((listener) => listener(event));
-        if (listeners.length > 0) {
+        // Acknowledge only an event some listener kept: a rejected one stays on the device.
+        const accepted = [...this.listeners]
+          .map((listener) => listener(event))
+          .some((result) => result !== false);
+        if (accepted) {
           this.acknowledge(event);
         }
       }
@@ -61,15 +63,16 @@ export class BufferedViewerClient implements PrototypeAgentClient {
   ): Promise<PrototypeAgentResult> {
     return this.client.request(type, body, options);
   }
-  onEvent(listener: (event: PrototypeAgentMessage) => void): () => void {
+  onEvent(listener: (event: PrototypeAgentMessage) => unknown): () => void {
     this.listeners.add(listener);
     if (!this.replayDelivered) {
       this.replayDelivered = true;
       // Keep live pushes queued during delivery, including reentrant pushes from the listener.
       while (this.events.length > 0) {
         const event = this.events.shift()!;
-        listener(event);
-        this.acknowledge(event);
+        if (listener(event) !== false) {
+          this.acknowledge(event);
+        }
       }
       this.buffering = false;
     }

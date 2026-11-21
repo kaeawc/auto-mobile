@@ -120,7 +120,7 @@ function installSlowRotate(recordRotationSlot: boolean) {
     execute: async (orientation) => {
       const mutation = async (slot?: RotationRestoreSlot): Promise<RotateResult> => {
         if (recordRotationSlot) {
-          slot?.record(PRIOR_ROTATION);
+          await slot?.record(PRIOR_ROTATION);
         }
         started = true;
         await adbWrite.promise;

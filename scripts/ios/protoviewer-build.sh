@@ -92,8 +92,24 @@ for catalog in Localizable InfoPlist; do
   xcrun xcstringstool compile "${viewer_root}/${catalog}.xcstrings" --output-directory "${app}"
 done
 
-# Native host APIs generate loose placeholder PNGs, with no committed binary assets.
-# Also inspect the plist structurally: a CFBundleIconName anywhere would break stamping.
+# The home-screen icon is the store art (#14152), rendered from store-listing/icon by the icon
+# generator and downscaled to the loose 120/180 px PNGs CFBundleIconFiles names. No asset catalog:
+# the guard below still rejects Assets.car, and a CFBundleIconName anywhere would break stamping.
+# The rasters are PNGs, which the repository routes through Git LFS and never commits, so they must
+# be rendered here; the generator needs Bun and the installed `sharp`. Fail fast instead of letting
+# Bun auto-install a missing package and hang a CI job until its timeout: `--no-install` makes an
+# absent `sharp` an immediate error.
+icon_dir="${out_dir}/icons"
+if ! command -v bun > /dev/null 2>&1; then
+  echo "bun is required to render the ProtoViewer icon; install Bun and run scripts/ci/install-bun-deps.sh" >&2
+  exit 1
+fi
+if ! bun --no-install "${repo_root}/scripts/store-listing/generate-icons.ts" --out "${icon_dir}" > /dev/null; then
+  echo "Icon generator failed; install the Bun dependencies (scripts/ci/install-bun-deps.sh) so sharp resolves" >&2
+  exit 1
+fi
+icon_source="${icon_dir}/ios/AppIcon.appiconset/AppIcon-1024.png"
+[[ -s "${icon_source}" ]] || { echo "Icon generator did not write ${icon_source}" >&2; exit 1; }
 cat > "${out_dir}/viewer-icons.swift" <<'SWIFT'
 import CoreGraphics
 import Foundation
@@ -119,17 +135,17 @@ guard let localNetworkUsage = metadata["NSLocalNetworkUsageDescription"] as? Str
       metadata["NSBonjourServices"] == nil
 else { fatalError("ProtoViewer requires a local network usage description and no Bonjour services") }
 guard !hasCompiledIconName(plist) else { fatalError("Template must not contain CFBundleIconName") }
+guard let sourceURL = CommandLine.arguments.dropFirst(2).first.map({ URL(fileURLWithPath: $0) }),
+      let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
+      let artwork = CGImageSourceCreateImageAtIndex(source, 0, nil)
+else { fatalError("Cannot read the icon artwork") }
 for (scale, size) in [(2, 120), (3, 180)] {
     guard let context = CGContext(
         data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
         space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
     ) else { fatalError("Cannot create icon context") }
-    context.setFillColor(CGColor(red: 0.18, green: 0.35, blue: 0.75, alpha: 1))
-    context.addPath(CGPath(
-        roundedRect: CGRect(x: 0, y: 0, width: CGFloat(size), height: CGFloat(size)),
-        cornerWidth: CGFloat(size) * 0.22, cornerHeight: CGFloat(size) * 0.22, transform: nil
-    ))
-    context.fillPath()
+    context.interpolationQuality = .high
+    context.draw(artwork, in: CGRect(x: 0, y: 0, width: CGFloat(size), height: CGFloat(size)))
     let url = directory.appendingPathComponent("ProtoViewerIcon60x60@\(scale)x.png")
     guard let image = context.makeImage(),
           let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)
@@ -138,7 +154,7 @@ for (scale, size) in [(2, 120), (3, 180)] {
     guard CGImageDestinationFinalize(destination) else { fatalError("Cannot write icon PNG") }
 }
 SWIFT
-xcrun --sdk macosx swift -swift-version 6 -warnings-as-errors "${out_dir}/viewer-icons.swift" "${app}"
+xcrun --sdk macosx swift -swift-version 6 -warnings-as-errors "${out_dir}/viewer-icons.swift" "${app}" "${icon_source}"
 if [[ -n "$(find "${app}" \( -name Assets.car -o \
   \( -name InfoPlist.strings ! -path "${app}/*.lproj/InfoPlist.strings" \) \) -print -quit)" ]]; then
   echo "Viewer template must not contain Assets.car or unlocalized InfoPlist.strings" >&2

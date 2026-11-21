@@ -428,6 +428,7 @@ enum PrototypePlatformValidator {
                     "Emit names starting with \(reservedEmitPrefix) are reserved for runtime events"
                 )
             }
+            try PrototypeSecureStorageRules.validateDataAction(fields, path: path, secure: declared.secureKeys)
             try PrototypeSecureStorageRules.validateEmit(fields, path: path, secure: declared.secureKeys)
             try PrototypeSecureStorageRules.validateRequest(fields, path: path, secure: declared.secureKeys)
             try PrototypeSecureStorageRules.validateBindings(fields, path: path, secure: declared.secureKeys)

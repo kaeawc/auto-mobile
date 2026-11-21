@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import dev.jasonpearson.automobile.protocol.*
 import java.io.File
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -266,6 +268,36 @@ class PrototypeRepeatTest {
       (rows[1].source?.onTap?.first() as PrototypeSetStateAction).value,
     )
     assertEquals(PrototypeEmitAction("pick_7"), rows[1].source?.onTap?.get(3))
+  }
+
+  @Test
+  fun `keyed set and remove data where binds the row item like the request where`() {
+    fun item(field: String) = buildJsonObject { put("item", field) }
+    fun literal(value: String) = buildJsonObject { put("value", value) }
+    val retry =
+      PrototypeButtonNode(
+        label = "Retry",
+        onTap =
+          listOf(
+            PrototypeSetDataAction(
+              "/data/messages",
+              literal("sending"),
+              PrototypeDataWhere("id", item("id")),
+              "status",
+            ),
+            PrototypeRemoveDataAction("/data/messages", PrototypeDataWhere("id", item("id"))),
+          ),
+      )
+    val rows = mapPrototypeSpec(spec(list(retry))).root.children
+    val tap = rows[0].source?.onTap
+    assertEquals(
+      buildJsonObject { put("value", "a") },
+      (tap?.get(0) as PrototypeSetDataAction).where?.equals,
+    )
+    assertEquals(
+      buildJsonObject { put("value", EmitContextResolver.scalar(PrototypeScalar.Numeric(7.0))) },
+      (rows[1].source?.onTap?.get(1) as PrototypeRemoveDataAction).where?.equals,
+    )
   }
 
   @Test

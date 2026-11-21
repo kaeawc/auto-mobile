@@ -283,8 +283,11 @@
             driver.onState = { [weak self] snapshot in self?.updatePlatformState(snapshot) }
             driver.onEvent = { [weak self] event in
                 self?.apply(activity: false) { session in
-                    do { return try session.deliverPlatformEvent(event.event, data: event.data) }
-                    catch { NSLog("Prototype platform event failed: %@", String(describing: error)); return [] }
+                    do { return try session.deliverPlatformEvent(
+                        event.event,
+                        data: event.data,
+                        simulated: event.simulated
+                    ) } catch { NSLog("Prototype platform event failed: %@", String(describing: error)); return [] }
                 }
             }
             return driver
@@ -336,6 +339,10 @@
 
         func pauseTimers() { timers.pause() }
         func resumeTimers() { timers.resume() }
+
+        func simulatePlatformEvent(id: String, event: String, data: JSONValue) -> String? {
+            platformDriver.simulate(id: id, event: event, data: data, session: session)
+        }
 
         func advanceClock(id: String, milliseconds: Int) -> PrototypeTimers.AdvanceResult {
             guard session.isShown, spec?.id == id else {
@@ -455,13 +462,18 @@
                 .restored(locked: prepared?.locked ?? [])
             // Drop buffered location/sensor events from the old session while keeping global and
             // host-supplied streams alive. New state must be seeded before the first draw.
-            platformDriver.resetSessionEvents()
-            platformRegistry.configure(locationBlock: (prepared?.spec ?? spec).locationBlock)
-            platformRegistry.configure(sensorsBlock: (prepared?.spec ?? spec).sensorsBlock, sessionID: showRevision + 1)
             let seeded: PrototypeSpec
-            do { seeded = try (prepared?.spec ?? spec).replacingPlatform(
-                platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }
-            ) } catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
+            do {
+                seeded = try platformDriver.seedForShow(
+                    prepared?.spec ?? spec,
+                    previousLocationBlock: session.spec?.locationBlock,
+                    previousSensorsBlock: session.spec?.sensorsBlock,
+                    previousSessionID: showRevision,
+                    sessionID: showRevision + 1
+                ) {
+                    platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }
+                }
+            } catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
             next.show(
                 seeded, reset: reset, appearance: appearance, locale: locale, specBytes: specBytes,
                 restoredState: prepared?.state, restoredStacks: prepared?.stacks

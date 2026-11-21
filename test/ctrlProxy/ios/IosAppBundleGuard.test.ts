@@ -97,6 +97,94 @@ describe("IosAppBundleGuard", () => {
 
     expect(lookups).toEqual([]);
   });
+
+  describe("installHostAppIfMissing", () => {
+    const SIM_ID = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
+    const APP_PATH = "/build/Debug-iphonesimulator/AutoMobileTest.app";
+
+    function hostAppGuard(options: {
+      simulator?: boolean;
+      installedBundleIds?: string[];
+      listFailure?: Error;
+    }) {
+      const installs: Array<[string, string | undefined]> = [];
+      const listings: Array<string | undefined> = [];
+      const guard = new DefaultIosAppBundleGuard({
+        device: { deviceId: SIM_ID, platform: "ios", name: "iPhone" },
+        deviceAppManager: {
+          getInstalledAppBundleHash: async () => null,
+          uninstallApp: async () => {},
+        },
+        processExecutor: new FakeProcessExecutor(),
+        timer: new FakeTimer(),
+        appBundleId: APP_BUNDLE_ID,
+        legacyAppBundleId: LEGACY_APP_BUNDLE_ID,
+        isSimulator: () => options.simulator ?? true,
+        isHashVerificationSkipped: () => false,
+        getExpectedAppHash: () => null,
+        hostAppSimctl: {
+          listAppsOrThrow: async (deviceId) => {
+            listings.push(deviceId);
+            if (options.listFailure) {
+              throw options.listFailure;
+            }
+            return (options.installedBundleIds ?? []).map((CFBundleIdentifier) => ({
+              CFBundleIdentifier,
+            }));
+          },
+          installApp: async (appPath, deviceId) => {
+            installs.push([appPath, deviceId]);
+          },
+        },
+      });
+      return { guard, installs, listings };
+    }
+
+    test("installs the host app on a simulator that lacks it", async () => {
+      const { guard, installs, listings } = hostAppGuard({
+        installedBundleIds: ["dev.jasonpearson.automobile.ctrlproxy.uitests.xctrunner"],
+      });
+      await guard.installHostAppIfMissing(APP_PATH);
+      expect(listings).toEqual([SIM_ID]);
+      expect(installs).toEqual([[APP_PATH, SIM_ID]]);
+    });
+
+    test("leaves an installed host app alone so its StoreKit state survives", async () => {
+      const { guard, installs } = hostAppGuard({ installedBundleIds: [APP_BUNDLE_ID] });
+      await guard.installHostAppIfMissing(APP_PATH);
+      expect(installs).toEqual([]);
+    });
+
+    test("does nothing on a physical device or without a built host app", async () => {
+      const physical = hostAppGuard({ simulator: false });
+      await physical.guard.installHostAppIfMissing(APP_PATH);
+      expect(physical.listings).toEqual([]);
+
+      const unbuilt = hostAppGuard({});
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await unbuilt.guard.installHostAppIfMissing(null);
+        expect(unbuilt.listings).toEqual([]);
+        expect(warn).toHaveBeenCalledTimes(1);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("logs and continues when the app listing fails", async () => {
+      const { guard, installs } = hostAppGuard({ listFailure: new Error("listapps failed") });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await guard.installHostAppIfMissing(APP_PATH);
+        expect(installs).toEqual([]);
+        expect(
+          warn.mock.calls.some(([message]) => String(message).includes("listapps failed")),
+        ).toBe(true);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
 });
 
 afterEach(() => {

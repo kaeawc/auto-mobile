@@ -255,6 +255,62 @@ describe("StoreKitTest cleared-session ledger", () => {
     expect(cleared.isTouched(deviceId, appId)).toBe(true);
   });
 
+  test("a refused load that answers after an overlapping successful load leaves the bundle unclean", async () => {
+    const answers: ((result: CtrlProxyStoreKitResult) => void)[] = [];
+    const sender: StoreKitSender = {
+      requestStoreKit: () => new Promise((resolve) => answers.push(resolve)),
+    };
+    const cleared = new InMemoryStoreKitClearedSessions();
+    const storeKit = new StoreKitTest(
+      () => sender,
+      () => "simulator",
+      cleared,
+    );
+    const load: StoreKitTestInput = { action: "load", appId, configPath: "/tmp/P.storekit" };
+    const refused = storeKit.run(simulator, load);
+    const loaded = storeKit.run(simulator, load);
+    answers[1]?.({ success: true, totalTimeMs: 1, action: "load", bundleId: appId });
+    await loaded;
+    answers[0]?.(OTHER_ACTIVE);
+    await refused;
+    expect(cleared.isCleared(deviceId, appId)).toBe(false);
+    expect(cleared.isTouched(deviceId, appId)).toBe(true);
+  });
+
+  test("a clear that answers after an overlapping load leaves the bundle unclean", async () => {
+    const answers: ((result: CtrlProxyStoreKitResult) => void)[] = [];
+    const sender: StoreKitSender = {
+      requestStoreKit: () => new Promise((resolve) => answers.push(resolve)),
+    };
+    const cleared = new InMemoryStoreKitClearedSessions();
+    const storeKit = new StoreKitTest(
+      () => sender,
+      () => "simulator",
+      cleared,
+    );
+    const clearing = storeKit.run(simulator, { action: "clear", appId });
+    const loaded = storeKit.run(simulator, {
+      action: "load",
+      appId,
+      configPath: "/tmp/P.storekit",
+    });
+    answers[1]?.({ success: true, totalTimeMs: 1, action: "load", bundleId: appId });
+    await loaded;
+    answers[0]?.({ success: true, totalTimeMs: 1, action: "clear", bundleId: appId });
+    await clearing;
+    expect(cleared.isCleared(deviceId, appId)).toBe(false);
+  });
+
+  test("markCleared with a stale generation marks nothing", () => {
+    const cleared = new InMemoryStoreKitClearedSessions();
+    const stale = cleared.generation(deviceId, appId);
+    expect(cleared.markTouched(deviceId, appId)).toBe(stale + 1);
+    expect(cleared.markCleared(deviceId, appId, stale)).toBe(false);
+    expect(cleared.isCleared(deviceId, appId)).toBe(false);
+    expect(cleared.markCleared(deviceId, appId, stale + 1)).toBe(true);
+    expect(cleared.isCleared(deviceId, appId)).toBe(true);
+  });
+
   test("another refused mutation does not count as the other-bundle refusal", async () => {
     const { storeKit, cleared } = harness("simulator", () => ({
       ...OTHER_ACTIVE,

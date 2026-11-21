@@ -118,6 +118,24 @@ enum PrototypeSecureStorageRules {
         }
     }
 
+    static func validateDataAction(_ fields: [String: JSONValue], path: String, secure: [String]) throws {
+        guard ["setData", "removeData"].contains(fields["type"]?.stringValue ?? "") else { return }
+        let candidates: [(JSONValue?, String)] = [
+            (fields["where"]?.objectFields?["equals"], "\(path).where.equals"),
+            (fields["value"], "\(path).value"),
+        ]
+        for (value, at) in candidates {
+            if let key = value?.objectFields?["state"]?.stringValue,
+               let leaked = secureKey(for: key, secure: secure)
+            {
+                throw PrototypeContractValidator.invalid(
+                    at,
+                    "Secure storage key \(leaked) cannot be sent in data actions"
+                )
+            }
+        }
+    }
+
     /// A `request` that sends a secure key without `allowSecureInRequest: true`: a `{state}` binding in a
     /// header, query value or body (a whole body, a form entry or a multipart value), or a `{key}` placeholder
     /// in the URL, a header or a query value. Members are checked in sorted order.
@@ -130,7 +148,10 @@ enum PrototypeSecureStorageRules {
             return entries.keys.sorted().map { (entries[$0], PrototypeLimits.dataMemberPath(at, key: $0)) }
         }
         let parts: [JSONValue] = if case let .array(items)? = body?["multipart"] { items } else { [] }
-        let candidates: [(JSONValue?, String)] = [(fields["url"], "\(path).url")]
+        let candidates: [(JSONValue?, String)] = [
+            (fields["url"], "\(path).url"),
+            (fields["where"]?.objectFields?["equals"], "\(path).where.equals"),
+        ]
             + members(fields["headers"], "\(path).headers")
             + members(fields["query"], "\(path).query")
             + [(fields["body"], "\(path).body")]

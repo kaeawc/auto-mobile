@@ -7,6 +7,7 @@ import type { DisposableAppTemplate } from "../../src/features/prototype/disposa
 
 export class FakeDisposableAppStamper implements DisposableAppStamper {
   readonly stamped: DisposableAppStampInput[] = [];
+  readonly released: string[] = [];
 
   constructor(
     private readonly offered: readonly DisposableAppTemplate[] = [
@@ -26,5 +27,9 @@ export class FakeDisposableAppStamper implements DisposableAppStamper {
   async stamp(input: DisposableAppStampInput): Promise<DisposableAppStamped> {
     this.stamped.push(input);
     return { artifactPath: `/stamped/${input.appId}.apk`, version: `1.0.${this.stamped.length}` };
+  }
+
+  async release(artifactPath: string): Promise<void> {
+    this.released.push(artifactPath);
   }
 }

@@ -4,8 +4,8 @@
 # emulator (#10891). Pull-request CI used to boot one emulator per suite; this
 # runs both from the single android-emulator action invocation.
 #
-# Both suites always run, so one red suite cannot hide the other; the exit
-# status is non-zero when either fails. The AutoMobile daemon is stopped between
+# Both suites and the performance-tool smoke (#18725) always run, so one red
+# step cannot hide another; the exit status is non-zero when any fails. The AutoMobile daemon is stopped between
 # them: the JUnit Runner suite starts a daemon with the default tool set and may
 # still hold a device assignment, while the Playground chain must start its own
 # daemon with only the navigation tools enabled.
@@ -23,6 +23,7 @@
 #   PERMISSION_CMD     SDK/CtrlProxy permission contract check
 #   NAV_GRAPH_CMD      navigation-graph SDK event integration
 #   NAV_GRAPH_E2E_CMD  navigation-graph exploration and replay
+#   PERF_SMOKE_CMD     performance-tool smoke (#18725)
 
 set -euo pipefail
 
@@ -42,10 +43,12 @@ permission_cmd="${PERMISSION_CMD:-${script_dir}/verify-sdk-ctrl-proxy-permission
 nav_graph_cmd="${NAV_GRAPH_CMD:-${script_dir}/navigation-graph-sdk-event-integration.sh}"
 nav_graph_e2e_cmd="${NAV_GRAPH_E2E_CMD:-${script_dir}/navigation-graph-e2e.sh}"
 saved_prototype_smoke_cmd="${SAVED_PROTOTYPE_SMOKE_CMD:-${script_dir}/saved-prototype-smoke.sh}"
+perf_smoke_cmd="${PERF_SMOKE_CMD:-${script_dir}/performance-tool-smoke.sh}"
 playground_tools="navigateTo,getNavigationGraph,explore"
 
 junit_status=0
 playground_status=0
+perf_status=0
 
 echo "=== JUnit Runner emulator suite ==="
 # Main's kotlin-code-coverage donor caches a device-less result in the borrowed
@@ -95,8 +98,17 @@ if [[ "$smoke_status" -ne 0 ]]; then
   fi
 fi
 
+echo "=== Resetting AutoMobile daemon before performance smoke ==="
+# Required, unlike the saved prototype smoke: it checks result shape only.
+set +e
+"$reset_daemon_cmd" \
+  && run_with_timeout "${PERF_SMOKE_TIMEOUT_SECONDS:-300}" env -u AUTOMOBILE_ENABLED_TOOLS "$perf_smoke_cmd"
+perf_status=$?
+set -e
+
 echo "JUnit Runner emulator suite exit status: ${junit_status}"
 echo "Playground Automobile emulator suite exit status: ${playground_status}"
-if [[ "$junit_status" -ne 0 || "$playground_status" -ne 0 ]]; then
+echo "Performance smoke exit status: ${perf_status}"
+if [[ "$junit_status" -ne 0 || "$playground_status" -ne 0 || "$perf_status" -ne 0 ]]; then
   exit 1
 fi

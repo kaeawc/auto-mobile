@@ -5,6 +5,7 @@ import { TvosRunnerLifecycle } from "../../../src/features/tvos/TvosRunnerLifecy
 import { InMemoryVisionosTargetApps } from "../../../src/features/visionos/VisionosTargetApps";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { drainUntil } from "../../helpers/fakeTimerStepping";
 import { FakeTvosRunnerClient } from "../../fakes/FakeTvosRunnerClient";
 import { FakeTvosRunnerLauncher } from "../../fakes/FakeTvosRunnerLauncher";
 
@@ -136,8 +137,7 @@ test("aborting startDevice during activation stops the launch and releases the s
   f.activator.hangUntilAborted = true;
   const controller = new AbortController();
   const started = f.owner.start({ deviceId: DEVICE, signal: controller.signal });
-  await Promise.resolve();
-  await Promise.resolve();
+  await drainUntil(() => f.activator.calls.length > 0, { description: "activation" });
   expect(f.activator.calls).toEqual([`${DEVICE} ${APP}`]);
   controller.abort();
   const result = await started;

@@ -72,8 +72,13 @@ constructor(
 )
 
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class ContentHiddenRegion(
+  /** The flagged node's bounds clipped to [hostBounds] and the screen. */
   val bounds: ElementBounds,
   val reason: String,
+  /** [bounds] as a percentage of the screen area. */
   val areaPercent: Int,
+  /** Bounds of the nearest ComposeView ancestor that owns the region. Absent from older APKs. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val hostBounds: ElementBounds? = null,
 )

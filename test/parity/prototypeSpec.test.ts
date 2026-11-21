@@ -96,7 +96,7 @@ describe("shared prototype contract", () => {
     for (const { name, json } of valid) {
       const result = validatePrototypeSpec(json);
       if (!result.success) {
-        throw new Error(JSON.stringify(result.error));
+        throw new Error(`${name}: ${JSON.stringify(result.error)}`);
       }
       decoded.set(name, result.data);
       capabilitiesByName.set(name, prototypeGateCapabilities(result.data));

@@ -54,7 +54,7 @@ restart the daemon so it installs the current runner.
 
 ## `performanceAudit`
 
-Android only.
+Both checks support Android and iOS Simulator. Calls on physical iOS devices fail.
 
 | Parameter | Meaning                                                                                                 |
 | --------- | ------------------------------------------------------------------------------------------------------- |
@@ -62,13 +62,14 @@ Android only.
 | `appId`   | App to audit (default: the foreground app)                                                              |
 | `failOn`  | `error` or `warning` fails the call when a check does not pass or cannot run; `never` (default) reports |
 
-`performance` measures UI jank, frame time and touch latency of the foreground app against the
-configured thresholds. When `appId` is not in the foreground, the result lists it under
-`unsupported` instead, and `failOn` `error` or `warning` then fails the call. `memory` takes a
-memory snapshot of `appId`.
+`performance` measures UI jank and frame time of the foreground app against the configured
+thresholds. Touch latency is measured on Android only. On iOS Simulator, instrument the app with
+auto-mobile-sdk to report frame metrics. The check reports `unsupported` when the app is in the
+background or the simulator receives no fresh frame metrics. `memory` takes a snapshot of
+`appId` on Android and checks its RSS growth over three seconds on iOS Simulator.
 
 Each result has `passed`, its metrics and its violations; `failed` is set when `failOn` matched.
-Frame-time percentiles and jank counts both cover only the frames rendered during the check, not
+On Android, frame-time percentiles and jank counts both cover only the frames rendered during the check, not
 frames from app launch or earlier screens. When the app rendered no frames during the check (an idle screen), the frame-time percentiles
 `p50Ms`–`p99Ms` are null and `metrics.frameTimeUnmeasured` says why. AutoMobile then skips the
 frame-time check, so it does not fail the call. For raw captures use `performanceTrace`,

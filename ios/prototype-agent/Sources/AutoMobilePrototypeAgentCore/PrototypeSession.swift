@@ -460,11 +460,28 @@ struct PrototypeSession {
         rebuildNavigation(for: rebuilt.root, keepingPages: pages, keepingStacks: stacks)
     }
 
-    mutating func deliverPlatformEvent(_ name: String, data: JSONValue) throws -> [PrototypeEvent] {
+    mutating func deliverPlatformEvent(
+        _ name: String,
+        data: JSONValue,
+        simulated: Bool = false
+    )
+        throws -> [PrototypeEvent]
+    {
         guard let spec else { return [] }
         var payload = JSONValue.object(["event": .string(name), "data": data])
-        if try JSONEncoder().encode(payload).count > PrototypeLimits.maxEmitPayloadBytes {
+        if simulated { payload = .object(["event": .string(name), "data": data, "simulated": .bool(true)]) }
+        let overBudget: Bool
+        if simulated {
+            overBudget = (PrototypeEmitContext.jsonByteCount(payload) ?? Int.max) > PrototypeLimits.maxEmitPayloadBytes
+        } else {
+            overBudget = try JSONEncoder().encode(payload).count > PrototypeLimits.maxEmitPayloadBytes
+        }
+        if overBudget {
             payload = .object(["event": .string(name), "data": .null, "truncated": .bool(true)])
+        }
+        if simulated, case var .object(fields) = payload {
+            fields["simulated"] = .bool(true)
+            payload = .object(fields)
         }
         let actions = spec.platformHandlers[name] ?? .array([])
         let decoded = try JSONDecoder().decode([PrototypeAction].self, from: JSONEncoder().encode(actions))

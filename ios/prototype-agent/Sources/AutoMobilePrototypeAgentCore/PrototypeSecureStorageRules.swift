@@ -69,19 +69,15 @@ enum PrototypeSecureStorageRules {
         }
     }
 
-    static func validateDataAction(
-        _ fields: [String: JSONValue], path: String, secure: [String], derive: [String: JSONValue] = [:]
-    )
-        throws
-    {
+    static func validateDataAction(_ fields: [String: JSONValue], path: String, secure: [String]) throws {
         guard ["setData", "removeData"].contains(fields["type"]?.stringValue ?? "") else { return }
         let candidates: [(JSONValue?, String)] = [
             (fields["where"]?.objectFields?["equals"], "\(path).where.equals"),
             (fields["value"], "\(path).value"),
         ]
         for (value, at) in candidates {
-            if let binding = value?.objectFields,
-               let leaked = bindingKey(binding, secure: secure, derive: derive)
+            if let key = value?.objectFields?["state"]?.stringValue,
+               let leaked = secureKey(for: key, secure: secure)
             {
                 throw PrototypeContractValidator.invalid(
                     at,
@@ -95,7 +91,7 @@ enum PrototypeSecureStorageRules {
     /// header, query value or body (a whole body, a form entry or a multipart value), or a `{key}` placeholder
     /// in the URL, a header or a query value. Members are checked in sorted order.
     static func validateRequest(
-        _ fields: [String: JSONValue], path: String, secure: [String], derive: [String: JSONValue]
+        _ fields: [String: JSONValue], path: String, secure: [String], derive: [String: JSONValue] = [:]
     )
         throws
     {

@@ -78,6 +78,8 @@
                 location: CLLocationManagerPrototypeLocationSource(),
                 sensors: CoreMotionPrototypeSensorSource(),
                 permissions: includePermissions ? UNUserNotificationCenterPrototypePermissionsSource() : nil,
+                permissionAuthorities: includePermissions ? FrameworkPrototypePermissionAuthority
+                    .hostAuthorities() : [:],
                 biometric: LAContextPrototypeBiometricSource()
             )
         }

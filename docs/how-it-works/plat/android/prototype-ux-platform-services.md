@@ -108,7 +108,7 @@ counts the current recording. A press-and-hold control uses the gesture action l
 uses a `media` audio player. No production runtime advertises the module yet.
 
 **Runtime permissions (#14297).** Canonical names live in `requires.permissions[].name`, and each entry's
-`purpose` becomes the iOS usage string and the Android rationale text. The `schemas/prototype-platform-permissions.json`
+`purpose` becomes the disposable iOS app's usage string and the Android rationale text. The `schemas/prototype-platform-permissions.json`
 file maps each name to its Android manifest permissions and grant mechanism, and to its iOS Info.plist usage key and
 `simctl privacy` service:
 
@@ -136,27 +136,33 @@ of `granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted` or `
 the user changes a permission in Settings and the app resumes. A call that needs a permission the user denied fails with `permission_denied` and never prompts implicitly. Overlay
 runtimes do not advertise the module, since a grant there would go to CtrlProxy or the borrowed host app.
 
-iOS standalone hosts and ProtoViewer register `permissions` for `notifications`; borrowed-app sessions
-do not expose the module. Other canonical names return `unavailable`.
-The first status read establishes `/platform/permissions/notifications` asynchronously without prompting.
-Requests and foreground Settings re-reads publish only changed states. A request prompts with alert,
-sound and badge options only while authorization is `notDetermined`, then re-reads notification settings
-for its result. Outside an app bundle with a bundle
-identifier, the source returns `unavailable` without accessing UserNotifications. No Info.plist key is
-required. One request may be in flight per module; a second returns `too_many_in_flight`. Request
-cancellation drops the late result while foreground observation stays active. The registry stops
-observation when its final observer releases it. It uses the shared iOS
-platform-call deadline. This module does not publish
-`/platform/notifications/authorization`; `provisional` authorization reads as `limited` here.
+iOS standalone hosts and ProtoViewer register `permissions` for `notifications`, `camera`,
+`microphone`, `photos`, `photosAdd`, `contacts`, `calendar` and `location`. Borrowed-app sessions
+omit the module. Other canonical names return `unavailable`. A missing usage key returns
+`unavailable` without accessing the framework. ProtoViewer supplies generic usage strings.
+`notifications` needs an app bundle with a bundle identifier and has no usage key.
 
-| iOS `UNAuthorizationStatus` | State           |
-| --------------------------- | --------------- |
-| `notDetermined`             | `notDetermined` |
-| `denied`                    | `denied`        |
-| `authorized`                | `granted`       |
-| `provisional`               | `limited`       |
-| `ephemeral`                 | `granted`       |
-| Unknown future value        | `unavailable`   |
+The first status read establishes `/platform/permissions/<name>` asynchronously without prompting.
+Foreground refresh re-reads each authority. Requests and foreground reads publish only changed
+states. A request prompts only while authorization is `notDetermined` and returns the resulting
+status. Notifications request alert, sound and badge options. Photos use read/write access,
+`photosAdd` uses add-only access, calendar requests full access and location requests when-in-use
+access. One request may be in flight per module. A second returns `too_many_in_flight`. The shared
+iOS platform-call deadline applies. Cancellation drops the late result while foreground observation
+stays active. The registry stops observation when its final observer releases it.
+
+| iOS authority                                 | Framework status                          | State                    |
+| --------------------------------------------- | ----------------------------------------- | ------------------------ |
+| All                                           | `notDetermined`, `denied`                 | Same as framework status |
+| Capture, photos, contacts, calendar, location | `restricted`                              | `restricted`             |
+| Notifications, capture, photos, contacts      | `authorized`                              | `granted`                |
+| Notifications                                 | `ephemeral`                               | `granted`                |
+| Notifications                                 | `provisional`                             | `limited`                |
+| Photos, contacts                              | `limited`                                 | `limited`                |
+| Calendar                                      | `fullAccess`                              | `granted`                |
+| Calendar                                      | `writeOnly`                               | `limited`                |
+| Location                                      | `authorizedWhenInUse`, `authorizedAlways` | `granted`                |
+| All                                           | Unknown future value                      | `unavailable`            |
 
 Android Activity hosts register `permissions` for `notifications`: ProtoViewer, disposable apps and
 CtrlProxy's SavedPrototypeActivity advertise the capability. A plain Activity without an

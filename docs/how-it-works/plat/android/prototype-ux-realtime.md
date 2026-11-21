@@ -75,8 +75,18 @@ Status runs
 idle → connecting → open, then reconnecting with backoff, ending closed (or error when the last
 close carried one). Attempts reset after 5 s open. Sends wait in a 32-entry queue while
 (re)connecting, flush on open and drop on close. A patch closes removed channels and reconnects only
-changed live ones; dismiss closes every connection with 1001 and silences the sink. The controller is not
-wired into the prototype runtime as the `realtime` module.
+changed live ones; dismiss closes every connection with 1001 and silences the sink.
+
+A `PrototypeRuntime` constructed with realtime transports owns one controller as its own `realtime`
+module, built per runtime like the device module, so two prototypes never share a channel. No host
+passes transports yet, so nothing advertises the realtime capabilities. Lock order: the controller's
+lock is outer and the runtime's interaction lock inner. The runtime posts `update` (show and patch),
+`show` and `close` (dismiss) to one ordered inbox on its request scope, and `realtime.*` calls use
+the same inbox, outside the interaction lock. The sink takes the interaction lock and drops effects
+once the runtime is inactive. It publishes `/platform/realtime` and delivers `realtime.*` events
+directly, not through the module's flows. A status event and its `statusKey` write therefore keep
+their order against frames. Channel URL and header placeholders bind to the committed state and data
+at each show or patch.
 
 Pure TS, Kotlin and Swift rules replay shared
 backoff and coalescing vectors under `test/fixtures/prototype-spec/realtime/`. Reconnect uses

@@ -2,6 +2,9 @@ package dev.jasonpearson.automobile.protoviewer
 
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageState
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRemoteImageLoader
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRemoteImageProvider
 import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -14,27 +17,36 @@ import kotlinx.coroutines.selects.select
 class SettingsPrototypeHttpClient(
   private val settings: SettingsStore,
   allowedClient: () -> PrototypeHttpClient,
-) : PrototypeHttpClient {
+) : PrototypeHttpClient, PrototypeRemoteImageProvider {
   private val allowed by lazy(allowedClient)
 
+  var allowedImages: () -> PrototypeRemoteImageLoader? = { null }
+  override val remoteImages = PrototypeRemoteImageLoader { url, target ->
+    withConsent({ PrototypeImageState.Missing }) {
+      allowedImages()?.load(url, target) ?: PrototypeImageState.Missing
+    }
+  }
+
   override suspend fun execute(request: PrototypeHttpRequest): PrototypeRequestResponse =
+    withConsent({ DeniedPrototypeHttpClient.execute(request) }) { allowed.execute(request) }
+
+  private suspend fun <T> withConsent(denied: suspend () -> T, call: suspend () -> T): T =
     coroutineScope {
       val epoch = settings.networkRevocations.value
-      if (!settings.allowNetwork.value)
-        return@coroutineScope DeniedPrototypeHttpClient.execute(request)
+      if (!settings.allowNetwork.value) return@coroutineScope denied()
       val revoked =
         async(start = CoroutineStart.UNDISPATCHED) {
           settings.networkRevocations.first { it != epoch }
         }
       // Transport errors raised by revocation-time cancellation must not escape as host details.
-      val response = async { runTransport(request) }
+      val response = async { runTransport(call) }
       try {
         select {
-          revoked.onAwait { DeniedPrototypeHttpClient.execute(request) }
+          revoked.onAwait { denied() }
           response.onAwait {
             if (settings.allowNetwork.value && settings.networkRevocations.value == epoch)
               it.getOrThrow()
-            else DeniedPrototypeHttpClient.execute(request)
+            else denied()
           }
         }
       } finally {
@@ -46,11 +58,9 @@ class SettingsPrototypeHttpClient(
   @Suppress(
     "TooGenericExceptionCaught",
   ) // Any transport failure is deferred until consent is rechecked.
-  private suspend fun runTransport(
-    request: PrototypeHttpRequest,
-  ): Result<PrototypeRequestResponse> =
+  private suspend fun <T> runTransport(call: suspend () -> T): Result<T> =
     try {
-      Result.success(allowed.execute(request))
+      Result.success(call())
     } catch (error: CancellationException) {
       throw error
     } catch (error: Exception) {

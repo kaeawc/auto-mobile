@@ -429,6 +429,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeImageNode ->
       copy(
+        url = url?.let(instance::interpolate),
         semantics = semantics,
         onAppear = onAppear,
         onTap = onTap,

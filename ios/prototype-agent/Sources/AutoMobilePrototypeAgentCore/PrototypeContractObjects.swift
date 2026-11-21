@@ -57,6 +57,7 @@ extension PrototypeContractValidator {
                 "Exactly one of \(exactlyOne.joined(separator: ", ")) is required"
             )
         }
+        let optionalGroups = strings(rule["optionalDependentGroups"])
         for trigger in sorted(rule["dependents"]?.objectFields?.keys ?? [String: JSONValue]().keys) {
             let names = strings(rule["dependents"]?.objectFields?[trigger])
             let present = names.filter { data[$0] != nil }
@@ -65,7 +66,9 @@ extension PrototypeContractValidator {
                 if let first = present.first {
                     throw invalid(keyPath(path, first), "Requires \(triggers.joined(separator: " or "))")
                 }
-            } else if trigger.contains("|"), present.count != 1, let first = names.first {
+            } else if trigger.contains("|"), !optionalGroups.contains(trigger), present.count != 1,
+                      let first = names.first
+            {
                 throw invalid(
                     keyPath(path, present.dropFirst().first ?? first),
                     "Exactly one of \(names.joined(separator: ", ")) is required"

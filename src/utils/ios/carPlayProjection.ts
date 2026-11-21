@@ -3,6 +3,7 @@ import { ENV, readEnvRaw } from "../../config/env";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { execFileAsync, type ExecFileAsync } from "../HostCommandExecutor";
 import { runExecSeam } from "../ExecSeam";
+import { boundedHelperTimeoutMs, type CarPlayHelperCallOptions } from "./carPlayScreenPower";
 
 export const carPlayProjectionStateSchema = z.discriminatedUnion("found", [
   z
@@ -34,10 +35,14 @@ export const carPlayProjectionStateSchema = z.discriminatedUnion("found", [
 ]);
 
 export type CarPlayProjectionState = z.infer<typeof carPlayProjectionStateSchema>;
+export type CarPlayProjectingState = Extract<CarPlayProjectionState, { found: true }> &
+  ({ isCarDisplay: true } | { isCarInstrumentsDisplay: true });
 
 export interface CarPlayProjectionProbe {
-  probe(udid: string): Promise<CarPlayProjectionState>;
+  probe(udid: string, options?: CarPlayHelperCallOptions): Promise<CarPlayProjectionState>;
 }
+
+const PROBE_TIMEOUT_MS = 15000;
 
 export function parseCarPlayProjectionState(json: string): CarPlayProjectionState {
   try {
@@ -56,7 +61,7 @@ export class DefaultCarPlayProjectionProbe implements CarPlayProjectionProbe {
     private readonly env: NodeJS.ProcessEnv = process.env,
   ) {}
 
-  async probe(udid: string): Promise<CarPlayProjectionState> {
+  async probe(udid: string, options?: CarPlayHelperCallOptions): Promise<CarPlayProjectionState> {
     const path = readEnvRaw(ENV.CARPLAY_PROJECTION_PROBE_PATH, this.env);
     if (!path?.trim()) {
       throw new ActionableError(
@@ -67,7 +72,11 @@ export class DefaultCarPlayProjectionProbe implements CarPlayProjectionProbe {
     try {
       const result = await runExecSeam(
         (options) => this.exec("xcrun", args, options),
-        { timeoutMs: 15000, maxBuffer: 1024 * 1024 },
+        {
+          timeoutMs: boundedHelperTimeoutMs(PROBE_TIMEOUT_MS, options),
+          maxBuffer: 1024 * 1024,
+          signal: options?.signal,
+        },
         { command: "xcrun", args },
       );
       return parseCarPlayProjectionState(result.stdout);
@@ -80,8 +89,10 @@ export class DefaultCarPlayProjectionProbe implements CarPlayProjectionProbe {
   }
 }
 
-export function assertCarPlayProjecting(state: CarPlayProjectionState): void {
-  if (state.isCarDisplay || state.isCarInstrumentsDisplay) {
+export function assertCarPlayProjecting(
+  state: CarPlayProjectionState,
+): asserts state is CarPlayProjectingState {
+  if (state.found && (state.isCarDisplay || state.isCarInstrumentsDisplay)) {
     return;
   }
   const status = state.found
@@ -95,6 +106,8 @@ export function assertCarPlayProjecting(state: CarPlayProjectionState): void {
 export async function requireCarPlayProjection(
   udid: string,
   probe: CarPlayProjectionProbe,
-): Promise<void> {
-  assertCarPlayProjecting(await probe.probe(udid));
+): Promise<CarPlayProjectingState> {
+  const state = await probe.probe(udid);
+  assertCarPlayProjecting(state);
+  return state;
 }

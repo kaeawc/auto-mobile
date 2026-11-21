@@ -39,6 +39,12 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/spotlight-exclude.sh
 source "${SCRIPT_DIR}/../lib/spotlight-exclude.sh"
+# Build with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+if [[ -f "${SCRIPT_DIR}/xcode_version.sh" ]]; then
+    # shellcheck source=scripts/ios/xcode_version.sh
+    source "${SCRIPT_DIR}/xcode_version.sh"
+    select_pinned_xcode
+fi
 
 # Default paths and settings
 DERIVED_DATA="/tmp/automobile-ctrl-proxy"
@@ -58,7 +64,7 @@ SIMULATOR_ID=$(xcrun simctl list devices booted -j 2>/dev/null | grep -o '"udid"
 if [ -z "${SIMULATOR_ID}" ]; then
     echo -e "${RED}Error: No booted iOS simulator found.${NC}"
     echo -e "${YELLOW}Boot a simulator first:${NC}"
-    echo -e "  xcrun simctl boot \"iPhone 16\""
+    echo -e "  xcrun simctl boot \"iPhone 17 Pro\"   # on the iOS 27.2 runtime"
     exit 1
 fi
 

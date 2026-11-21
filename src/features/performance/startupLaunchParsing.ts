@@ -99,6 +99,23 @@ export function parseResolvedActivity(output: string, packageName: string): stri
   return component;
 }
 
+/**
+ * Whether the `SystemPerformanceHinter:` section of `dumpsys window` lists a
+ * `reason=Transition` session, which window manager holds while a shell
+ * transition (such as the HOME animation) plays. False when the section is
+ * absent, which is the case on images without shell transitions.
+ */
+export function hasActiveWindowTransition(output: string): boolean {
+  const lines = output.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === "SystemPerformanceHinter:");
+  if (start < 0) {
+    return false;
+  }
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line.length > 0 && !/^\s/.test(line));
+  return (end < 0 ? rest : rest.slice(0, end)).some((line) => /\breason=Transition\b/.test(line));
+}
+
 /** Summary statistics over a set of launch-time samples. */
 export interface StartupTimingStats {
   min: number;

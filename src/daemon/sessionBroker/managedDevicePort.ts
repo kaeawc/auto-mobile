@@ -3,6 +3,8 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { applyDeviceProfile } from "./deviceProfileApply";
+import { sweepExpiredDisposableApps, type DisposableAppExpirySweeper } from "./disposableAppSweep";
 import { combineAbortSignals } from "../../utils/AbortContext";
 import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../../utils/deviceTimeouts";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../utils/runnerReadinessConfig";
@@ -59,11 +61,12 @@ type ManagedDevicePortRegistry = Pick<
   BindingRegistry,
   "getAssignment" | "listOpenBindingJournal" | "openBindingJournal"
 >;
-type BrokerDeviceAcquisitionResult = Awaited<ReturnType<BrokerDeviceAcquisition["acquire"]>>;
+export type BrokerDeviceAcquisitionResult = Awaited<ReturnType<BrokerDeviceAcquisition["acquire"]>>;
 type BrokerDeviceAcquisitionEntry = BrokerDeviceAcquisitionResult["bindings"][number];
 type DestructionProgress = "absent" | "pending";
 
 export interface ManagedDevicePortDependencies {
+  disposableAppExpirySweeper?: DisposableAppExpirySweeper;
   androidConfigReader?: Pick<AvdConfigReader, "readConfig">;
   bindMutationRecorder?: (scope: DeviceMutationScope) => void;
   /** Stable provider-owned identity. Consumer requests never choose this scope or a binding index. */
@@ -142,6 +145,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     sessionId: string;
     profile: BrokerNativeProfile;
     timing?: SessionPreparationTiming;
+    expiredDisposableAppsRemoved?: string[];
   }> {
     this.assertResource(resource, "reserved");
     if (!resource.requestId) {
@@ -187,50 +191,24 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       }
     }
     const sessionId = await this.readySessionId(result, resource, profile);
-    await this.captureBaselinesHoldingLease(resource, result, profile, {
+    const prepared = await this.captureBaselinesHoldingLease(resource, result, profile, {
       sessionId,
       signal: options.signal,
       deadlineMs,
       deviceProfileOptions: options,
     });
-    const binding = result.bindings.find(
-      (entry) => entry.bindingIndex === resource.allocationIndex,
-    );
     return {
       sessionId,
-      profile: await brokerReceiptProfile(profile, binding, this.dependencies.androidConfigReader),
-      timing: preparationTiming(binding?.lifecycle),
+      ...prepared,
+      timing: preparationTiming(
+        result.bindings.find((entry) => entry.bindingIndex === resource.allocationIndex)?.lifecycle,
+      ),
     };
   }
 
   /**
-   * Apply the request's manufacturer profile to the prepared session's device (#14058). Its
-   * release restores what it changed; a failure fails preparation like a readiness failure.
-   */
-  private async applyDeviceProfile(
-    resource: BrokerResourceRecord,
-    result: BrokerDeviceAcquisitionResult,
-    sessionId: string,
-    options: SessionDevicePreparationOptions,
-  ): Promise<void> {
-    const deviceProfile = options.deviceProfile;
-    if (!deviceProfile) {
-      return;
-    }
-    const device =
-      this.androidDevices.get(resource.resourceId)?.device ?? acquiredAndroidDevice(result);
-    const applier =
-      this.dependencies.manufacturerProfileApplier ?? defaultManufacturerProfileApplier;
-    const applied = await applier.apply(device, deviceProfile, sessionId, options.signal);
-    if (applied.status === "route_to_real_device") {
-      throw new ActionableError(applied.message);
-    }
-    logger.info(`[SessionBroker] ${applied.message}`);
-  }
-
-  /**
    * Keeps the acquired session's lease renewed while baseline capture and the manufacturer
-   * profile apply delay the client grant.
+   * profile apply and disposable app sweep delay the client grant.
    */
   private async captureBaselinesHoldingLease(
     resource: BrokerResourceRecord,
@@ -242,7 +220,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       deadlineMs: number;
       deviceProfileOptions: SessionDevicePreparationOptions;
     },
-  ): Promise<void> {
+  ): Promise<{ profile: BrokerNativeProfile; expiredDisposableAppsRemoved?: string[] }> {
     const { sessionId } = options;
     const release = this.dependencies.leaseKeepalive?.hold({
       taskId: resource.requestId!,
@@ -256,7 +234,30 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
         await this.capturePoolEntryBaseline(resource, sessionId, options);
       }
       // After the reset baseline is captured, so a keep-booted reset returns to pre-profile state.
-      await this.applyDeviceProfile(resource, result, sessionId, options.deviceProfileOptions);
+      await applyDeviceProfile({
+        knownDevice: this.androidDevices.get(resource.resourceId)?.device,
+        result,
+        applier: this.dependencies.manufacturerProfileApplier ?? defaultManufacturerProfileApplier,
+        sessionId,
+        options: options.deviceProfileOptions,
+      });
+      const binding = result.bindings.find(
+        (entry) => entry.bindingIndex === resource.allocationIndex,
+      );
+      const removed = await sweepExpiredDisposableApps(
+        this.dependencies.disposableAppExpirySweeper,
+        this.dependencies.timer ?? defaultTimer,
+        { platform: profile.platform, transportId: binding?.device?.transportId },
+        options,
+      );
+      return {
+        profile: await brokerReceiptProfile(
+          profile,
+          binding,
+          this.dependencies.androidConfigReader,
+        ),
+        ...(removed.length ? { expiredDisposableAppsRemoved: removed } : {}),
+      };
     } finally {
       release?.();
     }
@@ -1022,13 +1023,4 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
   private async hasOpenJournal(key: BindingKey): Promise<boolean> {
     return (await this.dependencies.registry.listOpenBindingJournal(key)).length > 0;
   }
-}
-
-/** The acquired Android emulator as a booted device, for work on the prepared session. */
-function acquiredAndroidDevice(result: BrokerDeviceAcquisitionResult): BootedDevice {
-  const binding = result.bindings[0]?.device;
-  if (!binding?.transportId) {
-    throw new ActionableError("A manufacturer profile requires the acquired emulator serial");
-  }
-  return { platform: "android", name: binding.name, deviceId: binding.transportId };
 }

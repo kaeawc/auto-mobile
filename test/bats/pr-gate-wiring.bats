@@ -131,6 +131,25 @@ load yq-helpers
   done
 }
 
+@test "performance-tool sources trigger the Android emulator job's performance smoke (#18725)" {
+  require_mikefarah_yq
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-android")
+    | (.with.filters | from_yaml | .android[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  local path
+  for path in \
+    'src/features/performance/**' \
+    'src/features/performanceTrace/**' \
+    'src/features/profiling/**' \
+    'src/server/*performance*'; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
+  done
+  grep -q 'performance-tool-smoke.sh' "$BATS_TEST_DIRNAME/../../scripts/android/run-emulator-suites.sh"
+}
+
 @test "required CtrlProxy job runs prototype-compose tests and coverage" {
   require_mikefarah_yq
   [ "$(yq -r '.jobs."kotlin-code-coverage".name' "$WF")" = 'Run CtrlProxy Unit Tests' ]
@@ -452,7 +471,7 @@ load yq-helpers
   run yq -r '.jobs."ios-device-webrtc"."runs-on"' "$WF"
   [ "$status" -eq 0 ]
   local same="github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository"
-  [ "$output" = "\${{ (${same} && vars.AUTOMOBILE_NAMESPACE_MACOS_ENABLED == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (${same} && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.heavy != 'hosted') && fromJSON('[\"self-hosted\",\"automobile-mac-heavy\"]') || 'macos-26' }}" ]
+  [ "$output" = "\${{ (${same} && vars.AUTOMOBILE_NAMESPACE_MACOS_ENABLED == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (${same} && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.heavy != 'hosted') && fromJSON('[\"self-hosted\",\"automobile-mac-heavy\"]') || 'xcode-27' }}" ]
   run yq -r '.jobs."ios-device-webrtc"."timeout-minutes"' "$WF"
   [ "$output" -le 30 ]
   # No CircleCI copy (#11012).

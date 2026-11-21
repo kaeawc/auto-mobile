@@ -602,6 +602,50 @@ describe("capability handshake before a save (#14156)", () => {
     expect(device.imports).toHaveLength(1);
   });
 
+  test("a build older than the support window imports with a warning and an update link (#14156)", async () => {
+    const device = new FakeProtoViewerDevice();
+    device.reports = [{ ...older(["prototype_dead_tap_v1"]), versionCode: 86 }];
+    const output = await routeToProtoViewer(
+      { action: "save", spec: deadTapSpec },
+      { ...deps(device), oldestSupported: { version: "0.0.93", versionCode: 93 } },
+    );
+    expect(output?.success).toBe(true);
+    expect(device.imports).toHaveLength(1);
+    expect(output?.warning).toBe(
+      `${PROTOVIEWER_IMPORTED_WARNING} The installed ProtoViewer (0.0.86) is older than the oldest supported release (0.0.93); this host supports the last 3 releases. Update ProtoViewer from ${PLAY}.`,
+    );
+  });
+
+  test("a build inside the support window, a local build and an unknown window add no warning", async () => {
+    const window = { version: "0.0.93", versionCode: 93 };
+    const cases: Array<[number, typeof window | null]> = [
+      [93, window],
+      [95, window],
+      [1, window],
+      [86, null],
+    ];
+    for (const [versionCode, oldestSupported] of cases) {
+      const device = new FakeProtoViewerDevice();
+      device.reports = [{ ...older(["prototype_dead_tap_v1"]), versionCode }];
+      const output = await routeToProtoViewer(
+        { action: "save", spec: deadTapSpec },
+        { ...deps(device), oldestSupported },
+      );
+      expect(output?.warning).toBe(PROTOVIEWER_IMPORTED_WARNING);
+    }
+  });
+
+  test("a refused save keeps its update hint without the support-window warning", async () => {
+    const device = new FakeProtoViewerDevice();
+    device.reports = [{ ...older(), versionCode: 86 }];
+    const output = await routeToProtoViewer(
+      { action: "save", spec: deadTapSpec },
+      { ...deps(device), oldestSupported: { version: "0.0.93", versionCode: 93 } },
+    );
+    expect(output?.errorCode).toBe("unsupported_capability");
+    expect(output?.warning).toBeUndefined();
+  });
+
   test("unusable app storage during the handshake keeps the platform save path", async () => {
     const device = new FakeProtoViewerDevice();
     device.reports = [new ProtoViewerStorageError("shell-owned folders")];

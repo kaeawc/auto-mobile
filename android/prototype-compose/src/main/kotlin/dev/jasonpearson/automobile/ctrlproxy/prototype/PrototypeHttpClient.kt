@@ -35,7 +35,11 @@ fun interface PrototypeHttpClient {
 
 /** The transport behind each `via` value. */
 @InternalAutoMobilePrototypeApi
-class PrototypeHttpClients(val host: PrototypeHttpClient, val device: PrototypeHttpClient) {
+class PrototypeHttpClients(
+  val host: PrototypeHttpClient,
+  val device: PrototypeHttpClient,
+  val remoteImages: PrototypeRemoteImageLoader? = null,
+) {
   fun forVia(via: String): PrototypeHttpClient = if (via == VIA_DEVICE) device else host
 
   companion object {

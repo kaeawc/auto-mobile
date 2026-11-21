@@ -416,3 +416,31 @@ test("cancelling during the focus wait stops typing", async () => {
   await expect(pending).rejects.toThrow("cancelled");
   expect(typeCalls()).toHaveLength(1);
 });
+
+test("typing uses the runner registered after the selector tap, not the one before it (#18822)", async () => {
+  // The selector tap is where a dropped owned runner is restarted; model that swap directly.
+  const restarted = new FakeWatchRunnerClient();
+  const swapping = new (class extends FakeWatchRunnerClient {
+    override async request(...args: Parameters<FakeWatchRunnerClient["request"]>) {
+      const result = await super.request(...args);
+      if (args[0].type === "tap") {
+        unregister();
+        unregister = watchRunners.register(device.deviceId, restarted);
+      }
+      return result;
+    }
+  })();
+  unregister();
+  unregister = watchRunners.register(device.deviceId, swapping);
+
+  const result = await watchSendKeys(
+    device.deviceId,
+    [{ action: "type", text: "hello" }],
+    { elementId: "ctrlproxy-crown" },
+    { timer: new FakeTimer() },
+  );
+
+  expect(result.success).toBe(true);
+  expect(swapping.commands.some((command) => command.type === "type")).toBe(false);
+  expect(restarted.commands).toEqual([{ type: "type", text: "hello" }]);
+});

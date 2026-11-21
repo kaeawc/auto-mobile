@@ -112,9 +112,11 @@ final class PrototypePlatformDriver {
     private func start(_ job: PrototypePlatformJob) {
         let id = job.call.callId
         started[id] = clock.nowMilliseconds
-        deadlines[id] = clock.schedule(afterMilliseconds: job.timeoutMs) { [weak self] in
-            MainActor.assumeIsolated {
-                self?.finish(id, .failure(.timeout, "Platform call timed out"))
+        if Self.hasDeadline(job.call.call) {
+            deadlines[id] = clock.schedule(afterMilliseconds: job.timeoutMs) { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.finish(id, .failure(.timeout, "Platform call timed out"))
+                }
             }
         }
         let registry = registry
@@ -134,6 +136,9 @@ final class PrototypePlatformDriver {
             self?.finish(id, result)
         }
     }
+
+    /// Permission prompts wait for the user, including when the action specifies timeoutMs.
+    nonisolated static func hasDeadline(_ call: String) -> Bool { call != "permissions.request" }
 
     nonisolated static func invalidArguments(_ call: PlatformCall) -> PlatformCallResult? {
         let parts = call.call.split(separator: ".")

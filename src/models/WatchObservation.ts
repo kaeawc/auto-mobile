@@ -51,43 +51,53 @@ export interface WatchHierarchyUnavailable<
   appNotRunning?: { bundleId: string };
 }
 
-/**
- * The `observe` result for an Apple Watch or Apple TV simulator: a simctl screenshot with its screen size and
- * an explicit hierarchy-unavailable note. Every hierarchy-derived field is absent by type.
- */
-export type WatchObservation<P extends AppleScreenshotOnlyPlatform = AppleScreenshotOnlyPlatform> =
-  Pick<
-    ObserveResult,
-    | "observationId"
-    | "deviceId"
-    | "display"
-    | "updatedAt"
-    | "screenSize"
-    | "screenshotPath"
-    | "screenshotExpiresAt"
-    | "screenshotFormat"
-    | "screenshotMimeType"
-    | "screenshotImageSize"
-    | "screenshotOrientation"
-    | "screenshotSource"
-    | "screenshotCaptureSource"
-    | "screenshotFallback"
-    | "screenshotFallbackReason"
-    | "screenshotStageDurationsMs"
-    | "screenshotCapturedAt"
-    | "screenshotImage"
-  > & { hierarchyUnavailable: WatchHierarchyUnavailable<P> };
+/** Screenshot metadata shared by Apple simulator observations that have no hierarchy. */
+export type ScreenshotOnlyObservation = Pick<
+  ObserveResult,
+  | "observationId"
+  | "deviceId"
+  | "display"
+  | "updatedAt"
+  | "screenSize"
+  | "screenshotPath"
+  | "screenshotExpiresAt"
+  | "screenshotFormat"
+  | "screenshotMimeType"
+  | "screenshotImageSize"
+  | "screenshotOrientation"
+  | "screenshotSource"
+  | "screenshotCaptureSource"
+  | "screenshotFallback"
+  | "screenshotFallbackReason"
+  | "screenshotStageDurationsMs"
+  | "screenshotCapturedAt"
+  | "screenshotImage"
+>;
 
-/** A screenshot-only Apple simulator observation, which the observe renderer must not project or diff. */
+export type WatchObservation<P extends AppleScreenshotOnlyPlatform = AppleScreenshotOnlyPlatform> =
+  ScreenshotOnlyObservation & { hierarchyUnavailable: WatchHierarchyUnavailable<P> };
+
+export type CarPlayObservation = ScreenshotOnlyObservation & {
+  hierarchyUnavailable: { platform: "ios"; message: string };
+};
+
+/** A screenshot-only watchOS, tvOS or visionOS observation. */
 export function isWatchObservation(value: unknown): value is WatchObservation {
+  const platform = hierarchyUnavailablePlatform(value);
+  return platform === "watchos" || platform === "tvos" || platform === "visionos";
+}
+
+/** These observations bypass the renderer's hierarchy projection and diffing. */
+export function isScreenshotOnlyAppleObservation(value: unknown): boolean {
+  return isWatchObservation(value) || hierarchyUnavailablePlatform(value) === "ios";
+}
+
+function hierarchyUnavailablePlatform(value: unknown): unknown {
   if (!value || typeof value !== "object" || !("hierarchyUnavailable" in value)) {
-    return false;
+    return undefined;
   }
   const note: unknown = value.hierarchyUnavailable;
-  return (
-    typeof note === "object" &&
-    note !== null &&
-    "platform" in note &&
-    (note.platform === "watchos" || note.platform === "tvos" || note.platform === "visionos")
-  );
+  return typeof note === "object" && note !== null && "platform" in note
+    ? note.platform
+    : undefined;
 }

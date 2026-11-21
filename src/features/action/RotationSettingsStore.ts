@@ -21,7 +21,9 @@ import { runWithAbortSignal } from "../../utils/AbortContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
   DEVICE_STATE_ROTATION_LOCK,
+  DEVICE_STATE_SNAPSHOT_ATTEMPTS,
   ROTATION_SETTING_CLEANUP_TIMEOUT_MS,
+  UNSETTLED_DEVICE_STATE,
   unlockDeviceStateRotationEntry,
   type RotationContext,
   type RotationRestoreSlot,
@@ -73,6 +75,51 @@ export class RotationSettingsStore {
       logger.warn(`Failed to read ${namespace} setting ${key}: ${error}`);
       return null;
     }
+  }
+
+  /**
+   * Captured once, with the session's first originals, before any write can change it. Android
+   * keeps auto-rotate per device state, so the posture and `accelerometer_rotation` are read as
+   * one snapshot: the committed state is read before and after the setting, and the snapshot is
+   * retried while they differ. A posture that never settles is recorded as
+   * {@link UNSETTLED_DEVICE_STATE}, and release then leaves auto-rotate to the restored lock map.
+   */
+  async captureDeviceStateRotationLock(
+    state: RotationRestoreState,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const lock = await this.readSetting("secure", DEVICE_STATE_ROTATION_LOCK, signal);
+    if (lock === null) {
+      return;
+    }
+    state.deviceStateRotationLock = lock;
+    for (let attempt = 0; attempt < DEVICE_STATE_SNAPSHOT_ATTEMPTS; attempt++) {
+      const before = await this.readCommittedDeviceState();
+      throwIfAborted(signal);
+      if (before < 0) {
+        return; // Unreadable posture: keep the captured value (the pre-#18833 behaviour).
+      }
+      const autoRotate =
+        state.accelerometerRotation === null
+          ? null
+          : await this.readSystemSetting("accelerometer_rotation", signal);
+      const after = await this.readCommittedDeviceState();
+      throwIfAborted(signal);
+      if (after < 0) {
+        return;
+      }
+      if (before === after) {
+        state.deviceStateRotationLockState = after;
+        if (autoRotate === "0" || autoRotate === "1") {
+          state.accelerometerRotation = autoRotate === "0" ? 0 : 1;
+        }
+        return;
+      }
+    }
+    logger.info(
+      `[Rotate] Device state kept changing while auto-rotate was captured; release leaves accelerometer_rotation to device_state_rotation_lock.`,
+    );
+    state.deviceStateRotationLockState = UNSETTLED_DEVICE_STATE;
   }
 
   async writeRotationSettings(options: {
@@ -130,14 +177,28 @@ export class RotationSettingsStore {
           throw await this.readBackMismatch(key, expected, actual, signal);
         }
       }
-      // Without an accelerometer_rotation read-back nothing verifies the map; surface its failure.
-      if (lockWriteError !== undefined && accelerometerRotation === null) {
-        throw toActionableError(
-          lockWriteError,
-          `Failed to restore device_state_rotation_lock=${lock}`,
-        );
+      // Without an accelerometer_rotation read-back nothing verifies the map: read it back, and
+      // surface a failed write or mismatch so the release retry runs.
+      if (lock !== undefined && accelerometerRotation === null) {
+        await this.verifyDeviceStateLock(lock, lockWriteError, signal);
       }
     });
+  }
+
+  private async verifyDeviceStateLock(
+    lock: string,
+    writeError: unknown,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (writeError !== undefined) {
+      throw toActionableError(writeError, `Failed to restore device_state_rotation_lock=${lock}`);
+    }
+    const actual = await this.readSetting("secure", DEVICE_STATE_ROTATION_LOCK, signal);
+    if (actual !== lock) {
+      throw new ActionableError(
+        `Restoration of device_state_rotation_lock=${lock} did not verify by read-back (read ${actual ?? "unset"}).`,
+      );
+    }
   }
 
   /** Writes the captured per-state lock map; returns the write error instead of throwing. */
@@ -183,6 +244,12 @@ export class RotationSettingsStore {
       captured === undefined
     ) {
       return state.accelerometerRotation;
+    }
+    if (captured === UNSETTLED_DEVICE_STATE) {
+      logger.info(
+        "[Rotate] Auto-rotate was captured while the device state kept changing; device_state_rotation_lock decides accelerometer_rotation.",
+      );
+      return null;
     }
     const current = await this.readCommittedDeviceState();
     throwIfAborted(signal);

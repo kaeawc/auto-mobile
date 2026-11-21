@@ -533,7 +533,11 @@ export function imageSlotUses(value: unknown): number {
 /** The node's own image slots: an `image` costs at least 1, a `videoPlayer` its `poster`. */
 export function nodeImageUses(node: Raw): number {
   if (node.type === "image") {
-    return Math.max(1, imageSlotUses(node.asset));
+    return (
+      (node.url === undefined ? Math.max(1, imageSlotUses(node.asset)) : 0) +
+      imageSlotUses(record(node.placeholder)?.asset) +
+      imageSlotUses(record(node.error)?.asset)
+    );
   }
   return node.type === "videoPlayer" ? imageSlotUses(node.poster) : 0;
 }

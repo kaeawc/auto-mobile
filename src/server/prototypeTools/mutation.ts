@@ -35,6 +35,7 @@ import { prototypeAppLayerVisibilityOutput } from "../../features/prototype/prot
 import { shownAppearance } from "../../features/prototype/prototypeAppearance";
 import { resolvePrototypeDisplayId } from "../../features/prototype/prototypeDisplay";
 import { prototypeGestureFields } from "../../features/prototype/prototypeGestures";
+import { prototypeIosNotificationFallbackPaths } from "../../features/prototype/prototypePlatformGates";
 import { parsePrototypeHiddenReason } from "../../features/prototype/prototypeHidden";
 import { PROTOTYPE_ZOOM_RENDERING_GATE } from "../../features/prototype/prototypeZoomTransition";
 import {
@@ -343,7 +344,6 @@ async function performMutation(
       displayId,
       signal,
     });
-    const spec = authoredArgs.spec;
     return {
       ...mutationReply,
       lastResult,
@@ -351,7 +351,10 @@ async function performMutation(
       ...anchorsOutput(resolved),
       ...(await showAdviceOutput(authoredArgs, device, dependencies, { result, signal })),
       ...visibility,
-      ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy, spec),
+      ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy, {
+        spec: authoredArgs.spec,
+        platform: device.platform,
+      }),
     };
   } catch (error) {
     recordPrototypeTextShow(device.deviceId, args.action, undefined, {
@@ -806,12 +809,24 @@ function anchorsOutput(
     : {};
 }
 
+function notificationFallbackWarning(spec: unknown, platform: BootedDevice["platform"]) {
+  if (platform !== "ios") {
+    return undefined;
+  }
+  const paths = prototypeIosNotificationFallbackPaths(spec);
+  if (!paths.length) {
+    return undefined;
+  }
+  const remaining = paths.length > 20 ? ` and ${paths.length - 20} more fields` : "";
+  return `The iOS Prototype Viewer uses plain notification content for ${paths.slice(0, 20).join(", ")}${remaining}.`;
+}
+
 /** [landedWarning] is reported only when the mutation succeeded. */
 function missingAssetsOutput(
   result: PrototypeResult,
   warnings: readonly (string | undefined)[],
-  landedWarning?: string,
-  spec?: unknown,
+  landedWarning: string | undefined,
+  { spec, platform }: { spec: unknown; platform: BootedDevice["platform"] },
 ): {
   missingAssets?: string[];
   warning?: string;
@@ -824,6 +839,7 @@ function missingAssetsOutput(
     ...warnings,
     degraded.warning,
     result.success ? landedWarning : undefined,
+    result.success ? notificationFallbackWarning(spec, platform) : undefined,
     ...(result.success ? prototypeTimerWarnings(spec) : []),
     ...(result.success ? prototypeSensitiveWarnings(spec) : []),
     ...(result.success ? prototypeTopAppBarInsetWarnings(spec) : []),

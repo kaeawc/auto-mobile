@@ -163,6 +163,7 @@ internal object PrototypeSpecInput {
   private fun structuralError(value: JsonElement, context: Context): PrototypeSpecError? =
     PrototypeLazyListRules.limitError(value, context.budget.maxListItems)
       ?: walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
+      ?: PrototypeRemoteImages.error(value.jsonObject, context.nodes)
       ?: excludeAccessoryReferences(context)
       ?: PrototypeRouteRules.error(value.jsonObject, context)
       ?: PrototypeSharedElementRules.error(context)

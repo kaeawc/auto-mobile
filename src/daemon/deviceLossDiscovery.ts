@@ -28,6 +28,9 @@ import {
 } from "./disconnectMonitor";
 import type { DevicePool, PooledDevice } from "./devicePool";
 import { MISSING_DEVICE_MISS_THRESHOLD, type DeviceLossMisses } from "./deviceLossMisses";
+import { isHeldDisconnectDevice } from "./disconnectMonitorCadence";
+import { selectUnownedOfflineRecoveryIds } from "./disconnectMonitor";
+import { resolveExcludedEmulatorConsolePorts } from "../utils/android-cmdline-tools/EmulatorPortReservations";
 
 /**
  * The stateless half of the device-disconnect monitor, split out of daemon.ts (#11808): discovery
@@ -390,6 +393,70 @@ export function collectDisconnectCandidates(
     }
   }
   return { candidateDeviceIds, candidatePlatforms, candidateIncarnations };
+}
+
+/** The transports to reconnect for each target: its listed-offline aliases, else the serial itself. */
+export function offlineRecoveryTransports(
+  dispatchTargets: readonly string[],
+  offlineTransportIds: ReadonlyMap<string, ReadonlySet<string>> | undefined,
+): string[] {
+  return dispatchTargets.flatMap((id) => {
+    const aliases = offlineTransportIds?.get(id);
+    return aliases?.size ? [...aliases] : [id];
+  });
+}
+
+/** Fails closed: an unparsable exclusion withholds reconnect from every emulator. */
+function excludedConsolePortsForRecovery(env: NodeJS.ProcessEnv): ReadonlySet<number> | "all" {
+  try {
+    return resolveExcludedEmulatorConsolePorts(env);
+  } catch (error) {
+    logger.warn(
+      `[DisconnectMonitor] Cannot resolve excluded emulator console ports; withholding emulator reconnects: ${errorMessage(error)}`,
+      error,
+    );
+    return "all";
+  }
+}
+
+/**
+ * The disconnect candidates offline recovery may send `adb reconnect` to (#18911):
+ * those this daemon holds (a session's assignment, an active recording, a pool
+ * binding or a startup lease) that are not on an excluded emulator console port.
+ */
+export function ownedOfflineRecoveryCandidates(
+  candidateDeviceIds: ReadonlySet<string>,
+  services: {
+    devicePool(): Pick<
+      DevicePool,
+      "getAllDevices" | "getDevice" | "isDeviceLeasedForAndroidStartup"
+    >;
+    sessionManager(): { getAllSessions(): readonly Pick<Session, "assignedDevice">[] };
+  },
+  activeRecordings: ActiveRecordings,
+  env: NodeJS.ProcessEnv = process.env,
+): Set<string> {
+  const devicePool = services.devicePool();
+  const sessionManager = services.sessionManager();
+  const held = new Set([
+    ...sessionManager.getAllSessions().map(({ assignedDevice }) => assignedDevice),
+    ...activeRecordings.map(({ deviceId }) => deviceId),
+    ...devicePool
+      .getAllDevices()
+      .filter((device) =>
+        isHeldDisconnectDevice(
+          devicePool.getDevice(device.id),
+          devicePool.isDeviceLeasedForAndroidStartup(device.id),
+        ),
+      )
+      .map(({ id }) => id),
+  ]);
+  const unowned = selectUnownedOfflineRecoveryIds(
+    candidateDeviceIds,
+    (id) => held.has(id),
+    excludedConsolePortsForRecovery(env),
+  );
+  return new Set([...candidateDeviceIds].filter((id) => !unowned.has(id)));
 }
 
 export function collectDisconnectedRecordings<Device extends { id: string }>(

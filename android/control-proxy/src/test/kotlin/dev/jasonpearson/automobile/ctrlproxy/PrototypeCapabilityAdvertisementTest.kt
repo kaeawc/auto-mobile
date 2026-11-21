@@ -30,6 +30,7 @@ class PrototypeCapabilityAdvertisementTest {
         .supportedCommands()
     assertTrue("prototype_platform_window_controls_v1" in commands)
     assertTrue("prototype_hide_keyboard_v1" in commands)
+    assertFalse("prototype_remote_image_v1" in commands)
     assertTrue("simulate_prototype_platform" in commands)
     assertTrue("prototype_platform_simulation_v1" in commands)
   }

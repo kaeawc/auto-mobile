@@ -248,6 +248,27 @@ describe("iOS saved prototype tool actions", () => {
     expect(installer.calls).toEqual([]);
     expect(reader.reads).toEqual([]);
   });
+  test("iOS save without ProtoViewer refuses a webView node before installer work", async () => {
+    const page = {
+      type: "webView",
+      url: "https://example.com/post",
+      allowedOrigins: ["https://example.com"],
+    };
+    const refused = await save({
+      spec: {
+        ...spec,
+        requires: { platform: ["webview"] },
+        root: { type: "column", children: [{ type: "text", text: "Hi" }, page] },
+      },
+    });
+    expect(refused).toEqual({
+      success: false,
+      errorCode: "unsupported_capability",
+      error: expect.stringContaining("root.children[1]"),
+    });
+    expect(refused.error).toContain("ProtoViewer");
+    expect(installer.calls).toEqual([]);
+  });
 
   test("invalid spec reports the validator path before any installer or file call", async () => {
     const output = await save({ spec: { ...spec, root: { type: "unknown" } }, assets });

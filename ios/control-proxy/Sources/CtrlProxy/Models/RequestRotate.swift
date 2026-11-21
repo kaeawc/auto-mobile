@@ -3,6 +3,8 @@ import Foundation
 public struct RequestRotate: Decodable, Sendable {
     public var requestId: String?
     public var orientation: String
+    /// "cover" or "inner" on a foldable; the runner then rotates through the device pose (#17047).
+    public var panel: String?
 }
 
 extension RequestRotate: CommandPayload {}

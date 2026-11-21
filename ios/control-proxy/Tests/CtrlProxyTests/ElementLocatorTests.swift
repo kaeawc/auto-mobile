@@ -2163,6 +2163,15 @@ final class ElementLocatorTests: XCTestCase {
         )
     }
 
+    func testCanParkForegroundApp_onlyForAppsOnIPad() {
+        // #18828: a Windowed Apps window parked by Home stays .runningForeground on iPad.
+        XCTAssertTrue(ElementLocator.canParkForegroundApp(trackedBundleId: "com.apple.DocumentsApp", isPad: true))
+        XCTAssertFalse(ElementLocator.canParkForegroundApp(trackedBundleId: "com.apple.DocumentsApp", isPad: false))
+        XCTAssertFalse(ElementLocator.canParkForegroundApp(trackedBundleId: "com.apple.springboard", isPad: true))
+        XCTAssertFalse(ElementLocator.canParkForegroundApp(trackedBundleId: "com.apple.Spotlight", isPad: true))
+        XCTAssertFalse(ElementLocator.canParkForegroundApp(trackedBundleId: nil, isPad: true))
+    }
+
     // AC3: the ~40-app foreground-detection sweep is bounded on the miss path.
     func testShouldRunSystemAppSweep_runsWhenNeverSwept() {
         // lastMissTime == 0 means the sweep has never cached a miss (or a

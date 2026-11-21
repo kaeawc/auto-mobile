@@ -214,23 +214,48 @@ enum PrototypeDataText {
         return value.displayString
     }
 
+    static func stateKeys(_ text: String) -> [String] {
+        var consumed: [Range<Int>] = []
+        scan(Array(text.utf16), includePlatform: true) { open, close, _, _ in
+            consumed.append(open ..< close + 1)
+            return true
+        }
+        var keys: [String] = []
+        scan(Array(text.utf16), prefixOverride: "", valid: PrototypeRepeat.isFieldName) { open, _, key, _ in
+            if !consumed.contains(where: { $0.contains(open) }) { keys.append(key) }
+            return true
+        }
+        return keys
+    }
+
+    static func platformPointers(_ text: String) -> [String] {
+        var pointers: [String] = []
+        scan(Array(text.utf16), includePlatform: true) { _, _, pointer, isPlatform in
+            if isPlatform { pointers.append(pointer) }
+            return true
+        }
+        return pointers
+    }
+
     /// Returning false stops the shared scanner before any oversized binding is constructed.
     private static func scan(
         _ units: [UInt16],
         includePlatform: Bool = false,
+        prefixOverride: String? = nil,
+        valid: (String) -> Bool = PrototypeDataPointer.isValid,
         visit: (Int, Int, String, Bool) -> Bool
     ) {
         var cursor = 0
         while cursor < units.count {
             let isPlatform = includePlatform && units.dropFirst(cursor + 1).starts(with: Array("platform:".utf16))
-            let prefix = Array((isPlatform ? "platform:" : "data:").utf16)
+            let prefix = Array((prefixOverride ?? (isPlatform ? "platform:" : "data:")).utf16)
             let end = min(units.count, cursor + 2 + prefix.count + PrototypeLimits.maxDataPointerLength)
             if units[cursor] == 123,
                units[(cursor + 1) ..< end].starts(with: prefix),
                let close = units[(cursor + 1) ..< end].firstIndex(of: 125)
             {
                 let pointer = String(decoding: units[(cursor + 1 + prefix.count) ..< close], as: UTF16.self)
-                if PrototypeDataPointer.isValid(pointer) {
+                if valid(pointer) {
                     guard visit(cursor, close, pointer, isPlatform) else { return }
                     cursor = close + 1
                     continue

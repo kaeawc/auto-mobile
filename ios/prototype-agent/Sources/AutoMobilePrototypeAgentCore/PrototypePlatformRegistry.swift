@@ -182,6 +182,8 @@ public final class PrototypePlatformRegistry {
         let simulation = supportsSimulation ? [
             PrototypeAgentProtocol.platformSimulationCapability,
             PrototypeAgentProtocol.simulatePlatformRequest,
+            PrototypeAgentProtocol.platformOutcomesCapability,
+            PrototypeAgentProtocol.queueCallOutcomeRequest,
         ] : []
         return Set(modules.values.map(\.capability) + simulation).sorted()
     }

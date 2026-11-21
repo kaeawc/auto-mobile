@@ -33048,10 +33048,60 @@
           "maximum": 3600000
         },
         "event": {
-          "description": "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push, media.statusChanged|ended|error drives a media player; other known module events require Android prototype_platform_simulation_v1 and a module that supports simulation",
+          "description": "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push, media.statusChanged|ended|error drives a media player; other known module events require prototype_platform_simulation_v1 and a module that supports simulation",
           "type": "string",
           "minLength": 1,
           "maxLength": 128
+        },
+        "call": {
+          "description": "simulate only: queue an outcome for this known platform call, for example test.echo; requires prototype_platform_outcomes_v1",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "outcome": {
+          "description": "simulate call only: exactly one result (any JSON value) or error; at most 4096 UTF-8 bytes total",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "result": {}
+              },
+              "required": ["result"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "unsupported",
+                        "unavailable",
+                        "permission_denied",
+                        "invalid_args",
+                        "cancelled",
+                        "timeout",
+                        "too_many_in_flight",
+                        "platform_error"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": ["code"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["error"],
+              "additionalProperties": false
+            }
+          ]
         },
         "data": {
           "description": "simulate event only: other module events take their event data schema where defined, otherwise any JSON object, within the 4096-byte delivered emit budget; notifications.push takes the push payload {type, data?, notification?: {title, body?, channel?, group?, badge?}}, at most 4096 bytes of compact JSON; media.* takes {player, status? (buffering|ready|ended|error), code? (for error), advanceMs? (fake engine only: advance its clock first)}",
@@ -33071,7 +33121,7 @@
           "enum": ["auto", "connection", "system"]
         },
         "id": {
-          "description": "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; optional for status and inspect only to select an Android disposable app by its installed spec id; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
+          "description": "Prototype id required for simulate, dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; optional for status and inspect only to select an Android disposable app by its installed spec id; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
           "type": "string",
           "minLength": 1
         },

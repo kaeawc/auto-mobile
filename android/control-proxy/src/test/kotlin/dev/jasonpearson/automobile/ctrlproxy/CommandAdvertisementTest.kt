@@ -49,6 +49,7 @@ class CommandAdvertisementTest {
       "prototype_theme_modes_v1",
       "prototype_timers_v1",
       "prototype_platform_simulation_v1",
+      "prototype_platform_outcomes_v1",
       "prototype_tooltip_v1",
       "prototype_pager_state_key_v1",
       "prototype_flow_grid_v1",

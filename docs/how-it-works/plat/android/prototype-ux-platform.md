@@ -101,7 +101,16 @@ mutations. Debug `TestPlatformModule` supports `test.tick`; the iOS agent regist
 `test` module only with `AUTOMOBILE_PROTOTYPE_AGENT_TEST_HOOKS=1`. The dispatcher publishes the module's
 state, runs the ordinary `platform.on` handler and reports `prototype_platform_event` with
 `simulated:true`. Injection is a host wire request, never a spec action. Push and media keep their
-existing routes. Call outcomes, state seeding and `platformMode` are unavailable.
+existing routes.
+
+**Scripted call outcomes.** The authenticated `queue_prototype_call_outcome` request requires
+`prototype_platform_outcomes_v1`. It queues a JSON result or a platform error for a known call and
+an active prototype. The owning module must be declared, registered and opted in to simulation.
+The runtime validates the outcome and enforces the 4096-byte budget before inserting it. Each
+runtime holds a FIFO of up to 16 outcomes per call name and clears it on show or close.
+Argument validation, rate limits and in-flight limits apply before consuming an outcome.
+When one is queued, the normal completion path uses it and skips module availability and invocation.
+With an empty queue, the dispatcher calls the module as usual.
 
 **Device state.** The `device` module exposes `/platform/device/widthClass` on both
 platforms: Android reports Material `compact` (<600dp), `medium` (600–839dp), or

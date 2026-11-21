@@ -75,6 +75,7 @@ enum PrototypeBundleCapabilities {
             if PrototypeMediaItems.usedBy(node) { names.insert(PrototypeMediaItems.capability) }
             if node["shared"] != nil { names.insert("prototype_shared_element_v2") }
             let type = node["type"]?.stringValue ?? ""
+            if !PrototypeDerivedValidator.conditionReferences(node, path: "").isEmpty { need("derive") }
             if PrototypeStringConditions.uses(node) { need("string_conditions") }
             if type == "icon", node["effect"] != nil { need("icon_effects") }
             if type == "icon",
@@ -183,8 +184,7 @@ enum PrototypeBundleCapabilities {
         }
         if ["setData", "appendData", "prependData", "upsertData", "removeData"]
             .contains(type ?? "") { names.insert("prototype_data_actions_v1") }
-        if ["setData", "removeData"].contains(type ?? ""),
-           fields["where"] != nil || fields["member"] != nil { names.insert("prototype_data_actions_v2") }
+        if PrototypeGeneratedValues.needsDataV2(fields) { names.insert("prototype_data_actions_v2") }
         if type == "upsertData" ||
             (type == "appendData" && fields["maxItems"] != nil) || PrototypeChannels
             .needsValueCapability(fields) { names.insert("prototype_platform_realtime_v1") }

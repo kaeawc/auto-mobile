@@ -25,6 +25,7 @@ import {
 import type { FrameTimePercentiles, MemoryBreakdownMb } from "../../models/PerfSnapshot";
 
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
+import { outsideFixtureCapture } from "../../utils/fixtureCapture/fixtureCaptureScope";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -141,8 +142,10 @@ export class PerformanceMonitor {
       return;
     }
 
+    // The interval outlives the tool call that armed it: keep its commands out of that call's
+    // fixture capture (#18770).
     this.intervalHandle = this.timer.setInterval(() => {
-      void this.trigger();
+      void outsideFixtureCapture(() => this.trigger());
     }, PerformanceMonitor.TICK_INTERVAL_MS);
 
     logger.info("[PerformanceMonitor] Started background monitoring");
@@ -385,8 +388,9 @@ export class PerformanceMonitor {
 
     const now = this.timer.now();
     const promises: Promise<void>[] = [];
-    const resolveIOSProcess = createIOSPerformanceProcessResolver(() =>
-      this.execFileAsync("ps", [...PS_SNAPSHOT_ARGS]),
+    const resolveIOSProcess = createIOSPerformanceProcessResolver(
+      () => this.execFileAsync("ps", [...PS_SNAPSHOT_ARGS]),
+      this.simCtlClientFactory,
     );
 
     for (const device of this.monitoredDevices.values()) {
@@ -558,7 +562,7 @@ export class PerformanceMonitor {
    * Sample metrics for an iOS device.
    * iOS metrics are limited compared to Android:
    * - FPS/frame time: Not available without in-app SDK
-   * - CPU/Memory: Available via simctl spawn
+   * - CPU/Memory: Available from host ps for simulator apps
    */
   private async sampleIOSDevice(
     device: MonitoredDevice,

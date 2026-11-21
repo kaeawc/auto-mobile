@@ -44,6 +44,13 @@ export const PLAY_STORE_ICON_SIZE = 512;
 /** App Store marketing icon, and the single size modern asset catalogs need. */
 export const IOS_MARKETING_ICON_SIZE = 1024;
 
+/** Play feature graphic: a fixed 1024 x 500 banner drawn from the same icon layers. */
+export const FEATURE_GRAPHIC = {
+  path: "android/play-store/feature-graphic.png",
+  width: 1024,
+  height: 500,
+} as const;
+
 /** Solid backdrop for the iOS dark variant; the light background would glare on a dark home screen. */
 export const IOS_DARK_BACKGROUND = "#0B1220";
 

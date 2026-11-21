@@ -1,0 +1,302 @@
+{
+  "note": "Sequential steps against one backend per case. A step joins a connection to a room path (join, path, query), sends a client frame (send, data), publishes a frame (publish, frame, delivered), leaves (leave), advances the injected timer (advanceMs) or answers an HTTP request (request, status, expect, collections as in requests.json). refused is the join status or send reason a refused step reports. deliveries lists, per connection, the wire frames the step delivered in order; a connection it omits receives nothing. A JSON frame is JSON text with no whitespace. Ids come from fake-1, fake-2, ... A future Kotlin/Swift twin replays these.",
+  "cases": [
+    {
+      "name": "onConnect, echo, relay and publish",
+      "definition": {
+        "rooms": [
+          {
+            "path": "/rooms/:roomId",
+            "onConnect": [
+              {
+                "type": "welcome",
+                "room": "{params.roomId}",
+                "me": "{query.user}"
+              }
+            ],
+            "echo": true,
+            "relay": true
+          }
+        ]
+      },
+      "steps": [
+        {
+          "join": "a",
+          "path": "/rooms/general",
+          "query": {
+            "user": "ana"
+          },
+          "deliveries": {
+            "a": ["{\"type\":\"welcome\",\"room\":\"general\",\"me\":\"ana\"}"]
+          }
+        },
+        {
+          "join": "b",
+          "path": "/rooms/general",
+          "query": {
+            "user": "bo"
+          },
+          "deliveries": {
+            "b": ["{\"type\":\"welcome\",\"room\":\"general\",\"me\":\"bo\"}"]
+          }
+        },
+        {
+          "join": "c",
+          "path": "/rooms/other",
+          "query": {
+            "user": "cy"
+          },
+          "deliveries": {
+            "c": ["{\"type\":\"welcome\",\"room\":\"other\",\"me\":\"cy\"}"]
+          }
+        },
+        {
+          "send": "a",
+          "data": "hi",
+          "deliveries": {
+            "a": ["hi"],
+            "b": ["hi"]
+          }
+        },
+        {
+          "publish": "/rooms/general",
+          "frame": {
+            "type": "notice",
+            "text": "maintenance"
+          },
+          "delivered": 2,
+          "deliveries": {
+            "a": ["{\"type\":\"notice\",\"text\":\"maintenance\"}"],
+            "b": ["{\"type\":\"notice\",\"text\":\"maintenance\"}"]
+          }
+        },
+        {
+          "publish": "/rooms/empty",
+          "frame": "nobody",
+          "delivered": 0
+        },
+        {
+          "leave": "b"
+        },
+        {
+          "send": "a",
+          "data": "alone",
+          "deliveries": {
+            "a": ["alone"]
+          }
+        },
+        {
+          "send": "b",
+          "data": "late",
+          "refused": "not_open"
+        },
+        {
+          "join": "x",
+          "path": "/nowhere",
+          "refused": 404
+        }
+      ]
+    },
+    {
+      "name": "relay without echo",
+      "definition": {
+        "rooms": [
+          {
+            "path": "/signal",
+            "relay": true
+          }
+        ]
+      },
+      "steps": [
+        {
+          "join": "a",
+          "path": "/signal"
+        },
+        {
+          "join": "b",
+          "path": "/signal"
+        },
+        {
+          "send": "a",
+          "data": "{\"sdp\":\"offer\"}",
+          "deliveries": {
+            "b": ["{\"sdp\":\"offer\"}"]
+          }
+        },
+        {
+          "send": "b",
+          "data": "{\"sdp\":\"answer\"}",
+          "deliveries": {
+            "a": ["{\"sdp\":\"answer\"}"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "timeline runs per connection from its open",
+      "definition": {
+        "rooms": [
+          {
+            "path": "/drivers/:id",
+            "timeline": [
+              {
+                "afterMs": 1000,
+                "frame": {
+                  "driver": "{params.id}",
+                  "lat": 1
+                }
+              },
+              {
+                "afterMs": 2500,
+                "frame": {
+                  "driver": "{params.id}",
+                  "lat": 2
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "join": "a",
+          "path": "/drivers/7"
+        },
+        {
+          "advanceMs": 1000,
+          "deliveries": {
+            "a": ["{\"driver\":\"7\",\"lat\":1}"]
+          }
+        },
+        {
+          "join": "b",
+          "path": "/drivers/7"
+        },
+        {
+          "advanceMs": 1000,
+          "deliveries": {
+            "b": ["{\"driver\":\"7\",\"lat\":1}"]
+          }
+        },
+        {
+          "advanceMs": 500,
+          "deliveries": {
+            "a": ["{\"driver\":\"7\",\"lat\":2}"]
+          }
+        },
+        {
+          "leave": "b"
+        },
+        {
+          "advanceMs": 5000
+        }
+      ]
+    },
+    {
+      "name": "a collection write broadcasts the stored item to its room",
+      "definition": {
+        "collections": {
+          "messages": []
+        },
+        "broadcasts": {
+          "messages": {
+            "room": "/rooms/{item:/roomId}",
+            "frame": {
+              "type": "message",
+              "message": "{item}"
+            }
+          }
+        },
+        "rooms": [
+          {
+            "path": "/rooms/:roomId"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "join": "a",
+          "path": "/rooms/r1"
+        },
+        {
+          "join": "b",
+          "path": "/rooms/r1"
+        },
+        {
+          "join": "c",
+          "path": "/rooms/r2"
+        },
+        {
+          "request": {
+            "method": "POST",
+            "path": "/messages",
+            "body": {
+              "roomId": "r1",
+              "text": "hey"
+            }
+          },
+          "status": 201,
+          "expect": {
+            "roomId": "r1",
+            "text": "hey",
+            "id": "fake-1"
+          },
+          "collections": {
+            "messages": [
+              {
+                "roomId": "r1",
+                "text": "hey",
+                "id": "fake-1"
+              }
+            ]
+          },
+          "deliveries": {
+            "a": [
+              "{\"type\":\"message\",\"message\":{\"roomId\":\"r1\",\"text\":\"hey\",\"id\":\"fake-1\"}}"
+            ],
+            "b": [
+              "{\"type\":\"message\",\"message\":{\"roomId\":\"r1\",\"text\":\"hey\",\"id\":\"fake-1\"}}"
+            ]
+          }
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/messages/fake-1",
+            "body": {
+              "text": "edited"
+            }
+          },
+          "status": 200,
+          "expect": {
+            "roomId": "r1",
+            "text": "edited",
+            "id": "fake-1"
+          },
+          "collections": {
+            "messages": [
+              {
+                "roomId": "r1",
+                "text": "edited",
+                "id": "fake-1"
+              }
+            ]
+          }
+        },
+        {
+          "request": {
+            "method": "POST",
+            "path": "/messages",
+            "body": {
+              "id": "fake-1"
+            }
+          },
+          "status": 409,
+          "expect": {
+            "error": "An item with that id already exists"
+          }
+        }
+      ]
+    }
+  ]
+}

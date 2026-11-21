@@ -152,6 +152,11 @@ There is no per-host consent. MCP-direct `show` is unaffected. When on:
   (iOS); the host does not verify the signer yet.
 - Support window: the MCP server supports the three most recent ProtoViewer
   releases. Older builds still get the handshake or the app's own gate, without a guarantee.
+  The oldest supported release is the third newest entry in `RELEASE_CHECKSUM_REGISTRY` that ships
+  the ProtoViewer APK. When the handshake read a report whose `versionCode` is below that release's
+  code, a successful save adds a warning naming both versions and the store link. Local builds
+  (`versionCode` 1), iOS builds and saves that skip the handshake are not checked. The host and the
+  Gradle versionCode derivation share the vectors in `test/fixtures/protoviewer-version-codes.txt`.
 - `prototype save`: on Android (for the current user) or an iOS simulator, when ProtoViewer is
   installed, build a canonical bundle (#13616) and route it as above. Otherwise the CtrlProxy or
   template path applies unchanged. `pin` and `icon` describe CtrlProxy launcher shortcuts, which ProtoViewer has not, so

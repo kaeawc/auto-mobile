@@ -42,6 +42,13 @@ source "${SCRIPT_DIR}/xcodegen_version.sh"
 # shellcheck source=scripts/ios/local-sim-build-args.sh
 source "${SCRIPT_DIR}/local-sim-build-args.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# Build with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+# Shell-test fixtures that copy this script without the helper keep the active Xcode.
+if [[ -f "${PROJECT_ROOT}/scripts/ios/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${PROJECT_ROOT}/scripts/ios/xcode_version.sh"
+  select_pinned_xcode
+fi
 # shellcheck source=scripts/lib/spotlight-exclude.sh
 source "${PROJECT_ROOT}/scripts/lib/spotlight-exclude.sh"
 CTRL_PROXY_IOS_DIR="${PROJECT_ROOT}/ios/control-proxy"
@@ -230,6 +237,6 @@ echo ""
 echo -e "To run tests manually:"
 echo -e "  xcodebuild test-without-building \\"
 echo -e "    -xctestrun \"${XCTESTRUN_FILE}\" \\"
-echo -e "    -destination 'platform=iOS Simulator,name=iPhone 15' \\"
+echo -e "    -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \\"
 echo -e "    -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService"
 echo ""

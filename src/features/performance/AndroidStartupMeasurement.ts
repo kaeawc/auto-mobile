@@ -1,10 +1,13 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { parseResumedActivityForDisplay } from "../../utils/android-cmdline-tools/parseResumedActivity";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import type { Timer } from "../../utils/SystemTimer";
 import {
+  hasActiveWindowTransition,
   parseAmStartWaitOutput,
+  type AmStartWaitResult,
   parseFullyDrawnReports,
   parseResolvedActivity,
   summarizeStartupSamples,
@@ -49,6 +52,10 @@ export type StartupDeviceShell = Pick<AdbExecutor, "executeCommand" | "getDevice
 
 /** Waits between launch steps; injectable so tests run on a FakeTimer without real delays. */
 export interface StartupMeasurementTiming {
+  /** Longest wait for the target app to leave the foreground after HOME. */
+  homeSettleTimeoutMs: number;
+  /** Interval between foreground reads after HOME. */
+  homePollMs: number;
   /** Idle after stopping or backgrounding the app, before the measured launch. */
   preLaunchIdleMs: number;
   /** Idle after a launch so the app finishes its startup work before the next iteration. */
@@ -60,6 +67,8 @@ export interface StartupMeasurementTiming {
 }
 
 export const DEFAULT_STARTUP_MEASUREMENT_TIMING: StartupMeasurementTiming = {
+  homeSettleTimeoutMs: 5000,
+  homePollMs: 250,
   preLaunchIdleMs: 500,
   postLaunchSettleMs: 1500,
   fullyDrawnTimeoutMs: 10_000,
@@ -72,6 +81,14 @@ const COMPILE_TIMEOUT_MS = 180_000;
 const LOGCAT_MAX_BUFFER = 1024 * 1024;
 const LAUNCHER_INTENT = "-a android.intent.action.MAIN -c android.intent.category.LAUNCHER";
 const DROP_CACHES_SCRIPT = "sync; echo 3 > /proc/sys/vm/drop_caches";
+const RESUMED_ACTIVITY_COMMAND = "shell dumpsys activity activities";
+const WINDOW_TRANSITION_COMMAND = "shell dumpsys window | grep -A 8 SystemPerformanceHinter:";
+/**
+ * Extra attempts for a warm or hot launch that `am start -W` did not track
+ * (`LaunchState: UNKNOWN` with no `TotalTime`): it fired while the HOME
+ * transition was still finishing (#18756).
+ */
+const MAX_UNTRACKED_LAUNCH_RETRIES = 2;
 
 type RootShell = "shell" | "su";
 
@@ -80,6 +97,13 @@ interface IterationSample {
   totalTimeMs: number | null;
   waitTimeMs: number | null;
   fullyDrawnMs: number | null;
+  /** Untracked launches redone before this sample. */
+  retries: number;
+}
+
+/** A launch `am start -W` did not time: no `TotalTime`, and an `UNKNOWN` (or no) state. */
+function isUntrackedLaunch(launch: AmStartWaitResult): boolean {
+  return launch.totalTimeMs === null && (launch.launchState ?? "UNKNOWN").startsWith("UNKNOWN");
 }
 
 /** Checks the schema cannot express; returns the iteration count to run. */
@@ -231,8 +255,63 @@ export class AndroidStartupMeasurement {
       }
     } else {
       await this.exec("shell input keyevent KEYCODE_HOME", signal);
+      await this.waitForHome(request.appId, signal);
     }
     await this.timer.sleep(this.timing.preLaunchIdleMs);
+  }
+
+  /**
+   * Waits, within one deadline, for the target to stop being resumed and then
+   * for the HOME transition to finish. The launcher is resumed while that
+   * transition still plays, and a launch fired then comes back untracked.
+   */
+  private async waitForHome(appId: string, signal?: AbortSignal): Promise<void> {
+    const deadline = this.timer.now() + this.timing.homeSettleTimeoutMs;
+    const leftForeground = await this.pollUntil(
+      RESUMED_ACTIVITY_COMMAND,
+      (stdout) => parseResumedActivityForDisplay(stdout).activity?.packageName !== appId,
+      deadline,
+      signal,
+    );
+    if (leftForeground) {
+      await this.pollUntil(
+        WINDOW_TRANSITION_COMMAND,
+        (stdout) => !hasActiveWindowTransition(stdout),
+        deadline,
+        signal,
+      );
+    }
+  }
+
+  /** Polls a read until `done` holds; false on the deadline or when the read fails. */
+  private async pollUntil(
+    command: string,
+    done: (stdout: string) => boolean,
+    deadline: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    let remainingMs = deadline - this.timer.now();
+    while (remainingMs > 0) {
+      try {
+        const { stdout } = await this.exec(command, signal, remainingMs);
+        if (done(stdout)) {
+          return true;
+        }
+      } catch (error) {
+        signal?.throwIfAborted();
+        // A slow or unavailable read (grep finds no hinter section on older images)
+        // should still leave the idle and launch steps in place.
+        logger.debug(`[measureStartup] Could not read device state after HOME: ${error}`);
+        return false;
+      }
+
+      const sleepMs = Math.min(this.timing.homePollMs, deadline - this.timer.now());
+      if (sleepMs > 0) {
+        await this.timer.sleep(sleepMs);
+      }
+      remainingMs = deadline - this.timer.now();
+    }
+    return false;
   }
 
   private async launch(component: string, clearTask: boolean, signal?: AbortSignal) {
@@ -255,17 +334,33 @@ export class AndroidStartupMeasurement {
     rootShell: RootShell | null,
     signal?: AbortSignal,
   ): Promise<IterationSample> {
-    await this.prepare(request, rootShell, signal);
-    const launchedAtMs = await this.shell.getDeviceTimestampMs();
-    const launched = await this.launch(component, request.mode === "warm", signal);
-    const fullyDrawnMs = await this.readFullyDrawn(request, launchedAtMs, signal);
-    await this.timer.sleep(this.timing.postLaunchSettleMs);
-    return {
-      launchState: launched.launchState ?? "UNKNOWN",
-      totalTimeMs: launched.totalTimeMs,
-      waitTimeMs: launched.waitTimeMs,
-      fullyDrawnMs,
-    };
+    for (let retries = 0; ; retries++) {
+      await this.prepare(request, rootShell, signal);
+      const launchedAtMs = await this.shell.getDeviceTimestampMs();
+      const launched = await this.launch(component, request.mode === "warm", signal);
+      if (
+        request.mode !== "cold" &&
+        retries < MAX_UNTRACKED_LAUNCH_RETRIES &&
+        isUntrackedLaunch(launched)
+      ) {
+        logger.info(
+          `[measureStartup] ${request.mode} launch of ${component} was not tracked ` +
+            `(LaunchState ${launched.launchState ?? "absent"}, no TotalTime); going HOME and retrying.`,
+        );
+        // Let the untracked launch finish before backgrounding the app again.
+        await this.timer.sleep(this.timing.postLaunchSettleMs);
+        continue;
+      }
+      const fullyDrawnMs = await this.readFullyDrawn(request, launchedAtMs, signal);
+      await this.timer.sleep(this.timing.postLaunchSettleMs);
+      return {
+        launchState: launched.launchState ?? "UNKNOWN",
+        totalTimeMs: launched.totalTimeMs,
+        waitTimeMs: launched.waitTimeMs,
+        fullyDrawnMs,
+        retries,
+      };
+    }
   }
 
   /** The first `Fully drawn` the app logged since this launch; polls when asked to wait. */
@@ -304,8 +399,13 @@ export class AndroidStartupMeasurement {
     samples: IterationSample[],
   ): MeasureStartupResult {
     const warnings: string[] = [];
+    // An "already on top" launch prints `LaunchState: UNKNOWN` with `TotalTime: 0`
+    // (nothing was started), so it counts as having no TotalTime.
     const ttidSamples = samples.flatMap((sample) =>
-      sample.totalTimeMs === null ? [] : [sample.totalTimeMs],
+      sample.totalTimeMs === null ||
+      (sample.totalTimeMs === 0 && sample.launchState.startsWith("UNKNOWN"))
+        ? []
+        : [sample.totalTimeMs],
     );
     const ttid = summarizeStartupSamples(ttidSamples);
     if (!ttid) {
@@ -317,6 +417,14 @@ export class AndroidStartupMeasurement {
     if (ttidSamples.length < samples.length) {
       warnings.push(
         `${samples.length - ttidSamples.length} of ${samples.length} launches reported no TotalTime.`,
+      );
+    }
+
+    const retried = samples.reduce((total, sample) => total + sample.retries, 0);
+    if (retried > 0) {
+      warnings.push(
+        `${retried} untracked launches (LaunchState UNKNOWN, no TotalTime) were retried after ` +
+          "going HOME again; the HOME transition had not finished.",
       );
     }
 

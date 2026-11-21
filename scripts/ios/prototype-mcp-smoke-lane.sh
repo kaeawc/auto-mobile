@@ -31,6 +31,13 @@ fi
 requested="$1"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
+# Build and create simulators with the repository-pinned Xcode unless DEVELOPER_DIR
+# already names one. Shell-test fixtures without the helper keep the active Xcode.
+if [[ -f "${script_dir}/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${script_dir}/xcode_version.sh"
+  select_pinned_xcode
+fi
 cd "${repo_root}"
 export XCRUN_BIN="${XCRUN_BIN:-xcrun}"
 xcodebuild_bin="${XCODEBUILD_BIN:-xcodebuild}"
@@ -189,6 +196,8 @@ if [[ ${requested} == latest ]]; then prefix=""; fi
 runtime_line="$(printf '%s' "${runtimes_json}" | jq -r --arg p "${prefix}" '
   [.runtimes[]
     | select(.isAvailable != false)
+    # Skip device-specific runtimes such as iOS-27-2-iPhone19-4 (iPhone Duo only).
+    | select(.identifier | test("\\.iOS-[0-9-]+-[A-Za-z]") | not)
     | select($p == "" or .version == $p or (.version | startswith($p + ".")))]
   | sort_by(.version | split(".") | map(tonumber? // 0))
   | last // empty

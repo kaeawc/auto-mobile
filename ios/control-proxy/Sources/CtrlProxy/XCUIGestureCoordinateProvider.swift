@@ -13,8 +13,6 @@ import os
             let base: XCUICoordinate
             let resolved: XCUICoordinate
             let application: XCUIApplication
-            /// Screen origin of an inset app window added to a point offset (#6635).
-            let windowTranslation: GesturePoint?
         }
 
         private let app: XCUIApplication
@@ -26,7 +24,7 @@ import os
         private static let referenceScreenCache = ReferenceScreenCache {
             do {
                 return try catchingObjCException {
-                    let frame = XCUIApplication(bundleIdentifier: "com.apple.springboard").frame
+                    let frame = XCUIApplication.withoutUIInterruptions(bundleIdentifier: "com.apple.springboard").frame
                     return GestureSize(width: Double(frame.width), height: Double(frame.height))
                 }
             } catch {
@@ -47,7 +45,8 @@ import os
         }
 
         var observedApplication: XCUIApplication {
-            relativeApp ?? locator.foregroundBundleId.map { XCUIApplication(bundleIdentifier: $0) } ?? app
+            relativeApp ?? locator.foregroundBundleId
+                .map { XCUIApplication.withoutUIInterruptions(bundleIdentifier: $0) } ?? app
         }
 
         func displayInventory() -> GestureDisplayInventory {
@@ -125,7 +124,8 @@ import os
             if let corrected = cached.resolvingSinglePanel(reference: reference) { return corrected }
             do {
                 return try catchingObjCException {
-                    let target = locator.foregroundBundleId.map { XCUIApplication(bundleIdentifier: $0) } ?? app
+                    let target = locator.foregroundBundleId
+                        .map { XCUIApplication.withoutUIInterruptions(bundleIdentifier: $0) } ?? app
                     relativeApp = target
                     let frame = target.frame
                     let screen = reference ?? GestureSize(
@@ -186,15 +186,15 @@ import os
                     target = app
                 } else {
                     target = relativeApp ?? locator.foregroundBundleId
-                        .map { XCUIApplication(bundleIdentifier: $0) } ?? app
+                        .map { XCUIApplication.withoutUIInterruptions(bundleIdentifier: $0) } ?? app
                 }
                 let anchor = target.coordinate(withNormalizedOffset: CGVector(
                     dx: selection.normalized.x, dy: selection.normalized.y
                 ))
-                let translation = selection.windowTranslation(windowTranslation)
-                let base = translation.map { anchor.withOffset(CGVector(dx: $0.x, dy: $0.y)) } ?? anchor
-                let resolved = selection.offset.map { base.withOffset(CGVector(dx: $0.x, dy: $0.y)) } ?? base
-                return Coordinate(base: base, resolved: resolved, application: target, windowTranslation: translation)
+                // Observe reports an inset window in screen space (#18830), so a point offset is
+                // already a screen point and needs no window origin added.
+                let resolved = selection.offset.map { anchor.withOffset(CGVector(dx: $0.x, dy: $0.y)) } ?? anchor
+                return Coordinate(base: anchor, resolved: resolved, application: target)
             }
         }
 

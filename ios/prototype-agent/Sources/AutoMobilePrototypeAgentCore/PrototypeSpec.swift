@@ -111,6 +111,7 @@ struct PrototypeSpec: Decodable {
     let locationBlock: JSONValue?
     let sensorsBlock: JSONValue?
     let platformHandlers: [String: JSONValue]
+    let declaredPlatform: Set<String>
     let declaredPermissions: Set<String>
     private(set) var platformState: [String: JSONValue] = [:]
     /// The route params `{route.<name>}` placeholders are bound to in `root` (#14188); empty at decode.
@@ -161,6 +162,9 @@ struct PrototypeSpec: Decodable {
         // key order; a state that does not decode is reported at its own turn below.
         let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state))
         let requires = try container.decodeIfPresent(JSONValue.self, forKey: .requires)
+        if case let .array(platform)? = requires?.objectFields?["platform"] {
+            declaredPlatform = Set(platform.compactMap(\.stringValue))
+        } else { declaredPlatform = [] }
         if case let .array(permissions)? = requires?.objectFields?["permissions"] {
             declaredPermissions = Set(permissions.compactMap { $0.objectFields?["name"]?.stringValue })
         } else {
@@ -250,7 +254,7 @@ struct PrototypeSpec: Decodable {
         try PrototypeLimits.guardSubstitutedText(collections, data: data, derived: formatContext, state: menuState)
         // Route params bind before data resolution, so `{data:/posts/{route.id}/title}` resolves (#14188).
         let routed = PrototypeRouteBinder.bind(collections, scope: routes)
-        let bound = PrototypeDataResolver.resolveRoot(routed, data: data, platform: platform)
+        let bound = PrototypeDataResolver.resolveRoot(routed, data: data, platform: platform, derived: values)
         let resolved = strings
             .map { PrototypeStrings.resolve(bound, strings: $0, locales: locales, data: data) } ?? bound
         try PrototypeLimits.guardTree(resolved)
@@ -290,6 +294,7 @@ struct PrototypeSpec: Decodable {
         platformState = spec.platformState
         routeScope = spec.routeScope
         id = spec.id
+        declaredPlatform = spec.declaredPlatform
         declaredPermissions = spec.declaredPermissions
         strings = spec.strings
         locales = spec.locales
@@ -761,6 +766,7 @@ indirect enum Condition: Decodable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case key, equals, notEquals, contains, startsWith, lengthGt, lengthLt, all, any, not, valid
+        case derived = "_derivedValue"
         case greaterThan = "gt"
         case lessThan = "lt"
     }
@@ -782,7 +788,9 @@ indirect enum Condition: Decodable, Equatable {
         } else if let not = try container.decodeIfPresent(Condition.self, forKey: .not) {
             self = .not(not)
         } else {
-            let key = try container.decode(String.self, forKey: .key)
+            let isDerived = container.contains(.derived)
+            let derived = isDerived ? try container.decode(JSONValue.self, forKey: .derived) : nil
+            let key = isDerived ? "" : try container.decode(String.self, forKey: .key)
             if let value = try container.decodeIfPresent(JSONValue.self, forKey: .equals) {
                 self = .equals(key: key, value: value)
             } else if let value = try container.decodeIfPresent(JSONValue.self, forKey: .notEquals) {
@@ -806,8 +814,18 @@ indirect enum Condition: Decodable, Equatable {
                     debugDescription: "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt is required"
                 )
             }
+            if let derived {
+                let match: Bool = switch self {
+                case let .equals(_, operand): PrototypeDataValues.equal(derived, operand)
+                case let .notEquals(_, operand): !PrototypeDataValues.equal(derived, operand)
+                default: holds([key: derived])
+                }
+                self = Self.constant(match)
+            }
         }
     }
+
+    private static func constant(_ value: Bool) -> Self { value ? .all([]) : .any([]) }
 
     /// A missing key fails `equals`, `gt` and `lt` and satisfies `notEquals`; a non-numeric value
     /// fails the numeric comparisons instead of throwing.

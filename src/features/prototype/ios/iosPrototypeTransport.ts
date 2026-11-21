@@ -1,3 +1,10 @@
+import {
+  prototypePlatformSimulationIssue,
+  prototypePlatformSimulationUnsupportedMessage,
+  simulatePrototypePlatformMessage,
+} from "../prototypePlatformSimulation";
+import { PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
+import type { PrototypePlatformSimulationRequest } from "../../observe/android/ctrlProxyProtocol/prototypeMessages";
 import { parsePrototypeBackdrop } from "../prototypeBackdrop";
 import {
   prototypeShaderPatchSpec,
@@ -354,6 +361,32 @@ export class IosPrototypeTransport implements PrototypeTransport {
     return toPrototypeResult(await this.request("dismiss_prototype", body, timeoutMs));
   }
 
+  async simulatePlatformEvent(
+    id: string,
+    event: string,
+    data: PrototypePlatformSimulationRequest["data"],
+    timeoutMs?: number,
+  ): Promise<PrototypeResult> {
+    if (
+      !this.supportsCapability(PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY) ||
+      !this.supportsCapability("simulate_prototype_platform")
+    ) {
+      throw new ActionableError(prototypePlatformSimulationUnsupportedMessage());
+    }
+    const issue = prototypePlatformSimulationIssue(event, data);
+    if (issue) {
+      throw new ActionableError(issue[1]);
+    }
+    const message = simulatePrototypePlatformMessage({ id, event, data });
+    return toPrototypeResult(
+      await this.request(
+        message.type,
+        { id: message.id, event: message.event, data: message.data },
+        timeoutMs,
+      ),
+    );
+  }
+
   async advanceClock(
     id: string,
     advanceTimeMs: number,
@@ -465,6 +498,10 @@ export class IosPrototypeTransport implements PrototypeTransport {
     return this.agent.handshake.showingId;
   }
 
+  get eventShowingStartSequence(): number | undefined {
+    return this.agent.handshake.showingStartSequence;
+  }
+
   get eventInstanceId(): string | undefined {
     return this.agent.handshake.appInstanceId;
   }
@@ -489,14 +526,12 @@ export class IosPrototypeTransport implements PrototypeTransport {
     };
   }
 
-  onEvent(listener: (event: PrototypeEvent) => void): () => void {
+  onEvent(listener: (event: PrototypeEvent) => unknown): () => void {
     return this.agent.onEvent((message) => {
       // Decode at the push boundary, as CtrlProxy does: malformed frames never reach listeners,
       // and a kind this host does not know arrives as a sequence-only marker.
       const decoded = decodePrototypeEvent(message, "[prototype-agent]");
-      if (decoded !== undefined) {
-        listener(decoded);
-      }
+      return decoded === undefined ? undefined : listener(decoded);
     });
   }
 

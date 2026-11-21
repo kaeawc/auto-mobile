@@ -101,19 +101,20 @@ enum PrototypeDataValues {
         }
     }
 
+    static func equal(_ value: JSONValue?, _ operand: JSONValue) -> Bool {
+        guard let value, isScalar(value), isScalar(operand) else { return false }
+        if case let .string(left) = value, case let .string(right) = operand {
+            return left.utf16.elementsEqual(right.utf16)
+        }
+        return value == operand
+    }
+
     static func holds(_ condition: [String: JSONValue], data: [String: JSONValue]?) -> Bool {
         let value = condition["data"]?.stringValue.flatMap {
             PrototypeDataPointer.resolve(data, pointer: $0)
         }
-        func equal(_ operand: JSONValue) -> Bool {
-            guard let value, isScalar(value), isScalar(operand) else { return false }
-            if case let .string(left) = value, case let .string(right) = operand {
-                return left.utf16.elementsEqual(right.utf16)
-            }
-            return value == operand
-        }
-        if let operand = condition["equals"] { return equal(operand) }
-        if let operand = condition["notEquals"] { return !equal(operand) }
+        if let operand = condition["equals"] { return equal(value, operand) }
+        if let operand = condition["notEquals"] { return !equal(value, operand) }
         if case let .bool(empty)? = condition["empty"] { return isEmpty(value) == empty }
         guard case let .number(left)? = value, left.isFinite else { return false }
         if case let .number(right)? = condition["gt"], right.isFinite { return left > right }
@@ -251,19 +252,20 @@ enum PrototypeDataResolver {
     static func resolveRoot(
         _ root: JSONValue,
         data: [String: JSONValue]?,
-        platform: [String: JSONValue]? = nil
+        platform: [String: JSONValue]? = nil,
+        derived: [String: JSONValue] = [:]
     )
         -> JSONValue
     {
         var repeats = PrototypeRepeatData(data: data)
-        return resolveRoot(root, data: data, platform: platform, repeats: &repeats, pass: .all)
+        return resolveRoot(root, data: data, platform: platform, derived: derived, repeats: &repeats, pass: .all)
     }
 
     /// Resolves only `repeat` item sources, leaving every text and condition untouched, so a lazy row can
     /// bind its row tokens before `{data:...}` pointers resolve and substituted values are never re-bound.
     static func resolveRepeatSources(_ root: JSONValue, data: [String: JSONValue]?) -> JSONValue {
         var repeats = PrototypeRepeatData(data: data)
-        return resolveRoot(root, data: data, platform: nil, repeats: &repeats, pass: .repeatsOnly)
+        return resolveRoot(root, data: data, platform: nil, derived: [:], repeats: &repeats, pass: .repeatsOnly)
     }
 
     /// `deferDataText` binds platform text and conditions, leaving data text for per-row binding.
@@ -271,7 +273,7 @@ enum PrototypeDataResolver {
 
     private static func resolveRoot(
         _ root: JSONValue, data: [String: JSONValue]?, platform: [String: JSONValue]?,
-        repeats: inout PrototypeRepeatData, pass: Pass
+        derived: [String: JSONValue], repeats: inout PrototypeRepeatData, pass: Pass
     )
         -> JSONValue
     {
@@ -286,23 +288,31 @@ enum PrototypeDataResolver {
             value, repeats: &repeats, retainSource: PrototypeRepeat.containsFieldSource(root)
         ) }
         for key in ["visibleWhen", "enabledWhen", "errorWhen"] where pass != .repeatsOnly {
-            if let value = fields[key] { fields[key] = resolveCondition(value, data: data, platform: platform) }
+            if let value = fields[key] { fields[key] = resolveCondition(
+                value,
+                data: data,
+                platform: platform,
+                derived: derived
+            ) }
         }
         if pass != .repeatsOnly, case let .array(styles)? = fields["styleWhen"] {
             fields["styleWhen"] = .array(styles.map { entry in
                 guard case var .object(style) = entry, let condition = style["when"] else { return entry }
-                style["when"] = resolveCondition(condition, data: data, platform: platform)
+                style["when"] = resolveCondition(condition, data: data, platform: platform, derived: derived)
                 return .object(style)
             })
         }
         if let child = fields["child"] {
-            fields["child"] = resolveRoot(child, data: data, platform: platform, repeats: &repeats, pass: pass)
+            fields["child"] = resolveRoot(
+                child, data: data, platform: platform, derived: derived, repeats: &repeats, pass: pass
+            )
         } else if fields["type"] == .string("adaptive") {
             for slot in PrototypeAdaptive.slots {
                 if let child = fields[slot] { fields[slot] = resolveRoot(
                     child,
                     data: data,
                     platform: platform,
+                    derived: derived,
                     repeats: &repeats, pass: pass
                 ) }
             }
@@ -311,19 +321,24 @@ enum PrototypeDataResolver {
             // `{row.x}` first, then resolves, so a pointer such as `{data:/rows/{index}/name}` stays whole.
             let rowPass: Pass = pass == .all && lazy ? .deferDataText : pass
             fields["children"] = .array(children
-                .map { resolveRoot($0, data: data, platform: platform, repeats: &repeats, pass: rowPass) })
+                .map { resolveRoot(
+                    $0, data: data, platform: platform, derived: derived, repeats: &repeats, pass: rowPass
+                ) })
         }
         for name in ["header", "footer"] {
             if let child = fields[name] { fields[name] = resolveRoot(
                 child,
                 data: data,
                 platform: platform,
+                derived: derived,
                 repeats: &repeats, pass: pass
             ) }
         }
         if case let .object(screens)? = fields["screens"] {
             fields["screens"] = .object(screens
-                .mapValues { resolveRoot($0, data: data, platform: platform, repeats: &repeats, pass: pass) })
+                .mapValues { resolveRoot(
+                    $0, data: data, platform: platform, derived: derived, repeats: &repeats, pass: pass
+                ) })
         }
         return .object(fields)
     }
@@ -348,21 +363,41 @@ enum PrototypeDataResolver {
     private static func resolveCondition(
         _ value: JSONValue,
         data: [String: JSONValue]?,
-        platform: [String: JSONValue]?
+        platform: [String: JSONValue]?,
+        derived: [String: JSONValue]
     )
         -> JSONValue
     {
         guard case var .object(fields) = value else { return value }
+        if let name = fields["derived"]?.stringValue {
+            let raw = derived[name]
+            let value = raw?.numberValue?.isFinite == false ? nil : raw
+            if case let .bool(empty)? = fields["empty"] {
+                let form = PrototypeDataValues.isEmpty(value) == empty ? "all" : "any"
+                return .object([form: .array([])])
+            }
+            // Keep a scalar operand through repeat binding, which can still substitute its comparator.
+            fields.removeValue(forKey: "derived")
+            fields["_derivedValue"] = value.flatMap { PrototypeDataValues.isScalar($0) ? $0 : nil } ?? .null
+            return .object(fields)
+        }
         if fields["data"] != nil || fields["platform"] != nil {
             let isPlatform = fields["platform"] != nil
             if isPlatform { fields["data"] = fields.removeValue(forKey: "platform") }
             let form = PrototypeDataValues.holds(fields, data: isPlatform ? platform : data) ? "all" : "any"
             return .object([form: .array([])])
         }
-        if let negated = fields["not"] { fields["not"] = resolveCondition(negated, data: data, platform: platform) }
+        if let negated = fields["not"] {
+            fields["not"] = resolveCondition(negated, data: data, platform: platform, derived: derived)
+        }
         for group in ["all", "any"] {
             if case let .array(conditions)? = fields[group] {
-                fields[group] = .array(conditions.map { resolveCondition($0, data: data, platform: platform) })
+                fields[group] = .array(conditions.map { resolveCondition(
+                    $0,
+                    data: data,
+                    platform: platform,
+                    derived: derived
+                ) })
             }
         }
         return .object(fields)

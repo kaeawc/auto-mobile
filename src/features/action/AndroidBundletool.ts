@@ -8,6 +8,7 @@ import {
   type BundletoolLocator,
 } from "../../utils/android-cmdline-tools/BundletoolLocator";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
+import { withFixtureCaptureScrub } from "../../utils/fixtureCapture/fixtureCaptureScope";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
@@ -111,7 +112,11 @@ export class AndroidBundletool {
     ];
     const secrets = keystore ? [keystore.storePassword, keystore.keyPassword ?? ""] : [];
     try {
-      await this.run(tool, args, BUNDLETOOL_BUILD_APKS_TIMEOUT_MS, signal);
+      // Fixture capture applies the same scrub as the logs, so a capture never holds a password.
+      await withFixtureCaptureScrub(
+        (text) => scrubBundletoolText(text, secrets),
+        () => this.run(tool, args, BUNDLETOOL_BUILD_APKS_TIMEOUT_MS, signal),
+      );
     } catch (error) {
       if (isCancellation(error, signal)) {
         throw error;

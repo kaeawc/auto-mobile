@@ -192,7 +192,7 @@ are reported in \`platformNotes\`.
 
 ## Loading, empty and error states
 
-State-key \`contains\`/\`startsWith\` compare UTF-16 substrings/prefixes, case-sensitive with no Unicode normalization. Literal operands are nonempty strings up to 256 UTF-16 units; repeat placeholders always bind as text (a numeric item renders as its text), and an empty substituted operand holds for every string. \`lengthGt\`/\`lengthLt\` compare UTF-16 length strictly against literal integers 0..100000 (\`😀\` has length 2). Missing or non-string state values fail all four. They are valid only with \`key\`, wherever a condition is accepted, and require \`prototype_string_conditions_v1\`.
+String \`contains\`/\`startsWith\` compare UTF-16 substrings/prefixes, case-sensitive with no Unicode normalization. Literal operands are nonempty strings up to 256 UTF-16 units; repeat placeholders always bind as text (a numeric item renders as its text), and an empty substituted operand holds for every string. \`lengthGt\`/\`lengthLt\` compare UTF-16 length strictly against literal integers 0..100000 (\`😀\` has length 2). Missing or non-string values fail all four. They use \`key\` or \`derived\` and require \`prototype_string_conditions_v1\`.
 
 (needs \`prototype_loading_states_v1\`) \`{data: "/feed", empty: true}\` holds when the value is
 missing, \`[]\`, \`{}\` or \`""\`; \`empty: false\` is its inverse. It replaces the comparison, so
@@ -781,10 +781,10 @@ are rejected; a missing text path renders empty.
   placeholders are not charged. Crossing the total fails at that field with \`Substituted text total limit exceeded\`.
   During state interpolation, a replacement that would exceed the per-call substitution limit stays
   as written, and later placeholders may still substitute.
-- A condition uses exactly one of \`key\`, \`data\`, \`platform\`, \`valid\`, \`all\`, \`any\`, \`not\`. A data condition has exactly
-  one comparison: \`equals\` (same scalar type and value), \`notEquals\` (its inverse, including missing
-  or non-scalar), \`gt\` or \`lt\` (numbers only, otherwise false), or \`empty\` (data only). \`equals\`/\`notEquals\` operands are
-  literals; repeat placeholders there are rejected. Key forms also accept \`contains\`, \`startsWith\`, \`lengthGt\` or \`lengthLt\` (see string conditions). \`bottomSheet.openWhen\` remains boolean state.
+- A condition uses exactly one of \`key\`, \`data\`, \`platform\`, \`derived\`, \`valid\`, \`all\`, \`any\` or \`not\`.
+  Data and derived conditions require one comparison: \`equals\` (same scalar type and value),
+  \`notEquals\` (its inverse, including missing or non-scalar), \`gt\` or \`lt\` (numbers only), or \`empty\`. Data conditions require literal equality operands. Key and derived conditions also
+  accept string comparisons. \`bottomSheet.openWhen\` uses boolean state.
 
 The host validates data and repeat paths; the device resolves bindings once per show before
 repeat expansion. All data uses require \`prototype_data_model_v1\`; an older device is refused
@@ -838,7 +838,7 @@ every limit counts the expanded tree.
 
 export const GUIDE_APPEARANCE = `## Style polish
 
-Glass: style.surface "glass" and strict style.glass {variant?:regular|clear,tint?:colour,interactive?:boolean} need prototype_glass_v1 (iOS 26+ only today; older iOS and Android refuse it). glass requires surface "glass" in the same style, including styleWhen; cornerRadius shapes it, absent means capsule. ios.glassGroup {spacing:0..200} is for column/row/box/flow/grid/list/listItem; descendant glass shared keys morph in their nearest group, must be unique there, cannot collide with visibility-pair keys, and require repeat.key templates under repeat (including the repeated node). ios.glassUnion (ASCII id, 1..64), ios.glassTransition matchedGeometry|materialize|identity need a base glass surface; ios.backgroundExtension:true is image-only. All four ios glass keys are node-only, invalid in window.ios/theme.ios. All four need only the glass gate on iOS; other ios keys still need the unadvertised platform namespace gate; Android ignores ios fields with platformNotes paths. Android rendering is deferred, with real blur required at API 31+ and no glass below API 31. scroll.edgeEffect soft|hard|none needs prototype_scroll_edge_effect_v1: iOS 26 native; older iOS shares fadeEdges (24/8 dp defaults, authored lengths win, none disables only the edge effect and its default fallback; explicit fadeEdges still apply). System accessibility settings control glass appearance; assert structure/bounds.
+Glass: style.surface "glass" and strict style.glass {variant?:regular|clear,tint?:colour,interactive?:boolean} need prototype_glass_v1 (iOS 26+, and Android; older iOS refuses it). glass requires surface "glass" in the same style, including styleWhen; cornerRadius shapes it, absent means capsule. ios.glassGroup {spacing:0..200} is for column/row/box/flow/grid/list/listItem; descendant glass shared keys morph in their nearest group, must be unique there, cannot collide with visibility-pair keys, and require repeat.key templates under repeat (including the repeated node). ios.glassUnion (ASCII id, 1..64), ios.glassTransition matchedGeometry|materialize|identity need a base glass surface; ios.backgroundExtension:true is image-only. All four ios glass keys are node-only, invalid in window.ios/theme.ios. All four need only the glass gate on iOS; other ios keys still need the unadvertised platform namespace gate; Android ignores ios fields with platformNotes paths. Android blurs earlier sibling layers of the same spec behind the node (24 dp regular, 8 dp clear; Haze) on API 31+ and draws a tonal scrim below; it cannot blur other apps, which is what window.backdrop does. scroll.edgeEffect soft|hard|none needs prototype_scroll_edge_effect_v1: iOS 26 native; older iOS shares fadeEdges (24/8 dp defaults, authored lengths win, none disables only the edge effect and its default fallback; explicit fadeEdges still apply). System accessibility settings control glass appearance; assert structure/bounds.
 
 Layered style.shadows (1-3 strict {color,radius,spread?,offset?,inner?}, radius 0-1000 dp, spread and offset axes -1000..1000; omitted spread/offset/inner mean 0/{x:0,y:0}/false), style.cornerStyle circular|continuous (default circular), style.border {width,color? ,gradient?} with exactly one of color or gradient, scroll.fadeEdges {top?,bottom?,start?,end?} (0-1000 dp, at least one), and image.filter {saturation?,tint?} (saturation 0-2, at least one) require prototype_style_polish_v2. shadows excludes elevation and shadowColor. Fades appear only where scrolling remains; start/end mirror in RTL. Colour pairs in shadows and tint, and pairs or role names in border gradient stops also require prototype_theme_modes_v1.
 
@@ -1031,7 +1031,7 @@ export const GUIDE_ERRORS = `## Common validation errors
 | \`Duplicate repeat key "x" (items <i> and <j>)\` | Give every item a unique rendered identity. |
 | \`Derived repeat key "x" has the same input for items <i> and <j>\` | Two rows feed a derived key the same constant or field value; derive it from a field that differs per row. |
 | \`Bound state key "x" is invalid (repeat item <i>)\` | A path-bound key must form a valid state key; error is at repeat.items.path. |
-| \`Requires key or data or platform\` | Supply one condition source with exactly one comparison. |
+| \`Requires key or data or platform or derived\` | Supply one condition source with exactly one comparison. |
 | \`Repeat path cell limit exceeded\` | Reduce path-bound repeats or the scalar members projected per item; see \`MAX_PROTOTYPE_REPEAT_PATH_CELLS\`. |
 | \`Substituted text total limit exceeded\` | Reduce bindable fields, replacement lengths or repeat items; see \`MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL\`. |
 | \`Repeat placeholder in a data condition operand is not supported\` | Use a literal operand; state conditions still bind repeat operands. |

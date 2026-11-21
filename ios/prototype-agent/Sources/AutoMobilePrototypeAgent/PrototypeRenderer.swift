@@ -1844,7 +1844,9 @@
         @State private var decoder = PrototypeLazyList.RowDecoder()
 
         var body: some View {
-            if let row = decoder.decode(node: node, data: model.spec?.data, index: index) {
+            if let row = decoder.decode(
+                node: node, data: model.spec?.data, derived: model.spec?.derivedValues ?? [:], index: index
+            ) {
                 NodeView(node: row.node, model: model)
                     .onAppear { visibility(key, true) }
                     .onDisappear { visibility(key, false) }

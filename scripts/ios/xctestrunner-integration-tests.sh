@@ -31,6 +31,13 @@ NC='\033[0m' # No Color
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# Build with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+# Shell-test fixtures that copy this script without the helper keep the active Xcode.
+if [[ -f "${PROJECT_ROOT}/scripts/ios/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${PROJECT_ROOT}/scripts/ios/xcode_version.sh"
+  select_pinned_xcode
+fi
 XCTESTRUNNER_DIR="${PROJECT_ROOT}/ios/XCTestRunner"
 
 # Test filter
@@ -62,7 +69,7 @@ echo -e "  ${GREEN}✓${NC} CtrlProxy iOS artifacts found"
 BOOTED_DEVICE=$(xcrun simctl list devices booted -j | grep -o '"udid" : "[^"]*"' | head -1 | sed 's/"udid" : "\(.*\)"/\1/')
 if [ -z "$BOOTED_DEVICE" ]; then
     echo -e "  ${RED}✗${NC} No booted simulator found"
-    echo -e "${YELLOW}Boot a simulator first: xcrun simctl boot 'iPhone 15'${NC}"
+    echo -e "${YELLOW}Boot a simulator first: xcrun simctl boot 'iPhone 17 Pro' (iOS 27.2 runtime)${NC}"
     exit 1
 fi
 echo -e "  ${GREEN}✓${NC} Simulator booted: ${BOOTED_DEVICE}"

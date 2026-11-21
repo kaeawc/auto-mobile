@@ -202,10 +202,14 @@ private class PrototypeListKeys(var keys: List<String>, var hasHeader: Boolean)
 private val listNodeJson = Json { ignoreUnknownKeys = false }
 
 /** Resolve each node after row binding, including children bound by a nested repeat. */
-internal fun resolvePrototypeListNodeText(node: PrototypeNode, data: JsonObject?): PrototypeNode {
+internal fun resolvePrototypeListNodeText(
+  node: PrototypeNode,
+  data: JsonObject?,
+  shield: Boolean = false,
+): PrototypeNode {
   val json = listNodeJson
   val raw = json.encodeToJsonElement(PrototypeNode.serializer(), node).jsonObject
-  val resolved = PrototypeDataResolver.resolveNodeText(raw, data)
+  val resolved = PrototypeDataResolver.resolveNodeText(raw, data, shield)
   val unshielded = unshieldPrototypeRowJson(resolved).jsonObject
   if (unshielded == raw) return node
   val decoded = json.decodeFromJsonElement(PrototypeNode.serializer(), unshielded)

@@ -40,6 +40,7 @@ object AutoMobilePrototype {
       "prototype_derive_v1",
       "prototype_nested_repeat_v1",
       "prototype_gestures_v1",
+      "prototype_glass_v1",
       "prototype_keyframes_v1",
       "prototype_loops_v1",
       "prototype_motion_tokens_v1",

@@ -78,17 +78,23 @@ effect). Rules:
   field needs no `prototype_theme_modes_v1`.
 - Blur can be unavailable: Android below API 31, cross-window blur disabled by the device or
   battery saver, a window layer that cannot blur, or iOS below the material's minimum. There the device draws
-  a tonal fill instead of nothing: `tint` at 85% alpha, else the `surfaceContainer` role at 85%. On Android this is the only
-  path below API 31; from API 31 the blur is real (`RenderEffect`).
+  a tonal fill using `tint` or the `surfaceContainer` role at 85% alpha.
 - The field needs `prototype_backdrop_v1`. A device without it would ignore the field and draw a
   plain window, so the host refuses the show (a placement `scrim` still dims what is behind).
   CtrlProxy and the iOS prototype agent advertise it (#15126). On iOS an authored `blur` picks the nearest
   material, and Reduce Transparency draws the tonal fill.
-- Android: from API 31 the window asks for blur-behind when `WindowManager.isCrossWindowBlurEnabled`
-  is true, with `tint` laid over it at 35% alpha. It uses `FLAG_BLUR_BEHIND`, radius = `blur` or the
-  material's: ultraThin 8, thin 16, regular 24, thick 40 dp. Otherwise, and always for `glass`, it draws the
-  tonal fill. Node-level `surface: "glass"` (#15244, #15256) reuses these pieces
-  (`PrototypeBackdrops.plan`, `Modifier.prototypeRenderBlur`, the tonal fallback).
+- On Android, real window blur requires API 31 and enabled cross-window blur. Floating cards use
+  a translucent dialog with `Window.setBackgroundBlurRadius` and the root surface's uniform
+  rounded outline. An unset radius gives square corners. Sheets and fullscreen windows use
+  `FLAG_BLUR_BEHIND`. The radius comes from `blur` or the material (ultraThin 8, thin 16, regular 24,
+  thick 40 dp), and `tint` overlays the blur at 35% alpha. A failed dialog attach or a card shape
+  that the platform cannot match uses the tonal fill. A floating card with a zero blur radius
+  also uses the tonal fill.
+- Node-level `surface: "glass"` (`prototype_glass_v1`) uses Haze to blur earlier sibling layers
+  within the spec on Android 12 and later. The `style.glass` variants use 24 dp for `regular`
+  and 8 dp for `clear`. An authored tint overlays the blur at 35%. Below API 31 the node draws
+  the tonal scrim. Haze samples only this composition, so cross-window content comes from
+  `window.backdrop`.
 - A successful show reports `lastResult.backdrop`: `blur`, or `fallback` when the tonal fill was
   drawn. It is absent without `window.backdrop`, on dismiss, on a failed show and for adopted prototypes.
 
@@ -119,7 +125,8 @@ The car
 top bar can be taller than the `systemBars` top inset the overlay window receives. For fullscreen and
 top-gravity floating windows, the host therefore uses the larger of that inset and the display's `systemBars` top
 inset. The dismiss bar, the escape pill and top-edge `safeAreaPadding` clear the whole bar. With `none`,
-authored content without top-edge `safeAreaPadding` still starts behind the car top bar. Car App Library templates and car-specific spec nodes are out of scope.
+authored content without top-edge `safeAreaPadding` still starts behind the car top bar. Car App Library templates and car-specific spec nodes are out of scope; see
+[Automotive prototypes](automotive-prototypes.md).
 
 ## Common node properties
 

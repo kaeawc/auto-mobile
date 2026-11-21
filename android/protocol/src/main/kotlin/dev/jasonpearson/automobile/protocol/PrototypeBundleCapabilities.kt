@@ -114,7 +114,7 @@ internal object PrototypeBundleCapabilities {
     val type = text(action["type"])
     if (type in PrototypeDataRules.dataActionTypes) caps.add("prototype_data_actions_v1")
     if (type == "prependData") caps.add("prototype_lazy_list_v1")
-    if (PrototypeDataRules.isKeyedAction(action)) caps.add("prototype_data_actions_v2")
+    if (PrototypeGeneratedValues.needsDataV2(action)) caps.add("prototype_data_actions_v2")
   }
 
   private fun fields(node: JsonObject, caps: MutableSet<String>) {
@@ -132,6 +132,7 @@ internal object PrototypeBundleCapabilities {
       caps.add("prototype_loading_states_v1")
     repeatCapabilities(node["repeat"] as? JsonObject, caps)
     PrototypeBindableFields.first<Unit>(node, "") { value, _, kind ->
+      if (kind == PrototypeBindableKind.DERIVED_CONDITION) caps.add("prototype_derive_v1")
       val bound =
         when (kind) {
           PrototypeBindableKind.TEXT -> text(value)?.let(PrototypeDataText::hasBinding) == true

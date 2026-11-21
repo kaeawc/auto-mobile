@@ -189,10 +189,17 @@ class PrototypeChannelController(
     null
   }
 
-  /** `realtime.send`: sent when open, queued while (re)connecting, refused otherwise. */
-  suspend fun send(channel: String, data: String): PrototypeChannelError? = lock.withLock {
+  /**
+   * `realtime.send`: sent when open, queued while (re)connecting, refused otherwise. [wanted] is
+   * checked under the lock, so a caller that gave up while waiting for it sends nothing.
+   */
+  suspend fun send(
+    channel: String,
+    data: String,
+    wanted: () -> Boolean = { true },
+  ): PrototypeChannelError? = lock.withLock {
     val slot = slots[channel] ?: return@withLock unknown(channel)
-    if (closing) {
+    if (closing || !wanted()) {
       return@withLock PrototypeChannelError(
         PrototypeChannelError.NETWORK,
         "The channels are closed",
@@ -212,7 +219,8 @@ class PrototypeChannelController(
       lock.withLock {
         flush?.cancel()
         window.clear()
-        slots.values.forEach(::abandon)
+        // One connection whose close throws must not leave the others open.
+        slots.values.forEach { slot -> report { abandon(slot) } }
         slots.clear()
       }
       inbox.close()

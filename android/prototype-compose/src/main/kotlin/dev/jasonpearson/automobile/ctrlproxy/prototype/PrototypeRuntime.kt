@@ -2115,16 +2115,18 @@ class PrototypeRuntime(
     )
     val followUps = (if (result.succeeded) request.onSuccess else request.onError).orEmpty()
     if (followUps.isEmpty() || !current.active || !requireValid(followUps)) return
-    val followUpWrites =
-      try {
-        plannedWrites(followUps, current.spec)
-      } catch (error: IllegalArgumentException) {
-        warn("Refused the follow-up of request ${request.requestId}: ${error.message}")
-        return
-      }
+    // The request's event is restored before planning, so an event-bound write is planned (and
+    // refused) with the value it will write, before any follow-up runs.
     val previousEvent = eventData
     eventData = request.eventContext
     try {
+      val followUpWrites =
+        try {
+          plannedWrites(followUps, current.spec)
+        } catch (error: IllegalArgumentException) {
+          warn("Refused the follow-up of request ${request.requestId}: ${error.message}")
+          return
+        }
       run(followUps, followUpWrites, request.context)
     } finally {
       eventData = previousEvent

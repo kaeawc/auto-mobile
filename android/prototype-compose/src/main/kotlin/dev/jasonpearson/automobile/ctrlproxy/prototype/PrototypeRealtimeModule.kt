@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.prototype.PlatformErrorCode
 import dev.jasonpearson.automobile.prototype.PlatformEvent
 import dev.jasonpearson.automobile.prototype.PrototypePlatformModule
 import kotlin.random.Random
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -47,7 +48,7 @@ internal class PrototypeRealtimeModule(
   config: PrototypeRealtimeConfig,
   sink: PrototypeChannelSink,
   scope: CoroutineScope,
-  onError: (Throwable) -> Unit,
+  private val onError: (Throwable) -> Unit,
   newId: () -> String,
 ) : PrototypePlatformModule {
   override val name = NAME
@@ -71,7 +72,18 @@ internal class PrototypeRealtimeModule(
   private val inbox = Channel<suspend () -> Unit>(Channel.UNLIMITED)
 
   init {
-    scope.launch { for (work in inbox) work() }
+    scope.launch {
+      for (work in inbox) {
+        try {
+          work()
+        } catch (cancelled: CancellationException) {
+          throw cancelled
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+          // One failed operation must not stop the inbox: later calls and close() still run.
+          onError(error)
+        }
+      }
+    }
   }
 
   /** The spec's channels as declared at a show or patch; unchanged ones are left alone. */
@@ -101,14 +113,23 @@ internal class PrototypeRealtimeModule(
         .trySend {
           // A call cancelled (timed out or dismissed) while it waited in the inbox does nothing.
           if (caller?.isActive == false) return@trySend
-          result.complete(
-            when (call.call) {
-              CONNECT -> controller.connect(channel)
-              DISCONNECT -> controller.disconnect(channel)
-              SEND -> controller.send(channel, checkNotNull(body))
-              else -> unsupported(call.call)
-            },
-          )
+          try {
+            result.complete(
+              when (call.call) {
+                CONNECT -> controller.connect(channel)
+                DISCONNECT -> controller.disconnect(channel)
+                // Checked again under the controller lock: the caller may time out waiting for it.
+                SEND -> controller.send(channel, checkNotNull(body)) { caller?.isActive != false }
+                else -> unsupported(call.call)
+              },
+            )
+          } catch (cancelled: CancellationException) {
+            result.cancel(cancelled)
+            throw cancelled
+          } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            result.complete(failed(call.call, error))
+            throw error
+          }
         }
         .isSuccess
     if (!queued) {
@@ -119,6 +140,9 @@ internal class PrototypeRealtimeModule(
     return result.await()?.let { PlatformCallResult.Failure(it.toPlatformError()) }
       ?: PlatformCallResult.Success(JsonObject(emptyMap()))
   }
+
+  private fun failed(call: String, error: Exception) =
+    PrototypeChannelError(PLATFORM_ERROR, error.message ?: "$call failed")
 
   private fun unsupported(call: String) =
     PrototypeChannelError(PrototypeChannelError.INVALID_REQUEST, "$call is not a realtime call")
@@ -134,6 +158,7 @@ internal class PrototypeRealtimeModule(
     const val CONNECT = "realtime.connect"
     const val DISCONNECT = "realtime.disconnect"
     const val SEND = "realtime.send"
+    private const val PLATFORM_ERROR = "platform_error"
 
     /** A string body goes on the wire as written and any other JSON as compact JSON text. */
     internal fun sendText(args: JsonObject): String? =

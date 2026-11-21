@@ -292,23 +292,19 @@ internal object PrototypeBindableFields {
     field(action, "path", path, PrototypeBindableKind.DATA_PATH)?.let {
       return it
     }
-    if (hasValue)
-      dataValue(action["value"], "$path.value")?.let {
-        return it
-      }
-    return binding((action["where"] as? JsonObject)?.get("equals"), "$path.where.equals")
-  }
-
-  /** A data action's value; an `{object}` value (#18826) binds each member like a value. */
-  private fun <T : Any> Visitor<T>.dataValue(value: JsonElement?, path: String): T? {
-    val members =
-      (value as? JsonObject)?.get("object") as? JsonObject ?: return binding(value, path)
-    for ((name, member) in members) {
-      binding(member, memberPath("$path.object", name))?.let {
+    if (hasValue) {
+      // An `{object}` value (#18826) binds each member like a value.
+      val value = action["value"]
+      val members = (value as? JsonObject)?.get("object") as? JsonObject
+      val bound =
+        members?.entries?.firstNotNullOfOrNull { (name, member) ->
+          binding(member, memberPath("$path.value.object", name))
+        } ?: if (members == null) binding(value, "$path.value") else null
+      bound?.let {
         return it
       }
     }
-    return null
+    return binding((action["where"] as? JsonObject)?.get("equals"), "$path.where.equals")
   }
 
   private fun <T : Any> Visitor<T>.requestBody(value: JsonElement?, path: String): T? {

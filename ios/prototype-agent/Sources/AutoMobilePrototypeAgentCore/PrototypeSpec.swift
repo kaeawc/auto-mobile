@@ -110,6 +110,8 @@ struct PrototypeSpec: Decodable {
     let media: JSONValue?
     let locationBlock: JSONValue?
     let sensorsBlock: JSONValue?
+    let notificationsBlock: JSONValue?
+    let requiresNotifications: Bool
     let platformHandlers: [String: JSONValue]
     let declaredPlatform: Set<String>
     let declaredPermissions: Set<String>
@@ -148,6 +150,7 @@ struct PrototypeSpec: Decodable {
         media = try container.decodeIfPresent(JSONValue.self, forKey: .media)
         locationBlock = try container.decodeIfPresent(JSONValue.self, forKey: .location)
         sensorsBlock = try container.decodeIfPresent(JSONValue.self, forKey: .sensors)
+        notificationsBlock = try container.decodeIfPresent(JSONValue.self, forKey: .notifications)
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         // The host validator owns the strict shape; a malformed block means "no storage" here.
@@ -170,6 +173,8 @@ struct PrototypeSpec: Decodable {
         } else {
             declaredPermissions = []
         }
+        requiresNotifications = PrototypeContractValidator.strings(requires?.objectFields?["platform"])
+            .contains("notifications")
         // Validate platform vocabulary before resolving device-owned reads.
         try PrototypePlatformValidator.validate(
             requires: requires,
@@ -180,7 +185,7 @@ struct PrototypeSpec: Decodable {
             storage: container.decodeIfPresent(JSONValue.self, forKey: .storage),
             location: container.decodeIfPresent(JSONValue.self, forKey: .location),
             sensors: container.decodeIfPresent(JSONValue.self, forKey: .sensors),
-            notifications: container.decodeIfPresent(JSONValue.self, forKey: .notifications),
+            notifications: notificationsBlock,
             media: media,
             root: raw,
             state: menuState ?? [:]
@@ -285,6 +290,8 @@ struct PrototypeSpec: Decodable {
         media = spec.media
         locationBlock = spec.locationBlock
         sensorsBlock = spec.sensorsBlock
+        notificationsBlock = spec.notificationsBlock
+        requiresNotifications = spec.requiresNotifications
         platformHandlers = spec.platformHandlers
         platformState = spec.platformState
         routeScope = spec.routeScope

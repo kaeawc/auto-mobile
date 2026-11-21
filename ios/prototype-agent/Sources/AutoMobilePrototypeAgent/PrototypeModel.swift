@@ -493,6 +493,8 @@
             {
                 carriedRealtime = .object(realtime.filter { spec.channels?.objectFields?[$0.key] != nil })
             }
+            if session.spec?.id != spec.id { platformDriver.resetNotificationEvents() }
+            platformRegistry.configureNotifications(for: prepared?.spec ?? spec)
             let seeded: PrototypeSpec
             do {
                 seeded = try platformDriver.seedForShow(
@@ -824,6 +826,8 @@
             }
             if wasShown, !session.isShown {
                 realtimeModule?.close()
+                platformRegistry.configureNotifications(for: nil)
+                platformDriver.resetNotificationEvents()
                 platformRegistry.configure(locationBlock: nil)
                 platformRegistry.configure(sensorsBlock: nil)
                 hitRects.removeAll()

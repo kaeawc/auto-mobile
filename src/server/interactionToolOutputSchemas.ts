@@ -56,6 +56,7 @@ export const dragAndDropResultSchema = z
       })
       .passthrough()
       .optional(),
+    unsupported: z.enum(["springboard_icon_drag"]).optional(),
     ...a11yGestureTimingFields(),
   })
   .passthrough();

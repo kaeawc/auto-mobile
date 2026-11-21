@@ -1,3 +1,4 @@
+import { prototypeRemoteImageError } from "./prototypeRemoteImages";
 import { prototypeGeneratedValuesError } from "./prototypeGeneratedBindings";
 import { prototypeGlassObjectError } from "./prototypeGlass";
 import { iconNames, prototypeIconNameError } from "./prototypeIconNames";
@@ -883,7 +884,9 @@ function behaviourErrors(
 
 function walkedError(value: unknown, context: Context): PrototypeValidationError | undefined {
   return (
-    walk(value, definitions.spec, "", { context, depth: 0 }) ?? excludeAccessoryReferences(context)
+    walk(value, definitions.spec, "", { context, depth: 0 }) ??
+    prototypeRemoteImageError(context.nodes, object(value)?.state) ??
+    excludeAccessoryReferences(context)
   );
 }
 

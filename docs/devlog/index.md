@@ -14,6 +14,7 @@ To add one, copy the [template](template.md).
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-11-21 | concept  | [iOS Simulator audio routing open questions](2026-11-21-ios-simulator-audio-routing-open-questions.md)                             |
 | 2026-11-20 | decision | [Fixture capture mode](2026-11-20-fixture-capture-mode.md)                                                                         |
+| 2026-11-19 | decision | [Per-runtime prototype budgets](2026-11-19-prototype-runtime-budgets.md)                                                           |
 | 2026-11-19 | decision | [iOS Simulator audio isolation](2026-11-19-ios-simulator-audio-isolation.md)                                                       |
 | 2026-11-19 | decision | [Committed page bundle and one export budget](2026-11-19-prototype-web-page-bundle.md)                                             |
 | 2026-11-19 | decision | [Headless CarPlay on TVOut with a StarkConfig](2026-11-19-headless-carplay-tvout-stark.md)                                         |

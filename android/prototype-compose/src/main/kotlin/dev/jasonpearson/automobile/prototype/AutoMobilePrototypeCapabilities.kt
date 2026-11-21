@@ -44,6 +44,7 @@ object AutoMobilePrototype {
       "prototype_loops_v1",
       "prototype_motion_tokens_v1",
       "prototype_lazy_list_v1",
+      "prototype_large_budget_v1",
       "prototype_icon_effects_v1",
       "prototype_linkify_v1",
       "prototype_loading_states_v1",

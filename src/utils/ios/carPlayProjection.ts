@@ -89,8 +89,12 @@ export class DefaultCarPlayProjectionProbe implements CarPlayProjectionProbe {
   }
 }
 
+/** What a refused action says it skipped: capture by default. */
+const CAPTURE_SKIPPED = "Capture was skipped because the frame would be black.";
+
 export function assertCarPlayProjecting(
   state: CarPlayProjectionState,
+  skipped: string = CAPTURE_SKIPPED,
 ): asserts state is CarPlayProjectingState {
   if (state.found && (state.isCarDisplay || state.isCarInstrumentsDisplay)) {
     return;
@@ -99,15 +103,16 @@ export function assertCarPlayProjecting(
     ? `CarPlay screen ${state.name} is attached but not projecting (${state.identity}).`
     : "No CarPlay screen (TVOut or AirPlay display) was found; it is not projecting.";
   throw new ActionableError(
-    `${status} Capture was skipped because the frame would be black. Run carplay-power-helper power-on (ios/carplay-power) after every boot of an iOS 26.x simulator, then retry; the iOS 27 Simulator does not support CarPlay.`,
+    `${status} ${skipped} Run carplay-power-helper power-on (ios/carplay-power) after every boot of an iOS 26.x simulator, then retry; the iOS 27 Simulator does not support CarPlay.`,
   );
 }
 
 export async function requireCarPlayProjection(
   udid: string,
   probe: CarPlayProjectionProbe,
+  options?: { signal?: AbortSignal; skipped?: string },
 ): Promise<CarPlayProjectingState> {
-  const state = await probe.probe(udid);
-  assertCarPlayProjecting(state);
+  const state = await probe.probe(udid, options?.signal ? { signal: options.signal } : undefined);
+  assertCarPlayProjecting(state, options?.skipped);
   return state;
 }

@@ -4,6 +4,10 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# Build with the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+# shellcheck source=scripts/ios/xcode_version.sh
+source "${REPO_ROOT}/scripts/ios/xcode_version.sh"
+select_pinned_xcode
 SDK_DIR="${REPO_ROOT}/ios/auto-mobile-sdk"
 OUTPUT_DIR="${REPO_ROOT}/docs/ios-sdk"
 DOCC_OUTPUTS="${SDK_DIR}/.build/plugins/Swift-DocC/outputs"

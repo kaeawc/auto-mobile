@@ -7,6 +7,8 @@ import type {
 } from "../../../src/daemon/sessionManager";
 import { FakeWatchRunnerLauncher } from "../../fakes/FakeWatchRunnerLauncher";
 import { FakeWatchRunnerClient } from "../../fakes/FakeWatchRunnerClient";
+import { WatchRunnerError } from "../../../src/features/watch/WatchRunnerError";
+import { FakeRunnerPorts } from "../../fakes/FakeRunnerPorts";
 import {
   WebSocketWatchRunnerClient,
   type WatchRunnerClient,
@@ -482,4 +484,71 @@ test("failure cleanup from an old launch cannot stop a replacement runner", asyn
   first.stop?.();
   expect(f.launcher.stops).toBe(1);
   expect(watchRunners.get("owned-watch")).toBeDefined();
+});
+
+function foreignPortFixture(foreignPorts: number[]) {
+  const ports = new FakeRunnerPorts();
+  const launcher = new FakeWatchRunnerLauncher(new FakeWatchRunnerClient());
+  const launch = launcher.launch.bind(launcher);
+  launcher.launch = async (options) => {
+    if (foreignPorts.includes(options.port)) {
+      launcher.launches.push(options);
+      // Thrown by WebSocketWatchRunnerClient when another daemon's runner answers (#18924).
+      throw new WatchRunnerError(
+        "Refusing runner: connected platform must be watchos.",
+        "invalid_runner_platform",
+      );
+    }
+    return launch(options);
+  };
+  const owner = new WatchRunnerLifecycle({
+    launcher,
+    artifacts: { resolve: async () => "/products/CtrlProxyWatch_watchsimulator.xctestrun" },
+    ports,
+  });
+  owners.push(owner);
+  const sessions = new FakeSessions();
+  return {
+    owner,
+    launcher,
+    ports,
+    request: { deviceId: "owned-watch", ownerSession: "watch-session", sessions },
+  };
+}
+
+test("a port answered by another platform's runner is quarantined and the next port used", async () => {
+  const f = foreignPortFixture([8765]);
+  expect(await f.owner.ensure(f.request)).toBeUndefined();
+  expect(f.launcher.launches.map((launch) => launch.port)).toEqual([8765, 8767]);
+  expect(f.ports.events).toEqual([
+    "allocate 8765",
+    "quarantine 8765",
+    "release 8765",
+    "allocate 8767",
+  ]);
+  expect(watchRunners.get("owned-watch")).toBe(f.launcher.client);
+  f.owner.stop("owned-watch");
+  expect(f.ports.allocations.size).toBe(0);
+});
+
+test("foreign runners on every attempted port report the runner unavailable", async () => {
+  const f = foreignPortFixture([8765, 8767, 8768, 8769]);
+  const reason = await f.owner.ensure(f.request);
+  expect(reason).toContain("connected platform must be watchos");
+  expect(f.launcher.launches.map((launch) => launch.port)).toEqual([8765, 8767, 8768]);
+  // The last refused port is quarantined too, so the next start within 60 s skips it.
+  expect(f.ports.quarantined).toEqual([8765, 8767, 8768]);
+  expect(f.ports.allocations.size).toBe(0);
+  expect(watchRunners.get("owned-watch")).toBeUndefined();
+});
+
+test("other launch failures are not retried on another port", async () => {
+  const f = foreignPortFixture([]);
+  f.launcher.launch = async (options) => {
+    f.launcher.launches.push(options);
+    throw new WatchRunnerError("Watch runner exited during startup", "command_failed");
+  };
+  expect(await f.owner.ensure(f.request)).toContain("exited during startup");
+  expect(f.launcher.launches).toHaveLength(1);
+  expect(f.ports.quarantined).toEqual([]);
 });

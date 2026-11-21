@@ -104,56 +104,86 @@ class PrototypeDataActionsRuntimeTest {
     assertEquals(2, spec.data?.get("items")?.jsonArray?.size)
   }
 
-  private suspend fun assertSecureKeyedWriteRefused(action: String) {
-    val secret = "private-keyed-write-token"
-    // A matching row ensures an unguarded secure selector would actually change public data.
-    val spec =
-      validated(
-        """{"id":"secure-keyed","window":{"placement":{"type":"fullscreen"}},
-          "requires":{"platform":["secureStorage"]},"state":{"token":"","count":0},
-          "storage":{"version":1,"keys":["state:count"],"secure":["state:token"]},
-          "data":{"items":[{"id":"$secret","title":"old"}]},
-          "root":{"type":"button","label":"Edit","onTap":[$action]}}""",
-      )
-    val runtime =
-      runtime(spec.copy(state = spec.state.orEmpty() + ("token" to PrototypeScalar.Text(secret))))
-    val before = runtime.current.revision
+  private fun secureKeyedSpec(action: String): String =
+    """{"id":"secure-keyed","window":{"placement":{"type":"fullscreen"}},
+      "requires":{"platform":["secureStorage"]},
+      "state":{"token":"","count":0,"selected":"public-row","title":"changed"},
+      "storage":{"version":1,"keys":["state:count"],"secure":["state:token"]},
+      "data":{"items":[{"id":"public-row","title":"old"}]},
+      "root":{"type":"button","label":"Edit","onTap":[$action]}}"""
 
-    runtime.handle(tap((spec.root as PrototypeButtonNode).onTap))
-
-    assertEquals(spec.data, runtime.current.spec.data)
-    assertEquals(before, runtime.current.revision)
-    assertEquals(PrototypeScalar.Text(secret), runtime.current.state["token"])
-    assertTrue(events.isEmpty())
-    assertEquals(listOf("Prototype action could not be completed"), warnings)
-    assertFalse((events.toString() + warnings).contains(secret))
-    runtime.close()
+  private fun assertSecureKeyedWriteRejected(action: String, path: String) {
+    val validation = PrototypeSpecValidator.validate(secureKeyedSpec(action))
+    assertTrue(validation.toString(), validation is PrototypeSpecValidation.Failure)
+    val failure = (validation as PrototypeSpecValidation.Failure).error
+    assertEquals(path, failure.path)
+    assertEquals(
+      "Secure storage key state:token cannot be sent in data actions",
+      failure.message,
+    )
   }
 
   @Test
-  fun `keyed setData refuses a secure value binding`() = runTest {
-    assertSecureKeyedWriteRefused(
+  fun `validation refuses a keyed setData secure value binding`() {
+    assertSecureKeyedWriteRejected(
       """{"type":"setData","path":"/data/items","member":"title",
         "where":{"field":"id","equals":{"data":"/items/0/id"}},
         "value":{"state":"token"}}""",
+      "root.onTap[0].value",
     )
   }
 
   @Test
-  fun `keyed setData refuses a secure selector binding`() = runTest {
-    assertSecureKeyedWriteRefused(
+  fun `validation refuses a keyed setData secure selector binding`() {
+    assertSecureKeyedWriteRejected(
       """{"type":"setData","path":"/data/items","member":"title",
         "where":{"field":"id","equals":{"state":"token"}},
         "value":{"value":"changed"}}""",
+      "root.onTap[0].where.equals",
     )
   }
 
   @Test
-  fun `keyed removeData refuses a secure selector binding`() = runTest {
-    assertSecureKeyedWriteRefused(
+  fun `validation refuses a keyed removeData secure selector binding`() {
+    assertSecureKeyedWriteRejected(
       """{"type":"removeData","path":"/data/items",
         "where":{"field":"id","equals":{"state":"token"}}}""",
+      "root.onTap[0].where.equals",
     )
+  }
+
+  @Test
+  fun `validated public keyed bindings write data without changing secure state`() = runTest {
+    val secret = "private-keyed-write-token"
+    val spec =
+      validated(
+        secureKeyedSpec(
+          """{"type":"setData","path":"/data/items","member":"title",
+            "where":{"field":"id","equals":{"state":"selected"}},
+            "value":{"state":"title"}},
+            {"type":"removeData","path":"/data/items",
+            "where":{"field":"id","equals":{"state":"selected"}}}""",
+        ),
+      )
+    val runtime =
+      runtime(spec.copy(state = spec.state.orEmpty() + ("token" to PrototypeScalar.Text(secret))))
+    val actions = (spec.root as PrototypeButtonNode).onTap!!
+    val before = runtime.current.revision
+
+    runtime.handle(tap(actions.take(1)))
+    assertEquals(
+      Json.parseToJsonElement("""[{"id":"public-row","title":"changed"}]"""),
+      runtime.items(),
+    )
+    assertEquals(PrototypeScalar.Text(secret), runtime.current.state["token"])
+    runtime.handle(tap(actions.drop(1)))
+    assertEquals(emptyList<JsonElement>(), runtime.items())
+    assertTrue(runtime.current.revision > before)
+    assertEquals(PrototypeScalar.Text(secret), runtime.current.state["token"])
+    assertEquals(2, events.size)
+    assertTrue(warnings.isEmpty())
+    assertFalse((events.toString() + warnings).contains(secret))
+    runtime.close()
   }
 
   @Test

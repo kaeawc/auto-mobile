@@ -8,6 +8,9 @@ import type { ConvertibleNode } from "./types";
 
 type SnapshotNode = Hierarchy | ViewHierarchyNode | ConvertibleNode;
 
+/** An iPad window parked by Home (Windowed Apps) keeps a scaled card with this value (#18828). */
+const STASHED_CARD_VALUE = "Stashed";
+
 function collectNodeWidths(
   node: SnapshotNode,
   contentWidths: number[],
@@ -20,7 +23,11 @@ function collectNodeWidths(
     const width = bounds.right - bounds.left;
     if (identifier === "AppSwitcherContentView") {
       contentWidths.push(width);
-    } else if (typeof identifier === "string" && identifier.startsWith("card:")) {
+    } else if (
+      typeof identifier === "string" &&
+      identifier.startsWith("card:") &&
+      attrs.value !== STASHED_CARD_VALUE
+    ) {
       cardWidths.push(width);
     }
   }

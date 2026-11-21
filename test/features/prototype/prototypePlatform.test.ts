@@ -18,6 +18,7 @@ import {
   PROTOTYPE_PLATFORM_MODULE_GATES,
   prototypePlatformFields,
   prototypePlatformModuleFields,
+  prototypeIosNotificationFallbackPaths,
   prototypePlatformUnsupportedMessage,
 } from "../../../src/features/prototype/prototypePlatformGates";
 import {
@@ -153,6 +154,42 @@ describe("notifications module contract", () => {
     expect(notifications.calls.schedule.capability).toBe(
       "prototype_platform_notifications_scheduled_v1",
     );
+  });
+
+  test("the iOS notifications gate directs an injected agent to the standalone Viewer", () => {
+    const spec = { requires: { platform: ["notifications"] } };
+    const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+      (entry) => entry.capability === notifications.capability,
+    )!;
+    expect(gate.fields(spec)).toEqual(["requires.platform[0]"]);
+    expect(gate.unsupportedMessage(gate.fields(spec), "ios")).toContain(
+      "the standalone iOS Prototype Viewer",
+    );
+    expect(gate.unsupportedMessage(gate.fields(spec), "android")).toContain("connected CtrlProxy");
+  });
+
+  test("locates iOS notification fields that fall back to plain content", () => {
+    const spec = {
+      root: {
+        type: "button",
+        onTap: [
+          {
+            type: "platform",
+            call: "notifications.post",
+            args: { style: { value: { type: "bigText" } } },
+          },
+          {
+            type: "platform",
+            call: "notifications.schedule",
+            args: { progress: { value: { value: 0.5 } }, style: { state: "style" } },
+          },
+        ],
+      },
+    };
+    expect(prototypeIosNotificationFallbackPaths(spec)).toEqual([
+      "root.onTap[1].args.progress",
+      "root.onTap[1].args.style",
+    ]);
   });
 
   test("a notifications.push handler needs prototype_platform_push_v1 on top of the module", () => {

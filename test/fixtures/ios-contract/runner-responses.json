@@ -49,6 +49,11 @@
       "error" : "arrow key was not sent: XCUITest failed while finding the focused text input during fixture phase (fixture detail); the UI likely changed mid-query, so observe again and retry",
       "errorCode" : "focus_query_failed",
       "name" : "focus_query_failed"
+    },
+    {
+      "error" : "drag not supported: the stroke starts on the SpringBoard icon \"Safari\", and synthesized touches open its context menu but never lift it; no input was sent",
+      "errorCode" : "springboard_icon_drag",
+      "name" : "springboard_icon_drag"
     }
   ],
   "responses" : [
@@ -1439,6 +1444,28 @@
         "timestamp" : 1700000000000,
         "totalTimeMs" : 17,
         "type" : "press_key_result"
+      }
+    },
+    {
+      "name" : "error_springboard_icon_drag",
+      "wire" : {
+        "error" : "drag not supported: the stroke starts on the SpringBoard icon \"Safari\", and synthesized touches open its context menu but never lift it; no input was sent",
+        "errorCode" : "springboard_icon_drag",
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "path_gesture_result"
       }
     },
     {

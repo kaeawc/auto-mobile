@@ -245,6 +245,9 @@ export class IosCtrlProxyLaunch {
     // Use xcodebuild test-without-building (same approach as physical devices).
     // simctl spawn is unreliable on Xcode 26.3+ (NSPOSIXErrorDomain code=2).
     const xctestrunPath = await this.resolveVerifiedXctestrun("simulator");
+    await this.state.appBundleGuard.installHostAppIfMissing(
+      await this.state.builder.getAppBundlePath("simulator"),
+    );
 
     const timeout = readEnvRaw(AMBIENT_ENV.CTRL_PROXY_IOS_TIMEOUT) || "86400";
     const bundleId = this.host.resolveTargetBundleId();

@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
+import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import java.io.File
 import kotlinx.serialization.json.Json
@@ -39,6 +41,8 @@ class AutoMobilePrototypeCapabilitiesTest {
   private val exclusions =
     setOf(
       "prototype_links_v1", // Only the stamped app shell delivers inbound URLs.
+      // Validation only; no remote image loader is implemented.
+      "prototype_remote_image_v1",
       "prototype_scroll_edge_effect_v1", // Contract only until Android edge rendering in PR 2.
       // Realtime transport, routing and lifecycle remain owed by the runtime slices.
       "prototype_platform_realtime_v1",
@@ -147,6 +151,30 @@ class AutoMobilePrototypeCapabilitiesTest {
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilitiesForSdk(32))
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilitiesForSdk(33))
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilities)
+  }
+
+  @Test
+  fun `remote images are refused by the advertised renderer`() {
+    val spec =
+      """{"id":"remote","window":{"placement":{"type":"fullscreen"}},"root":{"type":"image","url":"https://example.com/a"}}"""
+    for (sdk in listOf(32, 33, 36)) {
+      val capabilities = AutoMobilePrototype.capabilitiesForSdk(sdk)
+      assertTrue("prototype_remote_image_v1" !in capabilities)
+      val refused = PrototypeSpecValidator.validate(spec, supportedCapabilities = capabilities)
+      assertTrue(refused is PrototypeSpecValidation.Failure)
+      assertTrue(
+        (refused as PrototypeSpecValidation.Failure)
+          .error
+          .message
+          .contains("prototype_remote_image_v1"),
+      )
+      assertTrue(
+        PrototypeSpecValidator.validate(
+          spec,
+          supportedCapabilities = capabilities + "prototype_remote_image_v1",
+        ) is PrototypeSpecValidation.Success,
+      )
+    }
   }
 
   @Test

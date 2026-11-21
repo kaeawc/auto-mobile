@@ -56,6 +56,7 @@ import { prototypeStaggerShape } from "./prototypeChoreographySchema";
 import { prototypeImageShape, prototypeMotionNodeShape } from "./prototypeMotionV2Schema";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import {
+  prototypeContentSourceIssue,
   fadeEdgesSchema,
   imageFilterSchema,
   anchorSchema,
@@ -841,16 +842,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
 export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
   prototypeNodeBaseSchema.superRefine((node, context) => {
     tooltipAnchorIssue(node, context);
-    if (node.type === "text" && (node.text !== undefined) === (node.spans !== undefined)) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: [node.spans !== undefined ? "spans" : "text"],
-        message:
-          node.spans !== undefined
-            ? "text and spans cannot both be set"
-            : "text node needs text or spans",
-      });
-    }
+    prototypeContentSourceIssue(node, context);
   });
 const windowSchema = z
   .object({

@@ -21,6 +21,8 @@ export interface ModelOptions {
   readonly fieldDocs?: Readonly<Record<string, string>>;
   /** Fields the typed Kotlin models deliberately omit (validated by the contract, stripped before decode). */
   readonly omitKotlinFields?: readonly string[];
+  /** Existing Kotlin constructor parameters in order, followed by new fields in contract order. */
+  readonly kotlinFieldOrder?: readonly string[];
   /** Kotlin non-null defaults for optional fields; Swift defaults are unsupported. */
   readonly fieldDefaults?: TypeRefs;
   readonly kotlinBase?: {
@@ -98,6 +100,12 @@ export const prototypeModelSelection = {
     // Preserve the existing native fields; span stagger has no Kotlin model field.
     omitKotlinFields: ["stagger"],
   },
+  linkify: {
+    languages: ["kotlin"],
+    kotlinName: "PrototypeLinkifyOptions",
+    fieldTypes: { onTap: { kotlin: "JsonArray" } },
+    doc: "`linkify` on a text node: the [kinds] to detect, the [style] of a match and the actions a tap\nruns. [onTap] stays JSON because its `{match}` bindings are bound per match before decoding\n([PrototypeLinkify.actions]).",
+  },
   chartSeries: {
     languages: ["kotlin"],
     doc: "One chart series: the `/data` array at [path], its points' [y] and optional [x] members.",
@@ -122,6 +130,18 @@ export const prototypeModelSelection = {
   platformHandlers: {
     languages: ["kotlin"],
     doc: "Root `platform`: action lists keyed by `<module>.<event>`.",
+  },
+  platformRequires: {
+    languages: ["kotlin"],
+    kotlinName: "PrototypeRequires",
+    // An empty list means "none declared"; PrototypeRequiresSerializer omits it on encode.
+    fieldDefaults: { capabilities: { kotlin: "emptyList()" } },
+    doc: "The root `requires` block (#14294): platform modules, permissions, background needs and\nexplicit capabilities.",
+  },
+  platformPermission: {
+    languages: ["kotlin"],
+    kotlinName: "PrototypePermissionRequirement",
+    doc: "One declared permission: a canonical [name] and the [purpose] shown to the user.",
   },
   scrollEdge: {},
   scrollTransition: {},
@@ -185,6 +205,42 @@ export const prototypeModelSelection = {
     },
   },
   placement: { swiftConformances: ["Decodable"] },
+  window: {
+    languages: ["kotlin"],
+    omitKotlinFields: ["ios", "android"],
+    kotlinFieldOrder: [
+      "placement",
+      "opacity",
+      "layer",
+      "persistence",
+      "chrome",
+      "deadTaps",
+      "backdrop",
+      "transition",
+      "keepScreenOn",
+      "layoutDirection",
+      "brightness",
+      "orientation",
+      "statusBar",
+    ],
+    fieldTypes: { brightness: { kotlin: "JsonElement" } },
+    fieldDefaults: { opacity: { kotlin: "100" } },
+    fieldDocs: {
+      layer:
+        "`system` (default when absent) stacks above system UI as an accessibility overlay; `app` stacks\njust above apps, below the shade, keyboard and screenshot preview, and needs\nSYSTEM_ALERT_WINDOW.",
+      persistence:
+        "`session` (default when absent) ends the prototype with its host session; `device` keeps it\ninteractive after the last client disconnects and disables the idle timeout.",
+      chrome:
+        "Fullscreen host chrome: `none` by default, or `bar`; device persistence defaults to `bar`.",
+      deadTaps: "Opt-in window-local dead-tap events; coordinates never include field contents.",
+      backdrop: "Blur or tonal fill behind the window (`prototype_backdrop_v1`, #15126).",
+      keepScreenOn:
+        "Overlay-scoped window controls (`prototype_platform_window_controls_v1`, #14320).",
+      layoutDirection:
+        "Protocol parity only; Android does not advertise or apply layout direction.",
+      brightness: '`"system"` or a whole 0-100 brightness.',
+    },
+  },
   gradient: {
     swiftName: "PrototypeGradient",
     swiftConformances: ["Decodable", "Equatable"],

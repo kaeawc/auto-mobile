@@ -28,9 +28,14 @@ object PrototypeRequiresSerializer : KSerializer<PrototypeRequires> {
     output.encodeJsonElement(
       if (value.capabilities.isNotEmpty() && value.hasNoPlatformBlock())
         JsonArray(value.capabilities.map(::JsonPrimitive))
-      else output.json.encodeToJsonElement(value),
+      else output.json.encodeToJsonElement(value).withoutEmptyCapabilities(value),
     )
   }
+
+  // The generated model defaults capabilities to an empty list; never encode it as `[]`.
+  private fun JsonElement.withoutEmptyCapabilities(value: PrototypeRequires): JsonElement =
+    if (value.capabilities.isEmpty() && this is JsonObject) JsonObject(this - "capabilities")
+    else this
 
   private fun PrototypeRequires.hasNoPlatformBlock(): Boolean =
     listOf(platform, permissions, background).all { it == null }

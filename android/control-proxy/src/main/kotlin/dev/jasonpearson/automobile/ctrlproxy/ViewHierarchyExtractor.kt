@@ -1146,46 +1146,69 @@ internal constructor(
     }
 
     val candidates = mutableListOf<ContentHiddenRegion>()
+    val screen = ElementBounds(0, 0, screenWidth, screenHeight)
 
-    fun visit(node: UIElementInfo, isComposeDescendant: Boolean) {
+    // `host` is the bounds of the nearest ComposeView ancestor, or null outside Compose. A flagged
+    // node is clipped to that host and the screen before it is reported: the host's parent clips
+    // any overflow (#18879), and the server cannot tell an owning host from a smaller nested one.
+    fun visit(node: UIElementInfo, host: ElementBounds?) {
       val nodeIsComposeView = node.className?.contains("ComposeView") == true
       val children = visibleChildren(node)
 
-      if (isComposeDescendant && isLikelyComposeInteropHiddenBoundary(node, children, screenArea)) {
-        val bounds = node.bounds ?: return
-        val areaPercent = ((bounds.area().toDouble() / screenArea.toDouble()) * 100).toInt()
-        candidates.add(
-          ContentHiddenRegion(
-            bounds = bounds,
-            reason = CONTENT_HIDDEN_REASON_COMPOSE_INTEROP,
-            areaPercent = areaPercent,
-          ),
-        )
-        return
+      if (host != null) {
+        val region = composeInteropHiddenRegion(node, children, host, screen)
+        if (region != null) {
+          candidates.add(region)
+          return
+        }
       }
 
-      val childIsComposeDescendant = isComposeDescendant || nodeIsComposeView
+      val childHost = if (nodeIsComposeView) node.bounds ?: host else host
       for (child in children) {
-        visit(child, childIsComposeDescendant)
+        visit(child, childHost)
       }
     }
 
-    visit(root, false)
+    visit(root, null)
     return candidates
+  }
+
+  /**
+   * The hidden region a Compose descendant reports, clipped to its ComposeView [host] and the
+   * [screen], or null when the node is not a hidden boundary or its clipped area is at or under the
+   * reporting floor.
+   */
+  private fun composeInteropHiddenRegion(
+    node: UIElementInfo,
+    children: List<UIElementInfo>,
+    host: ElementBounds,
+    screen: ElementBounds,
+  ): ContentHiddenRegion? {
+    val bounds = node.bounds ?: return null
+    val clipped = bounds.intersect(host)?.intersect(screen) ?: return null
+    if (!isLikelyComposeInteropHiddenBoundary(node, bounds, clipped, children, screen.area())) {
+      return null
+    }
+    return ContentHiddenRegion(
+      bounds = clipped,
+      reason = CONTENT_HIDDEN_REASON_COMPOSE_INTEROP,
+      areaPercent = ((clipped.area().toDouble() / screen.area().toDouble()) * 100).toInt(),
+      hostBounds = host,
+    )
   }
 
   private fun isLikelyComposeInteropHiddenBoundary(
     node: UIElementInfo,
+    bounds: ElementBounds,
+    visibleBounds: ElementBounds,
     children: List<UIElementInfo>,
     screenArea: Int,
   ): Boolean {
-    val bounds = node.bounds ?: return false
-    val nodeArea = bounds.area()
-    if (nodeArea <= 0) {
+    if (bounds.area() <= 0) {
       return false
     }
 
-    val areaPercent = nodeArea.toDouble() / screenArea.toDouble()
+    val areaPercent = visibleBounds.area().toDouble() / screenArea.toDouble()
     if (areaPercent <= MIN_HIDDEN_REGION_SCREEN_AREA) {
       return false
     }
@@ -1237,6 +1260,18 @@ internal constructor(
   }
 
   private fun ElementBounds.area(): Int = width * height
+
+  /** The overlap of two bounds, or null when they share no area. */
+  private fun ElementBounds.intersect(other: ElementBounds): ElementBounds? {
+    val overlap =
+      ElementBounds(
+        max(left, other.left),
+        max(top, other.top),
+        min(right, other.right),
+        min(bottom, other.bottom),
+      )
+    return overlap.takeUnless { it.hasZeroArea() }
+  }
 
   /** Detect intent chooser indicators in an optimized hierarchy. */
   private fun detectIntentChooserIndicators(element: UIElementInfo): Boolean {

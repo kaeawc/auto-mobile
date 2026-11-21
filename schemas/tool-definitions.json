@@ -5422,6 +5422,10 @@
           "required": ["level", "reason", "selector"],
           "additionalProperties": {}
         },
+        "unsupported": {
+          "type": "string",
+          "enum": ["springboard_icon_drag"]
+        },
         "a11yTotalTimeMs": {
           "type": "number"
         },

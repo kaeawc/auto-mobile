@@ -33,6 +33,11 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { type AndroidCtrlProxy } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import {
+  isRunnerSpringBoardIconDrag,
+  RUNNER_SPRINGBOARD_ICON_DRAG_CODE,
+  springBoardIconDragMessage,
+} from "../observe/ios/runnerErrorCodes";
+import {
   createGlobalPerformanceTracker,
   type PerformanceTracker,
 } from "../../utils/PerformanceTracker";
@@ -86,6 +91,24 @@ export function getIosDragTimeoutMs(
       plannedDurationMs * IOS_DRAG_TIMEOUT_DURATION_RATIO,
   );
 }
+/**
+ * The iOS runner refused a drag starting on a SpringBoard icon before any input (#18859), so the
+ * reply is definite even though the request went out.
+ */
+function springBoardIconRefusal(result: {
+  success: boolean;
+  error?: string;
+  errorCode?: string;
+}): DragDispatchOutcome | undefined {
+  return !result.success && isRunnerSpringBoardIconDrag(result)
+    ? {
+        success: false,
+        unsupported: RUNNER_SPRINGBOARD_ICON_DRAG_CODE,
+        error: springBoardIconDragMessage("dragAndDrop", result.error),
+      }
+    : undefined;
+}
+
 function indeterminateResult(reason: string) {
   return {
     success: false,
@@ -150,6 +173,7 @@ export interface DragDispatchRequest {
 export interface DragDispatchOutcome {
   success: boolean;
   error?: string;
+  unsupported?: DragAndDropResult["unsupported"];
   a11yTotalTimeMs?: number;
   a11yGestureTimeMs?: number;
 }
@@ -432,6 +456,7 @@ export class DragAndDrop extends BaseVisualChange {
             a11yTotalTimeMs: dragResult.a11yTotalTimeMs,
             a11yGestureTimeMs: dragResult.a11yGestureTimeMs,
             error: dragResult.error,
+            unsupported: dragResult.unsupported,
           };
         },
         {
@@ -779,6 +804,10 @@ export class DragAndDrop extends BaseVisualChange {
       });
       result = await awaitWhileRequestIsLive(request, signal);
       throwIfAborted(signal);
+      const refusal = this.device.platform === "ios" ? springBoardIconRefusal(result) : undefined;
+      if (refusal) {
+        return refusal;
+      }
       if (
         !result.success &&
         dispatched &&

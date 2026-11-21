@@ -112,6 +112,8 @@ struct PrototypeSpec: Decodable {
     let media: JSONValue?
     let locationBlock: JSONValue?
     let sensorsBlock: JSONValue?
+    let notificationsBlock: JSONValue?
+    let requiresNotifications: Bool
     let platformHandlers: [String: JSONValue]
     let declaredPlatform: Set<String>
     let declaredPermissions: Set<String>
@@ -150,6 +152,7 @@ struct PrototypeSpec: Decodable {
         media = try container.decodeIfPresent(JSONValue.self, forKey: .media)
         locationBlock = try container.decodeIfPresent(JSONValue.self, forKey: .location)
         sensorsBlock = try container.decodeIfPresent(JSONValue.self, forKey: .sensors)
+        notificationsBlock = try container.decodeIfPresent(JSONValue.self, forKey: .notifications)
         links = try container.decodeIfPresent([JSONValue].self, forKey: .links) ?? []
         requiredCapabilities = try PrototypePlatformValidator.capabilities(
             container.decodeIfPresent(JSONValue.self, forKey: .requires)
@@ -176,6 +179,8 @@ struct PrototypeSpec: Decodable {
         } else {
             declaredPermissions = []
         }
+        requiresNotifications = PrototypeContractValidator.strings(requires?.objectFields?["platform"])
+            .contains("notifications")
         // Validate platform vocabulary before resolving device-owned reads.
         try PrototypePlatformValidator.validate(
             requires: requires,
@@ -186,7 +191,7 @@ struct PrototypeSpec: Decodable {
             storage: container.decodeIfPresent(JSONValue.self, forKey: .storage),
             location: container.decodeIfPresent(JSONValue.self, forKey: .location),
             sensors: container.decodeIfPresent(JSONValue.self, forKey: .sensors),
-            notifications: container.decodeIfPresent(JSONValue.self, forKey: .notifications),
+            notifications: notificationsBlock,
             media: media,
             root: raw,
             state: menuState ?? [:]
@@ -293,6 +298,8 @@ struct PrototypeSpec: Decodable {
         media = spec.media
         locationBlock = spec.locationBlock
         sensorsBlock = spec.sensorsBlock
+        notificationsBlock = spec.notificationsBlock
+        requiresNotifications = spec.requiresNotifications
         platformHandlers = spec.platformHandlers
         platformState = spec.platformState
         routeScope = spec.routeScope
@@ -921,6 +928,11 @@ final class PrototypeNode: Decodable {
     let contentDescription: String?
     /// An uploaded image asset id, or a `{light, dark}` pair of ids (#11218).
     let asset: PrototypeModeValue?
+    let url: String?
+    let crossfade: Bool?
+    let via: String?
+    let imagePlaceholder: JSONValue?
+    let imageError: JSONValue?
     let filter: ImageFilter?
     let fadeEdges: FadeEdges?
     let edgeEffect: String?
@@ -1073,7 +1085,7 @@ final class PrototypeNode: Decodable {
         case into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey,
              transition, attentionLoop, keyframes, animate
         case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, zoomable,
-             semantics
+             semantics, error, url, crossfade, via
         case kind, selectionKey, openKey, list, detail, content, main
         case effect, name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
@@ -1134,6 +1146,12 @@ final class PrototypeNode: Decodable {
         semantics = try container.decodeIfPresent(PrototypeSemantics.self, forKey: .semantics)
         contentDescription = try container.decodeIfPresent(String.self, forKey: .contentDescription)
         asset = try container.decodeIfPresent(PrototypeModeValue.self, forKey: .asset)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        crossfade = try container.decodeIfPresent(Bool.self, forKey: .crossfade)
+        via = try container.decodeIfPresent(String.self, forKey: .via)
+        imagePlaceholder = decodedType == "image" ? try container
+            .decodeIfPresent(JSONValue.self, forKey: .placeholder) : nil
+        imageError = decodedType == "image" ? try container.decodeIfPresent(JSONValue.self, forKey: .error) : nil
         filter = try container.decodeIfPresent(ImageFilter.self, forKey: .filter)
         fadeEdges = try container.decodeIfPresent(FadeEdges.self, forKey: .fadeEdges)
         edgeEffect = try container.decodeIfPresent(String.self, forKey: .edgeEffect)
@@ -1155,7 +1173,7 @@ final class PrototypeNode: Decodable {
             .decodeIfPresent(PrototypeNode.self, forKey: .supporting) : nil
         adaptiveItems = type == "adaptive" ? try container.decodeIfPresent([RadioOption].self, forKey: .items) : nil
         stateKey = try container.decodeIfPresent(String.self, forKey: .stateKey)
-        placeholder = try container.decodeIfPresent(String.self, forKey: .placeholder)
+        placeholder = decodedType == "image" ? nil : try container.decodeIfPresent(String.self, forKey: .placeholder)
         reverse = try container.decodeIfPresent(Bool.self, forKey: .reverse)
         stickToEnd = try container.decodeIfPresent(Bool.self, forKey: .stickToEnd)
         atEndKey = try container.decodeIfPresent(String.self, forKey: .atEndKey)
@@ -1316,6 +1334,9 @@ final class PrototypeNode: Decodable {
     func collectAssets(into ids: inout Set<String>) {
         // A {light, dark} pair references both ids, whichever mode is drawn.
         ids.formUnion(asset?.values ?? [])
+        for fallback in [imagePlaceholder, imageError] {
+            if let asset = fallback?.objectFields?["asset"]?.stringValue { ids.insert(asset) }
+        }
         ids.formUnion(fontAssetIds())
         items?.compactMap(\.image).forEach { ids.formUnion($0.values) }
         children?.forEach { $0.collectAssets(into: &ids) }

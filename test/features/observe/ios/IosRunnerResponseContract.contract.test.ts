@@ -9,6 +9,7 @@ import {
   RUNNER_FOCUS_QUERY_FAILED_CODE,
   RUNNER_GESTURE_BOUND_EXCEEDED_CODE,
   RUNNER_HIERARCHY_CAPTURE_FAILED_CODE,
+  RUNNER_SPRINGBOARD_ICON_DRAG_CODE,
 } from "../../../../src/features/observe/ios/runnerErrorCodes";
 
 // Read once: each test only exercises the pure host decoder against Swift-produced JSON.
@@ -387,6 +388,7 @@ describe("Swift runner production response encoders → host decoder", () => {
         RUNNER_FOCUS_QUERY_FAILED_CODE,
         RUNNER_GESTURE_BOUND_EXCEEDED_CODE,
         RUNNER_HIERARCHY_CAPTURE_FAILED_CODE,
+        RUNNER_SPRINGBOARD_ICON_DRAG_CODE,
       ].sort(),
     );
   });

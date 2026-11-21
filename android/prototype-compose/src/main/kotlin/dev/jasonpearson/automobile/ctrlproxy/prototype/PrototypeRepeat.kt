@@ -43,6 +43,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeListItemNode
 import dev.jasonpearson.automobile.protocol.PrototypeListItemSwitch
 import dev.jasonpearson.automobile.protocol.PrototypeListItemTrailing
 import dev.jasonpearson.automobile.protocol.PrototypeListNode
+import dev.jasonpearson.automobile.protocol.PrototypeLoadingIndicatorNode
 import dev.jasonpearson.automobile.protocol.PrototypeMapNode
 import dev.jasonpearson.automobile.protocol.PrototypeMenuEntry
 import dev.jasonpearson.automobile.protocol.PrototypeMenuNode
@@ -568,6 +569,21 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         label = instance.display(label),
+        split =
+          split?.let { authored ->
+            authored.copy(
+              menu =
+                authored.menu.map { item ->
+                  if (item is PrototypeMenuEntry)
+                    item.copy(
+                      label = instance.display(item.label),
+                      trailingText = item.trailingText?.let(instance::display),
+                      onTap = item.onTap?.map { it.bound(instance) },
+                    )
+                  else item
+                },
+            )
+          },
       )
     is PrototypeSliderNode ->
       copy(
@@ -685,6 +701,18 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         label = label?.let(instance::display),
+        menu =
+          menu?.let { authored ->
+            authored.copy(
+              items =
+                authored.items.map {
+                  it.copy(
+                    label = instance.display(it.label),
+                    onTap = it.onTap.map { action -> action.bound(instance) },
+                  )
+                },
+            )
+          },
       )
     is PrototypeSegmentedButtonNode ->
       copy(
@@ -791,6 +819,15 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         visibleWhen = visibleWhen,
       )
     is PrototypeCameraPreviewNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
+    is PrototypeLoadingIndicatorNode ->
       copy(
         semantics = semantics,
         onAppear = onAppear,

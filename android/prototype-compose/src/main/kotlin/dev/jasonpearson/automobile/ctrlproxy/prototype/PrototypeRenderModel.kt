@@ -575,6 +575,7 @@ internal fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeWebViewNode -> "webView"
     is PrototypeCastButtonNode -> "castButton"
     is PrototypeCameraPreviewNode -> "cameraPreview"
+    is PrototypeLoadingIndicatorNode -> "loadingIndicator"
   }
 
 private fun prototypeNodeText(

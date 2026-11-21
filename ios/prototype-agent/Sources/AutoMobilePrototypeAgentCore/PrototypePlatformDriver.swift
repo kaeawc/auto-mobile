@@ -20,6 +20,13 @@ final class PrototypePlatformDriver {
         self.clock = clock
     }
 
+    func simulate(id: String, event: String, data: JSONValue, session: PrototypeSession) -> String? {
+        PrototypePlatformSimulation.apply(id: id, event: event, data: data, session: session, registry: registry) {
+            onState?(registry.snapshot)
+            onEvent?($0)
+        }
+    }
+
     func subscribe() {
         if !observing {
             observing = true
@@ -43,6 +50,31 @@ final class PrototypePlatformDriver {
                     onEvent?(event)
                 }
             }
+        }
+    }
+
+    /// Seed before publishing a show. A rejected seed leaves the previous configuration listening
+    /// again; the caller subscribes after publishing a successful show.
+    func seedForShow(
+        _ spec: PrototypeSpec,
+        previousLocationBlock: JSONValue?,
+        previousSensorsBlock: JSONValue?,
+        previousSessionID: Int,
+        sessionID: Int,
+        snapshot: () -> [String: JSONValue]
+    )
+        throws -> PrototypeSpec
+    {
+        resetSessionEvents()
+        registry.configure(locationBlock: spec.locationBlock)
+        registry.configure(sensorsBlock: spec.sensorsBlock, sessionID: sessionID)
+        do {
+            return try spec.replacingPlatform(snapshot())
+        } catch {
+            registry.configure(locationBlock: previousLocationBlock)
+            registry.configure(sensorsBlock: previousSensorsBlock, sessionID: previousSessionID)
+            subscribe()
+            throw error
         }
     }
 

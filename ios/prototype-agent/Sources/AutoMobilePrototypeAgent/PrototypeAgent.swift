@@ -232,17 +232,23 @@ final class PrototypeAgent: NSObject {
     init(
         mode: PrototypeLifecycleMode = .session,
         runtime: PrototypePlatformReport.Runtime = .iosAgent,
-        registry: PrototypePlatformRegistry = .system
+        registry: PrototypePlatformRegistry = .system,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
+        testHooksEnabled = PrototypeTestHooks.isEnabled(environment: environment)
         // No concrete permission-needing modules are approved for injection yet (#14289).
         model = PrototypeModel(
-            mode: mode, runtime: runtime, storage: PrototypeStorageCoordinator.fileBacked(), registry: registry
+            mode: mode,
+            runtime: runtime,
+            storage: PrototypeStorageCoordinator.fileBacked(),
+            registry: registry.withTestHooks(environment: environment)
         )
         outbox = PrototypeEventOutbox(mode: mode)
         super.init()
     }
 
     private init(model: PrototypeModel) {
+        testHooksEnabled = PrototypeTestHooks.isEnabled(environment: ProcessInfo.processInfo.environment)
         self.model = model
         outbox = PrototypeEventOutbox(mode: model.mode)
         super.init()
@@ -268,7 +274,7 @@ final class PrototypeAgent: NSObject {
     /// The flags last applied, so an unrelated state change posts no accessibility notification.
     private var appliedAccessibility = PrototypeHostAccessibility.hidden
 
-    private var testHooksEnabled = false
+    private let testHooksEnabled: Bool
     /// Authenticated host connections, as last reported by the server on the main queue.
     private var connectedClients = 0
     /// Hide-for-screenshot hold (#9305); the prototype window stays hidden while it is active.
@@ -291,7 +297,6 @@ final class PrototypeAgent: NSObject {
         }
 
         booted = true
-        testHooksEnabled = PrototypeTestHooks.isEnabled(environment: ProcessInfo.processInfo.environment)
         NSLog(
             "[AutoMobilePrototypeAgent] %@ (protocol %d) loaded into %@, listening on 127.0.0.1:%d",
             PrototypeAgentProtocol.agentVersion,
@@ -620,6 +625,13 @@ final class PrototypeAgent: NSObject {
             // No update_prototype (#10550): a same-id show_prototype replaces the shown prototype.
             case "dismiss_prototype":
                 dismissPrototype(message, result: result)
+            case PrototypeAgentProtocol.simulatePlatformRequest:
+                guard let id = message["id"] as? String, !id.isEmpty,
+                      let event = message["event"] as? String,
+                      let raw = message["data"], let data = PrototypeRequestWire.json(raw)
+                else { return result(false, "simulate_prototype_platform needs id, event and JSON object data") }
+                let error = model.simulatePlatformEvent(id: id, event: event, data: data)
+                result(error == nil, error)
             case PrototypeAgentProtocol.advanceClockRequest:
                 guard let id = message["id"] as? String, !id.isEmpty,
                       let raw = message["advanceTimeMs"] as? NSNumber,

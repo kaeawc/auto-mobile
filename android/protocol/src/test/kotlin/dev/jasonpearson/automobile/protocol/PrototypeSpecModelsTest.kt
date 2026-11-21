@@ -235,6 +235,7 @@ class PrototypeSpecModelsTest {
     assertRoundTrip(
       "conditionFilled",
       PrototypeCondition(
+        derived = "cartCount",
         key = "enabled",
         equals = PrototypeScalar.BooleanValue(true),
         notEquals = PrototypeScalar.BooleanValue(false),

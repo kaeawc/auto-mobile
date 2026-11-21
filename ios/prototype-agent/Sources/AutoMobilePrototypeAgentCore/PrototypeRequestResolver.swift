@@ -9,6 +9,8 @@ struct PrototypeResolvedRequest: Equatable {
     let url: String
     let headers: [String: String]
     let body: JSONValue?
+    var `where`: PrototypeDataWrite.Match? = nil
+    var member: String? = nil
     var uploadBody: PrototypeUploadBody? = nil
 }
 
@@ -21,6 +23,7 @@ enum PrototypeRequestResolver {
 
     static func resolve(
         _ action: PrototypeAction, urlText: String, inputs: some PrototypeEmitContextInputs,
+        context: PrototypeActionContext? = nil,
         assets: (any PrototypeUploadAssetSource)? = nil,
         boundary: any PrototypeUploadBoundaryGenerating = PrototypeUploadBoundaryGenerator()
     )
@@ -38,7 +41,7 @@ enum PrototypeRequestResolver {
             // JSON objects are unordered in Swift, so every runtime uses sorted key order (UTF-16 code
             // units, like JS `sort()`) for a canonical query.
             for name in (entries ?? [:]).keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
-                switch entryText(entries?[name], what: "\(field).\(name)", inputs: inputs) {
+                switch entryText(entries?[name], what: "\(field).\(name)", inputs: inputs, context: context) {
                 case let .success(text):
                     if field == "headers" {
                         if headers.keys.contains(where: { $0.lowercased() == name.lowercased() }) {
@@ -66,10 +69,24 @@ enum PrototypeRequestResolver {
             ) } catch let error as PrototypeRequestError { return .failure(error) }
             catch { return .failure(.init(.invalidRequest, "Invalid upload body")) }
         } else if let binding = action.body {
-            switch PrototypeDataWrite.resolveValue(binding, inputs: inputs) {
+            switch PrototypeDataWrite.resolveValue(binding, inputs: inputs, context: context) {
             case let .success(value): body = value
             case let .failure(failure):
-                return .failure(.init(.invalidRequest, "body: \(failure.message)"))
+                return .failure(.init(
+                    failure.code == .lastGeneratedUnset ? .lastGeneratedUnset : .invalidRequest,
+                    "body: \(failure.message)"
+                ))
+            }
+        }
+        var match: PrototypeDataWrite.Match?
+        if let selector = action.where {
+            switch PrototypeDataWrite.resolveValue(selector.equals, inputs: inputs, context: context) {
+            case let .success(value): match = .init(field: selector.field, equals: value)
+            case let .failure(error):
+                return .failure(.init(
+                    error.code == .lastGeneratedUnset ? .lastGeneratedUnset : .invalidRequest,
+                    "where.equals: \(error.message)"
+                ))
             }
         }
         let url: String
@@ -83,6 +100,8 @@ enum PrototypeRequestResolver {
             url: url,
             headers: headers,
             body: body,
+            where: match,
+            member: action.member,
             uploadBody: upload
         ))
     }
@@ -90,15 +109,18 @@ enum PrototypeRequestResolver {
     /// One header or query entry as text: a literal string with placeholders, or a binding that
     /// must resolve to a string, number or boolean.
     private static func entryText(
-        _ raw: JSONValue?, what: String, inputs: some PrototypeEmitContextInputs
+        _ raw: JSONValue?, what: String, inputs: some PrototypeEmitContextInputs, context: PrototypeActionContext?
     )
         -> Result<String, PrototypeRequestError>
     {
         if case let .string(literal)? = raw { return .success(bindText(literal, inputs: inputs)) }
         guard let raw else { return .failure(.init(.invalidRequest, "\(what) is missing")) }
-        switch PrototypeDataWrite.resolveValue(raw, inputs: inputs) {
+        switch PrototypeDataWrite.resolveValue(raw, inputs: inputs, context: context) {
         case let .failure(failure):
-            return .failure(.init(.invalidRequest, "\(what): \(failure.message)"))
+            return .failure(.init(
+                failure.code == .lastGeneratedUnset ? .lastGeneratedUnset : .invalidRequest,
+                "\(what): \(failure.message)"
+            ))
         case let .success(value):
             guard value.isScalar, PrototypeDataValues.isScalar(value) else {
                 return .failure(.init(.invalidRequest, "\(what) must resolve to a string, number or boolean"))

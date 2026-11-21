@@ -1,4 +1,9 @@
 import { buildObserveResult } from "../../helpers/observeFixture";
+import {
+  capturedFocusedFieldsUnderPrototype,
+  observationOf,
+} from "../../helpers/prototypeWindowCapture";
+import { findFocusedElement } from "../../../src/features/observe/HierarchyFocus";
 import { createAndroidTestClient } from "../../helpers/androidCtrlProxyClientSpies";
 import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { createExecResult } from "../../../src/utils/execResult";
@@ -3094,6 +3099,55 @@ describe("DefaultSendKeysCommandExecutor", () => {
       expect(
         adb.getExecutedCommands().some((command) => command.startsWith("shell input keyevent")),
       ).toBe(false);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
+  test.each([
+    [true, true, undefined],
+    [false, false, 'the focused field holds "display"'],
+  ] as const)(
+    "IME read-back without a layer reads the input-focused window: prototype window focused=%s (#18895)",
+    async (prototypeWindowFocused, success, error) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+        createExecResult(priorImeId, ""),
+        createExecResult(commitImeId, ""),
+      ]);
+      const hierarchy = capturedFocusedFieldsUnderPrototype({
+        appText: "display",
+        prototypeText: "Buy milk",
+        prototypeWindowFocused,
+      });
+      // The collector's document-order focused element is the app's field under the prototype.
+      const observation = {
+        ...observationOf(hierarchy),
+        updatedAt: timer.now(),
+        focusedElement: findFocusedElement(hierarchy) ?? undefined,
+      };
+      expect(observation.focusedElement?.text).toBe("display");
+      const observer = createObserver(observation);
+      const textClient = createTextClient({
+        commitViaIme: async () => ({ success: true, committedUnits: "Buy milk".length }),
+      });
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        observer,
+        { textClient: textClient.client, timer },
+      );
+
+      const result = await executor.type({ action: "type", text: "Buy milk", mode: "ime" });
+
+      expect(result.success).toBe(success);
+      if (error === undefined) {
+        expect(result.error).toBeUndefined();
+      } else {
+        expect(result.error).toContain(error);
+      }
+      expect(textClient.commitViaImeCalls).toEqual([{ text: "Buy milk", priorImeId }]);
       expect(timer.getPendingTimeoutCount()).toBe(0);
     },
   );

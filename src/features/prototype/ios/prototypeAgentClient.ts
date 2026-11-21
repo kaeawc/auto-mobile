@@ -44,6 +44,7 @@ export type PrototypeAgentRequestType =
   | "dismiss_prototype"
   // Wipes a prototype's stored `storage` values (#12522), advertised as `prototype_storage_v1`.
   | "advance_prototype_clock"
+  | "simulate_prototype_platform"
   | "clear_prototype_storage"
   | "put_prototype_asset"
   | "remove_prototype_asset"
@@ -84,6 +85,11 @@ export interface PrototypeAgentHandshake {
   appInstanceId?: string;
   /** Current UI showing; remounts retain the process sequence ledger. */
   showingId?: string;
+  /**
+   * First event sequence of the current showing. A replayed dismissal below it ended an earlier
+   * showing, so it must not end this one. Older apps omit it.
+   */
+  showingStartSequence?: number;
   agentVersion: string;
   protocolVersion: number;
   capabilities: string[];
@@ -96,8 +102,11 @@ export interface PrototypeAgentClient {
     body?: PrototypeAgentMessage,
     options?: { timeoutMs?: number },
   ): Promise<PrototypeAgentResult>;
-  /** Subscribes to `prototype_event` pushes; returns an unsubscribe function. */
-  onEvent(listener: (event: PrototypeAgentMessage) => void): () => void;
+  /**
+   * Subscribes to `prototype_event` pushes; returns an unsubscribe function. A listener returns
+   * false when it rejected the event, so a buffered subscriber does not acknowledge it.
+   */
+  onEvent(listener: (event: PrototypeAgentMessage) => unknown): () => void;
   /** A buffered subscriber accepted these events; disposable-app transports may trim replay. */
   acknowledgeEventsThrough?(sequence: number): void;
   /** Called once when the connection ends; returns an unsubscribe function. */

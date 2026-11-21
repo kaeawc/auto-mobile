@@ -352,7 +352,7 @@ describe("CachingDisplayInventoryProvider", () => {
     expect((await provider.hydrate(device, "1")).displays).toBe(displays);
   });
 
-  test("failed reads back off for thirty seconds on the injected clock", async () => {
+  test("failed reads first retry after two seconds on the injected clock", async () => {
     const timer = new FakeTimer();
     let reads = 0;
     const source = {
@@ -367,7 +367,7 @@ describe("CachingDisplayInventoryProvider", () => {
     const provider = new CachingDisplayInventoryProvider(source, source, { timer });
     expect(await provider.hydrate({ ...device, displays }, "1")).toEqual({ ...device, displays });
     expect((await provider.hydrate(device, "1")).displays).toBeUndefined();
-    timer.advanceTime(29_999);
+    timer.advanceTime(1_999);
     expect((await provider.hydrate(device, "1")).displays).toBeUndefined();
     expect(reads).toBe(1);
     timer.advanceTime(1);
@@ -391,7 +391,7 @@ describe("CachingDisplayInventoryProvider", () => {
     const provider = new CachingDisplayInventoryProvider(source, source, {
       timer,
       degradedRetryMs: 5000,
-      failureRetryMs,
+      failureBackoff: failureRetryMs,
     });
     expect((await provider.hydrate(device, "1"))[displayInventoryOutcome]).toEqual({
       kind: "unreadable",
@@ -420,7 +420,7 @@ describe("CachingDisplayInventoryProvider", () => {
     const provider = new CachingDisplayInventoryProvider(source, source, {
       timer,
       degradedRetryMs: 5000,
-      failureRetryMs,
+      failureBackoff: failureRetryMs,
     });
     const initial = await Promise.all(
       Array.from({ length: 50 }, () => provider.hydrate(device, "1")),
@@ -460,6 +460,219 @@ describe("CachingDisplayInventoryProvider", () => {
     expect(recovered.displays).toBe(displays);
     expect(recovered[displayInventoryOutcome]).toEqual({ kind: "multi" });
     expect(reads).toBe(2);
+  });
+
+  describe("a failed re-read after invalidation (#18832)", () => {
+    const iosDevice: BootedDevice = { deviceId: "SIM-1", name: "iPhone Duo", platform: "ios" };
+    const failingAfterFirst = () => {
+      let reads = 0;
+      let fail = true;
+      return {
+        get reads() {
+          return reads;
+        },
+        recover() {
+          fail = false;
+        },
+        read: async () => {
+          reads++;
+          if (reads > 1 && fail) {
+            throw new Error("Command timed out after 2000ms: xcrun simctl io SIM-1 enumerate");
+          }
+          return { displays, degraded: false };
+        },
+      };
+    };
+
+    test("hydrate keeps the prior panels and retries on the backoff", async () => {
+      const timer = new FakeTimer();
+      const source = failingAfterFirst();
+      const provider = new CachingDisplayInventoryProvider(source, source, {
+        timer,
+        failureBackoff: [1_000, 4_000],
+      });
+      expect((await provider.hydrate(iosDevice, "boot-1")).displays).toBe(displays);
+      provider.invalidate(iosDevice.deviceId);
+      const afterTimeout = await provider.hydrate(iosDevice, "boot-1");
+      expect(afterTimeout.displays).toBe(displays);
+      expect(afterTimeout[displayInventoryOutcome]).toEqual({ kind: "multi" });
+      expect(source.reads).toBe(2);
+      timer.advanceTime(999);
+      await provider.hydrate(iosDevice, "boot-1");
+      expect(source.reads).toBe(2);
+      timer.advanceTime(1);
+      expect((await provider.hydrate(iosDevice, "boot-1")).displays).toBe(displays);
+      expect(source.reads).toBe(3);
+      await Promise.resolve();
+      await Promise.resolve();
+      // The second consecutive failure waits the next backoff step.
+      timer.advanceTime(3_999);
+      await provider.hydrate(iosDevice, "boot-1");
+      expect(source.reads).toBe(3);
+      timer.advanceTime(1);
+      source.recover();
+      await provider.hydrate(iosDevice, "boot-1");
+      expect(source.reads).toBe(4);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect((await provider.hydrate(iosDevice, "boot-1")).displays).toBe(displays);
+      expect(source.reads).toBe(4);
+      expect(timer.getSleepHistory()).toEqual([]);
+    });
+
+    test("a degraded re-read without panels also keeps the prior panels", async () => {
+      const source = new FakeDisplayInventorySource({ displays, degraded: false });
+      const provider = new CachingDisplayInventoryProvider(source, source, {
+        timer: new FakeTimer(),
+      });
+      await provider.hydrate(iosDevice, "boot-1");
+      provider.invalidate(iosDevice.deviceId);
+      source.result = { degraded: true };
+      expect((await provider.hydrate(iosDevice, "boot-1")).displays).toBe(displays);
+    });
+
+    test("a fresh device with no prior read still reports unreadable", async () => {
+      const source = failingAfterFirst();
+      const provider = new CachingDisplayInventoryProvider(source, source, {
+        timer: new FakeTimer(),
+      });
+      await provider.hydrate(iosDevice, "boot-1");
+      const fresh: BootedDevice = { ...iosDevice, deviceId: "SIM-2" };
+      const result = await provider.hydrate(fresh, "boot-1");
+      expect(result.displays).toBeUndefined();
+      expect(result[displayInventoryOutcome]?.kind).toBe("unreadable");
+    });
+
+    test("a new boot identity does not inherit the previous incarnation's panels", async () => {
+      const source = failingAfterFirst();
+      const provider = new CachingDisplayInventoryProvider(source, source, {
+        timer: new FakeTimer(),
+      });
+      await provider.hydrate(iosDevice, "boot-1");
+      const rebooted = await provider.hydrate(iosDevice, "boot-2");
+      expect(rebooted.displays).toBeUndefined();
+      expect(rebooted[displayInventoryOutcome]?.kind).toBe("unreadable");
+    });
+  });
+
+  describe("shared last-good history", () => {
+    const iosDevice: BootedDevice = { deviceId: "SIM-1", name: "iPhone Duo", platform: "ios" };
+    const coverOnly = { panels: [displays.panels[1]], postures: ["closed" as const] };
+    type ReadResult = Awaited<ReturnType<DisplayInventorySource["read"]>>;
+    const scriptedSource = () => {
+      const pending: Array<{ resolve: (r: ReadResult) => void; reject: (e: Error) => void }> = [];
+      return {
+        pending,
+        read: () =>
+          new Promise<ReadResult>((resolve, reject) => {
+            pending.push({ resolve, reject });
+          }),
+      };
+    };
+    const settle = async () => {
+      for (let i = 0; i < 4; i++) {
+        await Promise.resolve();
+      }
+    };
+
+    test("a superseded read that finishes late does not replace a newer read's panels", async () => {
+      const timer = new FakeTimer();
+      const source = scriptedSource();
+      const provider = new CachingDisplayInventoryProvider(source, source, {
+        timer,
+        degradedRetryMs: 1_000,
+      });
+      const first = provider.hydrate(iosDevice, "boot-1");
+      await settle();
+      source.pending[0].resolve({ displays: coverOnly, degraded: true });
+      expect((await first).displays).toBe(coverOnly);
+      // A background refresh of the old entry is still in flight when invalidation starts a newer read.
+      timer.advanceTime(1_000);
+      await provider.hydrate(iosDevice, "boot-1");
+      await settle();
+      provider.invalidate(iosDevice.deviceId);
+      const second = provider.hydrate(iosDevice, "boot-1");
+      await settle();
+      expect(source.pending).toHaveLength(3);
+      source.pending[2].resolve({ displays, degraded: false });
+      expect((await second).displays).toBe(displays);
+      source.pending[1].resolve({ displays: coverOnly, degraded: false });
+      await settle();
+      // The next failed read falls back to the newer panels, not the superseded ones.
+      provider.invalidate(iosDevice.deviceId);
+      const third = provider.hydrate(iosDevice, "boot-1");
+      await settle();
+      source.pending[3].reject(new Error("timed out"));
+      expect((await third).displays).toBe(displays);
+    });
+
+    test("an old incarnation's late read does not erase the new incarnation's history", async () => {
+      const timer = new FakeTimer();
+      const source = scriptedSource();
+      const provider = new CachingDisplayInventoryProvider(source, source, {
+        timer,
+        degradedRetryMs: 1_000,
+      });
+      const old = provider.hydrate(iosDevice, "boot-1");
+      await settle();
+      source.pending[0].resolve({ displays: coverOnly, degraded: true });
+      await old;
+      // boot-1's background refresh is still in flight when the device reboots as boot-2.
+      timer.advanceTime(1_000);
+      await provider.hydrate(iosDevice, "boot-1");
+      await settle();
+      const fresh = provider.hydrate(iosDevice, "boot-2");
+      await settle();
+      expect(source.pending).toHaveLength(3);
+      source.pending[2].resolve({ displays, degraded: false });
+      expect((await fresh).displays).toBe(displays);
+      source.pending[1].resolve({ displays: coverOnly, degraded: false });
+      await settle();
+      provider.invalidate(iosDevice.deviceId);
+      const reread = provider.hydrate(iosDevice, "boot-2");
+      await settle();
+      source.pending[3].reject(new Error("timed out"));
+      expect((await reread).displays).toBe(displays);
+    });
+
+    test("retire drops the last good panels so a replacement on the same serial cannot inherit them", async () => {
+      let fail = false;
+      const source = {
+        read: async () => {
+          if (fail) {
+            throw new Error("timed out");
+          }
+          return { displays, degraded: false };
+        },
+      };
+      const provider = new CachingDisplayInventoryProvider(source, source, {
+        timer: new FakeTimer(),
+      });
+      // Sessionless calls use the serial itself as the identity token.
+      await provider.hydrate(iosDevice, iosDevice.deviceId);
+      provider.retire(iosDevice.deviceId);
+      fail = true;
+      const replacement = await provider.hydrate(iosDevice, iosDevice.deviceId);
+      expect(replacement.displays).toBeUndefined();
+      expect(replacement[displayInventoryOutcome]?.kind).toBe("unreadable");
+    });
+  });
+
+  test("the iOS adapter passes the injected enumerate timeout to simctl", async () => {
+    const timeouts: Array<number | undefined> = [];
+    const provider = createDisplayInventoryProvider(
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+      {
+        readDeviceDisplays: async (_udid, _signal, timeoutMs) => {
+          timeouts.push(timeoutMs);
+          return displays;
+        },
+      },
+      new FakeTimer(),
+      { iosEnumerateTimeoutMs: 7_500 },
+    );
+    await provider.hydrate({ deviceId: "SIM-1", name: "Duo", platform: "ios" }, "1");
+    expect(timeouts).toEqual([7_500]);
   });
 
   test("an aborted waiter does not cancel another waiter or poison the cache", async () => {

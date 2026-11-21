@@ -730,3 +730,29 @@ test("layout direction is an independent root window gate", () => {
     "window.layoutDirection",
   );
 });
+
+for (const container of containers) {
+  for (const action of [
+    { type: "setState", key: "id", value: { generate: "id" } },
+    {
+      type: "appendData",
+      path: "/data/rows",
+      value: { value: { id: { generate: "id" }, at: { now: "iso" } } },
+    },
+    {
+      type: "request",
+      url: "https://example.test",
+      into: "/data/rows",
+      where: { field: "id", equals: { lastGenerated: true } },
+    },
+  ]) {
+    test(`generated and keyed request gate covers ${container.name} ${container.field ?? ""} ${action.type}`, () => {
+      const candidate = container.wrap({ ...label, onTap: [action] });
+      expect(
+        prototypeRequiredCapabilities(candidate).some(
+          (gate) => gate.capability === "prototype_data_actions_v2",
+        ),
+      ).toBe(true);
+    });
+  }
+}

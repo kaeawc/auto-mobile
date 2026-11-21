@@ -40,6 +40,8 @@ import {
 } from "./webFold";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
+import { memoizedPrototypeDerive } from "../prototypeDerive";
+import type { PrototypeDerivedEntry } from "../prototypeFormatSchema";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import { scrimCss } from "./webSheet";
 import type { WebSkinId } from "./webSkin";
@@ -195,7 +197,8 @@ function windowHeight(placement: Raw | undefined): Raw {
 /**
  * A fullscreen or sheet root fills its window on each axis it leaves unsized, as both devices do
  * (#16190); explicit sizes stay, and a floating root keeps its content size. A sheet's root also
- * carries the sheet's height as its bound (see windowHeight).
+ * carries the sheet's height as its bound (see windowHeight). A drawer root fills nothing: its
+ * surface keeps the drawer's width.
  */
 function sizedRoot(spec: unknown): unknown {
   const root = record(record(spec)?.root);
@@ -204,9 +207,11 @@ function sizedRoot(spec: unknown): unknown {
     return root;
   }
   const style = record(root.style) ?? {};
+  // A drawer root is a window layer whose surface keeps its own constrained width and height.
+  const fill = root.type === "drawer" ? {} : { width: "fill", height: "fill" };
   return {
     ...root,
-    style: { width: "fill", height: "fill", ...style, ...windowHeight(placement) },
+    style: { ...fill, ...style, ...windowHeight(placement) },
   };
 }
 
@@ -331,6 +336,7 @@ function stillScope(
   const skin = options.skin ?? frame.platform;
   const textScale = stillTextScale(frame.platform, options.textSize);
   // Conditions and pager pages do not depend on the mode, so the walk reads a light scope.
+  const state = record(spec.state) ?? {};
   const scope: WebRenderScope = {
     style: {
       mode: "light",
@@ -342,7 +348,12 @@ function stillScope(
       ...(windowDirection(spec, locale) === "rtl" ? { rtl: true } : {}),
     },
     condition: {
-      state: record(spec.state) ?? {},
+      state,
+      derived: memoizedPrototypeDerive(
+        record(spec.derive) as Record<string, PrototypeDerivedEntry> | undefined,
+        spec.data,
+        state,
+      ),
       platform: frame.platform,
       platformState: platformStateFor(frame.platform, screenDp, fold),
     },

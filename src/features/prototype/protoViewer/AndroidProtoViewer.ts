@@ -139,6 +139,7 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     }
     return {
       ...(published.versionName ? { version: published.versionName } : {}),
+      versionCode: published.versionCode,
       capabilities: new Set(published.capabilities),
       updateUrl: PROTOVIEWER_PLAY_STORE_URL,
     };

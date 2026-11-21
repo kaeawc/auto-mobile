@@ -87,6 +87,7 @@ enum PrototypeStrictCapabilities {
             if fields["scrollLinked"] != nil || fields["scrollTransition"] != nil { need("scroll_motion") }
             if PrototypeMotionV3.required(fields) { result.insert(PrototypeMotionV3.capability) }
             let type = fields["type"]?.stringValue ?? ""
+            if !PrototypeDerivedValidator.conditionReferences(fields, path: "").isEmpty { need("derive") }
             if PrototypeStringConditions.uses(fields) { need("string_conditions") }
             let types = [
                 "startTimer": "timers",
@@ -171,8 +172,7 @@ enum PrototypeStrictCapabilities {
             }
             if ["setData", "appendData", "prependData", "upsertData", "removeData"]
                 .contains(type) { need("data_actions") }
-            if ["setData", "removeData"].contains(type),
-               fields["where"] != nil || fields["member"] != nil { result.insert("prototype_data_actions_v2") }
+            if PrototypeGeneratedValues.needsDataV2(fields) { result.insert("prototype_data_actions_v2") }
             if type == "upsertData" || (type == "appendData" && fields["maxItems"] != nil) || PrototypeChannels
                 .needsValueCapability(fields) { need("platform_realtime") }
             if type == "prependData" { need("lazy_list") }

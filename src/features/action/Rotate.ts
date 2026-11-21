@@ -37,6 +37,7 @@ import {
 } from "./RotationOrientationReader";
 import { RotationOutcomes, type AutoRotatePlan } from "./RotationOutcomes";
 import { RotationEndConfirmation } from "./RotationEndConfirmation";
+import { refuseRotateOnAndroidXr, type RotateXrOptions } from "./RotateUnsupportedError";
 import {
   DEVICE_STATE_ROTATION_LOCK,
   ROTATION_RETURN_CONFIRMATION_TIMEOUT_MS,
@@ -56,7 +57,7 @@ interface AndroidRotationWrites {
   restoreOnFailure: (result: RotateResult) => Promise<RotateResult>;
 }
 
-export interface RotateOptions {
+export interface RotateOptions extends RotateXrOptions {
   iosDisplayPixelProbe?: IosDisplayPixelProbe;
   deadlineMs?: number;
   sessionRotation?: <T>(mutation: (slot?: RotationRestoreSlot) => Promise<T>) => Promise<T>;
@@ -159,7 +160,7 @@ export class Rotate extends BaseVisualChange {
       captureUser: true,
       signal,
     });
-    await this.captureDeviceStateRotationLock(state, signal);
+    await this.store.captureDeviceStateRotationLock(state, signal);
     return state;
   }
 
@@ -207,6 +208,7 @@ export class Rotate extends BaseVisualChange {
           }
           return await this.executeIosRotation(orientation, progress, perf, signal);
         case "android":
+          await refuseRotateOnAndroidXr(this.device, this.adb, this.options.xrDetector, signal);
           if (display !== 0) {
             return await this.rotateNonDefaultDisplay(
               orientation,
@@ -579,17 +581,6 @@ export class Rotate extends BaseVisualChange {
     }
   }
 
-  /** Captured once, with the session's first originals, before any write can change it. */
-  private async captureDeviceStateRotationLock(
-    state: RotationRestoreState,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const lock = await this.store.readSetting("secure", DEVICE_STATE_ROTATION_LOCK, signal);
-    if (lock !== null) {
-      state.deviceStateRotationLock = lock;
-    }
-  }
-
   private rotationCallSettings(
     autoRotateState: "locked" | "enabled" | "unknown",
     slot?: RotationRestoreSlot,
@@ -621,12 +612,12 @@ export class Rotate extends BaseVisualChange {
             settings.previousUserRotation = state.userRotation;
           }
           if (!original) {
-            await this.captureDeviceStateRotationLock(state, signal);
+            await this.store.captureDeviceStateRotationLock(state, signal);
           }
           throwIfAborted(signal);
           slot.get();
           if (!original) {
-            slot.record(state);
+            await slot.record(state);
           }
         }
         settings.started = true;
@@ -723,7 +714,11 @@ export class Rotate extends BaseVisualChange {
       {
         autoRotateState,
         plan: {
-          preserveLock,
+          // A session's omitted lock holds an already-matching orientation like `true` (#18833);
+          // an unreadable auto-rotate setting keeps the no-write fallback.
+          preserveLock:
+            preserveLock ||
+            (slot !== undefined && lockOrientation === undefined && autoRotateState === "enabled"),
           restoreAutomaticRotation,
           beforeWrite: settings.beforeWrite,
           cleanup,
@@ -751,8 +746,9 @@ export class Rotate extends BaseVisualChange {
     // regardless of whether it was already off beforehand. Remember the
     // pre-existing value so it can be restored once the forced rotation
     // completes, instead of leaving auto-rotate permanently disabled
-    // (#6129). An explicit persistent request takes ownership of this state,
-    // while omission and false preserve the known prior auto-rotate state.
+    // (#6129). true, and omission in a device session (#18833), keep auto-rotate
+    // off so the orientation holds until session release restores the originals;
+    // false and direct-call omission turn auto-rotate back on before returning.
 
     try {
       this.outcomes.logAutoRotatePlan(autoRotateState, preserveLock, restoreAutomaticRotation);
@@ -769,7 +765,7 @@ export class Rotate extends BaseVisualChange {
           throwIfAborted(signal);
           cleanup.needed = shouldRestoreAutoRotate && autoRotateState !== "locked";
           await this.planDeviceStateLock(cleanup, {
-            shouldRestoreAutoRotate: shouldRestoreAutoRotate || plan.restoreAfterConfirmation,
+            shouldRestoreAutoRotate,
             autoRotateState,
             signal,
           });
@@ -798,7 +794,7 @@ export class Rotate extends BaseVisualChange {
       let warning: string | undefined;
       let restoreConfirmed = true;
 
-      if (shouldRestoreAutoRotate || plan.restoreAfterConfirmation) {
+      if (shouldRestoreAutoRotate) {
         ({ achievedOrientation, warning, restoreConfirmed } =
           await this.outcomes.restoreAutoRotateAndConfirmOrientation(orientation, signal, cleanup));
       }
@@ -976,19 +972,10 @@ export class Rotate extends BaseVisualChange {
       slot,
       signal,
     });
-    let { achievedOrientation, warning } = confirmation;
+    const { achievedOrientation } = confirmation;
+    let { warning } = confirmation;
     if (achievedOrientation === orientation) {
-      let restoreConfirmed = !restoreFailure;
-      if (plan.restoreAfterConfirmation) {
-        const restored = await this.outcomes.restoreAutoRotateAndConfirmOrientation(
-          orientation,
-          signal,
-          cleanup,
-        );
-        achievedOrientation = restored.achievedOrientation;
-        warning = [warning, restored.warning].filter(Boolean).join(" ") || undefined;
-        restoreConfirmed = restored.restoreConfirmed;
-      }
+      const restoreConfirmed = !restoreFailure;
       const result = await this.outcomes.finalizeAndroidRotation({
         orientation,
         value,

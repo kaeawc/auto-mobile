@@ -171,12 +171,14 @@ AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypeBundleRe
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func availability() -> PlatformAvailability
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func call(_ call: PlatformCall) async -> PlatformCallResult
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func configure(root: JSONValue?)
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func simulate(_ event: PlatformEvent) -> Bool
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func stop()
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var capability: String
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var events: AsyncStream<PlatformEvent>
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var name: String
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var requiredInfoPlistKeys: [String]
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var state: [String: JSONValue]
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var supportsSimulation: Bool
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public enum PlatformAvailability: Equatable, Sendable
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public enum PlatformCallResult: Equatable, Sendable
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public enum PlatformErrorCode: String, Sendable
@@ -185,6 +187,7 @@ AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func config
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func configure(root _: JSONValue?)
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func configure(sensorsBlock: JSONValue?)
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func containsInfoPlistKey(_ key: String) -> Bool
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func simulate(_: PlatformEvent) -> Bool
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func stop()
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public init()
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public init(event: String, data: JSONValue)
@@ -202,6 +205,8 @@ AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public struct Plat
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public struct PrototypeMainBundleReader: PrototypeBundleReader
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public var capabilities: [String]
 AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public var requiredInfoPlistKeys: [String]
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public var supportsSimulation: Bool
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public var supportsSimulation: Bool
 AutoMobilePrototypeAgentCore/PrototypeRemoteImages.swift: public enum PrototypeRemoteImages
 AutoMobilePrototypeAgentCore/PrototypeRemoteImages.swift: public static let androidHeapDivisor = 8
 AutoMobilePrototypeAgentCore/PrototypeRemoteImages.swift: public static let capability = "prototype_remote_image_v1"

@@ -84,7 +84,24 @@ describe("advertised capabilities (#16453)", () => {
     expect(current).toBe(renderPrototypeWebCapabilities(knownPrototypeCapabilities()));
   });
 
+  test("remote images remain known but their envelopes are refused by default", () => {
+    expect(knownPrototypeCapabilities()).toContain("prototype_remote_image_v1");
+    expect(refusal(envelope({ requires: ["prototype_remote_image_v1"] }))).toMatchObject({
+      code: "missingCapabilities",
+      missing: ["prototype_remote_image_v1"],
+    });
+  });
+
   test("the generator refuses an empty set", () => {
     expect(() => renderPrototypeWebCapabilities([])).toThrow("No prototype capabilities");
+    expect(() => renderPrototypeWebCapabilities(["prototype_remote_image_v1"])).toThrow(
+      "No prototype capabilities",
+    );
+    const mixed = renderPrototypeWebCapabilities([
+      "prototype_remote_image_v1",
+      "prototype_stack_v1",
+    ]);
+    expect(mixed).toContain('"prototype_stack_v1"');
+    expect(mixed).not.toContain('"prototype_remote_image_v1"');
   });
 });

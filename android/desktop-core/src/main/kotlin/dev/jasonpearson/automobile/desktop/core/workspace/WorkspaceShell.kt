@@ -41,6 +41,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.shell.UpdateReadyButton
 import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 
@@ -292,6 +293,12 @@ data class WorkspaceShellOptions(
     ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
   },
   val screenshotSaver: ScreenshotSaver = RealScreenshotSaver(),
+  /**
+   * Where a pane's Screenshot capture runs its blocking connect, wait and save. Tests pass
+   * `Dispatchers.Unconfined` so the capture follows the Compose test clock instead of a real thread
+   * pool.
+   */
+  val captureDispatcher: CoroutineDispatcher = Dispatchers.IO,
   val healthSheetContent: @Composable () -> Unit = { DefaultHealthSheetBody() },
   val compareContent: @Composable (DeviceColumn, DeviceColumn) -> Unit = { a, b ->
     TwoDeviceCompareView(
@@ -311,6 +318,7 @@ internal data class DeviceColumnContent(
   val streamContent: @Composable (DeviceColumn) -> Unit,
   val observationStreamFactory: (String) -> ObservationStream,
   val screenshotSaver: ScreenshotSaver,
+  val captureDispatcher: CoroutineDispatcher,
   val externalCaptureRequest: Pair<String, Int>?,
   val canDiff: Boolean,
 )
@@ -332,11 +340,12 @@ internal data class PaneContent(
   val streamContent: @Composable (DeviceColumn) -> Unit,
   val observationStreamFactory: (String) -> ObservationStream,
   val screenshotSaver: ScreenshotSaver,
+  val captureDispatcher: CoroutineDispatcher,
   val externalCaptureRequest: Pair<String, Int>?,
 )
 
 internal data class StreamContent(
-  val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+  val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
   val streamContent: @Composable (DeviceColumn) -> Unit,
   val observationStreamFactory: (String) -> ObservationStream,
   val screenshotSaver: ScreenshotSaver,
@@ -399,6 +408,7 @@ private fun WorkspaceShellOptions.WorkspaceColumns(
               streamContent = streamContent,
               observationStreamFactory = observationStreamFactory,
               screenshotSaver = screenshotSaver,
+              captureDispatcher = captureDispatcher,
               externalCaptureRequest = externalCaptureRequest,
               canDiff = canDiff,
             ),

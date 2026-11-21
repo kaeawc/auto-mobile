@@ -178,7 +178,7 @@ A disposable app installs one spec as its own app, with its own package, label, 
 and foreground-service types. The host core lives in `src/features/prototype/disposableApp/`.
 The Android stamper packages a spec into a signed APK. The `prototype` actions `installApp`,
 `listApps` and `uninstallApp` (`{appId}`, `{all: true}` or `{expired: true}`) run on the daemon's
-`DisposableAppManager`, built on the first such call. iOS runs them on
+`DisposableAppManager`, built on first use. iOS runs them on
 [simulators only](../ios/prototype-agent-saved.md#disposable-apps), and the headless virtual
 device refuses them.
 
@@ -208,7 +208,7 @@ One daemon-host attacher serves every MCP registration and keeps app/device curs
 appInstanceId}` acknowledges matching instances after subscriber delivery. Epochs initialize before
 replay. Status reconciles its app only. The 256-event buffer closes on overflow for replay. Device
 cleanup and host disposal close sockets, remove adb forwards and forget device cursors. Uninstall
-and reinstall each forget only that app's cursors.
+and reinstall forget only that app's cursors.
 
 The app stores up to 200 unacknowledged events and replays them on the next hello. The host
 de-duplicates replays by sequence within the connection and coordinator. The app drops the oldest
@@ -232,51 +232,49 @@ overflow or blocked writes close the peer, and events and requests continue with
   `requiredPrototypeCapabilities(spec)`. If none does, it refuses and names the missing capabilities
   and the closest flavor.
 - **Registry.** The registry file `disposable-apps.json` under the AutoMobile data dir keys records
-  by device id. Each record holds appId, slug, platform, label, spec sha256, template, signer,
+  by device id. Records hold appId, slug, platform, label, spec sha256, template, signer,
   installedAt and expiresAt. Writes are serialized and atomic. A corrupt file or record is skipped
   with a warning. An install writes its record and new expiresAt once the package is on the device,
-  before seeding, reset or permissions. If one fails, the error says the app is installed without
-  that step, and the sweep still sees the current TTL.
+  before seeding, reset or permissions. If one fails, the error names the missing step, and the
+  sweep still sees the current TTL.
 - **Lifecycle.** `ttlHours` defaults to 72, accepts 0 to 720, and 0 means no expiry. Re-installing
   a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
   uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs
   from the host's disposable-app key: one requested id is refused with an error, and in a bulk
-  removal the package is reported under `skipped`. When the session broker acquires an Android
-  device, it sweeps expired apps within the preparation deadline. The acquisition result reports
-  the removed app IDs, and each removal is logged at `warn`. An app already gone from the device
-  still has its registry record cleared. Doctor reports expired apps that are still installed or
-  registered on each connected Android device.
+  removal the package is reported under `skipped`. Acquiring an Android device through the session
+  broker sweeps expired apps within the preparation deadline and reports their IDs; each removal
+  is logged at `warn`. An app already gone from the device still has its record cleared. Doctor
+  reports expired apps still installed or registered on each connected Android device.
 - **Device commands.** The Android installer runs `adb install -r` (then `pm clear` for `reset`),
   `pm grant` per granted manifest permission, and `pm revoke` plus the `user-set user-fixed` flags
-  per denied one, so a denial reads as blocked with no dialog. It refuses a grant and a deny that
-  share a manifest permission (`microphone` and `speech`) before any write. `adb install` and
+  per denied one, so a denial reads as blocked with no dialog. It refuses, before any write, a grant and
+  deny sharing a manifest permission (`microphone` and `speech`). `adb install` and
   `adb uninstall` must print `Success`. The installed signer comes from the package signing
   inspection; a signer set that cannot be read never matches the host key, and an unknown
   presence fails the removal instead of guessing.
 
 ### Template packaging and stamping
 
-The release template package contains an unsigned, unminified APK, the merged text
-manifest, stamp points, capability metadata, and template identity plus APK SHA-256.
+The release template package holds an unsigned, unminified APK, the merged text
+manifest, stamp points, capability metadata, template identity and APK SHA-256.
 The host loads a local flavor through `AUTOMOBILE_ANDROID_PROTOTYPE_APP_TEMPLATE`
-and checks its checksum; a released download is not available yet.
+and checks its checksum; there is no released download yet.
 
-Stamping preserves the compiled code and resource table. The host changes the
-package, provider authorities, literal label, exact permission set (always including
+Stamping keeps the compiled code and resource table and changes the package, provider authorities, literal label, exact permission set (always including
 INTERNET), and explicitly enabled components in structured XML. App-owned resource
 references retain the template resource namespace with private-resource access.
-`aapt2 link` resolves those names back to binary resource ids, avoiding unsafe
-binary-manifest string replacement. The spec and assets are baked under
-`assets/prototype/` at stamp time. An `icon.backgroundColor` (`#RRGGBB` or
-`#AARRGGBB`) rewrites the `prototype_icon_background` colour value in the stored
+`aapt2 link` resolves those names to binary resource ids, avoiding binary-manifest
+string replacement. The spec and assets are baked into
+`assets/prototype/`. An `icon.backgroundColor` (`#RRGGBB` or
+`#AARRGGBB`) rewrites the `prototype_icon_background` colour in the stored
 resource table, in every configuration. That colour backs the adaptive icon and the
-Android 12+ splash screen, so both follow it. The stamp fails if the template has no
-literal colour by that name. An `icon.asset` is refused: the raster foreground
+Android 12+ splash screen. The stamp fails without a
+literal colour of that name. An `icon.asset` is refused: the raster foreground
 layer is not stamped yet.
 
 Template signatures are removed before assembly. The resource table stays stored;
 zipalign aligns it before apksigner signs with v2/v3 using a persistent host-owned
-PKCS12 identity. Verification checks the resulting signer before publishing the
-content-addressed cache artifact. The signer certificate SHA-256 is available to
+PKCS12 identity. Verification checks the signer before publishing the
+content-addressed cache artifact, whose signer certificate SHA-256 feeds
 the installation signing guard. Cache identity covers the template, stamp inputs,
-asset bytes, and signer; cache hits check the saved artifact digest.
+asset bytes, and signer; hits check the saved digest.

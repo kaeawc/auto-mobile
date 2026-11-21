@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "id": "data-object",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "draft": "Buy milk"
+    },
+    "data": {
+      "todos": []
+    },
+    "root": {
+      "type": "button",
+      "label": "Add",
+      "onTap": [
+        {
+          "type": "appendData",
+          "path": "/data/todos",
+          "value": {
+            "object": {
+              "title": {
+                "object": {
+                  "text": {
+                    "state": "draft"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].value.object"
+}

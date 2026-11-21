@@ -679,6 +679,20 @@ export interface DataWrite {
 
 type CopyRead = Pick<DataWrite, "source" | "from">;
 
+const OBJECT_MEMBER_VALUE = /\.value\.object\.[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * The action path a data value read at `at` belongs to: `<action>.value`, or an `{object}` member
+ * at `<action>.value.object.<member>` (#18826).
+ */
+function dataValuePrefix(at: string): string | undefined {
+  const member = OBJECT_MEMBER_VALUE.exec(at);
+  if (member) {
+    return at.slice(0, member.index);
+  }
+  return at.endsWith(".value") ? at.slice(0, -".value".length) : undefined;
+}
+
 /**
  * Pairs a data action's `path` (or a `setState`'s `key`) with its `value` read; both are visited
  * at sibling paths. A `setState` text value is treated as a read of every data or platform
@@ -715,8 +729,9 @@ class DataCopies {
     if (kind === "operand" && at.endsWith(".value")) {
       this.visitStateValue(raw, at.slice(0, -".value".length));
     }
-    if (kind === "emitBinding" && at.endsWith(".value")) {
-      this.visitDataValue(object(raw), at);
+    const prefix = kind === "emitBinding" ? dataValuePrefix(at) : undefined;
+    if (prefix !== undefined) {
+      this.visitDataValue(object(raw), at, prefix);
     }
   }
 
@@ -736,28 +751,37 @@ class DataCopies {
     ];
   }
 
-  private visitDataValue(binding: Record<string, unknown> | undefined, at: string): void {
+  /** An `{object}` value's members all read into one action, so reads accumulate per prefix. */
+  private addReads(prefix: string, reads: CopyRead[]): void {
+    this.reads.set(prefix, [...(this.reads.get(prefix) ?? []), ...reads]);
+  }
+
+  private visitDataValue(
+    binding: Record<string, unknown> | undefined,
+    at: string,
+    prefix: string,
+  ): void {
     for (const source of ["data", "platform"] as const) {
       const from = binding?.[source];
       if (typeof from === "string") {
-        this.reads.set(at.slice(0, -".value".length), [{ source, from }]);
+        this.addReads(prefix, [{ source, from }]);
       }
     }
     if (typeof binding?.item === "string") {
-      const scopes = this.scopes(at);
-      if (scopes.length > 0) {
-        this.reads.set(
-          at.slice(0, -".value".length),
-          scopes.map(({ from }) => ({ source: "data", from })),
-        );
-      }
+      this.addReads(
+        prefix,
+        this.scopes(at).map(({ from }): CopyRead => ({ source: "data", from })),
+      );
     }
   }
 
   /** A data action's `{state}` value reads a key; a `setState`'s `key` names its destination. */
   private visitKey(key: string, at: string): void {
-    if (at.endsWith(".value.state")) {
-      this.reads.set(at.slice(0, -".value.state".length), [{ source: "state", from: key }]);
+    const prefix = at.endsWith(".state")
+      ? dataValuePrefix(at.slice(0, -".state".length))
+      : undefined;
+    if (prefix !== undefined) {
+      this.addReads(prefix, [{ source: "state", from: key }]);
     } else if (at.endsWith(".key")) {
       this.stateDestinations.set(at.slice(0, -".key".length), key);
     }

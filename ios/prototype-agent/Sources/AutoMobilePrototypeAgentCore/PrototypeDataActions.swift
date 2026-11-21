@@ -63,6 +63,10 @@ enum PrototypeDataWrite {
     )
         -> Result<JSONValue, PrototypeDataWriteFailure>
     {
+        // An `{object}` value (#18826) is handled before emit validation, which does not accept it.
+        if case let .object(form)? = binding, form.count == 1, let members = form["object"] {
+            return resolveObject(members, inputs: inputs, context: context)
+        }
         if let generated = PrototypeGeneratedValues.resolveBinding(binding, context: context) { return generated }
         guard let binding,
               let bindings = try? PrototypeEmitContext.validate(.object(["value": binding]), path: "value"),
@@ -98,6 +102,33 @@ enum PrototypeDataWrite {
         default:
             return .failure(.init(code: .invalidValue, message: "A data write value cannot use \(kind) here"))
         }
+    }
+
+    /// Each member resolves like a top-level value; the first unresolved member (in sorted name
+    /// order) fails the write.
+    private static func resolveObject(
+        _ members: JSONValue, inputs: some PrototypeEmitContextInputs, context: PrototypeActionContext?
+    )
+        -> Result<JSONValue, PrototypeDataWriteFailure>
+    {
+        guard case let .object(fields) = members, !fields.isEmpty else {
+            return .failure(.init(code: .invalidValue, message: "An object data write value needs member bindings"))
+        }
+        var resolved: [String: JSONValue] = [:]
+        for name in fields.keys.sorted() {
+            guard case let .object(member)? = fields[name], member["object"] == nil else {
+                return .failure(.init(
+                    code: .invalidValue, message: "Object member \(name) must be a flat value binding"
+                ))
+            }
+            switch resolveValue(.object(member), inputs: inputs, context: context) {
+            case let .success(value):
+                resolved[name] = value
+            case let .failure(failure):
+                return .failure(failure)
+            }
+        }
+        return .success(.object(resolved))
     }
 
     // MARK: Write
@@ -406,6 +437,35 @@ enum PrototypeDataWrite {
 }
 
 extension PrototypeDataWrite {
+    /// An `{object}` value's literal members (#18826). An `upsertData` key's first pointer segment
+    /// must name a member, and when that member is a literal the rest must resolve non-null in it.
+    private static func validateObject(
+        _ members: [String: JSONValue], fields: [String: JSONValue], at path: String
+    )
+        throws
+    {
+        if fields["type"] == .string("upsertData") {
+            let tokens = PrototypeDataPointer.tokens(fields["key"]?.stringValue ?? "")
+            let member = tokens.first.flatMap { members[$0]?.objectFields }
+            let literal = member?["value"]
+            let identity = literal.flatMap { PrototypeDataPointer.resolve($0, tokens: tokens.dropFirst()) }
+            if member == nil || (literal != nil && (identity == nil || identity == .null)) {
+                throw PrototypeContractValidator.invalid(
+                    "\(path).key",
+                    "upsertData key pointer must start with an object value member, non-null when that member is a literal"
+                )
+            }
+        }
+        for name in members.keys.sorted() {
+            guard let literal = members[name]?.objectFields?["value"] else { continue }
+            do { try PrototypeLimits.guardDataWrite(["value": literal]) }
+            catch { throw PrototypeContractValidator.invalid(
+                "\(path).value.object.\(name).value",
+                "A data write value must be a string, boolean, finite number, array or object"
+            ) }
+        }
+    }
+
     /// Static authored-action checks, sharing the runtime's pointer and value limits.
     static func validate(actions: [PrototypeLocatedValue], data: [String: JSONValue]?) throws {
         for action in actions {
@@ -420,6 +480,9 @@ extension PrototypeDataWrite {
                 "\(action.path).path",
                 "Data action paths are /data/<RFC 6901 pointer> and address a member of data"
             ) }
+            if let members = fields["value"]?.objectFields?["object"]?.objectFields {
+                try validateObject(members, fields: fields, at: action.path)
+            }
             if let literal = fields["value"]?.objectFields?["value"] {
                 if fields["type"] == .string("upsertData") {
                     let identity = PrototypeDataPointer.resolve(

@@ -1,0 +1,31 @@
+{
+  "id": "data-object-generated",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "rows": []
+  },
+  "root": {
+    "type": "button",
+    "label": "Add",
+    "onTap": [
+      {
+        "type": "appendData",
+        "path": "/data/rows",
+        "value": {
+          "object": {
+            "ref": {
+              "lastGenerated": true
+            },
+            "id": {
+              "generate": "id"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

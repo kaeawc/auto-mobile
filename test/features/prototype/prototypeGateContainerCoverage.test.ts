@@ -323,6 +323,16 @@ const fixtures: Record<string, Node> = {
       },
     ],
   },
+  prototype_data_actions_v3: {
+    ...label,
+    onTap: [
+      {
+        type: "appendData",
+        path: "/data/rows",
+        value: { object: { title: { state: "liked" }, done: { value: false } } },
+      },
+    ],
+  },
   prototype_network_v1: {
     ...label,
     onTap: [{ type: "request", url: "http://localhost:8080/feed", into: "/data/feed" }],

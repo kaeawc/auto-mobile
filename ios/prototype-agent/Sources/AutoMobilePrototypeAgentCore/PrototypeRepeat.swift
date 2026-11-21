@@ -730,7 +730,7 @@ struct PrototypeRepeatInstance {
 
     private func bindDataAction(_ fields: inout [String: JSONValue]) {
         if case let .string(path)? = fields["path"] { fields["path"] = .string(bindDataPath(path)) }
-        if case let .object(binding)? = fields["value"] { fields["value"] = bindDataValue(binding) }
+        if case let .object(binding)? = fields["value"] { fields["value"] = bindDataActionValue(binding) }
         if var selector = fields["where"]?.objectFields, let binding = selector["equals"]?.objectFields {
             selector["equals"] = bindDataValue(binding)
             fields["where"] = .object(selector)
@@ -840,6 +840,16 @@ struct PrototypeRepeatInstance {
         path.split(separator: "/", omittingEmptySubsequences: false)
             .map { $0 == "{index}" ? String(index) : String($0) }
             .joined(separator: "/")
+    }
+
+    /// A data action's value: an `{object}` value (#18826) binds each member like a value binding.
+    private func bindDataActionValue(_ binding: [String: JSONValue]) -> JSONValue {
+        guard case let .object(members)? = binding["object"] else { return bindDataValue(binding) }
+        var bound = binding
+        bound["object"] = .object(members.mapValues { member in
+            member.objectFields.map(bindDataValue) ?? member
+        })
+        return .object(bound)
     }
 
     /// A data action's value binding, bound like an `emit.context` entry: `item` and `index` become

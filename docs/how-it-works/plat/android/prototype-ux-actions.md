@@ -52,7 +52,8 @@ or sheet binding's scalar type at runtime (renderer-enforced, #9300).
 on the device, so "add to cart" or "delete row" needs no agent round trip. They require
 `prototype_data_actions_v1` with `prototype_data_model_v1`; prepend also requires
 `prototype_lazy_list_v1`. Keyed `setData` and `removeData` additionally require
-`prototype_data_actions_v2`, as do generated value bindings and keyed request writes. The
+`prototype_data_actions_v2`, as do generated value bindings and keyed request writes, and an
+`{object}` value `prototype_data_actions_v3`. The
 host refuses a show, or a patch whose resulting spec contains one, on a device without it. It uses
 the same gate registry as every other capability (`PROTOTYPE_SPEC_CAPABILITY_GATES`, checked on
 the complete result of `show`, `patch` and `replaceNode`).
@@ -64,6 +65,15 @@ the complete result of `show`, `patch` and `replaceNode`).
 - `value` takes the `emit.context` binding forms except `page`: `{value: json}` (the literal form),
   `{state: key}`, `{data: pointer}` and, in a repeat, `{item: field}` and `{index: true}`. A written
   value is data: no null.
+- On these four writes only (#18826), `{object: {name: binding}}` writes an object. It has 1 to
+  `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` members named like path keys, and each member is one of the
+  five flat forms above or a generated binding (below). Members do not nest and resolve in sorted
+  name order, so a `{generate}` member precedes a `{lastGenerated}` one by name on every platform; a
+  generated member needs `prototype_data_actions_v2` too and counts in the static `lastGenerated`
+  check. A repeat binds `{item}`/`{index}` members per row. A missing member source fails the write
+  like a top-level one. An `upsertData` `key` must start with
+  a member name, and must resolve non-null when that member is a `{value}` literal. The
+  secure-storage and library copy-taint checks read each member.
 - Generated bindings are `{generate: "id"}`, `{now: "epochMs" | "iso"}` and `{lastGenerated: true}`.
   They work in data-action values, setState values, request body/header/query bindings and selectors.
   Exact one-key generated objects inside `{value: json}` expand recursively. Object members resolve

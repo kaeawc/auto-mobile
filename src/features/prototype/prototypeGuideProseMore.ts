@@ -236,7 +236,10 @@ written:
 
 \`value\` uses the emit.context binding forms except \`page\`: \`{value: json}\` is the literal,
 \`{state: key}\` reads state, \`{data: pointer}\` reads data, and \`{item: field}\` and
-\`{index: true}\` read the repeat row (repeat only). A written value must be data: strings, booleans,
+\`{index: true}\` read the repeat row (repeat only). \`{object: {title: {state: "draft"}, done: {value: false}}}\`
+writes an object built from 1-16 named members, each one of those five flat forms (no nesting), so an
+\`appendData\` of it adds a whole new row from a text field; an \`upsertData\` key must start with a member.
+A missing member source fails the write. A written value must be data: strings, booleans,
 finite numbers, arrays and objects, without null. Inside a repeat, a whole \`{index}\` segment of
 \`path\`, as in \`/data/cart/{index}\`, is bound to the current row; \`{index}\` anywhere else, or
 \`{alias.field}\`, is rejected.
@@ -292,8 +295,9 @@ has written a prototype's data, a patch with \`/data\` ops needs \`baseRevision\
 newer than that revision touched an overlapping path (\`data\` lists those paths). A \`show\` makes its
 own \`data\` authoritative again and clears the history.
 
-Data actions require \`prototype_data_actions_v1\`. A show or patch result that contains one is
-refused on a device without it, before anything is shown or sent.
+Data actions require \`prototype_data_actions_v1\`, and an \`{object}\` value also
+\`prototype_data_actions_v3\`. A show or patch result that contains one is refused on a device without
+it, before anything is shown or sent.
 
 
 ### Realtime channels

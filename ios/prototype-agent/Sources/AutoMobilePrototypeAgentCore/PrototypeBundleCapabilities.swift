@@ -185,6 +185,8 @@ enum PrototypeBundleCapabilities {
         if ["setData", "appendData", "prependData", "upsertData", "removeData"]
             .contains(type ?? "") { names.insert("prototype_data_actions_v1") }
         if PrototypeGeneratedValues.needsDataV2(fields) { names.insert("prototype_data_actions_v2") }
+        if ["setData", "appendData", "prependData", "upsertData"].contains(type ?? ""),
+           fields["value"]?.objectFields?["object"] != nil { names.insert("prototype_data_actions_v3") }
         if type == "upsertData" ||
             (type == "appendData" && fields["maxItems"] != nil) || PrototypeChannels
             .needsValueCapability(fields) { names.insert("prototype_platform_realtime_v1") }

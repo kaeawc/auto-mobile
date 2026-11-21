@@ -47,6 +47,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeMapNode
 import dev.jasonpearson.automobile.protocol.PrototypeMenuEntry
 import dev.jasonpearson.automobile.protocol.PrototypeMenuNode
 import dev.jasonpearson.automobile.protocol.PrototypeNode
+import dev.jasonpearson.automobile.protocol.PrototypeObjectDataValue
 import dev.jasonpearson.automobile.protocol.PrototypePagerNode
 import dev.jasonpearson.automobile.protocol.PrototypePasteButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypePrependDataAction
@@ -86,6 +87,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import dev.jasonpearson.automobile.protocol.PrototypeTooltipNode
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
+import dev.jasonpearson.automobile.protocol.PrototypeUpsertDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeValidityKeys
 import dev.jasonpearson.automobile.protocol.PrototypeVideoPlayerNode
 import dev.jasonpearson.automobile.protocol.PrototypeWebViewNode
@@ -939,13 +941,15 @@ private fun PrototypeAction.boundDataAction(instance: RepeatInstance): Prototype
     is PrototypeSetDataAction ->
       copy(
         path = instance.dataPath(path),
-        value = instance.dataValue(value),
+        value = instance.dataActionValue(value),
         where = where?.boundWhere(instance),
       )
     is PrototypePrependDataAction ->
-      copy(path = instance.dataPath(path), value = instance.dataValue(value))
+      copy(path = instance.dataPath(path), value = instance.dataActionValue(value))
     is PrototypeAppendDataAction ->
-      copy(path = instance.dataPath(path), value = instance.dataValue(value))
+      copy(path = instance.dataPath(path), value = instance.dataActionValue(value))
+    is PrototypeUpsertDataAction ->
+      copy(path = instance.dataPath(path), value = instance.dataActionValue(value))
     is PrototypeRemoveDataAction ->
       copy(path = instance.dataPath(path), where = where?.boundWhere(instance))
     else -> null
@@ -967,6 +971,15 @@ private fun RepeatInstance.requestEntry(entry: JsonElement): JsonElement =
 /** `{item}` and `{index}` become literals of this row; `{state}` keys interpolate. */
 private fun RepeatInstance.dataValue(binding: EmitContextBinding): EmitContextBinding =
   PrototypeRepeatTemplate.bindBinding(
+    binding,
+    alias,
+    item.mapValues { (_, value) -> EmitContextResolver.scalar(value) },
+    index,
+  )
+
+/** A data action's value: an `{object}` (#18826) binds each member like [dataValue]. */
+private fun RepeatInstance.dataActionValue(binding: EmitContextBinding): EmitContextBinding =
+  PrototypeObjectDataValue.bindToRow(
     binding,
     alias,
     item.mapValues { (_, value) -> EmitContextResolver.scalar(value) },

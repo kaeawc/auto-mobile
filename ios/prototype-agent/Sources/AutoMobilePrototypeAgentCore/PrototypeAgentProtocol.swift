@@ -47,6 +47,7 @@ enum PrototypeAgentProtocol {
         dataModelCapability,
         dataActionsCapability,
         dataActionsV2Capability,
+        dataActionsV3Capability,
         networkCapability,
         networkDeviceCapability,
         networkUploadCapability,
@@ -193,6 +194,8 @@ enum PrototypeAgentProtocol {
     /// `change` event named for the `/data/...` path with `{op, value?, revision}` (#12519). Same name
     /// as the CtrlProxy capability; the host refuses a spec using one on an agent without it.
     static let dataActionsV2Capability = "prototype_data_actions_v2"
+    /// `{object}` data-action values whose members are flat bindings (#18826).
+    static let dataActionsV3Capability = "prototype_data_actions_v3"
     static let dataActionsCapability = "prototype_data_actions_v1"
     /// The `request` action (#12529): host-proxied calls (`via: "host"`, the default) through
     /// `prototype_request` / `prototype_response` frames, and the `/data`, `__meta`, `statusKey` and

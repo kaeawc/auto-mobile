@@ -101,7 +101,7 @@
             pending.continuation.resume(returning: outcome)
         }
 
-        private nonisolated static func authorization(_ status: UNAuthorizationStatus)
+        nonisolated static func authorization(_ status: UNAuthorizationStatus)
             -> PrototypeNotificationAuthorization
         {
             switch status {

@@ -2205,8 +2205,8 @@ data class PrototypePlatformHandlers(
 )
 
 /**
- * The root `requires` block (#14294): platform modules, permissions, background needs and
- * explicit capabilities.
+ * The root `requires` block (#14294): platform modules, permissions, background needs and explicit
+ * capabilities.
  */
 @Serializable
 data class PrototypeRequires(

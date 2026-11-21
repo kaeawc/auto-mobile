@@ -222,9 +222,6 @@ export const nodeActionTypeRefs = {
   textSpan: {
     kotlin: "PrototypeTextSpan",
   },
-  linkify: {
-    kotlin: "PrototypeLinkifyOptions",
-  },
   iconName: {
     kotlin: "String",
   },

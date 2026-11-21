@@ -115,11 +115,21 @@ class PrototypeChannelController(
   private val dirty = linkedSetOf<String>()
   private var flush: Job? = null
   private var started = false
+  private var closed = false
   // Set before close() waits for the lock, so work suspended in a sink call sees it at once.
   @Volatile private var closing = false
 
   init {
     scope.launch { for (work in inbox) lock.withLock { if (!closing) report { work() } } }
+  }
+
+  /**
+   * Dismissal began. Takes no lock, so it holds at once: work still waiting for the lock (a send
+   * queued behind a blocked flush, a transport callback, a timer) does nothing, and [close] then
+   * closes the connections.
+   */
+  fun beginClose() {
+    closing = true
   }
 
   /** The current snapshot of [channel], or null when it is not declared. */
@@ -179,23 +189,38 @@ class PrototypeChannelController(
     null
   }
 
-  /** `realtime.send`: sent when open, queued while (re)connecting, refused otherwise. */
-  suspend fun send(channel: String, data: String): PrototypeChannelError? = lock.withLock {
+  /**
+   * `realtime.send`: sent when open, queued while (re)connecting, refused otherwise. [wanted] is
+   * checked under the lock, so a caller that gave up while waiting for it sends nothing.
+   */
+  suspend fun send(
+    channel: String,
+    data: String,
+    wanted: () -> Boolean = { true },
+  ): PrototypeChannelError? = lock.withLock {
     val slot = slots[channel] ?: return@withLock unknown(channel)
+    if (closing || !wanted()) {
+      return@withLock PrototypeChannelError(
+        PrototypeChannelError.NETWORK,
+        "The channels are closed",
+      )
+    }
     sendError(slot, data)
   }
 
   /** Dismiss or reset: closes every connection; the sink hears nothing more. */
   suspend fun close() {
-    if (closing) return
+    if (closed) return
+    closed = true
     closing = true
-    // closing is already set, so a later close() returns at once: this cleanup must finish even if
+    // closed is already set, so a later close() returns at once: this cleanup must finish even if
     // the caller is cancelled while a sink call holds the lock.
     withContext(NonCancellable) {
       lock.withLock {
         flush?.cancel()
         window.clear()
-        slots.values.forEach(::abandon)
+        // One connection whose close throws must not leave the others open.
+        slots.values.forEach { slot -> report { abandon(slot) } }
         slots.clear()
       }
       inbox.close()

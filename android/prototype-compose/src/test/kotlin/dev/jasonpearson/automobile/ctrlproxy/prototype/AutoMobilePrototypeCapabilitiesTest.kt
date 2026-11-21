@@ -41,8 +41,6 @@ class AutoMobilePrototypeCapabilitiesTest {
   private val exclusions =
     setOf(
       "prototype_links_v1", // Only the stamped app shell delivers inbound URLs.
-      // Validation only; no remote image loader is implemented.
-      "prototype_remote_image_v1",
       "prototype_scroll_edge_effect_v1", // Contract only until Android edge rendering in PR 2.
       // Realtime transport, routing and lifecycle remain owed by the runtime slices.
       "prototype_platform_realtime_v1",
@@ -154,25 +152,21 @@ class AutoMobilePrototypeCapabilitiesTest {
   }
 
   @Test
-  fun `remote images are refused by the advertised renderer`() {
+  fun `remote images are accepted by the advertised renderer on every sdk`() {
     val spec =
       """{"id":"remote","window":{"placement":{"type":"fullscreen"}},"root":{"type":"image","url":"https://example.com/a"}}"""
     for (sdk in listOf(32, 33, 36)) {
       val capabilities = AutoMobilePrototype.capabilitiesForSdk(sdk)
-      assertTrue("prototype_remote_image_v1" !in capabilities)
-      val refused = PrototypeSpecValidator.validate(spec, supportedCapabilities = capabilities)
-      assertTrue(refused is PrototypeSpecValidation.Failure)
+      assertTrue("prototype_remote_image_v1" in capabilities)
       assertTrue(
-        (refused as PrototypeSpecValidation.Failure)
-          .error
-          .message
-          .contains("prototype_remote_image_v1"),
+        PrototypeSpecValidator.validate(spec, supportedCapabilities = capabilities)
+          is PrototypeSpecValidation.Success,
       )
       assertTrue(
         PrototypeSpecValidator.validate(
           spec,
-          supportedCapabilities = capabilities + "prototype_remote_image_v1",
-        ) is PrototypeSpecValidation.Success,
+          supportedCapabilities = capabilities - "prototype_remote_image_v1",
+        ) is PrototypeSpecValidation.Failure,
       )
     }
   }

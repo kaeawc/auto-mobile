@@ -1,16 +1,22 @@
 # waaagh App broker (kaeawc/waaagh#268): acts as the waaagh-bot GitHub App for a cloud session that
-# must never see the App's key. A session dispatches it (waaagh's app-broker.sh) with op=status to
+# must never see the App's key. A session starts it (waaagh's app-broker.sh) with op=status to
 # post the `orchestrate/review` commit status on a PR's head, or op=merge to merge that PR at that
 # head once the App's own `orchestrate/review` there is success. The App token is minted here from
 # this repository's GH_APP_ID / GH_APP_PRIVATE_KEY secrets, scoped to this repository and to the one
 # permission the write needs, used once and never printed or passed on. Reads use the workflow's
 # own read-only GITHUB_TOKEN.
+# Triggers: a `repository_dispatch` event of type app-broker, with the request in client_payload
+# (op, pr, sha, state, description, method). Sending one needs only Contents write, which a Claude
+# Code cloud session has; workflow_dispatch needs Actions write, which it does not. workflow_dispatch
+# stays for a manual run from the Actions tab. Both are checked the same way.
 # Callers: the actors listed in the APP_BROKER_ACTORS repository variable (comma-separated logins),
 # else the repository owner. Copy this file unchanged to .github/workflows/app-broker.yml in each
 # target repository; waaagh's copy is tested to match it.
 name: app-broker
 
 on:
+  repository_dispatch:
+    types: [app-broker]
   workflow_dispatch:
     inputs:
       op:
@@ -50,7 +56,7 @@ permissions:
   statuses: read
 
 concurrency:
-  group: app-broker-${{ github.event.inputs.pr }}
+  group: app-broker-${{ github.event.inputs.pr || github.event.client_payload.pr }}
   cancel-in-progress: false
 
 jobs:
@@ -62,12 +68,12 @@ jobs:
       ACTOR: ${{ github.actor }}
       ALLOWED: ${{ vars.APP_BROKER_ACTORS }}
       OWNER: ${{ github.repository_owner }}
-      OP: ${{ github.event.inputs.op }}
-      PR: ${{ github.event.inputs.pr }}
-      SHA: ${{ github.event.inputs.sha }}
-      STATE: ${{ github.event.inputs.state }}
-      DESCRIPTION: ${{ github.event.inputs.description }}
-      METHOD: ${{ github.event.inputs.method }}
+      OP: ${{ github.event.inputs.op || github.event.client_payload.op }}
+      PR: ${{ github.event.inputs.pr || github.event.client_payload.pr }}
+      SHA: ${{ github.event.inputs.sha || github.event.client_payload.sha }}
+      STATE: ${{ github.event.inputs.state || github.event.client_payload.state }}
+      DESCRIPTION: ${{ github.event.inputs.description || github.event.client_payload.description }}
+      METHOD: ${{ github.event.inputs.method || github.event.client_payload.method }}
     steps:
       - name: Check the caller and the request
         env:
@@ -76,7 +82,10 @@ jobs:
           set -euo pipefail
           allowed=${ALLOWED:-$OWNER}
           case ",${allowed// /}," in *",$ACTOR,"*) ;; *) echo "::error::$ACTOR may not use the broker (APP_BROKER_ACTORS: $allowed)"; exit 1 ;; esac
+          case "$OP" in status | merge) ;; *) echo "::error::op must be status or merge"; exit 1 ;; esac
           [[ "$PR" =~ ^[1-9][0-9]*$ ]] || { echo "::error::pr must be a number"; exit 1; }
+          [[ "$OP" != status || "$STATE" =~ ^(success|failure|pending|error)$ ]] || { echo "::error::op=status needs state: success, failure, pending or error"; exit 1; }
+          [[ -z "$METHOD" || "$METHOD" =~ ^(squash|merge|rebase)$ ]] || { echo "::error::method must be squash, merge or rebase"; exit 1; }
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be 40 hex characters"; exit 1; }
           ((${#DESCRIPTION} <= 140)) || { echo "::error::description is over 140 characters"; exit 1; }
           pr=$(gh api "repos/$GH_REPO/pulls/$PR")
@@ -92,12 +101,12 @@ jobs:
           app-id: ${{ secrets.GH_APP_ID }}
           private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
           repositories: ${{ github.event.repository.name }}
-          permission-statuses: ${{ github.event.inputs.op == 'status' && 'write' || '' }}
-          permission-contents: ${{ github.event.inputs.op == 'merge' && 'write' || '' }}
-          permission-pull-requests: ${{ github.event.inputs.op == 'merge' && 'write' || '' }}
+          permission-statuses: ${{ env.OP == 'status' && 'write' || '' }}
+          permission-contents: ${{ env.OP == 'merge' && 'write' || '' }}
+          permission-pull-requests: ${{ env.OP == 'merge' && 'write' || '' }}
 
       - name: Post the orchestrate/review status
-        if: github.event.inputs.op == 'status'
+        if: env.OP == 'status'
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
@@ -106,7 +115,7 @@ jobs:
             -f description="$DESCRIPTION" --jq '"posted \(.context)=\(.state) on \(.sha // "'"$SHA"'") by \(.creator.login)"'
 
       - name: Merge at the reviewed head
-        if: github.event.inputs.op == 'merge'
+        if: env.OP == 'merge'
         env:
           READ_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ steps.app.outputs.token }}
@@ -118,4 +127,4 @@ jobs:
             jq -s -c '[.[][] | select(.context == "orchestrate/review")] | sort_by(.updated_at // .created_at) | last // {}')
           [[ "$(jq -r .state <<<"$latest")" == success ]] || { echo "::error::orchestrate/review at $SHA is not success: $(jq -r '.state // "absent"' <<<"$latest")"; exit 1; }
           [[ "$(jq -r .creator.login <<<"$latest")" == "$BOT" ]] || { echo "::error::orchestrate/review at $SHA was posted by $(jq -r .creator.login <<<"$latest"), not $BOT"; exit 1; }
-          gh api -X PUT "repos/$GH_REPO/pulls/$PR/merge" -f sha="$SHA" -f merge_method="$METHOD" --jq '"merged=\(.merged) sha=\(.sha) \(.message)"'
+          gh api -X PUT "repos/$GH_REPO/pulls/$PR/merge" -f sha="$SHA" -f merge_method="${METHOD:-squash}" --jq '"merged=\(.merged) sha=\(.sha) \(.message)"'

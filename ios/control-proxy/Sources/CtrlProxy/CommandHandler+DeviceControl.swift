@@ -92,11 +92,36 @@ extension CommandHandler {
         }
     }
 
+    /// A foldable ignores XCUIDevice for its panels on iOS 27 (#17047), so a panel rotate always
+    /// posts the pose, and refuses where the pose path is unavailable (not a simulator).
+    private func performFoldableRotation(_ target: RotateTarget, panel: FoldablePanel) async throws -> RotateResult {
+        let appAxisBefore = await readAppAxis()
+        let decision = FoldableRotateDecision(target: target, appAxisBefore: appAxisBefore)
+        do {
+            try await simulatedOrientationSetter.setDeviceOrientation(panel.deviceOrientation(for: target))
+        } catch HingeAngleError.unsupportedPlatform {
+            return decision.physicalDeviceRefusal()
+        }
+        let deadline = rotationTimer.now() + RotateDecision.timeoutMs
+        while true {
+            let appAxis = await readAppAxis()
+            let now = rotationTimer.now()
+            let outcome = decision.poll(appAxis: appAxis, deadlineReached: now >= deadline)
+            if let result = outcome.result { return result }
+            await rotationTimer.wait(milliseconds: min(RotateDecision.pollIntervalMs, deadline - now))
+        }
+    }
+
     func handleRotate(_ request: RequestRotate, startTime: Date) async throws -> RotateResponse {
         guard let target = RotateTarget(request.orientation) else {
             throw CommandError.invalidParameter("orientation", request.orientation)
         }
-        let result = try await performRotation(target)
+        let result: RotateResult
+        if let panel = request.panel.flatMap(FoldablePanel.init(rawValue:)) {
+            result = try await performFoldableRotation(target, panel: panel)
+        } else {
+            result = try await performRotation(target)
+        }
         return RotateResponse(
             requestId: request.requestId,
             success: result.error == nil,

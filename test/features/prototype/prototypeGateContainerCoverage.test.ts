@@ -178,6 +178,17 @@ const fixtures: Record<string, Node> = {
   prototype_strings_v1: { ...label, text: "{t:title}" },
   prototype_remote_image_v1: { type: "image", url: "https://example.com/image.png" },
   prototype_semantics_v1: { ...label, semantics: { heading: true } },
+  prototype_nested_repeat_v1: {
+    type: "column",
+    repeat: { items: [{ lines: [{ sku: "a" }] }], as: "order" },
+    children: [
+      {
+        type: "column",
+        repeat: { items: { field: "lines" }, as: "line" },
+        children: [{ type: "text", text: "{line.sku}" }],
+      },
+    ],
+  },
   prototype_derive_v1: {
     type: "column",
     repeat: { items: { derived: "results" }, as: "item" },

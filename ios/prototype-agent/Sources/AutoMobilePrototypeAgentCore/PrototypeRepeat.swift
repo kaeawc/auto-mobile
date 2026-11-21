@@ -5,7 +5,7 @@ import Foundation
 /// A `box`/`row`/`column` with `repeat: {items, as}` renders its children once per item, in item
 /// order. Expansion runs on the raw node tree before it is decoded, so the renderer and session
 /// only ever see concrete nodes. The host validator has already checked the template (fields exist
-/// in every item, no nested `repeat`, expanded limits), so this only binds values.
+/// in every item, bounded nested `repeat`, expanded limits), so this only binds values.
 ///
 /// Bound per instance, as on Android: a `text` node's `text`, the component label, title and
 /// button fields listed on `bindTextFields`; `setState` values and `emit` names in
@@ -28,7 +28,7 @@ enum PrototypeRepeat {
     /// interpolation. Scalars, not `Character`s: a combining mark after `}` would otherwise fuse
     /// with it into one grapheme cluster that is not `}`, unlike the host's UTF-16 scan
     /// (`templateSegments` in src/features/prototype/prototypeTemplate.ts) and Kotlin's.
-    static func segments(_ text: String, alias: String) -> [Segment] {
+    static func segments(_ text: String, alias: String, outerAlias: String? = nil) -> [Segment] {
         let scalars = text.unicodeScalars
         var segments: [Segment] = []
         var literal = String.UnicodeScalarView()
@@ -38,7 +38,8 @@ enum PrototypeRepeat {
             literal = String.UnicodeScalarView()
         }
         while cursor < scalars.endIndex {
-            let token = scalars[cursor] == "{" ? placeholder(in: scalars, openingAt: cursor, alias: alias) : nil
+            let token = scalars[cursor] == "{" ?
+                placeholder(in: scalars, openingAt: cursor, alias: alias, outerAlias: outerAlias) : nil
             if let (segment, end) = token {
                 flush()
                 segments.append(segment)
@@ -54,18 +55,29 @@ enum PrototypeRepeat {
 
     /// Field `expand` stamps on the first child of each keyed repeat row; it is not part of the authored contract.
     static let rowKeyField = "_repeatKey"
+    static let identityField = "_repeatIdentity"
 
-    /// Drops the expansion-only row key everywhere under `value`, so a post-expansion structural
+    /// Drops expansion-only row keys and identities everywhere under `value`, so a post-expansion structural
     /// check sees only authored fields (#15815). Authored specs are contract-checked before expansion.
     static func withoutRowKeys(_ value: JSONValue) -> JSONValue {
         switch value {
         case var .object(fields):
             fields[rowKeyField] = nil
+            fields[identityField] = nil
             return .object(fields.mapValues(withoutRowKeys))
         case let .array(items):
             return .array(items.map(withoutRowKeys))
         default:
             return value
+        }
+    }
+
+    /// Raw rows are needed only when a descendant reads a collection from its enclosing item.
+    static func containsFieldSource(_ node: JSONValue) -> Bool {
+        guard let fields = node.objectFields else { return false }
+        if fields["repeat"]?.objectFields?["items"]?.objectFields?["field"] != nil { return true }
+        return PrototypeStrictRepeats.children(fields, path: "root").contains {
+            containsFieldSource(.object($0.value))
         }
     }
 
@@ -77,37 +89,52 @@ enum PrototypeRepeat {
     )
         -> JSONValue
     {
-        guard case var .object(fields) = node else { return node }
+        expand(node, outer: nil, formatter: formatter, environment: environment)
+    }
+
+    static func expand(
+        _ node: JSONValue, outer: PrototypeRepeatInstance?, formatter: PrototypeValueFormatter,
+        environment: PrototypeFormatEnvironment
+    )
+        -> JSONValue
+    {
+        guard var fields = (outer?.bind(node, descendants: false) ?? node).objectFields else { return node }
         let lazy = fields["type"] == .string("list")
         if !lazy, case let .array(children)? = fields["children"] {
-            let expanded: [JSONValue] = if case let .object(spec)? = fields["repeat"] {
-                instances(of: spec, formatter: formatter, environment: environment).flatMap { instance in
+            if let spec = fields["repeat"]?.objectFields {
+                fields["children"] = .array(instances(
+                    of: spec, formatter: formatter, environment: environment, outer: outer
+                ).flatMap { instance in
                     children.enumerated().map { index, child in
-                        var bound = instance.bind(child)
-                        // As on Android, the first template child anchors the repeat row.
-                        if index == 0, let key = spec["key"]?.stringValue,
-                           let value = instance.item[key], var fields = bound.objectFields,
-                           let rendered = PrototypeScrollTarget.scalarKey(value)
-                        {
-                            fields[rowKeyField] = .string(rendered)
-                            bound = .object(fields)
+                        var bound = expand(child, outer: instance, formatter: formatter, environment: environment)
+                        if var anchored = bound.objectFields, let identity = instance.identity {
+                            // Every template child needs an identity; only the first is a scroll anchor.
+                            anchored[identityField] = .string("\(identity)/children[\(index)]")
+                            if index == 0, spec["key"] != nil {
+                                anchored[rowKeyField] = .string(identity)
+                            }
+                            bound = .object(anchored)
                         }
                         return bound
                     }
-                }
+                })
             } else {
-                children
+                fields["children"] = .array(children.map {
+                    expand($0, outer: outer, formatter: formatter, environment: environment)
+                })
             }
-            fields["children"] = .array(expanded.map { expand($0, formatter: formatter, environment: environment) })
         }
         if !lazy { fields["repeat"] = nil }
         let slots = fields["type"] == .string("adaptive") ? PrototypeAdaptive.slots : ["child", "header", "footer"]
         for name in slots {
-            if let child = fields[name] { fields[name] = expand(child, formatter: formatter, environment: environment) }
+            if let child = fields[name] {
+                fields[name] = expand(child, outer: outer, formatter: formatter, environment: environment)
+            }
         }
-        if case let .object(screens)? = fields["screens"] {
-            fields["screens"] = .object(screens
-                .mapValues { expand($0, formatter: formatter, environment: environment) })
+        if let screens = fields["screens"]?.objectFields {
+            fields["screens"] = .object(screens.mapValues {
+                expand($0, outer: outer, formatter: formatter, environment: environment)
+            })
         }
         return .object(fields)
     }
@@ -119,50 +146,62 @@ enum PrototypeRepeat {
     )
         throws
     {
+        try validateDerivedTree(
+            node, path: path, formatter: formatter, environment: environment,
+            outer: nil, names: [], repeatPath: path
+        )
+    }
+
+    private static func validateDerivedTree(
+        _ node: JSONValue, path: String, formatter: PrototypeValueFormatter,
+        environment: PrototypeFormatEnvironment, outer: PrototypeRepeatInstance?,
+        names: Set<String>, repeatPath: String
+    )
+        throws
+    {
         guard let fields = node.objectFields else { return }
-        if let repeated = fields["repeat"]?.objectFields,
-           let derived = repeated["derive"]?.objectFields, !derived.isEmpty
-        {
-            let rows = instances(of: repeated, formatter: formatter, environment: environment)
-            for child in PrototypeStrictRepeats.children(fields, path: path) {
+        if let outer, !names.isEmpty {
+            let own = fields.filter { !["child", "children", "screens", "header", "footer"].contains($0.key) }
+            try derivedBindings(.object(own), path: path, repeatPath: repeatPath, row: outer, names: names)
+        }
+        let repeated = fields["repeat"]?.objectFields
+        let rows = repeated.map { instances(of: $0, formatter: formatter, environment: environment, outer: outer) }
+        let ownNames = Set(repeated?["derive"]?.objectFields?.keys ?? [:].keys)
+        for child in PrototypeStrictRepeats.children(fields, path: path) {
+            if let rows, child.path.hasPrefix("\(path).children[") {
+                let inherited = outer == nil ? Set<String>() : Set(names.map { "outer.\($0)" })
                 for row in rows {
-                    try derivedBindings(
-                        .object(child.value),
-                        path: child.path,
-                        repeatPath: path,
-                        row: row,
-                        names: Set(derived.keys)
+                    try validateDerivedTree(
+                        .object(child.value), path: child.path, formatter: formatter, environment: environment,
+                        outer: row, names: ownNames.union(inherited), repeatPath: path
                     )
                 }
-            }
-            if let key = repeated["key"]?.stringValue, derived[key] != nil {
-                var seen: [[UInt16]: Int] = [:]
-                for row in rows {
-                    guard let value = row.item[key] else {
-                        throw PrototypeContractValidator.invalid(
-                            "\(path).repeat.key",
-                            "Unknown repeat field \(PrototypeContractValidator.quoted(key))"
-                        )
-                    }
-                    let text = value.displayString
-                    let identity = Array(text.utf16)
-                    if let first = seen[identity] {
-                        throw PrototypeContractValidator.invalid(
-                            "\(path).repeat.key",
-                            "Duplicate repeat key \(PrototypeContractValidator.quoted(text)) (items \(first) and \(row.index))"
-                        )
-                    }
-                    seen[identity] = row.index
-                }
+            } else {
+                try validateDerivedTree(
+                    .object(child.value), path: child.path, formatter: formatter, environment: environment,
+                    outer: outer, names: names, repeatPath: repeatPath
+                )
             }
         }
-        for child in PrototypeStrictRepeats.children(fields, path: path) {
-            try validateDerivedRows(
-                .object(child.value),
-                path: child.path,
-                formatter: formatter,
-                environment: environment
-            )
+        // Bindings report invalid state keys and emit names before derived identity collisions.
+        if let rows, let key = repeated?["key"]?.stringValue, ownNames.contains(key) {
+            var seen: [[UInt16]: Int] = [:]
+            for row in rows {
+                guard let value = row.item[key] else {
+                    throw PrototypeContractValidator.invalid(
+                        "\(path).repeat.key", "Unknown repeat field \(PrototypeContractValidator.quoted(key))"
+                    )
+                }
+                let text = value.displayString
+                let identity = Array(text.utf16)
+                if let first = seen[identity] {
+                    throw PrototypeContractValidator.invalid(
+                        "\(path).repeat.key",
+                        "Duplicate repeat key \(PrototypeContractValidator.quoted(text)) (items \(first) and \(row.index))"
+                    )
+                }
+                seen[identity] = row.index
+            }
         }
     }
 
@@ -192,16 +231,21 @@ enum PrototypeRepeat {
         for key in PrototypeContractValidator.sorted(fields.keys) {
             guard !["payload", "repeat", "linkify"].contains(key), let child = fields[key] else { continue }
             let fieldPath = PrototypeContractValidator.keyPath(path, key)
-            if let text = child.stringValue, segments(text, alias: row.alias).contains(where: {
-                if case let .field(name) = $0 { return names.contains(name) }; return false
-            }) {
+            if let text = child.stringValue,
+               segments(text, alias: row.alias, outerAlias: row.outerAlias).contains(where: {
+                   if case let .field(name) = $0 { return names.contains(name) }; return false
+               })
+            {
                 let bound = row.interpolate(text)
                 if keyFields.contains(key), !(key == "key" && fields["type"] == .string("upsertData")),
                    !isFieldName(bound)
                 {
                     throw PrototypeContractValidator.invalid(
-                        "\(repeatPath).repeat.items[\(row.index)]",
-                        "Bound state key \(PrototypeContractValidator.quoted(bound)) is invalid"
+                        row
+                            .outerAlias == nil ? "\(repeatPath).repeat.items[\(row.index)]" :
+                            "\(repeatPath).repeat.items.field",
+                        "Bound state key \(PrototypeContractValidator.quoted(bound)) is invalid" +
+                            (row.outerAlias == nil ? "" : " (repeat item \(row.index))")
                     )
                 }
                 if key == "name", fields["type"] == .string("emit") {
@@ -222,11 +266,12 @@ enum PrototypeRepeat {
         }
     }
 
-    /// `key` is accepted but rows keep positional identity until keyed patching (#11675).
+    /// Compose outer and inner keys, using an index only for a repeat without a declared key.
     private static func instances(
         of spec: [String: JSONValue],
         formatter: PrototypeValueFormatter,
-        environment: PrototypeFormatEnvironment
+        environment: PrototypeFormatEnvironment,
+        outer: PrototypeRepeatInstance? = nil
     )
         -> [PrototypeRepeatInstance]
     {
@@ -235,18 +280,37 @@ enum PrototypeRepeat {
                 .map { try JSONDecoder().decode([String: PrototypeDerivedEntry].self, from: JSONEncoder().encode($0)) }
         ) ??
             [:]
-        guard case let .string(alias)? = spec["as"], case let .array(items)? = spec["items"] else { return [] }
+        guard let alias = spec["as"]?.stringValue else { return [] }
+        let source: JSONValue?
+        if let field = spec["items"]?.objectFields?["field"]?.stringValue {
+            source = (outer?.sourceItem ?? outer?.item)?[field]
+        } else { source = spec["_sourceItems"] ?? spec["items"] }
+        guard case let .array(items)? = source else { return [] }
         return items.enumerated().map { index, item in
             guard case let .object(fields) = item else { return PrototypeRepeatInstance(
                 alias: alias,
                 item: [:],
                 index: index
             ) }
+            var values = PrototypeDerivedValues.project(
+                PrototypeDataValues.project(fields).objectFields ?? [:],
+                derive: derive, formatter: formatter, environment: environment
+            )
+            if let outer {
+                for (name, value) in outer.item {
+                    values["outer.\(name)"] = value
+                }
+                values["$outerIndex"] = .number(Double(outer.index))
+            }
+            let key = spec["key"]?.stringValue
+            let ownIdentity = key.flatMap { values[$0] }.flatMap(PrototypeScrollTarget.scalarKey)
+                ?? (key == nil ? String(index) : nil)
+            let identity = ownIdentity.map { value in
+                outer.map { "\($0.identity ?? String($0.index))/\(value)" } ?? value
+            }
             return PrototypeRepeatInstance(
-                alias: alias,
-                item: PrototypeDerivedValues
-                    .project(fields, derive: derive, formatter: formatter, environment: environment),
-                index: index
+                alias: alias, item: values, index: index, outerAlias: outer?.alias, sourceItem: fields,
+                identity: identity
             )
         }
     }
@@ -363,12 +427,25 @@ enum PrototypeRepeat {
     private typealias Scalars = String.UnicodeScalarView
     private typealias Token = (segment: Segment, end: Scalars.Index)
 
-    private static func placeholder(in scalars: Scalars, openingAt open: Scalars.Index, alias: String) -> Token? {
+    private static func placeholder(
+        in scalars: Scalars, openingAt open: Scalars.Index, alias: String, outerAlias: String?
+    )
+        -> Token?
+    {
         let start = scalars.index(after: open)
         guard let close = scalars[start...].firstIndex(of: "}") else { return nil }
         let inner = Array(scalars[start ..< close])
         let end = scalars.index(after: close)
         if inner == Array("index".unicodeScalars) { return (.index, end) }
+        if let outerAlias {
+            let token = String(String.UnicodeScalarView(inner))
+            if token == "outerIndex" { return (.field("$outerIndex"), end) }
+            let prefix = "\(outerAlias)."
+            if token.hasPrefix(prefix) {
+                let field = String(token.dropFirst(prefix.count))
+                return isFieldName(field) ? (.field("outer.\(field)"), end) : nil
+            }
+        }
         let prefix = Array("\(alias).".unicodeScalars)
         guard inner.starts(with: prefix) else { return nil }
         var name = String.UnicodeScalarView()
@@ -383,7 +460,7 @@ enum PrototypeRepeat {
     }
 }
 
-/// Only emit-context scope checks are added here; full spec cross-field validation stays on the host.
+/// Repeat nesting and emit-context scope checks; full spec cross-field validation stays on the host.
 extension PrototypeRepeat {
     static func validateEmitContexts(_ root: JSONValue, data: [String: JSONValue]?) throws {
         var repeats = PrototypeRepeatData(data: data)
@@ -393,6 +470,9 @@ extension PrototypeRepeat {
     private struct EmitScope {
         let alias: String
         let items: [JSONValue]
+        /// Unprojected rows are used only to resolve an inner repeat's collection source.
+        let sourceItems: [JSONValue]
+        var outerAlias: String?
     }
 
     private static func emitChildScope(
@@ -406,17 +486,33 @@ extension PrototypeRepeat {
         if case let .object(spec)? = fields["repeat"], let alias = spec["as"]?.stringValue {
             let items: JSONValue
             if case let .object(source)? = spec["items"], let pointer = source["path"]?.stringValue {
-                items = repeats.items(pointer)
+                items = PrototypeDataPointer.resolve(repeats.data, pointer: pointer) ?? .array([])
+            } else if let field = spec["items"]?.objectFields?["field"]?.stringValue, let scope {
+                items = .array(scope.sourceItems.enumerated().flatMap { index, outer in
+                    PrototypeStrictBindings.array(outer.objectFields?[field]).map { row in
+                        var values = PrototypeDataValues.project(row.objectFields ?? [:]).objectFields ?? [:]
+                        for (name, value) in scope.items[index].objectFields ?? [:] {
+                            values["outer.\(name)"] = value
+                        }
+                        return .object(values)
+                    }
+                })
             } else {
-                items = spec["items"] ?? .array([])
+                items = spec["_sourceItems"] ?? spec["items"] ?? .array([])
             }
             if case let .array(rows) = items {
                 let names = spec["derive"]?.objectFields?.keys ?? [:].keys
                 let derivedFields = Dictionary(uniqueKeysWithValues: names.map { ($0, JSONValue.string("")) })
                 let projected = rows.map { row in
-                    JSONValue.object((row.objectFields ?? [:]).merging(derivedFields) { old, _ in old })
+                    let values = spec["items"]?.objectFields?["field"] == nil
+                        ? PrototypeDataValues.project(row.objectFields ?? [:]).objectFields ?? [:]
+                        : row.objectFields ?? [:]
+                    return JSONValue.object(values.merging(derivedFields) { old, _ in old })
                 }
-                childScope = EmitScope(alias: alias, items: projected)
+                childScope = EmitScope(
+                    alias: alias, items: projected, sourceItems: rows,
+                    outerAlias: spec["items"]?.objectFields?["field"] == nil ? nil : scope?.alias
+                )
             }
         }
         return childScope
@@ -428,6 +524,11 @@ extension PrototypeRepeat {
         throws
     {
         guard case let .object(fields) = node else { return }
+        if scope != nil, let repeated = fields["repeat"]?.objectFields,
+           repeated["items"]?.objectFields?["field"]?.stringValue == nil
+        {
+            throw PrototypeLimits.violation("\(path).repeat", "Nested repeat is not supported")
+        }
         for name in ["onTap", "onLongPress", "onDoubleTap", "onEndReached", "onAppear"] {
             try validateEmitActions(fields[name], path: "\(path).\(name)", scope: scope)
         }
@@ -495,7 +596,7 @@ extension PrototypeRepeat {
                 .stringValue { try requireEmitField(field, at: bindingPath, scope: scope) }
         }
         if let key = binding["state"]?.stringValue, let scope {
-            for segment in segments(key, alias: scope.alias) {
+            for segment in segments(key, alias: scope.alias, outerAlias: scope.outerAlias) {
                 if case let .field(field) = segment { try requireEmitField(
                     field,
                     at: "\(bindingPath).state",
@@ -573,9 +674,12 @@ struct PrototypeRepeatInstance {
     let alias: String
     let item: [String: JSONValue]
     let index: Int
+    var outerAlias: String?
+    var sourceItem: [String: JSONValue]?
+    var identity: String?
 
     /// One template node bound to this instance; descendants are bound too.
-    func bind(_ node: JSONValue) -> JSONValue {
+    func bind(_ node: JSONValue, descendants: Bool = true) -> JSONValue {
         guard case var .object(fields) = node else { return node }
         PrototypeRepeat.bindTextFields(&fields, transform: interpolate)
         bindComponentActions(&fields)
@@ -609,12 +713,13 @@ struct PrototypeRepeatInstance {
                 return .object(entryFields)
             })
         }
+        guard descendants else { return .object(fields) }
         if case let .array(children)? = fields["children"] {
-            fields["children"] = .array(children.map(bind))
+            fields["children"] = .array(children.map { bind($0) })
         }
         if let child = fields["child"] { fields["child"] = bind(child) }
         if case let .object(screens)? = fields["screens"] {
-            fields["screens"] = .object(screens.mapValues(bind))
+            fields["screens"] = .object(screens.mapValues { bind($0) })
         }
         return .object(fields)
     }
@@ -878,7 +983,7 @@ struct PrototypeRepeatInstance {
     /// exactly one placeholder keeps the item's own type.
     func interpolateScalar(_ value: JSONValue) -> JSONValue {
         guard case let .string(text) = value else { return value }
-        let segments = PrototypeRepeat.segments(text, alias: alias)
+        let segments = PrototypeRepeat.segments(text, alias: alias, outerAlias: outerAlias)
         if segments.count == 1 {
             switch segments[0] {
             case .index: return .number(Double(index))
@@ -891,7 +996,7 @@ struct PrototypeRepeatInstance {
 
     /// Unknown fields cannot occur after validation; they are left as their literal placeholder.
     func interpolate(_ text: String) -> String {
-        PrototypeRepeat.segments(text, alias: alias).map { segment in
+        PrototypeRepeat.segments(text, alias: alias, outerAlias: outerAlias).map { segment in
             switch segment {
             case let .literal(literal): literal
             case .index: String(index)

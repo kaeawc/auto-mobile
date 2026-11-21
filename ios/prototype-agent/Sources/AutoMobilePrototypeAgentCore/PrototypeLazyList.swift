@@ -45,7 +45,7 @@ enum PrototypeLazyList {
 
     /// The row's template with its item bound and data resolved, before decoding.
     static func resolvedRow(
-        node: PrototypeNode, data: [String: JSONValue]?, index: Int
+        node: PrototypeNode, data: [String: JSONValue]?, derived: [String: JSONValue] = [:], index: Int
     )
         -> (key: String, json: JSONValue)?
     {
@@ -54,37 +54,54 @@ enum PrototypeLazyList {
               items.indices.contains(index) else { return nil }
         let fields = PrototypeDataValues.project(items[index].objectFields ?? [:]).objectFields ?? [:]
         let bound = PrototypeRepeatInstance(alias: spec.as, item: fields, index: index).bind(raw)
-        return (fields[spec.key]?.displayString ?? "", PrototypeDataResolver.resolveRoot(bound, data: data))
+        return (
+            fields[spec.key]?.displayString ?? "",
+            PrototypeDataResolver.resolveRoot(bound, data: data, derived: derived)
+        )
     }
 
-    static func row(node: PrototypeNode, data: [String: JSONValue]?, index: Int) throws -> Row? {
-        guard let resolved = resolvedRow(node: node, data: data, index: index) else { return nil }
+    static func row(
+        node: PrototypeNode, data: [String: JSONValue]?, derived: [String: JSONValue] = [:], index: Int
+    )
+        throws -> Row?
+    {
+        guard let resolved = resolvedRow(node: node, data: data, derived: derived, index: index) else { return nil }
         let row = try JSONDecoder().decode(PrototypeNode.self, from: JSONEncoder().encode(resolved.json))
         return Row(key: resolved.key, index: index, node: row)
     }
 
-    static func rows(node: PrototypeNode, data: [String: JSONValue]?) throws -> [Row] {
-        try keys(node: node, data: data).indices.compactMap { try row(node: node, data: data, index: $0) }
+    static func rows(
+        node: PrototypeNode, data: [String: JSONValue]?, derived: [String: JSONValue] = [:]
+    )
+        throws -> [Row]
+    {
+        try keys(node: node, data: data).indices.compactMap {
+            try row(node: node, data: data, derived: derived, index: $0)
+        }
     }
 
     /// Owned by a single lazy cell, so a malformed row is absent and warns once per cell lifetime.
     final class RowDecoder {
         private var reportedFailure = false
         private let warning: (String) -> Void
-        private let load: (PrototypeNode, [String: JSONValue]?, Int) throws -> Row?
+        private let load: (PrototypeNode, [String: JSONValue]?, [String: JSONValue], Int) throws -> Row?
 
         init(
             warning: @escaping (String) -> Void = { lazyListLog.warning("\($0, privacy: .private)") },
-            load: @escaping (PrototypeNode, [String: JSONValue]?, Int) throws -> Row? = {
-                try row(node: $0, data: $1, index: $2)
+            load: @escaping (PrototypeNode, [String: JSONValue]?, [String: JSONValue], Int) throws -> Row? = {
+                try row(node: $0, data: $1, derived: $2, index: $3)
             }
         ) {
             self.warning = warning
             self.load = load
         }
 
-        func decode(node: PrototypeNode, data: [String: JSONValue]?, index: Int) -> Row? {
-            do { return try load(node, data, index) }
+        func decode(
+            node: PrototypeNode, data: [String: JSONValue]?, derived: [String: JSONValue] = [:], index: Int
+        )
+            -> Row?
+        {
+            do { return try load(node, data, derived, index) }
             catch {
                 if !reportedFailure {
                     reportedFailure = true

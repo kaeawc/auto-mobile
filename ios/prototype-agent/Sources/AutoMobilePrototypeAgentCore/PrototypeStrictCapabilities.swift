@@ -75,6 +75,7 @@ enum PrototypeStrictCapabilities {
             if fields["scrollLinked"] != nil || fields["scrollTransition"] != nil { need("scroll_motion") }
             if PrototypeMotionV3.required(fields) { result.insert(PrototypeMotionV3.capability) }
             let type = fields["type"]?.stringValue ?? ""
+            if !PrototypeDerivedValidator.conditionReferences(fields, path: "").isEmpty { need("derive") }
             if PrototypeStringConditions.uses(fields) { need("string_conditions") }
             let types = [
                 "startTimer": "timers",

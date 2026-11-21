@@ -160,7 +160,7 @@ export class Rotate extends BaseVisualChange {
       captureUser: true,
       signal,
     });
-    await this.captureDeviceStateRotationLock(state, signal);
+    await this.store.captureDeviceStateRotationLock(state, signal);
     return state;
   }
 
@@ -581,22 +581,6 @@ export class Rotate extends BaseVisualChange {
     }
   }
 
-  /** Captured once, with the session's first originals, before any write can change it. */
-  private async captureDeviceStateRotationLock(
-    state: RotationRestoreState,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const lock = await this.store.readSetting("secure", DEVICE_STATE_ROTATION_LOCK, signal);
-    if (lock !== null) {
-      state.deviceStateRotationLock = lock;
-      const deviceState = await this.store.readCommittedDeviceState();
-      throwIfAborted(signal);
-      if (deviceState >= 0) {
-        state.deviceStateRotationLockState = deviceState;
-      }
-    }
-  }
-
   private rotationCallSettings(
     autoRotateState: "locked" | "enabled" | "unknown",
     slot?: RotationRestoreSlot,
@@ -628,12 +612,12 @@ export class Rotate extends BaseVisualChange {
             settings.previousUserRotation = state.userRotation;
           }
           if (!original) {
-            await this.captureDeviceStateRotationLock(state, signal);
+            await this.store.captureDeviceStateRotationLock(state, signal);
           }
           throwIfAborted(signal);
           slot.get();
           if (!original) {
-            slot.record(state);
+            await slot.record(state);
           }
         }
         settings.started = true;

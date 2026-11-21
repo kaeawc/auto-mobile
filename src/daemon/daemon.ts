@@ -106,6 +106,7 @@ export {
 } from "./daemonCore/disconnectTargets";
 import { warmConfirmedManagedExecution } from "./daemonCore/managedExecutionWarmup";
 import { persistedSessionReaders } from "./daemonCore/persistedSessionReaders";
+import { FileRotationOriginalsLedger } from "./FileRotationOriginalsLedger";
 
 export type { DaemonDependencies };
 
@@ -345,6 +346,7 @@ export class Daemon {
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository, {
       sessionDeviceReboundEmitter: SessionDeviceReboundBroadcaster,
+      rotationOriginalsLedger: new FileRotationOriginalsLedger(),
     });
     this.sessionManager.attachDaemonSessionId(this.daemonSessionId);
     // Read when a recovery claims its row, so a peer that started after this daemon is seen. A
@@ -667,6 +669,7 @@ export class Daemon {
       lifecycle,
       bindingExclusionFactory: () => daemon.injected.bindingExclusionFactory,
       startBackgroundRegistryUpgrade: () => this.broker.startBackgroundRegistryUpgrade(),
+      lastBindingRegistryOpenFailure: () => this.broker.lastBindingRegistryOpenFailure(),
       bindingRegistry: () => daemon.runtime.bindingRegistry,
       deviceClaimMirrors: () => daemon.runtime.deviceClaimMirrors,
       foreignCtrlProxyForwardEvidence: () => daemon.injected.foreignCtrlProxyForwardEvidence,

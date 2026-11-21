@@ -13,6 +13,8 @@ private final class FakeStoreKitTestSession: StoreKitTestSessioning {
     var errors: [Int] = []
     var transactions: [StoreKitTransaction] = []
     var failure: String?
+    var failureError: NSError?
+    var clearedSimulatedErrors = 0
     var beforeBuy: (() async -> Void)?
 
     func resetToDefaultState() {
@@ -27,6 +29,7 @@ private final class FakeStoreKitTestSession: StoreKitTestSessioning {
 
     func buy(productId: String) async throws {
         await beforeBuy?()
+        if let failureError { throw failureError }
         if let failure { throw VerbatimLocalizedError(message: failure) }
         transactions.append(StoreKitTransaction(
             identifier: 42,
@@ -40,6 +43,7 @@ private final class FakeStoreKitTestSession: StoreKitTestSessioning {
     func expire(subscriptionId: String) { expired.append(subscriptionId) }
     func setTimeRate(_ rate: StoreKitTimeRate) { rates.append(rate) }
     func setSimulatedError(_ code: Int) async { errors.append(code) }
+    func clearSimulatedError() async { clearedSimulatedErrors += 1 }
     func allTransactions() -> [StoreKitTransaction] { transactions }
 }
 
@@ -176,34 +180,47 @@ final class StoreKitCommandTests: XCTestCase {
         XCTAssertEqual(expire.transactions, buy.transactions)
     }
 
-    func testClearResetsAndDropsOnlyTheRequestedBundle() async throws {
+    func testSecondBundleLoadIsRefusedWhileFirstIsActive() async throws {
         let firstBundle = FakeStoreKitTestSession()
         let secondBundle = FakeStoreKitTestSession()
         let handler = handler(StoreKitSessionStore(supported: true) { path in
-            path == "/tmp/a.storekit" ? firstBundle : secondBundle
+            path.hasSuffix("/a.storekit") ? firstBundle : secondBundle
         })
-        for bundle in ["a", "b"] {
-            let response = try await run(
-                handler,
-                "load",
-                bundle: bundle,
-                fields: ["configPath": "/tmp/\(bundle).storekit"]
-            )
-            XCTAssertTrue(response.success)
-        }
+        let loaded = try await run(handler, "load", bundle: "a", fields: ["configPath": "/tmp/a.storekit"])
+        XCTAssertTrue(loaded.success)
         _ = try await run(handler, "buy", bundle: "a", fields: ["productId": "only-a"])
-        XCTAssertEqual(firstBundle.transactions.count, 1)
-        XCTAssertTrue(secondBundle.transactions.isEmpty)
-        _ = try await run(handler, "buy", bundle: "b", fields: ["productId": "only-b"])
+        let refused = try await run(handler, "load", bundle: "b", fields: ["configPath": "/tmp/b.storekit"])
+        XCTAssertFalse(refused.success)
+        XCTAssertEqual(
+            refused.error,
+            "storekit environment active for bundleId a; send clear for it before loading another bundle"
+        )
+        XCTAssertEqual(secondBundle.resetCount, 0)
+        XCTAssertEqual(firstBundle.resetCount, 1)
+        let unloaded = try await run(handler, "list", bundle: "b")
+        XCTAssertEqual(unloaded.error, "no storekit session for bundleId; call load first")
+        let kept = try await run(handler, "list", bundle: "a")
+        XCTAssertEqual(kept.transactions?.map(\.productId), ["only-a"])
+    }
+
+    func testReloadingTheActiveBundleAndLoadingAfterClearAreAllowed() async throws {
+        let firstBundle = FakeStoreKitTestSession()
+        let secondBundle = FakeStoreKitTestSession()
+        let handler = handler(StoreKitSessionStore(supported: true) { path in
+            path.hasSuffix("/a.storekit") ? firstBundle : secondBundle
+        })
+        let loaded = try await run(handler, "load", bundle: "a", fields: ["configPath": "/tmp/a.storekit"])
+        XCTAssertTrue(loaded.success)
+        let reload = try await run(handler, "load", bundle: "a", fields: ["configPath": "/tmp/a.storekit"])
+        XCTAssertTrue(reload.success)
         let clear = try await run(handler, "clear", bundle: "a")
         XCTAssertTrue(clear.success)
         XCTAssertEqual(clear.transactions, [])
-        XCTAssertEqual(firstBundle.resetCount, 2)
-        XCTAssertEqual(firstBundle.clearCount, 2)
         let missing = try await run(handler, "list", bundle: "a")
         XCTAssertFalse(missing.success)
-        let remaining = try await run(handler, "list", bundle: "b")
-        XCTAssertEqual(remaining.transactions?.map(\.productId), ["only-b"])
+        let second = try await run(handler, "load", bundle: "b", fields: ["configPath": "/tmp/b.storekit"])
+        XCTAssertTrue(second.success)
+        XCTAssertEqual(secondBundle.resetCount, 1)
     }
 
     func testEveryOperationWithoutLoadFails() async throws {
@@ -223,6 +240,66 @@ final class StoreKitCommandTests: XCTestCase {
             XCTAssertEqual(result.error, "no storekit session for bundleId; call load first")
             XCTAssertEqual(result.action, action)
             XCTAssertEqual(result.bundleId, "com.example.app")
+        }
+    }
+
+    func testSimulatedErrorFailsOnlyTheNextBuy() async throws {
+        let session = FakeStoreKitTestSession()
+        let handler = handler(StoreKitSessionStore(supported: true) { _ in session })
+        try await load(handler)
+        _ = try await run(handler, "setSimulatedError", fields: ["simulatedError": 2])
+        let failed = try await run(handler, "buy", fields: ["productId": "coins"])
+        XCTAssertFalse(failed.success)
+        XCTAssertTrue(failed.error?.contains("2") == true, failed.error ?? "")
+        XCTAssertEqual(session.transactions.count, 0)
+        XCTAssertEqual(session.clearedSimulatedErrors, 1)
+        let next = try await run(handler, "buy", fields: ["productId": "coins"])
+        XCTAssertTrue(next.success)
+        XCTAssertEqual(session.transactions.count, 1)
+    }
+
+    func testReloadDropsPendingSimulatedError() async throws {
+        let session = FakeStoreKitTestSession()
+        let handler = handler(StoreKitSessionStore(supported: true) { _ in session })
+        try await load(handler)
+        _ = try await run(handler, "setSimulatedError", fields: ["simulatedError": 0])
+        try await load(handler)
+        let result = try await run(handler, "buy", fields: ["productId": "coins"])
+        XCTAssertTrue(result.success)
+    }
+
+    func testIosTwentySixRejectionsBecomeUnsupported() async throws {
+        // SKInternalErrorDomain 3: iOS 26.5 runner without embedded entitlements (#18644).
+        // SKServiceErrorDomain 2: iOS 27.2 runner with them, target app not installed (mt0098c).
+        let shapes = [("SKInternalErrorDomain", 3), ("SKServiceErrorDomain", 2)]
+        for (domain, code) in shapes {
+            for (os, expectUnsupported) in [(26, true), (27, true), (18, false)] {
+                let session = FakeStoreKitTestSession()
+                session.failureError = NSError(domain: domain, code: code)
+                let handler = handler(StoreKitSessionStore(supported: true, osMajorVersion: os) { _ in session })
+                try await load(handler)
+                let result = try await run(handler, "buy", fields: ["productId": "coins"])
+                XCTAssertFalse(result.success)
+                XCTAssertEqual(result.error?.hasPrefix("unsupported:"), expectUnsupported, "\(domain) iOS \(os)")
+                if expectUnsupported {
+                    XCTAssertTrue(result.error?.contains("\(domain) \(code)") == true, result.error ?? "")
+                    XCTAssertTrue(result.error?.contains("runner host app") == true, result.error ?? "")
+                    XCTAssertTrue(result.error?.contains("Restart the daemon") == true, result.error ?? "")
+                    XCTAssertFalse(result.error?.contains("iOS 18 simulator") == true, result.error ?? "")
+                }
+            }
+        }
+    }
+
+    func testIosTwentySixOtherStoreKitErrorsStayRaw() async throws {
+        for (domain, code) in [("SKServiceErrorDomain", 3), ("SKInternalErrorDomain", 2), ("SKErrorDomain", 2)] {
+            let session = FakeStoreKitTestSession()
+            session.failureError = NSError(domain: domain, code: code)
+            let handler = handler(StoreKitSessionStore(supported: true, osMajorVersion: 27) { _ in session })
+            try await load(handler)
+            let result = try await run(handler, "buy", fields: ["productId": "coins"])
+            XCTAssertFalse(result.success)
+            XCTAssertEqual(result.error?.hasPrefix("unsupported:"), false, "\(domain) \(code)")
         }
     }
 

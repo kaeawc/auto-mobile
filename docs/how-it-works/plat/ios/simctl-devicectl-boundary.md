@@ -111,7 +111,8 @@ read, seed the probe and report bounded simctl boot-state counts; capability com
 Apple documents devicectl for physical and simulated devices and says to start simulators with
 simctl or Device Hub first; simctl is not deprecated, and Xcode 27 adds `reboot` to both (#8347). On
 older CoreDevice, everything goes through `simctl`; only devicectl-only features report unsupported.
-CI stays on Xcode 26.5 and covers the simctl path.
+CI runs the pinned Xcode 27.2 (`scripts/ios/xcode_version.sh`); the nightly Xcode 26.6 sweeps
+only build, so no CI job exercises the older-CoreDevice simctl-only path.
 
 ## Guardrails
 

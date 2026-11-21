@@ -228,6 +228,34 @@ describe("EmulatorAudioClient.injectAudio", () => {
     expect(transport.calls).toHaveLength(0);
   });
 
+  test("awaits an async stream guard: a rejection opens no transport (#18687)", async () => {
+    const { client, transport } = setup();
+    const guard = Promise.withResolvers<void>();
+    const outcome = client
+      .injectAudio(CLIP, { beforeStreamOpen: () => guard.promise })
+      .catch((error: unknown) => error);
+    await Promise.resolve();
+    expect(transport.calls).toHaveLength(0);
+    const refusal = new EmulatorAudioError("audio_guest_capture_unavailable", "no recorder");
+    guard.reject(refusal);
+    expect(await outcome).toBe(refusal);
+    expect(transport.calls).toHaveLength(0);
+  });
+
+  test("awaits an async stream guard: a resolution opens the stream", async () => {
+    const { client, transport } = setup();
+    let guarded = false;
+    const injection = await client.injectAudio(CLIP, {
+      beforeStreamOpen: async () => {
+        await Promise.resolve();
+        guarded = true;
+      },
+    });
+    expect(guarded).toBe(true);
+    expect(transport.calls).toHaveLength(1);
+    await injection.done;
+  });
+
   test("streams the clip in 20ms packets with the format on the first packet only", async () => {
     const { client, transport } = setup();
     const injection = await client.injectAudio(CLIP);

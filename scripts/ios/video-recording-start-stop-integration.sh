@@ -14,6 +14,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# Use the repository-pinned Xcode unless DEVELOPER_DIR already names one.
+# Shell-test fixtures that copy this script without the helper keep the active Xcode.
+if [[ -f "${SCRIPT_DIR}/xcode_version.sh" ]]; then
+  # shellcheck source=scripts/ios/xcode_version.sh
+  source "${SCRIPT_DIR}/xcode_version.sh"
+  select_pinned_xcode
+fi
 
 require_command() {
   local command_name="$1"

@@ -7,6 +7,7 @@ import type { IosCtrlProxyBuilder } from "./IosCtrlProxyBuilder";
 export type IosCtrlProxyBuilderSurface = Pick<
   IosCtrlProxyBuilder,
   | "build"
+  | "getAppBundlePath"
   | "getExpectedAppHash"
   | "getInstalledBundleVersion"
   | "getXctestrunPath"

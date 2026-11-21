@@ -383,9 +383,10 @@
     },
     "condition": {
       "kind": "object",
-      "exactlyOne": ["key", "data", "platform", "all", "any", "not", "valid"],
+      "exactlyOne": ["key", "data", "platform", "all", "any", "not", "valid", "derived"],
+      "optionalDependentGroups": ["key|derived"],
       "dependents": {
-        "key|data|platform": [
+        "key|data|platform|derived": [
           "equals",
           "notEquals",
           "gt",
@@ -396,7 +397,7 @@
           "lengthGt",
           "lengthLt"
         ],
-        "key": ["contains", "startsWith", "lengthGt", "lengthLt"]
+        "key|derived": ["contains", "startsWith", "lengthGt", "lengthLt"]
       },
       "fields": {
         "key": {
@@ -532,6 +533,10 @@
             "max": 100000
           },
           "optional": true
+        },
+        "derived": {
+          "rule": { "kind": "key" },
+          "optional": true
         }
       }
     },
@@ -620,7 +625,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 1e-6,
+                "min": 0.000001,
                 "max": 10000
               },
               "optional": false
@@ -974,7 +979,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 10000
           },
           "optional": true
@@ -1070,7 +1075,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 10000
           },
           "optional": true
@@ -1152,7 +1157,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 1000
           },
           "optional": true
@@ -1193,7 +1198,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 1000
           },
           "optional": true
@@ -1504,7 +1509,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 1e-6,
+                "min": 0.000001,
                 "max": 10000
               },
               "optional": false
@@ -1778,6 +1783,42 @@
                               "kind": "pointer"
                             }
                           ]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "generate": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["id"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "now": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["epochMs", "iso"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "lastGenerated": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [true]
                         },
                         "optional": false
                       }
@@ -2133,6 +2174,42 @@
                         "optional": false
                       }
                     }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "generate": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["id"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "now": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["epochMs", "iso"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "lastGenerated": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [true]
+                        },
+                        "optional": false
+                      }
+                    }
                   }
                 ]
               },
@@ -2278,6 +2355,42 @@
                         "optional": false
                       }
                     }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "generate": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["id"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "now": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["epochMs", "iso"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "lastGenerated": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [true]
+                        },
+                        "optional": false
+                      }
+                    }
                   }
                 ]
               },
@@ -2412,6 +2525,42 @@
                           "optional": false
                         }
                       }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "generate": {
+                          "rule": {
+                            "kind": "enum",
+                            "values": ["id"]
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "now": {
+                          "rule": {
+                            "kind": "enum",
+                            "values": ["epochMs", "iso"]
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "lastGenerated": {
+                          "rule": {
+                            "kind": "enum",
+                            "values": [true]
+                          },
+                          "optional": false
+                        }
+                      }
                     }
                   ]
                 }
@@ -2482,6 +2631,42 @@
                           "rule": {
                             "kind": "json",
                             "maxDepth": 24
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "generate": {
+                          "rule": {
+                            "kind": "enum",
+                            "values": ["id"]
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "now": {
+                          "rule": {
+                            "kind": "enum",
+                            "values": ["epochMs", "iso"]
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "lastGenerated": {
+                          "rule": {
+                            "kind": "enum",
+                            "values": [true]
                           },
                           "optional": false
                         }
@@ -2656,10 +2841,82 @@
                                     "optional": false
                                   }
                                 }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "generate": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": ["id"]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "now": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": ["epochMs", "iso"]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "lastGenerated": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": [true]
+                                    },
+                                    "optional": false
+                                  }
+                                }
                               }
                             ]
                           },
                           "minEntries": 1
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "generate": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["id"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "now": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["epochMs", "iso"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "lastGenerated": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [true]
                         },
                         "optional": false
                       }
@@ -2755,7 +3012,26 @@
                 "kind": "key"
               },
               "optional": true
+            },
+            "where": {
+              "rule": {
+                "kind": "ref",
+                "name": "dataWhere"
+              },
+              "optional": true
+            },
+            "member": {
+              "rule": {
+                "kind": "string",
+                "pattern": "dataMember",
+                "max": 256
+              },
+              "optional": true
             }
+          },
+          "dependents": {
+            "where": ["member"],
+            "into": ["where"]
           }
         },
         "platform": {
@@ -3171,6 +3447,42 @@
                         "optional": false
                       }
                     }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "generate": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["id"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "now": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["epochMs", "iso"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "lastGenerated": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [true]
+                        },
+                        "optional": false
+                      }
+                    }
                   }
                 ]
               },
@@ -3294,6 +3606,42 @@
                               "kind": "pointer"
                             }
                           ]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "generate": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["id"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "now": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": ["epochMs", "iso"]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "lastGenerated": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [true]
                         },
                         "optional": false
                       }
@@ -4970,7 +5318,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 1e-6,
+                "min": 0.000001,
                 "max": 10000
               },
               "optional": false
@@ -18797,7 +19145,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 1e-6,
+                "min": 0.000001,
                 "max": 10000
               },
               "optional": false
@@ -18843,7 +19191,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6,
+            "min": 0.000001,
             "max": 1000
           },
           "optional": true
@@ -21569,6 +21917,42 @@
               "optional": false
             }
           }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "generate": {
+              "rule": {
+                "kind": "enum",
+                "values": ["id"]
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "now": {
+              "rule": {
+                "kind": "enum",
+                "values": ["epochMs", "iso"]
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "lastGenerated": {
+              "rule": {
+                "kind": "enum",
+                "values": [true]
+              },
+              "optional": false
+            }
+          }
         }
       ]
     },
@@ -22498,6 +22882,42 @@
                     "rule": {
                       "kind": "json",
                       "maxDepth": 24
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "generate": {
+                    "rule": {
+                      "kind": "enum",
+                      "values": ["id"]
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "now": {
+                    "rule": {
+                      "kind": "enum",
+                      "values": ["epochMs", "iso"]
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "lastGenerated": {
+                    "rule": {
+                      "kind": "enum",
+                      "values": [true]
                     },
                     "optional": false
                   }

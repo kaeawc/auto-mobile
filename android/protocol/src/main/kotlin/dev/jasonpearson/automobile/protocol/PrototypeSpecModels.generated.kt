@@ -288,6 +288,8 @@ data class PrototypeRequestAction(
   val onError: List<PrototypeAction>? = null,
   val append: PrototypeRequestAppend? = null,
   val progressKey: String? = null,
+  val where: PrototypeDataWhere? = null,
+  val member: String? = null,
 ) : PrototypeAction()
 
 /**
@@ -2526,6 +2528,7 @@ data class PrototypeCondition(
   val startsWith: PrototypeScalar? = null,
   val lengthGt: Int? = null,
   val lengthLt: Int? = null,
+  val derived: String? = null,
 )
 
 @Serializable

@@ -27524,7 +27524,7 @@
     "annotations": {
       "destructiveHint": false
     },
-    "description": "Pass/fail performance checks of an app on the current screen, against the configured thresholds. kinds: performance (UI jank, frame time and touch latency of the foreground app; appId must be in the foreground) and memory (a memory snapshot of appId); default both. Each reports passed with its metrics and violations. failOn error|warning makes the call fail when a check does not pass or cannot run (performance of an appId not in the foreground is listed under unsupported), for plan assertions; default never. For raw captures use performanceTrace, captureTrace, measureStartup or heapDump. Android only.",
+    "description": "Pass/fail performance checks of an app on the current screen, against the configured thresholds. kinds: performance (UI jank, frame time and Android-only touch latency of the foreground app; appId must be in the foreground) and memory (memory usage of appId); default both. Each reports passed with its metrics and violations. failOn error|warning makes the call fail when a check does not pass or cannot run (performance of an appId not in the foreground is listed under unsupported), for plan assertions; default never. For raw captures use performanceTrace, captureTrace, measureStartup or heapDump. Android and iOS Simulator. On iOS Simulator, performance requires an app instrumented with auto-mobile-sdk.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -45776,7 +45776,7 @@
       "$defs": {
         "__schema1": {
           "type": "string",
-          "description": "Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode. EDITOR_ACTION_MISMATCH: the device reported a semantic key (next, previous, done, search, send, go) as not performed, either because the focused field did not carry out the action or, for done/search/send/go below Android API 30, because the Enter key could not be delivered; observe the screen before retrying. Instead of next use key:\"tab\" or a selector for the next field; for a submit action tap the submit control if there is one, otherwise key:\"enter\" may submit, though a multiline field can insert a newline instead."
+          "description": "Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode. EDITOR_ACTION_MISMATCH: the device reported a semantic key (next, previous, done, search, send, go) as not performed, either because the focused field did not carry out the action or, for done/search/send/go below Android API 30, because the Enter key could not be delivered; observe the screen before retrying. Instead of next use key:\"tab\" or a selector for the next field; for a submit action tap the submit control if there is one, otherwise key:\"enter\" may submit, though a multiline field can insert a newline instead. KEYBOARD_INTRODUCTION (iOS): the keyboard's one-time \"slide to type\" introduction covers the keyboard and sendKeys could not dismiss it; tap its Continue button, then retry."
         },
         "__schema2": {
           "type": "object",

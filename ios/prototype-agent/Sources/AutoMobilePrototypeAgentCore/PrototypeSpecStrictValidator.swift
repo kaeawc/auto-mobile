@@ -43,8 +43,9 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeLimits.guardSubstitutedText(collections, data: modelData)
             try repeats.expanded(root.objectFields ?? [:], path: "root")
             try PrototypeStrictSemantics.storage(fields, context: context)
+            try PrototypeGeneratedValues.validate(context.actions)
             try PrototypeDataWrite.validate(actions: context.actions, data: modelData)
-            try PrototypeRequestValidator.validateActions(context.actions, state: state)
+            try PrototypeRequestValidator.validateActions(context.actions, state: state, data: modelData)
             try PrototypePlatformValidator.validateTestTags(nodes: context.locatedNodes)
             try PrototypePlatformValidator.validate(
                 requires: fields["requires"],
@@ -80,7 +81,7 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeLimits.guardAuthoredTree(root)
             try PrototypeMenus.validateAuthoredText(root)
             try PrototypeRepeat.validateEmitContexts(collections, data: modelData)
-            let resolved = PrototypeDataResolver.resolveRoot(collections, data: modelData)
+            let resolved = PrototypeDataResolver.resolveRoot(collections, data: modelData, derived: derivedValues)
             try PrototypeLimits.guardTree(resolved)
             let expanded = PrototypeRepeat.expand(resolved)
             try PrototypeBarScroll.validate(expanded)

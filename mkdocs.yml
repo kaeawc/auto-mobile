@@ -400,6 +400,7 @@ nav:
           - "iOS Photos full access": how-it-works/plat/ios/photos-full-access.md
           - "iOS simulator load reduction": how-it-works/plat/ios/simulator-load-reduction.md
           - "iOS Simulator audio loopback": how-it-works/plat/ios/simulator-audio-loopback.md
+          - "iOS Simulator audio isolation": how-it-works/plat/ios/simulator-audio-isolation.md
           - "iOS Simulator camera poster": how-it-works/plat/ios/simulator-camera-poster.md
           - "iOS keep-booted reset": how-it-works/ios-keep-booted-reset.md
           - "iOS CarPlay template snapshots": how-it-works/plat/ios/carplay-template-snapshot.md
@@ -506,6 +507,8 @@ nav:
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-20: Fixture capture mode": devlog/2026-11-20-fixture-capture-mode.md
+      - "2026-11-19: iOS Simulator audio isolation": devlog/2026-11-19-ios-simulator-audio-isolation.md
       - "2026-11-19: Committed page bundle and one export budget": devlog/2026-11-19-prototype-web-page-bundle.md
       - "2026-11-19: Headless CarPlay on TVOut with a StarkConfig": devlog/2026-11-19-headless-carplay-tvout-stark.md
       - "2026-11-18: Tasks eligibility from measured tool durations": devlog/2026-11-18-tasks-eligibility-from-measured-durations.md

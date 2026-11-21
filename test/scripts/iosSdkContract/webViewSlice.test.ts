@@ -170,7 +170,10 @@ describe("WKWebView contract judge (phase E)", () => {
       }
       expect(webViewObservationReady({ result })).toBe(true);
       expect(observedWebButtonSelector({ result })).toEqual({ text: WEB_VIEW_LABELS.button });
-      expect(judge({ observe: { result } }, host)).toEqual([]);
+      const next: ToolOutcome = JSON.parse(
+        JSON.stringify(observation("d2", "s2")).replaceAll(origin, host.origin),
+      );
+      expect(judge({ observe: { result }, "after-navigation": next }, host)).toEqual([]);
     }
   });
   test("all four ordered cases pass against the page and bridge logs", () => {
@@ -242,6 +245,20 @@ describe("WKWebView contract judge (phase E)", () => {
       const leaked: ToolOutcome = JSON.parse(bad);
       expect(judge({ observe: leaked })).toContainEqual(
         expect.objectContaining({ caseName: "observe", boundary: "sdk-adapter" }),
+      );
+    }
+  });
+
+  test("the post-navigation hierarchy is held to the same frame policy", () => {
+    for (const bad of [
+      JSON.stringify(observation("d2", "s2")).replaceAll(origin, disallowedOrigin),
+      ...[WEB_VIEW_NODES.allowed, WEB_VIEW_NODES.disallowed].map((id) =>
+        JSON.stringify(observation("d2", "s2", id)),
+      ),
+    ]) {
+      const leaked: ToolOutcome = JSON.parse(bad);
+      expect(judge({ "after-navigation": leaked })).toContainEqual(
+        expect.objectContaining({ caseName: "stale-handle", boundary: "sdk-adapter" }),
       );
     }
   });

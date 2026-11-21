@@ -3,7 +3,7 @@ import { z } from "zod/v3";
 import { prototypeOwnKeyRecordV3 } from "./prototypeOwnKeyRecord";
 import { iconNames, prototypeIconNameError } from "./prototypeIconNames";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
-import { pointerSchema, stateKeySchema } from "./prototypeActionValues";
+import { keySchema, pointerSchema, stateKeySchema } from "./prototypeActionValues";
 import { createEffectSchema } from "./prototypeEffectsSchema";
 
 export { iconNames } from "./prototypeIconNames";
@@ -79,6 +79,15 @@ export type PrototypeCondition =
   | { data: string; gt: number }
   | { data: string; lt: number }
   | { data: string; empty: boolean }
+  | { derived: string; equals: string | number | boolean }
+  | { derived: string; notEquals: string | number | boolean }
+  | { derived: string; gt: number }
+  | { derived: string; lt: number }
+  | { derived: string; empty: boolean }
+  | { derived: string; contains: string }
+  | { derived: string; startsWith: string }
+  | { derived: string; lengthGt: number }
+  | { derived: string; lengthLt: number }
   | { platform: string; equals: string | number | boolean }
   | { platform: string; notEquals: string | number | boolean }
   | { platform: string; gt: number }
@@ -109,6 +118,15 @@ export const conditionSchema: z.ZodType<PrototypeCondition> = z.lazy(
       z.object({ data: pointerSchema, lt: z.number().finite() }).strict(),
       // A missing value, [], {} or "" is empty (#14207).
       z.object({ data: pointerSchema, empty: z.boolean() }).strict(),
+      z.object({ derived: keySchema, equals: scalarSchema }).strict(),
+      z.object({ derived: keySchema, notEquals: scalarSchema }).strict(),
+      z.object({ derived: keySchema, gt: z.number().finite() }).strict(),
+      z.object({ derived: keySchema, lt: z.number().finite() }).strict(),
+      z.object({ derived: keySchema, empty: z.boolean() }).strict(),
+      z.object({ derived: keySchema, contains: z.string().min(1).max(256) }).strict(),
+      z.object({ derived: keySchema, startsWith: z.string().min(1).max(256) }).strict(),
+      z.object({ derived: keySchema, lengthGt: z.number().int().min(0).max(100000) }).strict(),
+      z.object({ derived: keySchema, lengthLt: z.number().int().min(0).max(100000) }).strict(),
       z.object({ platform: pointerSchema, equals: scalarSchema }).strict(),
       z.object({ platform: pointerSchema, notEquals: scalarSchema }).strict(),
       z.object({ platform: pointerSchema, gt: z.number().finite() }).strict(),

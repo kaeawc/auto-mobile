@@ -118,9 +118,7 @@ internal object PrototypeObjectRules {
     return null
   }
 
-  /**
-   * Single-trigger dependents are optional; a pipe-separated trigger group requires exactly one.
-   */
+  /** Multi-trigger groups require one dependent unless the contract marks the group optional. */
   fun formConstraint(
     data: JsonObject,
     rule: JsonObject,
@@ -141,6 +139,7 @@ internal object PrototypeObjectRules {
       )
     }
     val dependents = rule["dependents"] as? JsonObject ?: return null
+    val optionalGroups = (rule["optionalDependentGroups"] as? JsonArray).orEmpty()
     for ((trigger, names) in dependents.toSortedMap()) {
       val fields = names.jsonArray.map { it.jsonPrimitive.content }
       val present = fields.filter { data.containsKey(it) }
@@ -150,7 +149,11 @@ internal object PrototypeObjectRules {
             keyPath(path, present.first()),
             "Requires ${trigger.split("|").joinToString(" or ")}",
           )
-      } else if ("|" in trigger && present.size != 1) {
+      } else if (
+        "|" in trigger &&
+          optionalGroups.none { it.jsonPrimitive.content == trigger } &&
+          present.size != 1
+      ) {
         return fail(
           keyPath(path, present.getOrNull(1) ?: fields.first()),
           "Exactly one of ${fields.joinToString(", ")} is required",

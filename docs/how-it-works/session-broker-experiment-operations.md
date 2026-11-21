@@ -11,7 +11,7 @@ Part of [the session-only provider experiment](session-broker-experiment.md).
   "defaults": {
     "ios": {
       "platform": "ios",
-      "policyVersion": "local-ios-26.5-v1",
+      "policyVersion": "local-ios-27.2-v1",
       "hardware": {
         "omitted": "phone",
         "archetypes": [
@@ -24,7 +24,7 @@ Part of [the session-only provider experiment](session-broker-experiment.md).
           }
         ]
       },
-      "os": { "selector": { "kind": "exact", "version": "26.5" }, "preferredVersion": "26.5" }
+      "os": { "selector": { "kind": "exact", "version": "27.2" }, "preferredVersion": "27.2" }
     }
   },
   "reuseCleanDevices": false,
@@ -44,7 +44,7 @@ an exact Duo model needs neither.
 The optional `defaults.ios.os.archetypes` list holds at most one
 entry per archetype, each `{ archetype, selector, preferredVersion }`. An entry replaces `os` for
 that hardware archetype only when the request omits the OS. A host can therefore pin phones and
-tablets to exact 26.5 while `duo` defaults to 27.1. Explicit request selectors stay as
+tablets to exact 27.2 while `duo` defaults to 27.1. Explicit request selectors stay as
 requested, and provenance records the entry used as `osDefaultArchetype`. Android `os` selectors use the release version (`16`),
 not the API level (`36`); at equal versions the resolver prefers `google_apis`
 over `google_apis_playstore`.

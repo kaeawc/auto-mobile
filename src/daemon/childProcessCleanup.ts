@@ -1,3 +1,4 @@
+import { daemonAXBridgeSessions } from "./axBridgeSessionLifecycle";
 import { stopVisionosRunners } from "../features/visionos/VisionosRunnerLifecycle";
 import { defaultBlePeripheralManager } from "../features/blePeripheral/defaultBlePeripheralManager";
 import { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/AndroidInventoryInvalidation";
@@ -28,6 +29,7 @@ const CHILD_PROCESS_CLEANUP_TIMEOUT_MS = 1_500;
  * without starting real capture or iOS runner processes.
  */
 export interface DaemonChildProcessCleanupDependencies {
+  stopAXBridgeSessions?(): void;
   stopBlePeripherals?(): Promise<void>;
   shutdownInventoryReads?(): void;
   stopAcceptingVideoRecordingStarts(): Promise<void>;
@@ -45,6 +47,7 @@ export interface DaemonChildProcessCleanupDependencies {
 }
 
 const defaultDependencies: DaemonChildProcessCleanupDependencies = {
+  stopAXBridgeSessions: () => daemonAXBridgeSessions.shutdown(),
   stopBlePeripherals: () => defaultBlePeripheralManager.shutdown(),
   shutdownInventoryReads: () => {
     invalidateAndroidInventoryProvenanceAndCatalog();
@@ -60,6 +63,14 @@ const defaultDependencies: DaemonChildProcessCleanupDependencies = {
   stopTvosRunners,
   stopVisionosRunners,
 };
+
+function stopSessionChildren(dependencies: DaemonChildProcessCleanupDependencies): void {
+  dependencies.stopAXBridgeSessions?.();
+  dependencies.shutdownInventoryReads?.();
+  dependencies.stopWatchRunners();
+  dependencies.stopTvosRunners?.();
+  dependencies.stopVisionosRunners?.();
+}
 
 async function stopBleChildren(
   dependencies: DaemonChildProcessCleanupDependencies,
@@ -83,10 +94,7 @@ async function stopBleChildren(
 export async function cleanupDaemonChildProcesses(
   dependencies: DaemonChildProcessCleanupDependencies = defaultDependencies,
 ): Promise<void> {
-  dependencies.shutdownInventoryReads?.();
-  dependencies.stopWatchRunners();
-  dependencies.stopTvosRunners?.();
-  dependencies.stopVisionosRunners?.();
+  stopSessionChildren(dependencies);
   const timer = dependencies.timer ?? defaultTimer;
   const timeoutMs = dependencies.timeoutMs ?? CHILD_PROCESS_CLEANUP_TIMEOUT_MS;
   await stopBleChildren(dependencies, timer, timeoutMs);

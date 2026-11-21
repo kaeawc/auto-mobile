@@ -60204,7 +60204,7 @@
       "type": "object",
       "properties": {
         "display": {
-          "description": "Target panel key, role, or active; \"headUnit\" taps the Android Auto head unit at x, y in head-unit pixels",
+          "description": "Target panel key, role, or active; \"headUnit\" taps the Android Auto head unit at x, y in head-unit pixels; \"carPlay\" taps an iOS 26.x simulator's CarPlay screen at x, y in its pixels",
           "type": "string"
         },
         "snapshotId": {

@@ -26,7 +26,11 @@ import type { WatchRunnerClient } from "../features/watch/WatchRunnerClient";
 import type { VisionosRunnerClient } from "../features/visionos/VisionosRunnerClient";
 import { WatchRunnerError } from "../features/watch/WatchRunnerError";
 import { watchRunners } from "../features/watch/WatchRunnerRegistry";
-import { normalizeWatchHierarchy } from "../features/watch/WatchHierarchy";
+import {
+  withWatchRunnerRead,
+  type WatchRunnerRecoveryLifecycle,
+} from "../features/watch/WatchRunnerRecovery";
+import { normalizeWatchHierarchy, type WatchHierarchy } from "../features/watch/WatchHierarchy";
 import { getWatchRunnerLifecycle } from "../features/watch/WatchRunnerLifecycle";
 import {
   LaunchctlWatchTargetAppProbe,
@@ -95,6 +99,8 @@ export interface WatchObserveDependencies extends RetainedObservePngDependencies
   runner?: WatchRunnerClient;
   /** Recovers a disconnected lifecycle-owned tvOS runner; defaults to the shared lifecycle. */
   tvosRunnerLifecycle?: Pick<TvosRunnerLifecycle, "restartOwned" | "ownsRunner">;
+  /** Restarts a dropped lifecycle-owned watch runner; defaults to the shared lifecycle. */
+  watchRunnerLifecycle?: WatchRunnerRecoveryLifecycle;
   /** Starts or reuses the visionOS window-app runner; defaults to the shared runner lifecycle. */
   visionosRunner?: (deviceId: string, signal?: AbortSignal) => Promise<VisionosRunnerClient>;
   /** The window app each connected visionOS runner was started for; defaults to the shared registry. */
@@ -346,7 +352,7 @@ async function watchHierarchyForObserve(
   if (screenshotOnlyPlatform(device) === "tvos") {
     return tvosHierarchyForObserve(device, args, signal, dependencies.tvosRunnerLifecycle);
   }
-  return appleRunnerHierarchy(device, args, signal, dependencies.runner);
+  return appleRunnerHierarchy(device, args, signal, dependencies);
 }
 
 /**
@@ -387,17 +393,44 @@ async function tvosHierarchyForObserve(
   }
 }
 
+/**
+ * How observe reads the watch runner hierarchy, or undefined when there is no runner. A dropped
+ * lifecycle-owned runner is restarted once (#18822), except on a sessionless read of a device
+ * another session holds, which only reuses its runner.
+ */
+function watchHierarchyReader(
+  device: BootedDevice,
+  signal: AbortSignal | undefined,
+  dependencies: WatchObserveDependencies,
+): (() => Promise<WatchHierarchy>) | undefined {
+  const runner = dependencies.runner ?? watchRunners.get(device.deviceId);
+  if (dependencies.runner || (dependencies.heldDeviceRead ?? isReadOfHeldDevice)(device.deviceId)) {
+    return runner && (() => runner.hierarchy(signal));
+  }
+  const lifecycle = dependencies.watchRunnerLifecycle ?? getWatchRunnerLifecycle();
+  // An exited xcodebuild unregisters its client while the lifecycle keeps ownership to restart it.
+  if (runner === undefined && !lifecycle.ownsRunner(device.deviceId)) {
+    return undefined;
+  }
+  return () =>
+    withWatchRunnerRead(device.deviceId, (client) => client.hierarchy(signal), signal, lifecycle);
+}
+
 async function appleRunnerHierarchy(
   device: BootedDevice,
   args: ObserveArgs,
   signal: AbortSignal | undefined,
-  injectedRunner?: WatchRunnerClient,
+  dependencies: WatchObserveDependencies,
 ): Promise<HierarchyOutcome> {
   const platform = screenshotOnlyPlatform(device);
-  const runner = injectedRunner ?? watchRunners.get(device.deviceId);
-  assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, runner !== undefined);
+  const read = watchHierarchyReader(device, signal, dependencies);
+  assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, read !== undefined);
+  if (!read) {
+    return {};
+  }
   try {
-    return runner ? { hierarchy: normalizeWatchHierarchy(await runner.hierarchy(signal)) } : {};
+    const hierarchy = await read();
+    return { hierarchy: normalizeWatchHierarchy(hierarchy) };
   } catch (error) {
     if (error instanceof WatchRunnerError && error.errorCode === "app_not_foreground") {
       // A backgrounded fixture has no runner-visible hierarchy; its screenshot is still useful.

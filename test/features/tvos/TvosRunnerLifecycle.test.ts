@@ -17,6 +17,7 @@ import type {
 import { FakeTvosRunnerLauncher } from "../../fakes/FakeTvosRunnerLauncher";
 import { FakeTvosRunnerClient } from "../../fakes/FakeTvosRunnerClient";
 import { TvosRunnerError } from "../../../src/features/tvos/TvosRunnerError";
+import { FakeRunnerPorts } from "../../fakes/FakeRunnerPorts";
 
 class FakeSessions {
   readonly releases: ((sessionId: string) => void)[] = [];
@@ -438,40 +439,6 @@ test("one aborted recovery waiter does not cancel another", async () => {
   expect(launcher.launches).toHaveLength(1);
 });
 
-/** Hands out the lowest port that is neither allocated nor quarantined, like PortManager. */
-class FakeRunnerPorts {
-  readonly allocations = new Map<string, number>();
-  readonly quarantined: number[] = [];
-  readonly events: string[] = [];
-  allocate(deviceId: string): number {
-    const existing = this.allocations.get(deviceId);
-    if (existing !== undefined) {
-      return existing;
-    }
-    let port = 8765;
-    while (
-      port === 8766 ||
-      this.quarantined.includes(port) ||
-      [...this.allocations.values()].includes(port)
-    ) {
-      port++;
-    }
-    this.allocations.set(deviceId, port);
-    this.events.push(`allocate ${port}`);
-    return port;
-  }
-  release(deviceId: string, port: number): void {
-    if (this.allocations.get(deviceId) === port) {
-      this.allocations.delete(deviceId);
-      this.events.push(`release ${port}`);
-    }
-  }
-  quarantine(port: number): void {
-    this.quarantined.push(port);
-    this.events.push(`quarantine ${port}`);
-  }
-}
-
 function foreignPortFixture(foreignPorts: number[]) {
   const ports = new FakeRunnerPorts();
   const launcher = new FakeTvosRunnerLauncher(new FakeTvosRunnerClient());
@@ -523,7 +490,8 @@ test("foreign runners on every attempted port report the runner unavailable", as
   const reason = await f.owner.ensure(f.request);
   expect(reason).toContain("connected platform must be tvos");
   expect(f.launcher.launches.map((launch) => launch.port)).toEqual([8765, 8767, 8768]);
-  expect(f.ports.quarantined).toEqual([8765, 8767]);
+  // The last refused port is quarantined too, so the next start within 60 s skips it.
+  expect(f.ports.quarantined).toEqual([8765, 8767, 8768]);
   expect(f.ports.allocations.size).toBe(0);
   expect(tvosRunners.get("owned-tvos")).toBeUndefined();
 });

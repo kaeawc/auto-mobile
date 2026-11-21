@@ -239,6 +239,13 @@ extension ElementLocator {
         return "com.apple.Spotlight"
     }
 
+    /// Only an iPad keeps a parked app window `.runningForeground` behind its home screen (#18828).
+    /// Spotlight floats over the iPad home screen, so the icon list must not displace it.
+    nonisolated static func canParkForegroundApp(trackedBundleId: String?, isPad: Bool) -> Bool {
+        guard isPad, let trackedBundleId else { return false }
+        return trackedBundleId != "com.apple.springboard" && trackedBundleId != "com.apple.Spotlight"
+    }
+
     /// Choose SpringBoard for a visible switcher before considering its app cards.
     nonisolated static func foregroundBundleId(
         from candidates: [String],

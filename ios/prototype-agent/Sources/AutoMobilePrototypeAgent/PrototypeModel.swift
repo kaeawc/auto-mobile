@@ -464,6 +464,8 @@
             let prepared = storage?.prepare(spec)
             // Drop buffered location/sensor events from the old session while keeping global and
             // host-supplied streams alive. New state must be seeded before the first draw.
+            if session.spec?.id != spec.id { platformDriver.resetNotificationEvents() }
+            platformRegistry.configureNotifications(for: prepared?.spec ?? spec)
             let seeded: PrototypeSpec
             do {
                 seeded = try platformDriver.seedForShow(
@@ -790,6 +792,8 @@
             }
             if wasShown, !session.isShown {
                 platformDriver.clearOutcomes()
+                platformRegistry.configureNotifications(for: nil)
+                platformDriver.resetNotificationEvents()
                 platformRegistry.configure(locationBlock: nil)
                 platformRegistry.configure(sensorsBlock: nil)
                 hitRects.removeAll()

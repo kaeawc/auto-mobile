@@ -1,0 +1,20 @@
+# ProtoViewer release version -> Play versionCode vectors (#14156).
+# Read by both test/features/prototype/protoViewer/protoViewerSupportWindow.test.ts and
+# the Gradle ProtoViewerVersioningTest (build-logic), so the host's support-window check and the
+# Gradle versionCode derivation cannot drift apart.
+# Format: "<version> <versionCode>" for a valid release, "<version> invalid" for a rejected one.
+0.0.1 1
+0.0.89 89
+0.0.95 95
+0.1.0 1000
+0.999.999 999999
+1.0.0 1000000
+1.2.3 1002003
+2099.999.999 2099999999
+1.0.0-rc.1 invalid
+1.0.0-SNAPSHOT invalid
+01.0.0 invalid
+1.0 invalid
+2100.0.0 invalid
+1.1000.0 invalid
+1.0.1000 invalid

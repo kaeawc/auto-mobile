@@ -10,7 +10,12 @@ import type {
 import { DefaultObserveElementCollector } from "../../src/features/observe/ObserveElementCollector";
 import type { ElementBounds } from "../../src/models/ElementBounds";
 import type { ObserveResult } from "../../src/models/ObserveResult";
-import type { PrototypePlacement, ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
+import {
+  nodeAttributes,
+  type PrototypePlacement,
+  type ViewHierarchyNode,
+  type ViewHierarchyResult,
+} from "../../src/models/ViewHierarchyResult";
 
 /**
  * A captured two-window screen standing in for the CtrlProxy prototype
@@ -199,4 +204,43 @@ export function capturedAppLayerPrototypeHierarchy(): ViewHierarchyResult {
  */
 export function capturedFloatingCoverHierarchy(): ViewHierarchyResult {
   return convertCapture(floatingCoverCapture.rawViewHierarchy.json);
+}
+
+/**
+ * The floating-prototype capture standing in for a focused prototype text field over a focused app
+ * field (#18895). No device capture of a focused prototype text field exists yet, so the
+ * prototype's `coverBox` and the app's `button_elevated` (kept under it in this unfiltered capture)
+ * become focused EditTexts holding the given text. With `prototypeWindowFocused` the prototype's
+ * window, not the app's, reports input focus, as it does once a prototype field is tapped. The
+ * window list and tree are otherwise as captured.
+ */
+export function capturedFocusedFieldsUnderPrototype(options: {
+  appText: string;
+  prototypeText: string;
+  prototypeWindowFocused: boolean;
+}): ViewHierarchyResult {
+  const hierarchy = capturedFloatingCoverHierarchy();
+  const fields: Record<string, string> = {
+    button_elevated: options.appText,
+    coverBox: options.prototypeText,
+  };
+  const visit = (node: ViewHierarchyNode): void => {
+    const attributes = nodeAttributes(node);
+    const text = fields[String(attributes["resource-id"])];
+    if (text !== undefined) {
+      Object.assign(attributes, { focused: "true", text, class: "android.widget.EditText" });
+    }
+    const children =
+      node.node === undefined ? [] : Array.isArray(node.node) ? node.node : [node.node];
+    children.forEach(visit);
+  };
+  visit(hierarchy.hierarchy as ViewHierarchyNode);
+  if (options.prototypeWindowFocused) {
+    hierarchy.windows = hierarchy.windows!.map((window) => ({
+      ...window,
+      isFocused: window.id === PROTOTYPE_CAPTURE.floatingPrototypeWindowId,
+      isActive: window.id === PROTOTYPE_CAPTURE.floatingPrototypeWindowId,
+    }));
+  }
+  return hierarchy;
 }

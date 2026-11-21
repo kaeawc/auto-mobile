@@ -240,7 +240,7 @@ test.each([
   [
     { data: "/n", key: "n", equals: 1 },
     "key",
-    "Exactly one of key, data, platform, all, any, not, valid is required",
+    "Exactly one of key, data, platform, all, any, not, valid, derived is required",
   ],
   [
     { data: "/n" },
@@ -252,7 +252,7 @@ test.each([
     "gt",
     "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt is required",
   ],
-  [{ all: [{ key: "n", equals: 1 }], gt: 0 }, "gt", "Requires key or data or platform"],
+  [{ all: [{ key: "n", equals: 1 }], gt: 0 }, "gt", "Requires key or data or platform or derived"],
 ])("condition rule %p", (condition, field, message) => {
   const candidate = {
     id: "conditions",

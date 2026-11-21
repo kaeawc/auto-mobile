@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { BootedDevice } from "../../models";
+import type { BootedDevice, DeviceInfo } from "../../models";
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
 import type { Timer } from "../SystemTimer";
@@ -203,11 +203,17 @@ export function outsideFixtureCapture<T>(fn: () => T): T {
   return captureStorage.exit(fn);
 }
 
-/** Record the device the current tool call resolved; a no-op outside a capture scope. */
-export function noteFixtureCaptureDevice(device: BootedDevice | undefined): void {
+/**
+ * Record the device the current tool call resolved, with gaps filled from the image the pool
+ * admitted for it (see {@link capturedDeviceOf}); a no-op outside a capture scope.
+ */
+export function noteFixtureCaptureDevice(
+  device: BootedDevice | undefined,
+  admittedImage?: DeviceInfo,
+): void {
   const scope = captureStorage.getStore()?.scope;
   if (scope && device) {
-    scope.device = capturedDeviceOf(device);
+    scope.device = capturedDeviceOf(device, admittedImage);
   }
 }
 

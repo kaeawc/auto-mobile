@@ -661,6 +661,7 @@ async function saveIosPrototype(
   if (hasElementAnchors(args.spec!)) {
     return savedElementAnchorFailure();
   }
+  // The per-prototype viewer template has no web view module (#18814); only ProtoViewer draws one.
   const webViewRefusal = iosSavedWebViewRefusal(args);
   if (webViewRefusal) {
     return webViewRefusal;

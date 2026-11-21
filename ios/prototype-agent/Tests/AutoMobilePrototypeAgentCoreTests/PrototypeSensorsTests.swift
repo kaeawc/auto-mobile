@@ -394,6 +394,148 @@ final class PrototypeSensorsTests: XCTestCase {
         registry.configure(sensorsBlock: nil)
     }
 
+    private func showSpec(id: String, location: JSONValue, sensors: JSONValue) throws -> PrototypeSpec {
+        let raw = JSONValue.object([
+            "id": .string(id),
+            "window": .object(["placement": .object(["type": .string("fullscreen")])]),
+            "requires": .object([
+                "platform": .array([.string("location"), .string("sensors")]),
+                "permissions": .array(["location", "motion"].map {
+                    .object(["name": .string($0), "purpose": .string("Test subscriptions")])
+                }),
+            ]),
+            "location": location, "sensors": sensors,
+            "root": .object(["type": .string("text"), "text": .string("Test")]),
+        ])
+        return try JSONDecoder().decode(PrototypeSpec.self, from: JSONEncoder().encode(raw))
+    }
+
+    func testFailedShowRestoresPreviousBlocksSessionAndSensorAndLocationEvents() async throws {
+        let source = SensorSource()
+        let location = LocationTestSource()
+        let clock = LocationClock()
+        let registry = PrototypePlatformRegistry(modules: [
+            module(source), PrototypeLocationModule(source: location, bundle: LocationBundle(), clock: clock),
+        ])
+        let driver = PrototypePlatformDriver(registry: registry, clock: clock)
+        defer { driver.stopEvents() }
+        let first = try showSpec(
+            id: "A", location: .object(["accuracy": .string("precise"), "minDistanceM": .number(10)]),
+            sensors: block(.shake, .steps)
+        )
+        var session = PrototypeSession()
+        try session.show(driver.seedForShow(
+            first, previousLocationBlock: nil, previousSensorsBlock: nil, previousSessionID: 0, sessionID: 1
+        ) { registry.snapshot })
+        driver.subscribe()
+        let oldShake = try XCTUnwrap(source.handlers[.shake])
+        let oldLocation = try XCTUnwrap(location.handler)
+        source.report(.steps, .values(["steps": 10]))
+        source.report(.shake, .acceleration(x: 30, y: 0, z: 0))
+        location.report(location.fix)
+        let replacement = try showSpec(
+            id: "B", location: .object(["accuracy": .string("approximate"), "minDistanceM": .number(90)]),
+            sensors: block(.proximity)
+        )
+        XCTAssertThrowsError(try driver.seedForShow(
+            replacement, previousLocationBlock: session.spec?.locationBlock,
+            previousSensorsBlock: session.spec?.sensorsBlock, previousSessionID: 1, sessionID: 2
+        ) {
+            XCTAssertEqual(Set(source.handlers.keys), [.proximity])
+            XCTAssertEqual(location.distances.last, 90)
+            XCTAssertEqual(location.updateAccuracies.last, "approximate")
+            return registry.snapshot.merging([
+                "device": .object(["oversized": .string(String(repeating: "x", count: 65536))]),
+            ]) { _, device in device }
+        }) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else { return XCTFail("\(error)") }
+            XCTAssertEqual(context.debugDescription, "platform: Platform state exceeds limit")
+        }
+        XCTAssertEqual(session.spec?.id, "A")
+        XCTAssertEqual(Set(source.handlers.keys), [.shake, .steps])
+        XCTAssertEqual(location.distances, [10, 90, 10])
+        XCTAssertEqual(location.updateAccuracies, ["precise", "approximate", "precise"])
+        let stops = source.stops
+        registry.configure(sensorsBlock: first.sensorsBlock, sessionID: 1)
+        XCTAssertEqual(source.stops, stops, "Rollback must restore A's session ID as well as its block")
+        oldShake(.acceleration(x: 30, y: 0, z: 0))
+        oldLocation(location.fix)
+        XCTAssertEqual(registry.snapshot["sensors"], .object([:]))
+        XCTAssertEqual(registry.snapshot["location"]?.objectFields?["current"], .object([:]))
+
+        let received = XCTestExpectation(description: "A's streams resume after the rejected show")
+        received.expectedFulfillmentCount = 2
+        var events: [PlatformEvent] = []
+        driver.onEvent = { event in events.append(event); received.fulfill() }
+        source.report(.steps, .values(["steps": 2]))
+        source.report(.shake, .acceleration(x: 30, y: 0, z: 0))
+        location.report(location.fix)
+        let result = await XCTWaiter.fulfillment(of: [received], timeout: 1)
+        XCTAssertEqual(result, .completed)
+        XCTAssertEqual(events.count, 2, "Buffered events from before the failed show must be dropped")
+        XCTAssertEqual(Set(events.map(\.event)), ["sensors.shake", "location.updated"])
+        XCTAssertEqual(registry.snapshot["sensors"]?.objectFields?["steps"], .number(2))
+        XCTAssertEqual(registry.snapshot["location"]?.objectFields?["current"], location.fix.json)
+    }
+
+    func testSuccessfulShowResetsIdenticalBlocksAndDropsPreviousSessionEvents() async throws {
+        let source = SensorSource()
+        let location = LocationTestSource()
+        let clock = LocationClock()
+        let registry = PrototypePlatformRegistry(modules: [
+            module(source), PrototypeLocationModule(source: location, bundle: LocationBundle(), clock: clock),
+        ])
+        let driver = PrototypePlatformDriver(registry: registry, clock: clock)
+        defer { driver.stopEvents() }
+        let first = try showSpec(id: "A", location: .object([:]), sensors: block(.shake, .steps))
+        var session = PrototypeSession()
+        try session.show(driver.seedForShow(
+            first, previousLocationBlock: nil, previousSensorsBlock: nil, previousSessionID: 0, sessionID: 1
+        ) { registry.snapshot })
+        driver.subscribe()
+        let oldShake = try XCTUnwrap(source.handlers[.shake])
+        let oldLocation = try XCTUnwrap(location.handler)
+        source.report(.steps, .values(["steps": 10]))
+        source.report(.shake, .acceleration(x: 30, y: 0, z: 0))
+        location.report(location.fix)
+        let stops = source.stops
+        let next = try showSpec(id: "B", location: .object([:]), sensors: block(.shake, .steps))
+        let seeded = try driver.seedForShow(
+            next, previousLocationBlock: session.spec?.locationBlock,
+            previousSensorsBlock: session.spec?.sensorsBlock, previousSessionID: 1, sessionID: 2
+        ) {
+            registry.snapshot.merging(["device": .object(["test": .bool(true)])]) { _, device in device }
+        }
+        XCTAssertEqual(seeded.platformState["sensors"], .object([:]))
+        XCTAssertEqual(seeded.platformState["location"]?.objectFields?["current"], .object([:]))
+        XCTAssertEqual(seeded.platformState["device"], .object(["test": .bool(true)]))
+        XCTAssertEqual(source.stops, stops + 1)
+        XCTAssertEqual(location.distances, [0, 0], "Even an identical location block restarts on success")
+        session.show(seeded)
+        driver.subscribe()
+        XCTAssertEqual(session.spec?.id, "B")
+        registry.configure(sensorsBlock: next.sensorsBlock, sessionID: 2)
+        XCTAssertEqual(source.stops, stops + 1, "The new session ID must be retained")
+        oldShake(.acceleration(x: 30, y: 0, z: 0))
+        oldLocation(location.fix)
+        XCTAssertEqual(registry.snapshot["sensors"], .object([:]))
+        XCTAssertEqual(registry.snapshot["location"]?.objectFields?["current"], .object([:]))
+
+        let received = XCTestExpectation(description: "Only the new session's events are delivered")
+        received.expectedFulfillmentCount = 2
+        var events: [PlatformEvent] = []
+        driver.onEvent = { event in events.append(event); received.fulfill() }
+        source.report(.steps, .values(["steps": 2]))
+        source.report(.shake, .acceleration(x: 30, y: 0, z: 0))
+        location.report(location.fix)
+        let result = await XCTWaiter.fulfillment(of: [received], timeout: 1)
+        XCTAssertEqual(result, .completed)
+        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(Set(events.map(\.event)), ["sensors.shake", "location.updated"])
+        XCTAssertEqual(registry.snapshot["sensors"]?.objectFields?["steps"], .number(2))
+        XCTAssertEqual(registry.snapshot["location"]?.objectFields?["current"], location.fix.json)
+    }
+
     func testNewSessionDropsBufferedSensorEventsAndKeepsSharedStatusRunning() async {
         let source = SensorSource()
         let statusSource = FakeDeviceStatusSource(["value": .number(0)])

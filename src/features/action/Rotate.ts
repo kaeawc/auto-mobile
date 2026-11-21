@@ -37,6 +37,7 @@ import {
 } from "./RotationOrientationReader";
 import { RotationOutcomes, type AutoRotatePlan } from "./RotationOutcomes";
 import { RotationEndConfirmation } from "./RotationEndConfirmation";
+import { refuseRotateOnAndroidXr, type RotateXrOptions } from "./RotateUnsupportedError";
 import {
   DEVICE_STATE_ROTATION_LOCK,
   ROTATION_RETURN_CONFIRMATION_TIMEOUT_MS,
@@ -56,7 +57,7 @@ interface AndroidRotationWrites {
   restoreOnFailure: (result: RotateResult) => Promise<RotateResult>;
 }
 
-export interface RotateOptions {
+export interface RotateOptions extends RotateXrOptions {
   iosDisplayPixelProbe?: IosDisplayPixelProbe;
   deadlineMs?: number;
   sessionRotation?: <T>(mutation: (slot?: RotationRestoreSlot) => Promise<T>) => Promise<T>;
@@ -207,6 +208,7 @@ export class Rotate extends BaseVisualChange {
           }
           return await this.executeIosRotation(orientation, progress, perf, signal);
         case "android":
+          await refuseRotateOnAndroidXr(this.device, this.adb, this.options.xrDetector, signal);
           if (display !== 0) {
             return await this.rotateNonDefaultDisplay(
               orientation,

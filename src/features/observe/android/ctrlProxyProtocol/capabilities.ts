@@ -534,6 +534,7 @@ export const PROTOTYPE_DRAWER_CAPABILITY = "prototype_drawer_v1";
 
 export const PROTOTYPE_STRINGS_CAPABILITY = "prototype_strings_v1";
 
+export const PROTOTYPE_REMOTE_IMAGE_CAPABILITY = "prototype_remote_image_v1";
 export const PROTOTYPE_SEMANTICS_CAPABILITY = "prototype_semantics_v1";
 
 export const PROTOTYPE_DERIVE_CAPABILITY = "prototype_derive_v1";

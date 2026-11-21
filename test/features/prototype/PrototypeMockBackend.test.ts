@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { PrototypeMockBackend } from "../../../src/features/prototype/PrototypeMockBackend";
-import type { MockBackendDefinition } from "../../../src/features/prototype/prototypeMockSchema";
+import {
+  mockBackendDefinitionSchema,
+  type MockBackendDefinition,
+  type MockItem,
+} from "../../../src/features/prototype/prototypeMockSchema";
 import type { PrototypeRequestJson } from "../../../src/features/prototype/prototypeRequestProtocol";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -42,13 +46,15 @@ interface Step {
   body?: PrototypeRequestJson;
   expect?: PrototypeRequestJson;
   headers?: Record<string, string>;
+  collections?: Record<string, MockItem[]>;
 }
 
 describe("PrototypeMockBackend fixtures", () => {
   test.each(fixture.cases.map((entry) => [entry.name, entry] as const))(
     "%s",
     async (_name, entry) => {
-      const { engine } = backend(entry.definition as MockBackendDefinition);
+      const { engine } = backend(mockBackendDefinitionSchema.parse(entry.definition));
+      let collections = engine.snapshot();
       for (const step of entry.steps as Step[]) {
         const response = await engine.answer({
           method: step.method,
@@ -65,6 +71,12 @@ describe("PrototypeMockBackend fixtures", () => {
         for (const [name, value] of Object.entries(step.headers ?? {})) {
           expect(response.headers[name]).toBe(value);
         }
+        // The step's diff names every collection it changed; the rest must be untouched.
+        collections = { ...collections, ...step.collections };
+        expect({ at: `${step.method} ${step.path}`, collections: engine.snapshot() }).toEqual({
+          at: `${step.method} ${step.path}`,
+          collections,
+        });
       }
     },
   );

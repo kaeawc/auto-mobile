@@ -14,7 +14,7 @@ setup() {
 
   # Each fake records its argv plus the tool restriction it saw, and exits with
   # the status named by FAIL_<NAME> (default 0).
-  for name in gradle reset permission navgraph navgraph-e2e smoke; do
+  for name in gradle reset permission navgraph navgraph-e2e smoke perf; do
     cat > "${TEST_DIR}/${name}" <<EOF
 #!/usr/bin/env bash
 printf '%s %s tools=%s\n' "${name}" "\$*" "\${AUTOMOBILE_ENABLED_TOOLS:-unset}" >> "\$CALLS"
@@ -25,6 +25,7 @@ case "${name} \$*" in
   "navgraph "*) exit "\${FAIL_NAV_GRAPH:-0}" ;;
   "navgraph-e2e "*) exit "\${FAIL_NAV_GRAPH_E2E:-0}" ;;
   "permission"*) exit "\${FAIL_PERMISSION:-0}" ;;
+  "perf"*) exit "\${FAIL_PERF:-0}" ;;
 esac
 exit 0
 EOF
@@ -44,6 +45,7 @@ count=$((count + 1))
 printf '%s' "$count" > "$RESET_COUNT_FILE"
 printf 'reset %s tools=%s\n' "$count" "${AUTOMOBILE_ENABLED_TOOLS:-unset}" >> "$CALLS"
 if [[ "$count" -eq 2 && "${FAIL_SECOND_RESET:-0}" -eq 1 ]]; then exit 9; fi
+if [[ "$count" -eq 3 && "${FAIL_THIRD_RESET:-0}" -eq 1 ]]; then exit 9; fi
 EOF
   chmod +x "${TEST_DIR}/reset"
   export RESET_COUNT_FILE="$TEST_DIR/reset-count"
@@ -61,6 +63,7 @@ run_suites() {
     NAV_GRAPH_CMD="${TEST_DIR}/navgraph" \
     NAV_GRAPH_E2E_CMD="${TEST_DIR}/navgraph-e2e" \
     SAVED_PROTOTYPE_SMOKE_CMD="${TEST_DIR}/smoke" \
+    PERF_SMOKE_CMD="${TEST_DIR}/perf" \
     RESET_COUNT_FILE="$RESET_COUNT_FILE" \
     "$@" bash "$SCRIPT_ABS" control-proxy.apk
 }
@@ -75,7 +78,9 @@ navgraph  tools=navigateTo,getNavigationGraph,explore
 navgraph-e2e  tools=navigateTo,getNavigationGraph,explore
 gradle :playground:app:test --stacktrace --info tools=navigateTo,getNavigationGraph,explore
 reset 2 tools=unset
-smoke  tools=unset"
+smoke  tools=unset
+reset 3 tools=unset
+perf  tools=unset"
   [ "$(cat "$CALLS")" = "$expected" ]
 }
 
@@ -152,7 +157,10 @@ smoke  tools=unset"
   mkdir -p "$TEST_DIR/timeout-bin"
   cat > "$TEST_DIR/timeout-bin/timeout" <<'EOF'
 #!/usr/bin/env bash
-exit 124
+# Only the saved prototype smoke times out; anything else runs from its env word.
+[[ "$*" == */smoke* ]] && exit 124
+while [[ $# -gt 0 && "$1" != env ]]; do shift; done
+exec "$@"
 EOF
   chmod +x "$TEST_DIR/timeout-bin/timeout"
   run_suites PATH="$TEST_DIR/timeout-bin:$PATH" SAVED_PROTOTYPE_SMOKE_TIMEOUT_SECONDS=1
@@ -181,4 +189,24 @@ EOF
   [ "$status" -eq 1 ]
   ! grep -q '^navgraph-e2e ' "$CALLS"
   ! grep -q '^gradle :playground:app:test' "$CALLS"
+}
+
+@test "a failing performance smoke fails the run after both suites passed (#18725)" {
+  run_suites FAIL_PERF=4
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Performance smoke exit status: 4"* ]]
+}
+
+@test "the performance smoke runs after a failing suite" {
+  run_suites FAIL_JUNIT=3
+  [ "$status" -eq 1 ]
+  grep -q '^perf ' "$CALLS"
+  [[ "$output" == *"Performance smoke exit status: 0"* ]]
+}
+
+@test "a failed reset before the performance smoke fails the run without running it" {
+  run_suites FAIL_THIRD_RESET=1
+  [ "$status" -eq 1 ]
+  ! grep -q '^perf ' "$CALLS"
+  [[ "$output" == *"Performance smoke exit status: 9"* ]]
 }

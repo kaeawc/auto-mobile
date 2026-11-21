@@ -121,3 +121,230 @@ final class SpringBoardPanelTests: XCTestCase {
         XCTAssertEqual(moved?.bounds?.bottom, 139)
     }
 }
+
+/// Frames captured on an iPhone 18 Pro Max simulator (iOS 27.2) with Maps rotated to landscape
+/// (`rotation` 1) and its location alert up (#18858). SpringBoard's root frame was 956x440, but the
+/// window hosting the alert stayed 440x956 and framed the alert in portrait space.
+final class PortraitSpringBoardRotationTests: XCTestCase {
+    private let alertWindow = CGRect(x: 0, y: 0, width: 440, height: 956)
+    private let landscapeApp = CGRect(x: 0, y: 0, width: 956, height: 440)
+
+    private func resolve(window: CGRect, app: CGRect, rotation: Int?) -> PortraitSpringBoardRotation? {
+        PortraitSpringBoardRotation.resolve(alertWindowFrame: window, appFrame: app, deviceRotation: rotation)
+    }
+
+    private func box(_ bounds: ElementBounds?) -> [Int?] {
+        [bounds?.left, bounds?.top, bounds?.right, bounds?.bottom]
+    }
+
+    func testCapturedLandscapeAlertIsRotatedOntoTheButtonsTheScreenshotShows() throws {
+        let rotation = try XCTUnwrap(
+            resolve(window: alertWindow, app: landscapeApp, rotation: 1)
+        )
+        let buttons = [
+            UIElementInfo(text: "Allow Once", bounds: ElementBounds(left: 175, top: 334, right: 223, bottom: 622)),
+            UIElementInfo(
+                text: "Allow While Using App", bounds: ElementBounds(left: 119, top: 334, right: 167, bottom: 622)
+            ),
+            UIElementInfo(text: "Don’t Allow", bounds: ElementBounds(left: 63, top: 334, right: 111, bottom: 622)),
+        ]
+        let alert = UIElementInfo(
+            text: "Allow “Maps” to use your location?",
+            className: "UIAlertController",
+            bounds: ElementBounds(left: 47, top: 318, right: 413, bottom: 638),
+            node: buttons
+        )
+
+        let rotated = ElementLocator.rotatedIntoLandscape(alert, portraitSpringBoard: rotation)
+
+        // The bounds the fixed runner reported on the same device; "Don’t Allow" is drawn at
+        // x 334-622, y 329-375 in the landscape screenshot, below the other two buttons.
+        XCTAssertEqual(box(rotated.bounds), [318, 27, 638, 393])
+        XCTAssertEqual(rotated.node?.map { box($0.bounds) }, [
+            [334, 217, 622, 265],
+            [334, 273, 622, 321],
+            [334, 329, 622, 377],
+        ])
+        XCTAssertEqual(rotated.node?.map(\.text), ["Allow Once", "Allow While Using App", "Don’t Allow"])
+    }
+
+    func testLandscapeRightIsTheOppositeQuarterTurn() throws {
+        let rotation = try XCTUnwrap(
+            resolve(window: alertWindow, app: landscapeApp, rotation: 3)
+        )
+        let moved = rotation.landscapeBounds(ElementBounds(left: 63, top: 334, right: 111, bottom: 622))
+        XCTAssertEqual(box(moved), [956 - 622, 63, 956 - 334, 111])
+    }
+
+    func testWindowsThatAlreadyMatchTheAppAreLeftAlone() {
+        // Portrait app over a portrait window, and SpringBoard's own (landscape) root frame.
+        XCTAssertNil(
+            PortraitSpringBoardRotation.resolve(alertWindowFrame: alertWindow, appFrame: alertWindow, deviceRotation: 0)
+        )
+        XCTAssertNil(
+            resolve(window: landscapeApp, app: landscapeApp, rotation: 1)
+        )
+        // A transposed window without landscape evidence, or with an unsupported rotation.
+        for rotation in [nil, 0, 2] {
+            XCTAssertNil(
+                PortraitSpringBoardRotation.resolve(
+                    alertWindowFrame: alertWindow, appFrame: landscapeApp, deviceRotation: rotation
+                )
+            )
+        }
+        // Different sizes (an inset iPad window) and empty frames.
+        XCTAssertNil(
+            PortraitSpringBoardRotation.resolve(
+                alertWindowFrame: alertWindow, appFrame: CGRect(x: 0, y: 0, width: 800, height: 440), deviceRotation: 1
+            )
+        )
+        XCTAssertNil(
+            PortraitSpringBoardRotation.resolve(alertWindowFrame: .zero, appFrame: landscapeApp, deviceRotation: 1)
+        )
+    }
+}
+
+/// Unfiltered runner hierarchies of the SpringBoard home screen on an iPad Pro 13-inch (M5)
+/// simulator (iOS 27.2), captured after `rotate` landscape and back to portrait (#18827). In
+/// landscape the root frame is 1376x1032 while every window keeps its 1032x1376 portrait frame,
+/// so the icons are framed in portrait space.
+final class PortraitSpringBoardWindowsTests: XCTestCase {
+    private struct Capture: Decodable {
+        struct Payload: Decodable {
+            let hierarchy: UIElementInfo
+            let rotation: Int?
+        }
+
+        let data: Payload
+    }
+
+    private func capture(_ name: String) throws -> Capture.Payload {
+        let url = try XCTUnwrap(Bundle.module.url(
+            forResource: name, withExtension: "json", subdirectory: "Fixtures/springboard-ipad"
+        ))
+        return try JSONDecoder().decode(Capture.self, from: Data(contentsOf: url)).data
+    }
+
+    private func box(_ bounds: ElementBounds?) -> [Int?] {
+        [bounds?.left, bounds?.top, bounds?.right, bounds?.bottom]
+    }
+
+    private func bounds(of label: String, in element: UIElementInfo) -> ElementBounds? {
+        if element.text == label, element.className == "SBIconView" { return element.bounds }
+        return element.node?.lazy.compactMap { self.bounds(of: label, in: $0) }.first
+    }
+
+    func testLandscapeHomeScreenIconsAreRotatedOntoTheScreenshot() throws {
+        let landscape = try capture("ios27_2-ipad-home-landscape-raw")
+        XCTAssertEqual(landscape.rotation, 1)
+        XCTAssertEqual(box(bounds(of: "Safari", in: landscape.hierarchy)), [27, 523, 95, 591])
+
+        let (root, rotation) = ElementLocator.portraitSpringBoardWindowsInRootSpace(
+            landscape.hierarchy, deviceRotation: landscape.rotation
+        )
+
+        XCTAssertEqual(rotation, PortraitSpringBoardRotation(rotation: 1, portraitWidth: 1032, portraitHeight: 1376))
+        XCTAssertEqual(box(root.bounds), [0, 0, 1376, 1032])
+        // The landscape screenshot of the same device draws Safari in the dock at x 524-590,
+        // y 937-1006 and Contacts top-left at x 160-227, y 125-220.
+        XCTAssertEqual(box(bounds(of: "Safari", in: root)), [523, 937, 591, 1005])
+        XCTAssertEqual(box(bounds(of: "Messages", in: root)), [435, 937, 503, 1005])
+        XCTAssertEqual(box(bounds(of: "Contacts", in: root)), [157, 122, 230, 218])
+        // Each portrait window now covers the landscape screen.
+        let windows = (root.node ?? []).filter { $0.className == "UIWindow" }.map { box($0.bounds) }
+        XCTAssertTrue(windows.contains([0, 0, 1376, 1032]))
+        XCTAssertFalse(windows.contains([0, 0, 1032, 1376]))
+    }
+
+    func testForegroundSpringBoardAlertTakesTheTreeRotation() throws {
+        // No landscape iPad SpringBoard alert has been captured: this places an alert of the
+        // captured #18858 shape (UIAlertController over its buttons) in the captured landscape
+        // home screen's first portrait window, framed in that window's portrait space.
+        let landscape = try capture("ios27_2-ipad-home-landscape-raw")
+        let alert = UIElementInfo(
+            text: "Remove “Safari”?",
+            className: "UIAlertController",
+            bounds: ElementBounds(left: 376, top: 548, right: 656, bottom: 828),
+            node: [
+                UIElementInfo(text: "Cancel", bounds: ElementBounds(left: 392, top: 760, right: 640, bottom: 808)),
+            ]
+        )
+        var children = try XCTUnwrap(landscape.hierarchy.node)
+        let windowIndex = try XCTUnwrap(children.firstIndex {
+            $0.className == "UIWindow" && box($0.bounds) == [0, 0, 1032, 1376]
+        })
+        children[windowIndex] = ElementLocator.copying(
+            children[windowIndex], node: (children[windowIndex].node ?? []) + [alert]
+        )
+        let (root, rotation) = ElementLocator.portraitSpringBoardWindowsInRootSpace(
+            ElementLocator.copying(landscape.hierarchy, node: children), deviceRotation: landscape.rotation
+        )
+        let rotationValue = try XCTUnwrap(rotation)
+
+        let topLevel = ElementLocator.appSnapshotAlertsInRootSpace([alert], portraitSpringBoard: rotationValue)
+
+        func find(_ text: String, in element: UIElementInfo) -> UIElementInfo? {
+            if element.text == text { return element }
+            return element.node?.lazy.compactMap { find(text, in: $0) }.first
+        }
+        let inTree = try XCTUnwrap(find("Remove “Safari”?", in: root))
+        // (x, y) -> (y, 1032 - x): the top-level copy lands where its in-tree copy does.
+        XCTAssertEqual(box(topLevel.first?.bounds), [548, 376, 828, 656])
+        XCTAssertEqual(box(topLevel.first?.bounds), box(inTree.bounds))
+        XCTAssertEqual(box(topLevel.first?.node?.first?.bounds), [760, 392, 808, 640])
+        XCTAssertEqual(box(topLevel.first?.node?.first?.bounds), box(inTree.node?.first?.bounds))
+        // Without a portrait SpringBoard rotation the alerts are returned as captured.
+        XCTAssertEqual(
+            ElementLocator.appSnapshotAlertsInRootSpace([alert], portraitSpringBoard: nil).map { box($0.bounds) },
+            [[376, 548, 656, 828]]
+        )
+    }
+
+    func testPortraitHomeScreenIsUnchanged() throws {
+        let portrait = try capture("ios27_2-ipad-home-portrait-raw")
+        XCTAssertEqual(portrait.rotation, 0)
+
+        let (root, rotation) = ElementLocator.portraitSpringBoardWindowsInRootSpace(
+            portrait.hierarchy, deviceRotation: portrait.rotation
+        )
+
+        XCTAssertNil(rotation)
+        XCTAssertEqual(box(bounds(of: "Safari", in: root)), [351, 1280, 419, 1348])
+    }
+
+    func testLandscapeTreeWithoutLandscapeRotationIsUnchanged() throws {
+        let landscape = try capture("ios27_2-ipad-home-landscape-raw")
+        for deviceRotation in [nil, 0, 2] {
+            let (root, rotation) = ElementLocator.portraitSpringBoardWindowsInRootSpace(
+                landscape.hierarchy, deviceRotation: deviceRotation
+            )
+            XCTAssertNil(rotation)
+            XCTAssertEqual(box(bounds(of: "Safari", in: root)), [27, 523, 95, 591])
+        }
+    }
+
+    func testWindowsAlreadyInTheRootSpaceAreLeftAlone() {
+        // After a windowed app parks, SpringBoard can report landscape windows (#18828's capture).
+        let icon = UIElementInfo(
+            text: "Contacts",
+            className: "SBIconView",
+            bounds: ElementBounds(left: 157, top: 122, right: 230, bottom: 218)
+        )
+        let root = UIElementInfo(
+            className: "XCUIApplication",
+            bounds: ElementBounds(left: 0, top: 0, right: 1376, bottom: 1032),
+            node: [
+                UIElementInfo(
+                    className: "UIWindow",
+                    bounds: ElementBounds(left: 0, top: 0, right: 1376, bottom: 1032),
+                    node: [icon]
+                ),
+            ]
+        )
+
+        let (mapped, rotation) = ElementLocator.portraitSpringBoardWindowsInRootSpace(root, deviceRotation: 1)
+
+        XCTAssertNil(rotation)
+        XCTAssertEqual(box(bounds(of: "Contacts", in: mapped)), [157, 122, 230, 218])
+    }
+}

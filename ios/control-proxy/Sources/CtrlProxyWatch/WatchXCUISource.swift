@@ -158,6 +158,7 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
         try performGesture {
             let hasAlerts = !systemAlerts().isEmpty
             let appForeground = app.state == .runningForeground
+            // Alerts over a backgrounded app use a Carousel coordinate drag because app gestures can block.
             let route = watchSwipeRoute(
                 hasAlerts: hasAlerts, appForeground: appForeground,
                 clockfaceForeground: !hasAlerts && !appForeground && clockface.state == .runningForeground

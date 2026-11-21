@@ -19,4 +19,13 @@ class PrototypeTextFieldActionsTest {
     assertEquals(ImeAction.Done, prototypeTextFieldImeAction(null, true))
     assertEquals(ImeAction.Default, prototypeTextFieldImeAction(null, false))
   }
+
+  @Test
+  fun `a keyboard action makes an unset field single-line and an explicit setting wins`() {
+    assertEquals(false, prototypeTextFieldMultiline(null, ImeAction.Done))
+    assertEquals(false, prototypeTextFieldMultiline(null, ImeAction.Search))
+    assertEquals(null, prototypeTextFieldMultiline(null, ImeAction.Default))
+    assertEquals(true, prototypeTextFieldMultiline(true, ImeAction.Default))
+    assertEquals(false, prototypeTextFieldMultiline(false, ImeAction.Done))
+  }
 }

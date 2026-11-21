@@ -8838,6 +8838,12 @@
         "type": "int",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "derived",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeContainer": [
@@ -14279,6 +14285,18 @@
       },
       {
         "name": "progressKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "where",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeDataWhere",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "member",
         "type": "string",
         "nullable": true,
         "hasDefault": true

@@ -70,7 +70,7 @@ export class FakeOnDemandAuditEngines implements OnDemandAuditEngines {
     this.calls.push("performance");
     return this.performanceResult;
   }
-  async memory(appId: string) {
+  async memory(appId: string): Promise<MemoryAuditResult | undefined> {
     this.calls.push(`memory:${appId}`);
     return this.memoryResult;
   }

@@ -1,3 +1,4 @@
+import com.android.build.api.variant.HostTestBuilder
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 
 plugins {
@@ -12,6 +13,14 @@ android {
   defaultConfig { testInstrumentationRunner = null }
 
   testOptions { unitTests.isIncludeAndroidResources = true }
+}
+
+// AGP 9 creates host unit tests only for the tested (debug) build type. Release-only behavior
+// (BuildConfig.DEBUG == false) needs its own run, so CI also runs testReleaseUnitTest (#18623).
+androidComponents {
+  beforeVariants(selector().withBuildType("release")) { variant ->
+    variant.hostTests.getValue(HostTestBuilder.UNIT_TEST_TYPE).enable = true
+  }
 }
 
 kotlin {

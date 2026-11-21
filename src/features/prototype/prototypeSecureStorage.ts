@@ -7,9 +7,9 @@ import type { PrototypePlatformError } from "./prototypePlatform";
  * the runtime keeps in the Android Keystore or the iOS Keychain instead of plaintext storage:
  * the list needs the `secureStorage` module, each key is a declared string state key that is not
  * also in `storage.keys`, a `secureAuth` entry names a secure key and needs the `biometric` module,
- * and no secure key may bind into an emit context, route params or platform args, or into a
- * `request` that does not opt in with `allowSecureInRequest: true`. Kotlin and Swift
- * `PrototypeSecureStorageRules` mirror these checks.
+ * and no secure key may bind into an emit context, route params, platform args or a data-write
+ * value, or into a `request` that does not opt in with `allowSecureInRequest: true`. Kotlin and Swift
+ * `PrototypeSecureStorageRules` mirror these checks, except the data-write value check (#18669).
  */
 export function prototypeSecureStorageError(root: Raw): PrototypePlatformError | undefined {
   const storage = record(root.storage);
@@ -85,12 +85,23 @@ export function prototypeSecureStorageEmitError(
   return undefined;
 }
 
+/** Data actions whose `value` may be a `{state}` binding; `removeData` writes no value. */
+const DATA_WRITE_TYPES: ReadonlySet<unknown> = new Set([
+  "setData",
+  "appendData",
+  "upsertData",
+  "prependData",
+]);
+
 /** Refuses action bindings that could expose secure state outside its storage. */
 export function prototypeSecureStorageActionError(
   action: Raw,
   path: string,
   root: Raw,
 ): PrototypePlatformError | undefined {
+  if (DATA_WRITE_TYPES.has(action.type)) {
+    return dataWriteError(action.value, `${path}.value`, root);
+  }
   switch (action.type) {
     case "emit":
       return prototypeSecureStorageEmitError(action, path, root);
@@ -100,23 +111,46 @@ export function prototypeSecureStorageActionError(
     case "replace":
       return bindingMapError(action.params, `${path}.params`, root, "route params");
     case "setStack":
-      for (const [index, entry] of (Array.isArray(action.path) ? action.path : []).entries()) {
-        const error = bindingMapError(
-          record(entry)?.params,
-          `${path}.path[${index}].params`,
-          root,
-          "route params",
-        );
-        if (error) {
-          return error;
-        }
-      }
-      return undefined;
+      return stackPathError(action.path, `${path}.path`, root);
     case "platform":
       return bindingMapError(action.args, `${path}.args`, root, "platform args");
     default:
       return undefined;
   }
+}
+
+/** The first `setStack` path entry whose route params bind a secure key. */
+function stackPathError(
+  entries: unknown,
+  path: string,
+  root: Raw,
+): PrototypePlatformError | undefined {
+  for (const [index, entry] of (Array.isArray(entries) ? entries : []).entries()) {
+    const error = bindingMapError(
+      record(entry)?.params,
+      `${path}[${index}].params`,
+      root,
+      "route params",
+    );
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * A data-write `{state}` value that reads a secure key: the write would copy the secret into `/data`,
+ * its change event and, when the target is in `storage.keys`, plaintext storage. `allowSecureInRequest`
+ * does not apply.
+ */
+function dataWriteError(
+  value: unknown,
+  path: string,
+  root: Raw,
+): PrototypePlatformError | undefined {
+  const key = bindingKey(value, strings(record(root.storage)?.secure));
+  return key ? { path, message: `Secure storage key ${key} cannot be written to data` } : undefined;
 }
 
 /** Only state bindings are resolved here; literal strings do not expand placeholders. */

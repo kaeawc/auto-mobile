@@ -98,7 +98,7 @@ function screenBounds(context: ContentHiddenRegionClipContext): ElementBounds | 
 
 /**
  * Clips CtrlProxy's `contentHiddenRegions` (#18675) to what can actually be drawn: the screen, the
- * Compose host view that owns it, then the visible window that host-clipped region overlaps most. The runner
+ * Compose host view that owns it (the region's `hostBounds` when the runner sends it, #18879), then the visible window that host-clipped region overlaps most. The runner
  * reports the raw bounds of the flagged Compose node, which can be larger than its `ComposeView`
  * host (a fill-max-size child of a host that is shorter than the window) and so extend past the
  * screen and over sibling Views such as a bottom navigation bar. The host's parent clips that
@@ -120,10 +120,10 @@ export function clipContentHiddenRegions(
   const windowBounds = parsedWindows.every((bounds) => bounds !== null)
     ? parsedWindows.filter((bounds): bounds is ElementBounds => bounds !== null)
     : [];
-  const hostBounds = composeHostBounds(context.hierarchy);
+  const composeHosts = composeHostBounds(context.hierarchy);
   const screenArea = screen ? boundsArea(screen) : 0;
 
-  const clipped = regions.flatMap((region): ContentHiddenRegion[] => {
+  const clipped = regions.flatMap(({ hostBounds, ...region }): ContentHiddenRegion[] => {
     const raw = parseBounds(region.bounds);
     if (!raw) {
       return [region];
@@ -131,7 +131,9 @@ export function clipContentHiddenRegions(
     const onScreen = screen ? intersectBounds(raw, screen) : raw;
     // Host first: the window is then chosen from what the owning host can draw, so an overflow
     // into a split-screen neighbour cannot pick that neighbour and erase the region.
-    const host = owningHost(raw, hostBounds);
+    // A runner that walked the real tree names the owning host; only guess it from the converted
+    // tree for older APKs, where a smaller nested host can share the region's top-left corner.
+    const host = parseBounds(hostBounds) ?? owningHost(raw, composeHosts);
     const inHost = onScreen && (host ? intersectBounds(onScreen, host) : onScreen);
     const inWindow = inHost && clipToBestWindow(inHost, windowBounds);
     if (!inWindow) {

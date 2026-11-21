@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.buildlogic.protoviewer
 
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -57,6 +58,30 @@ class ProtoViewerVersioningTest {
     }
     assertThrows(IllegalArgumentException::class.java) {
       ProtoViewerVersioning.versionCode("1.0.1000")
+    }
+  }
+
+  /**
+   * The MCP host derives the same code to check the support window (#14156,
+   * src/features/prototype/protoViewer/protoViewerSupportWindow.ts); both read these vectors.
+   */
+  @Test
+  fun matchesTheVectorsSharedWithTheHost() {
+    val vectors =
+      File("../../test/fixtures/protoviewer-version-codes.txt")
+        .readLines()
+        .map(String::trim)
+        .filter { it.isNotEmpty() && !it.startsWith("#") }
+        .map { it.split(Regex("\\s+")) }
+    assertTrue(vectors.isNotEmpty())
+    vectors.forEach { (version, expected) ->
+      if (expected == "invalid") {
+        assertThrows(version, IllegalArgumentException::class.java) {
+          ProtoViewerVersioning.versionCode(version)
+        }
+      } else {
+        assertEquals(version, expected.toInt(), ProtoViewerVersioning.versionCode(version))
+      }
     }
   }
 }

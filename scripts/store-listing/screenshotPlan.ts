@@ -225,7 +225,10 @@ function screenSteps(profile: DeviceProfile, screen: ScreenId, pins: PlanPins): 
         {
           kind: "mcp",
           tool: "tapOn",
-          args: { selector: { text: `More options for ${FEATURED.label}` } },
+          args:
+            profile.platform === "ios"
+              ? { selector: { text: FEATURED.label }, action: "longPress" }
+              : { selector: { text: `More options for ${FEATURED.label}` } },
         },
         { kind: "mcp", tool: "tapOn", args: { selector: { text: "Share" } } },
         capture,

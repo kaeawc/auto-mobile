@@ -2,10 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { formatToolParamError } from "../../src/server/toolParamError";
 import { phoneCallSchema, sendSmsSchema } from "../../src/server/telephonyTools";
-import {
-  biometricAuthSchema,
-  getIosSimulatorCapabilitiesSchema,
-} from "../../src/server/biometricTools";
+import { biometricAuthSchema } from "../../src/server/biometricTools";
 import { accessibilityFocusSchema } from "../../src/server/accessibilityFocusTools";
 import {
   exploreSchema,
@@ -39,8 +36,6 @@ interface StrictCase {
   readonly name: string;
   readonly schema: z.ZodType<any>;
   readonly valid: Record<string, unknown>;
-  /** Device targeting is injected by the executor into requiresDevice tools only. */
-  readonly deviceTargeted?: boolean;
 }
 
 const strictCases: StrictCase[] = [
@@ -51,15 +46,8 @@ const strictCases: StrictCase[] = [
     schema: sendSmsSchema,
     valid: { phoneNumber: "+15555550100", message: "hello" },
   },
-  // #6712: biometrics (biometricAuth carries a `.refine()`;
-  // getIosSimulatorCapabilities has no device-targeting wrapper)
+  // #6712: biometrics (biometricAuth carries a `.refine()`)
   { name: "biometricAuth", schema: biometricAuthSchema, valid: { action: "match" } },
-  {
-    name: "getIosSimulatorCapabilities",
-    schema: getIosSimulatorCapabilitiesSchema,
-    valid: { deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16", runtime: "iOS-18-0" },
-    deviceTargeted: false,
-  },
   // #6712: accessibility focus
   { name: "accessibilityFocus", schema: accessibilityFocusSchema, valid: { action: "set" } },
   // #6712: navigation
@@ -97,18 +85,8 @@ describe("issues #6712/#6613: object-shaped tool inputs reject undeclared argume
       appLifecycleSchema.safeParse({ appId: "com.example.app", action: "foreground" }).success,
     ).toBe(false);
   });
-  test("getIosSimulatorCapabilities accepts optional session targeting fields", () => {
-    expect(
-      getIosSimulatorCapabilitiesSchema.safeParse({
-        deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
-        runtime: "iOS-18-0",
-        sessionUuid: "11111111-2222-3333-4444-555555555555",
-        keepScreenAwake: true,
-      }).success,
-    ).toBe(true);
-  });
 
-  for (const { name, schema, valid, deviceTargeted = true } of strictCases) {
+  for (const { name, schema, valid } of strictCases) {
     test(`${name} rejects an undeclared top-level argument`, () => {
       const result = schema.safeParse({ ...valid, ...UNDECLARED_PROBE });
       expect(result.success).toBe(false);
@@ -130,9 +108,6 @@ describe("issues #6712/#6613: object-shaped tool inputs reject undeclared argume
     });
 
     test(`${name} still accepts injected device targeting`, () => {
-      if (!deviceTargeted) {
-        return;
-      }
       // The executor injects these into requiresDevice tool calls after device
       // allocation; strict mode must not reject them.
       const result = schema.safeParse({

@@ -55,6 +55,50 @@ enum SpringBoardPanel {
     static let innerPanelRotation = 1
 }
 
+/// On an iPhone the SpringBoard window that hosts a system alert keeps its portrait frame while
+/// the app in front of it is rotated, even though SpringBoard's root frame turns landscape: a
+/// fresh SpringBoard snapshot frames the alert in portrait space while the app's own tree is
+/// landscape (#18858). The alert is drawn rotated with the app, so its bounds need the same
+/// quarter-turn to share the observation's space and to be tappable.
+struct PortraitSpringBoardRotation: Equatable, Sendable {
+    /// `DeviceRotation` value: 1 is landscapeLeft, 3 is landscapeRight.
+    let rotation: Int
+    let portraitWidth: Int
+    let portraitHeight: Int
+
+    /// Non-nil only when the alert's window is portrait-shaped, the app frame is its landscape
+    /// transpose and the device reads landscape. A window that already matches the app (an iPad,
+    /// or a portrait app) needs nothing.
+    static func resolve(alertWindowFrame: CGRect, appFrame: CGRect, deviceRotation: Int?) -> Self? {
+        guard deviceRotation == 1 || deviceRotation == 3, let rotation = deviceRotation else { return nil }
+        let window = GestureSize(width: Double(alertWindowFrame.width), height: Double(alertWindowFrame.height))
+        let app = GestureSize(width: Double(appFrame.width), height: Double(appFrame.height))
+        let tolerance = 1.0
+        guard window.isValid, app.isValid, window.width < window.height,
+              abs(app.width - window.height) <= tolerance,
+              abs(app.height - window.width) <= tolerance else { return nil }
+        return Self(
+            rotation: rotation,
+            portraitWidth: ElementBounds.clampedInt(alertWindowFrame.width),
+            portraitHeight: ElementBounds.clampedInt(alertWindowFrame.height)
+        )
+    }
+
+    /// landscapeLeft puts the portrait top edge on the left, so `(x, y)` is drawn at
+    /// `(y, width - x)`; landscapeRight is the opposite turn, `(height - y, x)`.
+    func landscapeBounds(_ bounds: ElementBounds) -> ElementBounds {
+        if rotation == 3 {
+            return SpringBoardPanel.landscapeBounds(bounds, portraitHeight: portraitHeight)
+        }
+        return ElementBounds(
+            left: bounds.top,
+            top: portraitWidth - bounds.right,
+            right: bounds.bottom,
+            bottom: portraitWidth - bounds.left
+        )
+    }
+}
+
 extension ElementLocator {
     /// Dialogs and sheets are extracted from the portrait snapshot separately from the main tree, so
     /// they get the same inner-panel rotation as it. A nil height leaves app-snapshot alerts and
@@ -77,16 +121,39 @@ extension ElementLocator {
     )
         -> UIElementInfo
     {
-        UIElementInfo(
+        mappingBounds(element, rootBounds: rootBounds) {
+            SpringBoardPanel.landscapeBounds($0, portraitHeight: portraitHeight)
+        }
+    }
+
+    /// Rotate a portrait SpringBoard alert subtree into the rotated app's landscape space (#18858).
+    nonisolated static func rotatedIntoLandscape(
+        _ element: UIElementInfo,
+        portraitSpringBoard: PortraitSpringBoardRotation
+    )
+        -> UIElementInfo
+    {
+        mappingBounds(element, rootBounds: nil) { portraitSpringBoard.landscapeBounds($0) }
+    }
+
+    /// `skipSubtree` keeps a matching node and its descendants exactly as captured.
+    nonisolated static func mappingBounds(
+        _ element: UIElementInfo,
+        rootBounds: ElementBounds?,
+        skipSubtree: (UIElementInfo) -> Bool = { _ in false },
+        _ transform: (ElementBounds) -> ElementBounds
+    )
+        -> UIElementInfo
+    {
+        if skipSubtree(element) { return element }
+        return UIElementInfo(
             text: element.text,
             value: element.value,
             textSize: element.textSize,
             contentDesc: element.contentDesc,
             resourceId: element.resourceId,
             className: element.className,
-            bounds: rootBounds ?? element.bounds.map {
-                SpringBoardPanel.landscapeBounds($0, portraitHeight: portraitHeight)
-            },
+            bounds: rootBounds ?? element.bounds.map(transform),
             clickable: element.clickable,
             enabled: element.enabled,
             focusable: element.focusable,
@@ -107,7 +174,7 @@ extension ElementLocator {
             viewId: element.viewId,
             extras: element.extras,
             actions: element.actions,
-            node: element.node?.map { rotatedIntoLandscape($0, portraitHeight: portraitHeight) }
+            node: element.node?.map { mappingBounds($0, rootBounds: nil, skipSubtree: skipSubtree, transform) }
         )
     }
 }

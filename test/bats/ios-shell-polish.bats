@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 #
 # Tests for the iOS shell-script polish fixes in #3652:
-#  A) setup-ios-simulator.sh: "iPhone 16" preference must not match "iPhone 16e"
+#  A) setup-ios-simulator.sh: no name-text simulator matching ("iPhone 16" vs "iPhone 16e")
 #  B) ctrl-proxy-run.sh: SIMULATOR_NAME must be the device name, not the UDID
 #  C) ensure-simulator-runtime.sh: unknown-arg message must name the bad arg
 #  D) local/validate-ios.sh: simctl check must not use `command -v xcrun simctl`
@@ -16,32 +16,12 @@ teardown() {
 }
 
 # --- A ---------------------------------------------------------------------
-@test "find_simulator_device prefers 'iPhone 16', not 'iPhone 16e'" {
-  local script="scripts/ios/setup-ios-simulator.sh"
-  local abs
-  abs="$(cd "$(dirname "$script")" && pwd)/$(basename "$script")"
-
-  # Stub xcrun to list both an iPhone 16e and an iPhone 16.
-  cat > "$STUB_DIR/xcrun" <<'EOF'
-#!/usr/bin/env bash
-cat <<'DEVS'
-    iPhone 16e (AAAA-0001) (Shutdown)
-    iPhone 16 (BBBB-0002) (Shutdown)
-DEVS
-EOF
-  chmod +x "$STUB_DIR/xcrun"
-
-  local fn="$WORK_DIR/find_simulator_device.sh"
-  awk '/^find_simulator_device\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$abs" > "$fn"
-
-  run env PATH="$STUB_DIR:$PATH" bash -c '
-    source "$1"
-    log_debug() { :; }
-    find_simulator_device "17.0"
-  ' _ "$fn"
-
-  [ "$status" -eq 0 ]
-  [ "$output" = "iPhone 16" ]
+@test "setup-ios-simulator no longer matches simulators by name text" {
+  # The name regexes behind the 16/16e bug were replaced by simctl JSON selection
+  # (scripts/ios/simulator-select.sh); test/bats/setup-ios-simulator-select.bats
+  # covers that choice.
+  run grep -nE 'grep[^|]*"iPhone 1[0-9]' scripts/ios/setup-ios-simulator.sh
+  [ "$status" -eq 1 ]
 }
 
 # --- B ---------------------------------------------------------------------

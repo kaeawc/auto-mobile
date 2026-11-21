@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import {
   allIconTargets,
   iosContentsJson,
+  FEATURE_GRAPHIC,
   ICON_SOURCE_DIR,
   IOS_DARK_BACKGROUND,
   type IconTarget,
@@ -129,6 +130,32 @@ export async function createSharpRenderer(): Promise<IconRenderer> {
   };
 }
 
+/**
+ * The Play feature graphic: the background layer fills the banner and the foreground sits centred
+ * at banner height, so the art is the app icon's own mark. No text: the store overlays none and
+ * rasterized glyphs would depend on the host's fonts, breaking byte-identical regeneration.
+ */
+export async function renderFeatureGraphic(sources: IconSources): Promise<RenderedIcon> {
+  const sharp = (await import("sharp")).default;
+  const { width, height, path } = FEATURE_GRAPHIC;
+  const layer = (svg: string, size: number) =>
+    sharp(Buffer.from(svg), { density: (72 * size) / 108 })
+      .resize(size, size)
+      .png()
+      .toBuffer();
+  const background = await sharp(await layer(sources.background, height))
+    .resize(width, height, { fit: "fill" })
+    .png()
+    .toBuffer();
+  const foreground = await layer(sources.foreground, height);
+  const bytes = await sharp(background)
+    .composite([{ input: foreground, left: Math.round((width - height) / 2), top: 0 }])
+    .removeAlpha()
+    .png()
+    .toBuffer();
+  return { path, bytes };
+}
+
 export function parseArgs(argv: readonly string[]): { out?: string; list: boolean } {
   const out = argv.indexOf("--out");
   return {
@@ -147,7 +174,11 @@ export async function main(argv: readonly string[]): Promise<number> {
     return 0;
   }
   const outDir = resolve(repoRoot, args.out ?? DEFAULT_OUT_DIR);
-  const rendered = await renderIcons(await createSharpRenderer(), readIconSources(repoRoot));
+  const sources = readIconSources(repoRoot);
+  const rendered = [
+    ...(await renderIcons(await createSharpRenderer(), sources)),
+    await renderFeatureGraphic(sources),
+  ];
   rendered.forEach((icon) => {
     const file = join(outDir, icon.path);
     mkdirSync(dirname(file), { recursive: true });

@@ -47,10 +47,12 @@ export function prototypeKeyedDataActionsUnsupportedMessage(
   fields: readonly string[],
   platform: "android" | "ios",
 ): string {
-  return prototypeDataActionsUnsupportedMessage(fields, platform).replace(
-    PROTOTYPE_DATA_ACTIONS_CAPABILITY,
-    PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY,
-  );
+  return prototypeDataActionsUnsupportedMessage(fields, platform)
+    .replace(PROTOTYPE_DATA_ACTIONS_CAPABILITY, PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY)
+    .replace(
+      "the setData, appendData, prependData or removeData action",
+      "keyed writes or generated value bindings",
+    );
 }
 
 const INDEX_SEGMENT = "{index}";

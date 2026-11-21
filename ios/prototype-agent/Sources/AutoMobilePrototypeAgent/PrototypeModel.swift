@@ -464,13 +464,18 @@
             let prepared = storage?.prepare(spec)
             // Drop buffered location/sensor events from the old session while keeping global and
             // host-supplied streams alive. New state must be seeded before the first draw.
-            platformDriver.resetSessionEvents()
-            platformRegistry.configure(locationBlock: (prepared?.spec ?? spec).locationBlock)
-            platformRegistry.configure(sensorsBlock: (prepared?.spec ?? spec).sensorsBlock, sessionID: showRevision + 1)
             let seeded: PrototypeSpec
-            do { seeded = try (prepared?.spec ?? spec).replacingPlatform(
-                platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }
-            ) } catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
+            do {
+                seeded = try platformDriver.seedForShow(
+                    prepared?.spec ?? spec,
+                    previousLocationBlock: session.spec?.locationBlock,
+                    previousSensorsBlock: session.spec?.sensorsBlock,
+                    previousSessionID: showRevision,
+                    sessionID: showRevision + 1
+                ) {
+                    platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }
+                }
+            } catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
             platformDriver.clearOutcomes()
             next.show(
                 seeded, reset: reset, appearance: appearance, locale: locale, specBytes: specBytes,

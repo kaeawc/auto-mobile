@@ -24,6 +24,33 @@ class PrototypeDeriveTest {
     }
   }
 
+  @Test
+  fun `derived condition names validate at the authored path`() {
+    val fixture =
+      Json.parseToJsonElement(File(fixtureDirectory(), "derive/conditions.json").readText())
+        .jsonObject
+    val spec = fixture.getValue("spec").jsonObject
+    assertTrue(PrototypeSpecValidator.validate(spec.toString()) is PrototypeSpecValidation.Success)
+    val root = spec.getValue("root").jsonObject
+    val children = root.getValue("children").jsonArray
+    val invalidChild =
+      JsonObject(
+        children.first().jsonObject + ("visibleWhen" to fixture.getValue("unknownCondition")),
+      )
+    val invalidRoot =
+      JsonObject(root + ("children" to JsonArray(listOf(invalidChild) + children.drop(1))))
+    val invalidSpec = JsonObject(spec + ("root" to invalidRoot))
+    val result = PrototypeSpecValidator.validate(invalidSpec.toString())
+    val expected = fixture.getValue("error").jsonObject
+    assertEquals(
+      PrototypeSpecError(
+        expected.getValue("path").jsonPrimitive.content,
+        expected.getValue("message").jsonPrimitive.content,
+      ),
+      (result as? PrototypeSpecValidation.Failure)?.error,
+    )
+  }
+
   private class Counter : PrototypeDeriveObserver {
     val names = mutableListOf<String>()
 

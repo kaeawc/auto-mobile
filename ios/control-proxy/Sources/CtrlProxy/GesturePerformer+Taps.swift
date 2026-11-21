@@ -119,7 +119,6 @@ extension GesturePerformer {
                         let coordinate = candidate.coordinate
                         let selection = candidate.selection
                         let construction = candidate.route == .displayTargetedRecord ? "displayTargetedPoint" :
-                            coordinate?.windowTranslation != nil ? "windowOriginPlusPointOffset" :
                             (selection.strategy == .legacy ? "appFrameOriginPlusPointOffset" : "appNormalizedOffset")
                         let requested = TapDiagnostics.Requested(
                             x: requested.x, y: requested.y, durationMs: requested.durationMs,

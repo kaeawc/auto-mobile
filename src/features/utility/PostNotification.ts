@@ -30,9 +30,27 @@ import {
 } from "./ios/IosNotificationAuthorizationReader";
 
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import { watchNotificationDeliveryVerdict } from "./ios/watchNotificationDeliveryLog";
+import {
+  watchNotificationDeliveryVerdict,
+  type WatchNotificationDeliveryVerdict,
+} from "./ios/watchNotificationDeliveryLog";
 
 export { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
+
+function withWatchPresentationWarning(
+  warning: string | undefined,
+  verdict: WatchNotificationDeliveryVerdict | null,
+  bundleId: string,
+): string | undefined {
+  if (verdict !== "NOT_PRESENTED") {
+    return warning;
+  }
+  return [warning, watchNotPresentedWarning(bundleId)].filter(Boolean).join(" ");
+}
+
+function watchNotPresentedWarning(bundleId: string): string {
+  return `The watch delivered the push to ${bundleId} but showed no banner: the app is in the foreground and its notification delegate declined to present it (notifications are authorized, not denied). Background the app (pressButton home) and post again if the banner is needed.`;
+}
 
 interface PostNotificationAction {
   label: string;
@@ -255,10 +273,11 @@ export class PostNotification {
         warning,
       };
     }
-    if (
-      this.device.platform === "watchos" &&
-      (await this.watchDeliveryVerdict(bundleId, deliveryLogBaseline)) === "NO"
-    ) {
+    const watchVerdict =
+      this.device.platform === "watchos"
+        ? await this.watchDeliveryVerdict(bundleId, deliveryLogBaseline)
+        : null;
+    if (watchVerdict === "NO") {
       return {
         success: false,
         supported: true,
@@ -276,7 +295,7 @@ export class PostNotification {
       method: "simctlPush",
       appId: bundleId,
       channelId: options.channelId,
-      warning,
+      warning: withWatchPresentationWarning(warning, watchVerdict, bundleId),
     };
   }
 
@@ -302,7 +321,7 @@ export class PostNotification {
   private async watchDeliveryVerdict(
     bundleId: string,
     ignoreLines: ReadonlySet<string>,
-  ): Promise<"NO" | "YES" | null> {
+  ): Promise<WatchNotificationDeliveryVerdict | null> {
     try {
       const first = watchNotificationDeliveryVerdict(
         await this.simctl.readNotificationDeliveryLog(this.device.deviceId),

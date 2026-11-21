@@ -1,0 +1,6 @@
+Timestamp               Ty Process[PID:TID]
+2026-11-19 01:24:01.853 Df log[61833:0] [com.apple.log:] log run noninteractively, parent: 55778 (launchd_sim), args: 'log' 'show' '--last' '10s' '--style' 'compact' '--predicate' 'eventMessage CONTAINS "Saving notification"'
+2026-11-19 01:24:02.618 Df Carousel[55795:2064fdb] [com.apple.UserNotifications:DataStore] [dev.jasonpearson.automobile.ctrlproxy.watch] Saving notification 4846-A4BB: NO [ hasAlertContent: YES, shouldPresentAlert: NO settingsShouldSave: YES pipelineState: pending]
+2026-11-19 01:24:02.724 Df Carousel[55795:206609b] [com.apple.UserNotifications:DataStore] [dev.jasonpearson.automobile.ctrlproxy.watch] Saving notification 4846-A4BB: NO [ hasAlertContent: YES, shouldPresentAlert: NO settingsShouldSave: YES pipelineState: completed]
+2026-11-19 01:24:02.941 Df log[61858:0] [com.apple.log:] log run noninteractively, parent: 55778 (launchd_sim), args: 'log' 'show' '--last' '10s' '--style' 'compact' '--predicate' 'eventMessage CONTAINS "Saving notification"'
+2026-11-19 01:24:03.820 Df log[61957:0] [com.apple.log:] log run noninteractively, parent: 55778 (launchd_sim), args: 'log' 'show' '--last' '60s' '--style' 'compact' '--predicate' 'eventMessage CONTAINS "Saving notification"'

@@ -56,8 +56,8 @@ executors:
     parameters:
       xcode:
         type: string
-        default: "26.6"
-        description: "CircleCI Xcode image tag (26.6 matches the PR toolchain floor)."
+        default: "27.2"
+        description: "CircleCI Xcode image tag (27.2 matches the PR toolchain pin, scripts/ios/xcode_version.sh)."
     macos:
       # Verify a tag is offered at
       # https://circleci.com/developer/machine/image/xcode before adding it.
@@ -235,7 +235,7 @@ jobs:
     parameters:
       xcode:
         type: string
-        default: "26.6"
+        default: "27.2"
       superseded-path-group:
         type: string
         default: ""
@@ -325,7 +325,7 @@ jobs:
     parameters:
       xcode:
         type: string
-        default: "26.6"
+        default: "27.2"
     executor:
       name: ios
       xcode: << parameters.xcode >>
@@ -341,6 +341,11 @@ jobs:
             for package in ios/screen-capture ios/network-filter ios/audio-loopback ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
               (cd "${package}" && swift package resolve)
             done
+      # swift-build.sh builds ProtoViewer, whose icon generator needs Bun and sharp.
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: bash scripts/ci/install-bun-deps.sh
       - run:
           name: "Build Swift packages"
           command: ./scripts/ios/swift-build.sh
@@ -502,7 +507,7 @@ jobs:
           name: "Resolve CtrlProxy Swift package dependencies"
           command: cd ios/control-proxy && swift package resolve
       - run:
-          name: "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.6)"
+          name: "Boot iOS Simulator for CtrlProxy UI tests (Xcode 27.2)"
           no_output_timeout: 12m
           command: |
             ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
@@ -537,7 +542,7 @@ jobs:
               echo "export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=xctest"
             } >> "${BASH_ENV}"
       - run:
-          name: "Run selected CtrlProxy iOS tests (Xcode 26.6)"
+          name: "Run selected CtrlProxy iOS tests (Xcode 27.2)"
           no_output_timeout: 8m
           command: |
             if [[ ! "${SIMULATOR_UDID}" =~ ^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$ ]]; then
@@ -555,7 +560,7 @@ jobs:
               -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testPressKeyForwardDeleteRemovesFollowingCharacter \
               -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testPressKeyForwardDeleteAtEndOfTextFailsClosed
       - run:
-          name: "Ensure AutoMobile daemon ready (Xcode 26.6)"
+          name: "Ensure AutoMobile daemon ready (Xcode 27.2)"
           environment:
             AUTOMOBILE_DAEMON_DEBUG: "1"
             AUTOMOBILE_DAEMON_EMBEDDED_SDK: "1"
@@ -566,7 +571,7 @@ jobs:
             echo 'export PATH="${HOME}/.bun/bin:${PATH}"' >> "${BASH_ENV}"
             ./scripts/ci/ensure-daemon-ready.sh
       - run:
-          name: "Warm up iOS CtrlProxy (Xcode 26.6)"
+          name: "Warm up iOS CtrlProxy (Xcode 27.2)"
           no_output_timeout: 12m
           command: ./scripts/ci/ensure-ctrl-proxy-ready.sh
       - run:
@@ -671,6 +676,8 @@ workflows:
     jobs:
       - xctestrunner-simulator-tests:
           name: "XCTestRunner Simulator Tests"
+      # The two sweeps stay on Xcode 26.6, the published Swift 6.3 toolchain floor;
+      # PRs and post-merge builds use the pin in scripts/ios/xcode_version.sh.
       - ios-swift-packages:
           name: "Swift Packages Sweep (Xcode 26.6)"
           xcode: "26.6"

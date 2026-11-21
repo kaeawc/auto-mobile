@@ -1,0 +1,7 @@
+Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=dev.l18722.dbg/dev.l18722.Main }
+Status: ok
+LaunchState: COLD
+Activity: dev.l18722.dbg/dev.l18722.Main
+TotalTime: 457
+WaitTime: 461
+Complete

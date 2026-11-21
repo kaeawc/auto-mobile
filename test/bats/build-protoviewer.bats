@@ -253,3 +253,26 @@ PY
   run bash "$SCRIPT" "$OUT"
   [ "$status" -ne 0 ]
 }
+
+@test "fails fast with an install hint when bun is not on PATH" {
+  PATH="${MOCK_BIN}:/usr/bin:/bin"
+  command -v bun > /dev/null && skip "bun is installed under /usr/bin or /bin"
+  run bash "$SCRIPT" "$OUT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'bun is required to render the ProtoViewer icon'* ]]
+  [[ "$output" == *'install-bun-deps.sh'* ]]
+  [ ! -e "$OUT/ProtoViewer.app/ProtoViewerIcon60x60@2x.png" ]
+}
+
+@test "an unresolvable sharp fails immediately instead of auto-installing, and no app is signed" {
+  command -v bun > /dev/null || skip "bun is not installed"
+  cat > "${FIXTURE}/scripts/store-listing/generate-icons.ts" <<'TS'
+await import("sharp-package-that-does-not-exist");
+TS
+  run timeout 20 bash "$SCRIPT" "$OUT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'Icon generator failed'* ]]
+  [[ "$output" == *'install-bun-deps.sh'* ]]
+  run cat "$BUILD_LOG"
+  [[ "$output" != *'--force --sign - '* ]]
+}

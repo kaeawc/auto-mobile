@@ -73,45 +73,35 @@ final class WindowedAppTranslationTests: XCTestCase {
         ))
     }
 
-    func testOnlyAutomaticPointOffsetSelectionsAreTranslated() {
-        let translation = GesturePoint(x: 230, y: 255)
+    func testInsetWindowPointOffsetsAreDeliveredAsScreenPoints() {
         let windowed = GestureCoordinateGeometry(
-            app: windowSize, screen: screenSize, observation: windowSize, rotation: 0
+            app: windowSize, screen: screenSize, observation: screenSize, rotation: 0,
+            appOrigin: .zero, windowTranslation: GesturePoint(x: 230, y: 255)
         )
-        let point = GesturePoint(x: 187, y: 311)
-        // The captured inset window: mismatch, but no multi-panel mapping, so a point offset.
+        // A screen point inside the inset window: mismatch, but no multi-panel mapping, so the
+        // observed point is the delivered offset with no window origin added (#18830).
+        let point = GesturePoint(x: 417, y: 566)
         let automatic = GestureCoordinateSelection.choose(point: point, geometry: windowed)
         XCTAssertEqual(automatic.strategy, .legacy)
         XCTAssertEqual(automatic.reason, "mappingUndefined(rotation=0,geometryOrPoint)")
         XCTAssertEqual(automatic.offset, point)
-        XCTAssertEqual(automatic.windowTranslation(translation), translation)
-        XCTAssertNil(automatic.windowTranslation(nil))
-
-        XCTAssertNil(
-            GestureCoordinateSelection.choose(point: point, geometry: windowed, forced: .legacy)
-                .windowTranslation(translation)
+        XCTAssertEqual(
+            GestureCoordinateSelection.choose(point: point, geometry: windowed, forced: .legacy).offset,
+            point
         )
-        let normalized = GestureCoordinateSelection.choose(
-            point: point, geometry: windowed, forced: .appRelativeObserved
-        )
-        XCTAssertEqual(normalized.strategy, .appRelativeObserved)
-        XCTAssertNil(normalized.windowTranslation(translation))
     }
 
     func testForcedIsATypedFlagNotTheReasonText() {
-        let translation = GesturePoint(x: 230, y: 255)
         let point = GesturePoint(x: 187, y: 311)
         // A legacy selection whose reason text happens to read "forced" is still automatic.
         let automatic = GestureCoordinateSelection(
             strategy: .legacy, reason: "forced", normalized: .zero, offset: point
         )
         XCTAssertFalse(automatic.isForced)
-        XCTAssertEqual(automatic.windowTranslation(translation), translation)
-        // A forced selection stays untranslated whatever its reason text says.
         let renamed = GestureCoordinateSelection(
             strategy: .legacy, reason: "callerForced", normalized: .zero, offset: point, isForced: true
         )
-        XCTAssertNil(renamed.windowTranslation(translation))
+        XCTAssertTrue(renamed.isForced)
 
         let windowed = GestureCoordinateGeometry(
             app: windowSize, screen: screenSize, observation: windowSize, rotation: 0
@@ -144,19 +134,19 @@ final class WindowedAppTranslationTests: XCTestCase {
         )
         XCTAssertEqual(button.frame, CGRect(x: 57, y: 330, width: 260, height: 40))
 
-        // The observed centre goes through the same automatic selection as an app node and
-        // lands back on the button's screen centre (417,605).
-        let center = GesturePoint(x: Double(button.frame.midX), y: Double(button.frame.midY))
-        let windowed = GestureCoordinateGeometry(
-            app: windowSize, screen: screenSize, observation: windowSize, rotation: 0
+        // Moving the merged hierarchy into screen space lands the button back on its screen frame.
+        let translation = try XCTUnwrap(ElementLocator.windowScreenTranslation(
+            appFrame: appFrame, screenFrame: springboardFrame, windowFrame: { windowFrame }
+        ))
+        let merged = UIElementInfo(
+            bounds: ElementBounds(clamping: appFrame),
+            node: [UIElementInfo(bounds: ElementBounds(clamping: button.frame))]
         )
-        let selection = GestureCoordinateSelection.choose(point: center, geometry: windowed)
-        let translation = try XCTUnwrap(selection.windowTranslation(GesturePoint(x: 230, y: 255)))
-        let offsetPoint = try XCTUnwrap(selection.offset)
-        XCTAssertEqual(
-            GesturePoint(x: translation.x + offsetPoint.x, y: translation.y + offsetPoint.y),
-            GesturePoint(x: 417, y: 605)
-        )
+        let screen = ElementLocator.translatedToScreen(merged, by: translation)
+        XCTAssertEqual(screen.node?.first?.bounds?.left, 287)
+        XCTAssertEqual(screen.node?.first?.bounds?.top, 585)
+        XCTAssertEqual(screen.node?.first?.bounds?.right, 547)
+        XCTAssertEqual(screen.node?.first?.bounds?.bottom, 625)
     }
 
     func testSpringboardAlertsStayPutWithoutAnInsetWindow() {
@@ -194,5 +184,91 @@ final class WindowedAppTranslationTests: XCTestCase {
             .zero
         )
         XCTAssertEqual(windowReads, 0)
+    }
+
+    /// #18830, mt0098c on an iPad Pro 13-inch (M5), iOS 27.2: Files resized to a 1201x865 window
+    /// at screen (-135,83). Observe reported the Search button at window-relative [1151,14,1187,50]
+    /// and the keyboard at screen [2,596,1378,1016] in one tree.
+    func testInsetWindowHierarchyMovesIntoScreenSpaceExceptTheKeyboard() throws {
+        let appFrame = CGRect(x: 0, y: 0, width: 1201, height: 865)
+        let translation = try XCTUnwrap(ElementLocator.windowScreenTranslation(
+            appFrame: appFrame,
+            screenFrame: CGRect(x: 0, y: 0, width: 1376, height: 1032),
+            windowFrame: { CGRect(x: -135, y: 83, width: 1201, height: 865) }
+        ))
+        XCTAssertEqual(translation, CGPoint(x: -135, y: 83))
+
+        let appBounds = ElementBounds(clamping: appFrame)
+        let screenBounds = ElementBounds(left: 0, top: 0, right: 1376, bottom: 1032)
+        let key = UIElementInfo(
+            className: "UIKeyboardKey",
+            bounds: ElementBounds(left: 10, top: 700, right: 90, bottom: 760)
+        )
+        let keyboard = UIElementInfo(
+            className: "UIKeyboard", bounds: ElementBounds(left: 2, top: 596, right: 1378, bottom: 1016), node: [key]
+        )
+        let assistantBar = UIElementInfo(
+            className: "UIView",
+            bounds: ElementBounds(left: 2, top: 541, right: 1378, bottom: 596)
+        )
+        let observed = UIElementInfo(
+            className: "XCUIApplication",
+            bounds: appBounds,
+            node: [
+                UIElementInfo(className: "UIWindow", bounds: appBounds, node: [
+                    UIElementInfo(
+                        text: "Search", className: "UIButton",
+                        bounds: ElementBounds(left: 1151, top: 14, right: 1187, bottom: 50)
+                    ),
+                ]),
+                UIElementInfo(className: "UIWindow", bounds: screenBounds, node: [assistantBar, keyboard]),
+            ]
+        )
+        let screen = ElementLocator.translatedToScreen(observed, by: translation)
+        let bounds = { (node: UIElementInfo?) in
+            node?.bounds.map { [$0.left, $0.top, $0.right, $0.bottom] }
+        }
+        XCTAssertEqual(bounds(screen), [-135, 83, 1066, 948])
+        // The Search button's screen centre (1034,115) matches where the tap landed on the device.
+        XCTAssertEqual(bounds(screen.node?[0].node?[0]), [1016, 97, 1052, 133])
+        // The keyboard's own window, its assistant bar and its keys are already screen space.
+        XCTAssertEqual(bounds(screen.node?[1]), [0, 0, 1376, 1032])
+        XCTAssertEqual(bounds(screen.node?[1].node?[0]), [2, 541, 1378, 596])
+        XCTAssertEqual(bounds(screen.node?[1].node?[1]), [2, 596, 1378, 1016])
+        XCTAssertEqual(bounds(screen.node?[1].node?[1].node?[0]), [10, 700, 90, 760])
+
+        // Hosts read the screen size from the root, so the root reports the screen.
+        XCTAssertEqual(bounds(ElementLocator.withRootBounds(screen, screenBounds)), [0, 0, 1376, 1032])
+    }
+
+    func testKeyboardInsideTheAppWindowKeepsOnlyTheKeyboardInScreenSpace() throws {
+        let appBounds = ElementBounds(left: 0, top: 0, right: 596, bottom: 775)
+        let keyboard = UIElementInfo(
+            className: "UIKeyboard",
+            bounds: ElementBounds(left: 0, top: 1028, right: 1032, bottom: 1373)
+        )
+        let label = UIElementInfo(
+            className: "UILabel",
+            bounds: ElementBounds(left: 20, top: 67, right: 150, bottom: 108)
+        )
+        let observed = UIElementInfo(
+            className: "XCUIApplication", bounds: appBounds,
+            node: [UIElementInfo(className: "UIWindow", bounds: appBounds, node: [label, keyboard])]
+        )
+        let screen = ElementLocator.translatedToScreen(observed, by: CGPoint(x: 218, y: 243))
+        XCTAssertEqual(screen.node?[0].node?[0].bounds?.left, 238)
+        XCTAssertEqual(screen.node?[0].node?[0].bounds?.top, 310)
+        XCTAssertEqual(screen.node?[0].node?[1].bounds?.top, 1028)
+    }
+
+    func testScreenSizedAppIsNotTranslated() {
+        var windowReads = 0
+        let screen = CGRect(x: 0, y: 0, width: 1032, height: 1376)
+        XCTAssertNil(ElementLocator.windowScreenTranslation(
+            appFrame: screen, screenFrame: screen, windowFrame: { windowReads += 1; return screen }
+        ))
+        XCTAssertEqual(windowReads, 0)
+        let node = UIElementInfo(bounds: ElementBounds(left: 1, top: 2, right: 3, bottom: 4))
+        XCTAssertEqual(ElementLocator.translatedToScreen(node, by: .zero).bounds?.right, 3)
     }
 }

@@ -28,12 +28,13 @@ nonisolated func hasMultiPanelMismatch(app: GestureSize, screen: GestureSize) ->
 /// In an iPadOS windowed app (iOS 27 "Windowed Apps"), XCTest reports the application
 /// element's frame, and the snapshot hierarchy that observe is built from, relative to the
 /// app window with origin (0,0). The app's window element and synthesized events use screen
-/// space. Observe therefore reports window-relative points, and the runner adds the window's
-/// screen origin before it delivers a point-offset gesture. Full-screen apps and iPhones have
-/// the window at the app frame's origin, so this returns nil and nothing changes.
+/// space. Observe adds this offset to every window-relative node, so observed bounds and
+/// gesture points are screen points and a point-offset gesture is delivered unchanged (#18830).
+/// Full-screen apps and iPhones have the window at the app frame's origin, so this returns nil
+/// and nothing changes.
 ///
 /// The window must be the same size as the application frame. A different window (another
-/// scene, or a system window) would otherwise move every gesture.
+/// scene, or a system window) would otherwise move every observed node.
 nonisolated func windowedAppTranslation(
     appOrigin: GesturePoint, appSize: GestureSize, windowOrigin: GesturePoint, windowSize: GestureSize
 )
@@ -198,13 +199,6 @@ struct GestureCoordinateSelection: Equatable, Sendable {
 
     var anchor: GestureCoordinateAnchor {
         strategy == .legacy ? .legacyApplication : .observedApplication
-    }
-
-    /// Only an automatic point-offset selection is window-relative. Normalized selections map
-    /// onto the app frame (multi-panel devices), and a forced legacy tap stays exactly as supplied.
-    nonisolated func windowTranslation(_ translation: GesturePoint?) -> GesturePoint? {
-        guard strategy == .legacy, !isForced, offset != nil else { return nil }
-        return translation
     }
 
     nonisolated static func mappedOffset(

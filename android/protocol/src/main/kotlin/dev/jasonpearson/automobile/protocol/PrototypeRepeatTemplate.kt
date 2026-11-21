@@ -174,6 +174,7 @@ internal enum class PrototypeBindableKind {
   TEXT,
   OPERAND,
   DATA_OPERAND,
+  DERIVED_CONDITION,
   EMIT_NAME,
   EMIT_BINDING,
   KEY,
@@ -333,6 +334,20 @@ internal object PrototypeBindableFields {
     return if (body.containsKey("file")) null else binding(value, path)
   }
 
+  private fun <T : Any> Visitor<T>.nestedCondition(condition: JsonObject, path: String): T? {
+    condition(condition["not"], "$path.not")?.let {
+      return it
+    }
+    for (form in listOf("all", "any")) {
+      for ((member, memberPath) in objects(condition, form, path)) {
+        condition(member, memberPath)?.let {
+          return it
+        }
+      }
+    }
+    return null
+  }
+
   private class Visitor<T : Any>(
     val visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
   ) {
@@ -350,6 +365,9 @@ internal object PrototypeBindableFields {
 
     fun condition(value: JsonElement?, path: String): T? {
       val condition = value as? JsonObject ?: return null
+      field(condition, "derived", path, PrototypeBindableKind.DERIVED_CONDITION)?.let {
+        return it
+      }
       field(condition, "data", path, PrototypeBindableKind.ROUTE_POINTER)?.let {
         return it
       }
@@ -373,17 +391,7 @@ internal object PrototypeBindableFields {
           return it
         }
       }
-      condition(condition["not"], "$path.not")?.let {
-        return it
-      }
-      for (form in listOf("all", "any")) {
-        for ((member, memberPath) in objects(condition, form, path)) {
-          condition(member, memberPath)?.let {
-            return it
-          }
-        }
-      }
-      return null
+      return nestedCondition(condition, path)
     }
 
     fun action(action: JsonObject, path: String): T? {

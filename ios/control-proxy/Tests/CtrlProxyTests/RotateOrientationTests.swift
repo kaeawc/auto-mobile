@@ -289,7 +289,7 @@ final class RotateOrientationTests: XCTestCase {
 }
 
 @MainActor
-private final class ScriptedRotateElementLocator: ElementLocating {
+final class ScriptedRotateElementLocator: ElementLocating {
     var foregroundBundleId: String?
     var readCount = 0
     var throwOnRead = false

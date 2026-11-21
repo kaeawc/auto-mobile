@@ -115,7 +115,7 @@ function header(
   context: { spec: ShownSpecJson; revision: number; frame: DeviceFrame; version: string },
 ): string[] {
   const { spec } = context;
-  const capabilities = requiredPrototypeCapabilities(spec);
+  const capabilities = requiredPrototypeCapabilities(spec, platform);
   const assetLines =
     assets.length === 0
       ? ["Assets: none"]

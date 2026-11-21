@@ -985,7 +985,11 @@ class PrototypeRuntime(
     val writes = HashMap<Int, Pair<String, PrototypeSpec>>()
     for ((index, action) in bindStateValues(actions).withIndex()) {
       if (action == PrototypeDismissAction) break
-      if (action is PrototypeSetStateAction && action.value is PrototypeScalar.Binding) continue
+      // Generated-value bindings resolve at run time; an event or platform binding still bound here
+      // resolved to no scalar, so it is planned and refused like any invalid write.
+      if (action is PrototypeSetStateAction && action.value is PrototypeScalar.Binding) {
+        if (!(action.value as PrototypeScalar.Binding).value.readsHandlerEvent()) continue
+      }
       val (key, value) = action.stateWrite(spec.state.orEmpty()) ?: continue
       spec = validated(spec, mapOf(key to value))
       writes[index] = key to spec
@@ -2302,11 +2306,13 @@ class PrototypeRuntime(
    * handlers, routes and platform-call follow-ups all bind. A binding that resolves to no scalar
    * stays as authored and is refused like any invalid write.
    */
+  private fun JsonObject.readsHandlerEvent(): Boolean = "event" in this || "platform" in this
+
   private fun bindStateValues(actions: List<PrototypeAction>): List<PrototypeAction> =
     actions.map { action ->
       val write = action as? PrototypeSetStateAction ?: return@map action
       val binding = (write.value as? PrototypeScalar.Binding)?.value ?: return@map action
-      if ("event" !in binding && "platform" !in binding) return@map action
+      if (!binding.readsHandlerEvent()) return@map action
       val resolved = PrototypeDataWriter.resolveValue(binding, bindingInputs())
       val value = (resolved as? PrototypeDataValue.Resolved)?.value as? JsonPrimitive
       if (value == null || value is JsonNull) write

@@ -1,5 +1,9 @@
 import type { PrototypeRuntimeKind } from "./prototypePlatformReport";
 import {
+  PROTOTYPE_REMOTE_IMAGE_CAPABILITY,
+  prototypeRemoteImageFields,
+} from "./prototypeRemoteImages";
+import {
   PROTOTYPE_LOOPS_CAPABILITY,
   prototypeLoopFields,
   prototypeLoopsUnsupportedMessage,
@@ -340,6 +344,12 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_STRINGS_CAPABILITY,
     fields: prototypeStringsFields,
     unsupportedMessage: prototypeStringsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_REMOTE_IMAGE_CAPABILITY,
+    fields: prototypeRemoteImageFields,
+    unsupportedMessage: (fields, platform) =>
+      `The ${platform} device does not advertise ${PROTOTYPE_REMOTE_IMAGE_CAPABILITY}; remote image fields at ${fields.join(", ")} must be replaced with a bundled asset: remove url and remote-image options. Nothing was shown.`,
   },
   {
     capability: PROTOTYPE_SEMANTICS_CAPABILITY,

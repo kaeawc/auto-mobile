@@ -9,6 +9,8 @@ import {
   RUNNER_GESTURE_BOUND_EXCEEDED_CODE,
   RUNNER_GESTURE_BOUND_EXCEEDED_WORDING,
   RUNNER_HIERARCHY_CAPTURE_FAILED_CODE,
+  RUNNER_SPRINGBOARD_ICON_DRAG_CODE,
+  isRunnerSpringBoardIconDrag,
   isRunnerDeadlineCompletedLate,
   isRunnerFocusQueryFailed,
   isRunnerGestureBoundExceeded,
@@ -145,6 +147,27 @@ describe("arrow focus-query failure: Swift GestureError <-> host contract (#1092
     expect(isRunnerFocusQueryFailed({ errorCode: RUNNER_FOCUS_QUERY_FAILED_CODE })).toBe(true);
     expect(isRunnerFocusQueryFailed({ errorCode: RUNNER_GESTURE_BOUND_EXCEEDED_CODE })).toBe(false);
     expect(isRunnerFocusQueryFailed({})).toBe(false);
+  });
+});
+
+describe("SpringBoard icon drag refusal: Swift GestureError <-> host contract (#18859)", () => {
+  test("the Swift wire code is the TypeScript constant", () => {
+    expect(runnerError("springboard_icon_drag").errorCode).toBe(RUNNER_SPRINGBOARD_ICON_DRAG_CODE);
+  });
+
+  test("the Swift description says no input was sent", () => {
+    expect(runnerError("springboard_icon_drag").error).toContain("no input was sent");
+  });
+
+  test("only the code identifies the refusal", () => {
+    const wordingOnly: { errorCode?: string; error: string } = {
+      error: runnerError("springboard_icon_drag").error,
+    };
+    expect(isRunnerSpringBoardIconDrag({ errorCode: RUNNER_SPRINGBOARD_ICON_DRAG_CODE })).toBe(
+      true,
+    );
+    expect(isRunnerSpringBoardIconDrag({ errorCode: RUNNER_FOCUS_QUERY_FAILED_CODE })).toBe(false);
+    expect(isRunnerSpringBoardIconDrag(wordingOnly)).toBe(false);
   });
 });
 

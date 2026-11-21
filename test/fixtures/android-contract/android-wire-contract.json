@@ -12668,8 +12668,8 @@
       {
         "name": "asset",
         "type": "object:PrototypeModeValue",
-        "nullable": false,
-        "hasDefault": false
+        "nullable": true,
+        "hasDefault": true
       },
       {
         "name": "contentScale",
@@ -12686,6 +12686,36 @@
       {
         "name": "filter",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeImageFilter",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "url",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "crossfade",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "via",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "placeholder",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "error",
+        "type": "json",
         "nullable": true,
         "hasDefault": true
       }

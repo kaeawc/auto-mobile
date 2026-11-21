@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
 import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
@@ -276,6 +278,56 @@ describe("DragAndDrop - iOS", () => {
     } finally {
       delegate.mockRestore();
     }
+  });
+
+  // The runner's own wire reply, captured from the Swift encoder (#18859).
+  const springBoardRefusal = (): { error: string; errorCode: string } => {
+    const fixture = JSON.parse(
+      readFileSync(
+        join(import.meta.dir, "../../fixtures/ios-contract/runner-responses.json"),
+        "utf8",
+      ),
+    ) as { commandErrors: { name: string; error: string; errorCode: string }[] };
+    const entry = fixture.commandErrors.find((error) => error.name === "springboard_icon_drag");
+    if (!entry) {
+      throw new Error("Missing springboard_icon_drag runner fixture");
+    }
+    return entry;
+  };
+
+  test("a SpringBoard icon source is a typed unsupported result, not an indeterminate drag", async () => {
+    const refusal = springBoardRefusal();
+    const runner = spyOn(iosDragClient, "requestDrag").mockImplementation(
+      async ({ onDispatch }) => {
+        onDispatch?.();
+        return { success: false, totalTimeMs: 17, ...refusal };
+      },
+    );
+    const result = await dragAndDrop.execute({
+      source: { elementId: "source-id" },
+      target: { elementId: "target-id" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.unsupported).toBe("springboard_icon_drag");
+    expect(result.error).toContain("dragAndDrop is not supported on iOS");
+    expect(result.error).toContain("No input was sent");
+    expect(result.error).toContain(refusal.error);
+    expect(result.error).not.toContain("indeterminate");
+    expect(runner).toHaveBeenCalledTimes(1);
+  });
+
+  test("a dispatched failure without the SpringBoard code stays indeterminate", async () => {
+    spyOn(iosDragClient, "requestDrag").mockImplementation(async ({ onDispatch }) => {
+      onDispatch?.();
+      return { success: false, totalTimeMs: 17, error: "Gesture failed: fixture" };
+    });
+    const result = await dragAndDrop.execute({
+      source: { elementId: "source-id" },
+      target: { elementId: "target-id" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.unsupported).toBeUndefined();
+    expect(result.error).toContain("Drag outcome is indeterminate");
   });
 
   test("abort stops waiting even while the client is still connecting", async () => {

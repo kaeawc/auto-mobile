@@ -67,6 +67,9 @@ enum PrototypeBundleCapabilities {
             if PrototypeStylePolishV2.themedColors(node) { need("theme_modes") }
             if PrototypeStylePolishV2.required(node) { names.insert(PrototypeStylePolishV2.capability) }
             if node["semantics"] != nil { need("semantics") }
+            if node["type"] == .string("image"),
+               ["url", "placeholder", "error", "crossfade", "via"]
+               .contains(where: { node[$0] != nil }) { need("remote_image") }
             if PrototypeStrings.textFields(.object(node))
                 .contains(where: { $0.text.contains("{t:") }) { need("strings") }
             if node["repeat"]?.objectFields?["stagger"] != nil { need("window_motion") }
@@ -75,6 +78,7 @@ enum PrototypeBundleCapabilities {
             if PrototypeMediaItems.usedBy(node) { names.insert(PrototypeMediaItems.capability) }
             if node["shared"] != nil { names.insert("prototype_shared_element_v2") }
             let type = node["type"]?.stringValue ?? ""
+            if !PrototypeDerivedValidator.conditionReferences(node, path: "").isEmpty { need("derive") }
             if PrototypeStringConditions.uses(node) { need("string_conditions") }
             if type == "icon", node["effect"] != nil { need("icon_effects") }
             if type == "icon",

@@ -1,4 +1,5 @@
 export type FeatureFlagKey =
+  | "ios-axbridge"
   | "debug"
   | "debug-perf"
   | "ui-perf-mode"
@@ -52,6 +53,13 @@ export interface FeatureFlagDefinition {
 }
 
 export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
+  {
+    key: "ios-axbridge",
+    label: "iOS AXBridge companion",
+    description:
+      "Opt in to a session-owned macOS Accessibility companion for iOS simulators. Requires an Aqua desktop login and Accessibility trust.",
+    defaultValue: false,
+  },
   {
     key: "debug",
     label: "Debug mode",

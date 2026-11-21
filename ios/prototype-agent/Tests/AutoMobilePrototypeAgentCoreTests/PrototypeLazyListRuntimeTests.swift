@@ -130,11 +130,14 @@ final class PrototypeLazyListRuntimeTests: XCTestCase {
         let spec = try spec()
         var warnings: [String] = []
         var boundIndices: [Int] = []
-        let decoder = PrototypeLazyList.RowDecoder(warning: { warnings.append($0) }, load: { node, data, index in
-            boundIndices.append(index)
-            if index == 0 { throw DecodeFailure() }
-            return try PrototypeLazyList.row(node: node, data: data, index: index)
-        })
+        let decoder = PrototypeLazyList.RowDecoder(
+            warning: { warnings.append($0) },
+            load: { node, data, derived, index in
+                boundIndices.append(index)
+                if index == 0 { throw DecodeFailure() }
+                return try PrototypeLazyList.row(node: node, data: data, derived: derived, index: index)
+            }
+        )
         XCTAssertEqual(PrototypeLazyList.keys(node: spec.root, data: spec.data), ["1", "2"])
         XCTAssertTrue(boundIndices.isEmpty)
         XCTAssertNil(decoder.decode(node: spec.root, data: spec.data, index: 0))

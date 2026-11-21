@@ -40,6 +40,8 @@ import {
 } from "./webFold";
 import { el, type WebElement } from "./webNodes";
 import { stillPlatformState } from "./webPlatformState";
+import { memoizedPrototypeDerive } from "../prototypeDerive";
+import type { PrototypeDerivedEntry } from "../prototypeFormatSchema";
 import { renderWebNode, type UnsupportedWebNode, type WebRenderScope } from "./webRender";
 import { scrimCss } from "./webSheet";
 import type { WebSkinId } from "./webSkin";
@@ -334,6 +336,7 @@ function stillScope(
   const skin = options.skin ?? frame.platform;
   const textScale = stillTextScale(frame.platform, options.textSize);
   // Conditions and pager pages do not depend on the mode, so the walk reads a light scope.
+  const state = record(spec.state) ?? {};
   const scope: WebRenderScope = {
     style: {
       mode: "light",
@@ -345,7 +348,12 @@ function stillScope(
       ...(windowDirection(spec, locale) === "rtl" ? { rtl: true } : {}),
     },
     condition: {
-      state: record(spec.state) ?? {},
+      state,
+      derived: memoizedPrototypeDerive(
+        record(spec.derive) as Record<string, PrototypeDerivedEntry> | undefined,
+        spec.data,
+        state,
+      ),
       platform: frame.platform,
       platformState: platformStateFor(frame.platform, screenDp, fold),
     },

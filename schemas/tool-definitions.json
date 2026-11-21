@@ -23128,7 +23128,7 @@
           "type": "boolean"
         },
         "display": {
-          "description": "Panel key, role (inner, cover, rear, external, cluster, overlay, virtual), active, or opt-in Android all. All adds per-panel displays (never overlay or virtual displays) while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true.",
+          "description": "Panel key, role (inner, cover, rear, external, cluster, overlay, virtual), active, or opt-in Android all. All adds per-panel displays (never overlay or virtual displays) while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true. CarPlay selector 'carplay' is screenshot-only and requires a projecting CarPlay screen on an iOS simulator.",
           "type": "string"
         },
         "project": {
@@ -24794,7 +24794,7 @@
           "enum": ["tile", "watchface", "launcher", "app"]
         },
         "hierarchyUnavailable": {
-          "description": "Apple Watch, Apple TV and Apple Vision Pro simulators: this observation is a screenshot with screenSize; the view hierarchy is not available without a connected watchOS, tvOS or visionOS window-app runner. viewHierarchy, skeleton, context, elements and the other element fields are absent, not empty: their absence does not mean an empty screen.",
+          "description": "Apple Watch, Apple TV and Apple Vision Pro simulators: this observation is a screenshot with screenSize; the view hierarchy is not available without a connected watchOS, tvOS or visionOS window-app runner. viewHierarchy, skeleton, context, elements and the other element fields are absent, not empty: their absence does not mean an empty screen. On iOS, this field identifies a screenshot-only CarPlay observation.",
           "type": "object",
           "properties": {
             "platform": {
@@ -24810,6 +24810,10 @@
                 {
                   "type": "string",
                   "const": "visionos"
+                },
+                {
+                  "type": "string",
+                  "const": "ios"
                 }
               ]
             },

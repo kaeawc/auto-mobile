@@ -109,6 +109,8 @@ export interface SessionBrokerResult {
    * provisionDevice's watch readiness. Android and iOS sessions are automation-ready and omit it.
    */
   readiness?: SessionBrokerReadiness;
+  /** Expired disposable app IDs cleaned up during this acquisition. */
+  expiredDisposableAppsRemoved?: string[];
   cleanupPending: boolean;
   failure?: SessionBrokerFailure;
   timing?: SessionBrokerTiming;

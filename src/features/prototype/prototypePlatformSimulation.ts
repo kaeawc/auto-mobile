@@ -10,7 +10,7 @@ import { prototypePlatformEvent } from "./prototypePlatform";
 
 import { PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY } from "../observe/android/ctrlProxyProtocol/capabilities";
 export function prototypePlatformSimulationUnsupportedMessage(): string {
-  return `simulate: platform event injection requires Android CtrlProxy advertising ${PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY}. Update the connected CtrlProxy and use a module that supports simulation (debug test.tick).`;
+  return `simulate: platform event injection requires the connected prototype runtime advertising ${PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY}. Update the connected prototype runtime and use a module that supports simulation (debug test.tick).`;
 }
 /** Reuse event data decoders where defined; other module events accept arbitrary JSON objects. */
 export function prototypePlatformSimulationIssue(

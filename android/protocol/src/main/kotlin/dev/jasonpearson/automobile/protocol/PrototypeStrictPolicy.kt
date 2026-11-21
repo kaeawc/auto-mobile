@@ -472,11 +472,11 @@ internal object PrototypeStrictPolicy {
 
     private fun nodeFeatures(fields: JsonObject, routeAlias: Boolean) {
       if ("shared" in fields) result.add("prototype_shared_element_v2")
-      val binding =
-        PrototypeBindableFields.first<Boolean>(fields, "") { raw, _, kind ->
-          if (usesData(raw, kind)) true else null
-        }
-      if (binding == true) need("data_model")
+      PrototypeBindableFields.first<Unit>(fields, "") { raw, _, kind ->
+        if (kind == PrototypeBindableKind.DERIVED_CONDITION) need("derive")
+        if (usesData(raw, kind)) need("data_model")
+        null
+      }
       polishFeatures(fields, routeAlias, result, ::need)
       val type = fields.text("type") ?: ""
       typeNamespaceFeatures(type, fields, ::need)

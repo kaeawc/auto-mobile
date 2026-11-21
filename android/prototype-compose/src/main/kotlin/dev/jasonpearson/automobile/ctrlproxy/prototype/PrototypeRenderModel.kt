@@ -341,7 +341,8 @@ internal class PrototypeNodeMapping(
     val selected =
       pager?.let { pages[it] } ?: (state[stateKey] as? PrototypeScalar.Numeric)?.value?.toInt() ?: 0
     val old = previous[path]
-    val authored = resolvePrototypeStyle(node.style, node.styleWhen, localState, validity)
+    val authored =
+      resolvePrototypeStyle(node.style, node.styleWhen, localState, validity, derivedValues)
     // Fixed-size window roots default to fill; explicit dimensions and descendants are unchanged.
     val resolved =
       if (path == "root" && fillWindowRoot)
@@ -363,7 +364,7 @@ internal class PrototypeNodeMapping(
         role,
         text,
         accessibleText(node.testTag),
-        node.visibleWhen?.holds(localState, validity) ?: true,
+        node.visibleWhen?.holds(localState, validity, derivedValues) ?: true,
         style,
         node.safeAreaPadding,
         prototypeNodeIconName(node),
@@ -380,12 +381,12 @@ internal class PrototypeNodeMapping(
         selected.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
         prototypeOpenWhen(node)?.let { state[it.key] == PrototypeScalar.BooleanValue(it.equals) }
           ?: false,
-        enabled = node.enabledCondition()?.holds(localState, validity) ?: true,
+        enabled = node.enabledCondition()?.holds(localState, validity, derivedValues) ?: true,
         // A shown error is read as is, so an inserted value in it loses its shield here.
         errorMessage =
-          prototypeShownError(node, localState, shownErrors, validity)
+          prototypeShownError(node, localState, shownErrors, validity, derivedValues)
             ?.let(PrototypeTextShield::unshield),
-        isError = prototypeIsError(node, localState, shownErrors, validity),
+        isError = prototypeIsError(node, localState, shownErrors, validity, derivedValues),
         checked =
           (prototypeToggleKey(node)
               ?: prototypeListItemToggleKey(node)

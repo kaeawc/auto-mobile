@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -20,12 +21,17 @@ import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import java.util.Base64
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
-internal abstract class WorkspaceShellUiFixture {
+internal abstract class WorkspaceShellUiFixture(
+  /** Runs pane screenshot captures on the test thread, so they follow [ComposeUiTest.mainClock]. */
+  protected val captureDispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+) {
 
   protected fun col(id: String, name: String, platform: Platform = Platform.Android) =
     DeviceColumn(deviceId = id, name = name, platform = platform)
@@ -36,6 +42,31 @@ internal abstract class WorkspaceShellUiFixture {
       asset = ReleaseAsset("AutoMobile-0.0.53-macos.dmg", "https://x/dmg", 1),
       releaseNotesUrl = "https://notes",
     )
+
+  /**
+   * Runs a few frames on the paused test clock, enough for a plain state change to recompose. With
+   * `autoAdvance` off and the capture on `Dispatchers.Unconfined`, nothing in these tests waits on
+   * wall-clock time (#18918).
+   */
+  protected fun ComposeUiTest.settle() {
+    repeat(SETTLE_FRAMES) { mainClock.advanceTimeByFrame() }
+  }
+
+  /**
+   * Steps frames on the paused test clock until [condition] holds. A capture's effects are queued
+   * for the next frame, so the frames it takes depend on the path, never on wall-clock time; the
+   * budget is virtual time, kept under the screenshot notice's auto-dismiss.
+   */
+  protected fun ComposeUiTest.advanceUntil(condition: () -> Boolean) {
+    mainClock.advanceTimeUntil(timeoutMillis = CAPTURE_BUDGET_MS, condition = condition)
+  }
+
+  protected companion object {
+    const val SETTLE_FRAMES = 3
+    const val CAPTURE_BUDGET_MS = 1_000L
+    const val ONE_PX_PNG =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+  }
 
   // #4846: full-window overlays must be modal to keyboard/screen-reader focus — the dimmed
   // workspace behind the scrim must leave the accessibility/focus tree so a Tab or a screen-reader
@@ -356,8 +387,7 @@ internal class WorkspaceShellUiTest : WorkspaceShellUiFixture() {
   @Test
   fun `clicking Screenshot captures a frame, saves it, and confirms in the pane`() =
     runComposeUiTest {
-      val onePxPng =
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+      val onePxPng = ONE_PX_PNG
       val fake = FakeObservationStream()
       var savedDeviceName: String? = null
       var savedBytes: ByteArray? = null
@@ -383,15 +413,18 @@ internal class WorkspaceShellUiTest : WorkspaceShellUiFixture() {
                     savedBytes = bytes
                     "/tmp/shots/$name.png"
                   },
+                captureDispatcher = captureDispatcher,
               ),
           )
         }
       }
+      mainClock.autoAdvance = false
 
       onNodeWithContentDescription("Screenshot Pixel 8").performClick()
+      advanceUntil { fake.observationRequestCount == 1 }
 
       // Screenshot is NOT a RunControl device mutation — it requests an observation on the stream.
-      waitUntil(timeoutMillis = 5_000L) { fake.observationRequestCount == 1 }
+      assertEquals(1, fake.observationRequestCount)
       assertEquals(null, dispatched)
       assertEquals("a", fake.lastConnectedDeviceId)
       assertEquals(deviceSessionUuid, fake.lastConnectedDeviceSessionUuid)
@@ -399,7 +432,8 @@ internal class WorkspaceShellUiTest : WorkspaceShellUiFixture() {
 
       // The returned frame's PNG bytes are written via the saver, and the pane confirms where.
       fake.emitScreenshot(ScreenshotStreamUpdate("a", 0L, onePxPng, 1, 1))
-      waitUntil(timeoutMillis = 5_000L) { savedBytes != null }
+      advanceUntil { savedBytes != null }
+      settle()
       assertEquals("Pixel 8", savedDeviceName)
       assertEquals(Base64.getDecoder().decode(onePxPng).toList(), savedBytes!!.toList())
       onNodeWithContentDescription("Screenshot status Pixel 8").assertIsDisplayed()
@@ -433,35 +467,31 @@ internal class WorkspaceShellUiTest : WorkspaceShellUiFixture() {
                   savedName = name
                   "/tmp/shots/$name.png"
                 },
+              captureDispatcher = captureDispatcher,
             ),
         )
       }
     }
+    mainClock.autoAdvance = false
 
-    runOnIdle { request.value = "b" to 1 }
-    waitUntil(timeoutMillis = 5_000L) { second.observationRequestCount == 1 }
+    runOnUiThread { request.value = "b" to 1 }
+    advanceUntil { second.observationRequestCount == 1 }
     assertEquals(0, first.observationRequestCount)
-    second.emitScreenshot(
-      ScreenshotStreamUpdate(
-        "b",
-        0L,
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
-        1,
-        1,
-      ),
-    )
-    waitUntil(timeoutMillis = 5_000L) { savedName == "Pixel 9" }
-    waitUntil(timeoutMillis = 5_000L) {
+    second.emitScreenshot(ScreenshotStreamUpdate("b", 0L, ONE_PX_PNG, 1, 1))
+    advanceUntil { savedName == "Pixel 9" }
+    advanceUntil {
       onAllNodesWithContentDescription("Screenshot status Pixel 9").fetchSemanticsNodes().size == 1
     }
     onNodeWithContentDescription("Screenshot status Pixel 9").assertIsDisplayed()
     onNodeWithContentDescription("Screenshot status Pixel 8").assertDoesNotExist()
 
-    runOnIdle { mode.value = InteractionMode.Inspect }
+    runOnUiThread { mode.value = InteractionMode.Inspect }
+    settle()
     onNodeWithText("inspect-slot").assertIsDisplayed()
-    runOnIdle { mode.value = InteractionMode.Input }
+    runOnUiThread { mode.value = InteractionMode.Input }
+    settle()
     onNodeWithContentDescription("Screenshot Pixel 9").assertIsDisplayed()
-    runOnIdle { assertEquals(1, second.observationRequestCount) }
+    assertEquals(1, second.observationRequestCount)
   }
 
   @Test
@@ -490,25 +520,19 @@ internal class WorkspaceShellUiTest : WorkspaceShellUiFixture() {
                   savedName = name
                   "/tmp/shots/$name.png"
                 },
+              captureDispatcher = captureDispatcher,
             ),
         )
       }
     }
-    runOnIdle { request.value = "a" to 1 }
-    waitForIdle()
+    mainClock.autoAdvance = false
+    runOnUiThread { request.value = "a" to 1 }
+    settle()
     assertEquals(0, fake.observationRequestCount)
-    runOnIdle { mode.value = InteractionMode.Input }
-    waitUntil(timeoutMillis = 5_000L) { fake.observationRequestCount == 1 }
-    fake.emitScreenshot(
-      ScreenshotStreamUpdate(
-        "a",
-        0L,
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
-        1,
-        1,
-      ),
-    )
-    waitUntil(timeoutMillis = 5_000L) { savedName == "Pixel 8" }
+    runOnUiThread { mode.value = InteractionMode.Input }
+    advanceUntil { fake.observationRequestCount == 1 }
+    fake.emitScreenshot(ScreenshotStreamUpdate("a", 0L, ONE_PX_PNG, 1, 1))
+    advanceUntil { savedName == "Pixel 8" }
   }
 
   @Test
@@ -702,12 +726,14 @@ internal class WorkspaceShellFacetsUiTest : WorkspaceShellUiFixture() {
         )
       }
     }
-    waitUntil { source.state.value is VideoStreamState.Streaming }
-    source.emitFrame(width = 1, height = 1)
-    waitUntil {
-      onAllNodesWithContentDescription("Live stream of Pixel 8").fetchSemanticsNodes().isNotEmpty()
-    }
     mainClock.autoAdvance = false
+    settle()
+    assertTrue(source.state.value is VideoStreamState.Streaming)
+    source.emitFrame(width = 1, height = 1)
+    settle()
+    assertTrue(
+      onAllNodesWithContentDescription("Live stream of Pixel 8").fetchSemanticsNodes().isNotEmpty(),
+    )
 
     fun assertMirrorUninterrupted() {
       assertEquals(1, source.connectCalls)

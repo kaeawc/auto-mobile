@@ -88,6 +88,29 @@ class PrototypeNestedRepeatTest {
         }
       }
 
+  @TestFactory
+  fun `shared duplicate nested key fixtures keep their verdicts`(): List<DynamicTest> =
+    Json.parseToJsonElement(File(directory, "repeat/nested-duplicate-keys.json").readText())
+      .jsonArray
+      .map { raw ->
+        val case = raw.jsonObject
+        DynamicTest.dynamicTest(case.getValue("name").jsonPrimitive.content) {
+          val result = PrototypeSpecValidator.validate(case.getValue("spec").toString())
+          val error = case["error"] as? JsonObject
+          if (error == null) {
+            assertTrue(result is PrototypeSpecValidation.Success, "$result")
+          } else {
+            assertEquals(
+              PrototypeSpecError(
+                error.getValue("path").jsonPrimitive.content,
+                error.getValue("message").jsonPrimitive.content,
+              ),
+              (result as? PrototypeSpecValidation.Failure)?.error,
+            )
+          }
+        }
+      }
+
   @Test
   fun `strict policy negotiates the nested gate`() {
     val spec = input(cases.first().jsonObject)

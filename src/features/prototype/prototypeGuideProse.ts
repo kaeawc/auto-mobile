@@ -783,8 +783,7 @@ are rejected; a missing text path renders empty.
   as written, and later placeholders may still substitute.
 - A condition uses exactly one of \`key\`, \`data\`, \`platform\`, \`derived\`, \`valid\`, \`all\`, \`any\` or \`not\`.
   Data and derived conditions require one comparison: \`equals\` (same scalar type and value),
-  \`notEquals\` (its inverse, including missing or non-scalar), \`gt\` or \`lt\` (numbers only),
-  or \`empty\`. Data conditions require literal equality operands. Key and derived conditions also
+  \`notEquals\` (its inverse, including missing or non-scalar), \`gt\` or \`lt\` (numbers only), or \`empty\`. Data conditions require literal equality operands. Key and derived conditions also
   accept string comparisons. \`bottomSheet.openWhen\` uses boolean state.
 
 The host validates data and repeat paths; the device resolves bindings once per show before
@@ -1030,6 +1029,7 @@ export const GUIDE_ERRORS = `## Common validation errors
 | \`Invalid pointer value\` | Use a nonempty RFC 6901 pointer within the pointer limit. |
 | \`Repeat path does not resolve to an array\` / \`Repeat path resolves to more than 128 items\` / \`Repeat path item <i> is not an object\` | Point to an array of objects within the repeat item limit. |
 | \`Duplicate repeat key "x" (items <i> and <j>)\` | Give every item a unique rendered identity. |
+| \`Derived repeat key "x" has the same input for items <i> and <j>\` | Two rows feed a derived key the same constant or field value; derive it from a field that differs per row. |
 | \`Bound state key "x" is invalid (repeat item <i>)\` | A path-bound key must form a valid state key; error is at repeat.items.path. |
 | \`Requires key or data or platform or derived\` | Supply one condition source with exactly one comparison. |
 | \`Repeat path cell limit exceeded\` | Reduce path-bound repeats or the scalar members projected per item; see \`MAX_PROTOTYPE_REPEAT_PATH_CELLS\`. |

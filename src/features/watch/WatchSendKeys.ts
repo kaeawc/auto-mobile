@@ -114,7 +114,6 @@ export async function watchSendKeys(
   const typing = validateWatchInput(commands, selector, options);
   const { signal, timer } = options;
   signal?.throwIfAborted();
-  const client = watchRunners.require(deviceId);
   // The call's only tap, so its Smart Stack preflight runs once per call, never per key (#17803).
   if (selector !== undefined) {
     await watchTapOn(deviceId, { action: "tap", ...selector }, signal, {
@@ -123,6 +122,8 @@ export async function watchSendKeys(
       observeEffect: false,
     });
   }
+  // Read after the tap: it may have restarted a dropped runner and registered a new client (#18822).
+  const client = watchRunners.require(deviceId);
   const results: SendKeysResult["commands"] = [];
   for (const [index, command] of typing.entries()) {
     signal?.throwIfAborted();

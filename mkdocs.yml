@@ -507,6 +507,7 @@ nav:
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-21: iOS Simulator audio routing open questions": devlog/2026-11-21-ios-simulator-audio-routing-open-questions.md
       - "2026-11-20: Fixture capture mode": devlog/2026-11-20-fixture-capture-mode.md
       - "2026-11-19: Per-runtime prototype budgets": devlog/2026-11-19-prototype-runtime-budgets.md
       - "2026-11-19: iOS Simulator audio isolation": devlog/2026-11-19-ios-simulator-audio-isolation.md

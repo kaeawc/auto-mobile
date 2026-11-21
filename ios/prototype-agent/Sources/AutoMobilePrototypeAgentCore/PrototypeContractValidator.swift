@@ -137,6 +137,10 @@ struct PrototypeContractValidator {
             try PrototypeLazyList.validateLimits(root: root, data: fields["data"]?.objectFields)
         }
         try validator.walk(value, rule: spec, path: "", depth: 0)
+        try PrototypeRemoteImages.validate(
+            nodes: validator.locatedNodes,
+            state: value.objectFields?["state"]?.objectFields ?? [:]
+        )
         validator.dropIgnoredAccessories()
         try PrototypeKeyframes.validate(nodes: validator.locatedNodes, spec: value.objectFields ?? [:])
         return validator
@@ -231,7 +235,9 @@ struct PrototypeContractValidator {
             if let overflow = budget.charge(nodes: 1, images: 0) { throw Self.invalid(path, overflow.message) }
             if depth + 1 > PrototypeLimits.maxDepth { throw Self.invalid(path, "Tree depth limit exceeded") }
             let nodeImages: Int = switch node["type"] {
-            case .string("image"): max(1, Self.imageUses(node["asset"]))
+            case .string("image"): (node["url"] == nil ? max(1, Self.imageUses(node["asset"])) : 0) + Self
+                .imageUses(node["placeholder"]?.objectFields?["asset"]) + Self
+                .imageUses(node["error"]?.objectFields?["asset"])
             case .string("videoPlayer"): Self.imageUses(node["poster"])
             default: 0
             }

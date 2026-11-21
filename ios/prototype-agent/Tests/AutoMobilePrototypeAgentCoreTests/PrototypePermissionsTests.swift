@@ -8,6 +8,7 @@ private final class PermissionTestSource: PrototypeNotificationAuthorizationSour
     var answer: PrototypePermissionState = .granted
     var reads = 0
     var requests = 0
+    var provisionalRequests: [Bool] = []
     var stops = 0
     var hold = false
     var holdStatus = false
@@ -36,7 +37,8 @@ private final class PermissionTestSource: PrototypeNotificationAuthorizationSour
         return readings.isEmpty ? current : readings.removeFirst()
     }
 
-    func request() async -> PrototypePermissionOutcome {
+    func request(provisional: Bool) async -> PrototypePermissionOutcome {
+        provisionalRequests.append(provisional)
         requests += 1
         if let outcome { return outcome }
         if hold {
@@ -85,11 +87,13 @@ private final class PermissionRegistryServices: PrototypeHapticsPlayer, Prototyp
 
 @MainActor
 final class PrototypePermissionsTests: XCTestCase {
-    private func call(_ names: [String] = ["notifications"]) -> PlatformCall {
-        PlatformCall(
+    private func call(_ names: [String] = ["notifications"], options: JSONValue? = nil) -> PlatformCall {
+        var args: [String: JSONValue] = ["names": .array(names.map(JSONValue.string))]
+        args["options"] = options
+        return PlatformCall(
             callId: "permission",
             call: "permissions.request",
-            args: ["names": .array(names.map(JSONValue.string))]
+            args: args
         )
     }
 
@@ -249,7 +253,8 @@ final class PrototypePermissionsTests: XCTestCase {
         let oldRead = try XCTUnwrap(source.statusWaiter)
         source.statusWaiter = nil
         module.stop()
-        // Keep the new baseline pending so it cannot mask a stale write from the stopped task.
+        // Resume the stopped generation while the restarted baseline is still pending.
+        // Cancellation is deliberately not the initial-read ownership guard; generation is.
         let restarted: AsyncStream<PlatformEvent> = await withCheckedContinuation { ready in
             let stream = module.events
             source.read = { ready.resume(returning: stream) }
@@ -322,64 +327,72 @@ final class PrototypePermissionsTests: XCTestCase {
         XCTAssertEqual(changes, [])
     }
 
-    func testRequestResultSupersedesEarlierReadsButKeepsLaterSettingsChanges() async throws {
-        let scenarios: [(initial: Bool, granted: Bool)] = [(true, true), (false, true), (true, false)]
-        for (initial, granted) in scenarios {
-            let source = PermissionTestSource()
-            source.holdStatus = initial
-            if !granted { source.outcome = .platformError }
-            let module = PrototypePermissionsModule(source: source)
-            let stream: AsyncStream<PlatformEvent> = await withCheckedContinuation { ready in
-                let stream = module.events
-                source.read = { ready.resume(returning: stream) }
-            }
-            source.read = nil
-            var events = stream.makeAsyncIterator()
-            if !initial {
-                let baseline = await events.next()
-                XCTAssertEqual(baseline, .stateRefresh("permissions"))
-                source.holdStatus = true
-                await withCheckedContinuation { (ready: CheckedContinuation<Void, Never>) in
-                    source.read = { ready.resume() }
-                    source.continuation?.yield(())
-                }
-                source.read = nil
-            }
-            let staleRead = try XCTUnwrap(source.statusWaiter)
-            source.statusWaiter = nil
-            source.holdStatus = false
-            let actual = await module.call(call())
-            let expectedState = JSONValue.string(granted ? "granted" : "notDetermined")
-            if granted {
-                XCTAssertEqual(actual, result(["notifications": .granted]))
-            } else {
-                XCTAssertEqual(actual, .failure(.platformError, "Permission request failed"))
-            }
-            XCTAssertEqual(module.state["notifications"], expectedState)
-            // Starting the next read proves the observation has processed the stale result.
+    func testRequestResultSupersedesStaleInitialRead() async throws {
+        for granted in [true, false] {
+            try await requestResultSupersedesRead(initial: true, granted: granted)
+        }
+    }
+
+    func testRequestResultSupersedesStaleForegroundRead() async throws {
+        // A failed request publishes no new state and does not supersede a foreground read.
+        try await requestResultSupersedesRead(initial: false, granted: true)
+    }
+
+    private func requestResultSupersedesRead(initial: Bool, granted: Bool) async throws {
+        let source = PermissionTestSource()
+        source.holdStatus = initial
+        if !granted { source.outcome = .platformError }
+        let module = PrototypePermissionsModule(source: source)
+        let stream: AsyncStream<PlatformEvent> = await withCheckedContinuation { ready in
+            let stream = module.events
+            source.read = { ready.resume(returning: stream) }
+        }
+        source.read = nil
+        var events = stream.makeAsyncIterator()
+        if !initial {
+            let baseline = await events.next()
+            XCTAssertEqual(baseline, .stateRefresh("permissions"))
             source.holdStatus = true
             await withCheckedContinuation { (ready: CheckedContinuation<Void, Never>) in
                 source.read = { ready.resume() }
-                // For the initial read, the sequence guard must prevent reinitializing the baseline.
-                staleRead.resume(returning: .limited)
                 source.continuation?.yield(())
             }
             source.read = nil
-            XCTAssertEqual(module.state["notifications"], expectedState)
-            let settingsRead = try XCTUnwrap(source.statusWaiter)
-            source.statusWaiter = nil
-            settingsRead.resume(returning: .denied)
-            var changes: [JSONValue] = []
-            while let event = await events.next() {
-                if event.event == "permissions.changed", let state = event.data.objectFields?["state"] {
-                    changes.append(state)
-                    if state == .string("denied") { break }
-                }
-            }
-            XCTAssertEqual(changes, granted ? [.string("granted"), .string("denied")] : [.string("denied")])
-            XCTAssertEqual(module.state["notifications"], .string("denied"))
-            module.stop()
         }
+        let staleRead = try XCTUnwrap(source.statusWaiter)
+        source.statusWaiter = nil
+        source.holdStatus = false
+        let actual = await module.call(call())
+        let expectedState = JSONValue.string(granted ? "granted" : "notDetermined")
+        if granted {
+            XCTAssertEqual(actual, result(["notifications": .granted]))
+        } else {
+            XCTAssertEqual(actual, .failure(.platformError, "Permission request failed"))
+        }
+        XCTAssertEqual(module.state["notifications"], expectedState)
+        // Starting the next read proves the observation has processed the stale result.
+        source.holdStatus = true
+        await withCheckedContinuation { (ready: CheckedContinuation<Void, Never>) in
+            source.read = { ready.resume() }
+            // For the initial read, the sequence guard must prevent reinitializing the baseline.
+            staleRead.resume(returning: .limited)
+            source.continuation?.yield(())
+        }
+        source.read = nil
+        XCTAssertEqual(module.state["notifications"], expectedState)
+        let settingsRead = try XCTUnwrap(source.statusWaiter)
+        source.statusWaiter = nil
+        settingsRead.resume(returning: .denied)
+        var changes: [JSONValue] = []
+        while let event = await events.next() {
+            if event.event == "permissions.changed", let state = event.data.objectFields?["state"] {
+                changes.append(state)
+                if state == .string("denied") { break }
+            }
+        }
+        XCTAssertEqual(changes, granted ? [.string("granted"), .string("denied")] : [.string("denied")])
+        XCTAssertEqual(module.state["notifications"], .string("denied"))
+        module.stop()
     }
 
     func testCameraRequestPreservesPendingNotificationReads() async throws {
@@ -466,6 +479,11 @@ final class PrototypePermissionsTests: XCTestCase {
             #"{"names":"notifications"}"#,
             #"{"names":[1]}"#,
             #"{"names":["notifications"],"extra":true}"#,
+            #"{"names":["notifications"],"options":true}"#,
+            #"{"names":["notifications"],"options":null}"#,
+            #"{"names":["notifications"],"options":[]}"#,
+            #"{"names":["notifications"],"options":{"provisional":"true"}}"#,
+            #"{"names":["notifications"],"options":{"unknown":true}}"#,
         ] {
             let args = try XCTUnwrap(JSONDecoder().decode(JSONValue.self, from: Data(raw.utf8)).objectFields)
             let actual = await module.call(PlatformCall(callId: "bad", call: "permissions.request", args: args))
@@ -510,34 +528,89 @@ final class PrototypePermissionsTests: XCTestCase {
         module.stop()
     }
 
-    func testDriverKeepsItsExistingDeadlineAndDropsLateGrant() async throws {
+    func testDriverPermissionRequestIgnoresDefaultAndExplicitDeadlines() async throws {
+        for timeout: Int? in [nil, 1] {
+            let source = PermissionTestSource()
+            source.hold = true
+            let module = PrototypePermissionsModule(source: source)
+            let clock = LocationClock()
+            let driver = PrototypePlatformDriver(registry: PrototypePlatformRegistry(modules: [module]), clock: clock)
+            let timeoutArg = timeout.map { ",\"timeoutMs\":\($0)" } ?? ""
+            let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data("""
+            {"id":"permission-deadline","window":{"placement":{"type":"fullscreen"}},
+             "requires":{"platform":["permissions"],
+               "permissions":[{"name":"notifications","purpose":"Send updates"}]},
+             "state":{"status":"idle"},"root":{"type":"button","label":"Allow","onTap":[
+               {"type":"platform","call":"permissions.request","args":{"names":{"value":["notifications"]}},
+                "statusKey":"status"\(timeoutArg)}]}}
+            """.utf8))
+            var session = PrototypeSession()
+            session.show(spec)
+            _ = try session.run(XCTUnwrap(spec.root.onTap))
+            var results: [PlatformCallResult] = []
+            driver.onComplete = { id, result, duration in
+                results.append(result)
+                _ = session.completePlatformCall(id, result, durationMs: duration)
+            }
+            await withCheckedContinuation { (ready: CheckedContinuation<Void, Never>) in
+                source.requested = { ready.resume() }
+                driver.perform(session.takePlatformCommands())
+            }
+            XCTAssertEqual(clock.live, 0)
+            clock.advance(PrototypePlatformValidator.maxTimeoutMs + 1)
+            XCTAssertEqual(results, [])
+            XCTAssertEqual(session.state["status"], .string("loading"))
+            source.complete(.granted)
+            await driver.settled()
+            XCTAssertEqual(results, [result(["notifications": .granted])])
+            XCTAssertEqual(session.state["status"], .string("success"))
+            module.stop()
+        }
+    }
+
+    func testDriverPermissionRequestResolvesOnStop() async throws {
         let source = PermissionTestSource()
         source.hold = true
         let module = PrototypePermissionsModule(source: source)
         let clock = LocationClock()
-        let stream = module.events
         let driver = PrototypePlatformDriver(registry: PrototypePlatformRegistry(modules: [module]), clock: clock)
         var results: [PlatformCallResult] = []
         driver.onComplete = { _, result, _ in results.append(result) }
         await withCheckedContinuation { (ready: CheckedContinuation<Void, Never>) in
             source.requested = { ready.resume() }
-            driver.perform([.start(PrototypePlatformJob(call: call(), timeoutMs: 1))])
+            driver.perform([.start(.init(call: call(), timeoutMs: 1))])
         }
         let request = try XCTUnwrap(module.requestTask)
-        let beforeTimeout = module.state
-        clock.advance(1)
-        XCTAssertEqual(results.count, 1)
-        guard let first = results.first, case .failure(.timeout, _) = first else { return XCTFail("\(results)") }
+        module.stop()
+        await driver.settled()
+        XCTAssertEqual(results, [.failure(.cancelled, "Permission request cancelled")])
         source.complete(.granted)
         await request.value
-        XCTAssertEqual(module.state, beforeTimeout)
-        XCTAssertEqual(results.count, 1)
+        XCTAssertNotEqual(module.state["notifications"], .string("granted"))
         module.stop()
-        var events: [PlatformEvent] = []
-        for await event in stream where event.event == "permissions.changed" { events.append(event) }
-        XCTAssertEqual(events, [])
-        XCTAssertEqual(results.count, 1)
         XCTAssertEqual(clock.live, 0)
+    }
+
+    func testProvisionalOptionDefaultsFalseAndReachesSource() async {
+        for options: JSONValue? in [
+            nil,
+            .object([:]),
+            .object(["provisional": .bool(false)]),
+            .object(["provisional": .bool(true)]),
+        ] {
+            let source = PermissionTestSource()
+            let provisional = options?.objectFields?["provisional"] == .bool(true)
+            source.answer = provisional ? .limited : .granted
+            let module = PrototypePermissionsModule(source: source)
+            let registry = PrototypePlatformRegistry(modules: [module])
+            let actual = await module.call(call(options: options))
+            XCTAssertEqual(source.provisionalRequests, [provisional])
+            XCTAssertEqual(actual, result(["notifications": source.answer]))
+            XCTAssertEqual(registry.snapshot["notifications"], .object([
+                "authorization": .string(source.answer.rawValue),
+            ]))
+            module.stop()
+        }
     }
 
     func testLazyBaselineForegroundChangesAndRefCountedRestart() async {
@@ -555,6 +628,7 @@ final class PrototypePermissionsTests: XCTestCase {
         }
         source.read = nil
         XCTAssertEqual(module.state["notifications"], .string("limited"))
+        XCTAssertEqual(registry.snapshot["notifications"], .object(["authorization": .string("limited")]))
         let changes = Task { () -> [PlatformEvent] in
             var events: [PlatformEvent] = []
             for await event in stream where event.event == "permissions.changed" {
@@ -567,6 +641,8 @@ final class PrototypePermissionsTests: XCTestCase {
         source.foreground(.granted)
         source.foreground(.denied)
         let events = await changes.value
+        XCTAssertEqual(registry.snapshot["notifications"], .object(["authorization": .string("denied")]))
+        XCTAssertFalse(registry.capabilities.contains("prototype_platform_notifications_v1"))
         XCTAssertEqual(events.map(\.data), ["granted", "denied"].map {
             .object(["name": .string("notifications"), "state": .string($0)])
         })
@@ -586,7 +662,25 @@ final class PrototypePermissionsTests: XCTestCase {
         XCTAssertEqual(module.state["notifications"], .string("denied"))
         registry.releaseSources()
         XCTAssertEqual(source.stops, 2)
+        XCTAssertNil(registry.snapshot["notifications"])
+        module.stop()
         XCTAssertEqual(source.requests, 0)
+    }
+
+    func testAuthorizationAliasPreservesRealNotificationsModule() async {
+        let source = PermissionTestSource()
+        let permissions = PrototypePermissionsModule(source: source)
+        let nativeState: [String: JSONValue] = ["authorization": .string("blocked"), "badge": .number(3)]
+        let notifications = PrototypeDeviceStatusModule(
+            name: "notifications", capability: "prototype_platform_notifications_v1",
+            source: FakeDeviceStatusSource(nativeState), clock: LocationClock()
+        )
+        let registry = PrototypePlatformRegistry(modules: [permissions, notifications])
+        _ = await permissions.call(call())
+        XCTAssertEqual(registry.snapshot["permissions"]?.objectFields?["notifications"], .string("granted"))
+        XCTAssertEqual(registry.snapshot["notifications"], .object(nativeState))
+        permissions.stop()
+        notifications.stop()
     }
 
     func testBothProductionFactoriesAdvertiseOnlyWithSource() {
@@ -606,6 +700,7 @@ final class PrototypePermissionsTests: XCTestCase {
             for registry in registries {
                 XCTAssertEqual(registry.capabilities.contains("prototype_platform_permissions_v1"), supplied)
                 XCTAssertEqual(registry.modules["permissions"] != nil, supplied)
+                XCTAssertFalse(registry.capabilities.contains("prototype_platform_notifications_v1"))
             }
         }
     }

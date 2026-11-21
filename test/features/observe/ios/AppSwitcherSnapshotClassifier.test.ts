@@ -3,7 +3,11 @@ import { isIosAppSwitcherVisible } from "../../../../src/features/observe/ios/Ap
 import { convertToViewHierarchyResult } from "../../../../src/features/observe/ios/IosHierarchyConverter";
 import type { IosRunnerWireHierarchy } from "../../../../src/features/observe/ios/types";
 
-function snapshot(cardWidth = 275, contentWidth = 402): IosRunnerWireHierarchy {
+function snapshot(
+  cardWidth = 275,
+  contentWidth = 402,
+  cardValue = "Active",
+): IosRunnerWireHierarchy {
   return {
     packageName: "com.apple.springboard",
     updatedAt: 1,
@@ -15,7 +19,7 @@ function snapshot(cardWidth = 275, contentWidth = 402): IosRunnerWireHierarchy {
           node: {
             "resource-id": "card:com.apple.Preferences:sceneID:com.apple.Preferences-default",
             bounds: [63, 128, 63 + cardWidth, 727],
-            value: "Active",
+            value: cardValue,
           },
         },
       ],
@@ -28,6 +32,12 @@ describe("iOS App Switcher snapshot classifier", () => {
     const hierarchy = snapshot();
     expect(isIosAppSwitcherVisible(hierarchy.hierarchy)).toBe(true);
     expect(isIosAppSwitcherVisible(convertToViewHierarchyResult(hierarchy).hierarchy)).toBe(true);
+  });
+
+  test("a scaled card that reports Stashed (iPad window parked by Home) is not visible", () => {
+    const hierarchy = snapshot(275, 402, "Stashed");
+    expect(isIosAppSwitcherVisible(hierarchy.hierarchy)).toBe(false);
+    expect(isIosAppSwitcherVisible(convertToViewHierarchyResult(hierarchy).hierarchy)).toBe(false);
   });
 
   test("home without cards and an empty hierarchy are not the switcher", () => {

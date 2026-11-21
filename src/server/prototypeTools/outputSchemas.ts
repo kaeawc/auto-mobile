@@ -1,4 +1,5 @@
 import { prototypeDegradedEffectSchema } from "../../features/prototype/prototypeDegradedEffects";
+import { prototypePlatformReportSchema } from "../../features/prototype/prototypePlatformReport";
 import { z } from "zod/v4";
 import { PROTOTYPE_PUSH_DELIVERIES } from "../../features/prototype/prototypePushSimulate";
 import {
@@ -507,6 +508,11 @@ export const prototypeOutputSchema = z.object({
     )
     .optional(),
   lastResult: lastResultSchema.optional(),
+  platformRuntime: prototypePlatformReportSchema
+    .optional()
+    .describe(
+      "inspect: the runtime and its registered modules; status: the host mirror from the last show or inspect, updated by platform call events. Unknown details are omitted",
+    ),
   platformStatus: z
     .object({
       battery: prototypeDeviceStatusReadingSchema.optional(),
@@ -538,31 +544,34 @@ export const prototypeOutputSchema = z.object({
     .array(
       z.object({
         platform: z.enum(["android", "ios", "all"]),
-        construct: z.enum([
-          "stack",
-          "stack.zoom",
-          "carousel",
-          "node.id",
-          "bottomSheet.dismissOnSwipe",
-          "bottomSheet.detents",
-          "icon.effect",
-          "icon.name",
-          "icon.variant",
-          "textField.variant",
-          "textField.label",
-          "node.gestures",
-          "searchBar",
-          "searchBar.icons",
-          "rich-text-links",
-          "strings.fallback",
-          "design.fallback",
-          "platformNamespace",
-          "scroll.edgeEffect",
-          "adaptive",
-          "menu",
-          "select",
+        construct: z.union([
+          z.templateLiteral(["platform.", z.string().min(1)]),
+          z.enum([
+            "stack",
+            "stack.zoom",
+            "carousel",
+            "node.id",
+            "bottomSheet.dismissOnSwipe",
+            "bottomSheet.detents",
+            "icon.effect",
+            "icon.name",
+            "icon.variant",
+            "textField.variant",
+            "textField.label",
+            "node.gestures",
+            "searchBar",
+            "searchBar.icons",
+            "rich-text-links",
+            "strings.fallback",
+            "design.fallback",
+            "platformNamespace",
+            "scroll.edgeEffect",
+            "adaptive",
+            "menu",
+            "select",
+          ]),
         ]),
-        effect: z.enum(["ignored", "substituted"]),
+        effect: z.enum(["ignored", "substituted", "simulated"]),
         paths: z.array(z.string()).max(20),
         total: z.number().int().positive().optional(),
         values: z.array(z.string()).optional(),
@@ -571,7 +580,7 @@ export const prototypeOutputSchema = z.object({
     )
     .optional()
     .describe(
-      "Successful show on either platform (legacy renderer differences apply to iOS only): strings.fallback applies to all platforms, lists locale and up to 20 referenced keys falling through to default (values), with paths strings.default.<key>; other notes describe platform differences: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
+      "Successful show on either platform (legacy renderer differences apply to iOS only): strings.fallback applies to all platforms, lists locale and up to 20 referenced keys falling through to default (values), with paths strings.default.<key>; other notes describe platform differences: platform and construct identify the difference; effect says ignored, substituted or simulated; platform.<module> notes describe reported availability reasons and carry empty paths; other paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
     ),
   accessibilityFindings: z
     .array(

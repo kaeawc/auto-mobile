@@ -1,6 +1,8 @@
 import { expandPrototypeComponents } from "./prototypeComponents";
 import { prototypeRealtimeFields } from "./prototypeChannels";
 import { prototypeMediaQueueFields } from "./prototypeMediaQueue";
+import type { PrototypeRuntimeKind } from "./prototypePlatformReport";
+import { prototypeRuntimeRefusalGuidance } from "./prototypeRuntimeRefusal";
 import { record } from "./prototypeTemplate";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
@@ -116,22 +118,40 @@ function unsupported(
   fields: readonly string[],
   platform: "android" | "ios",
   capability: string,
-  what: string,
+  {
+    what,
+    runtime,
+    appAdvice,
+  }: { what: string; runtime?: PrototypeRuntimeKind; appAdvice?: string },
 ): string {
-  const device = platform === "android" ? "connected CtrlProxy" : "connected iOS prototype agent";
-  const update =
-    platform === "android"
-      ? "Update the connected CtrlProxy"
-      : "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version";
+  const { device, advice } = prototypeRuntimeRefusalGuidance(platform, runtime);
   const more = fields.length > 1 ? ` (and ${fields.length - 1} more)` : "";
-  return `The ${device} does not advertise ${capability}, so it cannot run ${what} at ${fields[0]}${more}. Nothing was shown. ${update}, or use a spec without it.`;
+  return `The ${device} does not advertise ${capability}, so it cannot run ${what} at ${fields[0]}${more}. Nothing was shown. ${appAdvice ?? advice}, or use a spec without it.`;
+}
+
+// CtrlProxy runs without an Activity; the disposable shell and ProtoViewer register these modules.
+const CTRLPROXY_APP_ONLY_MODULES = new Set(["biometric", "permissions", "secureStorage"]);
+
+function platformModuleAppAdvice(name: string, runtime?: PrototypeRuntimeKind): string | undefined {
+  if (runtime === "ctrlproxy" && CTRLPROXY_APP_ONLY_MODULES.has(name)) {
+    return 'Install the spec as a disposable app with prototype action "installApp"';
+  }
+  // The injected agent excludes the permission prompt module; the saved Viewer enables it.
+  if (runtime === "iosAgent" && name === "permissions") {
+    return 'Save and open the spec in the iOS Prototype Viewer with prototype action "save"';
+  }
+  return undefined;
 }
 
 export function prototypePlatformUnsupportedMessage(
   fields: readonly string[],
   platform: "android" | "ios",
+  runtime?: PrototypeRuntimeKind,
 ): string {
-  return unsupported(fields, platform, PROTOTYPE_PLATFORM_CAPABILITY, "the platform vocabulary");
+  return unsupported(fields, platform, PROTOTYPE_PLATFORM_CAPABILITY, {
+    what: "the platform vocabulary",
+    runtime,
+  });
 }
 
 /** Authored call and handler paths whose definition names `capability` beyond its module's. */
@@ -203,16 +223,18 @@ const PROTOTYPE_PLATFORM_CALL_GATES = callCapabilities().map(({ capability, call
     ...(CALL_CAPABILITY_FIELDS[capability]?.fields(spec) ?? []),
     ...prototypePlatformCallCapabilityFields(spec, capability),
   ],
-  unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
-    unsupported(
-      fields,
-      platform,
-      capability,
-      [
+  unsupportedMessage: (
+    fields: readonly string[],
+    platform: "android" | "ios",
+    runtime?: PrototypeRuntimeKind,
+  ) =>
+    unsupported(fields, platform, capability, {
+      what: [
         ...calls,
         ...(CALL_CAPABILITY_FIELDS[capability] ? [CALL_CAPABILITY_FIELDS[capability].name] : []),
       ].join(" or "),
-    ),
+      runtime,
+    }),
 }));
 
 /** One generated gate per module in the `platformModules` table, then one per call capability. */
@@ -221,29 +243,46 @@ const PROTOTYPE_PLATFORM_MODULE_ONLY_GATES = Object.entries(PROTOTYPE_PLATFORM_M
     {
       capability: definition.capability,
       fields: (spec: unknown) => prototypePlatformModuleFields(spec, name),
-      unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
+      unsupportedMessage: (
+        fields: readonly string[],
+        platform: "android" | "ios",
+        runtime?: PrototypeRuntimeKind,
+      ) =>
         platform === "ios" && name === "notifications"
           ? `The notifications platform module at ${fields[0]} needs ${definition.capability}, which only the standalone iOS Prototype Viewer advertises. Use prototype save with an icon to install the per-prototype Viewer app.`
-          : unsupported(fields, platform, definition.capability, `the ${name} platform module`),
+          : unsupported(fields, platform, definition.capability, {
+              what: `the ${name} platform module`,
+              runtime,
+              appAdvice: platformModuleAppAdvice(name, runtime),
+            }),
     },
     ...Object.entries(definition.backends ?? {}).map(([backend, { capability }]) => ({
       capability,
       fields: (spec: unknown) => prototypePlatformBackendFields(spec, name, backend),
-      unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
-        unsupported(fields, platform, capability, `the ${name} \`${backend}\` backend`),
+      unsupportedMessage: (
+        fields: readonly string[],
+        platform: "android" | "ios",
+        runtime?: PrototypeRuntimeKind,
+      ) =>
+        unsupported(fields, platform, capability, {
+          what: `the ${name} \`${backend}\` backend`,
+          runtime,
+        }),
     })),
     ...(definition.deviceCapability
       ? [
           {
             capability: definition.deviceCapability,
             fields: (spec: unknown) => prototypeRealtimeFields(spec, true),
-            unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
-              unsupported(
-                fields,
-                platform,
-                definition.deviceCapability!,
-                "device realtime channels",
-              ),
+            unsupportedMessage: (
+              fields: readonly string[],
+              platform: "android" | "ios",
+              runtime?: PrototypeRuntimeKind,
+            ) =>
+              unsupported(fields, platform, definition.deviceCapability!, {
+                what: "device realtime channels",
+                runtime,
+              }),
           },
         ]
       : []),

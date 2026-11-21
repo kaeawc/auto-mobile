@@ -165,7 +165,7 @@ final class PrototypeAgent: NSObject {
             return
         }
 
-        let agent = PrototypeAgent(mode: .standalone, registry: .feedbackModules())
+        let agent = PrototypeAgent(mode: .standalone, runtime: .disposableApp, registry: .feedbackModules())
         instance = agent
         agent.boot()
     }
@@ -231,6 +231,7 @@ final class PrototypeAgent: NSObject {
 
     init(
         mode: PrototypeLifecycleMode = .session,
+        runtime: PrototypePlatformReport.Runtime = .iosAgent,
         registry: PrototypePlatformRegistry = .system,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
@@ -238,6 +239,7 @@ final class PrototypeAgent: NSObject {
         // No concrete permission-needing modules are approved for injection yet (#14289).
         model = PrototypeModel(
             mode: mode,
+            runtime: runtime,
             storage: PrototypeStorageCoordinator.fileBacked(),
             registry: registry.withTestHooks(environment: environment)
         )
@@ -735,6 +737,7 @@ final class PrototypeAgent: NSObject {
         var extra = missingAssetsExtra()
         let degraded = model.degradedEffects()
         if !degraded.isEmpty { extra["degradedEffects"] = degraded }
+        if let platformRuntime = model.platformRuntime { extra["platformRuntime"] = platformRuntime.foundationObject }
         extra.merge(model.session.navigationSnapshot) { _, navigation in navigation }
         if let appearance = model.session.appearance { extra["appearance"] = appearance.wireObject }
         if let plan = model.backdropPlan { extra["backdrop"] = plan.mode.rawValue }

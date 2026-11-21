@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { decodePrototypeEvent } from "../../../src/features/observe/android/CtrlProxyPrototypes";
-import { PROTOTYPE_PLATFORM_CAPABILITY } from "../../../src/features/observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
+  PROTOTYPE_PLATFORM_CAPABILITY,
+} from "../../../src/features/observe/android/ctrlProxyProtocol";
 import {
   PROTOTYPE_SPEC_CAPABILITY_GATES,
   requiredPrototypeCapabilities,
@@ -26,6 +29,7 @@ import {
   prototypePlatformDeliveredEventOf,
 } from "../../../src/features/prototype/prototypePlatformEvent";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
+import { specCapabilityRefusal } from "../../../src/server/prototypeTools/preflight";
 
 const window = { placement: { type: "fullscreen" } };
 const echo = { type: "platform", call: "test.echo", args: { message: { value: "hi" } } };
@@ -452,6 +456,78 @@ describe("platform capability gates", () => {
     );
   });
 
+  test("platform vocabulary refusals identify each runtime and its upgrade path", () => {
+    const cases = [
+      ["ctrlproxy", "android", "connected CtrlProxy", "Update the connected CtrlProxy"],
+      [
+        "iosAgent",
+        "ios",
+        "connected iOS prototype agent",
+        "Relaunch the app with launchApp prototype: true",
+      ],
+      ["iosViewer", "ios", "iOS Prototype Viewer", "Update the iOS Prototype Viewer"],
+      ["protoviewer", "android", "ProtoViewer", "Update ProtoViewer"],
+      [
+        "disposableApp",
+        "android",
+        "disposable app",
+        "Reinstall the disposable app with a template",
+      ],
+      [
+        "embedded",
+        "ios",
+        "embedded prototype runtime",
+        "Check the host app's prototype SDK and module configuration",
+      ],
+    ] as const;
+    for (const [runtime, platform, name, advice] of cases) {
+      const message = prototypePlatformUnsupportedMessage(["requires"], platform, runtime);
+      expect(message).toContain(`The ${name} does not advertise prototype_platform_v1`);
+      expect(message).toContain(advice);
+    }
+  });
+
+  test("app-only platform modules offer the installed app when refused by an overlay", () => {
+    for (const name of ["biometric", "permissions", "secureStorage"]) {
+      const gate = PROTOTYPE_PLATFORM_MODULE_GATES.find(
+        ({ capability }) => capability === PROTOTYPE_PLATFORM_MODULES[name].capability,
+      )!;
+      expect(gate.unsupportedMessage(["requires"], "android", "ctrlproxy")).toContain(
+        "Install the spec as a disposable app",
+      );
+      expect(gate.unsupportedMessage(["requires"], "android", "protoviewer")).toContain(
+        "Update ProtoViewer",
+      );
+    }
+  });
+
+  test("preflight uses the connected runtime's advice for missing permissions capability", async () => {
+    const candidate = spec({ requires: { platform: ["permissions"] } });
+    const ios = {
+      supportsCapability: (capability: string) => capability === PROTOTYPE_PLATFORM_CAPABILITY,
+    };
+    const viewer = {
+      supportsCapability: (capability: string) =>
+        ios.supportsCapability(capability) ||
+        capability === PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
+    };
+    const android = {
+      supportsCommand: async (capability: string) => ios.supportsCapability(capability),
+    };
+    expect((await specCapabilityRefusal({ android }, candidate, undefined))?.error).toContain(
+      "Install the spec as a disposable app",
+    );
+    expect((await specCapabilityRefusal({ ios }, candidate, undefined))?.error).toContain(
+      "Save and open the spec in the iOS Prototype Viewer",
+    );
+    expect((await specCapabilityRefusal({ ios: viewer }, candidate, undefined))?.error).toContain(
+      "Update the iOS Prototype Viewer",
+    );
+    expect(
+      (await specCapabilityRefusal({ ios, disposableApp: true }, candidate, undefined))?.error,
+    ).toContain("Reinstall the disposable app with a template");
+  });
+
   test("specs without the vocabulary need no platform gate", () => {
     expect(prototypePlatformFields(spec({}, { type: "text", text: "{data:/x}" }))).toEqual([]);
   });
@@ -489,6 +565,19 @@ describe("platform events", () => {
       prototypePlatformCallEventOf(decode(frame(PROTOTYPE_PLATFORM_EVENT_NAME, failed))!)?.error
         ?.code,
     ).toBe("permission_denied");
+  });
+
+  test("decodes runtime telemetry alongside an approximate location result", () => {
+    const location = {
+      ...finished,
+      call: "location.request",
+      approximate: true,
+      mode: "real",
+      inFlight: 0,
+    };
+    expect<unknown>(
+      prototypePlatformCallEventOf(decode(frame(PROTOTYPE_PLATFORM_EVENT_NAME, location))!),
+    ).toEqual(location);
   });
 
   test("decodes a delivered event with truncated data", () => {

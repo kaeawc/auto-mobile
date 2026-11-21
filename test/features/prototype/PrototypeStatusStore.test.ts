@@ -561,6 +561,70 @@ test("show snapshots expose initial stacks until a device snapshot supersedes th
   expect(store.status(scope).prototypes[0]).not.toHaveProperty("stacks");
 });
 
+test("mirrors platform completion counts and modes for the reported prototype and scope", () => {
+  const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+  const scope = { deviceId: "device", sessionUuid: "owner" };
+  store.record(
+    scope,
+    "show",
+    { id: "panel" },
+    {
+      result: {
+        success: true,
+        platformRuntime: {
+          runtime: "ctrlproxy",
+          modules: { haptics: { availability: "ready", mode: "real", inFlight: 2 } },
+        },
+      },
+    },
+  );
+  const completion = {
+    ...event(1),
+    id: "panel",
+    kind: "emit" as const,
+    name: "prototype_platform",
+    payload: {
+      callId: "one",
+      call: "haptics.perform",
+      outcome: "success",
+      durationMs: 1,
+      inFlight: 1,
+      mode: "fake",
+    },
+  };
+  store.recordEvent({ ...scope, sessionUuid: "other" }, completion);
+  store.recordEvent(scope, { ...completion, id: "sibling" });
+  expect(store.status(scope).platformRuntime?.modules.haptics).toEqual({
+    availability: "ready",
+    mode: "real",
+    inFlight: 2,
+  });
+  store.recordEvent(scope, completion);
+  expect(store.status(scope).platformRuntime?.modules.haptics).toEqual({
+    availability: "ready",
+    mode: "fake",
+    inFlight: 1,
+  });
+  store.recordEvent(scope, {
+    ...completion,
+    sequence: 2,
+    payload: {
+      callId: "two",
+      call: "haptics.perform",
+      outcome: "success",
+      durationMs: 0,
+      simulated: true,
+    },
+  });
+  expect(store.status(scope).platformRuntime?.modules.haptics).toEqual({
+    availability: "ready",
+    mode: "fake",
+    inFlight: 1,
+  });
+  store.dismissed(scope, "panel");
+  expect(store.status(scope).platformRuntime).toBeUndefined();
+});
+
 test("device-generated ids and timestamps reach both host mirrors without regeneration", () => {
   const store = new InMemoryPrototypeStatusStore(new FakeTimer());
   const scope = { deviceId: "generated-device" };

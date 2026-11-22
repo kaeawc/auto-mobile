@@ -107,9 +107,11 @@ export function parseNightMode(raw: string): DisplayTheme | undefined {
 /**
  * Android before 8 registers the `uimode` service but has no shell command for it, so
  * `cmd uimode night` exits 0 with "No shell command implementation." (issue #18984).
+ * API 24 writes it to stderr with empty stdout; API 25 writes it to stdout. Only this
+ * exact message counts, so unrelated stderr never marks night mode unsupported.
  */
-export function isNightModeUnsupported(raw: string): boolean {
-  return /no shell command implementation/i.test(raw);
+export function isNightModeUnsupported(stdout: string, stderr: string = ""): boolean {
+  return [stdout, stderr].some((stream) => /no shell command implementation/i.test(stream));
 }
 
 export const ANDROID_THEME_UNSUPPORTED_ERROR =

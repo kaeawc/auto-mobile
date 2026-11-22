@@ -24,3 +24,8 @@ No fixture is synthesized, and no device commands run in these tests.
 `night-mode-unsupported-api25.txt` is `cmd uimode night` on an Android 7.1.1 (API 25)
 emulator, copied verbatim from the output quoted in issue #18984 (exit 0, no
 `Night mode:` line). No API 24/25 system image was installed for this capture.
+
+`night-mode-unsupported-api24.stderr.txt` is the STDERR of `cmd uimode night` on an
+Android 7.0 (API 24) emulator (`system-images;android-24;google_apis;arm64-v8a`),
+copied verbatim from the device verification on #19038: exit 0, empty STDOUT, and the
+message only on STDERR. Tests feed it as stderr with empty stdout.

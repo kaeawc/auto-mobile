@@ -868,14 +868,16 @@ export class DisplayConfig {
     restorableValues: DisplayConfigValues;
     physicalDensity: number | undefined;
   }> {
-    const [fontRaw, densityRaw, nightRaw] = await Promise.all([
+    const [font, density, night] = await Promise.all([
       this.run(adb, "shell settings get system font_scale", "font scale"),
       this.run(adb, "shell wm density", "density"),
       this.run(adb, "shell cmd uimode night", "night mode"),
     ]);
+    const fontRaw = font.stdout;
+    const densityRaw = density.stdout;
     const parsedDensity = parseWmDensity(densityRaw);
     const fontScaleSnapshot = parseFontScaleSnapshot(fontRaw);
-    const theme = parseNightMode(nightRaw);
+    const theme = parseNightMode(night.stdout);
     const unreadable: string[] = [];
     if (fontScaleSnapshot === undefined) {
       unreadable.push("font scale");
@@ -883,7 +885,8 @@ export class DisplayConfig {
     if (parsedDensity.effective === undefined) {
       unreadable.push("display density");
     }
-    if (theme === undefined && !isNightModeUnsupported(nightRaw)) {
+    // API 24 prints the unsupported message to stderr with empty stdout; API 25 to stdout.
+    if (theme === undefined && !isNightModeUnsupported(night.stdout, night.stderr)) {
       unreadable.push("night mode");
     }
     if (unreadable.length > 0) {
@@ -1027,10 +1030,14 @@ export class DisplayConfig {
   }
 
   /**
-   * Read a command's stdout, rejecting shell-reported failures rather than
+   * Read a command's output, rejecting shell-reported failures rather than
    * fabricating a restoration baseline from partial output.
    */
-  private async run(adb: AdbExecutor, command: string, setting: string): Promise<string> {
+  private async run(
+    adb: AdbExecutor,
+    command: string,
+    setting: string,
+  ): Promise<{ stdout: string; stderr: string }> {
     try {
       const result = await adb.executeCommand(command, { noRetry: true });
       const stdout = result.stdout;
@@ -1038,7 +1045,7 @@ export class DisplayConfig {
       if (outputLooksLikeShellFailure(stdout, stderr)) {
         throw new Error(`'${command}' reported: ${`${stdout} ${stderr}`.trim()}`);
       }
-      return stdout;
+      return { stdout, stderr };
     } catch (error) {
       throw new ActionableError(`${setting}: failed to read '${command}': ${errorMessage(error)}`, {
         cause: error,

@@ -77,7 +77,11 @@ public struct PrototypeNetworkConfiguration: Sendable {
         device = deviceClient.map { EmbeddedHttpClient(client: $0) } ?? PrototypeURLSessionClient()
         handler = hostHandler.map { EmbeddedHttpClient(client: $0) }
         if deviceClient != nil {
-            remoteImages = PrototypeRemoteImageLoader(client: device)
+            // An app hook may add credentials, so its images never enter the app-wide URL-keyed
+            // memory or disk caches; only this configuration's loader can reuse them.
+            remoteImages = PrototypeRemoteImageLoader(
+                client: device, memory: PrototypeRemoteImageMemory(), directory: nil
+            )
         }
     }
 

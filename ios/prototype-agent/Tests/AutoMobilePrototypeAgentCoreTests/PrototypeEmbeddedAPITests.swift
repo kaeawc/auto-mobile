@@ -55,6 +55,30 @@ final class PrototypeEmbeddedAPITests: XCTestCase {
         XCTAssertTrue(hostCalls.isEmpty)
     }
 
+    func testRemoteImageCacheIsNotSharedAcrossEmbeddedDeviceClients() async throws {
+        let oldDevice = Client(body: PrototypeRemoteImageLoaderTests.png)
+        let newDevice = Client(body: PrototypeRemoteImageLoaderTests.png)
+        let old = PrototypeNetworkConfiguration(deviceClient: { try await oldDevice.perform($0) })
+        let new = PrototypeNetworkConfiguration(deviceClient: { try await newDevice.perform($0) })
+        let url = "https://public.example/account-image-\(UUID().uuidString)"
+        _ = try await old.remoteImages.load(url)
+        _ = try await new.remoteImages.load(url)
+        let newCalls = await newDevice.calls
+        XCTAssertEqual(newCalls.map { $0.url?.absoluteString }, [url], "Swapped client reused another client's image")
+        // The default loader must not see an image fetched through an app hook either.
+        XCTAssertNil(PrototypeRemoteImageMemory.shared.get(url))
+    }
+
+    func testRemoteImageRepeatLoadThroughSameEmbeddedDeviceClientHitsCache() async throws {
+        let device = Client(body: PrototypeRemoteImageLoaderTests.png)
+        let configuration = PrototypeNetworkConfiguration(deviceClient: { try await device.perform($0) })
+        let url = "https://public.example/repeat-image-\(UUID().uuidString)"
+        _ = try await configuration.remoteImages.load(url)
+        _ = try await configuration.remoteImages.load(url)
+        let calls = await device.calls
+        XCTAssertEqual(calls.count, 1)
+    }
+
     func testPublicConfigurationRoutesSharedFixtureThroughFakeClientsAndMapsRequestEvents() async throws {
         let cases = try JSONDecoder().decode(
             [RoutingCase].self,

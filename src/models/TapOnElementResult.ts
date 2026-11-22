@@ -14,7 +14,9 @@ export type TapEffectBasis =
   | "activeWindow unchanged"
   | "viewHierarchy changed"
   | "viewHierarchy unchanged"
-  | "insufficient observation data";
+  | "insufficient observation data"
+  /** watchOS: the tap closed the system alert (notification look or permission prompt) it was over. */
+  | "system alert dismissed";
 
 export interface TapEffect {
   screenChanged: boolean;

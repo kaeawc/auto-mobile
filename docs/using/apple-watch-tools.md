@@ -8,7 +8,10 @@ with `platform: "watchos"`.
 `observe` returns a screenshot. With the automation runner connected, it also returns the target
 app's view hierarchy and on-screen system alerts, even when the app is not in the foreground. Those
 alerts include the notification permission prompt, short look and long look, the last with action
-buttons.
+buttons. While a short look is up, `observe` re-reads for up to about 2 seconds and returns the long
+look that replaces it, with its action buttons. A short look that does not expand in that time is
+returned as it is. A compact banner, with the title beside the app icon, does not expand by itself:
+`tapOn` its title to open the long look.
 
 - If AutoMobile cannot read the hierarchy, the result carries `hierarchyUnavailable` and no
   hierarchy fields.
@@ -29,6 +32,7 @@ The watch refuses these options: `waitFor` with `for`, `posture`, `activeDisplay
 
 `tapOn` takes a `selector` with an exact `elementId` or `text`, and an optional `index`. It supports
 only `action: "tap"`. Only elements wholly on screen match, including notification action buttons.
+During a short look, `tapOn` waits for the long look the same way before it matches.
 The notification permission prompt scrolls: use `rotateCrown` to bring `Allow` wholly into view
 before you select it.
 
@@ -37,7 +41,8 @@ the watch screen fails with `tap is outside the watch screen`.
 
 Outside the Smart Stack, both results include `effect: {screenChanged, basis}`. AutoMobile checks
 the screen for about 1 second after the tap. `basis` is `viewHierarchy changed`,
-`viewHierarchy unchanged` or `insufficient observation data`. AutoMobile never retries the tap. A
+`viewHierarchy unchanged`, `system alert dismissed` (the tap closed the notification look or
+permission prompt it landed on) or `insufficient observation data`. AutoMobile never retries the tap. A
 changed screen does not prove the intended control responded, so `observe` when it matters.
 
 When a system or app alert, such as the notification permission prompt, covers the app, `tapOn`
@@ -147,8 +152,8 @@ permission prompt may appear first.
   `success: true` with a `warning` noting that notifications are authorized, not denied.
   Background the app with `pressButton` `home`, then post again if you need the banner.
 - When no delivery verdict is available, success means the simulator accepted the push.
-- A banner disappears after a few seconds. Call `observe` right after the push to inspect its short
-  look; the long look exposes its action buttons.
+- A banner disappears after a few seconds. Call `observe` right after the push: it returns the long
+  look with its action buttons once the short look expands.
 
 ## App management
 

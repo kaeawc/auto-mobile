@@ -25,7 +25,12 @@ import {
   tapSmartStackAt,
   tapSmartStackOn,
 } from "./WatchSmartStackTap";
-import { normalizeWatchHierarchy, rejectWatchAlertCoveredTap } from "./WatchHierarchy";
+import {
+  normalizeWatchHierarchy,
+  rejectWatchAlertCoveredTap,
+  type WatchHierarchy,
+} from "./WatchHierarchy";
+import { hasWatchSystemAlert, readSettledWatchHierarchy } from "./WatchNotificationLook";
 import { type WatchCommand, type WatchRunnerClient } from "./WatchRunnerClient";
 import { WatchRunnerError } from "./WatchRunnerError";
 import { watchRunners } from "./WatchRunnerRegistry";
@@ -146,21 +151,59 @@ function watchTapFingerprint(hierarchy: ViewHierarchyResult): string | null {
   return root && nodeAttributes(root).class ? hierarchyFingerprint(hierarchy) : null;
 }
 
-async function readWatchTapFingerprint(
+/** What a tap effect compares against: the pre-tap fingerprint and whether a system alert was up. */
+interface WatchTapBaseline {
+  fingerprint: string | null;
+  alert: boolean;
+}
+
+function watchTapBaseline(raw: WatchHierarchy): WatchTapBaseline {
+  return {
+    fingerprint: watchTapFingerprint(normalizeWatchHierarchy(raw)),
+    alert: hasWatchSystemAlert(raw),
+  };
+}
+
+async function readWatchTapBaseline(
   client: WatchRunnerClient,
   signal?: AbortSignal,
-): Promise<string | null> {
+): Promise<WatchTapBaseline> {
   try {
-    return watchTapFingerprint(normalizeWatchHierarchy(await client.hierarchy(signal)));
+    return watchTapBaseline(await client.hierarchy(signal));
   } catch (error) {
     logger.warn("Could not observe the watch tap hierarchy", error);
-    return null;
+    return { fingerprint: null, alert: false };
+  }
+}
+
+const ALERT_DISMISSED: TapEffect = { screenChanged: true, basis: "system alert dismissed" };
+
+/**
+ * Reads the hierarchy after a tap. A tap that closes a notification look over a backgrounded app
+ * leaves the runner nothing to read (`app_not_foreground`), which is itself the dismissal.
+ */
+async function readWatchTapAfter(
+  client: WatchRunnerClient,
+  before: WatchTapBaseline,
+  signal?: AbortSignal,
+): Promise<WatchHierarchy | "alert dismissed"> {
+  try {
+    return await client.hierarchy(signal);
+  } catch (error) {
+    if (
+      before.alert &&
+      error instanceof WatchRunnerError &&
+      error.errorCode === "app_not_foreground"
+    ) {
+      return "alert dismissed";
+    }
+    throw error;
   }
 }
 
 async function watchTapEffect(
   client: WatchRunnerClient,
-  before: string | null,
+  before: WatchTapBaseline,
   timer: Timer,
   signal?: AbortSignal,
 ): Promise<TapEffect> {
@@ -168,7 +211,7 @@ async function watchTapEffect(
     screenChanged: false,
     basis: "insufficient observation data",
   };
-  if (before === null) {
+  if (before.fingerprint === null) {
     logger.warn("Watch tap effect has insufficient pre-tap hierarchy data");
     return insufficient;
   }
@@ -176,13 +219,16 @@ async function watchTapEffect(
   try {
     for (;;) {
       // Let the client's request timeout and signal bound each read, even past the settle deadline.
-      const after = await client.hierarchy(signal);
+      const after = await readWatchTapAfter(client, before, signal);
+      if (after === "alert dismissed" || (before.alert && !hasWatchSystemAlert(after))) {
+        return ALERT_DISMISSED;
+      }
       const fingerprint = watchTapFingerprint(normalizeWatchHierarchy(after));
       if (fingerprint === null) {
         logger.warn("Watch tap effect has insufficient post-tap hierarchy data");
         return insufficient;
       }
-      if (fingerprint !== before) {
+      if (fingerprint !== before.fingerprint) {
         return { screenChanged: true, basis: "viewHierarchy changed" };
       }
       const remaining = deadline - timer.now();
@@ -269,15 +315,17 @@ export async function watchTapOn(
   if (stack) {
     return tapSmartStackOn(client, stack, options, signal);
   }
-  const hierarchy = normalizeWatchHierarchy(await client.hierarchy(signal));
-  const before = observeEffect ? watchTapFingerprint(hierarchy) : null;
+  // A short look has no action buttons yet; wait for the long look that shows them (#18655).
+  const raw = await readSettledWatchHierarchy(() => client.hierarchy(signal), timer, signal);
+  const hierarchy = normalizeWatchHierarchy(raw);
   const { element, command } = resolveWatchTapTarget(hierarchy, options, preferTextInput);
+  const before = observeEffect ? watchTapBaseline(raw) : undefined;
   await client.request(command, signal);
   return {
     success: true,
     action: "tap",
     element,
-    ...(observeEffect ? { effect: await watchTapEffect(client, before, timer, signal) } : {}),
+    ...(before ? { effect: await watchTapEffect(client, before, timer, signal) } : {}),
   };
 }
 
@@ -317,7 +365,7 @@ export async function watchTapAt(
     await tapSmartStackAt(client, stack.hierarchy, options, signal);
     return { success: true, x: options.x, y: options.y, action: "tap" };
   }
-  const before = await readWatchTapFingerprint(client, signal);
+  const before = await readWatchTapBaseline(client, signal);
   await client.request({ type: "tap", x: options.x, y: options.y }, signal);
   return {
     success: true,

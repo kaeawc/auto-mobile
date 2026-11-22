@@ -15,7 +15,7 @@ import { PrivateDaemonOrphanWatchdog } from "../privateDaemonOrphanWatchdog";
 import { IncumbentOwnerGuard } from "../incumbentOwnerGuard";
 import { NavigationRetentionMonitor } from "../NavigationRetentionMonitor";
 import { DatabaseHealthProbe } from "../../db/DatabaseHealthProbe";
-import { getDeviceDataStreamServer } from "../deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "../streams/deviceDataStreamSocketServer";
 import { NavigationGraphStreamBridge } from "../daemonStreamRouting";
 import { type InstalledAppsStore } from "../../db/installedAppsRepository";
 import { BackgroundBindingRegistryUpgrade } from "../sessionBroker/registry/BackgroundBindingRegistryUpgrade";

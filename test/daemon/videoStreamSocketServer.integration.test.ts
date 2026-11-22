@@ -11,19 +11,19 @@ import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSou
 import {
   VideoStreamSocketServer,
   type DeviceOwnershipChanges,
-} from "../../src/daemon/videoStreamSocketServer";
+} from "../../src/daemon/streams/videoStreamSocketServer";
 import { ScreenRecordingPermissionError } from "../../src/features/webrtc";
 import {
   SessionScopedStreamAuthenticator,
   type StreamAuthSessionManager,
   type StreamSocketAuthenticator,
-} from "../../src/daemon/streamSocketAuth";
+} from "../../src/daemon/streams/streamSocketAuth";
 import {
   CODEC_ID_H264,
   encodeDroppedFrames,
   PACKET_FLAG_DROPPED_FRAMES,
   PACKET_FLAG_HEARTBEAT,
-} from "../../src/daemon/videoStreamFraming";
+} from "../../src/daemon/streams/videoStreamFraming";
 import { SIMULATOR_FPS_DEFAULT } from "../../src/features/screen-stream/IosScreenCaptureHelper";
 import {
   permissiveDeviceAdmissionGate,

@@ -29,7 +29,7 @@ import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
 import type { AppearanceSocketResponse } from "../../src/daemon/wire/appearanceSocketTypes";
 import { appearanceSocketResponseSchema } from "./wireMessageSchemas";
-import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { SessionScopedStreamAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";

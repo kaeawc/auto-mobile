@@ -1,4 +1,4 @@
-import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "../../daemon/streams/deviceDataStreamSocketServer";
 
 export interface DeviceConnectionLostNotifier {
   onDeviceConnectionLost(deviceId: string): void;

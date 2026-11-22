@@ -5,16 +5,16 @@ import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
   type StreamAuthorizeInput,
-} from "../../src/daemon/streamSocketAuth";
+} from "../../src/daemon/streams/streamSocketAuth";
 import {
   PerformanceStreamSocketServer,
   type PerformanceStreamRepository,
-} from "../../src/daemon/performanceStreamSocketServer";
+} from "../../src/daemon/streams/performanceStreamSocketServer";
 import type {
   PerformanceStreamSocketRequest,
   PerformanceStreamSocketResponse,
-} from "../../src/daemon/performanceStreamSocketTypes";
-import { STREAM_LIMIT_MAX } from "../../src/daemon/streamQueryNormalizers";
+} from "../../src/daemon/streams/performanceStreamSocketTypes";
+import { STREAM_LIMIT_MAX } from "../../src/daemon/streams/streamQueryNormalizers";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { performanceStreamResponseFrameSchema } from "../helpers/wireMessageSchemas";

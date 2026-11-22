@@ -1,12 +1,12 @@
 import { streamSubscribeAuthCases } from "../helpers/streamSubscribeAuthCases";
-import type { StreamSocketAuthenticator } from "../../src/daemon/streamSocketAuth";
+import type { StreamSocketAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Socket } from "node:net";
 import {
   PerformancePushSocketServer,
   DEFAULT_THRESHOLDS,
   type LivePerformanceData,
-} from "../../src/daemon/performancePushSocketServer";
+} from "../../src/daemon/streams/performancePushSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";

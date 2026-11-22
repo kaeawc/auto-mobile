@@ -62,12 +62,12 @@ auto-mobile --cli getLogs --platform visionos --sessionUuid "$SESSION_ID" \
 
 `getLogs` reads the simulator's unified log for the app: lines from its `os.Logger` subsystem (`com.example.yourapp` or `com.example.yourapp.*`) or from its process.
 
-| Parameter                                                                                                    | visionOS behavior                                                                                                                      |
-| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `appId`                                                                                                      | Required.                                                                                                                              |
-| `since`                                                                                                      | `"lastAction"`, `"sessionStart"`, `"run-start"` (during plan execution only) or `{"seconds": N}`. Default: the last 300 seconds.       |
-| `minPriority`                                                                                                | `V`/`D` debug and up, `I` info and up, `W` default and up (the unified log has no warning level), `E` error and fault, `F` fault only. |
-| `tags`, `buffers`, `includeSystem`                                                                           | Android-only; ignored with a warning.                                                                                                  |
+| Parameter                          | visionOS behavior                                                                                                                      |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `appId`                            | Required.                                                                                                                              |
+| `since`                            | `"lastAction"`, `"sessionStart"`, `"run-start"` (during plan execution only) or `{"seconds": N}`. Default: the last 300 seconds.       |
+| `minPriority`                      | `V`/`D` debug and up, `I` info and up, `W` default and up (the unified log has no warning level), `E` error and fault, `F` fault only. |
+| `tags`, `buffers`, `includeSystem` | Android-only; ignored with a warning.                                                                                                  |
 
 `getLogs` is not listed by default; enable it with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
 

@@ -2,8 +2,8 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { BootedDevice, PlanStep } from "../../src/models";
 import type { SessionManager } from "../../src/daemon/sessionManager";
-import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
-import { DeviceGestureRecordingSocketServer } from "../../src/daemon/deviceGestureRecordingSocketServer";
+import { SessionScopedStreamAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
+import { DeviceGestureRecordingSocketServer } from "../../src/daemon/streams/deviceGestureRecordingSocketServer";
 import type { DeviceGestureRecordingCommand } from "../../src/daemon/deviceGestureRecordingSocketTypes";
 import { registerPlanTools } from "../../src/server/planTools";
 import {

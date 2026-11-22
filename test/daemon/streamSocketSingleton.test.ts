@@ -4,18 +4,18 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { describe, test, expect, spyOn } from "bun:test";
 import { logger } from "../../src/utils/logger";
-import * as appearanceSocketServer from "../../src/daemon/appearanceSocketServer";
-import * as deviceDataStreamSocketServer from "../../src/daemon/deviceDataStreamSocketServer";
-import * as deviceSnapshotSocketServer from "../../src/daemon/deviceSnapshotSocketServer";
-import * as failuresPushSocketServer from "../../src/daemon/failuresPushSocketServer";
-import * as failuresStreamSocketServer from "../../src/daemon/failuresStreamSocketServer";
-import * as performancePushSocketServer from "../../src/daemon/performancePushSocketServer";
-import * as performanceStreamSocketServer from "../../src/daemon/performanceStreamSocketServer";
-import * as telemetryPushSocketServer from "../../src/daemon/telemetryPushSocketServer";
-import * as deviceGestureRecordingSocketServer from "../../src/daemon/deviceGestureRecordingSocketServer";
-import * as videoRecordingSocketServer from "../../src/daemon/videoRecordingSocketServer";
-import * as videoStreamSocketServer from "../../src/daemon/videoStreamSocketServer";
-import * as webRtcStreamSocketServer from "../../src/daemon/webrtcStreamSocketServer";
+import * as appearanceSocketServer from "../../src/daemon/streams/appearanceSocketServer";
+import * as deviceDataStreamSocketServer from "../../src/daemon/streams/deviceDataStreamSocketServer";
+import * as deviceSnapshotSocketServer from "../../src/daemon/streams/deviceSnapshotSocketServer";
+import * as failuresPushSocketServer from "../../src/daemon/streams/failuresPushSocketServer";
+import * as failuresStreamSocketServer from "../../src/daemon/streams/failuresStreamSocketServer";
+import * as performancePushSocketServer from "../../src/daemon/streams/performancePushSocketServer";
+import * as performanceStreamSocketServer from "../../src/daemon/streams/performanceStreamSocketServer";
+import * as telemetryPushSocketServer from "../../src/daemon/streams/telemetryPushSocketServer";
+import * as deviceGestureRecordingSocketServer from "../../src/daemon/streams/deviceGestureRecordingSocketServer";
+import * as videoRecordingSocketServer from "../../src/daemon/streams/videoRecordingSocketServer";
+import * as videoStreamSocketServer from "../../src/daemon/streams/videoStreamSocketServer";
+import * as webRtcStreamSocketServer from "../../src/daemon/streams/webrtcStreamSocketServer";
 const cases = [
   {
     name: "Appearance",

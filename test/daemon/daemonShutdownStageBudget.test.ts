@@ -3,7 +3,7 @@ import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
 import * as daemonFilesModule from "../../src/daemon/daemonFiles";
-import { setVideoStreamSocketServerForTesting } from "../../src/daemon/videoStreamSocketServer";
+import { setVideoStreamSocketServerForTesting } from "../../src/daemon/streams/videoStreamSocketServer";
 import * as databaseModule from "../../src/db";
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";

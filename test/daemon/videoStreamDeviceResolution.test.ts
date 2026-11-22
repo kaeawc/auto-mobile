@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import {
   resolveVideoStreamDevice,
   validateCaptureHints,
-} from "../../src/daemon/videoStreamSocketServer";
+} from "../../src/daemon/streams/videoStreamSocketServer";
 import type { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 

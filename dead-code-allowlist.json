@@ -167,7 +167,7 @@
       "reason": "Socket server configuration is consumed by the runtime composition; static export analysis misses the linkage."
     },
     {
-      "file": "src/daemon/videoStreamSocketServer.ts",
+      "file": "src/daemon/streams/videoStreamSocketServer.ts",
       "name": "setVideoStreamSocketServerForTesting",
       "reason": "Test-only dependency injection seam for the video stream socket server."
     },

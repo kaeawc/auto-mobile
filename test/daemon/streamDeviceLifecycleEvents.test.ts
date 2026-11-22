@@ -2,7 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import {
   getDaemonStreamDeviceLifecycleEmitter,
   StreamDeviceLifecycleEmitter,
-} from "../../src/daemon/streamDeviceLifecycleEvents";
+} from "../../src/daemon/streams/streamDeviceLifecycleEvents";
 import { getDeviceIncarnationListeners } from "../../src/utils/deviceIncarnation";
 import { logger } from "../../src/utils/logger";
 

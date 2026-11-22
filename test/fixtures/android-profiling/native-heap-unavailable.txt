@@ -1,0 +1,4 @@
+Native heap dump not available. To enable, run these commands (requires root):
+# adb shell stop
+# adb shell setprop libc.debug.malloc.options backtrace
+# adb shell start

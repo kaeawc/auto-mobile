@@ -1,4 +1,4 @@
-import { LivePerformanceData } from "../../daemon/performancePushSocketServer";
+import { LivePerformanceData } from "../../daemon/streams/performancePushSocketServer";
 import type { MemoryBreakdownMb } from "../../models/PerfSnapshot";
 import { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";

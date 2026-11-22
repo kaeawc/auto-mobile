@@ -26,9 +26,9 @@ so R8 cannot strip the library as unused.
 | `+ media3-exoplayer`                | 7,217,477 | +139 KiB |   +2.0% |
 | `+ media3-exoplayer` + `ui-compose` | 7,233,861 | +155 KiB |   +2.2% |
 
-`media3-exoplayer-hls`, `-dash` and `media3-session` are not in the offline Gradle cache and were
-not measured; the owner decision excludes HLS and DASH from CtrlProxy. Media3 ExoPlayer needs no
-native libraries, so the delta is DEX only. The ProtoViewer app shell was not measured.
+We did not measure `media3-exoplayer-hls`, `-dash` or `media3-session` because the offline Gradle
+cache lacks them, and CtrlProxy excludes HLS and DASH. Media3 ExoPlayer needs no native
+libraries, so the delta is DEX only. We did not measure the ProtoViewer app shell.
 
 ## Android decode matrix
 

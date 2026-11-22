@@ -1,12 +1,12 @@
 import { isAndroidOrIosPlatform } from "../../models/Platform";
 import type { DaemonCoreServices, DaemonLifecycleState } from "./DaemonCoreState";
-import { DefaultObservationInitialFrameCoordinator } from "../observationInitialFrameCoordinator";
+import { DefaultObservationInitialFrameCoordinator } from "../streams/observationInitialFrameCoordinator";
 import { logger } from "../../utils/logger";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
-import { getPerformancePushServer } from "../performancePushSocketServer";
-import { getDeviceDataStreamServer } from "../deviceDataStreamSocketServer";
-import { getFailuresPushServer } from "../failuresPushSocketServer";
-import { getTelemetryPushServer } from "../telemetryPushSocketServer";
+import { getPerformancePushServer } from "../streams/performancePushSocketServer";
+import { getDeviceDataStreamServer } from "../streams/deviceDataStreamSocketServer";
+import { getFailuresPushServer } from "../streams/failuresPushSocketServer";
+import { getTelemetryPushServer } from "../streams/telemetryPushSocketServer";
 import { createRegistryDeviceSessionResolver } from "../deviceSessionResolver";
 import { AndroidCtrlProxyClient } from "../../features/observe/android";
 import {

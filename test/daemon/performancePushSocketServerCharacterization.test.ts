@@ -3,7 +3,7 @@ import {
   DEFAULT_THRESHOLDS,
   PerformancePushSocketServer,
   type LivePerformanceData,
-} from "../../src/daemon/performancePushSocketServer";
+} from "../../src/daemon/streams/performancePushSocketServer";
 
 const emptyMetrics: LivePerformanceData["metrics"] = {
   fps: null,

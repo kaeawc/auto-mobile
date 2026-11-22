@@ -5,12 +5,12 @@ import {
   SessionScopedStreamAuthenticator,
   type StreamAuthSessionManager,
   type StreamSocketAuthenticator,
-} from "../../src/daemon/streamSocketAuth";
+} from "../../src/daemon/streams/streamSocketAuth";
 import {
   resolveWebRtcStreamDevice,
   WebRtcStreamSocketServer,
   type WebRtcStreamSocketServerDependencies,
-} from "../../src/daemon/webrtcStreamSocketServer";
+} from "../../src/daemon/streams/webrtcStreamSocketServer";
 import {
   getWebRtcStreamDescriptor,
   listWebRtcStreams,
@@ -18,11 +18,11 @@ import {
   setWebRtcStreamManagerDependencies,
   startWebRtcStream,
   stopWebRtcStream,
-} from "../../src/daemon/webrtcStreamManager";
+} from "../../src/daemon/streams/webrtcStreamManager";
 import type {
   WebRtcStreamSocketRequest,
   WebRtcStreamSocketResponse,
-} from "../../src/daemon/webrtcStreamSocketTypes";
+} from "../../src/daemon/streams/webrtcStreamSocketTypes";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models";
 import {

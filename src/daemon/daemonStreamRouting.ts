@@ -9,7 +9,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
 import { holderOf } from "./deviceBinding";
-import type { DeviceDataStreamSocketServer } from "./deviceDataStreamSocketServer";
+import type { DeviceDataStreamSocketServer } from "./streams/deviceDataStreamSocketServer";
 import type { PooledDevice } from "./devicePool";
 import {
   assertControlNotOnForeignDaemonDevice,
@@ -19,9 +19,9 @@ import {
   convertSummaryToStreamData,
   createNavigationGraphRequestHandler,
 } from "./navigationGraphRequestHandler";
-import type { ObservationStreamIosClient } from "./observationInitialFrame";
+import type { ObservationStreamIosClient } from "./streams/observationInitialFrame";
 import { DeviceAssignedToBindingError } from "./sessionBroker/provisioning/refusal";
-import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
+import { createDefaultStreamSocketAuthenticator } from "./streams/streamSocketAuth";
 import { ENV } from "../config/env";
 
 /**

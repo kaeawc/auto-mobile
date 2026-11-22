@@ -443,10 +443,10 @@ enum PrototypePatch {
     }
 
     /// The refusal for a patch that touches state without a usable `baseRevision`, or on a key a device
-    /// write changed after it (the conflict carries those keys' current values); nil when it may proceed.
+    /// write changed after it (the conflict carries those keys' current public values); nil when it may proceed.
     static func stateGuard(
         ops: JSONValue, baseRevision: Int?, revision: Int, stateRevisions: [String: Int],
-        state: [String: JSONValue]
+        state: [String: JSONValue], secure: [String] = []
     )
         -> PrototypePatchOutcome?
     {
@@ -464,7 +464,7 @@ enum PrototypePatch {
         guard !changed.isEmpty else { return nil }
         return .conflict(
             revision: revision,
-            state: state.filter { changed.contains($0.key) },
+            state: PrototypeSecureStorageRules.redact(state: state.filter { changed.contains($0.key) }, secure: secure),
             baseRevision: baseRevision
         )
     }

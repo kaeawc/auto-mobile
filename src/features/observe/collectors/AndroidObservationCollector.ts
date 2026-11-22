@@ -135,7 +135,7 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
       }
       logger.debug("[OBSERVE] Using device metadata from accessibility service");
     } else {
-      this.applyKnownPanelScreenSize(result);
+      await this.applyKnownPanelScreenSize(result, signal);
       await Promise.all(this.startDeviceStateTasks(context, true));
     }
 
@@ -295,7 +295,10 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
    * display inventory, the same source the `display: "all"` fallback uses. Without
    * it the 0x0 placeholder breaks screenshot raster geometry on every read.
    */
-  private applyKnownPanelScreenSize(result: ObserveResult): void {
+  private async applyKnownPanelScreenSize(
+    result: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<void> {
     logger.warn("[OBSERVE] No screen dimensions from accessibility service");
     if (result.screenSize.width > 0 && result.screenSize.height > 0) {
       return;
@@ -311,13 +314,52 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
           focusedPanelKey: displayTransitions.observedPanel(device.deviceId)?.key,
         });
     if (!panel) {
-      logger.warn(
-        `[OBSERVE] Display ${targetKey} is not in the display inventory; leaving screen size unknown`,
-      );
+      await this.applyUnlistedDisplayScreenSize(result, targetKey, signal);
       return;
     }
     if (panel.sizePx.width > 0 && panel.sizePx.height > 0) {
       result.screenSize = { ...panel.sizePx };
+    }
+  }
+
+  private async applyUnlistedDisplayScreenSize(
+    result: ObserveResult,
+    targetKey: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!this.deps.device().displays?.panels.length && (!targetKey || targetKey === "0")) {
+      await this.applyWmSizeFallback(result, signal);
+      return;
+    }
+    logger.warn(
+      `[OBSERVE] Display ${targetKey} is not in the display inventory; leaving screen size unknown`,
+    );
+  }
+
+  /**
+   * A device with no multi-display inventory (every release before Android 10 has no
+   * `dumpsys SurfaceFlinger --display-id`, so the join finds nothing) has one default display:
+   * size it from `wm size`, rotated to the observed orientation (#18982).
+   */
+  private async applyWmSizeFallback(result: ObserveResult, signal?: AbortSignal): Promise<void> {
+    if (!this.deps.readDisplaySize) {
+      logger.warn(
+        "[OBSERVE] No display inventory and no wm size reader; leaving screen size unknown",
+      );
+      return;
+    }
+    try {
+      const physical = await this.deps.readDisplaySize();
+      signal?.throwIfAborted();
+      const rotated = result.rotation === 1 || result.rotation === 3;
+      result.screenSize = rotated
+        ? { width: physical.height, height: physical.width }
+        : { ...physical };
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      logger.warn(`[OBSERVE] wm size fallback failed: ${describeError(error)}`, error);
     }
   }
 }

@@ -39,11 +39,22 @@ extension GesturePerformer {
         )
             throws -> TapDiagnostics?
         {
-            try performTap(x: x, y: y, duration: duration, requested: nil, forced: forcedTapStrategy(strategy))
+            try focusingTappedWindow(x: x, y: y) {
+                try performTap(x: x, y: y, duration: duration, requested: nil, forced: forcedTapStrategy(strategy))
+            }
         }
 
         public func doubleTapReportingRoute(x: Double, y: Double) throws -> TapDiagnostics? {
-            try performTap(x: x, y: y, duration: 0, requested: nil, forced: nil, doubleTap: true)
+            try focusingTappedWindow(x: x, y: y) {
+                try performTap(x: x, y: y, duration: 0, requested: nil, forced: nil, doubleTap: true)
+            }
+        }
+
+        /// A delivered tap in another visible iPad window focuses that window (#18830).
+        private func focusingTappedWindow<T>(x: Double, y: Double, _ tap: () throws -> T) rethrows -> T {
+            let result = try tap()
+            (elementLocator as? ElementLocator)?.noteTap(x: x, y: y)
+            return result
         }
 
         private func forcedTapStrategy(_ value: String?) -> TapCoordinateStrategy? {
@@ -64,10 +75,10 @@ extension GesturePerformer {
         {
             // The requested value is always returned when delivery succeeds, even if every read fails.
             let requested = TapDiagnostics.Requested(x: x, y: y, durationMs: durationMs)
-            return try performTap(
+            return try focusingTappedWindow(x: x, y: y) { try performTap(
                 x: x, y: y, duration: TimeInterval(durationMs) / 1000.0, requested: requested,
                 forced: forcedTapStrategy(strategy)
-            )
+            ) }
                 ?? TapDiagnostics(requested: requested, sampleErrors: ["sampler: no sample returned"])
         }
 

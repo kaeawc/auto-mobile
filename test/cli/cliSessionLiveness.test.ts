@@ -222,6 +222,22 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         warmSessions.stopCleanupTimer();
       }
     }
+
+    // Also pay runCliCommand's first-call dynamic imports here: the first
+    // runCliCommand test otherwise lands near the 100 ms per-test budget.
+    const warmCli = isolateCliDataDir();
+    setDaemonProxyFactoryForTesting((): any => ({
+      callTool: async (): Promise<any> => ({ success: true }),
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => "warm-cli",
+      close: async (): Promise<void> => {},
+    }));
+    try {
+      await runCliCommand(["--session-uuid", "warm-cli", "observe"]);
+    } finally {
+      resetDaemonProxyFactoryForTesting();
+      warmCli.restore();
+      clearEnv();
+    }
   });
 
   beforeEach(() => {

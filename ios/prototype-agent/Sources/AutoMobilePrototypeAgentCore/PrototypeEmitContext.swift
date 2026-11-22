@@ -68,7 +68,9 @@ struct PrototypeEmitContext: Decodable {
         case "state", "page": value.stringValue.map { !$0.isEmpty } ?? false
         case "item", "derived": value.stringValue.map(PrototypeRepeat.isFieldName) ?? false
         case "index": value == .bool(true)
-        case "data", "platform", "event": value.stringValue.map(PrototypeDataPointer.isValid) ?? false
+        case "data", "platform": value.stringValue.map(PrototypeDataPointer.isValid) ?? false
+        // Only event bindings allow the empty pointer to select the whole decoded event.
+        case "event": value.stringValue.map { $0.isEmpty || PrototypeDataPointer.isValid($0) } ?? false
         case "value": validJSON(value, depth: 0)
         default: false
         }

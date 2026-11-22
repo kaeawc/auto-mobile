@@ -10,6 +10,8 @@ plugins {
 android {
   namespace = "dev.jasonpearson.automobile.prototype.saved"
 
+  buildFeatures { buildConfig = true }
+
   defaultConfig { testInstrumentationRunner = null }
 
   testOptions { unitTests.isIncludeAndroidResources = true }

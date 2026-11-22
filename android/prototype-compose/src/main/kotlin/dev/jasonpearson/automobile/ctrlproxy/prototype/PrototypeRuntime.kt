@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.*
 
 @InternalAutoMobilePrototypeApi
@@ -187,6 +188,8 @@ class PrototypeRuntime(
     PrototypeRequestLimiter(PrototypePlatformCalls.maxInFlight),
   private val requestHideKeyboard: suspend () -> Unit = {},
   monotonicMs: () -> Long = { System.nanoTime() / 1_000_000L },
+  /** Realtime channel transports (#14269); null leaves the runtime without a `realtime` module. */
+  realtime: PrototypeRealtimeConfig? = null,
   private val uploadAssets: PrototypeAssetSource? = null,
   private val idGenerator: PrototypeIdGenerator = SystemPrototypeIdGenerator,
   private val generatedClock: PrototypeClock = PrototypeClock(clock),
@@ -231,6 +234,11 @@ class PrototypeRuntime(
 
   /** Called only after the host accepts the show. A preserving replacement seeds without firing. */
   suspend fun shown(preservingState: Boolean = false) {
+    // Posted first, so a realtime call this show makes queues behind its declarations.
+    realtimeModule?.let {
+      it.update(channelDeclarations(current.spec))
+      it.show()
+    }
     appeared = if (preservingState) visibleAppearances().keys else emptySet()
     // Each stack's first screen enters once per show (#14188); a preserving show skips only the
     // stacks whose paths it kept, so a stack new to the replacement still enters. A stack an
@@ -344,7 +352,8 @@ class PrototypeRuntime(
         deliverPlatformEvent(name, data)
       }
       .also { if (initialPlatformState.isNotEmpty()) it.update(initialPlatformState) }
-  private var eventData: JsonObject? = null
+  /** The handler event; a realtime route's event is its decoded frame, which may be any JSON. */
+  private var eventData: JsonElement? = null
 
   private suspend fun deliverPlatformEvent(
     name: String,
@@ -385,6 +394,11 @@ class PrototypeRuntime(
 
   /** The running animations of this prototype's window, published in its window metadata. */
   @InternalAutoMobilePrototypeApi val motionActivity = PrototypeMotionActivity()
+
+  val remoteImages: PrototypeRemoteImageLoader?
+    get() = httpClients.remoteImages
+
+  val remoteImageActivity = PrototypeRemoteImageActivity()
 
   /** Effects that stopped animating over the frame budget (#15129), reported by `inspect`. */
   @InternalAutoMobilePrototypeApi val effectHealth = PrototypeEffectHealth()
@@ -431,7 +445,51 @@ class PrototypeRuntime(
         else -> it
       }
     }
-  val platformRegistry = PrototypePlatformRegistry(listOf(deviceModule) + sessionModules)
+
+  /**
+   * Where this runtime's channel controller lands its effects. The controller calls it under its
+   * own lock, so this takes the interaction lock inside it and never the reverse; like
+   * [settleRequest], an effect arriving after dismissal is dropped.
+   */
+  private val realtimeSink =
+    object : PrototypeChannelSink {
+      override suspend fun state(channel: String, state: JsonObject) = exclusively {
+        if (current.active) publishRealtimeState(channel, state)
+      }
+
+      override suspend fun event(name: String, data: JsonObject) = exclusively {
+        val channel = (data["channel"] as? JsonPrimitive)?.content
+        if (channel == null || !channelLive(channel)) return@exclusively
+        try {
+          deliverPlatformEvent(name, data)
+        } catch (refused: IllegalArgumentException) {
+          // A refused `platform.on` write changes nothing; the channel keeps delivering frames.
+          warn("Refused $name handler: ${refused.message}")
+        }
+      }
+
+      override suspend fun run(channel: String, actions: JsonArray, event: JsonElement) =
+        exclusively {
+          if (channelLive(channel)) runChannelActions(channel, actions, event)
+        }
+
+      override fun warn(message: String) = this@PrototypeRuntime.warn(message)
+    }
+
+  /**
+   * Whether an effect for [channel] still applies, checked inside the interaction lock. A flush
+   * that waited for the lock while a replacement removed its channel holds the controller lock, so
+   * the controller cannot drop it first; its actions and events are dropped here instead.
+   */
+  private fun channelLive(channel: String): Boolean =
+    current.active && channel in current.spec.channels.orEmpty()
+
+  private val realtimeModule = realtime?.let {
+    PrototypeRealtimeModule(spec.id, it, realtimeSink, requestScope, newRequestId)
+  }
+
+  val platformRegistry =
+    PrototypePlatformRegistry(listOf(deviceModule) + listOfNotNull(realtimeModule) + sessionModules)
   private val platformDispatcher =
     PrototypePlatformDispatcher(
       platformRegistry,
@@ -510,6 +568,7 @@ class PrototypeRuntime(
     stateWriteValidator = null
     mutableSnapshot.value = replacementSnapshot(spec)
     startPlatformUpdates()
+    updateRealtime()
   }
 
   /** Authoritative text replacement shares its epoch handling with patch commits. */
@@ -631,6 +690,7 @@ class PrototypeRuntime(
         stateRevisions = before.stateRevisions + changed.associateWith { revision },
       )
     startPlatformUpdates()
+    updateRealtime()
     // The commit is authoritative even if an ancillary event sink fails. Cancellation propagates.
     storage?.record(current.spec, current.stacks)
     try {
@@ -651,6 +711,7 @@ class PrototypeRuntime(
     locationModules().forEach { it.detach() }
     sensorsModules().forEach { it.detach() }
     platformDispatcher.close()
+    realtimeModule?.close()
     platformState.close()
     mutableSnapshot.value = current.copy(active = false)
     timerEngine.cancelAll()
@@ -840,7 +901,7 @@ class PrototypeRuntime(
       val plannedData = current.spec.data
       val plannedStacks = current.stacks
       val touched = LinkedHashSet<String>()
-      for ((index, action) in actions.withIndex()) {
+      for ((index, action) in bindStateValues(actions).withIndex()) {
         if (!current.active) break
         when (action) {
           is PrototypeEmitAction -> emitAction(action)
@@ -922,9 +983,13 @@ class PrototypeRuntime(
   ): Map<Int, Pair<String, PrototypeSpec>> {
     var spec = from
     val writes = HashMap<Int, Pair<String, PrototypeSpec>>()
-    for ((index, action) in actions.withIndex()) {
+    for ((index, action) in bindStateValues(actions).withIndex()) {
       if (action == PrototypeDismissAction) break
-      if (action is PrototypeSetStateAction && action.value is PrototypeScalar.Binding) continue
+      // Generated-value bindings resolve at run time; an event or platform binding still bound here
+      // resolved to no scalar, so it is planned and refused like any invalid write.
+      if (action is PrototypeSetStateAction && action.value is PrototypeScalar.Binding) {
+        if (!(action.value as PrototypeScalar.Binding).value.readsHandlerEvent()) continue
+      }
       val (key, value) = action.stateWrite(spec.state.orEmpty()) ?: continue
       spec = validated(spec, mapOf(key to value))
       writes[index] = key to spec
@@ -1346,8 +1411,9 @@ class PrototypeRuntime(
       override fun platform(pointer: String): JsonElement? =
         PrototypeDataPointer.resolve(current.platformState, pointer)
 
+      // `{event: ""}` is the whole handler event (a realtime route's decoded frame, #14269).
       override fun event(pointer: String): JsonElement? =
-        PrototypeDataPointer.resolve(eventData, pointer)
+        if (pointer.isEmpty()) eventData else PrototypeDataPointer.resolve(eventData, pointer)
     }
 
   /**
@@ -1527,7 +1593,7 @@ class PrototypeRuntime(
       action,
       if (invalid == null) args else null,
       invalid,
-      eventData,
+      eventData as? JsonObject,
       owningNodeId(current.spec, action),
     )
   }
@@ -1809,7 +1875,7 @@ class PrototypeRuntime(
         clock(),
         action.onSuccess,
         action.onError,
-        eventData,
+        eventData as? JsonObject,
         action.append,
         canCarrySecure(),
         action.progressKey,
@@ -2067,16 +2133,18 @@ class PrototypeRuntime(
     )
     val followUps = (if (result.succeeded) request.onSuccess else request.onError).orEmpty()
     if (followUps.isEmpty() || !current.active || !requireValid(followUps)) return
-    val followUpWrites =
-      try {
-        plannedWrites(followUps, current.spec)
-      } catch (error: IllegalArgumentException) {
-        warn("Refused the follow-up of request ${request.requestId}: ${error.message}")
-        return
-      }
+    // The request's event is restored before planning, so an event-bound write is planned (and
+    // refused) with the value it will write, before any follow-up runs.
     val previousEvent = eventData
     eventData = request.eventContext
     try {
+      val followUpWrites =
+        try {
+          plannedWrites(followUps, current.spec)
+        } catch (error: IllegalArgumentException) {
+          warn("Refused the follow-up of request ${request.requestId}: ${error.message}")
+          return
+        }
       run(followUps, followUpWrites, request.context)
     } finally {
       eventData = previousEvent
@@ -2201,6 +2269,91 @@ class PrototypeRuntime(
   private val checkedNodeCache =
     PrototypeCheckedNodeCache(AndroidPrototypeValueFormatter(clock = PrototypeClock(clock)))
 
+  // ---- realtime channels (#14269) ----
+
+  /** The spec's channels with URL and header placeholders bound to the committed state and data. */
+  private fun channelDeclarations(spec: PrototypeSpec): Map<String, PrototypeChannelDeclaration> =
+    spec.channels
+      .orEmpty()
+      .mapNotNull { (id, channel) ->
+        val declaration =
+          PrototypeChannelDeclaration.parse(
+            runtimeJson.encodeToJsonElement(PrototypeChannel.serializer(), channel).jsonObject,
+          ) ?: return@mapNotNull null
+        id to
+          declaration.copy(
+            url = requestText(declaration.url),
+            headers = declaration.headers.mapValues { requestText(it.value) },
+          )
+      }
+      .toMap()
+
+  /**
+   * A committed spec change: removed channels leave `/platform/realtime` at once, since the
+   * controller drops a removed channel without publishing, then the declarations are posted.
+   */
+  private fun updateRealtime() {
+    val module = realtimeModule ?: return
+    val previous = current.platformState[PrototypeRealtimeModule.NAME] as? JsonObject
+    val declared = current.spec.channels.orEmpty().keys
+    if (previous != null && !declared.containsAll(previous.keys)) {
+      publishModuleState(
+        PrototypeRealtimeModule.NAME,
+        JsonObject(previous.filterKeys { it in declared }),
+      )
+    }
+    module.update(channelDeclarations(current.spec))
+  }
+
+  /** `/platform/realtime/<channel>`, keeping only channels the current spec still declares. */
+  private fun publishRealtimeState(channel: String, state: JsonObject) {
+    val declared = current.spec.channels.orEmpty().keys
+    if (channel !in declared) return
+    val previous = current.platformState[PrototypeRealtimeModule.NAME] as? JsonObject
+    val channels = previous.orEmpty().filterKeys { it in declared && it != channel }
+    publishModuleState(PrototypeRealtimeModule.NAME, JsonObject(channels + (channel to state)))
+  }
+
+  /**
+   * A `setState` value bound to `{event}` or `{platform}` reads the handler event when its list is
+   * planned and run, so the validator sees the scalar it writes. Every list goes through [run], so
+   * handlers, routes and platform-call follow-ups all bind. A binding that resolves to no scalar
+   * stays as authored and is refused like any invalid write.
+   */
+  private fun JsonObject.readsHandlerEvent(): Boolean = "event" in this || "platform" in this
+
+  private fun bindStateValues(actions: List<PrototypeAction>): List<PrototypeAction> =
+    actions.map { action ->
+      val write = action as? PrototypeSetStateAction ?: return@map action
+      val binding = (write.value as? PrototypeScalar.Binding)?.value ?: return@map action
+      if (!binding.readsHandlerEvent()) return@map action
+      val resolved = PrototypeDataWriter.resolveValue(binding, bindingInputs())
+      val value = (resolved as? PrototypeDataValue.Resolved)?.value as? JsonPrimitive
+      if (value == null || value is JsonNull) write
+      else
+        write.copy(value = runtimeJson.decodeFromJsonElement(PrototypeScalar.serializer(), value))
+    }
+
+  /** A route, callback or `statusKey` list, applied as one write with [event] as its event. */
+  private suspend fun runChannelActions(channel: String, actions: JsonArray, event: JsonElement) {
+    val previousEvent = eventData
+    eventData = event
+    try {
+      val decoded = runtimeJson.decodeFromJsonElement(channelActions, actions)
+      if (decoded.isEmpty() || !requireValid(decoded)) return
+      run(decoded, plannedWrites(decoded, current.spec))
+      runAppearances()
+    } catch (refused: IllegalArgumentException) {
+      // A refused write changes nothing; the rest of the channel keeps running.
+      warn("Refused channel $channel actions: ${refused.message}")
+    } finally {
+      eventData = previousEvent
+      interactionRevision = null
+      // A channel writes outside handle(), so a stored key it changed is recorded here (#12522).
+      if (current.active) storage?.record(current.spec, current.stacks)
+    }
+  }
+
   private fun checkedNodes(): List<PrototypeNode> = checkedNodeCache.nodes(current.spec)
 
   private fun validity(): Map<String, Boolean> = prototypeValidity(checkedNodes(), current.state)
@@ -2268,7 +2421,9 @@ class PrototypeRuntime(
 
   init {
     for (module in platformRegistry.modules) {
-      if (module !== deviceModule) publishModuleState(module.name, module.state.value)
+      if (module !== deviceModule && module !== realtimeModule) {
+        publishModuleState(module.name, module.state.value)
+      }
     }
   }
 }
@@ -2301,6 +2456,8 @@ private fun normalizePagerState(spec: PrototypeSpec): PrototypeSpec {
 }
 
 private val runtimeJson = Json { classDiscriminator = "type" }
+
+private val channelActions = ListSerializer(PrototypeAction.serializer())
 
 private val EMPTY_ROUTE_PARAMS = JsonObject(emptyMap())
 

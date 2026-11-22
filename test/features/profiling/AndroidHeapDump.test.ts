@@ -110,7 +110,7 @@ describe("AndroidHeapDump (#14113)", () => {
     expect((refusal as HeapDumpRefusedError).code).toBe("heap_dump_not_debuggable");
     expect((refusal as Error).message).toContain("heap_dump_not_debuggable: com.example.release");
     expect(device.commands.some((c) => c.includes("dumpheap"))).toBe(false);
-    expect(registry.takeOwnedBy(DEVICE, "s-1")).toEqual({ traces: [], deviceFiles: [] });
+    expect(registry.takeOwnedBy(DEVICE, "s-1")).toEqual({ deviceFiles: [] });
   });
 
   test("maps am's own SecurityException to the same typed refusal and cleans up", async () => {

@@ -4,6 +4,25 @@ import XCTest
 /// The platform vocabulary backstop (#14294) rejects the shared fixtures at the host's paths, and
 /// its module table, permission and background names match the shared contract.
 final class PrototypePlatformTests: XCTestCase {
+    func testPermissionRequestOptionsAreStrictAtLoadTime() throws {
+        for (options, valid) in [
+            ("{}", true), (#"{"provisional":true}"#, true), (#"{"provisional":false}"#, true),
+            ("null", false), ("[]", false), ("true", false),
+            (#"{"provisional":"true"}"#, false), (#"{"extra":true}"#, false),
+        ] {
+            let data = Data("""
+            {"id":"permissions-options","window":{"placement":{"type":"fullscreen"}},
+             "requires":{"platform":["permissions"],
+               "permissions":[{"name":"notifications","purpose":"Send updates"}]},
+             "root":{"type":"button","label":"Allow","onTap":[
+               {"type":"platform","call":"permissions.request","args":{
+                 "names":{"value":["notifications"]},"options":{"value":\(options)}}}]}}
+            """.utf8)
+            if valid { XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data), options) }
+            else { XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: data), options) }
+        }
+    }
+
     @MainActor
     func testPresentationRegistriesShareDeviceStatusUntilFinalOwnerStops() {
         for name in ["battery", "power", "audio"] {

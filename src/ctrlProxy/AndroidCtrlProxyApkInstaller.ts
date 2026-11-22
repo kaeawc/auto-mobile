@@ -48,6 +48,15 @@ const CTRL_PROXY_PULL_TIMEOUT_MS = 120_000;
 const CTRL_PROXY_STAGED_APK_PATH = "/data/local/tmp/auto-mobile-ctrl-proxy-installed.apk";
 const CTRL_PROXY_INSTALL_ATTEMPTS = 3;
 
+/**
+ * `-r` keeps a forced setup working when the package is already installed: below API 28 a plain
+ * `adb install` rejects the replace (INSTALL_FAILED_ALREADY_EXISTS) and the platform stops the
+ * running service as part of that rejection (#18980). It is a no-op on a fresh install.
+ */
+function installCommand(apkPath: string): string {
+  return `install -r "${apkPath}"`;
+}
+
 interface InstallReadinessOptions {
   settleProbe?: AndroidInstallSettleProbe;
   installBackoff?: BackoffPolicy;
@@ -372,7 +381,10 @@ export class AndroidCtrlProxyApkInstaller {
         signal?.throwIfAborted();
         let output: ExecResult | undefined;
         try {
-          output = await this.host.executeApkStage(`install "${apkPath}"`, "CtrlProxy APK install");
+          output = await this.host.executeApkStage(
+            installCommand(apkPath),
+            "CtrlProxy APK install",
+          );
           signal?.throwIfAborted();
           if (!/failure|error|failed to install/i.test(`${output.stdout}\n${output.stderr}`)) {
             return output;
@@ -422,7 +434,7 @@ export class AndroidCtrlProxyApkInstaller {
     }
     let output: ExecResult | undefined;
     try {
-      output = await this.host.executeApkStage(`install "${apkPath}"`, "CtrlProxy APK install");
+      output = await this.host.executeApkStage(installCommand(apkPath), "CtrlProxy APK install");
       if (
         !isEmptyStreamedInstallFailure(output.stdout, output.stderr, "", this.host.device.deviceId)
       ) {

@@ -56,7 +56,11 @@ class PrototypeNetwork(
 ) {
   internal fun clients(): PrototypeHttpClients {
     val transport = device ?: return PrototypeHttpClients.Unavailable
-    return PrototypeHttpClients.forEmbedded(transport.adapt(), hostHandler?.adapt())
+    val clients = PrototypeHttpClients.forEmbedded(transport.adapt(), hostHandler?.adapt())
+    val images =
+      (transport as? dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRemoteImageProvider)
+        ?.remoteImages
+    return PrototypeHttpClients(clients.host, clients.device, images)
   }
 }
 

@@ -7,6 +7,7 @@ import {
   type DisposableAppUninstallTarget,
 } from "../../features/prototype/disposableApp/DisposableAppManager";
 import type { DisposableAppPlatform } from "../../features/prototype/disposableApp/disposableAppId";
+import { preparePrototypeAssets } from "../../features/prototype/prototypeAssetUploader";
 import { requireDisposableAppSimulator } from "../../features/prototype/disposableApp/ios/iosDisposableAppIdentity";
 import type { PrototypeJson } from "../../features/prototype/prototypeJson";
 import type { BootedDevice } from "../../models";
@@ -15,7 +16,7 @@ import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClie
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import type { prototypeSchema } from "./schemas";
-import type { PrototypeOutput } from "./types";
+import type { AssetReaders, PrototypeOutput } from "./types";
 
 /**
  * The prototype tool's disposable-app actions (#14184): install a spec as its own app, list the
@@ -63,24 +64,43 @@ function appPlatform(device: BootedDevice): DisposableAppPlatform {
   return device.platform;
 }
 
-function installInput(device: BootedDevice, args: PrototypeArgs): DisposableAppInstallInput {
+async function installInput(
+  device: BootedDevice,
+  args: PrototypeArgs,
+  readers: AssetReaders,
+): Promise<DisposableAppInstallInput> {
+  const prepared = await preparePrototypeAssets(
+    args.assets ?? [],
+    readers.assetFileReader,
+    readers.observationScreenshotReader,
+    readers.env,
+  );
+  if ("error" in prepared) {
+    throw new ActionableError(prepared.error);
+  }
   // The schema requires app and a spec (inline or read from specPath) before dispatch.
   return {
     deviceId: device.deviceId,
     platform: appPlatform(device),
     spec: args.spec as PrototypeJson,
     app: args.app!,
+    assets: prepared.assets,
   };
+}
+
+interface DisposableAppRouteContext {
+  readers: AssetReaders;
+  attachments?: { forget(deviceId: string, appId: string): Promise<void> };
 }
 
 async function run(
   apps: PrototypeDisposableApps,
   device: BootedDevice,
   args: PrototypeArgs,
-  attachments?: { forget(deviceId: string, appId: string): Promise<void> },
+  { readers, attachments }: DisposableAppRouteContext,
 ): Promise<PrototypeOutput> {
   if (args.action === "installApp") {
-    const disposableApp = await apps.install(installInput(device, args));
+    const disposableApp = await apps.install(await installInput(device, args, readers));
     await attachments?.forget(device.deviceId, disposableApp.appId);
     return { success: true, disposableApp };
   }
@@ -100,10 +120,10 @@ export async function disposableAppOutput(
   apps: PrototypeDisposableApps,
   device: BootedDevice,
   args: PrototypeArgs,
-  attachments?: { forget(deviceId: string, appId: string): Promise<void> },
+  context: DisposableAppRouteContext,
 ): Promise<PrototypeOutput> {
   try {
-    return await run(apps, device, args, attachments);
+    return await run(apps, device, args, context);
   } catch (error) {
     logger.warn(`prototype ${args.action} failed on ${device.deviceId}`, error);
     return {

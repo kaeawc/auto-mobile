@@ -29,10 +29,16 @@ fun appShellPlatform(activity: ComponentActivity): PrototypePlatform =
 
 /**
  * Renderer capabilities the shell does not wire: it passes the renderer no `PrototypeNetwork`
- * transport (it links no HTTP stack; see `verifyAppShellDependencies`), so a request would fail.
+ * transport (it links no HTTP stack; see `verifyAppShellDependencies`), so a request would fail and
+ * a remote image would have no loader and render only its error placeholder.
  */
 val APP_SHELL_UNWIRED_CAPABILITIES: Set<String> =
-  setOf("prototype_network_v1", "prototype_network_device_v1", "prototype_network_upload_v1")
+  setOf(
+    "prototype_network_v1",
+    "prototype_network_device_v1",
+    "prototype_network_upload_v1",
+    "prototype_remote_image_v1",
+  )
 
 /**
  * What the packaged template's `capabilities.json` advertises to the host: the renderer's own

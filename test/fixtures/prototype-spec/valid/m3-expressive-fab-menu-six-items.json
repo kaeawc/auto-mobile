@@ -1,0 +1,81 @@
+{
+  "id": "expressive",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "mode": "day"
+  },
+  "root": {
+    "type": "fab",
+    "testTag": "create",
+    "icon": "add",
+    "contentDescription": "Create",
+    "menu": {
+      "items": [
+        {
+          "icon": "add",
+          "label": "Item 0",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "item0"
+            }
+          ]
+        },
+        {
+          "icon": "add",
+          "label": "Item 1",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "item1"
+            }
+          ]
+        },
+        {
+          "icon": "add",
+          "label": "Item 2",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "item2"
+            }
+          ]
+        },
+        {
+          "icon": "add",
+          "label": "Item 3",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "item3"
+            }
+          ]
+        },
+        {
+          "icon": "add",
+          "label": "Item 4",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "item4"
+            }
+          ]
+        },
+        {
+          "icon": "add",
+          "label": "Item 5",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "item5"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

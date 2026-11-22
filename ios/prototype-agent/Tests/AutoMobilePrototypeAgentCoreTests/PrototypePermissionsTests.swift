@@ -71,6 +71,35 @@ private final class PermissionTestSource: PrototypeNotificationAuthorizationSour
 }
 
 @MainActor
+private final class PermissionTestAuthority: PrototypePermissionAuthority {
+    var current: PrototypePermissionState = .notDetermined
+    var answer: PrototypePermissionState = .granted
+    var reads = 0
+    var requests = 0
+    var stops = 0
+
+    func status() async -> PrototypePermissionState {
+        reads += 1
+        return current
+    }
+
+    func request() async -> PrototypePermissionOutcome {
+        requests += 1
+        current = answer
+        return .status(current)
+    }
+
+    func stop() { stops += 1 }
+}
+
+@MainActor
+private struct PermissionTestBundle: PrototypeBundleReader {
+    var keys: Set<String>
+
+    func containsInfoPlistKey(_ key: String) -> Bool { keys.contains(key) }
+}
+
+@MainActor
 private final class PermissionRegistryServices: PrototypeHapticsPlayer, PrototypeSoundPlayer,
     PrototypeConnectivitySource, PrototypeLinkOpener, PrototypeSettingsURLOpener
 {
@@ -133,6 +162,136 @@ final class PrototypePermissionsTests: XCTestCase {
                 bundleIdentifier: identifier
             ))
         }
+    }
+
+    func testEveryCaptureAuthorizationMapping() {
+        let cases: [(PrototypeCaptureAuthorization, PrototypePermissionState)] = [
+            (.notDetermined, .notDetermined), (.restricted, .restricted), (.denied, .denied),
+            (.authorized, .granted), (.unknown, .unavailable),
+        ]
+        for (authorization, expected) in cases {
+            XCTAssertEqual(authorization.state, expected)
+        }
+    }
+
+    func testEveryPhotoAndContactsAuthorizationMapping() {
+        let cases: [(PrototypePhotoAuthorization, PrototypeContactsAuthorization, PrototypePermissionState)] = [
+            (.notDetermined, .notDetermined, .notDetermined), (.restricted, .restricted, .restricted),
+            (.denied, .denied, .denied), (.authorized, .authorized, .granted),
+            (.limited, .limited, .limited), (.unknown, .unknown, .unavailable),
+        ]
+        for (photos, contacts, expected) in cases {
+            XCTAssertEqual(photos.state, expected)
+            XCTAssertEqual(contacts.state, expected)
+        }
+    }
+
+    func testEveryCalendarAuthorizationMapping() {
+        let cases: [(PrototypeCalendarAuthorization, PrototypePermissionState)] = [
+            (.notDetermined, .notDetermined), (.restricted, .restricted), (.denied, .denied),
+            (.fullAccess, .granted), (.writeOnly, .limited), (.unknown, .unavailable),
+        ]
+        for (authorization, expected) in cases {
+            XCTAssertEqual(authorization.state, expected)
+        }
+    }
+
+    func testEveryWhenInUseAuthorizationMapping() {
+        let cases: [(PrototypeWhenInUseAuthorization, PrototypePermissionState)] = [
+            (.notDetermined, .notDetermined), (.restricted, .restricted), (.denied, .denied),
+            (.whenInUse, .granted), (.always, .granted), (.unknown, .unavailable),
+        ]
+        for (authorization, expected) in cases {
+            XCTAssertEqual(authorization.state, expected)
+        }
+    }
+
+    func testNonNotificationAuthorityRequestUpdatesStateAndEmitsOneChange() async throws {
+        let source = PermissionTestSource()
+        let photos = PermissionTestAuthority()
+        photos.answer = .limited
+        let module = PrototypePermissionsModule(
+            source: source, authorities: ["photos": photos],
+            bundle: PermissionTestBundle(keys: ["NSPhotoLibraryUsageDescription"])
+        )
+        let registry = PrototypePlatformRegistry(modules: [module])
+        let stream = module.events
+        let actual = await module.call(call(["photos"]))
+        XCTAssertEqual(actual, result(["photos": .limited]))
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data("""
+        {"id":"permission-state","window":{"placement":{"type":"fullscreen"}},
+         "requires":{"platform":["permissions"],"permissions":[{"name":"photos","purpose":"Choose photos"}]},
+         "root":{"type":"text","text":"{platform:/permissions/photos}"}}
+        """.utf8))
+        var session = PrototypeSession()
+        session.show(spec)
+        try session.setPlatformState(registry.snapshot)
+        XCTAssertEqual(session.spec?.root.text, "limited")
+        XCTAssertEqual(photos.requests, 1)
+        XCTAssertEqual(source.requests, 0)
+        module.stop()
+        var changes: [PlatformEvent] = []
+        for await event in stream where event.event == "permissions.changed" { changes.append(event) }
+        XCTAssertEqual(changes.map(\.data), [.object(["name": .string("photos"), "state": .string("limited")])])
+        XCTAssertEqual(photos.stops, 1)
+    }
+
+    func testForegroundRefreshReadsEveryAuthorityAndEmitsOnlyChanges() async throws {
+        let source = PermissionTestSource()
+        let camera = PermissionTestAuthority()
+        let photos = PermissionTestAuthority()
+        let module = PrototypePermissionsModule(
+            source: source, authorities: ["camera": camera, "photos": photos],
+            bundle: PermissionTestBundle(keys: ["NSCameraUsageDescription", "NSPhotoLibraryUsageDescription"])
+        )
+        let stream = module.events
+        var events = stream.makeAsyncIterator()
+        for _ in 0 ..< 3 {
+            let baseline = await events.next()
+            XCTAssertEqual(baseline, .stateRefresh("permissions"))
+        }
+        XCTAssertEqual(camera.reads, 1)
+        XCTAssertEqual(photos.reads, 1)
+        XCTAssertEqual(source.reads, 1)
+        camera.current = .denied
+        source.foreground(.limited)
+        source.foreground(.limited)
+        source.continuation?.finish()
+        let observation = try XCTUnwrap(module.observation)
+        await observation.value
+        XCTAssertEqual(camera.reads, 3)
+        XCTAssertEqual(photos.reads, 3)
+        XCTAssertEqual(source.reads, 3)
+        XCTAssertEqual(module.state, [
+            "camera": .string("denied"), "notifications": .string("limited"), "photos": .string("notDetermined"),
+        ])
+        module.stop()
+        var changes: [PlatformEvent] = []
+        while let event = await events.next() {
+            changes.append(event)
+        }
+        XCTAssertEqual(changes.map(\.data), [
+            .object(["name": .string("camera"), "state": .string("denied")]),
+            .object(["name": .string("notifications"), "state": .string("limited")]),
+        ])
+    }
+
+    func testMissingUsageKeySkipsAuthorityAndUnimplementedNameIsUnavailable() async {
+        XCTAssertTrue(PrototypePlatformPermissions.hasRequiredUsageKey(for: "notifications", contains: { _ in false }))
+        XCTAssertFalse(PrototypePlatformPermissions.hasRequiredUsageKey(for: "unknown", contains: { _ in true }))
+        let photosAdd = PermissionTestAuthority()
+        let module = PrototypePermissionsModule(
+            source: PermissionTestSource(), authorities: ["photosAdd": photosAdd],
+            bundle: PermissionTestBundle(keys: ["NSPhotoLibraryUsageDescription"])
+        )
+        let actual = await module.call(call(["photosAdd", "motion"]))
+        XCTAssertEqual(actual, result(["photosAdd": .unavailable, "motion": .unavailable]))
+        XCTAssertEqual(module.state["photosAdd"], .string("unavailable"))
+        XCTAssertEqual(module.state["motion"], .string("unavailable"))
+        module.stop()
+        XCTAssertEqual(photosAdd.reads, 0)
+        XCTAssertEqual(photosAdd.requests, 0)
+        XCTAssertEqual(photosAdd.stops, 0)
     }
 
     func testExplicitRequestGrantsOrDeniesAndPublishesResults() async {

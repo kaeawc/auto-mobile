@@ -144,8 +144,16 @@ internal class FakePrototypeHost : PrototypeHost {
   override var isShowing = false
   override var currentPlacement: PrototypePlacement? = null
   override val isTouchThroughActive = false
+  /** Draws the tonal backdrop for a blur request, like a failed card blur attach. */
+  var fallBackFromBlur = false
   override val appliedBackdrop: PrototypeBackdropMode?
-    get() = requests.lastOrNull()?.backdrop?.mode.takeIf { isShowing }
+    get() =
+      requests
+        .lastOrNull()
+        ?.backdrop
+        ?.mode
+        ?.let { if (fallBackFromBlur) PrototypeBackdropMode.FALLBACK else it }
+        .takeIf { isShowing }
 
   private fun display(operation: String, request: PrototypeRequest): Boolean {
     calls += operation

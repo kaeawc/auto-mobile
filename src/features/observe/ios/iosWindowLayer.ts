@@ -1,3 +1,5 @@
+import type { XCTestHierarchy } from "./types";
+
 /**
  * iOS window z-order, carried through hierarchy flattening.
  *
@@ -31,4 +33,31 @@ export function iosWindowLayer(extras: unknown): number | undefined {
  */
 export function rankWithIosWindowLayer(rank: number, layer: number | undefined): number {
   return layer === undefined ? rank : rank + Math.min(layer, 999) / 1000;
+}
+
+/**
+ * Owner bundle id stamped by the runner on each other app's window root that an iPad observation
+ * merges under the focused app's root (`ElementLocator.mergingBackgroundWindows`, #18830). Those
+ * roots also carry a layer behind every focused window, so they never rank above the focused app.
+ */
+export const IOS_WINDOW_PACKAGE_EXTRA = "automobile:iosWindowPackage";
+
+/**
+ * The capture with other apps' merged window roots removed, so per-app screen identity sees only
+ * the focused app. A capture without such roots is returned unchanged, as the same object.
+ */
+export function focusedAppWindowsOnly(capture: XCTestHierarchy): XCTestHierarchy {
+  const children = capture.hierarchy.node;
+  if (!children) {
+    return capture;
+  }
+  const list = Array.isArray(children) ? children : [children];
+  const kept = list.filter((child) => {
+    const owner = child.extras?.[IOS_WINDOW_PACKAGE_EXTRA];
+    return owner === undefined || owner === capture.packageName;
+  });
+  if (kept.length === list.length) {
+    return capture;
+  }
+  return { ...capture, hierarchy: { ...capture.hierarchy, node: kept } };
 }

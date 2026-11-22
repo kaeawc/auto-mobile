@@ -249,6 +249,7 @@
 		A88FAEB9DB1540A92291FE72 /* PrototypeAssetRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 411F6ECEE9350BB747E082B6 /* PrototypeAssetRegistrar.swift */; };
 		A897166C2C1E5B8E31EB9C13 /* PrototypeLibraryImageHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE843891D4840C37E573658E /* PrototypeLibraryImageHeader.swift */; };
 		A977966847F8A2BF0C70AB3D /* PrototypeBarScrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17E4EBFF81A585432FB85B80 /* PrototypeBarScrollView.swift */; };
+		A97E3ED717D3FAE78E8766C4 /* KeychainPrototypeSecureValueStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8475A5D72610289582CD7FF9 /* KeychainPrototypeSecureValueStore.swift */; };
 		AA4E1AEAB6BF86BBA9CD72D1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = DCD7113FE9637ADCD706C582 /* PrivacyInfo.xcprivacy */; };
 		AA71A3F4939558B77A6F6F03 /* NWPathConnectivitySource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B0EA0CD9F63E031B01FA46B /* NWPathConnectivitySource.swift */; };
 		AB47B5E3B7EAFB4B6B0CB54A /* PrototypePurchaseOutcome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A23BF6CBF66ED858A41789DD /* PrototypePurchaseOutcome.swift */; };
@@ -310,6 +311,7 @@
 		CA6DDB01CB5AFB754DC48661 /* PrototypeStorageRestore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87A7C6B282AC469C60A877A4 /* PrototypeStorageRestore.swift */; };
 		CAA5741BCBDF15BD0646B07C /* PrototypeEmbeddedEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01927961AA06DDDC055B09CD /* PrototypeEmbeddedEvent.swift */; };
 		CC51AAB3B7EDFA8AEC67350F /* PrototypeAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = A186CFA47E3239C9E4AE7B44 /* PrototypeAppearance.swift */; };
+		CCE44A8A29839A0F85942BD0 /* PrototypeSecureStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE9A5D8D5C87EA0604024841 /* PrototypeSecureStorage.swift */; };
 		CCE732EDB27B8BEAAC7FDFF6 /* SdkContractObservationScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60A7309625B075243845F7B6 /* SdkContractObservationScenario.swift */; };
 		CCECD490C4A0C793B6371FC0 /* PrototypeGesturePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7796A2E4B8BC6A2E282E1FE /* PrototypeGesturePlan.swift */; };
 		CE1A4CF4125A485731B7ECC0 /* PrototypeStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 679E22ECD16F6B5F410B2DC8 /* PrototypeStrings.swift */; };
@@ -593,6 +595,7 @@
 		82280F80610B7E163605220A /* StoreKitDemoFormattingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitDemoFormattingTests.swift; sourceTree = "<group>"; };
 		8303A71EDC6BC38DF5246F3F /* PrototypeBundleContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeBundleContract.swift; sourceTree = "<group>"; };
 		83553CC860F82C04394BCB69 /* PrototypeDrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeDrawerView.swift; sourceTree = "<group>"; };
+		8475A5D72610289582CD7FF9 /* KeychainPrototypeSecureValueStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainPrototypeSecureValueStore.swift; sourceTree = "<group>"; };
 		8522D605D095B89DA58FF266 /* PrototypePlatformRateLimiter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypePlatformRateLimiter.swift; sourceTree = "<group>"; };
 		85A0A1109BB4CA137B428C85 /* PrototypeLibraryModuleRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeLibraryModuleRule.swift; sourceTree = "<group>"; };
 		85A5513F82500821AC574ED4 /* PrototypeViewerLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeViewerLayout.swift; sourceTree = "<group>"; };
@@ -768,6 +771,7 @@
 		ED5AA5056D70CB85AC31BA03 /* PrototypePatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypePatch.swift; sourceTree = "<group>"; };
 		EE45DDC62C4113D106E58E27 /* PrototypeStackRoutes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeStackRoutes.swift; sourceTree = "<group>"; };
 		EE6AC2F596D1C0E7DB9F1EF0 /* PrototypeSensorSharing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeSensorSharing.swift; sourceTree = "<group>"; };
+		EE9A5D8D5C87EA0604024841 /* PrototypeSecureStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeSecureStorage.swift; sourceTree = "<group>"; };
 		EF0F64652214F20B26630AA8 /* PrototypeDeviceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeDeviceState.swift; sourceTree = "<group>"; };
 		EF611ACFB6B4CA1380FB8F46 /* PrototypeTapDisambiguator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeTapDisambiguator.swift; sourceTree = "<group>"; };
 		F09DCFC03257AAE253C6F76B /* PrototypeEmbeddedOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeEmbeddedOptions.swift; sourceTree = "<group>"; };
@@ -1007,6 +1011,7 @@
 			isa = PBXGroup;
 			children = (
 				F834BB66D27D904C821677FE /* AutoMobilePrototypeCapabilities.swift */,
+				8475A5D72610289582CD7FF9 /* KeychainPrototypeSecureValueStore.swift */,
 				4B0EA0CD9F63E031B01FA46B /* NWPathConnectivitySource.swift */,
 				87E9D86A8565B0615A31C4E0 /* PrototypeAccessibility.swift */,
 				818E183BBC313154549CCAA5 /* PrototypeAccessibilityGrouping.swift */,
@@ -1201,6 +1206,7 @@
 				86883568C54B6548EA9C9F3C /* PrototypeScalarText.swift */,
 				70E50DE79CB5C719FCF859D1 /* PrototypeScreenBudget.swift */,
 				DE1C9E1F1EAC5CEE78190250 /* PrototypeScrollMotion.swift */,
+				EE9A5D8D5C87EA0604024841 /* PrototypeSecureStorage.swift */,
 				A66BDD94AE39E75123D5D1DE /* PrototypeSecureStorageRules.swift */,
 				F2657DDE703AE838B34AF879 /* PrototypeSensitiveSinkRules.swift */,
 				A592D9EEB3D15A27166C0CB7 /* PrototypeSensorRules.swift */,
@@ -1540,6 +1546,7 @@
 				831EC73F5E08A1B69A515B7F /* AutoMobilePrototypeView.swift in Sources */,
 				E9313268346F690E192BAF2E /* CLLocationManagerPrototypeLocationSource.swift in Sources */,
 				A7D5DC570615EAFB4C92BFF4 /* CoreMotionPrototypeSensorSource.swift in Sources */,
+				A97E3ED717D3FAE78E8766C4 /* KeychainPrototypeSecureValueStore.swift in Sources */,
 				57EBA5DF55F26B67FE37F122 /* LAContextPrototypeBiometricSource.swift in Sources */,
 				AA71A3F4939558B77A6F6F03 /* NWPathConnectivitySource.swift in Sources */,
 				9C7B2BD3B293E8211125EB3F /* ProtoViewerLayout.swift in Sources */,
@@ -1762,6 +1769,7 @@
 				BE7751CCABFB4BA9FE65978F /* PrototypeScrollMotion.swift in Sources */,
 				A7CB10A6F1F356488A25FB80 /* PrototypeScrollMotionView.swift in Sources */,
 				625AE036AB76BE3020CD2090 /* PrototypeSearchBarView.swift in Sources */,
+				CCE44A8A29839A0F85942BD0 /* PrototypeSecureStorage.swift in Sources */,
 				FB48F5D78522210E27ABCFD5 /* PrototypeSecureStorageRules.swift in Sources */,
 				668EB04685CB0B7E4761E719 /* PrototypeSensitiveSinkRules.swift in Sources */,
 				347C596DEFDE56EC07FE4522 /* PrototypeSensorRules.swift in Sources */,

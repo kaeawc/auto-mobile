@@ -23,7 +23,7 @@ import {
   createDaemonHealthCheck,
   HEALTH_CHECK_INTERVAL_MS,
 } from "../../src/daemon/daemonHealthCheck";
-import { DefaultObservationStreamHealth } from "../../src/daemon/ObservationStreamHealth";
+import { DefaultObservationStreamHealth } from "../../src/daemon/streams/ObservationStreamHealth";
 import {
   DaemonMaintenance,
   type DaemonMaintenanceHost,

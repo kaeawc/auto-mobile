@@ -1,6 +1,6 @@
 import { z } from "zod/v4";
 import { SessionReleaseBroadcaster } from "../daemon/sessionReleaseBroadcast";
-import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streams/streamDeviceLifecycleEvents";
 import { getDefaultPerformanceTraceManager } from "../features/performanceTrace/defaultPerformanceTraceManager";
 import type { PerformanceTraceManager } from "../features/performanceTrace/PerformanceTraceManager";
 import {

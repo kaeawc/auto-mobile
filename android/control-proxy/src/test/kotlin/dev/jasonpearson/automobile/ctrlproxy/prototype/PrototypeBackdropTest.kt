@@ -235,6 +235,51 @@ class PrototypeBackdropTest {
   }
 
   @Test
+  fun `a runtime change to the root radius reshapes the card window only when it changes`() =
+    runTest {
+      val harness = CardHarness()
+      val base = floatingSpec()
+      val root = base.root as PrototypeBoxNode
+      val spec =
+        base.copy(
+          state =
+            mapOf(
+              "flat" to PrototypeScalar.BooleanValue(false),
+              "other" to PrototypeScalar.BooleanValue(false),
+            ),
+          root =
+            root.copy(
+              styleWhen =
+                listOf(
+                  PrototypeStyleWhen(
+                    PrototypeCondition(key = "flat", equals = PrototypeScalar.BooleanValue(true)),
+                    PrototypeStyle(cornerRadius = PrototypeCornerRadius.Dp(0.0)),
+                  ),
+                ),
+            ),
+        )
+      harness.controller.show("a", spec)
+      val runtime = checkNotNull(harness.controller.activeRuntime)
+      val first = harness.cards.windows.single()
+      assertEquals(36f, first.blur.cornerRadiusPx(200, 160), 0f)
+
+      harness.controller.interact(runtime, PrototypeInteraction.Toggle("other"))
+      assertEquals(1, harness.cards.windows.size)
+      assertFalse(first.removed)
+
+      harness.controller.interact(runtime, PrototypeInteraction.Toggle("flat"))
+      assertTrue(first.removed)
+      val flat = harness.cards.windows.last()
+      assertEquals(2, harness.cards.windows.size)
+      assertEquals(0f, flat.blur.cornerRadiusPx(200, 160), 0f)
+      assertFalse(flat.removed)
+
+      harness.controller.interact(runtime, PrototypeInteraction.Toggle("other"))
+      assertEquals(2, harness.cards.windows.size)
+      assertFalse(flat.removed)
+    }
+
+  @Test
   fun `sheet and fullscreen blur use the existing window manager`() = runTest {
     val harness = CardHarness()
     val plan = PrototypeBackdropPlan(PrototypeBackdropMode.BLUR, 16, null)

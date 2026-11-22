@@ -42,6 +42,26 @@ export async function resolveIosAppPid(
   return findIosSimulatorAppProcessId(list.stdout, appId) ?? undefined;
 }
 
+/**
+ * `xctrace record --launch` rejects a bundle id on a simulator as "Path not found" (#18790); it
+ * takes the installed `.app` path. Physical devices keep the bundle id.
+ */
+export async function resolveIosLaunchTarget(
+  device: BootedDevice,
+  appId: string,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  if (resolveIosDeviceKind({ deviceId: device.deviceId }) !== "simulator") {
+    return undefined;
+  }
+  const container = await new SimCtlClient(device).executeCommandArgs(
+    ["get_app_container", device.deviceId, appId, "app"],
+    PID_LOOKUP_TIMEOUT_MS,
+    signal,
+  );
+  return container.stdout.trim() || undefined;
+}
+
 /** Find `trace_processor_shell` once; a missing binary only limits Android summaries. */
 export function traceProcessorLocator(
   host: HostCommandExecutor,
@@ -72,6 +92,7 @@ export function createDefaultPerformanceTraceManager(): PerformanceTraceManager 
     ios: new XctraceRecorder({
       host,
       resolvePid: resolveIosAppPid,
+      resolveLaunchTarget: resolveIosLaunchTarget,
       timer: defaultTimer,
       environment: new HostXctraceEnvironment({
         xcodebuild: new XcodebuildClient(),

@@ -1204,6 +1204,7 @@ test("saved prototype error codes match Kotlin", () => {
     "unsupported_format",
     "internal_error",
     "render_failed",
+    "unsupported_capability",
   ];
   expect<unknown>(SAVED_PROTOTYPE_ERROR_CODES).toEqual(kotlinCodes);
   for (const code of kotlinCodes) {

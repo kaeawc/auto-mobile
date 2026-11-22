@@ -3,7 +3,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, symlinkSync 
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
-import { loadJobSteps, loadJobs, loadWorkflow, stepNamed } from "../helpers/workflowSteps";
+import {
+  loadJobSteps,
+  loadJobs,
+  loadWorkflow,
+  stepNamed,
+  usesAction,
+} from "../helpers/workflowSteps";
 
 const OWNER = "github.event.pull_request.user.login == 'kaeawc'";
 const SAME_REPO = "github.event.pull_request.head.repo.full_name == github.repository";
@@ -175,7 +181,7 @@ describe("root SPM toolchain floor workflow", () => {
       expect(checkout?.with?.clean).toBe(true);
       expect(cleanup?.if).toBe("always() && runner.environment == 'self-hosted'");
       expect(steps.indexOf(cleanup!)).toBe(steps.length - 1);
-      const hosted = steps.find((step) => step.uses === "maxim-lobanov/setup-xcode@v1");
+      const hosted = steps.find((step) => usesAction(step.uses) === "maxim-lobanov/setup-xcode");
       const selfHosted = steps.find((step) => step.name?.startsWith("Select self-hosted Xcode"));
       expect(hosted?.if, name).toBe("runner.environment == 'github-hosted'");
       expect(selfHosted?.if).toBe("runner.environment == 'self-hosted'");
@@ -225,7 +231,7 @@ describe("root SPM toolchain floor workflow", () => {
     for (const name of ["build-desktop-app", "swift-code-coverage"]) {
       const steps = loadJobSteps(".github/workflows/pull_request.yml", name);
       const checkout = stepNamed(steps, "Git Checkout");
-      expect(checkout?.uses).toBe("actions/checkout@v6");
+      expect(usesAction(checkout?.uses)).toBe("actions/checkout");
       expect(checkout?.with?.clean ?? true).toBe(true);
       const isolate = steps.find((step) => step.name?.startsWith("Isolate self-hosted"));
       const cleanup = steps.find(
@@ -405,7 +411,7 @@ describe("root SPM toolchain floor workflow", () => {
     const selfHosted = stepNamed(steps, "Select self-hosted Xcode ${{ matrix.config.xcode }}");
 
     expect(selectXcode?.if).toBe("runner.environment == 'github-hosted'");
-    expect(selectXcode?.uses).toBe("maxim-lobanov/setup-xcode@v1");
+    expect(usesAction(selectXcode?.uses)).toBe("maxim-lobanov/setup-xcode");
     expect(selectXcode?.with?.["xcode-version"]).toBe("${{ matrix.config.xcode }}");
     expect(selfHosted?.run).toBe(
       'bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"',
@@ -435,7 +441,7 @@ describe("root SPM toolchain floor workflow", () => {
     const build = steps.findIndex((step) => step.name === "Build root Package.swift");
 
     expect(selectXcode?.if).toBe("runner.environment == 'github-hosted'");
-    expect(selectXcode?.uses).toBe("maxim-lobanov/setup-xcode@v1");
+    expect(usesAction(selectXcode?.uses)).toBe("maxim-lobanov/setup-xcode");
     expect(selectXcode?.with?.["xcode-version"]).toBe("${{ matrix.config.xcode }}");
     expect(selfHosted?.run).toBe(
       'bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"',

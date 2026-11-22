@@ -144,3 +144,28 @@ export function indexOfWaitOn(steps: WorkflowStep[], id: string): number {
     return (Array.isArray(step.wait) ? step.wait : [step.wait]).includes(id);
   });
 }
+
+/**
+ * The action a `uses:` value names, without its `@ref`: `actions/checkout@<sha>` →
+ * `actions/checkout`. Remote actions are pinned to commit SHAs (the tag lives only in the
+ * trailing YAML comment), so guards match the action, not the exact ref.
+ */
+export function usesAction(uses: string | undefined): string | undefined {
+  return uses?.split("@")[0];
+}
+
+/**
+ * The tag a SHA-pinned `uses:` value was resolved from. The parsed YAML holds only
+ * `owner/repo@<sha>`; the tag survives as the `# <tag>` comment on the same line, so look up the
+ * line carrying that exact value in the raw text. Undefined when the value is not on a line with a
+ * tag comment.
+ */
+export function pinnedTag(rawYaml: string, uses: string): string | undefined {
+  for (const line of rawYaml.split("\n")) {
+    const [code, ...comment] = line.split("#");
+    if (comment.length > 0 && code.includes(`uses: ${uses}`)) {
+      return comment.join("#").trim().split(/\s+/)[0];
+    }
+  }
+  return undefined;
+}

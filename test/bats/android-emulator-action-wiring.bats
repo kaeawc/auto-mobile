@@ -80,9 +80,9 @@ load yq-helpers
   done
   [ "$(yq -r '.jobs."foldable-posture-tests"."continue-on-error"' "$nightly")" = "true" ]
   [ "$(yq -r '.jobs."foldable-posture-tests".env.AUTOMOBILE_FOLDABLE_LANE' "$nightly")" = "1" ]
-  artifact_name="$(yq -r '.jobs."foldable-posture-tests".steps[] | select(.uses == "actions/upload-artifact@v6") | .with.name' "$nightly")"
+  artifact_name="$(yq -r '.jobs."foldable-posture-tests".steps[] | select((.uses // "") | test("^actions/upload-artifact@")) | .with.name' "$nightly")"
   [[ "$artifact_name" == *"\${{ matrix.profile }}"* ]]
-  artifact_paths="$(yq -r '.jobs."foldable-posture-tests".steps[] | select(.uses == "actions/upload-artifact@v6") | .with.path' "$nightly")"
+  artifact_paths="$(yq -r '.jobs."foldable-posture-tests".steps[] | select((.uses // "") | test("^actions/upload-artifact@")) | .with.path' "$nightly")"
   [[ "$artifact_paths" == *'scratch/foldable-lane/'* ]]
 }
 
@@ -122,8 +122,8 @@ load yq-helpers
   local save_if save_index verify_index
   # The combined actions/cache action saves in a post-job step, while the
   # emulator still runs: on pull requests that save failed on every cache miss.
-  [ "$(yq -r '.runs.steps[] | select(.id == "avd-cache") | .uses' "$ACTION")" = "actions/cache/restore@v5" ]
-  [ "$(yq -r '[.runs.steps[] | select(.uses == "actions/cache@v5")] | length' "$ACTION")" = "0" ]
+  [ "$(yq -r '.runs.steps[] | select(.id == "avd-cache") | .uses | sub("@.*", "")' "$ACTION")" = "actions/cache/restore" ]
+  [ "$(yq -r '[.runs.steps[] | select((.uses // "") | test("^actions/cache@"))] | length' "$ACTION")" = "0" ]
   [ "$(yq -r '[.runs.steps[] | select((.uses // "") | test("^actions/cache/save@"))] | length' "$ACTION")" = "1" ]
   save_if="$(yq -r '.runs.steps[] | select(.name == "Save AVD cache") | .if' "$ACTION")"
   [ "$save_if" = "success() && github.event_name != 'pull_request' && steps.avd-cache.outputs.cache-hit != 'true'" ]

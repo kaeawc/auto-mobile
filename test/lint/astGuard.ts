@@ -87,7 +87,6 @@ export function unwrapCallee(callee: Expression): Expression {
 
 // Cache data, never Programs: Oxc's materialized trees dwarf the source strings.
 const syntaxCheckedSources = new Map<string, string>();
-const directories = new Map<string, { version: string; entries: Dirent[] }>();
 const inventories = new Map<string, { entries: Dirent[]; children: string[][]; files: string[] }>();
 
 type GuardStatIdentity = Pick<BigIntStats, "dev" | "ino" | "mtimeNs" | "ctimeNs" | "size">;
@@ -96,6 +95,8 @@ interface GuardSourceReaderOptions {
   platform: NodeJS.Platform;
   stat: (file: string) => GuardStatIdentity;
   readFile: (file: string) => string;
+  /** Wall clock in epoch nanoseconds; defaults to `Date.now()`. */
+  nowNs?: () => bigint;
 }
 
 function fileVersion(stat: GuardStatIdentity): string {
@@ -103,12 +104,36 @@ function fileVersion(stat: GuardStatIdentity): string {
   return `${stat.dev}:${stat.ino}:${stat.mtimeNs}:${stat.ctimeNs}:${stat.size}`;
 }
 
+/**
+ * Filesystem timestamps can be as coarse as a kernel tick (ext4: ~4-8 ms) or a full second
+ * (HFS+, some network mounts). A change landing in the same tick as a stat leaves the
+ * identity unchanged (#18986), so a snapshot whose timestamps are this recent is "racy"
+ * (as in git's racy-clean index entries) and is re-read rather than trusted.
+ */
+export const GUARD_RACY_WINDOW_NS = 2_000_000_000n;
+
+const wallClockNs = (): bigint => BigInt(Date.now()) * 1_000_000n;
+
+/** True when a snapshot taken at `nowNs` cannot rule out a later same-tick change. */
+export function guardStatIsRacy(stat: GuardStatIdentity, nowNs: bigint): boolean {
+  const newest = stat.mtimeNs > stat.ctimeNs ? stat.mtimeNs : stat.ctimeNs;
+  return nowNs - newest < GUARD_RACY_WINDOW_NS;
+}
+
 export function createGuardSourceReader(options: GuardSourceReaderOptions) {
+  const nowNs = options.nowNs ?? wallClockNs;
   const sources = new Map<string, { version: string | undefined; source: string }>();
+  const currentVersion = (absolute: string): string | undefined => {
+    // Windows/Bun can preserve every stat field across a same-size rewrite (#13843).
+    if (options.platform === "win32") {
+      return undefined;
+    }
+    const stat = options.stat(absolute);
+    return guardStatIsRacy(stat, nowNs()) ? undefined : fileVersion(stat);
+  };
   return (file: string | URL): string => {
     const absolute = path.resolve(typeof file === "string" ? file : fileURLToPath(file));
-    // Windows/Bun can preserve every stat field across a same-size rewrite (#13843).
-    const version = options.platform === "win32" ? undefined : fileVersion(options.stat(absolute));
+    const version = currentVersion(absolute);
     const cached = sources.get(absolute);
     if (version !== undefined && cached?.version === version) {
       return cached.source;
@@ -129,22 +154,67 @@ export const readGuardFile = createGuardSourceReader({
   readFile: (file) => readFileSync(file, "utf8"),
 });
 
-function directoryEntries(dir: string): Dirent[] {
-  const absolute = path.resolve(dir);
-  // Directory identities have the same Windows limitation. Re-list there so inventories
-  // see creates/removes/renames, including changes below an unchanged root directory.
-  if (process.platform === "win32") {
-    return readdirSync(absolute, { withFileTypes: true });
-  }
-  const version = fileVersion(statSync(absolute, { bigint: true }));
-  const cached = directories.get(absolute);
-  if (cached?.version === version) {
-    return cached.entries;
-  }
-  const entries = readdirSync(absolute, { withFileTypes: true });
-  directories.set(absolute, { version, entries });
-  return entries;
+/** The Dirent members the inventories read; real `Dirent`s satisfy it. */
+export type GuardDirectoryEntry = Pick<Dirent, "name" | "isDirectory" | "isFile">;
+
+interface GuardDirectoryListerOptions<E extends GuardDirectoryEntry> {
+  platform: NodeJS.Platform;
+  stat: (dir: string) => GuardStatIdentity;
+  readdir: (dir: string) => E[];
+  /** Wall clock in epoch nanoseconds; defaults to `Date.now()`. */
+  nowNs?: () => bigint;
 }
+
+function sameListing(a: readonly GuardDirectoryEntry[], b: readonly GuardDirectoryEntry[]) {
+  return (
+    a.length === b.length &&
+    a.every(
+      (entry, i) =>
+        entry.name === b[i].name &&
+        entry.isDirectory() === b[i].isDirectory() &&
+        entry.isFile() === b[i].isFile(),
+    )
+  );
+}
+
+/**
+ * Returns a listing reader that keeps the previous entries array (by identity) while a
+ * directory is unchanged, so inventories built on it can be reused.
+ */
+export function createGuardDirectoryLister<E extends GuardDirectoryEntry>(
+  options: GuardDirectoryListerOptions<E>,
+): (dir: string) => E[] {
+  const nowNs = options.nowNs ?? wallClockNs;
+  const directories = new Map<string, { version: string | undefined; entries: E[] }>();
+  return (dir: string): E[] => {
+    const absolute = path.resolve(dir);
+    // Directory identities have the same Windows limitation, and a directory's mtime, ctime
+    // and size can all survive a create in the same timestamp tick. Re-list in both cases;
+    // comparing names keeps the cached array (and the inventories keyed on it) when unchanged.
+    let version: string | undefined;
+    if (options.platform !== "win32") {
+      const stat = options.stat(absolute);
+      version = guardStatIsRacy(stat, nowNs()) ? undefined : fileVersion(stat);
+    }
+    const cached = directories.get(absolute);
+    if (version !== undefined && cached?.version === version) {
+      return cached.entries;
+    }
+    const entries = options.readdir(absolute);
+    if (cached !== undefined && sameListing(cached.entries, entries)) {
+      cached.version = version;
+      return cached.entries;
+    }
+    directories.set(absolute, { version, entries });
+    return entries;
+  };
+}
+
+const directoryEntries = createGuardDirectoryLister<Dirent>({
+  platform: process.platform,
+  stat: (dir) => statSync(dir, { bigint: true }),
+  readdir: (dir) => readdirSync(dir, { withFileTypes: true }),
+});
 
 /** Shared listing reads for guards with different file-selection rules. */
 export function guardDirectoryEntries(dir: string): Dirent[] {

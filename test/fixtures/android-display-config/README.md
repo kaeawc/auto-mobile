@@ -20,3 +20,7 @@ reproduction is `a8.out` #45–#49 (`out/a8-45-displayConfig.json`,
 `out/a8-46-displayConfig.json`, `out/a8-48-displayConfig.json`).
 `a6.out` #1–#6 also records reset forcing dark mode to light.
 No fixture is synthesized, and no device commands run in these tests.
+
+`night-mode-unsupported-api25.txt` is `cmd uimode night` on an Android 7.1.1 (API 25)
+emulator, copied verbatim from the output quoted in issue #18984 (exit 0, no
+`Night mode:` line). No API 24/25 system image was installed for this capture.

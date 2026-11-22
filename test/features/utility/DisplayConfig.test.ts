@@ -417,6 +417,59 @@ describe("DisplayConfig setConfig", () => {
     expect(commands).not.toContain("shell wm density 582");
   });
 
+  describe("Android before 8: cmd uimode night has no shell implementation (#18984)", () => {
+    const night = captured("night-mode-unsupported-api25");
+
+    test("getConfig reads font scale and density and omits theme", async () => {
+      const adbFactory = new FakeAdbClientFactory();
+      seedReads(adbFactory, { night });
+
+      const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
+
+      expect(result.success).toBe(true);
+      expect(result.current).toMatchObject({ fontScale: 1.0, density: 440 });
+      expect(result.current?.theme).toBeUndefined();
+    });
+
+    test("setting theme is refused with an actionable error and writes nothing", async () => {
+      const adbFactory = new FakeAdbClientFactory();
+      seedReads(adbFactory, { night });
+
+      const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
+        theme: "dark",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Android before 8");
+      const commands = adbFactory
+        .getFakeClient()
+        .getCommandCalls()
+        .map((c) => c.command);
+      expect(commands.some((c) => c.startsWith("shell cmd uimode night "))).toBe(false);
+    });
+
+    test("font scale still applies", async () => {
+      const adbFactory = new FakeAdbClientFactory();
+      seedReads(adbFactory, { night });
+
+      const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
+        fontScale: 1.0,
+      });
+
+      expect(result.error).toBeUndefined();
+      expect(result.success).toBe(true);
+    });
+
+    test("a garbled night-mode line on a supporting device is still unreadable", async () => {
+      const adbFactory = new FakeAdbClientFactory();
+      seedReads(adbFactory, { night: "garbage\n" });
+
+      const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
+
+      expect(result.success).toBe(false);
+    });
+  });
+
   test("sets dark theme via cmd uimode night", async () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory);

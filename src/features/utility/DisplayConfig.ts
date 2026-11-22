@@ -31,6 +31,8 @@ import {
 } from "./AndroidDisplayGeometry";
 import { DEFAULT_FONT_SCALE, type DisplayTheme, type FontScaleInput } from "./displayConfigTypes";
 import {
+  ANDROID_THEME_UNSUPPORTED_ERROR,
+  isNightModeUnsupported,
   nightModeArg,
   parseFontScaleSnapshot,
   parseNightMode,
@@ -765,6 +767,9 @@ export class DisplayConfig {
       const raw = await this.readRawValues(adb);
       previous = raw.restorableValues;
       physicalDensity = raw.physicalDensity;
+      if (input.theme !== undefined && raw.values.theme === undefined) {
+        return this.unsupported(ANDROID_THEME_UNSUPPORTED_ERROR);
+      }
     } catch (error) {
       logger.warn(`[DisplayConfig] setConfig pre-read failed: ${errorMessage(error)}`, error);
       return {
@@ -878,7 +883,7 @@ export class DisplayConfig {
     if (parsedDensity.effective === undefined) {
       unreadable.push("display density");
     }
-    if (theme === undefined) {
+    if (theme === undefined && !isNightModeUnsupported(nightRaw)) {
       unreadable.push("night mode");
     }
     if (unreadable.length > 0) {

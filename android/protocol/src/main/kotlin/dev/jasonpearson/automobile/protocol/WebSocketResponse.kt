@@ -1070,6 +1070,15 @@ data class PrototypeStackSnapshot(
   }
 }
 
+/** Aggregate image states; contains no remote URLs or per-image failures. */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class PrototypeRemoteImageCounts(
+  @EncodeDefault val loaded: Int = 0,
+  @EncodeDefault val failed: Int = 0,
+  @EncodeDefault val pending: Int = 0,
+)
+
 /**
  * One prototype the device is showing. [id] is the prototype id, which is its spec id.
  * [lastSequence] is the highest `prototype_event` sequence allocated for it, so a host resumes from
@@ -1114,6 +1123,7 @@ data class PrototypeStatusEntry(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val orientation: String? = null,
   /** `unsupported` when a style was requested: overlays do not own the status bar. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val statusBar: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val images: PrototypeRemoteImageCounts? = null,
 )
 
 /**

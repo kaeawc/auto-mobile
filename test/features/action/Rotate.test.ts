@@ -2347,7 +2347,7 @@ describe("Rotate", () => {
         const result = await iosRotate.execute("landscape");
         expect(result.success).toBe(false);
         expect(result.error).toBe(
-          "Rotation is not supported on this display (the screen size did not change)",
+          "The foreground app or screen does not rotate on this display (the screen size did not change)",
         );
       } finally {
         getInstanceSpy.mockRestore();

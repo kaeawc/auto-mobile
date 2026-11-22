@@ -22,6 +22,13 @@ function addImage(value: unknown, ids: Set<string>): void {
     }
   }
 }
+function addImageNodeAssets(node: Record<string, unknown>, images: Set<string>): void {
+  if (node.type === "image") {
+    addImage(node.asset, images);
+    addImage(record(node.placeholder)?.asset, images);
+    addImage(record(node.error)?.asset, images);
+  }
+}
 function addFont(style: unknown, fonts: Set<string>): void {
   const asset = record(record(style)?.fontFamily)?.asset;
   if (typeof asset === "string") {
@@ -62,9 +69,7 @@ export function collectPrototypeAssetReferences(spec: unknown): {
       }
       return value;
     });
-    if (node.type === "image") {
-      addImage(node.asset, images);
-    }
+    addImageNodeAssets(node, images);
     addImage(prototypeMapMarkerAsset(node), images);
     for (const item of Array.isArray(node.items) ? node.items : []) {
       addImage(record(item)?.image, images);

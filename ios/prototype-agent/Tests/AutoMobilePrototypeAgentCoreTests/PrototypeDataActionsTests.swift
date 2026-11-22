@@ -248,9 +248,38 @@ final class PrototypeDataActionsTests: XCTestCase {
     private struct Inputs: PrototypeEmitContextInputs {
         let stateValues: [String: JSONValue]
         let dataValues: [String: JSONValue]
+        var eventValue: JSONValue?
         func state(_ key: String) -> JSONValue? { stateValues[key] }
         func page(_: String) -> Int? { nil }
         func data(_ pointer: String) -> JSONValue? { PrototypeDataPointer.resolve(dataValues, pointer: pointer) }
+        func event(_ pointer: String) -> JSONValue? {
+            if pointer.isEmpty { return eventValue }
+            guard PrototypeDataPointer.isValid(pointer) else { return nil }
+            return eventValue.flatMap {
+                PrototypeDataPointer.resolve($0, tokens: PrototypeDataPointer.tokens(pointer)[...])
+            }
+        }
+    }
+
+    func testWholeEventBindingPreservesJSONValuesAndOnlyEventAllowsEmptyPointer() throws {
+        let binding = JSONValue.object(["event": .string("")])
+        let events: [JSONValue] = [
+            .number(3), .string("raw text"), .object(["id": .number(1)]), .array([.number(1)]), .bool(false), .null,
+        ]
+        for event in events {
+            let inputs = Inputs(stateValues: [:], dataValues: [:], eventValue: event)
+            XCTAssertEqual(try PrototypeDataWrite.resolveValue(binding, inputs: inputs).get(), event)
+        }
+        let absent = Inputs(stateValues: [:], dataValues: [:])
+        XCTAssertEqual(failureCode(PrototypeDataWrite.resolveValue(binding, inputs: absent)), .notFound)
+        for kind in ["data", "platform"] {
+            XCTAssertEqual(failureCode(PrototypeDataWrite.resolveValue(
+                .object([kind: .string("")]), inputs: absent
+            )), .invalidValue)
+        }
+        XCTAssertEqual(failureCode(PrototypeDataWrite.resolveValue(
+            .object(["event": .string("/bad~2")]), inputs: absent
+        )), .invalidValue)
     }
 
     func testValueBindingsResolveLiteralStateAndData() throws {

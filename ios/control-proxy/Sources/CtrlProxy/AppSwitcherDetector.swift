@@ -19,4 +19,15 @@ import Foundation
             return AppSwitcherSnapshotClassifier.isVisible(snapshots)
         }
     }
+
+    @MainActor
+    enum SpringBoardHomeScreenDetector {
+        /// One SpringBoard snapshot (a single IPC) rather than a per-element query.
+        static func isShowing(in springboard: XCUIApplication) -> Bool {
+            guard let snapshot = try? springboard.snapshot() else { return false }
+            return SpringBoardHomeScreenClassifier.isShowing(
+                ElementLocator.springBoardIconListElements(in: snapshot)
+            )
+        }
+    }
 #endif

@@ -4,6 +4,7 @@ package dev.jasonpearson.automobile.protocol
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
@@ -675,11 +676,16 @@ data class PrototypeImageNode(
   override val keyframes: JsonObject? = null,
   override val attentionLoop: PrototypeLoop? = null,
   /** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
-  val asset: PrototypeModeValue,
+  val asset: PrototypeModeValue? = null,
   val contentScale: String = "fit",
   /** Pinch, double-tap and pan zoom up to `maxScale` (#14208). */
   val zoomable: PrototypeZoomable? = null,
   val filter: PrototypeImageFilter? = null,
+  val url: String? = null,
+  val crossfade: Boolean? = null,
+  val via: String? = null,
+  val placeholder: JsonObject? = null,
+  val error: JsonObject? = null,
 ) : PrototypeNode()
 
 @SerialName("icon")
@@ -887,6 +893,7 @@ data class PrototypeButtonNode(
   val label: String,
   val variant: String = "filled",
   val icon: String? = null,
+  val split: PrototypeButtonSplit? = null,
   val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
@@ -1150,6 +1157,7 @@ data class PrototypeFabNode(
   val icon: String,
   val label: String? = null,
   val size: String = "regular",
+  val menu: PrototypeFabMenu? = null,
   val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
@@ -1182,6 +1190,7 @@ data class PrototypeSegmentedButtonNode(
   override val attentionLoop: PrototypeLoop? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
+  val variant: String? = null,
 ) : PrototypeNode()
 
 /** A Material top app bar with a title, an optional navigation icon and up to three actions. */
@@ -2095,6 +2104,35 @@ data class PrototypeCameraPreviewNode(
   val mode: String? = null,
 ) : PrototypeNode()
 
+@SerialName("loadingIndicator")
+@Serializable
+data class PrototypeLoadingIndicatorNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val shared: PrototypeShared? = null,
+  override val sharedKey: String? = null,
+  override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
+  override val onAppear: List<PrototypeAction>? = null,
+  override val semantics: PrototypeSemantics? = null,
+  override val ios: PrototypeIosNamespace? = null,
+  override val android: PrototypeAndroidNamespace? = null,
+  override val keyframes: JsonObject? = null,
+  override val attentionLoop: PrototypeLoop? = null,
+  val contained: Boolean? = null,
+) : PrototypeNode()
+
 @Serializable
 data class PrototypeRouteEntry(
   val screen: String,
@@ -2148,6 +2186,18 @@ data class PrototypeTextSpanStyle(
   val background: PrototypeModeValue? = null,
 )
 
+/**
+ * `linkify` on a text node: the [kinds] to detect, the [style] of a match and the actions a tap
+ * runs. [onTap] stays JSON because its `{match}` bindings are bound per match before decoding
+ * ([PrototypeLinkify.actions]).
+ */
+@Serializable
+data class PrototypeLinkifyOptions(
+  val kinds: List<String>,
+  val style: PrototypeTextSpanStyle? = null,
+  val onTap: JsonArray,
+)
+
 /** One chart series: the `/data` array at [path], its points' [y] and optional [x] members. */
 @Serializable
 data class PrototypeChartSeries(
@@ -2184,6 +2234,21 @@ data class PrototypeSpecTheme(
 @Serializable
 data class PrototypePlatformHandlers(
   val on: Map<String, List<PrototypeAction>>,
+)
+
+/** The root `requires` block (#14294): platform modules, permissions and background needs. */
+@Serializable
+data class PrototypeRequires(
+  val platform: List<String>? = null,
+  val permissions: List<PrototypePermissionRequirement>? = null,
+  val background: List<String>? = null,
+)
+
+/** One declared permission: a canonical [name] and the [purpose] shown to the user. */
+@Serializable
+data class PrototypePermissionRequirement(
+  val name: String,
+  val purpose: String,
 )
 
 @Serializable
@@ -2329,6 +2394,25 @@ data class PrototypeRadioOption(
   val label: String,
 )
 
+/** An M3 Expressive split `button`: its trailing half opens [menu]. */
+@Serializable
+data class PrototypeButtonSplit(
+  val menu: List<PrototypeMenuItem>,
+)
+
+@Serializable
+data class PrototypeFabMenuItem(
+  val icon: String,
+  val label: String,
+  val onTap: List<PrototypeAction>,
+)
+
+/** An M3 Expressive FAB menu: tapping the `fab` toggles 2..6 [items] above it. */
+@Serializable
+data class PrototypeFabMenu(
+  val items: List<PrototypeFabMenuItem>,
+)
+
 /** A fixed y axis for a chart; `max` is above `min`. */
 @Serializable
 data class PrototypeChartRange(
@@ -2435,6 +2519,38 @@ data class PrototypeFloatingPlacement(
   val gravity: String,
   val offset: PrototypeOffset,
 ) : PrototypePlacement()
+
+@Serializable
+data class PrototypeWindow(
+  val placement: PrototypePlacement,
+  val opacity: Int = 100,
+  /**
+   * `system` (default when absent) stacks above system UI as an accessibility overlay; `app` stacks
+   * just above apps, below the shade, keyboard and screenshot preview, and needs
+   * SYSTEM_ALERT_WINDOW.
+   */
+  val layer: String? = null,
+  /**
+   * `session` (default when absent) ends the prototype with its host session; `device` keeps it
+   * interactive after the last client disconnects and disables the idle timeout.
+   */
+  val persistence: String? = null,
+  /** Fullscreen host chrome: `none` by default, or `bar`; device persistence defaults to `bar`. */
+  val chrome: String? = null,
+  /** Opt-in window-local dead-tap events; coordinates never include field contents. */
+  val deadTaps: Boolean? = null,
+  /** Blur or tonal fill behind the window (`prototype_backdrop_v1`, #15126). */
+  val backdrop: PrototypeBackdrop? = null,
+  val transition: String? = null,
+  /** Overlay-scoped window controls (`prototype_platform_window_controls_v1`, #14320). */
+  val keepScreenOn: Boolean? = null,
+  /** Protocol parity only; Android does not advertise or apply layout direction. */
+  val layoutDirection: String? = null,
+  /** `"system"` or a whole 0-100 brightness. */
+  val brightness: JsonElement? = null,
+  val orientation: String? = null,
+  val statusBar: String? = null,
+)
 
 @Serializable sealed class PrototypeGradient
 

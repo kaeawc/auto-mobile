@@ -247,6 +247,8 @@ export interface PrototypeDegradedEffect {
 
 /** One prototype the device reported to `inspect_prototypes`. `id` is the prototype id (its spec id). */
 export interface PrototypeStatusEntry {
+  /** Aggregate remote image states, with no URLs or per-image failures. */
+  images?: { loaded: number; failed: number; pending: number };
   /** Agent-owned read-only content of the shown spec; absent when it has none. */
   data?: PrototypeData;
   id: string;

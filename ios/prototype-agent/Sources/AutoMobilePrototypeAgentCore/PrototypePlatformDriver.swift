@@ -5,6 +5,7 @@ import Foundation
 @MainActor
 final class PrototypePlatformDriver {
     let registry: PrototypePlatformRegistry
+    var realtime: PrototypeRealtimeModule?
     private let clock: any PrototypeClock
     private var calls: [String: Task<Void, Never>] = [:]
     private var deadlines: [String: any PrototypeTimerHandle] = [:]
@@ -88,6 +89,10 @@ final class PrototypePlatformDriver {
         }
     }
 
+    func resetNotificationEvents() {
+        subscriptions.removeValue(forKey: "notifications")?.cancel()
+    }
+
     func stopEvents() {
         guard observing else { return }
         observing = false
@@ -108,17 +113,21 @@ final class PrototypePlatformDriver {
     private func start(_ job: PrototypePlatformJob) {
         let id = job.call.callId
         started[id] = clock.nowMilliseconds
-        deadlines[id] = clock.schedule(afterMilliseconds: job.timeoutMs) { [weak self] in
-            MainActor.assumeIsolated {
-                self?.finish(id, .failure(.timeout, "Platform call timed out"))
+        if Self.hasDeadline(job.call.call) {
+            deadlines[id] = clock.schedule(afterMilliseconds: job.timeoutMs) { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.finish(id, .failure(.timeout, "Platform call timed out"))
+                }
             }
         }
         let registry = registry
+        let realtime = realtime
         calls[id] = Task { [weak self] in
             guard !Task.isCancelled else { return }
             let result: PlatformCallResult
             let name = String(job.call.call.split(separator: ".").first ?? "")
-            if let module = registry.modules[name] {
+            let resolved: (any PrototypePlatformModule)? = name == "realtime" ? realtime : registry.modules[name]
+            if let module = resolved {
                 switch module.availability() {
                 case .ready:
                     if let invalid = Self.invalidArguments(job.call) { result = invalid }
@@ -130,6 +139,9 @@ final class PrototypePlatformDriver {
             self?.finish(id, result)
         }
     }
+
+    /// Permission prompts wait for the user, including when the action specifies timeoutMs.
+    nonisolated static func hasDeadline(_ call: String) -> Bool { call != "permissions.request" }
 
     nonisolated static func invalidArguments(_ call: PlatformCall) -> PlatformCallResult? {
         let parts = call.call.split(separator: ".")

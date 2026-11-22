@@ -36,10 +36,15 @@ targets:
       - path: Sources/Theme
       - path: Sources/Assets.xcassets
         type: folder
+      # The committed prototype-embedding sample (generated from automobile:prototype/native).
+      - path: ../prototype-agent/Fixtures/EmbedConsumer/Sources/EmbedConsumer/EmbeddingSamplePrototype.swift
+      - path: ../../samples/prototype-embedding/ios/Prototypes
+        type: folder
     dependencies:
       - target: PlaygroundShareSink
         embed: true
       - package: AutoMobileSDK
+      - target: AutoMobilePrototype
       - package: AutoMobileSdkWire
     settings:
       base:
@@ -48,6 +53,24 @@ targets:
         INFOPLIST_FILE: Sources/Info.plist
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
+
+  # The native prototype renderer, compiled from the same sources as the root manifest's
+  # AutoMobilePrototype product (the root package cannot join this graph: its SDK targets
+  # duplicate the local AutoMobileSDK/AutoMobileSdkWire packages).
+  AutoMobilePrototype:
+    type: framework
+    platform: iOS
+    sources:
+      - path: ../prototype-agent/Sources
+        excludes:
+          - AutoMobilePrototypeAgent/Loader.c
+          - AutoMobilePrototypeAgent/PrototypeAgent.swift
+          - AutoMobilePrototypeAgent/PrototypeServer.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.AutoMobilePrototype
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
 
   PlaygroundShareSink:
     type: app-extension

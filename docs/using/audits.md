@@ -65,8 +65,8 @@ Both checks support Android and iOS Simulator. Calls on physical iOS devices fai
 `performance` measures UI jank and frame time of the foreground app against the configured
 thresholds. Touch latency is measured on Android only. On iOS Simulator, instrument the app with
 auto-mobile-sdk to report frame metrics. The check reports `unsupported` when the app is in the
-background or the simulator receives no fresh frame metrics. `memory` takes a snapshot of
-`appId` on Android and checks its RSS growth over three seconds on iOS Simulator.
+background or the simulator receives no fresh frame metrics. Separately, `memory` takes a
+snapshot of `appId` on Android and checks its RSS growth over three seconds on iOS Simulator.
 
 Each result has `passed`, its metrics and its violations; `failed` is set when `failOn` matched.
 On Android, frame-time percentiles and jank counts both cover only the frames rendered during the check, not
@@ -98,8 +98,8 @@ The result includes the host file `path`, its `sizeBytes`, and its `format`.
 
 - Android writes an `.hprof` for a debuggable or profileable app. Set `native: true` to capture
   the native heap. `heap_dump_not_debuggable` means you need a debuggable or profileable build.
-  `native_heap_dump_unavailable` means the device has no native heap to dump (it needs malloc
-  debug on a rooted device).
+  `native_heap_dump_unavailable` means the device has no native heap to dump. Native dumps need
+  malloc debug on a rooted device.
 - iOS Simulator writes a `.memgraph` you can open in Xcode. Leave `native` unset. If you get
   `heap_dump_not_inspectable`, try a debuggable Simulator build. If the app stopped, relaunch
   it and retry.

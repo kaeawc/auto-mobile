@@ -26,7 +26,7 @@ wf_query() {
 @test "every job selects Xcode 27.2 explicitly and verifies it before building" {
   [ "$(wf_query "${WORKFLOW}" 'wf.env.XCODE_VERSION')" = "27.2" ]
   run wf_query "${WORKFLOW}" 'Object.entries(wf.jobs).filter(([, j]) => {
-    const i = j.steps.findIndex((s) => s.uses === "maxim-lobanov/setup-xcode@v1");
+    const i = j.steps.findIndex((s) => s.uses?.split("@")[0] === "maxim-lobanov/setup-xcode");
     const v = j.steps[i + 1];
     return !(i >= 0 && j.steps[i].with["xcode-version"] === "${{ env.XCODE_VERSION }}" &&
       v?.name === "Verify Xcode 27.2 is active" && v.run.includes("xcodebuild -version") && v.run.includes("exit 1"));

@@ -85,6 +85,7 @@ Tools that need only adb and the accessibility tree work unchanged. On the verif
 | `rotaryScroll`                          | Pass (see below)                                                    |
 | `performanceTrace`                      | Pass                                                                |
 | `prototype` `show`, `dismiss`, `save`   | Pass (see below)                                                    |
+| `rotate`                                | Fails at once: the display has a fixed orientation; nothing changes |
 
 The screen is small, and a round display cuts off content near the corners. Use `swipeOn` with
 `lookFor` to scroll until the element is visible, then `tapOn` to open it. Taps on round watch

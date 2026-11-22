@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.PrototypePlatformCalls
+import dev.jasonpearson.automobile.protocol.PrototypeSpecError
 import dev.jasonpearson.automobile.prototype.PlatformAvailability
 import dev.jasonpearson.automobile.prototype.PlatformCall
 import dev.jasonpearson.automobile.prototype.PlatformCallResult
@@ -23,13 +24,35 @@ interface PrototypeDeviceStatusSource {
   fun close()
 }
 
-/** Atomic snapshots; StateFlow suppresses equal readings without restarting the event timer. */
+/**
+ * Atomic snapshots; StateFlow suppresses equal readings without restarting the event timer. Real
+ * readings pass through a [DeviceStatusOverride], so fake mode and `simulate state` seeds (#14300)
+ * replace them until the mode returns to real.
+ */
 class DeviceStatusTracker(initial: JsonObject = JsonObject(emptyMap())) {
+  private val override = DeviceStatusOverride(platform = "android").apply { reading(initial) }
   private val mutableState = MutableStateFlow(initial)
   val state: StateFlow<JsonObject> = mutableState.asStateFlow()
 
+  @Synchronized
   fun update(reading: JsonObject) {
-    mutableState.value = reading
+    override.reading(reading)
+    publish()
+  }
+
+  @Synchronized
+  fun mode(mode: DeviceStatusMode) {
+    override.mode(mode)
+    publish()
+  }
+
+  /** The refusal for a seed the contract or the current mode rejects, or null once it shows. */
+  @Synchronized
+  fun seed(kind: DeviceStatusKind, seed: JsonObject): PrototypeSpecError? =
+    override.seed(kind.moduleName, seed).also { publish() }
+
+  private fun publish() {
+    override.shown?.let { mutableState.value = it }
   }
 }
 

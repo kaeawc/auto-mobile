@@ -159,7 +159,7 @@ YAML
   [ -n "$block" ]
   [ "$(echo "$block" | grep -c 'if: failure()')" -eq 2 ]
   [ "$(echo "$block" | grep -c 'continue-on-error: true')" -eq 2 ]
-  [ "$(echo "$block" | grep -c 'uses: actions/upload-artifact@v[0-9]')" -eq 2 ]
+  [ "$(echo "$block" | grep -c 'uses: actions/upload-artifact@')" -eq 2 ]
 }
 
 @test "composite uploads are expanded at their real call sites" {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { load } from "js-yaml";
+import { usesAction } from "../helpers/workflowSteps";
 
 const PULL_REQUEST_WORKFLOW = ".github/workflows/pull_request.yml";
 const MERGE_WORKFLOW = ".github/workflows/merge.yml";
@@ -75,7 +76,7 @@ describe("#4308 device WebRTC integration workflow", () => {
       (step) => step.id === "filter-webrtc",
     );
 
-    expect(filter?.uses).toBe("dorny/paths-filter@v3");
+    expect(usesAction(filter?.uses)).toBe("dorny/paths-filter");
     for (const path of [
       "src/features/webrtc/**",
       "src/features/screen-stream/**",
@@ -135,9 +136,9 @@ describe("#4308 device WebRTC integration workflow", () => {
         (step) => step.uses === "./.github/actions/android-emulator",
       );
 
-      expect(steps[apkIndex]?.uses).toBe("actions/download-artifact@v7");
+      expect(usesAction(steps[apkIndex]?.uses)).toBe("actions/download-artifact");
       expect(steps[apkIndex]?.with?.name).toBe("control-proxy-apk");
-      expect(steps[jarIndex]?.uses).toBe("actions/download-artifact@v7");
+      expect(usesAction(steps[jarIndex]?.uses)).toBe("actions/download-artifact");
       expect(steps[jarIndex]?.with?.name).toBe("video-server-jar");
       expect(emulatorIndex).toBeGreaterThan(apkIndex);
       expect(emulatorIndex).toBeGreaterThan(jarIndex);

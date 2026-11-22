@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { createWebRtcStreamDeviceIncarnationListener } from "../../src/daemon/webrtcStreamIncarnationListener";
+import { createWebRtcStreamDeviceIncarnationListener } from "../../src/daemon/streams/webrtcStreamIncarnationListener";
 
 describe("WebRTC incarnation listener", () => {
   test("retires the device before restore and repeats cleanup safely after restore", async () => {
@@ -27,10 +27,10 @@ describe("WebRTC incarnation listener", () => {
 
   test("boot listener has only the dependency-free incarnation registry as a runtime import", () => {
     const source = readFileSync(
-      new URL("../../src/daemon/webrtcStreamIncarnationListener.ts", import.meta.url),
+      new URL("../../src/daemon/streams/webrtcStreamIncarnationListener.ts", import.meta.url),
       "utf8",
     );
     const imports = new Bun.Transpiler({ loader: "ts" }).scanImports(source);
-    expect(imports).toEqual([{ kind: "import-statement", path: "../utils/deviceIncarnation" }]);
+    expect(imports).toEqual([{ kind: "import-statement", path: "../../utils/deviceIncarnation" }]);
   });
 });

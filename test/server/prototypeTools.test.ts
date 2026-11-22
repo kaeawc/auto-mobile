@@ -35,7 +35,7 @@ import {
 } from "../../src/features/prototype/prototypeSpecJsonSchema";
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
 import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
-import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streams/streamDeviceLifecycleEvents";
 import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/wire/constants";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
 import { prototypeTextFieldBindings } from "../../src/features/prototype/prototypeTextTarget";

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { BootedDevice } from "../../src/models";
 import { ProfilingRegistry } from "../../src/features/profiling/ProfilingRegistry";
 import { createHeapDumpHandler, heapDumpSchema } from "../../src/server/profilingTools";
@@ -54,7 +56,10 @@ describe("heapDump tool", () => {
 
   test("a non-debuggable app is refused with the typed error", async () => {
     const { heap, device } = setup();
-    device.packageDump = "    pkgFlags=[ HAS_CODE ALLOW_BACKUP ]\n";
+    device.dumpheapOutput["am dumpheap"] = readFileSync(
+      join(import.meta.dir, "../fixtures/android-profiling/am-dumpheap-not-debuggable.txt"),
+      "utf8",
+    );
     await expect(heap(android, { appId: "com.example.release" })).rejects.toThrow(
       "heap_dump_not_debuggable",
     );

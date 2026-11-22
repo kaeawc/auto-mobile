@@ -13,13 +13,13 @@ import {
 import {
   AppearanceSocketServer,
   type AppearanceSocketServerDependencies,
-} from "../../src/daemon/appearanceSocketServer";
+} from "../../src/daemon/streams/appearanceSocketServer";
 import { appearanceSocketResponseSchema } from "../helpers/wireMessageSchemas";
 import {
   ObserverAdmittingStreamAuthenticator,
   SessionScopedStreamAuthenticator,
   type StreamAuthSessionManager,
-} from "../../src/daemon/streamSocketAuth";
+} from "../../src/daemon/streams/streamSocketAuth";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
 

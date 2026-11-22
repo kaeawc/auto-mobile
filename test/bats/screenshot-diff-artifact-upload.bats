@@ -69,10 +69,10 @@ record_step() {
   [ -n "$step" ]
 }
 
-@test "record-screenshot-baselines diff upload uses actions/upload-artifact" {
+@test "record-screenshot-baselines diff upload uses SHA-pinned actions/upload-artifact" {
   step="$(record_step)"
   [ -n "$step" ]
-  [[ "$step" =~ uses:\ actions/upload-artifact@v[0-9]+ ]]
+  [[ "$step" =~ uses:\ actions/upload-artifact@[0-9a-f]{40}\ #\ v[0-9]+ ]]
 }
 
 @test "record-screenshot-baselines diff upload only runs on failure" {
@@ -117,14 +117,14 @@ record_step() {
 @test "pull_request desktop-core-unit-tests uploads the screenshot diff reports on failure" {
   step="$(job_block ".github/workflows/pull_request.yml" "desktop-core-unit-tests" | screenshot_upload_step)"
   [ -n "$step" ]
-  [[ "$step" =~ uses:\ actions/upload-artifact@v[0-9]+ ]]
+  [[ "$step" =~ uses:\ actions/upload-artifact@[0-9a-f]{40}\ #\ v[0-9]+ ]]
   [[ "$step" == *"if: failure()"* ]]
 }
 
 @test "merge desktop-core-unit-tests uploads the screenshot diff reports on failure" {
   step="$(job_block ".github/workflows/merge.yml" "desktop-core-unit-tests" | screenshot_upload_step)"
   [ -n "$step" ]
-  [[ "$step" =~ uses:\ actions/upload-artifact@v[0-9]+ ]]
+  [[ "$step" =~ uses:\ actions/upload-artifact@[0-9a-f]{40}\ #\ v[0-9]+ ]]
   [[ "$step" == *"if: failure()"* ]]
 }
 

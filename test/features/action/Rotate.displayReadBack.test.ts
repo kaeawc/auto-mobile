@@ -14,6 +14,7 @@ import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
+import { FakeWearOsDetector } from "../../fakes/FakeWearOsDetector";
 import { AwaitIdle } from "../../../src/features/observe/AwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -50,7 +51,10 @@ function setup() {
     rotate: new Rotate(device, {
       adb,
       timer,
-      options: { xrDetector: new FakeAndroidXrDetector() },
+      options: {
+        xrDetector: new FakeAndroidXrDetector(),
+        wearOsDetector: new FakeWearOsDetector(),
+      },
     }),
   };
 }
@@ -176,7 +180,10 @@ describe("Rotate on a default display that ignores user_rotation (am-flip-6p7 O1
     const rotate = new Rotate(device, {
       adb,
       timer,
-      options: { xrDetector: new FakeAndroidXrDetector() },
+      options: {
+        xrDetector: new FakeAndroidXrDetector(),
+        wearOsDetector: new FakeWearOsDetector(),
+      },
     });
     const observe = new FakeObserveScreen();
     observe.enableAutoVaryHierarchy();

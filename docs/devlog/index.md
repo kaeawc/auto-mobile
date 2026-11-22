@@ -13,6 +13,7 @@ To add one, copy the [template](template.md).
 | Date       | Kind     | Entry                                                                                                                              |
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-11-21 | concept  | [iOS Simulator audio routing open questions](2026-11-21-ios-simulator-audio-routing-open-questions.md)                             |
+| 2026-11-21 | decision | [Prototype media runtime placement spike](2026-11-21-prototype-media-runtime-placement-spike.md)                                   |
 | 2026-11-20 | decision | [Fixture capture mode](2026-11-20-fixture-capture-mode.md)                                                                         |
 | 2026-11-19 | decision | [Per-runtime prototype budgets](2026-11-19-prototype-runtime-budgets.md)                                                           |
 | 2026-11-19 | decision | [iOS Simulator audio isolation](2026-11-19-ios-simulator-audio-isolation.md)                                                       |

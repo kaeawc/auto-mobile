@@ -23,7 +23,7 @@ off_xcode_27_2() {
     const path = process.argv[1];
     const wf = load(await Bun.file(path).text());
     const bad = Object.entries(wf.jobs).filter(([, j]) => {
-      const setup = (j.steps ?? []).filter((s) => s.uses === "maxim-lobanov/setup-xcode@v1");
+      const setup = (j.steps ?? []).filter((s) => s.uses?.split("@")[0] === "maxim-lobanov/setup-xcode");
       return j["runs-on"] !== "xcode-27" || setup.length !== 1 || setup[0].with?.["xcode-version"] !== "27.2";
     });
     process.stdout.write(bad.map(([id]) => `${path}:${id}`).join("\n"));

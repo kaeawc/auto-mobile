@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { loadJobSteps, loadWorkflow, stepNamed } from "../helpers/workflowSteps";
+import { loadJobSteps, loadWorkflow, stepNamed, usesAction } from "../helpers/workflowSteps";
 
 const WORKFLOW = ".github/workflows/pull_request.yml";
 const MERGE_WORKFLOW = ".github/workflows/merge.yml";
@@ -56,7 +56,7 @@ describe("#5531 formatting workflow", () => {
 
     expect(steps.length).toBeGreaterThan(0);
     expect(format?.run).toBe("bun run format:check");
-    expect(steps.some((step) => step.uses === "actions/checkout@v6")).toBe(true);
-    expect(steps.some((step) => step.uses === "oven-sh/setup-bun@v2")).toBe(true);
+    expect(steps.some((step) => usesAction(step.uses) === "actions/checkout")).toBe(true);
+    expect(steps.some((step) => usesAction(step.uses) === "oven-sh/setup-bun")).toBe(true);
   });
 });

@@ -39,7 +39,7 @@ off_pin() {
       for (const config of configs) {
         for (const step of job.steps ?? []) {
           const picks = [];
-          if (step.uses === "maxim-lobanov/setup-xcode@v1") picks.push(step.with?.["xcode-version"]);
+          if (step.uses?.split("@")[0] === "maxim-lobanov/setup-xcode") picks.push(step.with?.["xcode-version"]);
           const run = typeof step.run === "string" ? step.run : "";
           for (const m of run.matchAll(/select-self-hosted-xcode\.sh(?:\s+--[\w-]+)*(?:\s+"([^"]+)"|\s+(?!--)([^\s"]+))?/g)) picks.push(m[1] ?? m[2] ?? pin);
           if (step.uses === "./.github/actions/ios-simulator-bring-up") picks.push(step.with?.["xcode-version"]);

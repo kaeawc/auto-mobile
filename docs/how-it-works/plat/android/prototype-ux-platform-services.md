@@ -12,13 +12,13 @@ No argument carries an amount, merchant, key or card: prices come only from the 
 The root `commerce` catalog (needs `commerce` in `requires.platform`) is `{backend: "fake", products}` with 1 to
 32 products. Each product has:
 
-| Field | Constraint |
-| --- | --- |
-| `id` | unique identifier |
-| `title` | — |
-| `kind` | `consumable`, `nonConsumable` or `subscription` |
-| `price.amount` | decimal string, up to two decimal places |
-| `price.currency` | upper-case three-letter code |
+| Field                    | Constraint                                                                                |
+| ------------------------ | ----------------------------------------------------------------------------------------- |
+| `id`                     | unique identifier                                                                         |
+| `title`                  | —                                                                                         |
+| `kind`                   | `consumable`, `nonConsumable` or `subscription`                                           |
+| `price.amount`           | decimal string, up to two decimal places                                                  |
+| `price.currency`         | upper-case three-letter code                                                              |
 | `period` / `trialPeriod` | subscription only; ISO 8601 duration of whole days, weeks, months or years (`P7D`, `P1M`) |
 
 The block has no merchant, gateway, key, card or URL field.
@@ -70,14 +70,14 @@ refuses state bindings and text placeholders in URLs, headers, query values and 
 event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
 exactly one `/<module>/<key>`. The keys are:
 
-| Key | Type / range |
-| --- | --- |
-| `pitchDeg` | whole degrees, -180 to 180 |
-| `rollDeg` | whole degrees, -180 to 180 |
-| `headingDeg` | whole degrees, 0 to 359 |
-| `steps` | counted since the subscription started |
-| `proximityNear` | boolean |
-| `lightLux` | whole lux, Android only (no public ambient-light API on iOS) |
+| Key             | Type / range                                                 |
+| --------------- | ------------------------------------------------------------ |
+| `pitchDeg`      | whole degrees, -180 to 180                                   |
+| `rollDeg`       | whole degrees, -180 to 180                                   |
+| `headingDeg`    | whole degrees, 0 to 359                                      |
+| `steps`         | counted since the subscription started                       |
+| `proximityNear` | boolean                                                      |
+| `lightLux`      | whole lux, Android only (no public ambient-light API on iOS) |
 
 A sensor the device lacks leaves its key absent, so it compares as
 missing. The runtimes copy whole-unit rounding from `prototypeSensorReference.ts`. Continuous values use per-key
@@ -228,30 +228,30 @@ calls:
 - `notifications.cancel` takes `id`, `group` or `all: true`.
 - `notifications.setBadge` takes `count` (0-9999).
 
-| Argument | Required | Constraint |
-| --- | --- | --- |
-| `id` | yes | 1-128 characters |
-| `channel` | yes | key-shaped channel id |
-| `title` | yes | non-blank, at most 128 |
-| `body` | no | at most 1024 |
-| `largeImage` | no | asset id |
-| `style` | no | see style table below |
-| `group` | no | — |
-| `badge` | no | whole number 0-9999 |
-| `data` | no | JSON, at most 1 KiB, echoed in every event for the notification |
-| `actions` | no | see below |
-| `progress` | no | see below |
-| `silent` | no | — |
-| `ongoing` | no | — |
+| Argument     | Required | Constraint                                                      |
+| ------------ | -------- | --------------------------------------------------------------- |
+| `id`         | yes      | 1-128 characters                                                |
+| `channel`    | yes      | key-shaped channel id                                           |
+| `title`      | yes      | non-blank, at most 128                                          |
+| `body`       | no       | at most 1024                                                    |
+| `largeImage` | no       | asset id                                                        |
+| `style`      | no       | see style table below                                           |
+| `group`      | no       | —                                                               |
+| `badge`      | no       | whole number 0-9999                                             |
+| `data`       | no       | JSON, at most 1 KiB, echoed in every event for the notification |
+| `actions`    | no       | see below                                                       |
+| `progress`   | no       | see below                                                       |
+| `silent`     | no       | —                                                               |
+| `ongoing`    | no       | —                                                               |
 
 The `style` argument is discriminated by `type`:
 
-| `type` | Fields |
-| --- | --- |
-| `bigText` | — |
-| `bigPicture` | `image` |
-| `inbox` | 1-6 `lines`, optional `summary` |
-| `messaging` | `self`, optional `conversationTitle`, 1-7 `messages` of `{from?, text, image?}` (absent `from` is the user) |
+| `type`       | Fields                                                                                                      |
+| ------------ | ----------------------------------------------------------------------------------------------------------- |
+| `bigText`    | —                                                                                                           |
+| `bigPicture` | `image`                                                                                                     |
+| `inbox`      | 1-6 `lines`, optional `summary`                                                                             |
+| `messaging`  | `self`, optional `conversationTitle`, 1-7 `messages` of `{from?, text, image?}` (absent `from` is the user) |
 
 The `actions` argument holds 1-3 buttons of
 `{id, label, opensApp?, reply?: {placeholder?}}`, and `progress` is `{value: 0..1}` or
@@ -269,12 +269,12 @@ publishes its authorization key without advertising notification delivery calls.
 Channels come from a root `notifications` block,
 `{channels: [{id, name, importance, description?, showBadge?}]}`, holding 1-8 channels:
 
-| Field | Constraint |
-| --- | --- |
-| `id` | unique, key-shaped |
-| `name` | non-blank, at most 64 |
-| `importance` | `min`, `low`, `default` or `high` |
-| `description` | optional, at most 256 |
+| Field         | Constraint                        |
+| ------------- | --------------------------------- |
+| `id`          | unique, key-shaped                |
+| `name`        | non-blank, at most 64             |
+| `importance`  | `min`, `low`, `default` or `high` |
+| `description` | optional, at most 256             |
 
 The block needs `notifications` in `requires.platform`. A
 literal `channel` on `notifications.post` must name a declared channel, and a literal `actions` list

@@ -3,20 +3,20 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   VideoStreamSocketServer,
   type DeviceOwnershipChanges,
-} from "../../src/daemon/videoStreamSocketServer";
+} from "../../src/daemon/streams/videoStreamSocketServer";
 import { BaseSocketServer } from "../../src/daemon/socketServer/BaseSocketServer";
 import {
   SessionScopedStreamAuthenticator,
   type StreamSocketAuthenticator,
-} from "../../src/daemon/streamSocketAuth";
+} from "../../src/daemon/streams/streamSocketAuth";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { releasingSessionHarness } from "../helpers/releasingSessionHarness";
-import { StreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
+import { StreamDeviceLifecycleEmitter } from "../../src/daemon/streams/streamDeviceLifecycleEvents";
 import {
   assertMayControl,
   ViewerReadOnlyError,
 } from "../../src/daemon/wire/streamSubscriptionPolicy";
-import { encodeSubscriptionNotice } from "../../src/daemon/videoStreamFraming";
+import { encodeSubscriptionNotice } from "../../src/daemon/streams/videoStreamFraming";
 import type { VideoStreamSocketResponse } from "../../src/daemon/wire/videoStreamSocketTypes";
 import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSource";
 import type { BootedDevice } from "../../src/models";

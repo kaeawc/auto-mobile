@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streams/streamDeviceLifecycleEvents";
 import { defaultPortReverseManager } from "../features/portReverse/defaultPortReverseManager";
 import { PortReverseError } from "../features/portReverse/PortReverseError";
 import {

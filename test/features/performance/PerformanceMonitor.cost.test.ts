@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, test } from "bun:test";
 import { registerPerformanceMonitorSessionCleanup } from "../../../src/daemon/performanceMonitorSessionCleanup";
-import type { LivePerformanceData } from "../../../src/daemon/performancePushSocketServer";
+import type { LivePerformanceData } from "../../../src/daemon/streams/performancePushSocketServer";
 import { PS_SNAPSHOT_ARGS } from "../../../src/devices/bootAdmission/psSnapshot";
 import { PerformanceMonitor } from "../../../src/features/performance/PerformanceMonitor";
 import {

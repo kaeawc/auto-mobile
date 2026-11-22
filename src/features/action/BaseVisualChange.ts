@@ -5,7 +5,7 @@ import {
   resolvePackageName,
 } from "./visualChangeObservationContext";
 import { getActionClockSkewCache, type ActionClockSkewProvider } from "./ActionClockSkewCache";
-import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "../../daemon/streams/deviceDataStreamSocketServer";
 import { ActionableError, BootedDevice, GfxMetrics, ObserveResult } from "../../models";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";

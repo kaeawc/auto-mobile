@@ -12,7 +12,7 @@ import { holderOf } from "../deviceBinding";
 import { wireSessionLifecycle } from "../daemonSessionLifecycleWiring";
 import type { SessionReleaseReason } from "../releaseReasons";
 import { type BindingExclusion } from "../sessionBroker/provisioning/exclusion";
-import { getDaemonStreamDeviceLifecycleEmitter } from "../streamDeviceLifecycleEvents";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../streams/streamDeviceLifecycleEvents";
 import {
   cancelAndReleaseSession as cancelExecutionsAndReleaseSession,
   cancelExecutionsCutBySessionRelease,

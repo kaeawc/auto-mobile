@@ -11,7 +11,7 @@ private const val PACKET_HEADER_BYTES = 12
 private const val FLAG_CONFIG = 1L shl 63
 private const val FLAG_KEY_FRAME = 1L shl 62
 
-// Mirror src/daemon/videoStreamFraming.ts: PACKET_FLAG_SUBSCRIPTION_NOTICE and
+// Mirror src/daemon/streams/videoStreamFraming.ts: PACKET_FLAG_SUBSCRIPTION_NOTICE and
 // SUBSCRIPTION_NOTICE_CODES. Bit 61 is also ROTATION_PRESENT on CONFIG packets.
 private const val FLAG_SUBSCRIPTION_NOTICE = 1L shl 61
 private const val NOTICE_DOWNGRADED_TO_VIEWER = 1L
@@ -25,7 +25,7 @@ private const val NOTICE_DEVICE_RESTORED = 6L
  * Bit 61: ROTATION_PRESENT (issue #4786). Set on a CONFIG packet whose bits 60-59 attest a display
  * rotation (`0..3`). The daemon relay leaves it clear when its source cannot prove rotation
  * (screenrecord/iOS), so an absent bit means "unknown" — distinct from the valid value 0. See
- * `src/daemon/videoStreamFraming.ts` for the encoder.
+ * `src/daemon/streams/videoStreamFraming.ts` for the encoder.
  */
 private const val FLAG_ROTATION_PRESENT = 1L shl 61
 /** Bit 59 is CONFIG-only rotation data, so it is free for non-CONFIG dropped-frame telemetry. */
@@ -36,7 +36,8 @@ private const val ROTATION_MASK = 0b11L shl ROTATION_SHIFT
 /**
  * Bit 60 on a non-CONFIG, zero-payload packet: a relay-originated heartbeat (issue #7549). Bit 60
  * is otherwise only meaningful on a CONFIG packet (part of the rotation field), so it is free to
- * reuse here as long as CONFIG stays clear. See `src/daemon/videoStreamFraming.ts` for the encoder.
+ * reuse here as long as CONFIG stays clear. See `src/daemon/streams/videoStreamFraming.ts` for the
+ * encoder.
  */
 private const val FLAG_HEARTBEAT = 1L shl 60
 
@@ -133,7 +134,7 @@ class VideoStreamFormatException(message: String) : Exception(message)
  *
  * The wire format is a 12-byte stream header (codec id, width, height) followed by repeating
  * 12-byte packet headers (`ptsAndFlags` as a big-endian int64, then payload length) each followed
- * by an Annex-B payload. See `src/daemon/videoStreamFraming.ts` for the encoder.
+ * by an Annex-B payload. See `src/daemon/streams/videoStreamFraming.ts` for the encoder.
  *
  * Socket reads split anywhere, including mid-header, so bytes are buffered until a complete unit is
  * available. Not thread-safe: feed it from a single reader.

@@ -9,16 +9,16 @@ import {
   type RefusalSurfaceFixture,
 } from "../helpers/refusalWireFixtures";
 import { afterEach, describe, expect, test } from "bun:test";
-import { DeviceGestureRecordingSocketServer } from "../../src/daemon/deviceGestureRecordingSocketServer";
+import { DeviceGestureRecordingSocketServer } from "../../src/daemon/streams/deviceGestureRecordingSocketServer";
 import {
   SessionScopedStreamAuthenticator,
   type StreamAuthorizeInput,
   type StreamSocketAuthenticator,
-} from "../../src/daemon/streamSocketAuth";
+} from "../../src/daemon/streams/streamSocketAuth";
 import type { DeviceGestureRecordingCommand } from "../../src/daemon/deviceGestureRecordingSocketTypes";
 import { ActionableError } from "../../src/models";
 import type { DeviceAdmissionGate } from "../../src/utils/deviceAdmissionGate";
-import type { DeviceGestureRecordingDeviceResolution } from "../../src/daemon/deviceGestureRecordingSocketServer";
+import type { DeviceGestureRecordingDeviceResolution } from "../../src/daemon/streams/deviceGestureRecordingSocketServer";
 import {
   getDeviceGestureRecordingStatus,
   startDeviceGestureRecording,

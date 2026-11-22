@@ -1,7 +1,7 @@
 /** Tray observation, gestures, and notification wait orchestration. */
 
 import { ActionableError } from "../../../models/ActionableError";
-import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "../../../daemon/streams/deviceDataStreamSocketServer";
 import {
   BootedDevice,
   Element,

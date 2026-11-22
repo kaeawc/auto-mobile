@@ -1,4 +1,4 @@
-import { createScreenshotUpdate } from "../../../src/daemon/deviceDataStream/screenshotUpdate";
+import { createScreenshotUpdate } from "../../../src/daemon/streams/deviceDataStream/screenshotUpdate";
 import { screenshotFrameSchema } from "../../helpers/wireMessageSchemas";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { describe, expect, test } from "bun:test";

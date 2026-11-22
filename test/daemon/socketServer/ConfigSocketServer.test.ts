@@ -3,10 +3,10 @@ import {
   ConfigSocketRequest,
   ConfigSocketServer,
 } from "../../../src/daemon/socketServer/ConfigSocketServer";
-import { DeviceSnapshotSocketServer } from "../../../src/daemon/deviceSnapshotSocketServer";
+import { DeviceSnapshotSocketServer } from "../../../src/daemon/streams/deviceSnapshotSocketServer";
 import { DEFAULT_DEVICE_SNAPSHOT_CONFIG } from "../../../src/models/DeviceSnapshotConfigDefaults";
 import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../../src/models/VideoRecordingConfigParsing";
-import { VideoRecordingSocketServer } from "../../../src/daemon/videoRecordingSocketServer";
+import { VideoRecordingSocketServer } from "../../../src/daemon/streams/videoRecordingSocketServer";
 import type {
   DeviceSnapshotConfig,
   DeviceSnapshotConfigInput,

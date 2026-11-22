@@ -187,9 +187,10 @@ The `appInstanceId`, sequence ledger and unacknowledged events persist in app st
 process kills. The journal records the package's last update time and is discarded under another
 one, so `adb install -r` (which keeps app storage) starts a fresh identity and ledger. Clearing app
 data deletes it. Saves run off the main thread, at most once per event; a frame reaches the host
-only after the write of the state it exposes completes. A snapshot over the 4 MiB journal limit
-evicts its oldest pending events as dropped, so the ledger still saves; a save that still fails is
-logged and keeps the previous file.
+only after the save of the state it exposes finishes, even if that save fails, so the host can hold
+a sequence the restored journal lacks. A snapshot over the 4 MiB journal limit evicts its oldest
+pending events as dropped, so the ledger still saves; a save that still fails is logged and keeps
+the previous file.
 
 `hello_result` reports identity and an optional `showingId`, which changes when the Activity
 mounts a new runtime. A same-process remount clears the dismissal and keeps pending events. Older

@@ -1,3 +1,5 @@
+import { createReadStream } from "node:fs";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { ActionableError, type BootedDevice } from "../../models";
 import { toActionableError } from "../../models/ActionableError";
@@ -33,8 +35,23 @@ import {
   XCTRACE_SUMMARY_SCHEMAS,
   type XctraceToc,
 } from "./xctraceExport";
+import {
+  summarizeTimeProfileStream,
+  type TimeProfileStreamSummary,
+} from "./xctraceTimeProfileStream";
 import { waitForChildExit, waitForChildOutput } from "./childProcessWaits";
 import { traceArtifactBytes, waitForXctraceFinalization } from "./xctraceFinalization";
+
+/** File access for table exports too large to hold in memory (the `time-profile` table, #18791). */
+export interface XctraceExportFiles {
+  open(path: string): AsyncIterable<string | Uint8Array>;
+  remove(path: string): Promise<void>;
+}
+
+const defaultExportFiles: XctraceExportFiles = {
+  open: (path) => createReadStream(path, { encoding: "utf8" }),
+  remove: (path) => rm(path, { force: true }),
+};
 
 export interface XctraceHost extends HostCommandExecutor {
   spawn(file: string, args: string[], options?: HostSpawnOptions): HostChildProcess;
@@ -301,7 +318,7 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
         }
       },
       summarize: async (signal) => {
-        const summarized = await summarizeXctrace(host, artifactPath, template, signal);
+        const summarized = await summarizeXctrace(host, artifactPath, template, { signal });
         return withRecordErrors(
           summarized,
           xctraceRecordErrors(output.read()),
@@ -385,6 +402,40 @@ async function exportXml(
   ).stdout;
 }
 
+interface ExportSource {
+  host: HostCommandExecutor;
+  files: XctraceExportFiles;
+  artifactPath: string;
+  signal?: AbortSignal;
+}
+
+/**
+ * `time-profile` is the one table that outgrows a stdout buffer (110 MB for a 10 s all-processes
+ * run), so export it to a file beside the trace and stream it, removing the file afterwards.
+ */
+async function summarizeTimeProfileExport(
+  source: ExportSource,
+  xpath: string,
+): Promise<TimeProfileStreamSummary> {
+  const { host, files, artifactPath, signal } = source;
+  const outputPath = `${artifactPath}.time-profile.xml`;
+  try {
+    await exportXml(
+      host,
+      ["--input", artifactPath, "--xpath", xpath, "--output", outputPath],
+      signal,
+    );
+    return await summarizeTimeProfileStream(files.open(outputPath), signal);
+  } finally {
+    await files.remove(outputPath).catch((error: unknown) => {
+      logger.warn(
+        `[performanceTrace] could not remove ${outputPath}: ${errorMessage(error)}`,
+        error,
+      );
+    });
+  }
+}
+
 function isEmptyRun(toc: XctraceToc): boolean {
   return toc.durationMs === 0 && toc.schemas.length === 0;
 }
@@ -402,13 +453,21 @@ function timeProfilerSummaryWarnings(
   return [];
 }
 
+function tocFailureWarning(error: unknown): string {
+  const unreadable = /malformed|missing/i.test(errorMessage(error))
+    ? " The trace is unreadable (xctrace did not finalize it); do not rely on the artifact."
+    : "";
+  return `xctrace export --toc failed: ${errorMessage(error)}.${unreadable}`;
+}
+
 /** Summarise a finished `.trace` through `xctrace export`: the TOC, then the template's table. */
 export async function summarizeXctrace(
   host: HostCommandExecutor,
   artifactPath: string,
   template: PerformanceTraceTemplate,
-  signal?: AbortSignal,
+  options: { signal?: AbortSignal; files?: XctraceExportFiles } = {},
 ): Promise<{ summary: PerformanceTraceSummary; warnings: string[] }> {
+  const { signal, files = defaultExportFiles } = options;
   const warnings: string[] = [];
   let toc;
   try {
@@ -416,13 +475,7 @@ export async function summarizeXctrace(
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn(`[performanceTrace] xctrace export --toc failed: ${errorMessage(error)}`, error);
-    const unreadable = /malformed|missing/i.test(errorMessage(error))
-      ? " The trace is unreadable (xctrace did not finalize it); do not rely on the artifact."
-      : "";
-    return {
-      summary: {},
-      warnings: [`xctrace export --toc failed: ${errorMessage(error)}.${unreadable}`],
-    };
+    return { summary: {}, warnings: [tocFailureWarning(error)] };
   }
   if (isEmptyRun(toc)) {
     return {
@@ -448,12 +501,9 @@ export async function summarizeXctrace(
     return { summary, warnings };
   }
   try {
-    const xpath = `/trace-toc/run[@number="1"]/data/table[@schema="${schema}"]`;
-    const rows = await parseXctraceTable(
-      await exportXml(host, ["--input", artifactPath, "--xpath", xpath], signal),
-    );
-    Object.assign(summary, summarizeXctraceTable(template, rows));
-    warnings.push(...timeProfilerSummaryWarnings(template, rows.length, summary));
+    const table = await summarizeTable({ host, files, artifactPath, signal }, template, schema);
+    Object.assign(summary, table.summary);
+    warnings.push(...table.warnings);
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn(
@@ -463,4 +513,25 @@ export async function summarizeXctrace(
     warnings.push(`xctrace export of "${schema}" failed: ${errorMessage(error)}`);
   }
   return { summary, warnings };
+}
+
+async function summarizeTable(
+  source: ExportSource,
+  template: PerformanceTraceTemplate,
+  schema: string,
+): Promise<{ summary: Partial<PerformanceTraceSummary>; warnings: string[] }> {
+  const xpath = `/trace-toc/run[@number="1"]/data/table[@schema="${schema}"]`;
+  if (template === "timeProfiler") {
+    const streamed = await summarizeTimeProfileExport(source, xpath);
+    const summary = { topFunctions: streamed.topFunctions };
+    return {
+      summary,
+      warnings: timeProfilerSummaryWarnings(template, streamed.sampleCount, summary),
+    };
+  }
+  const { host, artifactPath, signal } = source;
+  const rows = await parseXctraceTable(
+    await exportXml(host, ["--input", artifactPath, "--xpath", xpath], signal),
+  );
+  return { summary: summarizeXctraceTable(template, rows), warnings: [] };
 }

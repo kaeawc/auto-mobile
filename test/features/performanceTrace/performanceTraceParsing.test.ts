@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
-import { summarizeXctrace } from "../../../src/features/performanceTrace/XctraceRecorder";
+import {
+  summarizeXctrace,
+  type XctraceExportFiles,
+} from "../../../src/features/performanceTrace/XctraceRecorder";
 import {
   parseTraceProcessorCsv,
   summarizePerfettoTrace,
@@ -33,8 +36,25 @@ beforeAll(async () => {
 function summarizeTimeProfile(xml: string) {
   const host = new FakeHostCommandExecutor();
   host.setCommandResponse("--toc", createExecResult(timeProfilerToc, ""));
-  host.setCommandResponse("--xpath", createExecResult(xml, ""));
-  return summarizeXctrace(host, "/out/t.trace", "timeProfiler");
+  host.setCommandResponse("--xpath", createExecResult("", ""));
+  return summarizeXctrace(host, "/out/t.trace", "timeProfiler", {
+    files: exportFiles(xml),
+  });
+}
+
+function exportFiles(xml: string, removed: string[] = []): XctraceExportFiles {
+  return {
+    open: () => chunked(xml, 64),
+    remove: async (path) => {
+      removed.push(path);
+    },
+  };
+}
+
+async function* chunked(text: string, size: number) {
+  for (let start = 0; start < text.length; start += size) {
+    yield text.slice(start, start + size);
+  }
 }
 
 const base = { deviceId: "SIM", outputPath: "/out/t.trace", timeLimitMs: 30_000 };
@@ -212,10 +232,10 @@ describe("xctrace export parsing (#14102)", () => {
         <frame id="symbol" name="symbolicatedFunction"/>
       </tagged-backtrace></row>
       <row><tagged-backtrace ref="direct"/></row>
+      <row><backtrace id="wrapped"><frame ref="symbol"/></backtrace></row>
       <row><tagged-backtrace><backtrace ref="wrapped"/>
         <frame name="mustNotWin"/>
       </tagged-backtrace></row>
-      <row><backtrace id="wrapped"><frame ref="symbol"/></backtrace></row>
     </node></trace-query-result>`;
     const rows = await parseXctraceTable(xml);
     const expected = {
@@ -225,6 +245,25 @@ describe("xctrace export parsing (#14102)", () => {
     const result = await summarizeTimeProfile(xml);
     expect(result.summary.topFunctions).toEqual(expected.topFunctions);
     expect(result.warnings).toEqual([]);
+  });
+
+  test("streams the time-profile export to a file beside the trace, matching the in-memory summary", async () => {
+    const xml = fixture("xctrace-time-profile-xcode27-sim.xml");
+    const removed: string[] = [];
+    const host = new FakeHostCommandExecutor();
+    host.setCommandResponse("--toc", createExecResult(timeProfilerToc, ""));
+    host.setCommandResponse("--xpath", createExecResult("", ""));
+    const result = await summarizeXctrace(host, "/out/t.trace", "timeProfiler", {
+      files: exportFiles(xml, removed),
+    });
+    expect(result.summary.topFunctions).toEqual(
+      summarizeXctraceTable("timeProfiler", timeProfileXcode27Rows).topFunctions,
+    );
+    expect(host.getExecutedCalls().at(-1)?.args.slice(-2)).toEqual([
+      "--output",
+      "/out/t.trace.time-profile.xml",
+    ]);
+    expect(removed).toEqual(["/out/t.trace.time-profile.xml"]);
   });
 
   test("warns when time-profile rows contain no readable function names", async () => {

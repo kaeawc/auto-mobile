@@ -46,6 +46,7 @@ import { TapTargetResolver } from "./TapTargetResolver";
 import type { TapOnTalkBackStrategy } from "./TapGestureDispatcher";
 import { TapGestureDispatcher } from "./TapGestureDispatcher";
 import { warningsField, type TapOnFocusOutcome } from "./TapSemanticLinks";
+import { tapHierarchyUnavailableFields } from "./tapHierarchyUnavailable";
 
 type AndroidDisplayTalkBackState = { enabled: boolean; warnings: string[] };
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
@@ -371,6 +372,9 @@ export class TapDisplayRouter {
         if (outcome.visibilityError) {
           throw outcome.visibilityError;
         }
+        if (outcome.hierarchyUnavailableError) {
+          throw outcome.hierarchyUnavailableError;
+        }
         // Vision screenshots are not display-aware. Omit the observation to keep
         // the shared base error without invoking default-display vision fallback.
         await this.host.handleElementNotFound(options, {
@@ -386,6 +390,7 @@ export class TapDisplayRouter {
             {
               ...this.host.createErrorResult(options.action, errorMessage(error)),
               searchUntil: outcome.stats,
+              ...tapHierarchyUnavailableFields(error),
             },
             error,
           ),

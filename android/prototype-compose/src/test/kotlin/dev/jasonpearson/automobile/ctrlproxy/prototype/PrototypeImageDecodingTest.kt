@@ -41,6 +41,24 @@ class PrototypeImageDecodingTest {
   }
 
   @Test
+  fun `a non-identity EXIF transform halves the budget so source and copy fit together`() {
+    val budget = prototypeImagePixelBudget(4L * 1024 * 1024, 16L * 1024 * 1024, 8)
+    assertEquals(budget, prototypeImageTransformPixelBudget(budget, 1))
+    assertEquals(budget, prototypeImageTransformPixelBudget(budget, 0))
+    assertEquals(budget, prototypeImageTransformPixelBudget(budget, 9))
+    for (orientation in 2..8) {
+      assertEquals(budget / 2, prototypeImageTransformPixelBudget(budget, orientation))
+    }
+    // A source that fits the full budget at 2x sampling needs 4x once a transform copy is reserved.
+    val target = PrototypeImageTarget(4096, 2048)
+    assertEquals(2, prototypeImageSampleSize(4096, 2048, target, budget))
+    assertEquals(
+      4,
+      prototypeImageSampleSize(4096, 2048, target, prototypeImageTransformPixelBudget(budget, 6)),
+    )
+  }
+
+  @Test
   fun `EXIF orientations map asymmetric corners through all rotations and reflections`() {
     // The image-coordinate transform of (2, 3), before createBitmap translates the bounds.
     val expected =

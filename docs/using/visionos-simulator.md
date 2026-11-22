@@ -68,7 +68,8 @@ auto-mobile --cli getLogs --platform visionos --sessionUuid "$SESSION_ID" \
 | `since`                                                                                                      | `"lastAction"`, `"sessionStart"`, `"run-start"` (during plan execution only) or `{"seconds": N}`. Default: the last 300 seconds.       |
 | `minPriority`                                                                                                | `V`/`D` debug and up, `I` info and up, `W` default and up (the unified log has no warning level), `E` error and fault, `F` fault only. |
 | `tags`, `buffers`, `includeSystem`                                                                           | Android-only; ignored with a warning.                                                                                                  |
-| `getLogs` is not listed by default; enable it with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)). |
+
+`getLogs` is not listed by default; enable it with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
 
 ## List, stop and uninstall apps
 

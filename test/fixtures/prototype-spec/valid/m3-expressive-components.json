@@ -1,0 +1,123 @@
+{
+  "id": "expressive",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "mode": "day",
+    "loaded": 40
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "segmentedButton",
+        "testTag": "mode",
+        "stateKey": "mode",
+        "variant": "connected",
+        "options": [
+          {
+            "value": "day",
+            "label": "Day"
+          },
+          {
+            "value": "week",
+            "label": "Week"
+          },
+          {
+            "value": "month",
+            "label": "Month"
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "testTag": "send",
+        "label": "Send",
+        "onTap": [
+          {
+            "type": "emit",
+            "name": "send"
+          }
+        ],
+        "split": {
+          "menu": [
+            {
+              "label": "Schedule",
+              "icon": "schedule",
+              "onTap": [
+                {
+                  "type": "emit",
+                  "name": "schedule"
+                }
+              ]
+            },
+            {
+              "type": "divider"
+            },
+            {
+              "label": "Save draft",
+              "onTap": [
+                {
+                  "type": "emit",
+                  "name": "draft"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "type": "progress",
+        "variant": "wavy",
+        "stateKey": "loaded",
+        "max": 100
+      },
+      {
+        "type": "progress",
+        "variant": "wavy"
+      },
+      {
+        "type": "loadingIndicator",
+        "testTag": "loading",
+        "contentDescription": "Loading"
+      },
+      {
+        "type": "loadingIndicator",
+        "contained": true
+      },
+      {
+        "type": "fab",
+        "testTag": "create",
+        "icon": "add",
+        "contentDescription": "Create",
+        "menu": {
+          "items": [
+            {
+              "icon": "edit",
+              "label": "Note",
+              "onTap": [
+                {
+                  "type": "emit",
+                  "name": "note"
+                }
+              ]
+            },
+            {
+              "icon": "image",
+              "label": "Photo",
+              "onTap": [
+                {
+                  "type": "emit",
+                  "name": "photo"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

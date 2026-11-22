@@ -136,6 +136,8 @@ struct PrototypeInFlightRequest {
     let onSuccess: [PrototypeAction]
     let onError: [PrototypeAction]
     var append: PrototypeRequestAppend? = nil
+    /// The initiating handler event, restored before the follow-up list is planned and run.
+    let eventData: JSONValue?
     var `where`: PrototypeDataWrite.Match? = nil
     var member: String? = nil
     var context: PrototypeActionContext? = nil

@@ -45,6 +45,16 @@ describe("watch notification delivery verdict", () => {
       "NO",
     );
   });
+  test("separates a foreground shouldPresentAlert: NO from a denied NO", () => {
+    const foreground = readFileSync(
+      new URL("../../fixtures/ios/watch-log-saving-notification-foreground.txt", import.meta.url),
+      "utf8",
+    );
+    const foregroundBundle = "dev.jasonpearson.automobile.ctrlproxy.watch";
+    expect(watchNotificationDeliveryVerdict(foreground, foregroundBundle)).toBe("NOT_PRESENTED");
+    // A denied capture (settingsShouldSave: NO) stays NO.
+    expect(watchNotificationDeliveryVerdict(noLines.join("\n"), bundleId)).toBe("NO");
+  });
   test("returns null without delivery lines", () => {
     expect(watchNotificationDeliveryVerdict("", bundleId)).toBeNull();
     expect(watchNotificationDeliveryVerdict(capture.split("\n")[0], bundleId)).toBeNull();

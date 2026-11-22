@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "expressive",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "mode": "day"
+    },
+    "root": {
+      "type": "button",
+      "testTag": "send",
+      "label": "Send",
+      "onTap": [
+        {
+          "type": "emit",
+          "name": "send"
+        }
+      ],
+      "split": {
+        "menu": []
+      }
+    }
+  },
+  "expectedPath": "root.split.menu"
+}

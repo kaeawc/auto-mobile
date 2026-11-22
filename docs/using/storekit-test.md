@@ -36,7 +36,7 @@ fails the call before anything reaches the device.
 2. `buy`, `refund`, `expire`, `list` and `clear` return `transactions`, each with `identifier`,
    `productId`, `state` (`purchased`, `purchasing`, `failed`, `restored`, `deferred` or
    `unknown`) and `originalIdentifier` for renewals.
-3. `setSimulatedError` makes the next `buy` fail with that error, and is cleared after it.
+3. `setSimulatedError` makes the next `buy` fail with that error, then clears itself.
    Purchases the app starts itself keep failing until the next `buy`, `clear` or another `load`.
    On an iOS 26 or newer simulator the runner's host app must be installed before `load`;
    AutoMobile installs it when it starts the runner.

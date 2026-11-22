@@ -1,6 +1,6 @@
 # macOS CI capacity plan (#11010, #11011, #11012)
 
-Owner steps below are still open. The sourced CircleCI plan numbers are in the earlier
+Owner steps below are still open. Sourced CircleCI plan numbers are in the earlier
 [CircleCI migration plan](circleci-macos-migration.md) (#10887).
 
 Rule: every pull-request macOS job runs in exactly one place. Hosted
@@ -111,7 +111,7 @@ repository's self-hosted runners via the REST API and outputs `small`
 (`automobile-mac`) and `heavy` (`automobile-mac-heavy`), each `self-hosted` or
 `hosted`. A pool is `hosted` when no runner carrying exactly that label is
 `online`; a busy online runner still counts, since the job waits for it. It
-routes only the current run and never changes the repository variable. Every Mac pool job `needs` it and leaves its pool only on an
+routes only the current run, never the repository variable. Every Mac pool job `needs` it, leaves its pool only on an
 explicit `hosted`, and runs under `always()` so a cancelled or failed routing
 job does not skip it.
 
@@ -141,9 +141,9 @@ job does not skip it.
   `package.json`, `android/gradle/libs.versions.toml`, or
   `.github/workflows/pull_request.yml` changed (#11580).
   Otherwise its no-op leg reports from Linux with the same required check name.
-  The minimal installer installs the published npm package, and reads the
-  checkout's compileSdk TOML in the initial SDK advisory, before applying the
-  preset, when adb and an SDK path are detected (also non-interactively). The main-push installer remains unconditional.
+  The minimal installer installs the published npm package, reads the
+  checkout's compileSdk TOML in the initial SDK advisory, then applies the
+  preset when adb and an SDK path are detected (non-interactively). The main-push installer remains unconditional.
 - The four PR SwiftPM build/coverage jobs cache dependencies in
   `$RUNNER_TEMP/automobile-swiftpm-cache` on the Mac, symlinked from the isolated
   home's `Library/Caches/org.swift.swiftpm`. Home cleanup removes only the link,
@@ -190,7 +190,7 @@ job does not skip it.
   that Xcode lacks its Metal Toolchain. Local scripts call `select_pinned_xcode`.
   `test/bats/xcode-version-pin.bats` fails when a workflow job selects another
   version. The CircleCI nightly sweeps and the 26.6 entry of the Build Root SPM
-  Package matrix keep Xcode 26.6, the Swift 6.3 floor, verified; both pin
+  Package matrix keep Xcode 26.6, the Swift 6.3 floor, verified. Both pin
   `DEVELOPER_DIR` to that Xcode so `select_pinned_xcode` cannot move them to 27.2.
   A roll-up job keeps the required check name.
 - Swift Packages builds unsigned on the Mac: its signing flags are false
@@ -225,8 +225,7 @@ owner decision.
 **N for the small pool: 4.** Swift package builds and the desktop Gradle build
 are CPU-bound, each able to use most cores. Four small jobs plus the heavy lane
 leave about one performance core per process and headroom for the owner's work;
-memory (128 GiB) is not the limit. That is five runner processes: the existing
-`mac` runner, three new small ones and one heavy one.
+memory (128 GiB) is not the limit.
 
 ## Namespace macOS (#11012)
 

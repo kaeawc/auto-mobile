@@ -3,19 +3,19 @@
 Part of [the agent-authored prototype specification](prototype-ux.md).
 
 **Sandbox commerce (#14314).** The `commerce` module (`prototype_platform_commerce_v1`) has two calls.
-The `commerce.purchase` call takes a required `productId` (an identifier of at most 64 characters) and writes
-`{status, transactionId}` into `into`, where `status` is `purchased`, `deferred` or `pending`. A back-out is the
-typed error `cancelled`. The `commerce.restore` call takes no arguments. The `commerce.entitlementsChanged` event and the
+The `commerce.purchase` call takes a required `productId` (at most 64 characters) and writes
+`{status, transactionId}` into `into`, where `status` is `purchased`, `deferred` or `pending`. A back-out is
+typed error `cancelled`. The `commerce.restore` call takes no arguments. `commerce.entitlementsChanged` and the
 read-only keys `/platform/commerce/entitlements` and `/platform/commerce/lastTransaction` complete the module.
 No argument carries an amount, merchant, key or card: prices come only from the catalog.
 
 The root `commerce` catalog (needs `commerce` in `requires.platform`) is `{backend: "fake", products}` with 1 to
-32 products. Each product has a unique `id` (an identifier), a `title`, a `kind` (`consumable`, `nonConsumable`
+32 products. Each product has a unique `id`, a `title`, a `kind` (`consumable`, `nonConsumable`
 or `subscription`) and a `price`. The price has a decimal-string `amount` (up to two decimal places) and an
 upper-case three-letter `currency`. Only a subscription may have a `period` or `trialPeriod`, an ISO 8601 duration of
-whole days, weeks, months or years (`P7D`, `P1M`). The block has no merchant, gateway, key, card or URL field.
+whole days, weeks, months or years. The block has no merchant, gateway, key, card or URL field.
 Every `commerce.*` call needs the catalog, and a literal `productId` must name one of its products.
-The contract has no `commerce.checkout`, and no production runtime advertises the module.
+The contract has no `commerce.checkout`; no production runtime advertises the module.
 
 The fake store's state follows one reducer, `prototypePurchaseOutcome.ts`. Kotlin and Swift `PrototypePurchaseOutcome`
 copy it, and all three replay `test/fixtures/prototype-purchase/`. The `entitlements` key maps a product id to `active`,
@@ -28,17 +28,22 @@ untouched. A code other than `cancelled`, `alreadyOwned` or `platform_error` bec
 
 The store records every result as `lastTransaction`, but only `purchased` grants the entitlement. A
 `deferred` or `pending` transaction resolves later: `approved` grants the entitlement and `declined`
-records `declined`. Simulated `entitlementsChanged` events work on a subscription the user holds. The
-`renew` event sets it `active`, and `gracePeriod` and `billingRetry` set those states. The `expire` and
-`refund` events remove an entitlement and also apply to a non-consumable. The module raises
-`commerce.entitlementsChanged` only when the entitlements actually change.
+records `declined`. Simulated `entitlementsChanged` events work on a subscription the user holds:
+
+| Event                          | Effect                                                |
+| ------------------------------- | ------------------------------------------------------ |
+| `renew`                         | Sets the entitlement `active`                           |
+| `gracePeriod`, `billingRetry`   | Sets that state                                         |
+| `expire`, `refund`              | Removes the entitlement (also for a non-consumable)     |
+
+It raises `commerce.entitlementsChanged` only when entitlements actually change.
 
 **Secure storage (#14321).** `storage.secure` lists up to eight declared string `state:` keys,
 separate from `storage.keys`. It requires `secureStorage` in `requires.platform` and
 `prototype_platform_secureStorage_v1`. ProtoViewer, saved-prototype Activities and the disposable
 app shell register the module. CtrlProxy's injected overlay and unsupported embedded hosts refuse it.
 The module has no calls; `/platform/secureStorage/locked` is false. Biometric-bound `secureAuth`
-keys stay live-only: this runtime neither persists nor restores them.
+keys stay live-only, never persisted or restored.
 
 Each value is limited to 4096 UTF-8 bytes and excluded from the plaintext document and its byte
 budget. An app-private file under `prototype-storage/secure/` holds a Base64-encoded AES-GCM
@@ -46,7 +51,7 @@ ciphertext with a fresh random 12-byte IV. The 256-bit AES key stays in AndroidK
 `dev.automobile.prototype.<slug>-<full-id-sha256>`, without user authentication. The full id also
 authenticates the ciphertext; ProtoViewer isolates duplicate imports by library entry id.
 Writes sync a temporary file before atomic replacement. Missing or unusable keys and corrupt
-ciphertext leave values absent with a fixed warning that carries no payload or exception details.
+ciphertext leave values absent, with a fixed warning carrying no payload or exception details.
 
 The [storage precedence and clearing rules](prototype-ux-storage.md) apply to both stores.
 Reset, `clearStorage` and deletion remove the secure file and its Keystore alias; dismissal retains
@@ -59,10 +64,19 @@ value. Requests may reference them only with `allowSecureInRequest: true`; other
 refuses state bindings and text placeholders in URLs, headers, query values and bodies. See [request bindings](prototype-ux-request.md).
 
 **Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
-event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
-exactly one `/<module>/<key>`. The keys are `pitchDeg` and `rollDeg` (whole degrees, -180 to 180), `headingDeg` (0 to 359),
-`steps` (counted since the subscription started), `proximityNear` (boolean) and `lightLux` (whole lux, Android
-only). There is no public ambient-light API on iOS. A sensor the device lacks leaves its key absent, so it compares as
+event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat: a `/platform` pointer reads
+one `/<module>/<key>`.
+
+| Key             | Value                                            |
+| --------------- | ------------------------------------------------- |
+| `pitchDeg`      | Whole degrees, -180 to 180                        |
+| `rollDeg`       | Whole degrees, -180 to 180                        |
+| `headingDeg`    | 0 to 359                                          |
+| `steps`         | Counted since the subscription started            |
+| `proximityNear` | Boolean                                           |
+| `lightLux`      | Whole lux, Android only (no public iOS API)       |
+
+A sensor the device lacks leaves its key absent, so it compares as
 missing. The runtimes copy whole-unit rounding from `prototypeSensorReference.ts`. Continuous values use per-key
 throttling at `1000 / rateHz` ms (`rateHz` 1 to 30). A shake needs 2.7 g or more with a 1000 ms cooldown.
 On iOS, every distinct proximity change publishes immediately; identical consecutive values are ignored.
@@ -72,7 +86,7 @@ The root `sensors` block lists the sensors the device listens to, and needs `sen
 In it, `shake`, `steps` and `proximity` take `{}`, while `orientation` (the three degree keys) and `light` take an optional
 `rateHz` of 1 to 30. The `steps` sensor also needs the `motion` permission in `requires.permissions`. A `/platform/sensors`
 read or a `sensors.shake` handler must name a sensor the block lists. Android CtrlProxy advertises the module
-using platform sensors, with subscriptions only while the prototype is active and in the foreground. Steps
+using platform sensors, subscribed only while the prototype is active and foregrounded. Steps
 remain absent without an `ACTIVITY_RECOGNITION` grant; the module does not request it.
 
 The iOS agent, ProtoViewer and Viewer registries advertise the module using CoreMotion and UIKit proximity monitoring.
@@ -91,11 +105,12 @@ refuse these specs before show. Failures use `cancelled`, or `unavailable` with 
 `not_enrolled` or `no_hardware`. Only a foreground Activity can start a prompt. Cancellation, timeout
 and host teardown dismiss it.
 
-API 28 checks only `PackageManager.FEATURE_FINGERPRINT` before showing the prompt; a missing feature
-returns `unavailable` with reason `no_hardware`. With that feature present, enrollment and lockout
-errors come from the prompt callback. API 29 adds device credentials, and API 30 selects
-`BIOMETRIC_STRONG | DEVICE_CREDENTIAL` when requested. Earlier Android versions and credential
-fallback on API 28 report `no_hardware`.
+| API level                                      | Biometric prompt behavior                                                                                                                                       |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 28                                               | Checks only `PackageManager.FEATURE_FINGERPRINT` before showing the prompt; a missing feature returns `unavailable` with reason `no_hardware`. With the feature present, enrollment and lockout errors come from the prompt callback. |
+| 29                                               | Adds device credentials as a fallback.                                                                                                                          |
+| 30                                               | Selects `BIOMETRIC_STRONG \| DEVICE_CREDENTIAL` when requested.                                                                                                  |
+| Earlier than 28, or credential fallback on 28    | Reports `no_hardware`.                                                                                                                                           |
 
 **Voice notes (#14194, contract only).** The `audioRecorder` module
 (`prototype_platform_audioRecorder_v1`) records from the microphone, so every call needs `microphone`
@@ -107,9 +122,9 @@ and `audioRecorder.cancel` discards the recording. The `/platform/audioRecorder/
 counts the current recording. A press-and-hold control uses the gesture action lists, and playback
 uses a `media` audio player. No production runtime advertises the module yet.
 
-**Runtime permissions (#14297).** Canonical names live in `requires.permissions[].name`, and each entry's
-`purpose` becomes the iOS usage string and the Android rationale text. The `schemas/prototype-platform-permissions.json`
-file maps each name to its Android manifest permissions and grant mechanism, and to its iOS Info.plist usage key and
+**Runtime permissions (#14297).** Canonical names live in `requires.permissions[].name`; each entry's
+`purpose` becomes the iOS usage string and Android rationale text. `schemas/prototype-platform-permissions.json`
+maps each name to its Android manifest permission, grant mechanism, iOS Info.plist usage key and
 `simctl privacy` service:
 
 | Name                 | Android manifest                                 | Android grant     | iOS usage key                                  | `simctl privacy`        |
@@ -140,15 +155,18 @@ runtimes do not advertise the module, since a grant there would go to CtrlProxy 
 iOS standalone hosts and ProtoViewer register `permissions` for `notifications`; borrowed-app sessions
 do not expose the module. Other canonical names return `unavailable`.
 The first status read establishes `/platform/permissions/notifications` asynchronously without prompting.
-Requests and foreground Settings re-reads publish only changed states. A request uses alert,
+Requests and foreground Settings re-reads publish only changed states.
+
+A request uses alert,
 sound and badge options only while authorization is `notDetermined`; `options.provisional: true` adds
-provisional authorization without showing a prompt. It then re-reads notification settings
+it without showing a prompt. It then re-reads notification settings
 for its result. Outside an app bundle with a bundle
 identifier, the source returns `unavailable` without accessing UserNotifications. No Info.plist key is
 required. One request may be in flight per module; a second returns `too_many_in_flight`. Request
 cancellation drops the late result while foreground observation stays active. The registry stops
 observation when its final observer releases it. Permission requests have no platform-call deadline,
 including an explicit `timeoutMs`; `statusKey` stays `loading` until a result or cancellation.
+
 The same state is published at `/platform/notifications/authorization`, including the baseline and
 foreground re-reads, and cleared on stop. An authorization-only binding declares `notifications` in
 `requires.platform` and `requires.permissions` and uses the permissions capability on iOS.
@@ -175,7 +193,7 @@ without a platform-call deadline, including an explicit `timeoutMs`; `statusKey`
 until a result or cancellation. Cancellation, Activity destruction and teardown unregister the result
 launcher and drop late callbacks. Activity resume re-reads notification authorization and emits only
 changed states. Denial history belongs to each runtime session, is recorded only after a successful
-launch delivers a denial, and is cleared on reset or teardown and whenever a grant is observed.
+launch delivers a denial, and clears on reset, teardown or any later grant.
 
 | Android notification authorization                                      | State           |
 | ----------------------------------------------------------------------- | --------------- |
@@ -196,7 +214,7 @@ advertise the notifications module.
 The host sets declared permissions after install and before launch, so the first frame shows the final
 state. The mode is `prompt`, `grantDeclared`, or `{grant: [...], deny: [...]}` naming declared
 permissions only, each in one list. The `prompt` mode is the default for interactive shows: nothing is
-granted, so the first request shows the system dialog and plans rely on the system-alert policy (#14106). Tests and agent loops pass
+granted, so the first request shows the system dialog, per the system-alert policy (#14106). Tests and agent loops pass
 an explicit mode. An Android denial revokes with the `user-fixed` flag, so it reads `blocked` and no dialog
 appears; an iOS simulator denial is `simctl privacy revoke` and reads `denied`. Each declared permission is
 reported as `{name, state, verified}`; `verified` is false, with `reason`, for a simulator name that is
@@ -243,30 +261,28 @@ The bounds are named contract limits (`MAX_PROTOTYPE_NOTIFICATION_*`,
 checks literal values only. The limits that apply after placeholders resolve belong to the device
 runtime that posts the notification. They are a reply of at most 1 KiB, a resolved notification of at
 most 5 KiB, and at most 4 updates per second per notification, coalesced to the latest. The per-prototype
-iOS Viewer is the only runtime that posts notifications; no other host posts one, so these limits are not
-enforced elsewhere.
+iOS Viewer is the only runtime that posts notifications, so these limits go unenforced elsewhere.
 
 The iOS Viewer posts local notifications under its own bundle identity and advertises both
 `prototype_platform_notifications_v1` and `prototype_platform_notifications_scheduled_v1`, so
 `notifications.schedule` specs pass preflight. It uses one request identifier per prototype and notification
 id, and cancels matching delivered and scheduled requests by id, group, or all. Pending requests reserve
-space in the active limit because iOS can deliver them while the Viewer is suspended. The module reports the
-Viewer's authorization state. The launch delegate presents foreground notifications and routes taps, buttons
+space in the active limit because iOS can deliver them while the Viewer is suspended. The launch delegate
+presents foreground notifications and routes taps, buttons
 and replies to the prototype, queuing cold-start responses until its event stream is ready. The injected
 agent directs specs that require notifications to the standalone Viewer.
 
 The module's report (#14277) is `{permission, badge, channels, active, pending}`.
 `prototypeNotificationsReport` builds it from a platform snapshot: Android's active notifications, or
-iOS's delivered and pending requests. It keeps only `proto:<id>` tags and reports them as `id`. The
+iOS's delivered and pending requests. It keeps only `proto:<id>` tags and reports them as `id`.
 Kotlin and Swift `PrototypeNotificationsReport` twins replay
 `test/fixtures/prototype-notifications/report.json`. No runtime sends the report yet, so `status` and
 `inspect` do not show it.
 
 Title and body limits count UTF-16 code units. The 5 KiB total counts UTF-8 bytes of the resolved
-title, body and `data`, and is meant to fail the call on its own (`invalid_args` when over). A code
-unit is at most 3 bytes, so every literal at the per-field limits fits (at most 4,480 bytes). Text
-bound at post time can still exceed it, such as emoji counted per character (5,632 bytes at the
-limits).
+title, body and `data`, and fails the call on its own (`invalid_args` when over). A code
+unit is at most 3 bytes, so literals at the per-field limits always fit (at most 4,480 bytes). Text
+bound at post time can still exceed it.
 
 The `notifications.schedule` call takes the `post` arguments plus `delaySeconds` (a whole number,
 1 to 604800) and needs `prototype_platform_notifications_scheduled_v1` as well. The same channel and
@@ -279,6 +295,6 @@ gated per event rather than per call (#14285). The host delivers one with
 `prototype {action: "simulate", id, event: "notifications.push", data, transport?}`. It validates the
 payload first (`invalid_args`), then `auto` picks the live `connection` before the `system` push path.
 The result reports `transport`, `handled` and `delivery`, or `code: "unavailable"` when neither route
-exists. No runtime supplies a route yet, so every device answers `unavailable`. The runtime-neutral
+exists. No route exists yet, so every device answers `unavailable`. The runtime-neutral
 expectations live in `test/fixtures/prototype-spec/push/traces.json`. No production runtime advertises
 the module yet.

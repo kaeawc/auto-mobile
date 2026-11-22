@@ -12,7 +12,7 @@ after focusing a field with `selector`.
 `{ "action": "key", "key": "<name>", "modifiers": [...] }` presses one key.
 
 - `key` is a raw key (`enter`, `tab`, `escape`, `backspace`, `delete`,
-  `arrow_up`, `arrow_down`, `arrow_left`, `arrow_right`), a lowercase letter `a`
+  `arrow_up`, `arrow_down`, `arrow_left`, `arrow_right`), a letter `a`
   to `z`, or a semantic IME key (`next`, `previous`, `done`, `search`, `send`,
   `go`).
 - `modifiers` holds `shift`, `ctrl`, `alt` and `meta` (Command on iOS). Semantic

@@ -7,8 +7,8 @@ with `platform: "watchos"`.
 
 `observe` returns a screenshot. With the automation runner connected, it also returns the target
 app's view hierarchy and on-screen system alerts, even when the app is not in the foreground. Those
-alerts include the notification permission prompt and the notification short look and long look
-with action buttons.
+alerts include the notification permission prompt and its short and long look, with action
+buttons.
 
 - If AutoMobile cannot read the hierarchy, the result carries `hierarchyUnavailable` and no
   hierarchy fields.
@@ -59,7 +59,7 @@ When the Smart Stack is open and the host app is not in the foreground:
 - `observe` returns `hierarchyUnavailable` and no hierarchy fields.
 
 Tapping a widget opens its host app, where the normal tools work. A widget you just added
-shows its text about 2 seconds after the final Done tap; wait that long before you match it. See [Smart Stack](../how-it-works/plat/watchos/smart-stack.md) for how this works.
+shows its text about 2 seconds after the final Done tap; wait that long before you match it. See [Smart Stack](../how-it-works/plat/watchos/smart-stack.md).
 
 ## `swipeOn` and `pressButton`
 
@@ -98,11 +98,11 @@ the app reports no focused element, as with SwiftUI `digitalCrownRotation`, it i
 valued control outside scrolling content.
 
 - With a readable focused value before and after, that value must change for success.
-- Otherwise any hierarchy change counts as success. An unrelated update, such as a status label,
-  can satisfy it, so success does not confirm that the crown moved the control.
+- Otherwise any hierarchy change counts as success. An unrelated update can satisfy it, so success
+  does not confirm the crown moved the control.
 - Without a readable focused value, the tool first touches an interior point clear of elements to
-  wake crown routing. Content absent from the hierarchy, such as a canvas that handles taps, can
-  still receive that touch. To avoid it, tap the control that should respond first.
+  wake crown routing. Content absent from the hierarchy can still receive that touch. To avoid it,
+  tap the control that should respond first.
 - If nothing changes, it may wake again and retry once. That needs a stable screen and an unchanged
   readable focused value. After an initial wake it never repeats the turn without a comparable value.
 - Without a stable hierarchy, it compares the last pre-rotation value with the post-rotation value,
@@ -112,14 +112,14 @@ When a rotation changes nothing, the error says which case applies:
 
 - **The focused value stayed the same**: the error quotes it (`value stayed "10"`). The turn was too
   small, or the control is at its limit. It is at its limit only when the value already sits at the
-  end the turn heads toward, such as `"10"` after a positive `delta` on a 0–10 control. Otherwise,
-  including `"0"` after a positive `delta`, retry with a larger `delta` in the same direction.
+  end the turn heads toward. Otherwise, including `"0"` after a positive `delta`, retry with a
+  larger `delta` in the same direction.
 - **No focused control exposes a readable value**: no view may hold crown focus, or the scrolled
   content is at its limit. Tap the control first. For a `delta` between -1 and 1, the error also
   says the turn may be too small.
 
-Call `observe` after rotating. Retry only if it shows the turn had no effect, since a retry after a
-working turn can overshoot, and tap the control first.
+Call `observe` after rotating; retry only if it shows the turn had no effect, since a retry after a
+working turn can overshoot.
 
 ## `sendKeys`
 
@@ -141,11 +141,11 @@ pre-grant notification authorization, so the app must request permission. Find A
 - The watch does not ask a denied app again. Uninstall and reinstall it (`installApp` resets its
   permissions), launch it, answer Allow, then post again.
 - If the app is in the foreground and its notification delegate declines to present the alert,
-  the watch delivers the push without a banner. `postNotification` returns `success: true` with a
+  the watch delivers the push without a banner. The call still returns `success: true` with a
   `warning` saying so (notifications are authorized, not denied). Background the app with
   `pressButton` `home`, then post again if you need the banner.
 - When no delivery verdict is available, success means the simulator accepted the push.
-- A banner disappears after a few seconds. Call `observe` right after the push to inspect its short
+- A banner disappears after a few seconds. Call `observe` promptly to inspect its short
   look; the long look exposes its action buttons.
 
 ## App management
@@ -157,19 +157,18 @@ pre-grant notification authorization, so the app must request permission. Find A
   launch. It does not observe the launched app, so `verified` stays unset with
   `verificationSkipped: "platform"`.
 - `terminateApp` succeeds with `wasRunning: false` when the app was not running.
-- `crashApp` sends SIGABRT to the running watch app named by `appId`, as on an iOS simulator. It
+- `crashApp` sends SIGABRT to the running watch app named by `appId`, as on iOS. It
   checks the watch's unified log and the host crash reports for fresh crash evidence. The result has
-  `confirmed`, `evidence` and, when it finds the report, a `crashReport` summary. An app that is not
+  `confirmed`, `evidence` and, if found, a `crashReport` summary. An app that is not
   running fails with `wasRunning: false`, and AutoMobile signals nothing.
 
 To refresh a widget on demand, make the host app reload its widget timelines when it sees a launch
 argument you choose. Then call `terminateApp` and `launchApp` with that argument, for example
-`launchArguments: ["-reload"]`. The widget shows the new content within about 2 seconds, with no
-tap in the host app.
+`launchArguments: ["-reload"]`. The widget shows the new content within about 2 seconds.
 
 ## `getLogs`
 
-`getLogs` reads the watch simulator's unified log as on an iOS simulator. Enable it with
+`getLogs` reads the watch simulator's unified log as on iOS. Enable it with
 `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
 
 | Parameter                          | Watch behavior                                                                                                                        |

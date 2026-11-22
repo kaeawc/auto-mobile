@@ -79,7 +79,7 @@ on a simulator that already shows CarPlay is harmless.
 ## Tap the CarPlay screen
 
 Once `startDevice` has turned on the CarPlay screen, tap it with `tapAt` and `display: "carPlay"`.
-`x` and `y` are pixels on the CarPlay screen, which is 800x480 with the origin at the top left:
+Its `x` and `y` are pixels on the CarPlay screen, which is 800x480 with the origin at the top left:
 
 ```json
 {

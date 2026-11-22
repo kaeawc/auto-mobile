@@ -29,18 +29,18 @@ String comparisons require `prototype_string_conditions_v1` and use `key` or `de
 Numbers compare by value, so a state of `-0` equals `0` on every platform (#11408).
 
 Conditions nest to a depth of 8 (`MAX_PROTOTYPE_CONDITION_DEPTH` in the shared
-contract). The `key`, `data`, `platform` and `derived` forms each take one comparison. Derived conditions require
+contract). The `key`, `data`, `platform` and `derived` forms take one comparison each. Derived conditions require
 `prototype_derive_v1` and update when the named entry recomputes.
 Errors point at the offending field (for example `root.visibleWhen.gt`).
 The `toggle`, `increment` and `decrement` actions validate their `key` against the declared `state`
-(`root.onTap[0].key`). They are no-ops at runtime if other means changed the key's type.
+(`root.onTap[0].key`). They no-op at runtime if other means changed the key's type.
 After an `onTap` action list finishes, the device emits exactly one `change` event carrying
-the final state (#10622) if `setState`, `toggle`, `increment` or `decrement` changed state.
-Host `status` therefore follows button taps. A single changed
-key sends `{key, value}`; several send `{keys, values}`. The `emit` actions still fire
+the final state (#10622) if `setState`, `toggle`, `increment` or `decrement` changed state;
+host `status` follows button taps. A single changed
+key sends `{key, value}`; several send `{keys, values}`. The `emit` actions fire
 in order with the state at that point. A list that nets no change emits nothing,
-and a switch or checkbox tap keeps its own `{key, value}` change before its
-`onTap` runs. Wire patches from the host stay silent.
+and a switch or checkbox tap keeps its own `{key, value}` change before
+`onTap`. Wire patches from the host stay silent.
 
 An action list is atomic on Android (#11408). The runtime re-validates the state every
 write would leave (binding types, numeric ranges, the size cap) before the first action

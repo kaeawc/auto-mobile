@@ -1454,7 +1454,7 @@ describe("CtrlProxyManager", function () {
     test("waits through six seconds of binding and observes a healthy rebound", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
         createExecResult(accessibilityFixture("unbound"), ""),
-        ...Array.from({ length: 30 }, () => createExecResult(accessibilityFixture("binding"), "")),
+        ...Array.from({ length: 6 }, () => createExecResult(accessibilityFixture("binding"), "")),
         createExecResult(accessibilityFixture("bound-label"), ""),
       ]);
 
@@ -1479,7 +1479,7 @@ describe("CtrlProxyManager", function () {
 
     test("waits for an existing bind without starting a rebind", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
-        ...Array.from({ length: 32 }, () => createExecResult(accessibilityFixture("binding"), "")),
+        ...Array.from({ length: 8 }, () => createExecResult(accessibilityFixture("binding"), "")),
         createExecResult(accessibilityFixture("bound-label"), ""),
       ]);
 
@@ -1487,7 +1487,7 @@ describe("CtrlProxyManager", function () {
       expect(await accessibilityServiceClient.waitForAccessibilityServiceBinding()).toBe(
         "recovered",
       );
-      expect(timer.now()).toBe(6_000);
+      expect(timer.now()).toBe(7_000);
       expect(
         fakeAdb.wasCommandExecuted(`shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`),
       ).toBe(false);
@@ -1532,6 +1532,29 @@ describe("CtrlProxyManager", function () {
       expect(timer.getSleepHistory()).toEqual([100]);
     });
 
+    test("a slow cold start of 25 seconds is waited out without a second force-stop (#18981)", async () => {
+      fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
+        createExecResult(accessibilityFixture("crashed"), ""),
+        ...Array.from({ length: 20 }, () => createExecResult(accessibilityFixture("binding"), "")),
+        createExecResult(accessibilityFixture("bound-label"), ""),
+      ]);
+
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
+      expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(true);
+      expect(timer.now()).toBeGreaterThanOrEqual(25_000 - 2_000);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter(
+            (command) => command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
+          ),
+      ).toHaveLength(1);
+      // Each poll waits longer than the last, capped at 2 s.
+      const polls = timer.getSleepHistory().slice(1);
+      expect(polls.slice(0, 5)).toEqual([200, 400, 800, 1600, 2000]);
+      expect(Math.max(...polls)).toBe(2000);
+    });
+
     test("stops waiting at the bind budget when binding never finishes", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
         createExecResult(accessibilityFixture("unbound"), ""),
@@ -1549,7 +1572,7 @@ describe("CtrlProxyManager", function () {
     test("a second recovery during a long bind shares the first force-stop", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
         createExecResult(accessibilityFixture("unbound"), ""),
-        ...Array.from({ length: 35 }, () => createExecResult(accessibilityFixture("binding"), "")),
+        ...Array.from({ length: 6 }, () => createExecResult(accessibilityFixture("binding"), "")),
         createExecResult(accessibilityFixture("bound-label"), ""),
       ]);
       let rearmed: Promise<boolean> | undefined;

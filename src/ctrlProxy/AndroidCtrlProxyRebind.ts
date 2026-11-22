@@ -21,12 +21,16 @@ import { logger } from "../utils/logger";
 import { shellQuote } from "../utils/shellQuote";
 import { ActionableError, BootedDevice, ExecResult } from "../models";
 import { Timer } from "../utils/SystemTimer";
+import { exponentialBackoff } from "../utils/Backoff";
 import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT, CTRL_PROXY_PACKAGE } from "./constants";
 import { CtrlProxyInspectionError } from "./CtrlProxyInspectionError";
 
-// API 36 can take about 6 seconds to bind CtrlProxy after a force-stop; allow
-// another 2 seconds for scheduler and adb polling delay before giving up.
-export const REBIND_BIND_WAIT_BUDGET_MS = 8_000;
+// API 36 takes about 6 seconds to bind CtrlProxy after a force-stop, and a slow
+// device (software-emulated CPU, API 24) took 15-25 seconds from onServiceConnected to a
+// listening server (#18981). The wait ends early on bound, crashed or absent, so a long
+// budget only costs time when the framework keeps reporting the service as starting;
+// escalating to a force-stop before it ends restarts a service that is still booting.
+export const REBIND_BIND_WAIT_BUDGET_MS = 45_000;
 /**
  * Bound on each device write in the rebind's mutating section (remove, force-stop,
  * re-add, restore). Those writes run under a private signal because the caller's
@@ -64,7 +68,11 @@ export class AndroidCtrlProxyRebind {
   private static readonly REBIND_FORCE_STOP_SETTLE_MS = 100;
 
   // Poll the framework while it binds the new process.
-  private static readonly REBIND_HEALTH_POLL_MS = 200;
+  private static readonly REBIND_HEALTH_POLL = exponentialBackoff({
+    initialDelayMs: 200,
+    multiplier: 2,
+    maxDelayMs: 2_000,
+  });
 
   private static readonly REBIND_BIND_GRACE_MS = REBIND_BIND_WAIT_BUDGET_MS;
 
@@ -564,7 +572,7 @@ export class AndroidCtrlProxyRebind {
 
   private async waitForHealthyAfterRebind(): Promise<boolean> {
     const startedAt = this.host.timer.now();
-    for (;;) {
+    for (let attempt = 1; ; attempt++) {
       const state = await this.accessibilityServiceState();
       if (state === "bound") {
         return true;
@@ -577,7 +585,7 @@ export class AndroidCtrlProxyRebind {
         return false;
       }
       await this.host.timer.sleep(
-        Math.min(AndroidCtrlProxyRebind.REBIND_HEALTH_POLL_MS, remainingMs),
+        Math.min(AndroidCtrlProxyRebind.REBIND_HEALTH_POLL.delayForAttempt(attempt), remainingMs),
       );
     }
   }

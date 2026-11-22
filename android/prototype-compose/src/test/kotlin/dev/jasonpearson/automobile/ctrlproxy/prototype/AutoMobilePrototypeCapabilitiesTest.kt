@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
+import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import java.io.File
 import kotlinx.serialization.json.Json
@@ -38,7 +40,6 @@ class AutoMobilePrototypeCapabilitiesTest {
    */
   private val exclusions =
     setOf(
-      "prototype_glass_v1", // Real backdrop blur is deferred to PR 2; never simulate glass.
       "prototype_scroll_edge_effect_v1", // Contract only until Android edge rendering in PR 2.
       // Realtime transport, routing and lifecycle remain owed by the runtime slices.
       "prototype_platform_realtime_v1",
@@ -147,6 +148,32 @@ class AutoMobilePrototypeCapabilitiesTest {
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilitiesForSdk(32))
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilitiesForSdk(33))
     assertTrue("prototype_window_chrome_v1" in AutoMobilePrototype.capabilities)
+  }
+
+  @Test
+  fun `remote images are accepted by the advertised renderer on every sdk`() {
+    val spec =
+      """{"id":"remote","window":{"placement":{"type":"fullscreen"}},"root":{"type":"image","url":"https://example.com/a"}}"""
+    for (sdk in listOf(32, 33, 36)) {
+      val capabilities = AutoMobilePrototype.capabilitiesForSdk(sdk)
+      assertTrue("prototype_remote_image_v1" in capabilities)
+      assertTrue(
+        PrototypeSpecValidator.validate(spec, supportedCapabilities = capabilities)
+          is PrototypeSpecValidation.Success,
+      )
+      assertTrue(
+        PrototypeSpecValidator.validate(
+          spec,
+          supportedCapabilities = capabilities - "prototype_remote_image_v1",
+        ) is PrototypeSpecValidation.Failure,
+      )
+    }
+  }
+
+  @Test
+  fun `glass is advertised for both the tonal scrim and blur`() {
+    assertTrue("prototype_glass_v1" in AutoMobilePrototype.capabilitiesForSdk(30))
+    assertTrue("prototype_glass_v1" in AutoMobilePrototype.capabilitiesForSdk(33))
   }
 
   @Test

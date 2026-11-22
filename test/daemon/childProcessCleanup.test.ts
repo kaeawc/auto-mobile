@@ -8,6 +8,9 @@ describe("cleanupDaemonChildProcesses", () => {
     const calls: string[] = [];
 
     await cleanupDaemonChildProcesses({
+      stopAXBridgeSessions: () => {
+        calls.push("stop-axbridge");
+      },
       stopWatchRunners: () => {
         calls.push("stop-watch-runners");
       },
@@ -38,6 +41,7 @@ describe("cleanupDaemonChildProcesses", () => {
     });
 
     expect(calls).toEqual([
+      "stop-axbridge",
       "stop-watch-runners",
       "stop-tvos-runners",
       "stop-recording-starts",

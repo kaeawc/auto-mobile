@@ -32,6 +32,7 @@ import {
   type Session,
 } from "./sessionManager";
 import { RotationSettingManagedError } from "../models/RotationSettingManagedError";
+import type { RotationOriginalsPersistence } from "./rotationOriginalsPersistence";
 import type {
   SessionDeviceStateRestoreHost,
   SessionDeviceStateRestoreOptions,
@@ -168,12 +169,17 @@ export class QueuedDeviceStateRestore {
     rotationRestorePolicy,
     (deviceId) => {
       this.abandonedRotations.delete(deviceId);
+      // Removal only (rotation survives an incarnation bump): the durable record belongs to the
+      // removed device, never the next device on its serial (#18847).
+      void this.rotationOriginals?.retire(deviceId);
     },
   );
 
   private readonly rotationRestoreBackoff: BackoffPolicy;
 
   private readonly rotationRestorer: (device: BootedDevice) => RotationRestorer;
+
+  private readonly rotationOriginals: RotationOriginalsPersistence | undefined;
 
   private readonly screenReaderKind: RestoreKindSpec<ScreenReaderSessionState> = {
     queue: this.screenReaderRestores,
@@ -254,11 +260,13 @@ export class QueuedDeviceStateRestore {
       ),
     restored: (deviceId, state) => {
       this.forgetAbandonedRestore(this.abandonedRotations, deviceId, state);
+      this.forgetRotationOriginals(deviceId, state);
       logger.info(`Restored rotation settings on ${deviceId} on its next natural attempt`);
     },
     failed: (deviceId, state, error) => {
       if (isNonRetryableRotationRestoreError(error)) {
         this.forgetAbandonedRestore(this.abandonedRotations, deviceId, state);
+        this.forgetRotationOriginals(deviceId, state);
         logger.warn(
           `Rotation settings on ${deviceId} cannot be restored (window manager owns rotation); ` +
             `dropping the abandoned restore: ${errorMessage(error)}`,
@@ -288,6 +296,7 @@ export class QueuedDeviceStateRestore {
       | "screenReaderBackoff"
       | "rotation"
       | "rotationBackoff"
+      | "rotationOriginals"
       | "clock"
       | "clockRegistry"
     >,
@@ -296,6 +305,7 @@ export class QueuedDeviceStateRestore {
     this.screenReaderRestoreBackoff = options.screenReaderBackoff;
     this.rotationRestorer = options.rotation;
     this.rotationRestoreBackoff = options.rotationBackoff;
+    this.rotationOriginals = options.rotationOriginals;
     this.clockRestorer = options.clock;
     this.clockRegistry = options.clockRegistry ?? defaultDeviceClockRestoreRegistry;
   }
@@ -703,6 +713,7 @@ export class QueuedDeviceStateRestore {
           target.controller.signal.throwIfAborted();
           target.clear();
           this.forgetFencedRestore(this.rotationRestores.targets, deviceId, target);
+          this.forgetRotationOriginals(deviceId, target.state);
         },
         generation,
         5,
@@ -760,7 +771,58 @@ export class QueuedDeviceStateRestore {
    * outcome is definitively unrecoverable, so the record is dropped.
    */
   retryAbandonedRotationRestore(deviceId: string): Promise<void> {
+    this.adoptOrphanedRotationOriginals(deviceId);
     return this.retryAbandonedRestore(this.abandonedRotationRestore, deviceId);
+  }
+
+  /**
+   * Originals an earlier daemon process saved and never restored (it crashed or restarted after
+   * the rotate) become this device's abandoned restore (#18847). They predate anything this
+   * process recorded, so they replace a newer abandoned baseline. A release still restoring the
+   * device leaves the orphan for the next attempt.
+   */
+  private adoptOrphanedRotationOriginals(deviceId: string): void {
+    if (!this.rotationOriginals || this.rotationRestores.targets.has(deviceId)) {
+      return;
+    }
+    const orphan = this.rotationOriginals.takeOrphan(deviceId);
+    if (orphan) {
+      logger.info(
+        `Restoring rotation settings an earlier daemon saved for ${deviceId} before this session starts`,
+      );
+      this.abandonedRotations.set(deviceId, orphan);
+    }
+  }
+
+  /**
+   * A session reclaimed after a daemon restart lost its in-memory originals; the ones the earlier
+   * daemon saved for its device become the session's again, so the session keeps its rotation
+   * and its release restores them (#18847).
+   */
+  adoptRotationOriginalsForRecoveredSession(session: Session): void {
+    if (!this.rotationOriginals || session.cacheData.rotation) {
+      return;
+    }
+    const orphan = this.rotationOriginals.takeOrphan(session.assignedDevice);
+    if (orphan) {
+      logger.info(
+        `Session ${session.sessionId} reclaims the rotation originals an earlier daemon saved for ${session.assignedDevice}`,
+      );
+      session.cacheData.rotation = orphan;
+    }
+  }
+
+  /** Persist a session's first rotation originals before its first write; undefined when off. */
+  recordRotationOriginals(
+    deviceId: string,
+    state: RotationSessionState,
+  ): Promise<void> | undefined {
+    return this.rotationOriginals?.record(deviceId, state);
+  }
+
+  /** Drop a durable record once restored or unrecoverable; never rejects. */
+  forgetRotationOriginals(deviceId: string, state: RotationSessionState): void {
+    void this.rotationOriginals?.forget(deviceId, state);
   }
 
   trackRotationSessionSetup(

@@ -123,6 +123,23 @@ class PrototypePermissionsModuleTest {
   }
 
   @Test
+  fun `provisional options are accepted and ignored`() = runTest {
+    for (options in listOf("{}", """{"provisional":false}""", """{"provisional":true}""")) {
+      val source =
+        FakePrototypePermissionsSource().apply { current = PrototypePermissionState.GRANTED }
+      val module = PrototypePermissionsModule(source, backgroundScope)
+      val args = JsonObject(call().args + ("options" to Json.parseToJsonElement(options)))
+      val result = module.call(call().copy(args = args)) as PlatformCallResult.Success
+      assertEquals(
+        Json.parseToJsonElement("""{"results":{"notifications":"granted"}}"""),
+        result.value,
+      )
+      assertEquals(1, source.requests)
+      module.close()
+    }
+  }
+
+  @Test
   fun `invalid args and unknown calls fail before reading source`() = runTest {
     val source = FakePrototypePermissionsSource()
     val module = PrototypePermissionsModule(source, backgroundScope)
@@ -135,6 +152,11 @@ class PrototypePermissionsModuleTest {
         """{"names":"notifications"}""",
         """{"names":[1]}""",
         """{"names":["notifications"],"extra":true}""",
+        """{"names":["notifications"],"options":true}""",
+        """{"names":["notifications"],"options":null}""",
+        """{"names":["notifications"],"options":[]}""",
+        """{"names":["notifications"],"options":{"provisional":"true"}}""",
+        """{"names":["notifications"],"options":{"unknown":true}}""",
       )) {
       val result =
         module.call(call().copy(args = Json.parseToJsonElement(args).jsonObject))
@@ -327,6 +349,36 @@ class PrototypePermissionsModuleTest {
     assertEquals(0, source.requests)
     assertEquals(PrototypeScalar.Text("error"), runtime.current.state["requestStatus"])
     runtime.close()
+  }
+
+  @Test
+  fun `camera and microphone requests route to their own sources`() = runTest {
+    val notifications = FakePrototypePermissionsSource()
+    val camera =
+      FakePrototypePermissionsSource().apply { current = PrototypePermissionState.GRANTED }
+    val microphone =
+      FakePrototypePermissionsSource().apply { current = PrototypePermissionState.DENIED }
+    val module =
+      PrototypePermissionsModule(
+        mapOf(
+          PrototypeRuntimePermission.NOTIFICATIONS to notifications,
+          PrototypeRuntimePermission.CAMERA to camera,
+          PrototypeRuntimePermission.MICROPHONE to microphone,
+        ),
+        backgroundScope,
+      )
+    assertEquals(JsonPrimitive("denied"), module.state.value["microphone"])
+    val result = module.call(call("camera", "microphone")) as PlatformCallResult.Success
+    assertEquals(
+      Json.parseToJsonElement("""{"results":{"camera":"granted","microphone":"denied"}}"""),
+      result.value,
+    )
+    assertEquals(listOf(0, 1, 1), listOf(notifications, camera, microphone).map { it.requests })
+    camera.changes.emit(PrototypePermissionState.BLOCKED)
+    runCurrent()
+    assertEquals(JsonPrimitive("blocked"), module.state.value["camera"])
+    module.close()
+    assertTrue(listOf(notifications, camera, microphone).all { it.closed })
   }
 
   private fun TestScope.runtime(source: PrototypePermissionsSource) =

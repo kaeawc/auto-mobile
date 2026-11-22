@@ -58,7 +58,6 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   getDataStore: entry("Read Data Store", readDevice),
   getDeepLinks: entry("Get Deep Links", readDevice),
   getDeviceState: entry("Get Device State", readDevice),
-  getIosSimulatorCapabilities: entry("Get iOS Simulator Capabilities", readDevice),
   getSessionRequirementCapability: entry("Get Session Requirement Capability", readHost),
   getNotificationPolicy: entry("Get Notification Policy", readDevice),
   getLogs: entry("Read Device Logs", readDevice),
@@ -139,7 +138,6 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   accessibilityAudit: entry("Audit Accessibility", destructiveDevice),
   backgroundWork: entry("Control Background Jobs", destructiveDevice),
   // start/stop is a mixed-action tool: stop pulls the trace and deletes the device copy.
-  captureTrace: entry("Capture Trace", destructiveDevice),
   displayProfile: entry("Set Display Profile", destructiveDevice),
   // Pauses the app while dumping; leaves only a host file, no app or device state is lost.
   heapDump: entry("Dump Heap", controlDevice),

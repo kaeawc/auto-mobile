@@ -174,6 +174,7 @@ internal enum class PrototypeBindableKind {
   TEXT,
   OPERAND,
   DATA_OPERAND,
+  DERIVED_CONDITION,
   EMIT_NAME,
   EMIT_BINDING,
   KEY,
@@ -321,6 +322,20 @@ internal object PrototypeBindableFields {
     return if (body.containsKey("file")) null else binding(value, path)
   }
 
+  private fun <T : Any> Visitor<T>.nestedCondition(condition: JsonObject, path: String): T? {
+    condition(condition["not"], "$path.not")?.let {
+      return it
+    }
+    for (form in listOf("all", "any")) {
+      for ((member, memberPath) in objects(condition, form, path)) {
+        condition(member, memberPath)?.let {
+          return it
+        }
+      }
+    }
+    return null
+  }
+
   private class Visitor<T : Any>(
     val visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
   ) {
@@ -338,6 +353,9 @@ internal object PrototypeBindableFields {
 
     fun condition(value: JsonElement?, path: String): T? {
       val condition = value as? JsonObject ?: return null
+      field(condition, "derived", path, PrototypeBindableKind.DERIVED_CONDITION)?.let {
+        return it
+      }
       field(condition, "data", path, PrototypeBindableKind.ROUTE_POINTER)?.let {
         return it
       }
@@ -361,17 +379,7 @@ internal object PrototypeBindableFields {
           return it
         }
       }
-      condition(condition["not"], "$path.not")?.let {
-        return it
-      }
-      for (form in listOf("all", "any")) {
-        for ((member, memberPath) in objects(condition, form, path)) {
-          condition(member, memberPath)?.let {
-            return it
-          }
-        }
-      }
-      return null
+      return nestedCondition(condition, path)
     }
 
     fun action(action: JsonObject, path: String): T? {
@@ -426,6 +434,9 @@ internal object PrototypeBindableFields {
         }
       }
       requestBody(action["body"], "$path.body")?.let {
+        return it
+      }
+      binding((action["where"] as? JsonObject)?.get("equals"), "$path.where.equals")?.let {
         return it
       }
       field(action, "into", path, PrototypeBindableKind.REQUEST_INTO)?.let {
@@ -539,8 +550,6 @@ internal object PrototypeBindableFields {
 
     fun component(node: JsonObject, path: String): T? =
       when ((node["type"] as? JsonPrimitive)?.content) {
-        "button",
-        "fab" -> visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
         "menu" ->
           objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
             visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
@@ -566,7 +575,9 @@ internal object PrototypeBindableFields {
         "dialog",
         "snackbar" -> formComponent(node, path)
         "tooltip",
-        "image" -> contentComponent(node, path)
+        "image",
+        "button",
+        "fab" -> contentComponent(node, path)
         // The url binds placeholders like TypeScript's webView visitor (#16573).
         "webView" -> visitor.field(node, "url", path, PrototypeBindableKind.TEXT)
         else -> null
@@ -606,7 +617,27 @@ internal object PrototypeBindableFields {
               visitor.action(entry, at)
             }
         // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
-        "image" -> visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
+        "image" -> {
+          visitor.field(node, "asset", path, PrototypeBindableKind.TEXT)
+            ?: visitor.field(node, "url", path, PrototypeBindableKind.TEXT)
+        }
+        // An M3 Expressive split button's menu entries bind like `menu.items` (#15258).
+        "button" ->
+          visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
+            ?: objects(
+                node["split"] as? JsonObject ?: JsonObject(emptyMap()),
+                "menu",
+                "$path.split",
+              )
+              .firstNotNullOfOrNull { (entry, entryPath) ->
+                visitor.field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
+                  ?: part(entry, entryPath)
+              }
+        // An M3 Expressive FAB menu's items bind like parts (#15258).
+        "fab" ->
+          visitor.field(node, "label", path, PrototypeBindableKind.TEXT)
+            ?: objects(node["menu"] as? JsonObject ?: JsonObject(emptyMap()), "items", "$path.menu")
+              .firstNotNullOfOrNull { (entry, entryPath) -> part(entry, entryPath) }
         else -> null
       }
 

@@ -29,6 +29,8 @@ import {
   collectDisconnectedRecordings,
   discoverAndReconcile,
   MONITOR_IOS_LIST_MAX_AGE_MS,
+  offlineRecoveryTransports,
+  ownedOfflineRecoveryCandidates,
   getAndroidOfflineCanonicalIds,
   logDisconnectMisses,
   probeListedAndroidStates,
@@ -510,10 +512,7 @@ export class DaemonDisconnect {
     logger.warn(
       `[DisconnectMonitor] In-session device(s) ADB-offline (${dispatchTargets.join(", ")}); attempting bounded 'adb -s <serial> reconnect' recovery before miss-counting`,
     );
-    const transports = dispatchTargets.flatMap((id) => {
-      const aliases = listed.offlineTransportIds?.get(id);
-      return aliases?.size ? [...aliases] : [id];
-    });
+    const transports = offlineRecoveryTransports(dispatchTargets, listed.offlineTransportIds);
     // Recovery logs its own failures and is bounded per serial.
     await deviceManager.recoverAndroidOfflineDevices(transports);
     // Offline recovery reports each reconnected transport; state keyed by the canonical serial
@@ -911,7 +910,7 @@ export class DaemonDisconnect {
       await this.recoverOfflineCandidates(
         deviceManager,
         listed,
-        candidateDeviceIds,
+        ownedOfflineRecoveryCandidates(candidateDeviceIds, this.host.services, activeRecordings),
         candidateIncarnations,
       )
     ) {

@@ -7,6 +7,7 @@ import {
   resolveIosDeviceBackend,
   type DeviceAppUninstaller,
 } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
+import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { SimctlCommandTimeoutError } from "../../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import type { Timer } from "../../utils/SystemTimer";
@@ -17,6 +18,13 @@ export interface IosAppBundleGuard {
   uninstallLegacyAppIfPresent(): Promise<void>;
   /** Uninstalls the installed CtrlProxy app when its hash differs from the expected bundle. */
   verifyInstalledAppBundle(): Promise<void>;
+  /**
+   * Installs the runner's host app on a simulator when it is missing. `xcodebuild
+   * test-without-building` does not install it for a run that never launches the target app,
+   * and on iOS 26+ storekitd reads the host app's entitlements for every StoreKit Testing call
+   * (#18644). Best-effort and never throws.
+   */
+  installHostAppIfMissing(appPath: string | null): Promise<void>;
 }
 
 export interface DefaultIosAppBundleGuardOptions {
@@ -32,6 +40,8 @@ export interface DefaultIosAppBundleGuardOptions {
   /** True when the operator opted out of comparing the installed app hash. */
   isHashVerificationSkipped(): boolean;
   getExpectedAppHash(platform: "simulator" | "device"): string | null;
+  /** Lists and installs simulator apps for the host-app install; defaults to a `SimCtlClient`. */
+  hostAppSimctl?: Pick<SimCtlClient, "listAppsOrThrow" | "installApp">;
 }
 
 export class DefaultIosAppBundleGuard implements IosAppBundleGuard {
@@ -112,12 +122,46 @@ export class DefaultIosAppBundleGuard implements IosAppBundleGuard {
     logger.info("[IOSCtrlProxy] Installed CtrlProxy app hash matches expected bundle");
   }
 
+  async installHostAppIfMissing(appPath: string | null): Promise<void> {
+    if (!this.options.isSimulator()) {
+      return;
+    }
+    const { device, appBundleId } = this.options;
+    if (!appPath) {
+      logger.warn(
+        `[IOSCtrlProxy] Runner build has no host app bundle; StoreKit Testing purchases fail on iOS 26+ until ${appBundleId} is installed`,
+      );
+      return;
+    }
+    try {
+      const simctl = this.options.hostAppSimctl ?? this.simctl();
+      const installed = await simctl.listAppsOrThrow(device.deviceId);
+      if (installed.some((app) => getIosInstalledAppBundleId(app) === appBundleId)) {
+        return;
+      }
+      // Install only when absent: storekitd clears the bundle's StoreKit state on every install.
+      await simctl.installApp(appPath, device.deviceId);
+      logger.info(`[IOSCtrlProxy] Installed runner host app ${appBundleId} from ${appPath}`);
+    } catch (error) {
+      // Best-effort: only StoreKit Testing needs the host app, so the runner launch goes on.
+      logger.warn(
+        `[IOSCtrlProxy] Failed to install runner host app ${appBundleId}: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  private simctl(): SimCtlClient {
+    const { device, processExecutor, timer } = this.options;
+    return new SimCtlClient(device, (file, args) => processExecutor.executeCommand(file, args), {
+      timer,
+    });
+  }
+
   private uninstall(bundleId: string): Promise<void> {
-    const { device, deviceAppManager, processExecutor, timer } = this.options;
+    const { device, deviceAppManager } = this.options;
     return resolveIosDeviceBackend(device.deviceId, {
-      simctl: new SimCtlClient(device, (file, args) => processExecutor.executeCommand(file, args), {
-        timer,
-      }),
+      simctl: this.simctl(),
       deviceAppUninstaller: deviceAppManager,
     }).uninstallApp(bundleId, undefined, { terminateFirst: false });
   }

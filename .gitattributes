@@ -61,6 +61,7 @@ test/fixtures/android-car-service/*.txt text eol=lf
 test/fixtures/android-pointer-probe/*.txt text eol=lf
 test/fixtures/android-startup/*.txt text eol=lf
 test/fixtures/android-profiling/*.txt text eol=lf
+test/fixtures/ios-profiling/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/ios-duo/*.json text eol=lf
 test/fixtures/ios-carplay/*.json text eol=lf
@@ -110,6 +111,7 @@ test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
 test/fixtures/ios/ios27-uikit-semantic-links-sdk-owner-duplicate.json text eol=lf
 test/fixtures/ios/watch-log-saving-notification.txt text eol=lf
+test/fixtures/ios/watch-log-saving-notification-foreground.txt text eol=lf
 test/fixtures/ios/ipad-ios27-*.json text eol=lf
 test/fixtures/ios/iphone17-ios26-*.json text eol=lf
 test/fixtures/ios/keyboard-modes/*.json text eol=lf
@@ -203,6 +205,7 @@ docs/img/favicon.ico -filter -diff -merge -text
 # Launcher / app icons consumed by the Android, iOS, and desktop builds — must be
 # direct git blobs, since build & packaging jobs check out with lfs: false.
 android/playground/app/src/main/res/mipmap-*/ic_launcher*.png -filter -diff -merge -text
+android/prototype-app-shell/src/main/res/drawable-nodpi/prototype_icon_*.png -filter -diff -merge -text
 ios/Playground/Sources/Assets.xcassets/AppIcon.appiconset/AppIcon.png -filter -diff -merge -text
 android/desktop-app/src/main/resources/icons/app-icon.png -filter -diff -merge -text
 # Read from a marketplace clone, which does not fetch LFS objects.
@@ -275,6 +278,7 @@ test/fixtures/ios-contract/runner-checkout-sdk-capabilities.json text eol=lf
 test/fixtures/ios-contract/runner-checkout-storage-capabilities.json text eol=lf
 ios/control-proxy/Tests/CtrlProxyTests/Fixtures/sdk-health-*.json text eol=lf
 ios/control-proxy/Tests/CtrlProxyTests/Fixtures/recent-apps/*.txt text eol=lf
+ios/control-proxy/Tests/CtrlProxyTests/Fixtures/springboard-ipad/*.json text eol=lf
 test/fixtures/android-contract/*.json text eol=lf
 test/fixtures/ios-ctrlproxy-request-snapshots.json text eol=lf
 test/fixtures/ios-tcc-photos/*.json text eol=lf
@@ -348,4 +352,6 @@ schemas/prototype-ios-icon-symbols.json text eol=lf
 docs/using/prototype-icons.md text eol=lf
 test/fixtures/android-xr-sendkeys/*.txt text eol=lf
 test/fixtures/observe-output/compose-control-shapes-17955/*.json text eol=lf
+test/fixtures/observe-output/compose-interop-3183/*.json text eol=lf
 test/fixtures/observe-output/swipeon-container-floating-bar-18338/*.json text eol=lf
+test/fixtures/prototype-spec/data/generated-values.json text eol=lf

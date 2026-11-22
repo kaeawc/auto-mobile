@@ -201,12 +201,13 @@ describe("OnDemandAudit (#14075)", () => {
     expect(result.error).toContain("No foreground app");
   });
 
-  test("iOS reports each kind as unsupported without observing", async () => {
+  test("iOS refuses a mixed accessibility request without observing", async () => {
     const result = await audit({ deviceId: "sim", platform: "ios", name: "iPhone" }).run({
       kinds: ["accessibility", "memory"],
     });
 
     expect(engines.calls).toEqual([]);
+    expect(result.error).toBe("On-demand audits run on Android only.");
     expect(Object.keys(result.unsupported ?? {})).toEqual(["accessibility", "memory"]);
     expect(result.unsupported?.accessibility).toContain("accessibilityAudit");
   });

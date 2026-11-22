@@ -30,6 +30,15 @@ Most tools work the same on Android and iOS. These guides cover iOS:
 The **Platforms** column in [Tools](../tools.md) shows which devices each tool
 drives.
 
+## Limits
+
+- `dragPath` and `dragAndDrop` cannot move home screen or dock icons. Synthesized
+  touches open the icon's context menu but never lift it. A drag that holds at its
+  start on one of these icons fails with `unsupported: "springboard_icon_drag"`,
+  and no input is sent. Swipes that move right away, such as paging the home
+  screen, and drags inside apps work as usual. To rearrange icons or open Split
+  View, do it by hand.
+
 ## Running on a Mac host or CI
 
 - [iOS Simulator fleet cost](ios-simulator-fleet-cost.md) reports what booted
@@ -43,3 +52,4 @@ drives.
 - [Apple TV](apple-tv.md)
 - [Apple Watch](apple-watch.md)
 - [Apple Vision Pro simulator](visionos-simulator.md)
+- [CarPlay on iOS simulators](carplay.md)

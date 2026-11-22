@@ -209,18 +209,32 @@ internal object PrototypeDataText {
   private data class Placeholder(val start: Int, val end: Int, val pointer: String)
 
   /** The runtime scanner's recognized reads, shared with the R2 sink policy. */
-  fun pointers(text: String, namespace: String): List<String> =
-    placeholders(text, namespace).map { it.pointer }
+  fun pointers(
+    text: String,
+    namespace: String,
+    valid: (String) -> Boolean = PrototypeDataPointer::isValid,
+  ): List<String> {
+    val consumed =
+      if (namespace.isEmpty()) placeholders(text) + placeholders(text, "platform")
+      else if (namespace == "platform") placeholders(text) else emptyList()
+    return placeholders(text, namespace, valid)
+      .filter { span -> consumed.none { it.start <= span.start && span.start < it.end } }
+      .map { it.pointer }
+  }
 
-  private fun placeholders(text: String, namespace: String = "data"): List<Placeholder> {
+  private fun placeholders(
+    text: String,
+    namespace: String = "data",
+    valid: (String) -> Boolean = PrototypeDataPointer::isValid,
+  ): List<Placeholder> {
+    val prefix = if (namespace.isEmpty()) "" else "$namespace:"
     val found = mutableListOf<Placeholder>()
     var cursor = 0
     while (cursor < text.length) {
-      val close = closingBrace(text, cursor, namespace)
+      val close = closingBrace(text, cursor, prefix)
       val inner = if (close < 0) "" else text.substring(cursor + 1, close)
-      val pointer =
-        if (inner.startsWith("$namespace:")) inner.substring(namespace.length + 1) else ""
-      if (PrototypeDataPointer.isValid(pointer)) {
+      val pointer = if (inner.startsWith(prefix)) inner.substring(prefix.length) else ""
+      if (valid(pointer)) {
         found.add(Placeholder(cursor, close + 1, pointer))
         cursor = close + 1
       } else {
@@ -230,12 +244,12 @@ internal object PrototypeDataText {
     return found
   }
 
-  private fun closingBrace(text: String, cursor: Int, namespace: String): Int {
-    if (text[cursor] != '{' || !text.startsWith("$namespace:", cursor + 1)) return -1
+  private fun closingBrace(text: String, cursor: Int, prefix: String): Int {
+    if (text[cursor] != '{' || !text.startsWith(prefix, cursor + 1)) return -1
     val end =
       minOf(
         text.length,
-        cursor + 3 + namespace.length + PrototypeSpecValidator.MAX_PROTOTYPE_DATA_POINTER_LENGTH,
+        cursor + 2 + prefix.length + PrototypeSpecValidator.MAX_PROTOTYPE_DATA_POINTER_LENGTH,
       )
     for (index in cursor + 1 until end) {
       if (text[index] == '}') return index
@@ -290,7 +304,13 @@ internal object PrototypeDataText {
       append(literal(text.substring(cursor)))
     }
 
-  fun bindSources(text: String, data: JsonObject?, platform: JsonObject?): String {
+  /** With [shield], each inserted value is shielded from later placeholder scans (#18628). */
+  fun bindSources(
+    text: String,
+    data: JsonObject?,
+    platform: JsonObject?,
+    shield: Boolean = false,
+  ): String {
     val sources =
       placeholders(text).map { it to data } + placeholders(text, "platform").map { it to platform }
     return buildString {
@@ -298,7 +318,8 @@ internal object PrototypeDataText {
       for ((span, source) in sources.sortedBy { it.first.start }) {
         if (span.start < cursor) continue
         append(text.substring(cursor, span.start))
-        append(PrototypeDataValues.rendered(PrototypeDataPointer.resolve(source, span.pointer)))
+        val value = PrototypeDataValues.rendered(PrototypeDataPointer.resolve(source, span.pointer))
+        append(if (shield) PrototypeTextShield.shield(value) else value)
         cursor = span.end
       }
       append(text.substring(cursor))
@@ -320,18 +341,23 @@ internal object PrototypeDataText {
   }
 }
 
-/** Pure, one-time resolution before repeat expansion and state interpolation. */
+/**
+ * Pure, one-time resolution before repeat expansion and state interpolation. A renderer passes
+ * `shield` so the data and platform values it inserts stay literal through its later state, derived
+ * and row passes (#18628); the default output is the shared cross-platform resolution contract.
+ */
 object PrototypeDataResolver {
   fun resolveRoot(root: JsonObject, data: JsonObject?, platform: JsonObject? = null): JsonObject =
-    resolveRoot(root, data, PrototypeRepeatData(data), platform)
+    resolveRoot(root, data, PrototypeRepeatData(data), platform, shield = false)
 
   private fun resolveRoot(
     root: JsonObject,
     data: JsonObject?,
     repeats: PrototypeRepeatData,
     platform: JsonObject?,
+    shield: Boolean,
   ): JsonObject {
-    val own = textFields(root, data, platform)
+    val own = textFields(root, data, platform, shield)
     val resolved =
       JsonObject(
         own.mapValues { (key, value) ->
@@ -347,14 +373,21 @@ object PrototypeDataResolver {
           }
         },
       )
-    return mapChildren(resolved) { resolveRoot(it, data, repeats, platform) }
+    return mapChildren(resolved) { resolveRoot(it, data, repeats, platform, shield) }
   }
 
-  fun resolve(spec: PrototypeSpec, platform: JsonObject? = null): PrototypeSpec {
+  fun resolve(
+    spec: PrototypeSpec,
+    platform: JsonObject? = null,
+    shield: Boolean = false,
+  ): PrototypeSpec {
     val json = PrototypeSpecValidator.json
     val root = json.encodeToJsonElement(PrototypeNode.serializer(), spec.root).jsonObject
     if (!PrototypeBindingScan.hasBindings(root)) return spec
-    val resolved = json.decodeFromJsonElement<PrototypeNode>(resolveRoot(root, spec.data, platform))
+    val resolved =
+      json.decodeFromJsonElement<PrototypeNode>(
+        resolveRoot(root, spec.data, PrototypeRepeatData(spec.data), platform, shield),
+      )
     return spec.copy(root = resolved)
   }
 
@@ -407,12 +440,18 @@ object PrototypeDataResolver {
       },
     )
 
-  private fun textFields(node: JsonObject, data: JsonObject?, platform: JsonObject?): JsonObject {
+  private fun textFields(
+    node: JsonObject,
+    data: JsonObject?,
+    platform: JsonObject?,
+    shield: Boolean,
+  ): JsonObject {
     val replacements = mutableMapOf<String, JsonElement>()
     PrototypeBindableFields.first<Boolean>(node, "") { value, path, kind ->
       val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
       if (kind == PrototypeBindableKind.TEXT && text != null) {
-        replacements[path] = JsonPrimitive(PrototypeDataText.bindSources(text, data, platform))
+        replacements[path] =
+          JsonPrimitive(PrototypeDataText.bindSources(text, data, platform, shield))
       }
       null
     }

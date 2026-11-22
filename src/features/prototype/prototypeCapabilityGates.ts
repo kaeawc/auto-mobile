@@ -1,4 +1,8 @@
 import {
+  PROTOTYPE_REMOTE_IMAGE_CAPABILITY,
+  prototypeRemoteImageFields,
+} from "./prototypeRemoteImages";
+import {
   PROTOTYPE_LOOPS_CAPABILITY,
   prototypeLoopFields,
   prototypeLoopsUnsupportedMessage,
@@ -189,6 +193,11 @@ import {
 } from "./prototypeChecksCapability";
 
 import { PROTOTYPE_TOOLTIP_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { PROTOTYPE_M3_EXPRESSIVE_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeM3ExpressiveFields,
+  prototypeM3ExpressiveUnsupportedMessage,
+} from "./prototypeM3Expressive";
 import { prototypeTooltipFields, prototypeTooltipUnsupportedMessage } from "./prototypeTooltip";
 
 import { PROTOTYPE_DRAWER_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -332,9 +341,20 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypeTooltipUnsupportedMessage,
   },
   {
+    capability: PROTOTYPE_M3_EXPRESSIVE_CAPABILITY,
+    fields: prototypeM3ExpressiveFields,
+    unsupportedMessage: prototypeM3ExpressiveUnsupportedMessage,
+  },
+  {
     capability: PROTOTYPE_STRINGS_CAPABILITY,
     fields: prototypeStringsFields,
     unsupportedMessage: prototypeStringsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_REMOTE_IMAGE_CAPABILITY,
+    fields: prototypeRemoteImageFields,
+    unsupportedMessage: (fields, platform) =>
+      `The ${platform} device does not advertise ${PROTOTYPE_REMOTE_IMAGE_CAPABILITY}; remote image fields at ${fields.join(", ")} must be replaced with a bundled asset: remove url and remote-image options. Nothing was shown.`,
   },
   {
     capability: PROTOTYPE_SEMANTICS_CAPABILITY,
@@ -657,13 +677,20 @@ function preflightCapabilities(spec: unknown): string[] {
  * Capability names required by the gate table alone: the set the native strict validators
  * (Kotlin and Swift) compute and the shared corpus records.
  */
-export function prototypeGateCapabilities(spec: unknown): string[] {
-  return [...new Set(prototypeRequiredCapabilities(spec).map((gate) => gate.capability))].sort();
+export function prototypeGateCapabilities(spec: unknown, platform?: "android" | "ios"): string[] {
+  return [
+    ...new Set(prototypeRequiredCapabilities(spec, platform).map((gate) => gate.capability)),
+  ].sort();
 }
 
 /** Capability names required by a spec, for the native-code resource's renderer contract. */
-export function requiredPrototypeCapabilities(spec: unknown): string[] {
-  return [...new Set([...prototypeGateCapabilities(spec), ...preflightCapabilities(spec)])].sort();
+export function requiredPrototypeCapabilities(
+  spec: unknown,
+  platform?: "android" | "ios",
+): string[] {
+  return [
+    ...new Set([...prototypeGateCapabilities(spec, platform), ...preflightCapabilities(spec)]),
+  ].sort();
 }
 
 /**

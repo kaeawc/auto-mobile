@@ -164,8 +164,6 @@ const CLASSIFICATION: Classification = {
     "openLink",
     // Starts and stops an on-device tracer (perfetto) or a device-attached xctrace.
     "performanceTrace",
-    // Starts and stops an on-device Perfetto recorder from typed categories; heapDump makes the app write a dump.
-    "captureTrace",
     // Feeds, then stops feeding, audio into the emulator microphone.
     "injectAudioInput",
     "stopAudioInput",
@@ -229,13 +227,7 @@ const CLASSIFICATION: Classification = {
  * for a mixed tool). Control is the default: acquisition, release, routing and configuration.
  */
 const PLAIN_CLASSIFICATION: Classification = {
-  read: [
-    "doctor",
-    "getIosSimulatorCapabilities",
-    "getSessionRequirementCapability",
-    "listDeviceImages",
-    "listDevices",
-  ],
+  read: ["doctor", "getSessionRequirementCapability", "listDeviceImages", "listDevices"],
   perArgs: {
     recordToolCalls: {
       reads: [{ action: "status" }],

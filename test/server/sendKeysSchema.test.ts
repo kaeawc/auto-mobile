@@ -168,6 +168,27 @@ describe("sendKeysSchema", () => {
     });
   });
 
+  test("accepts lowercase letter keys a-z with modifier chords and rejects other characters", () => {
+    const parsed = sendKeysSchema.parse({
+      platform: "ios",
+      commands: [
+        { action: "key", key: "h", modifiers: ["meta"] },
+        { action: "key", key: "d", modifiers: ["meta", "alt"] },
+        { action: "key", key: "z" },
+      ],
+    });
+    expect(parsed.commands).toEqual([
+      { action: "key", key: "h", modifiers: ["meta"] },
+      { action: "key", key: "d", modifiers: ["meta", "alt"] },
+      { action: "key", key: "z" },
+    ]);
+    for (const key of ["H", "1", "ab", "space"]) {
+      expect(
+        sendKeysSchema.safeParse({ platform: "ios", commands: [{ action: "key", key }] }).success,
+      ).toBe(false);
+    }
+  });
+
   test("accepts keyboard profiles only with automatic or IME delivery", () => {
     for (const mode of [undefined, "auto", "ime"]) {
       expect(

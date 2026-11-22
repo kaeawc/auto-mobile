@@ -129,7 +129,8 @@ file maps each name to its Android manifest permissions and grant mechanism, and
 | `speech`             | `RECORD_AUDIO`                                   | `pm grant`        | `NSSpeechRecognitionUsageDescription`          | notGrantableOnSimulator |
 
 The `permissions` module (`prototype_platform_permissions_v1`) has one call, `permissions.request` with
-`names` (1-16 unique canonical names). A literal list may only name permissions declared in
+`names` (1-16 unique canonical names) and optional `options: {provisional?: boolean}` (default false).
+Android accepts and ignores these options. A literal list may only name permissions declared in
 `requires.permissions`; a bound list is checked by the runtime. State is `/platform/permissions/<name>`, one
 of `granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted` or `unavailable`, and
 `permissions.changed` carries `{name, state}` when a request changes authorization. It also fires when
@@ -145,11 +146,17 @@ omit the module. Other canonical names return `unavailable`. A missing usage key
 The first status read establishes `/platform/permissions/<name>` asynchronously without prompting.
 Foreground refresh re-reads each authority. Requests and foreground reads publish only changed
 states. A request prompts only while authorization is `notDetermined` and returns the resulting
-status. Notifications request alert, sound and badge options. Photos use read/write access,
+status. Notifications request alert, sound and badge options, and `options.provisional: true` adds
+provisional authorization without showing a prompt. Photos use read/write access,
 `photosAdd` uses add-only access, calendar requests full access and location requests when-in-use
-access. One request may be in flight per module. A second returns `too_many_in_flight`. The shared
-iOS platform-call deadline applies. Cancellation drops the late result while foreground observation
+access. One request may be in flight per module. A second returns `too_many_in_flight`. Permission
+requests have no platform-call deadline, including an explicit `timeoutMs`; `statusKey` stays `loading`
+until a result or cancellation. Cancellation drops the late result while foreground observation
 stays active. The registry stops observation when its final observer releases it.
+The notifications state is also published at `/platform/notifications/authorization`, including the
+baseline and foreground re-reads, and cleared on stop. An authorization-only binding declares
+`notifications` in `requires.platform` and `requires.permissions` and uses the permissions capability
+on iOS. Other notification state, calls and handlers require the notifications capability.
 
 | iOS authority                                 | Framework status                          | State                    |
 | --------------------------------------------- | ----------------------------------------- | ------------------------ |
@@ -226,8 +233,8 @@ State is `/platform/notifications/{badge, active, pending, authorization}` plus
 `/platform/notifications/channels/<id>/blocked` (a boolean, readable only for a declared channel). The
 `active` key is at most 24 per prototype, and `authorization` uses the permission vocabulary (`granted`,
 `denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). Android hosts do not
-advertise this module. The `permissions` module above supplies notification authorization without
-publishing the notifications state tree.
+advertise this module. The `permissions` module above supplies notification authorization; iOS also
+publishes its authorization key without advertising notification delivery calls.
 
 Channels come from a root `notifications` block,
 `{channels: [{id, name, importance, description?, showBadge?}]}`. It holds 1-8 channels with unique

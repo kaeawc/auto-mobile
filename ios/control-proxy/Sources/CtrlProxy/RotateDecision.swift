@@ -132,3 +132,61 @@ struct RotateDecision: Sendable {
         )
     }
 }
+
+/// The active panel of a foldable, as the daemon's observation names it.
+enum FoldablePanel: String, Equatable, Sendable {
+    case cover
+    case inner
+
+    /// The device orientation that shows `target` on this panel. The inner panel's interface is
+    /// landscape while the device is upright, so it is a quarter turn from the cover's mapping.
+    func deviceOrientation(for target: RotateTarget) -> SimulatedDeviceOrientation {
+        switch (self, target.orientation) {
+        case (.cover, "landscape_left"): .landscapeLeft
+        case (.cover, "landscape_right"): .landscapeRight
+        case (.cover, _): .portrait
+        case (.inner, "portrait_upside_down"): .landscapeRight
+        case (.inner, "portrait"): .landscapeLeft
+        case (.inner, _): .portrait
+        }
+    }
+}
+
+/// Pure decisions for a foldable rotation, verified only by the app's axis: the pose
+/// orientation does not move XCUIDevice.orientation, so it cannot confirm a direction.
+/// There is no initial no-op: an app that keeps one axis (Settings on the cover) leaves the app
+/// axis unchanged while the pose moved, so a restore whose target already matches the app axis
+/// must still post the pose to put it back.
+struct FoldableRotateDecision: Sendable {
+    /// The pose path exists only in the simulator; a physical foldable is not verified.
+    static let physicalDeviceError =
+        "Rotating an iPhone Duo panel is only supported on the iOS Simulator; it has not been verified on a physical device."
+
+    let target: RotateTarget
+    let appAxisBefore: AppAxis?
+
+    func physicalDeviceRefusal() -> RotateResult {
+        result(appAxis: appAxisBefore, performed: false, error: Self.physicalDeviceError)
+    }
+
+    func poll(appAxis: AppAxis?, deadlineReached: Bool) -> RotateOutcome {
+        if appAxis == target.axis {
+            return .success(result(appAxis: appAxis, performed: appAxisBefore != target.axis || !target.isCoarse))
+        }
+        guard deadlineReached else { return .pending }
+        let error = appAxis == nil
+            ? "Rotation to \(target.axis.rawValue) could not be confirmed: the view hierarchy was unavailable"
+            : RotateDecision.unchangedAxisError
+        return .failure(result(appAxis: appAxis ?? appAxisBefore, performed: false, error: error))
+    }
+
+    private func result(appAxis: AppAxis?, performed: Bool, error: String? = nil) -> RotateResult {
+        RotateResult(
+            previousOrientation: appAxisBefore?.rawValue ?? "unknown",
+            currentOrientation: error == nil ? target.orientation : (appAxis?.rawValue ?? "unknown"),
+            value: error == nil ? target.axis.value : (appAxis?.value ?? 0),
+            rotationPerformed: performed,
+            error: error
+        )
+    }
+}

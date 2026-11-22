@@ -39,8 +39,14 @@ protocol PrototypePermissionAuthority {
 
 @MainActor
 protocol PrototypeNotificationAuthorizationSource: AnyObject, PrototypePermissionAuthority {
+    /// Prompts only if still notDetermined and returns a fresh settings reading, never the grant Bool.
+    func request(provisional: Bool) async -> PrototypePermissionOutcome
     /// Foreground signals; the module owns status reads and their ordering against request results.
     var changes: AsyncStream<Void> { get }
+}
+
+extension PrototypeNotificationAuthorizationSource {
+    func request() async -> PrototypePermissionOutcome { await request(provisional: false) }
 }
 
 @MainActor
@@ -178,7 +184,9 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
             guard !Task.isCancelled, session == generation, let authority = authorities[name] else { return }
             let sequence = permissionSequences[name, default: 0]
             let state = await authority.status()
-            guard !Task.isCancelled, session == generation else { return }
+            // Generation owns late reads across stop/restart; stop also cancels the observation task.
+            guard session == generation else { return }
+            if !initial, Task.isCancelled { return }
             guard sequence == permissionSequences[name, default: 0] else { continue }
             if initial {
                 initialize(name, state)
@@ -203,7 +211,10 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
             }
             let outcome: PrototypePermissionOutcome
             if let authority = authorities[name] {
-                outcome = await request(name, from: authority, id: id)
+                outcome = await request(
+                    name, from: authority, id: id,
+                    provisional: call.args["options"]?.objectFields?["provisional"] == .bool(true)
+                )
             } else { outcome = .status(.unavailable) }
             guard active(id) else { return .failure(.cancelled, "Permission request cancelled") }
             let state: PrototypePermissionState
@@ -221,7 +232,7 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
     }
 
     private func request(
-        _ name: String, from authority: any PrototypePermissionAuthority, id: Int
+        _ name: String, from authority: any PrototypePermissionAuthority, id: Int, provisional: Bool
     )
         async -> PrototypePermissionOutcome
     {
@@ -235,6 +246,7 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
             }
             if name == "notifications", current != .notDetermined { return .status(current) }
         }
+        if name == "notifications" { return await source.request(provisional: provisional) }
         return await authority.request()
     }
 

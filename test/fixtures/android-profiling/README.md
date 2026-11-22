@@ -1,4 +1,4 @@
-# Android profiling fixtures (`captureTrace` / `heapDump`, #14113)
+# Android profiling fixtures (`performanceTrace` categories / `heapDump`, #14113)
 
 **Hand-reconstructed, not captured from a device.** No emulator, KVM or Android SDK was
 available when these were written. Each file reproduces what the named command prints,

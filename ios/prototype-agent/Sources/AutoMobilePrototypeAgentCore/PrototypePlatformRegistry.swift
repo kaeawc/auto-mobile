@@ -281,7 +281,13 @@ public final class PrototypePlatformRegistry {
     }
 
     var snapshot: [String: JSONValue] {
-        modules.mapValues { .object($0.state) }
+        var snapshot = modules.mapValues { JSONValue.object($0.state) }
+        if modules["notifications"] == nil, modules["permissions"] is PrototypePermissionsModule,
+           let authorization = snapshot["permissions"]?.objectFields?["notifications"]
+        {
+            snapshot["notifications"] = .object(["authorization": authorization])
+        }
+        return snapshot
     }
 }
 

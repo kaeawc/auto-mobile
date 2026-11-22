@@ -56,4 +56,20 @@ describe("tier import direction rules (#11789)", () => {
     expect(isViolation(wire, "src\\daemon\\wire\\LineFramer")).toBe(false);
     expect(isViolation(wire, "src/utils/logger")).toBe(false);
   });
+
+  test("the daemon streams package may not import the control socket or the daemon process (#15673)", () => {
+    const streams = rule("daemon/streams");
+    expect(isViolation(streams, "src/daemon/socketServer")).toBe(true);
+    expect(isViolation(streams, "src/daemon/socketServerParts/inputRoutes")).toBe(true);
+    expect(isViolation(streams, "src\\daemon\\daemon")).toBe(true);
+    expect(isViolation(streams, "src/daemon/daemonCore/DaemonBroker")).toBe(true);
+    expect(isViolation(streams, "src/daemon/manager")).toBe(true);
+    expect(isViolation(streams, "src/daemon/cli/status")).toBe(true);
+    expect(isViolation(streams, "src/daemon/socketServer/index")).toBe(false);
+    expect(isViolation(streams, "src/daemon/socketServerSingleton")).toBe(false);
+    expect(isViolation(streams, "src/daemon/daemonFiles")).toBe(false);
+    expect(isViolation(streams, "src/daemon/devicePool")).toBe(false);
+    expect(isViolation(streams, "src/daemon/streams/streamSocketAuth")).toBe(false);
+    expect(isViolation(streams, "src/daemon/wire/LineFramer")).toBe(false);
+  });
 });

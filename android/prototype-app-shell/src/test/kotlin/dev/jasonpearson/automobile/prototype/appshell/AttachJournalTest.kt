@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.prototype.appshell
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeEventKind
 import java.io.RandomAccessFile
+import java.util.concurrent.Executor
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -130,6 +131,76 @@ class AttachJournalTest {
     assertEquals(state, journal.load())
     assertEquals(1, logs.size)
   }
+
+  @Test
+  fun `oversized pending evicts the oldest events so the counters still save`() {
+    val events = (1L..5L).map { event(it, "x".repeat(200)) }
+    val full = state.copy(lastSequence = 5, dropped = 2, pending = events)
+    val limit = sizeOf(full.copy(pending = events.takeLast(2))) + 10
+    val journal = FileAttachJournal(file, INSTALL, logs::add, maxBytes = limit)
+
+    journal.save(full)
+
+    val restored = journal.load()
+    assertEquals(full.copy(dropped = 5, pending = events.takeLast(2)), restored)
+    assertEquals(1, logs.size)
+    assertFalse(logs.single().contains("xxx"))
+  }
+
+  @Test
+  fun `snapshot that cannot fit even without pending events keeps the previous one`() {
+    val journal = FileAttachJournal(file, INSTALL, logs::add, maxBytes = sizeOf(state) + 10)
+    journal.save(state)
+
+    journal.save(state.copy(appInstanceId = "i".repeat(sizeOf(state))))
+
+    assertEquals(state, journal.load())
+    assertEquals(listOf("Could not save attach journal"), logs)
+  }
+
+  @Test
+  fun `writer logs an unexpected save failure and keeps draining later snapshots`() = runTest {
+    val saved = mutableListOf<AttachJournalState>()
+    var failNext = true
+    val journal =
+      object : AttachJournal {
+        override fun load(): AttachJournalState? = null
+
+        override fun save(state: AttachJournalState) {
+          if (failNext) {
+            failNext = false
+            throw IllegalStateException("private-payload")
+          }
+          saved += state
+        }
+      }
+    val writer = AttachJournalWriter(journal, Executor(Runnable::run), logs::add)
+
+    writer.record(state, flush = true)
+    writer.awaitSaved(writer.version)
+    writer.record(state.copy(showing = 4), flush = true)
+    writer.awaitSaved(writer.version)
+
+    assertEquals(listOf(state.copy(showing = 4)), saved)
+    assertEquals(listOf("Could not save attach journal: IllegalStateException"), logs)
+  }
+
+  private fun sizeOf(snapshot: AttachJournalState): Int {
+    val probe = folder.root.resolve("probe-${snapshot.hashCode()}.json")
+    FileAttachJournal(probe, INSTALL, {}).save(snapshot)
+    return probe.length().toInt()
+  }
+
+  private fun event(sequence: Long, text: String) =
+    PrototypeEvent(
+      1,
+      "panel",
+      sequence,
+      PrototypeEventKind.EMIT,
+      "change",
+      buildJsonObject { put("text", text) },
+      emptyMap(),
+    )
 
   private companion object {
     const val INSTALL = "lastUpdateTime:1"

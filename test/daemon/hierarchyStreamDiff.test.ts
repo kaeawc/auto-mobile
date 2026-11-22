@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   annotateHierarchyDiff,
   HIERARCHY_DIFF_STATE_KEY,
-} from "../../src/daemon/hierarchyStreamDiff";
+} from "../../src/daemon/streams/hierarchyStreamDiff";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 
 function node(

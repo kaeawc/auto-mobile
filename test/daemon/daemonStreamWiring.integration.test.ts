@@ -3,15 +3,15 @@ import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
-import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
-import { DefaultObservationInitialFrameCoordinator } from "../../src/daemon/observationInitialFrameCoordinator";
-import type { InitialObservationFrame } from "../../src/daemon/observationInitialFrame";
+import { DeviceDataStreamSocketServer } from "../../src/daemon/streams/deviceDataStreamSocketServer";
+import { DefaultObservationInitialFrameCoordinator } from "../../src/daemon/streams/observationInitialFrameCoordinator";
+import type { InitialObservationFrame } from "../../src/daemon/streams/observationInitialFrame";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
-import { PerformancePushSocketServer } from "../../src/daemon/performancePushSocketServer";
-import { FailuresPushSocketServer } from "../../src/daemon/failuresPushSocketServer";
-import { TelemetryPushSocketServer } from "../../src/daemon/telemetryPushSocketServer";
-import { installDeviceDataStreamSocketServerForTesting } from "../../src/daemon/deviceDataStreamSocketServer";
+import { PerformancePushSocketServer } from "../../src/daemon/streams/performancePushSocketServer";
+import { FailuresPushSocketServer } from "../../src/daemon/streams/failuresPushSocketServer";
+import { TelemetryPushSocketServer } from "../../src/daemon/streams/telemetryPushSocketServer";
+import { installDeviceDataStreamSocketServerForTesting } from "../../src/daemon/streams/deviceDataStreamSocketServer";
 import { createFakeDaemonState } from "./helpers/inputSocketHarness";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import type { BootedDevice, Platform } from "../../src/models";
@@ -21,7 +21,7 @@ import type { NavigationGraphBridgeSource } from "../../src/daemon/daemonStreamR
 import {
   OBSERVATION_BATCH_HEADROOM_MS,
   PER_DEVICE_OBSERVATION_TIMEOUT_MS,
-} from "../../src/daemon/observationRequestBatch";
+} from "../../src/daemon/streams/observationRequestBatch";
 import type {
   DeviceSessionRecord,
   DeviceSessionEndOptions,
@@ -52,7 +52,7 @@ import type {
   OnObservationRequestedCallback,
   OnSubscriberConnectedCallback,
   RequestedObservation,
-} from "../../src/daemon/deviceDataStreamSocketServer";
+} from "../../src/daemon/streams/deviceDataStreamSocketServer";
 import {
   spyOnIosClientFactory,
   spyOnIosExistingFactory,

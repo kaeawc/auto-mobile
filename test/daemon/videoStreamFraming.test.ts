@@ -2,7 +2,7 @@ import {
   encodeSubscriptionNotice,
   PACKET_FLAG_SUBSCRIPTION_NOTICE,
   SUBSCRIPTION_NOTICE_CODES,
-} from "../../src/daemon/videoStreamFraming";
+} from "../../src/daemon/streams/videoStreamFraming";
 import { describe, expect, test } from "bun:test";
 import {
   CODEC_ID_H264,
@@ -22,7 +22,7 @@ import {
   PTS_MASK,
   ROTATION_MASK,
   ROTATION_SHIFT,
-} from "../../src/daemon/videoStreamFraming";
+} from "../../src/daemon/streams/videoStreamFraming";
 
 /** Annex-B chunk with a 4-byte start code and the given NAL type. */
 function annexB(nalType: number, payload: number[] = [0x00]): Buffer {

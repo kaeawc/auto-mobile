@@ -25,7 +25,7 @@ const DEFERRED_MODULES = [
   "src/features/prototype/prototypeGuide.ts",
   "src/vision/ClaudeVisionClient.ts",
   "src/daemon/socketServer/loopbackMcpClient.ts",
-  "src/daemon/webrtcStreamManager.ts",
+  "src/daemon/streams/webrtcStreamManager.ts",
 ];
 
 /** Packages only those deferred modules import. */

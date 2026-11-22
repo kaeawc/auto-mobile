@@ -39,7 +39,7 @@ import { join } from "node:path";
 import {
   getDeviceDataStreamServer,
   installDeviceDataStreamSocketServerForTesting,
-} from "../../../src/daemon/deviceDataStreamSocketServer";
+} from "../../../src/daemon/streams/deviceDataStreamSocketServer";
 import {
   observationStreamFrameInvalidator,
   type ObservationFrameInvalidator,

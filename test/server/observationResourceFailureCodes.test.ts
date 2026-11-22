@@ -25,7 +25,7 @@ import {
 import {
   OBSERVATION_SCREENSHOT_NOT_READY_RETRY_AFTER_MS,
   buildObservationScreenshotUri,
-} from "../../src/daemon/observationResourceUris";
+} from "../../src/daemon/streams/observationResourceUris";
 import {
   ResourceRegistry,
   type ResourceContent,

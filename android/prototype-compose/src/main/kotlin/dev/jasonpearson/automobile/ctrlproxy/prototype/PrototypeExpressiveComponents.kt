@@ -198,34 +198,13 @@ internal fun RenderPrototypeSplitButton(
       if (open) PROTOTYPE_CONNECTED_FULL_CORNER else SPLIT_INNER_CORNER,
       "splitCorner",
     )
-  val actions = source.onTap.orEmpty()
   val full = PROTOTYPE_CONNECTED_FULL_CORNER
   // An authored gradient is painted behind the button, so a filled half must not cover it.
   val transparent = node.style.source.gradient != null
   // Parent layout data and the node's semantics stay on the outer layout; each half is labelled.
   Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-      PrototypeVariantButton(
-        PrototypeButtonLook(
-          source.variant,
-          RoundedCornerShape(full, SPLIT_INNER_CORNER, SPLIT_INNER_CORNER, full),
-          node.enabled,
-          transparent = transparent,
-        ),
-        { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) },
-        Modifier.semantics { contentDescription = node.contentDescription ?: node.text },
-      ) {
-        prototypeIcon(source.icon)?.let {
-          Icon(
-            it,
-            contentDescription = null,
-            Modifier.size(ButtonDefaults.IconSize),
-            tint = prototypeForeground(node),
-          )
-          Box(Modifier.size(ButtonDefaults.IconSpacing))
-        }
-        PrototypeComponentLabel(node)
-      }
+      PrototypeSplitLeadingHalf(node, source, transparent, interact)
       PrototypeVariantButton(
         PrototypeButtonLook(
           source.variant,
@@ -261,6 +240,39 @@ internal fun RenderPrototypeSplitButton(
 }
 
 private val SPLIT_INNER_CORNER = 4.dp
+
+/** The split button's leading half: icon and label, running the node's `onTap`. */
+@Composable
+private fun PrototypeSplitLeadingHalf(
+  node: PrototypeRenderNode,
+  source: PrototypeButtonNode,
+  transparent: Boolean,
+  interact: (PrototypeInteraction) -> Unit,
+) {
+  val actions = source.onTap.orEmpty()
+  val full = PROTOTYPE_CONNECTED_FULL_CORNER
+  PrototypeVariantButton(
+    PrototypeButtonLook(
+      source.variant,
+      RoundedCornerShape(full, SPLIT_INNER_CORNER, SPLIT_INNER_CORNER, full),
+      node.enabled,
+      transparent = transparent,
+    ),
+    { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) },
+    Modifier.semantics { contentDescription = node.contentDescription ?: node.text },
+  ) {
+    prototypeIcon(source.icon)?.let {
+      Icon(
+        it,
+        contentDescription = null,
+        Modifier.size(ButtonDefaults.IconSize),
+        tint = prototypeForeground(node),
+      )
+      Box(Modifier.size(ButtonDefaults.IconSpacing))
+    }
+    PrototypeComponentLabel(node)
+  }
+}
 
 /** Whether the split menu is open, and whether its button is enabled (disabling every entry). */
 private data class SplitMenuState(val open: Boolean, val enabled: Boolean)

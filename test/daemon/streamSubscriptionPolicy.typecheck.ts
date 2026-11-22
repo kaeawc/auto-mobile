@@ -6,7 +6,7 @@ import {
 import type {
   endWebRtcStreamsForDevice,
   stopAllWebRtcStreams,
-} from "../../src/daemon/webrtcStreamManager";
+} from "../../src/daemon/streams/webrtcStreamManager";
 
 const reason: StreamSubscriptionEndReason = "stopped_by_owner";
 // @ts-expect-error Owner stop is not a device lifecycle event.

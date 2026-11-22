@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   DeviceDataStreamSocketServer,
   type NavigationGraphStreamData,
-} from "../../src/daemon/deviceDataStreamSocketServer";
-import type { StreamAuthorizeInput } from "../../src/daemon/streamSocketAuth";
+} from "../../src/daemon/streams/deviceDataStreamSocketServer";
+import type { StreamAuthorizeInput } from "../../src/daemon/streams/streamSocketAuth";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";

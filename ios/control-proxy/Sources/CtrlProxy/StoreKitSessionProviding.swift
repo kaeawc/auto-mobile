@@ -126,7 +126,10 @@ final class StoreKitSessionStore: StoreKitSessionProviding {
         return VerbatimLocalizedError(
             message: "unsupported: StoreKit Testing cannot \(action) on this iOS \(osMajorVersion) simulator: "
                 + "the system rejected the runner's StoreKit request (\(shape.domain) \(shape.code)) "
-                + "because the runner host app (AutoMobileTest) is missing. Restart the daemon to reinstall it."
+                + "because the runner host app (AutoMobileTest) is not installed for development: "
+                + "it is missing from the simulator "
+                + "(restart the daemon to reinstall it) or its build lacks the simulated get-task-allow "
+                + "entitlement (rebuild the runner)."
         )
     }
 

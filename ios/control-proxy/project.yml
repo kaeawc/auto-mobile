@@ -35,6 +35,12 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy
         INFOPLIST_FILE: AutoMobileTest/Info.plist
+        # CODE_SIGNING_ALLOWED=NO builds carry no entitlements, and iOS 26.5 storekitd then rejects the host app
+        # as "not installed for development" (#18961). Link them in as the section Xcode uses for simulator apps.
+        # A debug dylib would take the section instead of the stub executable storekitd inspects.
+        ENABLE_DEBUG_DYLIB: NO
+        OTHER_LDFLAGS:
+          - "-Wl,-sectcreate,__TEXT,__entitlements,$(SRCROOT)/AutoMobileTest/AutoMobileTest.entitlements"
         CODE_SIGN_STYLE: Automatic
     dependencies:
       # The app is only the UI-test host and constructs nothing, so it needs no proxy framework embedded.

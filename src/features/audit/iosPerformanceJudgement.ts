@@ -1,4 +1,4 @@
-import { DEFAULT_THRESHOLDS } from "../../daemon/performancePushSocketServer";
+import { DEFAULT_THRESHOLDS } from "../../daemon/streams/performancePushSocketServer";
 import type { PerformanceMetrics, PerformanceViolation } from "../../models/PerformanceAuditResult";
 import type { SdkFrameSample } from "../performance/SdkFrameMetricsStore";
 import type { OnDemandPerformanceResult, UnsupportedAudit } from "./OnDemandAudit";

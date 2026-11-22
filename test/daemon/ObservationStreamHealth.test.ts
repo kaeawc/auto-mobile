@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DefaultObservationStreamHealth } from "../../src/daemon/ObservationStreamHealth";
+import { DefaultObservationStreamHealth } from "../../src/daemon/streams/ObservationStreamHealth";
 
 describe("DefaultObservationStreamHealth", () => {
   test("is healthy only when the stream server is listening at its active socket path", () => {

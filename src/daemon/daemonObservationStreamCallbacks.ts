@@ -9,19 +9,19 @@ import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClien
 import type { DevicePool, PooledDevice } from "./devicePool";
 import type { PassiveWorkPolicy } from "./PassiveWorkPolicy";
 import type { SessionManager } from "./sessionManager";
-import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
-import type { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
+import { getDeviceDataStreamServer } from "./streams/deviceDataStreamSocketServer";
+import type { DefaultObservationInitialFrameCoordinator } from "./streams/observationInitialFrameCoordinator";
 import {
   pushInitialObservationFramesForSubscriber,
   selectObservationStreamDevices,
-} from "./observationInitialFrame";
+} from "./streams/observationInitialFrame";
 import {
   OBSERVATION_BATCH_HEADROOM_MS,
   PER_DEVICE_OBSERVATION_TIMEOUT_MS,
   createPooledObservationExecutor,
   runObservationRequestBatch,
-} from "./observationRequestBatch";
-import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
+} from "./streams/observationRequestBatch";
+import { createDefaultStreamSocketAuthenticator } from "./streams/streamSocketAuth";
 import {
   type StorageSubscriptionRequest,
   createObservationStreamIosClient,

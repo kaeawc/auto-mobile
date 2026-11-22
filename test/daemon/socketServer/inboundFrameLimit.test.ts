@@ -4,7 +4,7 @@ import { createFakeDaemonState } from "../helpers/inputSocketHarness";
 import { FakeSocket } from "../../fakes/FakeNetServer";
 import type { Socket } from "node:net";
 import { describe, expect, it } from "bun:test";
-import { FailuresStreamSocketServer } from "../../../src/daemon/failuresStreamSocketServer";
+import { FailuresStreamSocketServer } from "../../../src/daemon/streams/failuresStreamSocketServer";
 import { BaseSocketServer } from "../../../src/daemon/socketServer/BaseSocketServer";
 import { RequestResponseSocketServer } from "../../../src/daemon/socketServer/RequestResponseSocketServer";
 import {

@@ -39,7 +39,7 @@ targets:
         # as "not installed for development" (#18961). Link them in as the section Xcode uses for simulator apps.
         # A debug dylib would take the section instead of the stub executable storekitd inspects.
         ENABLE_DEBUG_DYLIB: NO
-        OTHER_LDFLAGS:
+        "OTHER_LDFLAGS[sdk=iphonesimulator*]":
           - "-Wl,-sectcreate,__TEXT,__entitlements,$(SRCROOT)/AutoMobileTest/AutoMobileTest.entitlements"
         CODE_SIGN_STYLE: Automatic
     dependencies:

@@ -2147,7 +2147,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				OTHER_LDFLAGS = (
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
 					"-Wl,-sectcreate,__TEXT,__entitlements,$(SRCROOT)/AutoMobileTest/AutoMobileTest.entitlements",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.ctrlproxy;
@@ -2300,7 +2300,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				OTHER_LDFLAGS = (
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
 					"-Wl,-sectcreate,__TEXT,__entitlements,$(SRCROOT)/AutoMobileTest/AutoMobileTest.entitlements",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.ctrlproxy;

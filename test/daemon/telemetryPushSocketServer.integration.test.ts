@@ -3,7 +3,7 @@ import {
   TelemetryPushSocketServer,
   boundBackfillEventText,
   type TelemetryFilter,
-} from "../../src/daemon/telemetryPushSocketServer";
+} from "../../src/daemon/streams/telemetryPushSocketServer";
 import { boundStructuredField } from "../../src/utils/truncateBodyText";
 import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecorder";
 import type { Subscriber } from "../../src/daemon/socketServer/SocketServerTypes";

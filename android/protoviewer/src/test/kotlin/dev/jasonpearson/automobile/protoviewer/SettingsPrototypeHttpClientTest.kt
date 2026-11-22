@@ -2,6 +2,9 @@ package dev.jasonpearson.automobile.protoviewer
 
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageState
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageTarget
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRemoteImageLoader
 import dev.jasonpearson.automobile.protocol.PrototypeRequestErrorCode
 import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
 import kotlinx.coroutines.CompletableDeferred
@@ -91,6 +94,43 @@ class SettingsPrototypeHttpClientTest {
     runCurrent()
     assertTrue(response.isCancelled)
     assertTrue(transport.cancelled)
+  }
+
+  @Test
+  fun imagesNeverReachEvenACachedLoaderWhileNetworkIsOff() = runTest {
+    var resolved = 0
+    client.allowedImages = {
+      resolved++
+      PrototypeRemoteImageLoader { _, _ -> error("Must not reach the cache") }
+    }
+    val result =
+      client.remoteImages.load("https://images.example/private", PrototypeImageTarget(1, 1))
+    assertEquals(PrototypeImageState.Missing, result)
+    assertEquals(0, resolved)
+  }
+
+  @Test
+  fun switchOffCancelsAnImageAndDropsItsResultWithoutAnEvent() = runTest {
+    settings.setAllowNetwork(true)
+    val answer = CompletableDeferred<PrototypeImageState>()
+    var cancelled = false
+    client.allowedImages = {
+      PrototypeRemoteImageLoader { _, _ ->
+        try {
+          answer.await()
+        } finally {
+          cancelled = true
+        }
+      }
+    }
+    val response = async {
+      client.remoteImages.load("https://images.example/private", PrototypeImageTarget(1, 1))
+    }
+    runCurrent()
+    settings.setAllowNetwork(false)
+    runCurrent()
+    assertEquals(PrototypeImageState.Missing, response.await())
+    assertTrue(cancelled)
   }
 
   private fun assertBlocked(response: PrototypeRequestResponse) {

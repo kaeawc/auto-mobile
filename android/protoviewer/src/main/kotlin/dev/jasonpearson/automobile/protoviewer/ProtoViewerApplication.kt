@@ -1,16 +1,20 @@
 package dev.jasonpearson.automobile.protoviewer
 
 import android.app.Application
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.net.toUri
+import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
+import dev.jasonpearson.automobile.ctrlproxy.prototype.CachedPrototypeRemoteImageLoader
+import dev.jasonpearson.automobile.ctrlproxy.prototype.FilePrototypeRemoteImageStore
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBiometricModule
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEgressPolicy
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePermissionsModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRemoteImageTransport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureValueStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
@@ -95,6 +99,7 @@ class ProtoViewerApplication : Application() {
         settings =
           SharedPreferencesSettingsStore(app.getSharedPreferences("settings", MODE_PRIVATE)),
         blocklist = blocklist,
+        imageContext = app,
       )
       .also { services ->
         services.shareImporter =
@@ -146,7 +151,9 @@ class ProtoViewerServices(
   val sharer: LibrarySharer? = null,
   val settings: SettingsStore,
   allowedClient: () -> PrototypeHttpClient = {
-    RetrofitPrototypeHttpClient(OkHttpClient(), policy = PrototypeEgressPolicy())
+    RetrofitPrototypeHttpClient(
+      OkHttpClient(),
+    )
   },
   val renderWatchdog: RenderWatchdog = DeadlineRenderWatchdog(),
   val renderer: ViewerRenderer = GuardedViewerRenderer,
@@ -154,11 +161,27 @@ class ProtoViewerServices(
     ::AndroidLocalNetworkPermission,
   val localNetworkGrant: LocalNetworkGrant = AndroidLocalNetworkGrant,
   val blocklist: ContentBlocklist,
+  imageContext: Context? = null,
 ) {
   internal var shareImporter: ShareLibraryImporter? = null
   /** Every reader sees the library with hidden and blocked received content removed. */
   val repository: BlocklistLibraryRepository = BlocklistLibraryRepository(library, blocklist)
-  val networkClient = SettingsPrototypeHttpClient(settings, allowedClient)
+  private val deviceClient by lazy(allowedClient)
+  private val imageLoader by lazy {
+    val transport = deviceClient as? PrototypeRemoteImageTransport
+    if (imageContext != null && transport != null)
+      CachedPrototypeRemoteImageLoader(
+        transport,
+        FilePrototypeRemoteImageStore(imageContext.cacheDir.resolve("prototype-remote-images")),
+        BitmapPrototypeImageDecoder(),
+      )
+    else null
+  }
+  val networkClient =
+    SettingsPrototypeHttpClient(settings) { deviceClient }
+      .apply {
+        allowedImages = { imageLoader }
+      }
 
   // Outlives activities so a stop/destroy still finishes the renderer's pending disk flush.
   val flushScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

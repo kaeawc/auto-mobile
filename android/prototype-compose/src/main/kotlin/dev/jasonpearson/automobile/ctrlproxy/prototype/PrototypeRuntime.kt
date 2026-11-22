@@ -401,6 +401,11 @@ class PrototypeRuntime(
   /** The running animations of this prototype's window, published in its window metadata. */
   @InternalAutoMobilePrototypeApi val motionActivity = PrototypeMotionActivity()
 
+  val remoteImages: PrototypeRemoteImageLoader?
+    get() = httpClients.remoteImages
+
+  val remoteImageActivity = PrototypeRemoteImageActivity()
+
   /** Effects that stopped animating over the frame budget (#15129), reported by `inspect`. */
   @InternalAutoMobilePrototypeApi val effectHealth = PrototypeEffectHealth()
 
@@ -473,6 +478,8 @@ class PrototypeRuntime(
         exclusively {
           if (channelLive(channel)) runChannelActions(channel, actions, event)
         }
+
+      override fun warn(message: String) = this@PrototypeRuntime.warn(message)
     }
 
   /**
@@ -484,14 +491,7 @@ class PrototypeRuntime(
     current.active && channel in current.spec.channels.orEmpty()
 
   private val realtimeModule = realtime?.let {
-    PrototypeRealtimeModule(
-      spec.id,
-      it,
-      realtimeSink,
-      requestScope,
-      { error -> Log.w("PrototypeRuntime", "Realtime sink failed", error) },
-      newRequestId,
-    )
+    PrototypeRealtimeModule(spec.id, it, realtimeSink, requestScope, newRequestId)
   }
 
   val platformRegistry =

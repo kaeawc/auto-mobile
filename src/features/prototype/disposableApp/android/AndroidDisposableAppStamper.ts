@@ -6,6 +6,7 @@ import { defaultIdGenerator, type IdGenerator } from "../../../../utils/IdGenera
 import { stableStringify } from "../../../../utils/stableStringify";
 import { resolveAutoMobileBaseDir } from "../../../../utils/tempDir";
 import type {
+  DisposableAppAsset,
   DisposableAppIcon,
   DisposableAppStamper,
   DisposableAppStampInput,
@@ -22,10 +23,12 @@ import { DefaultAndroidStampToolchain, type AndroidStampToolchain } from "./Andr
 import {
   DefaultAndroidStampZip,
   type AndroidStampZip,
-  type AndroidStampAsset,
+  type AndroidStampContent,
 } from "./AndroidStampZip";
 import { HostKeystoreSigner, type DisposableAppSigner } from "./DisposableAppSigner";
-import { parsePrototypeHex } from "../../prototypeContrast";
+import { parsePrototypeHex, prototypeRoleOverrides } from "../../prototypeContrast";
+import { record } from "../../prototypeTemplate";
+import { DefaultAndroidIconRenderer, type AndroidIconRenderer } from "./AndroidIconRenderer";
 
 /** Template colour behind the adaptive icon and the Android 12+ splash screen. */
 export const ANDROID_ICON_BACKGROUND_COLOR = "prototype_icon_background";
@@ -43,7 +46,7 @@ export interface AndroidDisposableAppStampInput {
   attachToken?: string;
   /** Development-only opt-in to expose attach on physical Android devices. */
   allowPhysicalDeviceAttach?: boolean;
-  assets: readonly AndroidStampAsset[];
+  assets: readonly DisposableAppAsset[];
   signer: DisposableAppSigner;
 }
 export interface AndroidDisposableAppStamped extends DisposableAppStamped {
@@ -55,6 +58,7 @@ export interface AndroidDisposableAppStamperDependencies {
   fs?: FileSystem;
   toolchain?: AndroidStampToolchain;
   zip?: AndroidStampZip;
+  iconRenderer?: AndroidIconRenderer;
   cacheDir?: string;
   idGenerator?: IdGenerator;
   signer?: DisposableAppSigner;
@@ -64,6 +68,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
   private readonly fs: FileSystem;
   private readonly tools: AndroidStampToolchain;
   private readonly zip: AndroidStampZip;
+  private readonly iconRenderer: AndroidIconRenderer;
   private readonly cacheDir: string;
   private readonly ids: IdGenerator;
   private readonly hostSigner: DisposableAppSigner;
@@ -73,6 +78,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
     this.fs = deps.fs ?? new DefaultFileSystem();
     this.tools = deps.toolchain ?? new DefaultAndroidStampToolchain();
     this.zip = deps.zip ?? new DefaultAndroidStampZip();
+    this.iconRenderer = deps.iconRenderer ?? new DefaultAndroidIconRenderer();
     this.cacheDir = deps.cacheDir ?? join(resolveAutoMobileBaseDir(), "prototype-android-cache");
     this.ids = deps.idGenerator ?? defaultIdGenerator;
     this.hostSigner = deps.signer ?? new HostKeystoreSigner();
@@ -88,12 +94,15 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
     input: AndroidDisposableAppStampInput | DisposableAppStampInput,
   ): Promise<AndroidDisposableAppStamped> {
     assertDisposableAppId(input.appId);
-    const colors = stampColors(input.icon);
+
     const android =
       typeof input.spec === "string"
         ? (input as AndroidDisposableAppStampInput)
         : await this.adapt(input as DisposableAppStampInput);
     try {
+      const spec: unknown = JSON.parse(android.spec);
+      const decoration = await this.iconDecoration(android, spec);
+      const { iconLayers } = decoration;
       const signer = await android.signer.signerSha256();
       const key = hash(
         stableStringify({
@@ -105,10 +114,14 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
           manifest: android.template.manifestXml,
           appId: android.appId,
           label: android.label,
-          colors: Object.fromEntries(colors),
+          colors: Object.fromEntries(decoration.colors),
+          iconLayers: iconLayers && {
+            foreground: hash(iconLayers.foreground),
+            monochrome: hash(iconLayers.monochrome),
+          },
           permissions: [...new Set(android.permissions)].sort(),
           enabledComponents: [...new Set(android.enabledComponents)].sort(),
-          spec: JSON.parse(android.spec),
+          spec,
           attachToken: android.attachToken,
           allowPhysicalDeviceAttach: android.allowPhysicalDeviceAttach === true,
           assets: android.assets
@@ -121,7 +134,13 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
       if (existing) {
         return await existing;
       }
-      const pending = this.build(android, key, signer, colors);
+      const pending = this.build(android, key, signer, {
+        ...decoration,
+        spec: stableStringify(spec),
+        assets: android.assets,
+        attachToken: android.attachToken,
+        allowPhysicalDeviceAttach: android.allowPhysicalDeviceAttach,
+      });
       this.inFlight.set(key, pending);
       try {
         return await pending;
@@ -143,15 +162,48 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
       permissions: input.declarations.android.permissions,
       enabledComponents: [],
       spec: stableStringify(input.spec),
-      assets: [],
+      icon: input.icon,
+      assets: input.assets ?? [],
       signer: this.hostSigner,
+    };
+  }
+  private async iconDecoration(input: AndroidDisposableAppStampInput, spec: unknown) {
+    const colors = new Map<string, number>();
+    const { icon } = input;
+    const explicit = icon && "backgroundColor" in icon;
+    const background = explicit ? parsePrototypeHex(icon.backgroundColor) : themeBackground(spec);
+    if (explicit && !background) {
+      throw new ActionableError("Icon backgroundColor must be #RRGGBB or #AARRGGBB.");
+    }
+    if (background) {
+      const { r, g, b, a } = background;
+      colors.set(
+        ANDROID_ICON_BACKGROUND_COLOR,
+        ((Math.round(a * 255) << 24) | (r << 16) | (g << 8) | b) >>> 0,
+      );
+    }
+    if (icon && "asset" in icon) {
+      const asset = input.assets.find(({ id }) => id === icon.asset);
+      if (!asset) {
+        throw new ActionableError(
+          `Android icon asset '${icon.asset}' is missing. Supply it in assets with installApp.`,
+        );
+      }
+      return { colors, iconLayers: await this.iconRenderer.render({ bytes: asset.bytes }) };
+    }
+    return {
+      colors,
+      iconLayers:
+        explicit && background
+          ? await this.iconRenderer.render({ label: input.label, background })
+          : undefined,
     };
   }
   private async build(
     input: AndroidDisposableAppStampInput,
     key: string,
     signer: string,
-    colors: ReadonlyMap<string, number>,
+    content: AndroidStampContent,
   ): Promise<AndroidDisposableAppStamped> {
     const directory = join(this.cacheDir, key);
     const apkPath = join(directory, "app.apk");
@@ -186,13 +238,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
       await this.tools.linkManifest(input.template.apkPath, manifest, linked);
       await this.fs.writeFileBuffer(
         assembled,
-        this.zip.assemble(templateBytes, await this.fs.readFileBuffer(linked), {
-          spec: stableStringify(JSON.parse(input.spec)),
-          assets: input.assets,
-          attachToken: input.attachToken,
-          allowPhysicalDeviceAttach: input.allowPhysicalDeviceAttach,
-          colors,
-        }),
+        this.zip.assemble(templateBytes, await this.fs.readFileBuffer(linked), content),
       );
       await this.tools.zipalign(assembled, aligned);
       await this.tools.sign(aligned, signed, input.signer);
@@ -208,27 +254,11 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
     }
   }
 }
-/**
- * A `backgroundColor` icon recolours the template's adaptive icon background and splash. An
- * uploaded `asset` icon needs a raster foreground layer, which is not stamped yet, so it is refused
- * rather than silently ignored.
- */
-function stampColors(icon: DisposableAppIcon | undefined): ReadonlyMap<string, number> {
-  if (icon === undefined) {
-    return new Map();
-  }
-  if (!("backgroundColor" in icon)) {
-    throw new ActionableError(
-      "Android disposable apps do not support an icon asset yet. Use icon.backgroundColor or omit icon.",
-    );
-  }
-  const rgba = parsePrototypeHex(icon.backgroundColor);
-  if (rgba === undefined) {
-    throw new ActionableError("Icon backgroundColor must be #RRGGBB or #AARRGGBB.");
-  }
-  const argb = ((Math.round(rgba.a * 255) << 24) | (rgba.r << 16) | (rgba.g << 8) | rgba.b) >>> 0;
-  return new Map([[ANDROID_ICON_BACKGROUND_COLOR, argb]]);
+function themeBackground(spec: unknown) {
+  const mode = record(record(spec)?.theme)?.mode === "dark" ? "dark" : "light";
+  return new Map(prototypeRoleOverrides(spec, mode)).get("background");
 }
+
 function hash(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }

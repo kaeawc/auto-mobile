@@ -74,6 +74,7 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     url: "https://example.com/a",
   }),
   prototype_style_polish_v2: fixture({ ...label, style: { cornerStyle: "continuous" } }),
+  prototype_m3_expressive_v1: fixture({ type: "loadingIndicator", id: "label" }),
   prototype_tooltip_v1: fixture({
     type: "column",
     id: "label",

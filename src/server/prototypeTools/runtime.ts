@@ -682,7 +682,10 @@ function earlyOutput(
   args: z.infer<typeof prototypeSchema>,
 ): Promise<PrototypeOutput> {
   return isDisposableAppAction(args.action)
-    ? disposableAppOutput(routes.disposableApps(), device, args, routes.disposableAgent)
+    ? disposableAppOutput(routes.disposableApps(), device, args, {
+        readers: routes.assetReaders,
+        attachments: routes.disposableAgent,
+      })
     : hostOnlyOutput(routes.hostOnly, args, routes.assetReaders, routes.shareFiles);
 }
 

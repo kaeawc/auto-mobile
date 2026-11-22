@@ -486,9 +486,60 @@ struct PrototypeSession {
         let actions = spec.platformHandlers[name] ?? .array([])
         let decoded = try JSONDecoder().decode([PrototypeAction].self, from: JSONEncoder().encode(actions))
         let delivered = emit(kind: "emit", name: "prototype_platform_event", payload: payload)
+        let previous = platformEventData
         platformEventData = data
-        defer { platformEventData = nil }
+        defer { platformEventData = previous }
         return delivered + run(decoded)
+    }
+
+    /// Channel callbacks use the same validation/planning path as platform follow-ups. Install the
+    /// event before planning state writes, so bindings are validated against this frame.
+    mutating func runChannelActions(_ actions: [JSONValue], event: JSONValue) throws -> [PrototypeEvent] {
+        let decoded = try JSONDecoder().decode([PrototypeAction].self, from: JSONEncoder().encode(actions))
+        let previous = platformEventData
+        platformEventData = event
+        defer { platformEventData = previous }
+        return run(decoded)
+    }
+
+    /// Applies one sink effect atomically through the normal session transition. The caller checks
+    /// owner identity and the current declaration inside its exclusive section before entering here.
+    mutating func applyChannelEffect(_ effect: PrototypeChannelEffect) throws -> [PrototypeEvent] {
+        guard isShown else { return [] }
+        if let snapshot = effect.state {
+            var platform = spec?.platformState ?? [:]
+            var realtime = platform["realtime"]?.objectFields ?? [:]
+            realtime[effect.channel] = snapshot
+            platform["realtime"] = .object(realtime)
+            try setPlatformState(platform)
+        }
+        var events: [PrototypeEvent] = []
+        if let name = effect.eventName { events += try deliverPlatformEvent(name, data: effect.event) }
+        events += try runChannelActions(effect.actions, event: effect.event)
+        return events
+    }
+
+    /// Only connection inputs are bound; route/callback event bindings remain for delivery time.
+    var resolvedChannels: [String: JSONValue] {
+        let inputs = EmitContextInputs(state: state, pages: pages, dataModel: data)
+        return (spec?.channels?.objectFields ?? [:]).mapValues { raw in
+            guard var fields = raw.objectFields else { return raw }
+            if let url = fields["url"]?.stringValue {
+                fields["url"] = .string(PrototypeRequestResolver.bindText(url, inputs: inputs))
+            }
+            if let headers = fields["headers"]?.objectFields {
+                fields["headers"] = .object(headers.mapValues { value in
+                    if let text = value.stringValue {
+                        return .string(PrototypeRequestResolver.bindText(text, inputs: inputs))
+                    }
+                    if case let .success(resolved) = PrototypeDataWrite.resolveValue(value, inputs: inputs) {
+                        return .string(resolved.displayString)
+                    }
+                    return value
+                })
+            }
+            return .object(fields)
+        }
     }
 
     /// A tap's actions in order; a `dismiss` ends the prototype and drops the remaining actions.
@@ -502,6 +553,7 @@ struct PrototypeSession {
     /// runs, so one rejected write drops the whole tap with no write, page move or event.
     mutating func run(_ actions: [PrototypeAction], context: PrototypeActionContext? = nil) -> [PrototypeEvent] {
         guard isShown else { return [] }
+        let actions = bindStateValues(actions)
         if let failed = requireValid(actions) { return failed }
         guard let writes = plannedWrites(actions, from: state) else { return [] }
         return execute(actions, writes, context: context)
@@ -534,6 +586,7 @@ struct PrototypeSession {
     /// first, when a value moved, then the action list.
     mutating func control(own: [(String, JSONValue)], then actions: [PrototypeAction]) -> [PrototypeEvent] {
         guard isShown else { return [] }
+        let actions = bindStateValues(actions)
         if let failed = requireValid(actions) { return failed }
         let (written, moved) = applying(own)
         if !moved.isEmpty, !accepts(written) { return [] }
@@ -561,6 +614,26 @@ struct PrototypeSession {
 
     private typealias PlannedWrite = (key: String, value: JSONValue)
 
+    /// Bind this list's setState values before planning or running it, as on Android. A missing,
+    /// null or non-scalar source stays authored so the normal state plan refuses the whole list.
+    /// Nested callbacks keep their bindings until their own event is installed and their list runs.
+    private func bindStateValues(_ actions: [PrototypeAction]) -> [PrototypeAction] {
+        let inputs = EmitContextInputs(
+            state: state, pages: pages, dataModel: data,
+            platformModel: spec?.platformState, eventData: platformEventData
+        )
+        return actions.map { action in
+            guard action.type == "setState", let binding = action.value?.objectFields,
+                  binding["event"] != nil || binding["platform"] != nil,
+                  case let .success(value) = PrototypeDataWrite.resolveValue(action.value, inputs: inputs),
+                  PrototypeDataValues.isScalar(value)
+            else { return action }
+            var bound = action
+            bound.value = value
+            return bound
+        }
+    }
+
     /// The write each state action of `actions` makes when the list starts from `start`, by action
     /// index; nil when the state it leaves behind is invalid. Nothing is applied here. Actions after
     /// a `dismiss` never run, so they are not planned; a toggle or step that is a no-op has no entry.
@@ -572,10 +645,11 @@ struct PrototypeSession {
     {
         var planned = start
         var writes: [Int: PlannedWrite] = [:]
-        for (index, action) in actions.enumerated() {
+        for (index, action) in bindStateValues(actions).enumerated() {
             if action.type == "dismiss" { break }
             if action.type == "setState", PrototypeGeneratedValues.form(action.value) != nil { continue }
             guard let write = stateWrite(action, in: planned) else { continue }
+            guard PrototypeDataValues.isScalar(write.value) else { return nil }
             planned[write.key] = write.value
             planned = clampedPagerState(planned)
             guard accepts(planned) else { return nil }
@@ -1173,6 +1247,7 @@ struct PrototypeSession {
         guard let pager else {
             return control(own: key.map { [($0, .number(Double(index)))] } ?? [], then: actions)
         }
+        let actions = bindStateValues(actions)
         if let failed = requireValid(actions) { return failed }
         guard let writes = plannedWrites(actions, from: state) else { return [] }
         return setPage(pager, index) + execute(actions, writes)
@@ -1423,6 +1498,7 @@ extension PrototypeSession {
             onSuccess: action.onSuccess ?? [],
             onError: action.onError ?? [],
             append: action.append,
+            eventData: platformEventData,
             where: request.where,
             member: action.member,
             context: actionContext?.copy()
@@ -1520,6 +1596,9 @@ extension PrototypeSession {
             name: PrototypeRequestEvent.name,
             payload: PrototypeRequestEvent.payload(job: inFlight.job, into: inFlight.into, meta: meta)
         )
+        let previous = platformEventData
+        platformEventData = inFlight.eventData
+        defer { platformEventData = previous }
         return events + run(failed ? inFlight.onError : inFlight.onSuccess, context: inFlight.context?.copy())
     }
 
@@ -1610,7 +1689,9 @@ private struct EmitContextInputs: PrototypeEmitContextInputs {
 
     func platform(_ pointer: String) -> JSONValue? { PrototypeDataPointer.resolve(platformModel, pointer: pointer) }
     func event(_ pointer: String) -> JSONValue? {
-        eventData.flatMap { PrototypeDataPointer.resolve($0, tokens: PrototypeDataPointer.tokens(pointer)[...]) }
+        if pointer.isEmpty { return eventData }
+        guard PrototypeDataPointer.isValid(pointer) else { return nil }
+        return eventData.flatMap { PrototypeDataPointer.resolve($0, tokens: PrototypeDataPointer.tokens(pointer)[...]) }
     }
 
     func state(_ key: String) -> JSONValue? { state[key] }
@@ -1700,6 +1781,9 @@ extension PrototypeSession {
             name: PrototypeRequestEvent.name,
             payload: PrototypeRequestEvent.payload(job: request.job, into: request.into, meta: meta)
         )
+        let previous = platformEventData
+        platformEventData = request.eventData
+        defer { platformEventData = previous }
         return events + run(failed ? request.onError : request.onSuccess, context: request.context?.copy())
     }
 }

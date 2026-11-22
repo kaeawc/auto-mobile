@@ -98,6 +98,7 @@ enum PrototypeStrictCapabilities {
             if fields["onAppear"] != nil { need("timers") }
             if fields["scrollLinked"] != nil || fields["scrollTransition"] != nil { need("scroll_motion") }
             if PrototypeMotionV3.required(fields) { result.insert(PrototypeMotionV3.capability) }
+            if PrototypeM3Expressive.required(fields) { result.insert(PrototypeM3Expressive.capability) }
             let type = fields["type"]?.stringValue ?? ""
             if type.isEmpty, let pointer = fields["platform"]?.stringValue { platformRead(pointer) }
             if !PrototypeDerivedValidator.conditionReferences(fields, path: "").isEmpty { need("derive") }

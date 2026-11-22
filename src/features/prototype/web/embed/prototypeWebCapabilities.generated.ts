@@ -36,6 +36,7 @@ export const PROTOTYPE_WEB_CAPABILITIES: readonly string[] = [
   "prototype_links_v1",
   "prototype_loading_states_v1",
   "prototype_loops_v1",
+  "prototype_m3_expressive_v1",
   "prototype_menus_v1",
   "prototype_motion_tokens_v1",
   "prototype_motion_v2",

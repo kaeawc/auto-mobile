@@ -183,16 +183,24 @@ const disposableAppInput = z
       .describe("Lowercase hyphenated words such as feedly or news-reader; names the app id"),
     label: z.string().min(1).max(120).describe("The launcher label, such as Feedly"),
     icon: z
-      .object({
-        backgroundColor: z
-          .string()
-          .regex(
-            /^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/,
-            "icon.backgroundColor must be #RRGGBB or #AARRGGBB",
-          )
-          .describe("#RRGGBB or #AARRGGBB behind the adaptive icon and splash screen"),
-      })
-      .strict()
+      .union([
+        z.strictObject({
+          backgroundColor: z
+            .string()
+            .regex(
+              /^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/,
+              "icon.backgroundColor must be #RRGGBB or #AARRGGBB",
+            )
+            .describe("#RRGGBB or #AARRGGBB behind the adaptive icon monogram and splash screen"),
+        }),
+        z.strictObject({
+          asset: z
+            .string()
+            .min(1)
+            .max(MAX_PROTOTYPE_ASSET_ID_LENGTH)
+            .describe("Id of a PNG or JPEG supplied in assets in this installApp call"),
+        }),
+      ])
       .optional(),
     ttlHours: z
       .number()
@@ -466,7 +474,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       assets: assetsInput
         .optional()
         .describe(
-          "show, save or share only: images to upload before the prototype is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the prototype changes and names the assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
+          "Assets for show, save, share or installApp. Supply {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Device uploads are sequential. If an upload fails, the prototype stays unchanged and the result names any assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
         ),
       url: z
         .string()
@@ -671,7 +679,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     awaitEvent: ["id", "eventName", "kind", "afterSequence"],
     serve: ["id", "port", "remote", "idleTimeoutMs"],
     stop: [],
-    installApp: ["spec", "specPath", "app"],
+    installApp: ["spec", "specPath", "app", "assets"],
     listApps: [],
     uninstallApp: ["appId", "all", "expired"],
   };

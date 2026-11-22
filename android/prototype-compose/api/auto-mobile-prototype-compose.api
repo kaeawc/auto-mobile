@@ -61,6 +61,8 @@ public final class dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost {
   public final void setNextSequence(kotlin.jvm.functions.Function1<? super java.lang.String, java.lang.Long>);
   public final dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageSessionRegistry getStorageRegistry();
   public final void setStorageRegistry(dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageSessionRegistry);
+  public final dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRealtimeConfig getRealtime();
+  public final void setRealtime(dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRealtimeConfig);
   public final kotlinx.coroutines.CoroutineScope getFlushScope();
   public final void setFlushScope(kotlinx.coroutines.CoroutineScope);
   public final dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink getEventSink();

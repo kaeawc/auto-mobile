@@ -5,6 +5,7 @@ import Foundation
 @MainActor
 final class PrototypePlatformDriver {
     let registry: PrototypePlatformRegistry
+    var realtime: PrototypeRealtimeModule?
     private let clock: any PrototypeClock
     private var calls: [String: Task<Void, Never>] = [:]
     private var deadlines: [String: any PrototypeTimerHandle] = [:]
@@ -120,11 +121,13 @@ final class PrototypePlatformDriver {
             }
         }
         let registry = registry
+        let realtime = realtime
         calls[id] = Task { [weak self] in
             guard !Task.isCancelled else { return }
             let result: PlatformCallResult
             let name = String(job.call.call.split(separator: ".").first ?? "")
-            if let module = registry.modules[name] {
+            let resolved: (any PrototypePlatformModule)? = name == "realtime" ? realtime : registry.modules[name]
+            if let module = resolved {
                 switch module.availability() {
                 case .ready:
                     if let invalid = Self.invalidArguments(job.call) { result = invalid }

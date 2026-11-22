@@ -52,6 +52,38 @@ class BitmapPrototypeImageDecoderTest {
   }
 
   @Test
+  fun `EXIF orientations five to eight choose the sample size for the swapped target`() {
+    // Stored 4096x2048, displayed 2048x4096. Sampling against the swapped 512x1024 target gives
+    // 2; the unswapped 1024x512 target would allow 4 and decode a 512x1024 bitmap.
+    val decoded =
+      requireNotNull(
+        largeDecoder.decode(
+          jpeg(ExifInterface.ORIENTATION_ROTATE_90, width = 4096, height = 2048),
+          PrototypeImageTarget(1024, 512),
+        ),
+      )
+    assertEquals(1024, decoded.width)
+    assertEquals(2048, decoded.height)
+  }
+
+  @Test
+  fun `EXIF orientation one samples against the unswapped target`() {
+    val decoded =
+      requireNotNull(
+        largeDecoder.decode(
+          jpeg(ExifInterface.ORIENTATION_NORMAL, width = 4096, height = 2048),
+          PrototypeImageTarget(1024, 512),
+        ),
+      )
+    assertEquals(1024, decoded.width)
+    assertEquals(512, decoded.height)
+  }
+
+  /** Budgets high enough that only the display target drives sample-size selection. */
+  private val largeDecoder =
+    BitmapPrototypeImageDecoder(maxPixels = Long.MAX_VALUE, maxDecodedBytes = Long.MAX_VALUE)
+
+  @Test
   fun `an EXIF transform samples further so the source and its copy share the pixel budget`() {
     val target = PrototypeImageTarget(24, 16)
     val upright =
@@ -70,10 +102,10 @@ class BitmapPrototypeImageDecoderTest {
     assertEquals(12, rotated.height)
   }
 
-  /** A 48x32 JPEG tagged with EXIF [orientation]. */
-  private fun jpeg(orientation: Int): ByteArray {
+  /** A [width]x[height] (48x32 by default) JPEG tagged with EXIF [orientation]. */
+  private fun jpeg(orientation: Int, width: Int = 48, height: Int = 32): ByteArray {
     val file = temp.newFile()
-    val source = Bitmap.createBitmap(48, 32, Bitmap.Config.ARGB_8888)
+    val source = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     file.outputStream().use { assertTrue(source.compress(Bitmap.CompressFormat.JPEG, 100, it)) }
     source.recycle()
     ExifInterface(file.path).apply {

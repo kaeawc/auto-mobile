@@ -123,6 +123,23 @@ class PrototypePermissionsModuleTest {
   }
 
   @Test
+  fun `provisional options are accepted and ignored`() = runTest {
+    for (options in listOf("{}", """{"provisional":false}""", """{"provisional":true}""")) {
+      val source =
+        FakePrototypePermissionsSource().apply { current = PrototypePermissionState.GRANTED }
+      val module = PrototypePermissionsModule(source, backgroundScope)
+      val args = JsonObject(call().args + ("options" to Json.parseToJsonElement(options)))
+      val result = module.call(call().copy(args = args)) as PlatformCallResult.Success
+      assertEquals(
+        Json.parseToJsonElement("""{"results":{"notifications":"granted"}}"""),
+        result.value,
+      )
+      assertEquals(1, source.requests)
+      module.close()
+    }
+  }
+
+  @Test
   fun `invalid args and unknown calls fail before reading source`() = runTest {
     val source = FakePrototypePermissionsSource()
     val module = PrototypePermissionsModule(source, backgroundScope)
@@ -135,6 +152,11 @@ class PrototypePermissionsModuleTest {
         """{"names":"notifications"}""",
         """{"names":[1]}""",
         """{"names":["notifications"],"extra":true}""",
+        """{"names":["notifications"],"options":true}""",
+        """{"names":["notifications"],"options":null}""",
+        """{"names":["notifications"],"options":[]}""",
+        """{"names":["notifications"],"options":{"provisional":"true"}}""",
+        """{"names":["notifications"],"options":{"unknown":true}}""",
       )) {
       val result =
         module.call(call().copy(args = Json.parseToJsonElement(args).jsonObject))

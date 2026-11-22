@@ -61,6 +61,36 @@ function isProvablyUndeliveredAdbError(error: unknown): boolean {
   );
 }
 
+/** Letter keys for shortcut chords such as meta+h (#18908). */
+export const INPUT_LETTER_KEYS = [
+  "a",
+  "b",
+  "c",
+  "d",
+  "e",
+  "f",
+  "g",
+  "h",
+  "i",
+  "j",
+  "k",
+  "l",
+  "m",
+  "n",
+  "o",
+  "p",
+  "q",
+  "r",
+  "s",
+  "t",
+  "u",
+  "v",
+  "w",
+  "x",
+  "y",
+  "z",
+] as const;
+
 export const SUPPORTED_INPUT_KEYS = [
   "enter",
   "tab",
@@ -71,11 +101,38 @@ export const SUPPORTED_INPUT_KEYS = [
   "arrow_down",
   "arrow_left",
   "arrow_right",
+  ...INPUT_LETTER_KEYS,
 ] as const;
 
 export type InputKeyName = (typeof SUPPORTED_INPUT_KEYS)[number];
 
 export const INPUT_KEY_CODE_MAP = {
+  a: "KEYCODE_A",
+  b: "KEYCODE_B",
+  c: "KEYCODE_C",
+  d: "KEYCODE_D",
+  e: "KEYCODE_E",
+  f: "KEYCODE_F",
+  g: "KEYCODE_G",
+  h: "KEYCODE_H",
+  i: "KEYCODE_I",
+  j: "KEYCODE_J",
+  k: "KEYCODE_K",
+  l: "KEYCODE_L",
+  m: "KEYCODE_M",
+  n: "KEYCODE_N",
+  o: "KEYCODE_O",
+  p: "KEYCODE_P",
+  q: "KEYCODE_Q",
+  r: "KEYCODE_R",
+  s: "KEYCODE_S",
+  t: "KEYCODE_T",
+  u: "KEYCODE_U",
+  v: "KEYCODE_V",
+  w: "KEYCODE_W",
+  x: "KEYCODE_X",
+  y: "KEYCODE_Y",
+  z: "KEYCODE_Z",
   enter: "KEYCODE_ENTER",
   tab: "KEYCODE_TAB",
   escape: "KEYCODE_ESCAPE",

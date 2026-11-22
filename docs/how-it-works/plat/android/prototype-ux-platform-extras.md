@@ -265,16 +265,19 @@ INTERNET), and explicitly enabled components in structured XML. App-owned resour
 references retain the template resource namespace with private-resource access.
 `aapt2 link` resolves those names to binary resource ids, avoiding binary-manifest
 string replacement. The spec and assets are baked into
-`assets/prototype/`. An `icon.backgroundColor` (`#RRGGBB` or
-`#AARRGGBB`) rewrites the `prototype_icon_background` colour in the stored
-resource table, in every configuration. That colour backs the adaptive icon and the
-Android 12+ splash screen. The stamp fails without a
-literal colour of that name. An `icon.asset` is refused: the raster foreground
-layer is not stamped yet.
+`assets/prototype/`. The adaptive icon and Android 12+ splash share
+`prototype_icon_background`. The host patches it in every configuration using
+`icon.backgroundColor`, the spec's authored `theme.colors.background` (with the
+selected mode's override, using light for system mode), or the template default.
+An `icon.asset` names a PNG or JPEG supplied with the install call. A colour-only
+icon uses a contrasting label monogram. The host places the artwork in the
+adaptive icon safe zone and uses its alpha as the themed icon silhouette.
+It resolves both drawable paths from the compiled resource table and fails
+if a requested resource is missing.
 
 Template signatures are removed before assembly. The resource table stays stored;
 zipalign aligns it before apksigner signs with v2/v3 using a persistent host-owned
 PKCS12 identity. Verification checks the signer before publishing the
 content-addressed cache artifact, whose signer certificate SHA-256 feeds
 the installation signing guard. Cache identity covers the template, stamp inputs,
-asset bytes, and signer; hits check the saved digest.
+asset bytes, rendered icon layers, and signer; hits check the saved digest.

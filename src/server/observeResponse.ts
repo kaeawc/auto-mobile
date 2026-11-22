@@ -58,6 +58,7 @@ import {
 import { type WaitForObservationOutcome } from "../features/observe/wait/WaitEvaluation";
 import type { ObserveArgs } from "./observeTools";
 import type { WatchObserveDependencies } from "./observeWatch";
+import type { CarPlayObserveDependencies } from "./observeCarPlay";
 import {
   defaultAudioInputDiagnostic,
   type AudioInputDiagnosticResolver,
@@ -96,6 +97,7 @@ export interface ObserveToolDependencies {
   androidAuto?: AndroidAutoProjectionResolver;
   /** Screenshot-only observe on an Apple Watch simulator (#14910); tests pass a fake capture. */
   watch?: WatchObserveDependencies;
+  carPlay?: CarPlayObserveDependencies;
 }
 
 /**

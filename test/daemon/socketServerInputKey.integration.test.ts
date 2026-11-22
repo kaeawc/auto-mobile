@@ -244,7 +244,7 @@ describe("UnixSocketServer input/key", () => {
     expect(missing.frameCount).toBe(1);
     expect(unsupported.response.success).toBe(false);
     expect(unsupported.response.error).toBe(
-      "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right",
+      "input/key key must be one of: enter, tab, escape, backspace, delete, arrow_up, arrow_down, arrow_left, arrow_right, a-z",
     );
     expect(unsupported.frameCount).toBe(1);
     expect(modifiers.response.success).toBe(false);

@@ -48,7 +48,7 @@
             // Invalid/unsupported specs never initialize persistence, start requests, or show a partial tree.
             let model = PrototypeModel(
                 mode: .standalone,
-                storage: loaded == nil ? nil : storage.coordinator(),
+                storage: loaded == nil ? nil : storage.coordinator(secure: registry.secureStorage),
                 registry: registry
             )
             super.init(model: model, contentEnabled: loaded != nil)

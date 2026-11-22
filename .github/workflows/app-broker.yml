@@ -66,7 +66,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Act as the App
-        uses: kaeawc/waaagh/actions/app-broker@61b6bbf54ec4361f54094d5370363e6a4911d61d # pinned
+        uses: kaeawc/waaagh/actions/app-broker@61b6bbf54ec4361f54094d5370363e6a4911d61d # main
         with:
           app-id: ${{ secrets.GH_APP_ID }}
           private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}

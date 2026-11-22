@@ -21422,7 +21422,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Android: measure cold/warm/hot app startup over N launches; TTID/TTFD percentiles, stored in performance results.",
+    "description": "Android and iOS Simulator: measure cold and warm app startup over repeated launches; store TTID percentiles in performance results. Android also supports hot starts and TTFD.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -21430,7 +21430,7 @@
         "appId": {
           "type": "string",
           "pattern": "^[A-Za-z0-9._-]+$",
-          "description": "Package to launch",
+          "description": "Android package name or iOS bundle ID to launch",
           "minLength": 1,
           "maxLength": 256
         },
@@ -21442,7 +21442,7 @@
         "mode": {
           "type": "string",
           "enum": ["cold", "warm", "hot"],
-          "description": "cold: process killed; warm: process kept, activity recreated; hot: activity resumed"
+          "description": "cold: process terminated; warm: process kept (Android recreates the activity, iOS Simulator returns from Home); hot: Android resumes the activity"
         },
         "iterations": {
           "description": "Launches to measure; default 5",

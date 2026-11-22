@@ -1,5 +1,8 @@
 complexity:
   active: true
+  LongMethod:
+    # Generated ejected-sample output compiled by the Playground embedding demo.
+    excludes: ["**/prototype-embedding/**"]
 coroutines:
   active: true
 empty-blocks:

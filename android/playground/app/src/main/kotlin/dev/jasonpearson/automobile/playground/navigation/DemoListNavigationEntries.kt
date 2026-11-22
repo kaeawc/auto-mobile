@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation3.runtime.EntryProviderScope
 import androidx.navigation3.runtime.NavKey
 import dev.jasonpearson.automobile.demos.ControlShapesScreen
+import dev.jasonpearson.automobile.demos.EmbeddedPrototypeScreen
 import dev.jasonpearson.automobile.demos.SharedRowIdListScreen
 import dev.jasonpearson.automobile.sdk.adapters.Navigation3Adapter
 
@@ -19,6 +20,9 @@ internal fun EntryProviderScope<NavKey>.demoListNavigationEntries(state: Navigat
   }
   entry<DemoControlShapesDestination> { destination ->
     DemoControlShapesEntry(destination, state)
+  }
+  entry<DemoEmbeddedPrototypeDestination> { destination ->
+    DemoEmbeddedPrototypeEntry(destination, state)
   }
 }
 
@@ -51,5 +55,21 @@ private fun DemoControlShapesEntry(
   }
   Box(modifier = Modifier.destinationSemanticModifier<DemoControlShapesDestination>()) {
     ControlShapesScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
+  }
+}
+
+@Composable
+private fun DemoEmbeddedPrototypeEntry(
+  destination: DemoEmbeddedPrototypeDestination,
+  state: NavigationState,
+) {
+  val (backStack, _, analyticsTracker) = state
+  Navigation3Adapter.TrackNavigation(destination)
+  LaunchedEffect(Unit) {
+    Log.d(TAG, "Navigated to EmbeddedPrototypeScreen")
+    analyticsTracker.trackScreenView("EmbeddedPrototypeScreen")
+  }
+  Box(modifier = Modifier.destinationSemanticModifier<DemoEmbeddedPrototypeDestination>()) {
+    EmbeddedPrototypeScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
   }
 }

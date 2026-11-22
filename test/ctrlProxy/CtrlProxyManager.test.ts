@@ -1972,6 +1972,53 @@ describe("CtrlProxyManager", function () {
       expect(result).toBe(expectedSha);
       expect(pullTimeoutMs).toBe(120_000);
     });
+
+    test("stages the APK in /data/local/tmp when a direct pull from /data/app fails (API 24)", async function () {
+      const installedApkPath = "/data/app/dev.jasonpearson.automobile.ctrlproxy-1/base.apk";
+      const stagedApkPath = "/data/local/tmp/auto-mobile-ctrl-proxy-installed.apk";
+      const apkContent = Buffer.from("fake-apk-content");
+      const expectedSha = crypto.createHash("sha256").update(apkContent).digest("hex");
+
+      // API 24 adbd: no sha256sum, and `/data/app` is unlistable so pull says the APK does not exist.
+      class StagedPullFakeAdb extends FakeAdbExecutor {
+        override async executeCommand(
+          command: string,
+          options?: Parameters<FakeAdbExecutor["executeCommand"]>[1],
+        ): Promise<ExecResult> {
+          const result = await super.executeCommand(command, options);
+          const localPath = command.match(/^pull "[^"]+" "([^"]+)"$/)?.[1];
+          if (localPath) {
+            await fs.writeFile(localPath, apkContent);
+          }
+          return result;
+        }
+      }
+      const localFakeAdb = new StagedPullFakeAdb();
+      localFakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${installedApkPath}\n`, ""),
+      );
+      localFakeAdb.setCommandError(
+        "shell sha256sum",
+        new Error("/system/bin/sh: sha256sum: not found"),
+      );
+      localFakeAdb.setCommandError(
+        `pull "${installedApkPath}"`,
+        new Error(`adb: error: remote object '${installedApkPath}' does not exist`),
+      );
+
+      AndroidCtrlProxyManager.resetInstances();
+      const fallbackClient = AndroidCtrlProxyManager.getInstance(testDevice, {
+        create: () => localFakeAdb,
+      });
+
+      const result = await fallbackClient.getInstalledApkSha256();
+      expect(result).toBe(expectedSha);
+      const commands = localFakeAdb.getExecutedCommands();
+      expect(commands).toContain(`shell cp '${installedApkPath}' '${stagedApkPath}'`);
+      expect(commands.some((c) => c.startsWith(`pull "${stagedApkPath}" `))).toBe(true);
+      expect(commands.at(-1)).toBe(`shell rm -f '${stagedApkPath}'`);
+    });
   });
 
   describe("ensureCompatibleVersion", function () {

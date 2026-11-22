@@ -3,7 +3,7 @@ import {
   AppearanceSocketServer,
   type AppearanceDeviceSource,
   type AppearanceSocketServerDependencies,
-} from "../../src/daemon/appearanceSocketServer";
+} from "../../src/daemon/streams/appearanceSocketServer";
 import { appearanceSocketResponseSchema } from "../helpers/wireMessageSchemas";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
@@ -12,7 +12,7 @@ import {
   STREAM_SOCKET_AUTH_ENV,
   type StreamAuthSessionManager,
   type StreamSocketAuthenticator,
-} from "../../src/daemon/streamSocketAuth";
+} from "../../src/daemon/streams/streamSocketAuth";
 import type { AppearanceConfig, AppearanceSyncMode, BootedDevice } from "../../src/models";
 
 /**

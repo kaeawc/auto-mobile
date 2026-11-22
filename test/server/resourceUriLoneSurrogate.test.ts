@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "fs";
 import { parseGuardSource } from "../lint/astGuard";
 import { collectSourceFacts } from "../lint/sourceFacts";
 import { buildAppFileResourceUri } from "../../src/server/appFileContract";
-import { buildObservationScreenshotUri } from "../../src/daemon/observationResourceUris";
+import { buildObservationScreenshotUri } from "../../src/daemon/streams/observationResourceUris";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { encodeUriSegment } from "../../src/utils/encodeUriSegment";
 import { buildNavigationNodeScreenshotUri } from "../../src/utils/navigationResourceUri";

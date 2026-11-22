@@ -91,12 +91,12 @@ describe("device-addressed admission gate (issue #6863)", () => {
     "src/daemon/socketServer/ideDeviceRoutes.ts",
     "src/daemon/socketServer/inputDeviceGating.ts",
     "src/daemon/socketServer/inputStrokes.ts",
-    "src/daemon/deviceDataStreamSocketServer.ts",
-    "src/daemon/videoStreamSocketServer.ts",
-    "src/daemon/videoStreamSocketDefaults.ts",
-    "src/daemon/videoStreamSocketSupport.ts",
-    "src/daemon/webrtcStreamSocketServer.ts",
-    "src/daemon/deviceGestureRecordingSocketServer.ts",
+    "src/daemon/streams/deviceDataStreamSocketServer.ts",
+    "src/daemon/streams/videoStreamSocketServer.ts",
+    "src/daemon/streams/videoStreamSocketDefaults.ts",
+    "src/daemon/streams/videoStreamSocketSupport.ts",
+    "src/daemon/streams/webrtcStreamSocketServer.ts",
+    "src/daemon/streams/deviceGestureRecordingSocketServer.ts",
   ] as const;
 
   /**
@@ -132,29 +132,29 @@ describe("device-addressed admission gate (issue #6863)", () => {
       what: "ide/* SharedPreferences and key-value mutations",
     },
     {
-      file: "src/daemon/deviceDataStreamSocketServer.ts",
+      file: "src/daemon/streams/deviceDataStreamSocketServer.ts",
       fn: "handleObservationRequest",
       what: "request_observation — refuses BEFORE observing, instead of acking an empty push",
     },
     {
-      file: "src/daemon/deviceDataStreamSocketServer.ts",
+      file: "src/daemon/streams/deviceDataStreamSocketServer.ts",
       fn: "resolveStorageTargetDeviceId",
       what:
         "subscribe_storage addressed by RAW serial — the session-keyed form is already " +
         "withheld by resolveDeviceId; teardown is deliberately exempt",
     },
     {
-      file: "src/daemon/videoStreamSocketServer.ts",
+      file: "src/daemon/streams/videoStreamSocketServer.ts",
       fn: "processLine",
       what: "video-stream subscribe — gated before any capture source is created",
     },
     {
-      file: "src/daemon/webrtcStreamSocketServer.ts",
+      file: "src/daemon/streams/webrtcStreamSocketServer.ts",
       fn: "handleStart",
       what: "webrtcStream start — gated before the WHIP publisher attaches to the device",
     },
     {
-      file: "src/daemon/deviceGestureRecordingSocketServer.ts",
+      file: "src/daemon/streams/deviceGestureRecordingSocketServer.ts",
       fn: "handleRequest",
       what:
         "deviceGestureRecording start — gated on the SELECTED device before readyDevice performs any " +
@@ -172,9 +172,9 @@ describe("device-addressed admission gate (issue #6863)", () => {
    * discovery established ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
    */
   const RESOLVERS_ONLY: readonly string[] = [
-    "src/daemon/webrtcStreamSocketServer.ts#resolveWebRtcStreamDevice",
-    "src/daemon/videoStreamSocketDefaults.ts#resolveVideoStreamDevice",
-    "src/daemon/deviceGestureRecordingSocketServer.ts#resolveDeviceGestureRecordingDevice",
+    "src/daemon/streams/webrtcStreamSocketServer.ts#resolveWebRtcStreamDevice",
+    "src/daemon/streams/videoStreamSocketDefaults.ts#resolveVideoStreamDevice",
+    "src/daemon/streams/deviceGestureRecordingSocketServer.ts#resolveDeviceGestureRecordingDevice",
   ];
 
   interface NamedFunction {

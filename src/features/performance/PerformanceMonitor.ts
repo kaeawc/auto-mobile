@@ -15,13 +15,13 @@ export { defaultSimCtlClientFactory } from "./PerformanceMonitorDefaults";
 import {
   getDeviceDataStreamServer,
   PerformanceStreamData,
-} from "../../daemon/deviceDataStreamSocketServer";
+} from "../../daemon/streams/deviceDataStreamSocketServer";
 import {
   DEFAULT_THRESHOLDS,
   getPerformancePushServer,
   LivePerformanceData,
   PerformancePushSocketServer,
-} from "../../daemon/performancePushSocketServer";
+} from "../../daemon/streams/performancePushSocketServer";
 import type { FrameTimePercentiles, MemoryBreakdownMb } from "../../models/PerfSnapshot";
 
 import { defaultTimer, Timer } from "../../utils/SystemTimer";

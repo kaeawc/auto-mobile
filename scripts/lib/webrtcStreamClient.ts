@@ -9,11 +9,11 @@ import {
   LineFramer,
 } from "../../src/daemon/wire/LineFramer";
 import { DaemonFrameTooLargeError } from "../../src/daemon/wire/DaemonFrameTooLargeError";
-import { webRtcStreamSocketResponseSchema } from "../../src/daemon/webrtcStreamSocketTypes";
+import { webRtcStreamSocketResponseSchema } from "../../src/daemon/streams/webrtcStreamSocketTypes";
 import type {
   WebRtcStreamSocketRequest,
   WebRtcStreamSocketResponse,
-} from "../../src/daemon/webrtcStreamSocketTypes";
+} from "../../src/daemon/streams/webrtcStreamSocketTypes";
 
 export const DEFAULT_WEBRTC_STREAM_REQUEST_TIMEOUT_MS = 45_000;
 

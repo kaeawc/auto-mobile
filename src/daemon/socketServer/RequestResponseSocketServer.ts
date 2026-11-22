@@ -1,4 +1,4 @@
-import { streamAuthRefusalFields } from "../streamSocketAuth";
+import { streamAuthRefusalFields } from "../streams/streamSocketAuth";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { Socket } from "node:net";
 import { logger } from "../../utils/logger";

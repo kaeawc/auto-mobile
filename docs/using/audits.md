@@ -97,8 +97,8 @@ Launch the app, then pass its Android package name or iOS bundle ID as `appId`.
 The result includes the host file `path`, its `sizeBytes`, and its `format`.
 
 - Android writes an `.hprof` for a debuggable or profileable app. Set `native: true` to capture
-  the native heap. `heap_dump_not_debuggable` means you need a debuggable or profileable build.
-  `native_heap_dump_unavailable` means the device has no native heap to dump (it needs malloc
+  the native heap. The error `heap_dump_not_debuggable` means you need a debuggable or profileable build.
+  The error `native_heap_dump_unavailable` means the device has no native heap to dump (it needs malloc
   debug on a rooted device).
 - iOS Simulator writes a `.memgraph` you can open in Xcode. Leave `native` unset. If you get
   `heap_dump_not_inspectable`, try a debuggable Simulator build. If the app stopped, relaunch

@@ -34,6 +34,7 @@ contract). The `key`, `data`, `platform` and `derived` forms each take one compa
 Errors point at the offending field (for example `root.visibleWhen.gt`).
 The `toggle`, `increment` and `decrement` actions validate their `key` against the declared `state`
 (`root.onTap[0].key`). They are no-ops at runtime if other means changed the key's type.
+
 After an `onTap` action list finishes, the device emits exactly one `change` event carrying
 the final state (#10622) if `setState`, `toggle`, `increment` or `decrement` changed state.
 Host `status` therefore follows button taps. A single changed

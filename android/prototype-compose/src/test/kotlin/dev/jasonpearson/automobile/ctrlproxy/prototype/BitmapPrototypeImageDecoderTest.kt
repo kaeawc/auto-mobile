@@ -42,18 +42,10 @@ class BitmapPrototypeImageDecoderTest {
 
   @Test
   fun `EXIF orientation six rotates the sampled JPEG`() {
-    val jpeg = temp.newFile("orientation.jpg")
-    val source = Bitmap.createBitmap(48, 32, Bitmap.Config.ARGB_8888)
-    jpeg.outputStream().use { assertTrue(source.compress(Bitmap.CompressFormat.JPEG, 100, it)) }
-    ExifInterface(jpeg.path).apply {
-      setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_ROTATE_90.toString())
-      saveAttributes()
-    }
-
     val decoded =
       requireNotNull(
-        BitmapPrototypeImageDecoder(maxPixels = 500)
-          .decode(jpeg.readBytes(), PrototypeImageTarget(24, 16)),
+        BitmapPrototypeImageDecoder(maxPixels = 1000)
+          .decode(jpeg(ExifInterface.ORIENTATION_ROTATE_90), PrototypeImageTarget(24, 16)),
       )
     assertEquals(16, decoded.width)
     assertEquals(24, decoded.height)
@@ -66,7 +58,7 @@ class BitmapPrototypeImageDecoderTest {
     val decoded =
       requireNotNull(
         largeDecoder.decode(
-          orientedJpeg(4096, 2048, ExifInterface.ORIENTATION_ROTATE_90),
+          jpeg(ExifInterface.ORIENTATION_ROTATE_90, width = 4096, height = 2048),
           PrototypeImageTarget(1024, 512),
         ),
       )
@@ -79,7 +71,7 @@ class BitmapPrototypeImageDecoderTest {
     val decoded =
       requireNotNull(
         largeDecoder.decode(
-          orientedJpeg(4096, 2048, ExifInterface.ORIENTATION_NORMAL),
+          jpeg(ExifInterface.ORIENTATION_NORMAL, width = 4096, height = 2048),
           PrototypeImageTarget(1024, 512),
         ),
       )
@@ -91,16 +83,36 @@ class BitmapPrototypeImageDecoderTest {
   private val largeDecoder =
     BitmapPrototypeImageDecoder(maxPixels = Long.MAX_VALUE, maxDecodedBytes = Long.MAX_VALUE)
 
-  private fun orientedJpeg(width: Int, height: Int, orientation: Int): ByteArray {
-    val jpeg = temp.newFile()
+  @Test
+  fun `an EXIF transform samples further so the source and its copy share the pixel budget`() {
+    val target = PrototypeImageTarget(24, 16)
+    val upright =
+      requireNotNull(
+        BitmapPrototypeImageDecoder(maxPixels = 500)
+          .decode(jpeg(ExifInterface.ORIENTATION_NORMAL), target),
+      )
+    assertEquals(24 * 16, upright.width * upright.height)
+
+    val rotated =
+      requireNotNull(
+        BitmapPrototypeImageDecoder(maxPixels = 500)
+          .decode(jpeg(ExifInterface.ORIENTATION_ROTATE_90), target),
+      )
+    assertEquals(8, rotated.width)
+    assertEquals(12, rotated.height)
+  }
+
+  /** A [width]x[height] (48x32 by default) JPEG tagged with EXIF [orientation]. */
+  private fun jpeg(orientation: Int, width: Int = 48, height: Int = 32): ByteArray {
+    val file = temp.newFile()
     val source = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    jpeg.outputStream().use { assertTrue(source.compress(Bitmap.CompressFormat.JPEG, 100, it)) }
+    file.outputStream().use { assertTrue(source.compress(Bitmap.CompressFormat.JPEG, 100, it)) }
     source.recycle()
-    ExifInterface(jpeg.path).apply {
+    ExifInterface(file.path).apply {
       setAttribute(ExifInterface.TAG_ORIENTATION, orientation.toString())
       saveAttributes()
     }
-    return jpeg.readBytes()
+    return file.readBytes()
   }
 
   companion object {

@@ -62,7 +62,8 @@ internal class BitmapPrototypeImage(val bitmap: Bitmap) : PrototypeDecodedImage 
 /**
  * [BitmapFactory] decoding with `inSampleSize` chosen by [prototypeImageSampleSize], so only a
  * display-sized bitmap is allocated within both pixel and byte budgets. EXIF orientation is applied
- * after sampling; the sizing and transform math can run without Android bitmap decoding.
+ * after sampling, within half the budget so the source and its transformed copy fit together; the
+ * sizing and transform math can run without Android bitmap decoding.
  */
 @InternalAutoMobilePrototypeApi
 class BitmapPrototypeImageDecoder(
@@ -85,8 +86,13 @@ class BitmapPrototypeImageDecoder(
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     // Bounds do not reliably report the eventual config. Reserve RGBA_F16's 8 bytes/pixel
     // even for an ARGB_8888 candidate: a high-bit-depth source can override inPreferredConfig.
-    val pixelBudget = prototypeImagePixelBudget(maxPixels, maxDecodedBytes, 8)
     val orientation = imageOrientation(bytes)
+    // The EXIF transform allocates its copy while the sampled source is still alive.
+    val pixelBudget =
+      prototypeImageTransformPixelBudget(
+        prototypeImagePixelBudget(maxPixels, maxDecodedBytes, 8),
+        orientation,
+      )
     val decodeTarget =
       if (orientation in 5..8) PrototypeImageTarget(target.heightPx, target.widthPx) else target
     val sampleSize =

@@ -45,6 +45,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpRequest
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePermissionsModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRemoteImageProvider
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeScheduledTask
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
@@ -320,20 +321,26 @@ private class ViewerContent(
   val network =
     PrototypeNetwork(
       device =
-        EmbeddedHttpClient { request ->
-          client.execute(
-            PrototypeHttpRequest(
-              request.requestId,
-              request.prototypeId,
-              request.method,
-              request.url,
-              request.headers,
-              request.body,
-              request.timeoutMs,
-              request.uploadBody,
-              request.onUploadProgress,
-            ),
-          )
+        object : EmbeddedHttpClient, PrototypeRemoteImageProvider {
+          override val remoteImages
+            get() = (client as? PrototypeRemoteImageProvider)?.remoteImages
+
+          override suspend fun execute(
+            request: dev.jasonpearson.automobile.prototype.PrototypeHttpRequest,
+          ) =
+            client.execute(
+              PrototypeHttpRequest(
+                request.requestId,
+                request.prototypeId,
+                request.method,
+                request.url,
+                request.headers,
+                request.body,
+                request.timeoutMs,
+                request.uploadBody,
+                request.onUploadProgress,
+              ),
+            )
         },
     )
 

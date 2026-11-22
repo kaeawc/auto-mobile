@@ -73,7 +73,7 @@ On Android, frame-time percentiles and jank counts both cover only the frames re
 frames from app launch or earlier screens. When the app rendered no frames during the check (an idle screen), the frame-time percentiles
 `p50Ms`–`p99Ms` are null and `metrics.frameTimeUnmeasured` says why. AutoMobile then skips the
 frame-time check, so it does not fail the call. For raw captures use `performanceTrace`,
-`captureTrace`, `measureStartup` or [`heapDump`](#heapdump).
+`measureStartup` or [`heapDump`](#heapdump).
 
 ## `heapDump`
 

@@ -9,6 +9,7 @@ const FLAG_SPARSE = 0x01;
 const FLAG_OFFSET16 = 0x02;
 const ENTRY_FLAG_COMPLEX = 0x0001;
 const ENTRY_FLAG_COMPACT = 0x0008;
+const TYPE_STRING = 0x03;
 const TYPE_INT_COLOR_ARGB8 = 0x1c;
 const TYPE_FIRST_COLOR = 0x1c;
 const TYPE_LAST_COLOR = 0x1f;
@@ -24,19 +25,14 @@ export function patchArscColors(arsc: Uint8Array, colors: ReadonlyMap<string, nu
   if (colors.size === 0) {
     return out;
   }
-  const table = chunkAt(out, 0);
-  if (table.type !== RES_TABLE_TYPE || table.size > out.length) {
-    throw new ActionableError("Template resources.arsc is not a resource table.");
-  }
-  const patch: Patch = { buf: out, colors, patched: new Set<string>() };
-  for (let offset = table.headerSize; offset < table.size;) {
-    const chunk = chunkAt(out, offset);
-    if (chunk.type === RES_TABLE_PACKAGE_TYPE) {
-      patchPackage(patch, offset, chunk);
-    }
-    offset += chunk.size;
-  }
-  const missing = [...colors.keys()].filter((name) => !patch.patched.has(name));
+  const patched = new Set<string>();
+  visitResourceValues(out, "color", new Set(colors.keys()), ({ name, typeOffset, dataOffset }) => {
+    assertColorType(out.readUInt8(typeOffset), name);
+    out.writeUInt8(TYPE_INT_COLOR_ARGB8, typeOffset);
+    out.writeUInt32LE(colors.get(name)! >>> 0, dataOffset);
+    patched.add(name);
+  });
+  const missing = [...colors.keys()].filter((name) => !patched.has(name));
   if (missing.length > 0) {
     throw new ActionableError(
       `Template resources.arsc has no colour value for ${missing.join(", ")}. Repackage the template.`,
@@ -45,10 +41,63 @@ export function patchArscColors(arsc: Uint8Array, colors: ReadonlyMap<string, nu
   return out;
 }
 
-interface Patch {
+/** Resolves every compiled file path for the named drawables, including shortened ZIP paths. */
+export function resolveArscDrawablePaths(
+  arsc: Buffer,
+  names: readonly string[],
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const table = chunkAt(arsc, 0);
+  const strings = readStringPool(arsc, table.headerSize);
+  const paths = new Map(names.map((name) => [name, new Set<string>()]));
+  visitResourceValues(arsc, "drawable", new Set(names), ({ name, typeOffset, dataOffset }) => {
+    const path = strings[arsc.readUInt32LE(dataOffset)];
+    if (arsc.readUInt8(typeOffset) !== TYPE_STRING || !path?.startsWith("res/")) {
+      throw new ActionableError(
+        `Template drawable ${name} is not a compiled resource file. Repackage the template.`,
+      );
+    }
+    paths.get(name)!.add(path);
+  });
+  const missing = names.filter((name) => paths.get(name)!.size === 0);
+  if (missing.length > 0) {
+    throw new ActionableError(
+      `Template resources.arsc has no drawable file for ${missing.join(", ")}. Repackage the template.`,
+    );
+  }
+  return paths;
+}
+
+interface ResourceValue {
+  name: string;
+  typeOffset: number;
+  dataOffset: number;
+}
+
+interface ResourceVisitor {
   buf: Buffer;
-  colors: ReadonlyMap<string, number>;
-  patched: Set<string>;
+  typeName: string;
+  names: ReadonlySet<string>;
+  visit(value: ResourceValue): void;
+}
+
+function visitResourceValues(
+  buf: Buffer,
+  typeName: string,
+  names: ReadonlySet<string>,
+  visit: ResourceVisitor["visit"],
+): void {
+  const table = chunkAt(buf, 0);
+  if (table.type !== RES_TABLE_TYPE) {
+    throw new ActionableError("Template resources.arsc is not a resource table.");
+  }
+  const visitor = { buf, typeName, names, visit };
+  for (let offset = table.headerSize; offset < table.size;) {
+    const chunk = chunkAt(buf, offset);
+    if (chunk.type === RES_TABLE_PACKAGE_TYPE) {
+      visitPackage(visitor, offset, chunk);
+    }
+    offset += chunk.size;
+  }
 }
 
 interface Chunk {
@@ -66,32 +115,42 @@ function chunkAt(buf: Buffer, offset: number): Chunk {
     headerSize: buf.readUInt16LE(offset + 2),
     size: buf.readUInt32LE(offset + 4),
   };
-  if (chunk.size < 8 || chunk.headerSize < 8 || offset + chunk.size > buf.length) {
+  if (
+    chunk.size < 8 ||
+    chunk.headerSize < 8 ||
+    chunk.headerSize > chunk.size ||
+    offset + chunk.size > buf.length
+  ) {
     throw new ActionableError("Template resources.arsc has a malformed chunk.");
   }
   return chunk;
 }
 
-function patchPackage(patch: Patch, start: number, pkg: Chunk): void {
-  const { buf } = patch;
+function visitPackage(visitor: ResourceVisitor, start: number, pkg: Chunk): void {
+  const { buf } = visitor;
   const fields = start + 8 + 4 + PACKAGE_NAME_BYTES;
   const typeStrings = readStringPool(buf, start + buf.readUInt32LE(fields));
   const keyStrings = readStringPool(buf, start + buf.readUInt32LE(fields + 8));
-  const colorTypeId = typeStrings.indexOf("color") + 1;
-  if (colorTypeId === 0) {
+  const typeId = typeStrings.indexOf(visitor.typeName) + 1;
+  if (typeId === 0) {
     return;
   }
   for (let offset = start + pkg.headerSize; offset < start + pkg.size;) {
     const chunk = chunkAt(buf, offset);
-    if (chunk.type === RES_TABLE_TYPE_TYPE && buf.readUInt8(offset + 8) === colorTypeId) {
-      patchType(patch, offset, chunk, keyStrings);
+    if (chunk.type === RES_TABLE_TYPE_TYPE && buf.readUInt8(offset + 8) === typeId) {
+      visitType(visitor, offset, chunk, keyStrings);
     }
     offset += chunk.size;
   }
 }
 
-function patchType(patch: Patch, start: number, type: Chunk, keys: readonly string[]): void {
-  const { buf } = patch;
+function visitType(
+  visitor: ResourceVisitor,
+  start: number,
+  type: Chunk,
+  keys: readonly string[],
+): void {
+  const { buf } = visitor;
   const flags = buf.readUInt8(start + 9);
   const entryCount = buf.readUInt32LE(start + 12);
   const entriesStart = start + buf.readUInt32LE(start + 16);
@@ -105,34 +164,36 @@ function patchType(patch: Patch, start: number, type: Chunk, keys: readonly stri
     if (entry + 8 > start + type.size) {
       throw new ActionableError("Template resources.arsc has an entry outside its type chunk.");
     }
-    patchEntry(patch, entry, keys);
+    visitEntry(visitor, entry, start + type.size, keys);
   }
 }
 
-function patchEntry(patch: Patch, entry: number, keys: readonly string[]): void {
-  const { buf } = patch;
+function visitEntry(
+  { buf, names, typeName, visit }: ResourceVisitor,
+  entry: number,
+  end: number,
+  keys: readonly string[],
+): void {
   const entryFlags = buf.readUInt16LE(entry + 2);
   const compact = (entryFlags & ENTRY_FLAG_COMPACT) !== 0;
   const name = keys[compact ? buf.readUInt16LE(entry) : buf.readUInt32LE(entry + 4)];
-  const argb = name === undefined ? undefined : patch.colors.get(name);
-  if (name === undefined || argb === undefined) {
+  if (name === undefined || !names.has(name)) {
     return;
   }
   if ((entryFlags & ENTRY_FLAG_COMPLEX) !== 0) {
-    throw new ActionableError(`Template colour ${name} is not a plain colour value.`);
+    const role = typeName === "color" ? "colour" : typeName;
+    throw new ActionableError(`Template ${role} ${name} is not a plain ${role} value.`);
   }
   if (compact) {
     // Compact entries keep the value type in the high byte of flags and the data inline.
-    assertColorType(entryFlags >> 8, name);
-    buf.writeUInt16LE((TYPE_INT_COLOR_ARGB8 << 8) | (entryFlags & 0xff), entry + 2);
-    buf.writeUInt32LE(argb >>> 0, entry + 4);
+    visit({ name, typeOffset: entry + 3, dataOffset: entry + 4 });
   } else {
     const value = entry + buf.readUInt16LE(entry);
-    assertColorType(buf.readUInt8(value + 3), name);
-    buf.writeUInt8(TYPE_INT_COLOR_ARGB8, value + 3);
-    buf.writeUInt32LE(argb >>> 0, value + 4);
+    if (value + 8 > end) {
+      throw new ActionableError("Template resources.arsc has a value outside its type chunk.");
+    }
+    visit({ name, typeOffset: value + 3, dataOffset: value + 4 });
   }
-  patch.patched.add(name);
 }
 
 function entryOffset(

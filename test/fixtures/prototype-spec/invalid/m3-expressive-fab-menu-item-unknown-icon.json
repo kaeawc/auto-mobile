@@ -1,0 +1,44 @@
+{
+  "spec": {
+    "id": "expressive",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "mode": "day"
+    },
+    "root": {
+      "type": "fab",
+      "testTag": "create",
+      "icon": "add",
+      "contentDescription": "Create",
+      "menu": {
+        "items": [
+          {
+            "icon": "add",
+            "label": "Item 0",
+            "onTap": [
+              {
+                "type": "emit",
+                "name": "x"
+              }
+            ]
+          },
+          {
+            "icon": "not_an_icon_name",
+            "label": "Item 1",
+            "onTap": [
+              {
+                "type": "emit",
+                "name": "x"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.menu.items[1].icon"
+}

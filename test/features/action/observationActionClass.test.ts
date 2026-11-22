@@ -95,6 +95,7 @@ const inPlaceKeys = [
   "arrow_right",
   "next",
   "previous",
+  ..."abcdefghijklmnopqrstuvwxyz".split(""),
 ];
 const buttonEnum = definitions.find(({ name }) => name === "pressButton")?.inputSchema.properties
   ?.button?.enum;

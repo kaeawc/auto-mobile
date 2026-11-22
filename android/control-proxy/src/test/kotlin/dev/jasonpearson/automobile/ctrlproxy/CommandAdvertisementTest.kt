@@ -50,6 +50,7 @@ class CommandAdvertisementTest {
       "prototype_timers_v1",
       "prototype_platform_simulation_v1",
       "prototype_tooltip_v1",
+      "prototype_m3_expressive_v1",
       "prototype_pager_state_key_v1",
       "prototype_flow_grid_v1",
       "prototype_pager_options_v1",
@@ -244,6 +245,7 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_window_metadata_v1"))
     assertTrue(commands.contains("prototype_menus_v1"))
     assertTrue(commands.contains("prototype_tooltip_v1"))
+    assertTrue(commands.contains("prototype_m3_expressive_v1"))
     assertTrue(commands.contains("prototype_drawer_v1"))
     assertTrue(commands.contains("screenshot_hide_prototype_v1"))
     assertTrue(commands.contains("sdk_capabilities_user_id_v1"))

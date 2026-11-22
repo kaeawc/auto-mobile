@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
@@ -82,11 +83,21 @@ private val CONNECTED_HEIGHT = 40.dp
 /** The animated inner corner of one connected segment; outer ends stay fully rounded. */
 @Composable
 internal fun animatePrototypeConnectedCorner(selected: Boolean): State<Dp> =
-  animateDpAsState(
+  animatePrototypeCorner(
     if (selected) PROTOTYPE_CONNECTED_FULL_CORNER else PROTOTYPE_CONNECTED_INNER_CORNER,
-    prototypeExpressiveSpatialSpec(),
-    label = "connectedCorner",
+    "connectedCorner",
   )
+
+/**
+ * A corner morph on the expressive spatial spring, reported to the window's motion activity until
+ * it settles so `observe(waitFor: stable)` does not capture it mid-morph.
+ */
+@Composable
+private fun animatePrototypeCorner(target: Dp, label: String): State<Dp> {
+  val corner = animateDpAsState(target, prototypeExpressiveSpatialSpec(), label = label)
+  ReportPrototypeMotion { corner.value != target }
+  return corner
+}
 
 private fun connectedShape(index: Int, count: Int, inner: Dp): Shape {
   val full = PROTOTYPE_CONNECTED_FULL_CORNER
@@ -118,12 +129,15 @@ internal fun RenderPrototypeConnectedSegments(
       val selected = option.value == node.selectedValue
       val inner by animatePrototypeConnectedCorner(selected)
       val colors = MaterialTheme.colorScheme
-      val container by
+      val containerTarget = if (selected) colors.secondary else colors.secondaryContainer
+      val containerState =
         animateColorAsState(
-          if (selected) colors.secondary else colors.secondaryContainer,
+          containerTarget,
           prototypeExpressiveSpec(effects = true),
           label = "connectedContainer",
         )
+      ReportPrototypeMotion { containerState.value != containerTarget }
+      val container by containerState
       val content = if (selected) colors.onSecondary else colors.onSecondaryContainer
       Surface(
         shape = connectedShape(index, source.options.size, inner),
@@ -150,12 +164,13 @@ internal fun RenderPrototypeConnectedSegments(
 
 /** Expansion of a FAB or split-button menu: 0 closed, 1 open, on the expressive spatial spring. */
 @Composable
-internal fun animatePrototypeMenuExpansion(open: Boolean): State<Float> =
-  animateFloatAsState(
-    if (open) 1f else 0f,
-    prototypeExpressiveSpatialSpec(),
-    label = "menuExpansion",
-  )
+internal fun animatePrototypeMenuExpansion(open: Boolean): State<Float> {
+  val target = if (open) 1f else 0f
+  val expansion =
+    animateFloatAsState(target, prototypeExpressiveSpatialSpec(), label = "menuExpansion")
+  ReportPrototypeMotion { expansion.value != target }
+  return expansion
+}
 
 internal fun Modifier.prototypeMenuExpansion(fraction: Float): Modifier = graphicsLayer {
   alpha = fraction.coerceIn(0f, 1f)
@@ -179,13 +194,14 @@ internal fun RenderPrototypeSplitButton(
   var open by remember(node.identity) { mutableStateOf(false) }
   val expansion by animatePrototypeMenuExpansion(open)
   val trailingCorner by
-    animateDpAsState(
+    animatePrototypeCorner(
       if (open) PROTOTYPE_CONNECTED_FULL_CORNER else SPLIT_INNER_CORNER,
-      prototypeExpressiveSpatialSpec(),
-      label = "splitCorner",
+      "splitCorner",
     )
   val actions = source.onTap.orEmpty()
   val full = PROTOTYPE_CONNECTED_FULL_CORNER
+  // An authored gradient is painted behind the button, so a filled half must not cover it.
+  val transparent = node.style.source.gradient != null
   // Parent layout data and the node's semantics stay on the outer layout; each half is labelled.
   Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -194,12 +210,18 @@ internal fun RenderPrototypeSplitButton(
           source.variant,
           RoundedCornerShape(full, SPLIT_INNER_CORNER, SPLIT_INNER_CORNER, full),
           node.enabled,
+          transparent = transparent,
         ),
         { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) },
         Modifier.semantics { contentDescription = node.contentDescription ?: node.text },
       ) {
         prototypeIcon(source.icon)?.let {
-          Icon(it, contentDescription = null, Modifier.size(ButtonDefaults.IconSize))
+          Icon(
+            it,
+            contentDescription = null,
+            Modifier.size(ButtonDefaults.IconSize),
+            tint = prototypeForeground(node),
+          )
           Box(Modifier.size(ButtonDefaults.IconSpacing))
         }
         PrototypeComponentLabel(node)
@@ -210,6 +232,7 @@ internal fun RenderPrototypeSplitButton(
           RoundedCornerShape(trailingCorner, full, full, trailingCorner),
           node.enabled,
           PaddingValues(12.dp),
+          transparent,
         ),
         { open = !open },
         Modifier.semantics {
@@ -218,7 +241,12 @@ internal fun RenderPrototypeSplitButton(
         },
       ) {
         prototypeIcon("arrow_drop_down")?.let {
-          Icon(it, contentDescription = null, Modifier.rotate(180f * expansion))
+          Icon(
+            it,
+            contentDescription = null,
+            Modifier.rotate(180f * expansion),
+            tint = prototypeForeground(node),
+          )
         }
       }
     }
@@ -283,12 +311,16 @@ private fun PrototypeSplitMenu(
   }
 }
 
-/** How one half of a split button draws: its Material variant, shape, enabled state and padding. */
+/**
+ * How one half of a split button draws: its Material variant, shape, enabled state, padding, and
+ * whether a filled half leaves its container transparent over an authored gradient.
+ */
 private data class PrototypeButtonLook(
   val variant: String,
   val shape: Shape,
   val enabled: Boolean,
   val padding: PaddingValues = ButtonDefaults.ContentPadding,
+  val transparent: Boolean = false,
 )
 
 @Composable
@@ -298,7 +330,7 @@ private fun PrototypeVariantButton(
   modifier: Modifier,
   content: @Composable RowScope.() -> Unit,
 ) {
-  val (variant, shape, enabled, padding) = look
+  val (variant, shape, enabled, padding, transparent) = look
   when (variant) {
     "tonal" ->
       FilledTonalButton(
@@ -315,6 +347,17 @@ private fun PrototypeVariantButton(
       OutlinedButton(onClick, modifier, enabled, shape, contentPadding = padding, content = content)
     "text" ->
       TextButton(onClick, modifier, enabled, shape, contentPadding = padding, content = content)
-    else -> Button(onClick, modifier, enabled, shape, contentPadding = padding, content = content)
+    else ->
+      Button(
+        onClick,
+        modifier,
+        enabled,
+        shape,
+        colors =
+          if (transparent) ButtonDefaults.buttonColors(containerColor = Color.Transparent)
+          else ButtonDefaults.buttonColors(),
+        contentPadding = padding,
+        content = content,
+      )
   }
 }

@@ -21,7 +21,7 @@ import "../features/performance/RecompositionTracker";
 import "../ctrlProxy/CtrlProxyManager";
 import "./appResources";
 import "./videoRecordingIncarnationListener";
-import "../daemon/webrtcStreamIncarnationListener";
+import "../daemon/streams/webrtcStreamIncarnationListener";
 
 export interface CtrlProxyClientLifecycle {
   closeAndRemove(deviceId: string): Promise<void>;

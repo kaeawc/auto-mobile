@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 75
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -49,7 +49,7 @@ jobs:
 
       # The fixture app builds with the project's Java 21 toolchain.
       - name: "Set up JDK"
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: "zulu"
           java-version: "21"
@@ -74,7 +74,7 @@ jobs:
 
       - name: "Upload Wear OS smoke artifacts"
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: wear-emulator-smoke
           path: |

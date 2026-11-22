@@ -1,7 +1,7 @@
 import {
   DeviceDataStreamSocketServer,
   installDeviceDataStreamSocketServerForTesting,
-} from "../../../src/daemon/deviceDataStreamSocketServer";
+} from "../../../src/daemon/streams/deviceDataStreamSocketServer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";

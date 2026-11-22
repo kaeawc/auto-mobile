@@ -30,7 +30,7 @@ import {
   collectWindowTruncations,
   isHostOutputTruncationReason,
 } from "../../features/observe/truncationReasons";
-import { buildObservationScreenshotUri } from "../../daemon/observationResourceUris";
+import { buildObservationScreenshotUri } from "../../daemon/streams/observationResourceUris";
 import { stripInternalObservationFields } from "../observationInternalFields";
 import type { FinalizeToolResponseContext } from "./contracts";
 

@@ -11,8 +11,8 @@ import kotlin.test.assertTrue
 /**
  * Covers the client half of the daemon's binary video framing.
  *
- * The encoder lives in `src/daemon/videoStreamFraming.ts`; these tests build bytes the same way it
- * does, so a drift on either side shows up here.
+ * The encoder lives in `src/daemon/streams/videoStreamFraming.ts`; these tests build bytes the same
+ * way it does, so a drift on either side shows up here.
  */
 class VideoStreamParserTest {
 

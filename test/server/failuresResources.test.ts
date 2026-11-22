@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { registerFailuresResources } from "../../src/server/failuresResources";
 import { FakeFailureAnalyticsRepository } from "../fakes/FakeFailureAnalyticsRepository";
-import type { TimeAggregation } from "../../src/daemon/failuresStreamSocketTypes";
+import type { TimeAggregation } from "../../src/daemon/streams/failuresStreamSocketTypes";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const NOW = Date.UTC(2026, 9, 5, 12, 0, 0);

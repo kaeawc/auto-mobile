@@ -1,5 +1,5 @@
 import { streamSubscribeAuthCases } from "../helpers/streamSubscribeAuthCases";
-import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import type { ObserverReleaseSource } from "../../src/daemon/observerReleaseBroadcast";
 import { describe, it, expect, beforeAll, beforeEach, afterEach, spyOn } from "bun:test";
@@ -9,17 +9,17 @@ import {
   type InitialFrameSubscriber,
   type NavigationGraphStreamData,
   type RequestedObservation,
-} from "../../src/daemon/deviceDataStreamSocketServer";
+} from "../../src/daemon/streams/deviceDataStreamSocketServer";
 import {
   OBSERVATION_BATCH_HEADROOM_MS,
   PER_DEVICE_OBSERVATION_TIMEOUT_MS,
   runObservationRequestBatch,
-} from "../../src/daemon/observationRequestBatch";
+} from "../../src/daemon/streams/observationRequestBatch";
 import {
   pushInitialObservationFramesForSubscriber,
   type ObservationStreamAndroidClient,
-} from "../../src/daemon/observationInitialFrame";
-import { DefaultObservationInitialFrameCoordinator } from "../../src/daemon/observationInitialFrameCoordinator";
+} from "../../src/daemon/streams/observationInitialFrame";
+import { DefaultObservationInitialFrameCoordinator } from "../../src/daemon/streams/observationInitialFrameCoordinator";
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
 import type { ScreenshotMetadata } from "../../src/features/observe/ScreenshotMetadata";
 import { buildObserveResult } from "../helpers/observeFixture";
@@ -35,7 +35,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import {
   SessionScopedStreamAuthenticator,
   type StreamSocketAuthenticator,
-} from "../../src/daemon/streamSocketAuth";
+} from "../../src/daemon/streams/streamSocketAuth";
 import { loadCoordinateMappingVectors } from "../parity/coordinateMappingGoldenVectors";
 import { loadSharp } from "../../src/utils/image/loadSharp";
 import {

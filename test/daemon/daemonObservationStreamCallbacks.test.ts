@@ -1,7 +1,7 @@
 import { describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import { configureObservationStreamCallbacks } from "../../src/daemon/daemonObservationStreamCallbacks";
-import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
-import { DefaultObservationInitialFrameCoordinator } from "../../src/daemon/observationInitialFrameCoordinator";
+import { DeviceDataStreamSocketServer } from "../../src/daemon/streams/deviceDataStreamSocketServer";
+import { DefaultObservationInitialFrameCoordinator } from "../../src/daemon/streams/observationInitialFrameCoordinator";
 import type { StorageSubscriptionRequest } from "../../src/daemon/daemonStreamRouting";
 import { FakeTimer } from "../fakes/FakeTimer";
 

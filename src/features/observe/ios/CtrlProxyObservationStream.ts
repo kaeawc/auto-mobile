@@ -13,7 +13,7 @@ import {
   metadataForScreenshotFormat,
   type ScreenshotMetadata,
 } from "../ScreenshotMetadata";
-import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "../../../daemon/streams/deviceDataStreamSocketServer";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";

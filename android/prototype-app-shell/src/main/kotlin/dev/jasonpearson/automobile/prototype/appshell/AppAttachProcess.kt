@@ -19,8 +19,8 @@ internal interface AttachEventLedger {
 
 /**
  * Retains delivery independently of the UI; tests inject scope, identity and listener startup.
- * Journal writes run on [journalExecutor]; frames reach the host only after the state they expose
- * is saved.
+ * Journal writes run on [journalExecutor]; frames reach the host only after the write of the state
+ * they expose completes.
  */
 @Suppress("LongParameterList") // Independent test seams for identity, journal and its writer.
 internal class AppAttachProcess(
@@ -34,7 +34,7 @@ internal class AppAttachProcess(
   journalExecutor: Executor = Executor(Runnable::run),
 ) : AttachEventLedger, AttachTarget {
   private val journalLock = Any()
-  private val writer = AttachJournalWriter(journal, journalExecutor)
+  private val writer = AttachJournalWriter(journal, journalExecutor, log)
   private var journalState =
     journal.load()
       ?: AttachJournalState(appInstanceId ?: UUID.randomUUID().toString(), 0, 0, 0, emptyList())

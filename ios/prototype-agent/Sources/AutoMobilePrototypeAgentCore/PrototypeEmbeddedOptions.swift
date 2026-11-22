@@ -28,12 +28,16 @@ public enum PrototypeStorageOption: Sendable, Hashable {
     /// Store values in an app-selected directory, using the same file format and id partitioning.
     case directory(URL)
 
-    func coordinator(clock: PrototypeClock = SystemPrototypeClock()) -> PrototypeStorageCoordinator? {
+    func coordinator(
+        clock: PrototypeClock = SystemPrototypeClock(), secure: (any PrototypeSecureValueStore)? = nil
+    )
+        -> PrototypeStorageCoordinator?
+    {
         switch self {
         case .none: nil
-        case .fileBacked: PrototypeStorageCoordinator.fileBacked(clock: clock)
+        case .fileBacked: PrototypeStorageCoordinator.fileBacked(clock: clock, secure: secure)
         case let .directory(url):
-            PrototypeStorageCoordinator(store: FilePrototypeStorageStore(directory: url), clock: clock)
+            PrototypeStorageCoordinator(store: FilePrototypeStorageStore(directory: url), clock: clock, secure: secure)
         }
     }
 }

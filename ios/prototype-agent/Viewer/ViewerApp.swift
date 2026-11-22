@@ -24,7 +24,7 @@ struct PrototypeViewerApp: App {
         let locations = Bundle.main.path(forResource: "prototype", ofType: "json").map { [$0] } ?? []
         let model = PrototypeModel(
             mode: .standalone,
-            storage: PrototypeStorageCoordinator.fileBacked(),
+            storage: PrototypeStorageCoordinator.fileBacked(secure: registry.secureStorage),
             registry: registry
         )
         model.setDeviceDark(UITraitCollection.current.userInterfaceStyle == .dark)

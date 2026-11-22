@@ -47,8 +47,8 @@ and its buttons. Tap one, for example `text: "Allow"`, then retry.
 `tapAt` has no such guard: a point under an alert taps the alert.
 
 With the host app in the background and no Smart Stack open, `tapAt` taps the watch face. Whether
-that opens a complication is unverified, so `observe` after. `tapOn` still needs the host app
-foregrounded.
+that opens a complication is unverified, so `observe` after. Outside a notification look or the
+Smart Stack, `tapOn` needs the host app foregrounded.
 
 ### Smart Stack widgets
 
@@ -148,8 +148,8 @@ permission prompt may appear first.
   `success: true` with a `warning` noting that notifications are authorized, not denied.
   Background the app with `pressButton` `home`, then post again if you need the banner.
 - When no delivery verdict is available, success means the simulator accepted the push.
-- A banner disappears after a few seconds. Call `observe` right after the push: it returns the long
-  look with its action buttons once the short look expands.
+- A banner lasts a few seconds: `observe` right after the push. For a compact banner,
+  tap its title, then `observe` the long look ([`observe`](#observe)).
 
 ## App management
 

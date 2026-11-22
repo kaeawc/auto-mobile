@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSequencedWatchRunner } from "../../fakes/FakeWatchRunnerClient";
 import { watchTapAt, watchTapOn } from "../../../src/features/watch/WatchActions";
@@ -104,6 +105,40 @@ describe("watch taps on a notification look", () => {
 
     expect(result.element).toMatchObject({ text: "Accept", class: "XCUIElementType(75)" });
     expect(result.effect).toEqual({ screenChanged: true, basis: "system alert dismissed" });
+    expect(client.commands).toEqual([
+      { type: "face", op: "dump" },
+      { type: "hierarchy" },
+      { type: "hierarchy" },
+      { type: "tap", x: 104, y: 138 },
+      { type: "hierarchy" },
+    ]);
+  });
+
+  test("tapOn taps the notification action, not the Smart Stack the look covers", async () => {
+    // The face dump reads the clockface process, which still reports the stack under the look.
+    const stackDump = readFileSync(
+      new URL(
+        "../../fixtures/watchos-clockface/fixture-face-smartstack-after-reload.txt",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    class StackUnderLookRunner extends FakeSequencedWatchRunner {
+      override async request(
+        ...args: Parameters<FakeSequencedWatchRunner["request"]>
+      ): Promise<unknown> {
+        const result = await super.request(...args);
+        return args[0].type === "face" && args[0].op === "dump" ? stackDump : result;
+      }
+    }
+    const client = new StackUnderLookRunner([longLook27.data], dismissedError);
+    unregister = watchRunners.register(deviceId, client);
+
+    const result = await watchTapOn(deviceId, { action: "tap", text: "Accept" }, undefined, {
+      timer: autoTimer(),
+    });
+
+    expect(result.element).toMatchObject({ text: "Accept", class: "XCUIElementType(75)" });
     expect(client.commands).toEqual([
       { type: "face", op: "dump" },
       { type: "hierarchy" },

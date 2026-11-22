@@ -298,6 +298,38 @@ function watchTapCommand(element: Element, all: Element[]): WatchCommand {
     : { type: "tap", x, y };
 }
 
+/** Whether the runner shows a system alert (a notification look or permission prompt). */
+async function isWatchSystemAlertUp(
+  client: WatchRunnerClient,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  try {
+    return hasWatchSystemAlert(await client.hierarchy(signal));
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (error instanceof WatchRunnerError && error.errorCode === "app_not_foreground") {
+      // Expected with only the Smart Stack up: the runner has no foreground app or alert to read.
+      logger.debug(`No watch system alert over the Smart Stack: ${errorMessage(error)}`);
+    } else {
+      logger.warn(`Could not check for a watch system alert: ${errorMessage(error)}`, error);
+    }
+    return false;
+  }
+}
+
+/**
+ * An open Smart Stack that no system alert covers. The face dump reads the clockface process,
+ * which still reports the stack while a notification look or permission prompt covers it.
+ */
+async function readUncoveredSmartStack(
+  client: WatchRunnerClient,
+  timer: Timer,
+  signal?: AbortSignal,
+): ReturnType<typeof readOpenSmartStack> {
+  const stack = await readOpenSmartStack(client, () => timer.now(), signal);
+  return stack && !(await isWatchSystemAlertUp(client, signal)) ? stack : undefined;
+}
+
 export async function watchTapOn(
   deviceId: string,
   options: TapOnElementOptions,
@@ -311,7 +343,7 @@ export async function watchTapOn(
   validateWatchTapOn(options);
   signal?.throwIfAborted();
   const client = await requireWatchRunner(deviceId, signal);
-  const stack = await readOpenSmartStack(client, () => timer.now(), signal);
+  const stack = await readUncoveredSmartStack(client, timer, signal);
   if (stack) {
     return tapSmartStackOn(client, stack, options, signal);
   }
@@ -360,7 +392,7 @@ export async function watchTapAt(
   validateWatchTapAt(options);
   signal?.throwIfAborted();
   const client = await requireWatchRunner(deviceId, signal);
-  const stack = await readOpenSmartStack(client, () => timer.now(), signal);
+  const stack = await readUncoveredSmartStack(client, timer, signal);
   if (stack) {
     await tapSmartStackAt(client, stack.hierarchy, options, signal);
     return { success: true, x: options.x, y: options.y, action: "tap" };

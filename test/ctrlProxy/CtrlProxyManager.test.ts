@@ -557,7 +557,7 @@ describe("CtrlProxyManager", function () {
       adb.setCommandResponseSequence(installedCommand, [
         createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}`, ""),
       ]);
-      adb.setCommandResponse('install "/tmp/ctrlproxy.apk"', createExecResult("Success", ""));
+      adb.setCommandResponse('install -r "/tmp/ctrlproxy.apk"', createExecResult("Success", ""));
       await manager.install("/tmp/ctrlproxy.apk");
 
       await expect(manager.isInstalled()).resolves.toBe(true);
@@ -578,7 +578,7 @@ describe("CtrlProxyManager", function () {
         grantResponse?: ExecResult,
       ): Promise<FakeAdbExecutor> {
         const adb = new FakeAdbExecutor();
-        adb.setCommandResponse('install "/tmp/ctrlproxy.apk"', createExecResult("Success", ""));
+        adb.setCommandResponse('install -r "/tmp/ctrlproxy.apk"', createExecResult("Success", ""));
         adb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult(sdk, ""));
         if (grantResponse) {
           adb.setCommandResponse(grantCommand, grantResponse);
@@ -603,7 +603,7 @@ describe("CtrlProxyManager", function () {
         const grant = `shell pm grant ${AndroidCtrlProxyManager.PACKAGE} android.permission.RECORD_AUDIO`;
         expect(commands.filter((command) => command === grant)).toHaveLength(1);
         expect(commands.indexOf(grant)).toBeGreaterThan(
-          commands.indexOf('install "/tmp/ctrlproxy.apk"'),
+          commands.indexOf('install -r "/tmp/ctrlproxy.apk"'),
         );
       });
 
@@ -638,7 +638,7 @@ describe("CtrlProxyManager", function () {
             const commands = adb.getExecutedCommands();
             const installCommand =
               mode === "reinstall"
-                ? 'install "/tmp/ctrlproxy.apk"'
+                ? 'install -r "/tmp/ctrlproxy.apk"'
                 : 'install -r -d "/tmp/ctrlproxy.apk"';
             for (const grant of [recordGrant, grantCommand]) {
               expect(commands.filter((command) => command === grant)).toHaveLength(1);
@@ -2425,7 +2425,7 @@ describe("CtrlProxyManager", function () {
         `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
         createExecResult("Success", ""),
       );
-      localFakeAdb.setCommandError('install "', new Error("INSTALL_FAILED_ABORTED"));
+      localFakeAdb.setCommandError('install -r "', new Error("INSTALL_FAILED_ABORTED"));
 
       const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
         timer: new FakeTimer(),
@@ -2499,7 +2499,7 @@ describe("CtrlProxyManager", function () {
           `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
           createExecResult("Success", ""),
         );
-        localFakeAdb.setCommandError('install "', new Error("INSTALL_FAILED_ABORTED"));
+        localFakeAdb.setCommandError('install -r "', new Error("INSTALL_FAILED_ABORTED"));
 
         const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
           timer: new FakeTimer(),
@@ -2551,7 +2551,7 @@ describe("CtrlProxyManager", function () {
           `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
           createExecResult("Success", ""),
         );
-        localFakeAdb.setCommandError('install "', new Error("INSTALL_FAILED_ABORTED"));
+        localFakeAdb.setCommandError('install -r "', new Error("INSTALL_FAILED_ABORTED"));
 
         const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
           timer: new FakeTimer(),
@@ -2846,7 +2846,7 @@ describe("CtrlProxyManager", function () {
         `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
         createExecResult("Success", ""),
       );
-      localFakeAdb.setCommandError('install "', new Error("Failure [INSTALL_FAILED_ABORTED]"));
+      localFakeAdb.setCommandError('install -r "', new Error("Failure [INSTALL_FAILED_ABORTED]"));
       const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
         timer: new FakeTimer(),
         fileDownloader: { download: async () => undefined },

@@ -42,21 +42,45 @@ class BitmapPrototypeImageDecoderTest {
 
   @Test
   fun `EXIF orientation six rotates the sampled JPEG`() {
-    val jpeg = temp.newFile("orientation.jpg")
-    val source = Bitmap.createBitmap(48, 32, Bitmap.Config.ARGB_8888)
-    jpeg.outputStream().use { assertTrue(source.compress(Bitmap.CompressFormat.JPEG, 100, it)) }
-    ExifInterface(jpeg.path).apply {
-      setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_ROTATE_90.toString())
-      saveAttributes()
-    }
-
     val decoded =
       requireNotNull(
-        BitmapPrototypeImageDecoder(maxPixels = 500)
-          .decode(jpeg.readBytes(), PrototypeImageTarget(24, 16)),
+        BitmapPrototypeImageDecoder(maxPixels = 1000)
+          .decode(jpeg(ExifInterface.ORIENTATION_ROTATE_90), PrototypeImageTarget(24, 16)),
       )
     assertEquals(16, decoded.width)
     assertEquals(24, decoded.height)
+  }
+
+  @Test
+  fun `an EXIF transform samples further so the source and its copy share the pixel budget`() {
+    val target = PrototypeImageTarget(24, 16)
+    val upright =
+      requireNotNull(
+        BitmapPrototypeImageDecoder(maxPixels = 500)
+          .decode(jpeg(ExifInterface.ORIENTATION_NORMAL), target),
+      )
+    assertEquals(24 * 16, upright.width * upright.height)
+
+    val rotated =
+      requireNotNull(
+        BitmapPrototypeImageDecoder(maxPixels = 500)
+          .decode(jpeg(ExifInterface.ORIENTATION_ROTATE_90), target),
+      )
+    assertEquals(8, rotated.width)
+    assertEquals(12, rotated.height)
+  }
+
+  /** A 48x32 JPEG tagged with EXIF [orientation]. */
+  private fun jpeg(orientation: Int): ByteArray {
+    val file = temp.newFile()
+    val source = Bitmap.createBitmap(48, 32, Bitmap.Config.ARGB_8888)
+    file.outputStream().use { assertTrue(source.compress(Bitmap.CompressFormat.JPEG, 100, it)) }
+    source.recycle()
+    ExifInterface(file.path).apply {
+      setAttribute(ExifInterface.TAG_ORIENTATION, orientation.toString())
+      saveAttributes()
+    }
+    return file.readBytes()
   }
 
   companion object {

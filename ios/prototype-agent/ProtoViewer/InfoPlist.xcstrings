@@ -33,6 +33,83 @@
           }
         }
       }
+    },
+    "NSCameraUsageDescription": {
+      "comment": "System permission prompt for camera requested by a prototype.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The prototype you are previewing asks for permission to use your camera."
+          }
+        }
+      }
+    },
+    "NSMicrophoneUsageDescription": {
+      "comment": "System permission prompt for microphone requested by a prototype.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The prototype you are previewing asks for permission to use your microphone."
+          }
+        }
+      }
+    },
+    "NSPhotoLibraryUsageDescription": {
+      "comment": "System permission prompt for photo library access requested by a prototype.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The prototype you are previewing asks for access to your photo library."
+          }
+        }
+      }
+    },
+    "NSPhotoLibraryAddUsageDescription": {
+      "comment": "System permission prompt for photo library additions requested by a prototype.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The prototype you are previewing asks for permission to add photos to your photo library."
+          }
+        }
+      }
+    },
+    "NSContactsUsageDescription": {
+      "comment": "System permission prompt for contacts requested by a prototype.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The prototype you are previewing asks for access to your contacts."
+          }
+        }
+      }
+    },
+    "NSCalendarsFullAccessUsageDescription": {
+      "comment": "System permission prompt for full calendar access requested by a prototype.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The prototype you are previewing asks for full access to your calendars."
+          }
+        }
+      }
+    },
+    "NSLocationWhenInUseUsageDescription": {
+      "comment": "System permission prompt for location while in use requested by a prototype.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The prototype you are previewing asks for permission to use your location while the app is open."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

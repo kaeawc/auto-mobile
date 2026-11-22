@@ -2,7 +2,7 @@ import { z } from "zod/v4";
 import type { AppearanceSocketResponse } from "../../src/daemon/wire/appearanceSocketTypes";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { daemonNotificationSchema, daemonResponseSchema } from "../../src/daemon/types";
-import { webRtcStreamSocketResponseSchema } from "../../src/daemon/webrtcStreamSocketTypes";
+import { webRtcStreamSocketResponseSchema } from "../../src/daemon/streams/webrtcStreamSocketTypes";
 import { appearanceConfigSchema } from "../../src/db/keyedJsonConfigRepository";
 
 /**

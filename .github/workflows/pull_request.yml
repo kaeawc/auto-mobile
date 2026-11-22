@@ -53,7 +53,7 @@ jobs:
       prototype_simulator_should_run: ${{ steps.prototype_simulator_should_run.outputs.should_run }}
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -62,7 +62,7 @@ jobs:
       # compileSdk advisory), and this workflow. merge.yml runs it on every main push.
       - name: "Check for installer inputs"
         id: filter-installer
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             installer:
@@ -73,7 +73,7 @@ jobs:
 
       - name: "Check for documentation-only changes"
         id: filter
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           retries: 3
           script: |
@@ -141,7 +141,7 @@ jobs:
 
       - name: "Check for SHA256-only changes"
         id: check-sha256
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           retries: 3
           script: |
@@ -189,7 +189,7 @@ jobs:
 
       - name: "Check for auto chore changes"
         id: check-auto-chore
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           retries: 3
           script: |
@@ -259,7 +259,7 @@ jobs:
 
       - name: "Check for Desktop Core module changes"
         id: filter-desktop-core
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             desktop_core:
@@ -298,7 +298,7 @@ jobs:
 
       - name: "Check for IDE Plugin changes"
         id: filter-ide-plugin
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             ide_plugin:
@@ -308,7 +308,7 @@ jobs:
 
       - name: "Check for Desktop App changes"
         id: filter-desktop-app
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             desktop_app:
@@ -325,7 +325,7 @@ jobs:
       # Gates the x86_64 memory-pressure payload emulator smoke (#16402).
       - name: "Check for lmk-pressure payload changes"
         id: filter-lmk-pressure
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             lmk:
@@ -337,7 +337,7 @@ jobs:
 
       - name: "Check for Android-related changes"
         id: filter-android
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             android:
@@ -409,7 +409,7 @@ jobs:
       # re-run it even though no .kt moved.
       - name: "Check for Kotlin source changes"
         id: filter-kotlin
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             kotlin:
@@ -426,7 +426,7 @@ jobs:
       # its enforcement must exercise the same cached Android analysis job.
       - name: "Check for Android lint inputs"
         id: filter-android-lint
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             lint:
@@ -439,7 +439,7 @@ jobs:
 
       - name: "Check for iOS-related changes"
         id: filter-ios
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             ios:
@@ -478,7 +478,7 @@ jobs:
       # there and import from src/**.
       - name: "Check for TypeScript-related changes"
         id: filter-ts
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             ts:
@@ -507,7 +507,7 @@ jobs:
       # to land and later block an unrelated TypeScript PR.
       - name: "Check for formatting-related changes"
         id: filter-format
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             format:
@@ -537,7 +537,7 @@ jobs:
       # deliberately absent. merge.yml still runs the full suite on every push.
       - name: "Check for shell-test-relevant changes"
         id: filter-shell
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             shell:
@@ -618,7 +618,7 @@ jobs:
       # crosses (#5164); it runs every night on CircleCI (nightly-macos) regardless.
       - name: "Check for iOS SDK contract inputs"
         id: filter-ios-sdk-contract
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             ios_sdk_contract:
@@ -647,7 +647,7 @@ jobs:
       # the TypeScript the driver imports. Moved here from CircleCI (#11011).
       - name: "Check for prototype agent smoke inputs"
         id: filter-prototype-simulator
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             prototype_simulator:
@@ -679,16 +679,16 @@ jobs:
       # actually in play — see webrtc_should_run.
       - name: "Check for WebRTC publisher changes"
         id: filter-webrtc
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             webrtc:
               - 'src/features/webrtc/**'
               - 'src/features/screen-stream/**'
-              - 'src/daemon/webrtcStreamManager.ts'
-              - 'src/daemon/webrtc*'
-              - 'src/daemon/videoStreamSocket*'
-              - 'src/daemon/videoStreamFraming.ts'
+              - 'src/daemon/streams/webrtcStreamManager.ts'
+              - 'src/daemon/streams/webrtc*'
+              - 'src/daemon/streams/videoStreamSocket*'
+              - 'src/daemon/streams/videoStreamFraming.ts'
               - 'src/daemon/daemonFiles.ts'
               - 'src/daemon/socketServer/**'
               - 'examples/mediamtx/**'
@@ -759,7 +759,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -778,7 +778,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -792,7 +792,7 @@ jobs:
 
       - name: "Upload Test Results"
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: desktop-core-test-results
           path: android/desktop-core/build/reports/tests/test/
@@ -802,7 +802,7 @@ jobs:
       # the rendering. See issue #3913.
       - name: "Upload Screenshot Diffs"
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: desktop-core-screenshot-diffs
           path: android/desktop-core/build/reports/screenshots/
@@ -824,7 +824,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -850,7 +850,7 @@ jobs:
         working-directory: android/ide-plugin
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -869,7 +869,7 @@ jobs:
         working-directory: android/ide-plugin
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -934,7 +934,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           clean: true
@@ -978,7 +978,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -1005,7 +1005,7 @@ jobs:
           fi
 
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           # Full history so the ktfmt check can diff the PR head against its base
@@ -1020,19 +1020,19 @@ jobs:
       # directory, so its save is skipped instead of freezing an incomplete
       # entry. The installers re-verify each file's SHA-256 before use (#17624).
       - name: "Cache pinned ktfmt download"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/auto-mobile/tools/ktfmt
           key: tool-download-ktfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ktfmt/ktfmt_version.sh') }}
 
       - name: "Cache pinned shfmt download"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/auto-mobile/tools/shfmt
           key: tool-download-shfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/shellcheck/shfmt_version.sh') }}
 
       - name: "Cache pinned lychee download"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/auto-mobile/tools/lychee
           key: tool-download-lychee-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/lychee/lychee_version.sh') }}
@@ -1041,14 +1041,14 @@ jobs:
       # Start its independent toolchain setup now so the required Fast Validation
       # job can validate that lockfile before a PR lands.
       - name: "Setup Python for documentation lock validation"
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         background: true
         id: setup-python-lock
         with:
           python-version: "3.11"
 
       - name: "Install uv for documentation lock validation"
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         background: true
         id: setup-uv-lock
         with:
@@ -1066,7 +1066,7 @@ jobs:
       # so the barrier sits at the end -- a hadolint failure surfaces there
       # rather than vanishing.
       - name: "Run hadolint"
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
         background: true
         id: hadolint
         with:
@@ -1098,7 +1098,7 @@ jobs:
       # Pin the JDK so the ktfmt check formats deterministically (project targets
       # Java 21) instead of relying on the runner image's default JDK.
       - name: "Set up JDK"
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: "zulu"
           java-version: "21"
@@ -1163,7 +1163,7 @@ jobs:
       - name: "Upload Fast Validation Logs"
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: fast-validation-logs
           path: scratch/fast-validate-*/
@@ -1185,7 +1185,7 @@ jobs:
     runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           # Full history so `origin/<base>...HEAD` has a merge-base.
@@ -1195,7 +1195,7 @@ jobs:
       # checksum-verified release download; restore its cache first so a GitHub
       # release outage cannot fail this job once lychee is cached (#17641).
       - name: "Cache pinned lychee download"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/auto-mobile/tools/lychee
           key: tool-download-lychee-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/lychee/lychee_version.sh') }}
@@ -1218,14 +1218,14 @@ jobs:
           fi
 
       - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.4
 
       # The selector adds `docs-github-markdown` when docs/ changes, and that
       # check exits 2 without uv ("uv is required"), failing every docs PR.
       - name: "Install uv for docs Markdown validation"
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         background: true
         id: install-uv
         with:
@@ -1267,19 +1267,19 @@ jobs:
       # Java and fetches the pinned JAR, so pin the JDK as Fast Validation does
       # and restore the checksum-verified tool cache (#17624).
       - name: "Set up JDK"
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: "zulu"
           java-version: "21"
 
       - name: "Cache pinned ktfmt download"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/auto-mobile/tools/ktfmt
           key: tool-download-ktfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ktfmt/ktfmt_version.sh') }}
 
       - name: "Cache pinned shfmt download"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/auto-mobile/tools/shfmt
           key: tool-download-shfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/shellcheck/shfmt_version.sh') }}
@@ -1313,7 +1313,7 @@ jobs:
     if: (needs.detect-changes.outputs.kotlin_changed == 'true' || needs.detect-changes.outputs.android_lint_changed == 'true') && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           fetch-depth: 0
@@ -1382,7 +1382,7 @@ jobs:
 
       - name: "Upload Android Lint Reports"
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: android-lint-reports
           path: |
@@ -1393,7 +1393,7 @@ jobs:
 
       - name: "Upload Detekt Reports"
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: detekt-reports
           path: android/**/build/reports/detekt/
@@ -1426,7 +1426,7 @@ jobs:
         os: [ubuntu-latest]
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -1437,7 +1437,7 @@ jobs:
       # directory, so its save is skipped instead of freezing an incomplete
       # entry. The installers re-verify each file's SHA-256 before use (#17624).
       - name: "Cache pinned shfmt download"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.cache/auto-mobile/tools/shfmt
           key: tool-download-shfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/shellcheck/shfmt_version.sh') }}
@@ -1481,7 +1481,7 @@ jobs:
           fi
 
       - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.4
 
@@ -1557,7 +1557,7 @@ jobs:
 
       - name: "Git Checkout"
         if: env.RUN_INSTALLER == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           clean: true
@@ -1618,7 +1618,7 @@ jobs:
       - name: "Upload Logs"
         if: env.RUN_INSTALLER == 'true' && (env.INSTALL_EXIT_CODE != '0' || env.UNINSTALL_EXIT_CODE != '0' || failure())
         continue-on-error: true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: installer-minimal-${{ matrix.os }}-logs
           path: ci-logs/
@@ -1661,7 +1661,7 @@ jobs:
       - name: "Git Checkout"
         if: github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true'
         continue-on-error: true
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           sparse-checkout: scripts/ci/mac-pool-routing.sh
           sparse-checkout-cone-mode: false
@@ -1689,7 +1689,7 @@ jobs:
     if: always() && !cancelled() && needs.detect-changes.result == 'success' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && (needs.detect-changes.outputs.ios_should_run == 'true' || needs.detect-changes.outputs.prototype_simulator_should_run == 'true' || needs.detect-changes.outputs.installer_changed == 'true' || ((needs.detect-changes.outputs.desktop_app_changed == 'true' || needs.detect-changes.outputs.desktop_core_changed == 'true') && needs.detect-changes.outputs.sha256_only != 'true'))
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           sparse-checkout: scripts/ci/mac-queue-watchdog.sh
           sparse-checkout-cone-mode: false
@@ -1715,7 +1715,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           fetch-depth: 1
@@ -1744,7 +1744,7 @@ jobs:
       TS_CHANGED: ${{ needs.detect-changes.outputs.ts_changed }}
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -1756,7 +1756,7 @@ jobs:
         continue-on-error: true
 
       - name: "Upload Bun Audit Results"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: always()
         with:
           name: bun-audit-results
@@ -1768,7 +1768,7 @@ jobs:
         run: bash scripts/ci/verify-pinned-runtime-graph.sh
 
       - name: "Upload Pinned Runtime Graph Report"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: ${{ always() && env.TS_CHANGED == 'true' }}
         with:
           name: pinned-runtime-graph-report
@@ -1782,7 +1782,7 @@ jobs:
       - name: "Upload Heap Snapshots"
         if: ${{ failure() && env.TS_CHANGED == 'true' }}
         continue-on-error: true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: heap-snapshots
           path: "*.heapsnapshot"
@@ -1810,7 +1810,7 @@ jobs:
           fi
 
       - name: "Upload Context Benchmark Report"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: ${{ always() && env.TS_CHANGED == 'true' }}
         with:
           name: context-benchmark-report
@@ -1818,7 +1818,7 @@ jobs:
           retention-days: 90
 
       - name: "Upload Tool Benchmark Report"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: ${{ always() && env.TS_CHANGED == 'true' }}
         with:
           name: tool-benchmark-report
@@ -1826,7 +1826,7 @@ jobs:
           retention-days: 90
 
       - name: "Upload Startup Benchmark Report"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: ${{ always() && env.TS_CHANGED == 'true' }}
         with:
           name: startup-benchmark-report
@@ -1834,7 +1834,7 @@ jobs:
           retention-days: 90
 
       - name: "Upload NPM Unpacked Size Benchmark Report"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: ${{ always() && env.TS_CHANGED == 'true' }}
         with:
           name: npm-unpacked-size-report
@@ -1843,7 +1843,7 @@ jobs:
 
       - name: "Post Consolidated Comment"
         if: ${{ !cancelled() && env.TS_CHANGED == 'true' && github.event.pull_request.head.repo.full_name == github.repository }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             const fs = require('fs');
@@ -2269,12 +2269,12 @@ jobs:
         os: [ubuntu-latest]
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
       - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.4
 
@@ -2324,7 +2324,7 @@ jobs:
 
       - name: "Git Checkout"
         if: env.RUN_MCP_BUILD_TEST == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           # Lint runs boundary guards that compare the working tree with
@@ -2341,7 +2341,7 @@ jobs:
       # churned the 10 GB repo cache that also holds the Gradle caches.
       - name: "Cache Bun dependencies"
         if: env.RUN_MCP_BUILD_TEST == 'true'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         background: true
         id: cache-bun
         with:
@@ -2356,7 +2356,7 @@ jobs:
 
       - name: "Cache Turborepo"
         if: env.RUN_MCP_BUILD_TEST == 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         background: true
         id: cache-turbo
         with:
@@ -2437,7 +2437,7 @@ jobs:
 
       - name: "Upload Windows netstat capture (#10717)"
         if: always() && !cancelled() && env.RUN_MCP_BUILD_TEST == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: windows-netstat-capture
           path: scratch/netstat-capture/
@@ -2447,7 +2447,7 @@ jobs:
       - name: "Upload Build/Test Logs"
         if: env.RUN_MCP_BUILD_TEST == 'true' && (failure() || cancelled() || matrix.os == 'windows-latest')
         continue-on-error: true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: mcp-build-test-logs-${{ matrix.os }}
           path: |
@@ -2482,7 +2482,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           # The stdlib-first gate compares package.json with the PR base SHA.
@@ -2497,7 +2497,7 @@ jobs:
       # The barrier must precede "Setup Auto Mobile": that composite runs
       # `turbo run build` against the same .turbo directory being restored.
       - name: "Cache Turborepo"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         background: true
         id: cache-turbo
         with:
@@ -2589,7 +2589,7 @@ jobs:
 
       - name: "Upload Node Unit Timing Budget Summary"
         if: always() && !cancelled()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: node-unit-timing-budget-summary
           path: scratch/timing-unit-reports/unit-timing-budget-summary.md
@@ -2611,7 +2611,7 @@ jobs:
       - name: "Upload Build/Test Logs"
         if: failure() || cancelled()
         continue-on-error: true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: mcp-build-test-logs-ubuntu-latest
           path: ci-logs/*.log
@@ -2655,7 +2655,7 @@ jobs:
     if: needs.detect-changes.outputs.lmk_pressure_changed == 'true'
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -2688,7 +2688,7 @@ jobs:
     if: needs.detect-changes.outputs.android_should_run == 'true'
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -2712,7 +2712,7 @@ jobs:
         run: bash scripts/coverage/generate-kotlin-badge.sh
 
       - name: "Upload Kotlin Coverage Badge"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: kotlin-coverage-badge
           path: coverage/kotlin-coverage-badge.json
@@ -2735,7 +2735,7 @@ jobs:
     if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -2792,14 +2792,14 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           clean: true
 
       - name: "Select Xcode 27.2"
         if: runner.environment == 'github-hosted'
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: "27.2"
 
@@ -2816,7 +2816,7 @@ jobs:
       # Same literal on every runner process shares one cache entry; it must name
       # the same directory as $RUNNER_TEMP/automobile-swiftpm-cache.
       - name: "Cache Swift coverage dependencies"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         id: cache-swift-coverage
         with:
           path: |
@@ -2837,7 +2837,7 @@ jobs:
           echo "build took ${SECONDS}s"
 
       - name: "Upload Swift Coverage Badge"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: swift-coverage-badge
           path: coverage/swift-coverage-badge.json
@@ -2904,7 +2904,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           clean: true
@@ -2913,7 +2913,7 @@ jobs:
       # compiler floor, not an ambient-runner compatibility check.
       - name: "Select Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'github-hosted'
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: ${{ matrix.config.xcode }}
 
@@ -2924,7 +2924,7 @@ jobs:
 
       # Same runner-independent literal and RUNNER_TEMP directory as the coverage cache above.
       - name: "Cache Swift package dependencies"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         id: cache-swift-packages
         with:
           path: |
@@ -3045,14 +3045,14 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           clean: true
 
       - name: "Select Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'github-hosted'
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: ${{ matrix.config.xcode }}
 
@@ -3065,7 +3065,7 @@ jobs:
       # auto-install without a dependency tree.
       - name: "Setup Bun"
         if: matrix.config.app == 'protoviewer'
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.4
 
@@ -3129,14 +3129,14 @@ jobs:
           echo "$isolated_home/.local/bin" >> "$GITHUB_PATH"
 
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           clean: true
 
       - name: "Select Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'github-hosted'
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: ${{ matrix.config.xcode }}
 
@@ -3147,7 +3147,7 @@ jobs:
 
       # Same runner-independent literal and RUNNER_TEMP directory as the coverage cache above.
       - name: "Cache Xcode Swift package dependencies"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         id: cache-xcode-spm
         with:
           path: |
@@ -3165,7 +3165,7 @@ jobs:
       # hit. Names must match the generated <name>.xcodeproj basenames passed to
       # xcode-build.sh.
       - name: "Cache Xcode DerivedData (Playground)"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         id: cache-xcode-derived-data-playground
         with:
           path: |
@@ -3176,7 +3176,7 @@ jobs:
             ${{ runner.os }}-${{ runner.environment }}-derived-xcode-build-Playground-${{ matrix.config.xcode }}-
 
       - name: "Cache Xcode DerivedData (CtrlProxy)"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         id: cache-xcode-derived-data-ctrlproxy
         with:
           path: |
@@ -3271,14 +3271,14 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           clean: true
 
       - name: "Select Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'github-hosted'
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: ${{ matrix.config.xcode }}
 
@@ -3288,7 +3288,7 @@ jobs:
         run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}" --require-metal
 
       - name: "Cache Playground Swift package dependencies"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         id: cache-playground-spm
         with:
           path: |
@@ -3299,7 +3299,7 @@ jobs:
             ${{ runner.os }}-${{ runner.environment }}-spm-playground-tests-${{ matrix.config.xcode }}-
 
       - name: "Cache Playground DerivedData"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         id: cache-playground-derived-data
         with:
           path: |
@@ -3388,7 +3388,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           clean: true
@@ -3398,7 +3398,7 @@ jobs:
       # a 6.3 manifest, so 26.6 is the floor entry and 27.2 the pinned toolchain.
       - name: "Select Xcode ${{ matrix.config.xcode }}"
         if: runner.environment == 'github-hosted'
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: ${{ matrix.config.xcode }}
 
@@ -3418,7 +3418,7 @@ jobs:
 
       # Same runner-independent literal and RUNNER_TEMP directory as the coverage cache above.
       - name: "Cache root Swift package dependencies"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         id: cache-root-spm
         with:
           path: |
@@ -3520,14 +3520,14 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           clean: true
 
       - name: "Select Xcode 27.2"
         if: runner.environment == 'github-hosted'
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: "27.2"
 
@@ -3540,7 +3540,7 @@ jobs:
         run: xcodebuild -version && xcrun simctl list runtimes iOS
 
       - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.4
 
@@ -3569,7 +3569,7 @@ jobs:
 
       - name: "Upload prototype agent smoke artifacts"
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: prototype-agent-smoke-ios-${{ matrix.ios }}
           path: |
@@ -3598,7 +3598,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -3619,7 +3619,7 @@ jobs:
       - name: "Upload Heap Dumps"
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: junit-runner-heap-dumps-unit
           path: heap-dump
@@ -3657,7 +3657,7 @@ jobs:
       GRADLE_BUILD_ACTION_CACHE_KEY_JOB: kotlin-code-coverage
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -3683,7 +3683,7 @@ jobs:
       - name: "Upload Heap Dumps"
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: junit-runner-heap-dumps-emulator
           path: heap-dump
@@ -3691,27 +3691,27 @@ jobs:
 
       - name: "Upload JUnit Runner Test Results"
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: junit-runner-emulator-test-results
           path: android/junit-runner/build/reports/tests/test/
 
       - name: "Upload Playground Test Results"
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: playground-automobile-emulator-test-results
           path: android/playground/app/build/reports/tests/test/
 
       - name: "Publish JUnit Runner Test Report"
-        uses: mikepenz/action-junit-report@v6
+        uses: mikepenz/action-junit-report@a16be3a69023e9bd7e748ede768b3282ea7b30ce # v6
         if: always()
         with:
           check_name: "JUnit Runner Emulator Test Report"
           report_paths: "android/junit-runner/build/test-results/**/*.xml"
 
       - name: "Publish Playground Test Report"
-        uses: mikepenz/action-junit-report@v6
+        uses: mikepenz/action-junit-report@a16be3a69023e9bd7e748ede768b3282ea7b30ce # v6
         if: always()
         with:
           check_name: "Playground Automobile Emulator Test Report"
@@ -3735,7 +3735,7 @@ jobs:
           exit 1
 
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -3755,7 +3755,7 @@ jobs:
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
       - name: "Download CtrlProxy APK"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: control-proxy-apk
           path: android/control-proxy/build/outputs/apk/debug
@@ -3774,7 +3774,7 @@ jobs:
       - name: "Upload Heap Dumps"
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: junit-runner-emulator-wtf-heap-dumps
           path: heap-dump
@@ -3782,13 +3782,13 @@ jobs:
 
       - name: "Upload Test Results"
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: junit-runner-emulator-wtf-test-results
           path: android/junit-runner/build/reports/tests/test/
 
       - name: "Publish Test Report"
-        uses: mikepenz/action-junit-report@v6
+        uses: mikepenz/action-junit-report@a16be3a69023e9bd7e748ede768b3282ea7b30ce # v6
         if: always()
         with:
           check_name: "JUnit Runner Emulator.wtf Test Report"
@@ -3816,7 +3816,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -3847,7 +3847,7 @@ jobs:
           android/protoviewer/build/outputs/apk/release/protoviewer-release.apk --allow-snapshot
 
       - name: "Store AAR"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: aar
           path: core/build/outputs/aar/core-debug.aar
@@ -3898,7 +3898,7 @@ jobs:
       - name: "Upload prototype consumer logs"
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: prototype-compose-consumer-logs
           path: scratch/prototype-compose-consumer/logs/
@@ -3907,7 +3907,7 @@ jobs:
       # JUnit Runner Kotlin Consumer Compatibility (folded in by #10894).
       - name: "Install JDK"
         if: ${{ !cancelled() }}
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: "zulu"
           java-version: "21"
@@ -3920,7 +3920,7 @@ jobs:
       - name: "Upload Compatibility Logs"
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: junit-runner-kotlin-consumer-compatibility-logs
           path: scratch/junit-runner-kotlin-consumer/logs/
@@ -3937,7 +3937,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -3956,13 +3956,13 @@ jobs:
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
       - name: "Upload CtrlProxy APK"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: control-proxy-apk
           path: android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
 
       - name: "Upload video-server jar"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: video-server-jar
           path: android/video-server/build/libs/automobile-video.jar
@@ -3984,7 +3984,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -4011,7 +4011,7 @@ jobs:
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
       - name: "Store Sample APK"
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: success() # Only upload if build succeeded
         with:
           name: playground-app-apk
@@ -4031,7 +4031,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
       - uses: ./.github/actions/ci-webrtc-publisher-integration
@@ -4044,7 +4044,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
       - uses: ./.github/actions/ci-android-device-whep
@@ -4080,12 +4080,12 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           clean: true
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.4
 
@@ -4093,7 +4093,7 @@ jobs:
 
       - name: "Select Xcode 27.2"
         if: runner.environment == 'github-hosted'
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: "27.2"
 
@@ -4108,7 +4108,7 @@ jobs:
         run: echo "version=$(xcodebuild -version | awk '/^Xcode / { print $2; exit }')" >> "$GITHUB_OUTPUT"
 
       - name: "Cache iOS capture Swift package dependencies"
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         id: cache-webrtc-spm
         with:
           path: |
@@ -4243,7 +4243,7 @@ jobs:
       - name: "Upload WebRTC device artifacts"
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ios-webrtc-device-artifacts-${{ github.run_attempt }}
           path: scratch/webrtc-device-integration/

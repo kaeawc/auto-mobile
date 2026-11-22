@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS } from "../../src/daemon/deviceDataStreamSocketServer";
+import { DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS } from "../../src/daemon/streams/deviceDataStreamSocketServer";
 import {
   createPooledObservationExecutor,
   runObservationRequestBatch,
-} from "../../src/daemon/observationRequestBatch";
+} from "../../src/daemon/streams/observationRequestBatch";
 import type { ObserveResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { buildObserveResult } from "../helpers/observeFixture";

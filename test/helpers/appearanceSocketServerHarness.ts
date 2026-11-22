@@ -1,5 +1,5 @@
 import type { Socket } from "net";
-import { AppearanceSocketServer } from "../../src/daemon/appearanceSocketServer";
+import { AppearanceSocketServer } from "../../src/daemon/streams/appearanceSocketServer";
 
 /** Drives one request line through the appearance server without opening a listener. */
 export class AppearanceSocketServerHarness extends AppearanceSocketServer {

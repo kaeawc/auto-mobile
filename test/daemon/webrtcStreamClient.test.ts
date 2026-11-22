@@ -6,7 +6,7 @@ import {
 import type {
   WebRtcStreamSocketRequest,
   WebRtcStreamSocketResponse,
-} from "../../src/daemon/webrtcStreamSocketTypes";
+} from "../../src/daemon/streams/webrtcStreamSocketTypes";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DaemonFrameTooLargeError } from "../../src/daemon/wire/DaemonFrameTooLargeError";

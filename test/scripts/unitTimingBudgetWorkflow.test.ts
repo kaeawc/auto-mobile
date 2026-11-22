@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { loadJobs } from "../helpers/workflowSteps";
+import { loadJobs, usesAction } from "../helpers/workflowSteps";
 
 const workflowDir = join(import.meta.dir, "../../.github/workflows");
 // Parse once outside timed tests. Discover direct and prepush callers so a new
@@ -108,7 +108,7 @@ test("timing budget uploads its summary after enforcement even on failure", () =
   expect(enforceIndex).toBeGreaterThanOrEqual(0);
   expect(uploadIndex).toBeGreaterThan(enforceIndex);
   const upload = budgetSteps[uploadIndex];
-  expect(upload.uses).toBe("actions/upload-artifact@v6");
+  expect(usesAction(upload.uses)).toBe("actions/upload-artifact");
   expect(upload.if).toBe("always() && !cancelled()");
   expect(upload.with).toEqual({
     name: "node-unit-timing-budget-summary",
@@ -131,7 +131,7 @@ test("merge coverage owns the Ubuntu unit gate and plain isolated timing verdict
   ).toBe(false);
   const windows = mergeJobs["node-unit-tests"];
   expect(
-    windows.steps?.find((s) => s.uses === "actions/checkout@v6")?.with?.["fetch-depth"],
+    windows.steps?.find((s) => usesAction(s.uses) === "actions/checkout")?.with?.["fetch-depth"],
   ).toBeUndefined();
   expect(windows.steps?.some((s) => s.env?.AUTOMOBILE_UNIT_JUNIT_DIR)).toBe(false);
   // The badge and gate job joins the instrumented parts (#16377).
@@ -139,11 +139,13 @@ test("merge coverage owns the Ubuntu unit gate and plain isolated timing verdict
   expect(coverage["timeout-minutes"]).toBe(20);
   expect(coverage["runs-on"]).toBe("ubuntu-latest");
   expect(coverage.permissions).toEqual({ contents: "read" });
-  expect(coverageSteps.find((s) => s.uses === "actions/checkout@v6")?.with?.["fetch-depth"]).toBe(
-    2,
-  );
+  expect(
+    coverageSteps.find((s) => usesAction(s.uses) === "actions/checkout")?.with?.["fetch-depth"],
+  ).toBe(2);
   expect(coverageSteps.some((s) => s.run?.includes("ci/run-ts-coverage.sh"))).toBe(false);
-  const download = coverageSteps.findIndex((s) => s.uses === "actions/download-artifact@v7");
+  const download = coverageSteps.findIndex(
+    (s) => usesAction(s.uses) === "actions/download-artifact",
+  );
   expect(coverageSteps[download]?.with).toEqual({
     pattern: "ts-coverage-part-*",
     path: "coverage-parts",

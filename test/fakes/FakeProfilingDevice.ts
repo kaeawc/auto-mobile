@@ -27,6 +27,8 @@ export class FakeProfilingDevice implements ProfilingAdbPort {
   perfettoStartOutput = "Connected to the Perfetto traced service, TTL: 30s\n31337\n";
   traceBytes = 4096;
   heapBytes = 8192;
+  /** First bytes `head -c` returns per device path; absent means an ordinary binary dump. */
+  readonly deviceFileHead = new Map<string, string>();
   packageDump = "    pkgFlags=[ DEBUGGABLE HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP ]\n";
   /** Per `dumpheap` entry point, its output; `null` means it writes the file. */
   dumpheapOutput: Record<"am dumpheap" | "cmd activity dumpheap", string | null> = {
@@ -85,6 +87,10 @@ export class FakeProfilingDevice implements ProfilingAdbPort {
     const size = /^wc -c < (\S+)/.exec(command);
     if (size) {
       return this.out(`${this.deviceFiles.get(size[1]) ?? 0}\n`);
+    }
+    const head = /^head -c \d+ (\S+)$/.exec(command);
+    if (head) {
+      return this.out(this.deviceFileHead.get(head[1]) ?? "");
     }
     const remove = /^rm -f (\S+)$/.exec(command);
     if (remove) {

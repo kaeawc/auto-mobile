@@ -100,3 +100,25 @@ updates:
       - "ios"
     commit-message:
       prefix: "chore(deps)"
+  # GitHub Actions. Every remote `uses:` is pinned to a commit SHA with its tag as
+  # a trailing comment (test/bats/workflow-action-versions.bats); Dependabot bumps
+  # the SHA and the comment together. One grouped weekly PR keeps the pins current
+  # without a PR per action. Covers the workflows and the composite actions.
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

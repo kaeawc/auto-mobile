@@ -1,6 +1,6 @@
 import { DeviceClaimMirrorHub } from "./deviceClaimMirrorHub";
 import type { DaemonSocketServer } from "./daemonSocketServer";
-import type { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
+import type { getDeviceDataStreamServer } from "./streams/deviceDataStreamSocketServer";
 import type { DaemonBrokerDeviceAcquisitionHandle } from "./sessionBroker/provisioning/daemonDeviceAcquisition";
 import type { ManagedExecutionReowner } from "./sessionBroker/provisioning/executionReowner";
 import type { BackgroundBindingRegistryUpgrade } from "./sessionBroker/registry/BackgroundBindingRegistryUpgrade";

@@ -268,7 +268,8 @@ enum PrototypePatch {
         return items
     }
 
-    private static func equal(_ left: JSONValue?, _ right: JSONValue?) -> Bool {
+    // Shared with channel route matchers: JSON string identity uses exact UTF-16.
+    static func equal(_ left: JSONValue?, _ right: JSONValue?) -> Bool {
         switch (left, right) {
         case (.null?, .null?): return true
         case let (.string(first)?, .string(second)?): return first.utf16.elementsEqual(second.utf16)

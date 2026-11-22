@@ -74,7 +74,7 @@ describe("iOS runner refusal screen-size checks (#17101)", () => {
     expect(result.success).toBe(false);
     expect(result.rotationPerformed).toBe(false);
     expect(result.error).toBe(
-      "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.",
+      "The foreground app or screen does not rotate on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.",
     );
     expect(result.message).toBe("Failed to rotate to portrait; the screen size did not change.");
   });
@@ -125,7 +125,12 @@ describe("iOS runner refusal screen-size checks (#17101)", () => {
   test("preserves a cover-panel refusal when the observed rotation does not change", () => {
     const refusal = runnerRefusal();
     const result = verifyIosRotation(refusal, "portrait", duoPrevious());
-    expect(result).toEqual({ ...refusal, previousOrientation: "portrait" });
+    expect(result).toEqual({
+      ...refusal,
+      previousOrientation: "portrait",
+      error:
+        "The foreground app or screen does not rotate on this display (the screen size did not change)",
+    });
   });
 
   test("keeps refusal reconciliation when either observation lacks a positive size", () => {
@@ -179,7 +184,7 @@ describe("iOS rotation verification vocabulary (#8778)", () => {
 describe("iOS runner rotation refusal display guidance", () => {
   const runnerError = "Rotation is not supported on this display (the screen size did not change)";
   const coverError =
-    "Rotation is not supported on the cover panel (the screen size did not change). Open the device to its inner panel (unfold the hinge) and retry there, or keep the current orientation.";
+    "The foreground app or screen does not rotate on the cover panel (the screen size did not change). Open the device to its inner panel (unfold the hinge) and retry there, or keep the current orientation.";
   const runnerFailure = (): RotateResult => ({
     ...duoRotation(),
     success: false,
@@ -211,9 +216,11 @@ describe("iOS runner rotation refusal display guidance", () => {
       success: false,
       rotationPerformed: false,
       error:
-        "Rotation is not supported on the inner panel (the screen size did not change). Keep the current orientation.",
+        "The foreground app or screen does not rotate on the inner panel (the screen size did not change). Keep the current orientation.",
     });
-    expect(verifyIosRotation(runnerFailure(), "landscape", undefined).error).toBe(runnerError);
+    expect(verifyIosRotation(runnerFailure(), "landscape", undefined).error).toBe(
+      "The foreground app or screen does not rotate on this display (the screen size did not change)",
+    );
   });
 
   test("an inner-panel rotation the display shows still wins over the runner refusal", () => {
@@ -243,9 +250,9 @@ describe("iOS rotation verification screen-size checks (#17047)", () => {
       display: { ...previous.display, role: "unknown" as const },
     };
     const coverError =
-      "Rotation is not supported on the cover panel (the screen size did not change). Open the device to its inner panel (unfold the hinge) and retry there, or keep the current orientation.";
+      "The foreground app or screen does not rotate on the cover panel (the screen size did not change). Open the device to its inner panel (unfold the hinge) and retry there, or keep the current orientation.";
     const genericError =
-      "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.";
+      "The foreground app or screen does not rotate on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.";
 
     const coverResult = verifyIosRotation(duoRotation(), "landscape", previous);
     expect(coverResult.error).toBe(coverError);
@@ -256,7 +263,7 @@ describe("iOS rotation verification screen-size checks (#17047)", () => {
     expect(coverResult.rotationPerformed).toBe(false);
 
     expect(verifyIosRotation(duoRotation(), "landscape", innerPrevious).error).toBe(
-      "Rotation is not supported on the inner panel (the screen size did not change). The runner reported a rotation but the screen size is unchanged.",
+      "The foreground app or screen does not rotate on the inner panel (the screen size did not change). The runner reported a rotation but the screen size is unchanged.",
     );
     expect(verifyIosRotation(duoRotation(), "landscape", unknownPrevious).error).toBe(genericError);
   });
@@ -266,7 +273,7 @@ describe("iOS rotation verification screen-size checks (#17047)", () => {
     expect(result.success).toBe(false);
     expect(result.rotationPerformed).toBe(false);
     expect(result.error).toBe(
-      "Rotation is not supported on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.",
+      "The foreground app or screen does not rotate on this display (the screen size did not change). The runner reported a rotation but the screen size is unchanged.",
     );
     expect(result.message).toBe("Failed to rotate to landscape; the screen size did not change.");
   });
@@ -346,7 +353,7 @@ describe("iOS rotation verification screen-size checks (#17047)", () => {
       { ...duoPrevious(), display: { ...duoPrevious().display, role: "inner" as const } },
     );
     expect(result.error).toContain(
-      "Rotation is not supported on the inner panel (the screen size did not change). The display is still portrait",
+      "The foreground app or screen does not rotate on the inner panel (the screen size did not change). The display is still portrait",
     );
   });
 
@@ -362,7 +369,7 @@ describe("iOS rotation verification screen-size checks (#17047)", () => {
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain(
-      "Rotation is not supported on this display (the screen size did not change). The display is still portrait",
+      "The foreground app or screen does not rotate on this display (the screen size did not change). The display is still portrait",
     );
   });
 });

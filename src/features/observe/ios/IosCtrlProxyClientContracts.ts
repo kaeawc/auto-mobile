@@ -71,6 +71,7 @@ import type {
   CtrlProxyRecentAppsResult,
   CtrlProxyResetPermissionsResult,
   CtrlProxyRotateResult,
+  IosRotatePanel,
   CtrlProxyScreenshotResult,
   CtrlProxySdkTriggerResult,
   CtrlProxySelectAllResult,
@@ -305,6 +306,7 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
     orientation: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    panel?: IosRotatePanel,
   ): Promise<CtrlProxyRotateResult>;
 
   requestSetHingeAngle(angle: number, timeoutMs?: number): Promise<CtrlProxyHingeAngleResult>;

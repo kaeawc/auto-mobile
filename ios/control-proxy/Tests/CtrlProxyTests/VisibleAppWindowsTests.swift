@@ -107,6 +107,90 @@ final class VisibleAppWindowsTests: XCTestCase {
         XCTAssertEqual(merged.node?.first?.node?.first?.text, "Browse")
     }
 
+    func testBackgroundRootsRankBehindEveryFocusedWindowLayer() {
+        let layer = ElementLocator.iosWindowLayerExtra
+        // The focused app shows a keyboard: its own windows are already stamped 0 (front) and 1.
+        let keyboard = UIElementInfo(
+            text: "Keyboard",
+            bounds: ElementBounds(left: 521, top: 900, right: 1032, bottom: 1253),
+            extras: [layer: "0"]
+        )
+        let general = UIElementInfo(
+            text: "General",
+            bounds: ElementBounds(left: 540, top: 200, right: 1000, bottom: 250),
+            extras: [layer: "1"]
+        )
+        let root = UIElementInfo(text: "Settings", bounds: screen, node: [general, keyboard])
+        // Files shows an alert over its own window: stamped 0 and 1 inside its tree.
+        let files = VisibleAppWindow(
+            bundleId: "com.apple.DocumentsApp",
+            frame: leftTile,
+            hierarchy: UIElementInfo(text: "Files", bounds: leftTile, node: [
+                UIElementInfo(text: "Browse", bounds: leftTile, extras: [layer: "1"]),
+                UIElementInfo(text: "Alert", bounds: leftTile, extras: [layer: "0"]),
+            ])
+        )
+        let safari = VisibleAppWindow(
+            bundleId: "com.apple.mobilesafari",
+            frame: leftTile,
+            hierarchy: UIElementInfo(text: "Safari", bounds: leftTile)
+        )
+
+        let merged = ElementLocator.mergingBackgroundWindows([files, safari], into: root)
+        let children = merged.node
+
+        XCTAssertEqual(children?.map(\.text), ["Files", "Safari", "General", "Keyboard"])
+        XCTAssertEqual(children?.map { $0.extras?[layer] }, ["2", "4", "1", "0"])
+        XCTAssertEqual(
+            children?.first?.node?.map { $0.extras?[layer] }, ["3", "2"],
+            "Files keeps its alert in front of its own window, both behind Settings"
+        )
+        XCTAssertEqual(
+            children?.map { $0.extras?[ElementLocator.iosWindowPackageExtra] },
+            ["com.apple.DocumentsApp", "com.apple.mobilesafari", nil, nil]
+        )
+    }
+
+    func testUnstampedFocusedAppStillOutranksBackgroundRoots() {
+        let root = UIElementInfo(text: "Settings", bounds: screen, node: [UIElementInfo(text: "General")])
+        let files = VisibleAppWindow(
+            bundleId: "com.apple.DocumentsApp", frame: leftTile, hierarchy: UIElementInfo(text: "Files")
+        )
+        let merged = ElementLocator.mergingBackgroundWindows([files], into: root)
+        XCTAssertEqual(merged.node?.first?.extras?[ElementLocator.iosWindowLayerExtra], "1")
+        XCTAssertNil(merged.node?.last?.extras?[ElementLocator.iosWindowLayerExtra])
+    }
+
+    private func observedLayout() -> ObservedLayout {
+        var layout = ObservedLayout()
+        layout.windowFrames = ObservedWindowFrames(
+            focused: rightTile, background: [(bundleId: "com.apple.DocumentsApp", frame: leftTile)]
+        )
+        return layout
+    }
+
+    func testTapInABackgroundWindowConsumesTheObservedFrames() {
+        var layout = observedLayout()
+        XCTAssertEqual(layout.takeTappedBackgroundOwner(x: 341, y: 1212), "com.apple.DocumentsApp")
+        XCTAssertNil(layout.takeTappedBackgroundOwner(x: 341, y: 1212))
+    }
+
+    func testLaunchOfTheSameAppDropsStaleWindowFrames() {
+        var layout = observedLayout()
+        layout.foregroundSwitched(appChanged: false)
+        XCTAssertNil(layout.takeTappedBackgroundOwner(x: 341, y: 1212))
+    }
+
+    func testForegroundChangeAndSetApplicationDropStaleWindowFrames() {
+        var switched = observedLayout()
+        switched.foregroundSwitched(appChanged: true)
+        XCTAssertNil(switched.takeTappedBackgroundOwner(x: 341, y: 1212))
+        var invalidated = observedLayout()
+        invalidated.invalidate()
+        XCTAssertNil(invalidated.windowFrames)
+        XCTAssertNil(invalidated.takeTappedBackgroundOwner(x: 341, y: 1212))
+    }
+
     func testNoBackgroundWindowsLeavesTheTreeAndSingleWindowUnchanged() {
         let root = UIElementInfo(text: "Settings", bounds: screen)
         let focused = WindowInfo(id: 0, type: 1, isActive: true, isFocused: true, bounds: rightTile)

@@ -18,6 +18,36 @@ struct ObservedWindowFrames {
     let background: [(bundleId: String, frame: ElementBounds)]
 }
 
+/// Geometry from the last observation that a later gesture may reuse. Anything that can change
+/// the foreground app or its windows drops all of it, so a tap never acts on a stale layout.
+struct ObservedLayout {
+    var gesture: ObservedGestureGeometry?
+    /// Window frames from the last multi-window observation (#18830).
+    var windowFrames: ObservedWindowFrames?
+
+    mutating func invalidate() {
+        gesture = nil
+        windowFrames = nil
+    }
+
+    /// A launch, terminate or home: window frames are stale even when the app stays the same.
+    mutating func foregroundSwitched(appChanged: Bool) {
+        if appChanged {
+            gesture = nil
+        }
+        windowFrames = nil
+    }
+
+    /// The background app a delivered tap landed in, which iPadOS just focused; the frames are
+    /// consumed so a second tap cannot switch again on them.
+    mutating func takeTappedBackgroundOwner(x: Double, y: Double) -> String? {
+        guard let frames = windowFrames,
+              let bundleId = ElementLocator.backgroundWindowOwner(x: x, y: y, in: frames) else { return nil }
+        windowFrames = nil
+        return bundleId
+    }
+}
+
 extension ElementLocator {
     /// Apps that may own another visible window: the apps this runner has launched or observed,
     /// plus, now and then, the common system apps. SpringBoard's tree names no app windows on
@@ -57,8 +87,17 @@ extension ElementLocator {
         return withChildren(element, children.isEmpty ? nil : children)
     }
 
+    /// Bundle id of the app owning a merged background window root, read by
+    /// src/features/observe/ios/iosWindowLayer.ts so per-app screen identity can drop it.
+    nonisolated static let iosWindowPackageExtra = "automobile:iosWindowPackage"
+
     /// Put background windows under the focused app's root, before its own children so they
     /// read as lower in z-order, the way Android's unified hierarchy lists window roots.
+    ///
+    /// Each background root is stamped with its owner and an `iosWindowLayer` behind every
+    /// focused layer, so host ranking never puts a background window above the focused app
+    /// (an unstamped root would rank topmost). A background app's own window stamps shift by
+    /// the same base, keeping its internal front-to-back order.
     nonisolated static func mergingBackgroundWindows(
         _ windows: [VisibleAppWindow],
         into root: UIElementInfo
@@ -66,7 +105,33 @@ extension ElementLocator {
         -> UIElementInfo
     {
         guard !windows.isEmpty else { return root }
-        return withChildren(root, windows.map(\.hierarchy) + (root.node ?? []))
+        var base = layerCount(of: root.node ?? [])
+        let stamped = windows.map { window -> UIElementInfo in
+            let shift = base
+            let children = window.hierarchy.node.map { nodes in
+                nodes.map { child -> UIElementInfo in
+                    guard let layer = windowLayer(of: child) else { return child }
+                    var extras = child.extras ?? [:]
+                    extras[iosWindowLayerExtra] = String(shift + layer)
+                    return copying(child, node: child.node, extras: extras)
+                }
+            }
+            var extras = window.hierarchy.extras ?? [:]
+            extras[iosWindowLayerExtra] = String(shift)
+            extras[iosWindowPackageExtra] = window.bundleId
+            base += layerCount(of: window.hierarchy.node ?? [])
+            return copying(window.hierarchy, node: children, extras: extras)
+        }
+        return withChildren(root, stamped + (root.node ?? []))
+    }
+
+    /// Window layers stamped on a root's children; an unstamped tree is one layer.
+    private nonisolated static func layerCount(of children: [UIElementInfo]) -> Int {
+        (children.compactMap(windowLayer(of:)).max() ?? 0) + 1
+    }
+
+    private nonisolated static func windowLayer(of element: UIElementInfo) -> Int? {
+        element.extras?[iosWindowLayerExtra].flatMap { Int($0) }
     }
 
     /// `windows` for an observation: the focused window first, then each background window.
@@ -203,9 +268,7 @@ extension ElementLocator {
         /// After a tap, track the background app whose observed window the tap landed in, since
         /// iPadOS focused it; both apps stay `.runningForeground`, so state cannot tell.
         func noteTap(x: Double, y: Double) {
-            guard let frames = observedWindowFrames,
-                  let bundleId = Self.backgroundWindowOwner(x: x, y: y, in: frames) else { return }
-            observedWindowFrames = nil
+            guard let bundleId = layout.takeTappedBackgroundOwner(x: x, y: y) else { return }
             switchForegroundApp(bundleId: bundleId)
         }
     #endif

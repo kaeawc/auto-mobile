@@ -68,18 +68,16 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
         var tracker = ForegroundTracker()
         var appSwitcherMayBeVisible = false
-        private var gestureGeometry: ObservedGestureGeometry?
-        /// Window frames from the last multi-window observation (#18830).
-        var observedWindowFrames: ObservedWindowFrames?
+        var layout = ObservedLayout()
 
         /// Reuse the last completed observation without XCUI reads on the legacy gesture path.
         var observedGestureGeometry: GestureCoordinateGeometry? {
-            gestureGeometry?.current(bundleId: foregroundBundleId, generation: DeviceRotation.changeGeneration)
+            layout.gesture?.current(bundleId: foregroundBundleId, generation: DeviceRotation.changeGeneration)
         }
 
         public func refreshGeometry() throws -> RefreshGeometryResponse.Geometry? {
             // Invalidate before any foreground probing or capture that can fail.
-            gestureGeometry = nil
+            layout.invalidate()
             _ = try getViewHierarchy()
             return observedGestureGeometry.map {
                 RefreshGeometryResponse.Geometry(geometry: $0, foregroundBundleId: foregroundBundleId)
@@ -147,7 +145,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             app.skipUIInterruptions()
             tracker.setApplication(app, bundleId: nil, observe: false)
             elementCache.removeAll()
-            gestureGeometry = nil
+            layout.invalidate()
         }
 
         public func trackObservedBundleId(_ bundleId: String) {
@@ -160,7 +158,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             app.skipUIInterruptions()
             tracker.setApplication(app, bundleId: bundleId, observe: bundleId != "com.apple.springboard")
             elementCache.removeAll()
-            gestureGeometry = nil
+            layout.invalidate()
         }
 
         /// Explicitly switch the tracked foreground app to the given bundle ID, clearing caches.
@@ -177,8 +175,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 now: DispatchTime.now().uptimeNanoseconds
             )
             elementCache.removeAll()
+            layout.foregroundSwitched(appChanged: previousBundleId != bundleId)
             if previousBundleId != bundleId {
-                gestureGeometry = nil
                 print("[ElementLocator] Foreground app changed: \(previousBundleId ?? "nil") -> \(bundleId)")
             }
         }
@@ -266,7 +264,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             }
 
             elementCache.removeAll()
-            gestureGeometry = nil
+            layout.invalidate()
 
             // Use the observed app's bundle identifier for packageName
             let bundleId = foregroundBundleId ?? "com.apple.springboard"
@@ -510,7 +508,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                     )
                 }
             } ?? []
-            observedWindowFrames = backgroundWindows.isEmpty ? nil : ObservedWindowFrames(
+            layout.windowFrames = backgroundWindows.isEmpty ? nil : ObservedWindowFrames(
                 focused: windowBounds,
                 background: backgroundWindows.map { (bundleId: $0.bundleId, frame: $0.frame) }
             )
@@ -608,7 +606,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 // Live SpringBoard reads see only the cover's frame; keep the observed panel.
                 pinnedToObservation: innerPanelFrame != nil
             )
-            gestureGeometry = ObservedGestureGeometry(
+            layout.gesture = ObservedGestureGeometry(
                 geometry: geometry,
                 bundleId: bundleId,
                 generation: beforeHierarchyCapture.generation

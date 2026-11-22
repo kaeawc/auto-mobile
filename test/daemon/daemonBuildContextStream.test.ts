@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { NavigationGraphStreamBridge } from "../../src/daemon/daemonStreamRouting";
-import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
+import { DeviceDataStreamSocketServer } from "../../src/daemon/streams/deviceDataStreamSocketServer";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { NavigationRepository } from "../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../src/db/testCoverageRepository";

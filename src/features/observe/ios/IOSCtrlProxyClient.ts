@@ -1,4 +1,4 @@
-import { getTelemetryPushServer } from "../../../daemon/telemetryPushSocketServer";
+import { getTelemetryPushServer } from "../../../daemon/streams/telemetryPushSocketServer";
 import {
   sdkCapabilityQueryOptions,
   type SdkCapabilityQueryOptions,
@@ -98,7 +98,7 @@ import {
 } from "../DeviceConnectionLostNotifier";
 import type { BaseResult } from "../shared/types";
 
-import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "../../../daemon/streams/deviceDataStreamSocketServer";
 
 import { ScreenshotCaptureResult } from "../ScreenshotBackoffScheduler";
 

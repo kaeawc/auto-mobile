@@ -13,7 +13,7 @@ import {
   SUSPECT_GRACE_MS,
 } from "../../src/daemon/wire/sessionLivenessWindows";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
-import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { SessionScopedStreamAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";

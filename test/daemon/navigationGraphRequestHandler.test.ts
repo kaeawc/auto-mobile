@@ -7,7 +7,7 @@ import {
 import { ActionableError } from "../../src/models/ActionableError";
 import type { NavigationGraphSummary } from "../../src/utils/interfaces/NavigationGraph";
 import { logger } from "../../src/utils/logger";
-import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
+import { DeviceDataStreamSocketServer } from "../../src/daemon/streams/deviceDataStreamSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { ackFrameSchema, navigationGraphFrameSchema } from "../helpers/wireMessageSchemas";

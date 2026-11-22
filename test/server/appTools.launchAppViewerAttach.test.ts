@@ -8,7 +8,7 @@ import {
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
-import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streams/streamDeviceLifecycleEvents";
 import { PrototypeViewerConnections } from "../../src/features/prototype/ios/prototypeViewerAttach";
 import { FakePrototypeAgentClient } from "../fakes/FakePrototypeAgentInjection";
 import { FakePrototypeViewerAttacher } from "../fakes/FakePrototypeViewerAttacher";

@@ -1,10 +1,10 @@
 import { streamSubscribeAuthCases } from "../helpers/streamSubscribeAuthCases";
-import type { StreamSocketAuthenticator } from "../../src/daemon/streamSocketAuth";
+import type { StreamSocketAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
 import { describe, it, expect, beforeEach } from "bun:test";
 import {
   FailuresPushSocketServer,
   type FailureNotificationPush,
-} from "../../src/daemon/failuresPushSocketServer";
+} from "../../src/daemon/streams/failuresPushSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { FailureSeverity, FailureType } from "../../src/models/failureAnalytics";
 import type { Socket } from "node:net";

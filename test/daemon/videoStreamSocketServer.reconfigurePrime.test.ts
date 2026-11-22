@@ -2,7 +2,7 @@ import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCap
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSource";
-import { VideoStreamSocketServer } from "../../src/daemon/videoStreamSocketServer";
+import { VideoStreamSocketServer } from "../../src/daemon/streams/videoStreamSocketServer";
 import { permissiveDeviceAdmissionGate } from "../../src/utils/deviceAdmissionGate";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";

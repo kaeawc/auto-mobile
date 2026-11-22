@@ -6,7 +6,7 @@ import {
   resetWebRtcStreamManager,
   setWebRtcStreamManagerDependencies,
   startWebRtcStream,
-} from "../../src/daemon/webrtcStreamManager";
+} from "../../src/daemon/streams/webrtcStreamManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";

@@ -7,6 +7,10 @@ import {
   type MeasureStartupResult,
   type StartupDeviceShell,
 } from "../features/performance/AndroidStartupMeasurement";
+import {
+  IosStartupMeasurement,
+  type IosStartupSimulator,
+} from "../features/performance/IosStartupMeasurement";
 import { ActionableError, type BootedDevice } from "../models";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -14,6 +18,8 @@ import {
   currentDeviceSessionUuid,
   type DeviceSessionUuidResolver,
 } from "../utils/deviceIncarnation";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
+import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { defineDeviceTool } from "./defineTool";
 import { measureStartupResultSchema } from "./measureStartupToolOutputSchemas";
@@ -21,8 +27,8 @@ import { measureStartupResultSchema } from "./measureStartupToolOutputSchemas";
 const measureStartupInput = z.object({
   appId: z
     .string()
-    .regex(/^[A-Za-z][\w]*(\.[A-Za-z_][\w]*)+$/, "appId must be an Android package name")
-    .describe("Package to launch"),
+    .regex(/^[A-Za-z0-9][\w-]*(\.[\w-]+)+$/, "appId must be a package name or bundle ID")
+    .describe("Android package name or iOS bundle ID to launch"),
   activity: z
     .string()
     .regex(/^[\w.$/]+$/, "activity must be a class name or package/class component")
@@ -31,7 +37,7 @@ const measureStartupInput = z.object({
   mode: z
     .enum(["cold", "warm", "hot"])
     .describe(
-      "cold: process killed; warm: process kept, activity recreated; hot: activity resumed",
+      "cold: process terminated; warm: process kept (Android recreates the activity, iOS Simulator returns from Home); hot: Android resumes the activity",
     ),
   iterations: z
     .number()
@@ -56,6 +62,7 @@ type MeasureStartupArgs = z.output<typeof measureStartupInput> & { sessionUuid?:
 /** What the handler needs, injectable so tests drive it with fakes. */
 export interface MeasureStartupDependencies {
   createShell: (device: BootedDevice) => StartupDeviceShell;
+  createIosSimulator: (device: BootedDevice) => IosStartupSimulator;
   timer: Timer;
   repository: Pick<PerformanceAuditRepository, "recordAudit">;
   /** The device epoch the run is stamped with, so history can be scoped per boot. */
@@ -64,6 +71,7 @@ export interface MeasureStartupDependencies {
 
 const defaultDependencies = (): MeasureStartupDependencies => ({
   createShell: (device) => defaultAdbClientFactory.create(device),
+  createIosSimulator: (device) => new SimCtlClient(device),
   timer: defaultTimer,
   repository: new PerformanceAuditRepository(),
   resolveDeviceSessionUuid: currentDeviceSessionUuid,
@@ -114,25 +122,25 @@ export const createMeasureStartupHandler =
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
-    if (device.platform !== "android") {
-      throw new ActionableError("measureStartup is only supported on Android.");
+    if (device.platform !== "android" && device.platform !== "ios") {
+      throw new ActionableError("measureStartup supports Android and iOS Simulator.");
+    }
+    if (device.platform === "ios" && resolveIosDeviceKind(device) === "physical") {
+      throw new ActionableError(
+        "Physical iOS devices do not expose launch timing through devicectl. Use performanceTrace with the launch template (appLaunch).",
+      );
+    }
+    if (device.platform === "android" && !/^[A-Za-z][\w]*(\.[A-Za-z_][\w]*)+$/.test(args.appId)) {
+      throw new ActionableError("appId must be an Android package name");
     }
     // The epoch that produces the samples, read before the launches: a removal or
     // reincarnation during the settle delays must not re-attribute this run.
     const deviceSessionUuid = deps.resolveDeviceSessionUuid(device.deviceId);
-    const measurement = new AndroidStartupMeasurement(deps.createShell(device), deps.timer);
-    const result = await measurement.measure(
-      {
-        appId: args.appId,
-        activity: args.activity,
-        mode: args.mode,
-        iterations: args.iterations,
-        compilation: args.compilation,
-        dropCaches: args.dropCaches,
-        waitForFullyDrawn: args.waitForFullyDrawn,
-      },
-      signal,
-    );
+    const measurement =
+      device.platform === "android"
+        ? new AndroidStartupMeasurement(deps.createShell(device), deps.timer)
+        : new IosStartupMeasurement(device.deviceId, deps.createIosSimulator(device), deps.timer);
+    const result = await measurement.measure(args, signal);
     await recordStartupResult(deps.repository, device, result, {
       timer: deps.timer,
       sessionUuid: args.sessionUuid,
@@ -149,7 +157,7 @@ export const createMeasureStartupHandler =
 const measureStartupTool = defineDeviceTool({
   name: "measureStartup",
   description:
-    "Android: measure cold/warm/hot app startup over N launches; TTID/TTFD percentiles, stored in performance results.",
+    "Android and iOS Simulator: measure cold and warm app startup over repeated launches; store TTID percentiles in performance results. Android also supports hot starts and TTFD.",
   input: measureStartupInput,
   options: { defaultEnabled: false, stopsApp: true, outputSchema: measureStartupResultSchema },
 });

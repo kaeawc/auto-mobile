@@ -48,6 +48,7 @@
                 permissions: UNUserNotificationCenterPrototypePermissionsSource(),
                 permissionAuthorities: FrameworkPrototypePermissionAuthority.hostAuthorities(),
                 biometric: LAContextPrototypeBiometricSource(),
+                secureStorage: KeychainPrototypeSecureValueStore(),
                 notifications: notifications
             )
         }

@@ -16,6 +16,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.keyPath
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.int
@@ -353,6 +354,23 @@ object PrototypePlatformCalls {
   fun callOwner(name: String): String? = callDefinition(name)?.first
 
   fun eventOwner(name: String): String? = eventModule(name)
+
+  /**
+   * Why a `simulate state` seed of [key] to [value] is refused for [module] on [platform], or null
+   * when the key is in the module's state table, the platform reports it and the value passes the
+   * key's contract rule (#14316, #14300). A [JsonNull] value removes the key, so only the key and
+   * platform are checked for it.
+   */
+  fun stateSeedError(module: String, platform: String, key: String, value: JsonElement): String? {
+    val entry =
+      module(module)?.member("state")?.member(key) ?: return "/platform/$module has no key $key"
+    if (platform !in entry.strings("platforms")) {
+      return "/platform/$module/$key is not reported on $platform"
+    }
+    if (value is JsonNull) return null
+    val rule = entry.member("value") ?: return "/platform/$module/$key has no value rule"
+    return walk(value, rule, key, Context(), 0)?.let { "$value is not a valid $key" }
+  }
 
   /** The contract's trailing debounce for a module event, or null when it delivers at once. */
   fun eventDebounceMs(name: String): Long? {

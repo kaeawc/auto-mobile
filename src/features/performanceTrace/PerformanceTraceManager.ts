@@ -70,8 +70,18 @@ export interface PerformanceTraceManagerDependencies {
   timer: Pick<Timer, "now">;
 }
 
+/** A start that has claimed its device but not registered its recorder yet. */
+interface InFlightStart {
+  ownerSessionUuid?: string;
+  /** Settles (never rejects) once the start registered its recorder or failed. */
+  settled: Promise<void>;
+}
+
 /** Stopped results kept so a repeated `stop` returns the same summary. */
 const MAX_STOPPED_RESULTS = 32;
+
+/** Stops a release tries before leaving an unsignalled recorder to its `timeLimitMs`. */
+const MAX_RELEASE_STOP_ATTEMPTS = 3;
 
 /**
  * Owns every live `performanceTrace` recorder (#14102), template or category (#18688): at most one per
@@ -81,7 +91,7 @@ const MAX_STOPPED_RESULTS = 32;
 export class PerformanceTraceManager {
   private readonly active = new Map<string, ActiveTrace>();
   /** Devices with a start in flight that has not registered its recorder yet. */
-  private readonly starting = new Set<string>();
+  private readonly starting = new Map<string, InFlightStart>();
   private readonly stopped = new Map<string, KnownPerformanceTrace>();
   /** Stopped traces whose summary is still being generated; readable, no longer recording. */
   private readonly summarizing = new Map<string, KnownPerformanceTrace>();
@@ -105,9 +115,17 @@ export class PerformanceTraceManager {
           `${device.deviceId}; stop it before starting another.`,
       );
     }
-    this.starting.add(device.deviceId);
+    const claimed = this.startClaimed(device, options, categoryConfig);
+    // A release that arrives mid-start waits for this, then stops the recorder it registered.
+    this.starting.set(device.deviceId, {
+      ownerSessionUuid: options.ownerSessionUuid,
+      settled: claimed.then(
+        () => undefined,
+        () => undefined,
+      ),
+    });
     try {
-      return await this.startClaimed(device, options, categoryConfig);
+      return await claimed;
     } finally {
       this.starting.delete(device.deviceId);
     }
@@ -157,7 +175,9 @@ export class PerformanceTraceManager {
       return await stopping;
     } finally {
       // A recorder that was never signalled is still active, so a retried stop starts afresh.
-      this.finishing.delete(traceId);
+      if (this.finishing.get(traceId) === stopping) {
+        this.finishing.delete(traceId);
+      }
     }
   }
 
@@ -166,14 +186,13 @@ export class PerformanceTraceManager {
    * once each recorder is done with its device; pulling is part of that, the summary is not.
    */
   async stopTracesForSession(sessionUuid: string): Promise<void> {
-    await this.stopMatching((trace) => trace.options.ownerSessionUuid === sessionUuid);
+    await this.stopMatching((_deviceId, owner) => owner === sessionUuid);
   }
 
   /** Stop the traces a session owns on one device, for a session that moved off that device. */
   async stopSessionTracesOnDevice(sessionUuid: string, deviceId: string): Promise<void> {
     await this.stopMatching(
-      (trace) =>
-        trace.options.ownerSessionUuid === sessionUuid && trace.device.deviceId === deviceId,
+      (traceDevice, owner) => owner === sessionUuid && traceDevice === deviceId,
     );
   }
 
@@ -192,7 +211,19 @@ export class PerformanceTraceManager {
 
   /** Stop every trace on a released or removed device. */
   async stopTracesOnDevice(deviceId: string): Promise<void> {
-    await this.stopMatching((trace) => trace.device.deviceId === deviceId);
+    await this.stopMatching((traceDevice) => traceDevice === deviceId);
+  }
+
+  /** Whether a session has a trace recording, or still starting, on a device. */
+  hasSessionTraceOnDevice(sessionUuid: string, deviceId: string): boolean {
+    const start = this.starting.get(deviceId);
+    if (start && start.ownerSessionUuid === sessionUuid) {
+      return true;
+    }
+    return [...this.active.values()].some(
+      (trace) =>
+        trace.options.ownerSessionUuid === sessionUuid && trace.device.deviceId === deviceId,
+    );
   }
 
   /** A recording or recently stopped trace by id, for read-only resources. */
@@ -211,27 +242,68 @@ export class PerformanceTraceManager {
     return [...this.active.keys()];
   }
 
-  private async stopMatching(match: (trace: ActiveTrace) => boolean): Promise<void> {
-    const traces = [...this.active.values()].filter(match);
-    await Promise.all(
-      traces.map(async (trace) => {
-        void this.stop(trace.traceId).catch((error: unknown) => {
-          logger.warn(
-            `[performanceTrace] failed to stop ${trace.traceId} on release: ${errorMessage(error)}`,
-            error,
-          );
-        });
-        // `stop` set it synchronously; the summary finishes in the background.
-        await trace.deviceDone;
-      }),
-    );
+  /**
+   * Stop the matching recorders, including ones whose start is still in flight: such a start is
+   * awaited, then the recorder it registered is stopped.
+   */
+  private async stopMatching(
+    match: (deviceId: string, ownerSessionUuid: string | undefined) => boolean,
+  ): Promise<void> {
+    const matchesTrace = (trace: ActiveTrace) =>
+      match(trace.device.deviceId, trace.options.ownerSessionUuid);
+    const traces = [...this.active.values()].filter(matchesTrace);
+    const starts = [...this.starting]
+      .filter(([deviceId, start]) => match(deviceId, start.ownerSessionUuid))
+      .map(async ([deviceId, start]) => {
+        await start.settled;
+        const started = [...this.active.values()].find(
+          (trace) => trace.device.deviceId === deviceId && matchesTrace(trace),
+        );
+        if (started && !traces.includes(started)) {
+          await this.stopOnRelease(started);
+        }
+      });
+    await Promise.all([...traces.map((trace) => this.stopOnRelease(trace)), ...starts]);
+  }
+
+  /**
+   * Resolve once the recorder is done with its device; the summary finishes in the background.
+   * A stop that fails before the recorder is signalled leaves it running, so it is retried a
+   * bounded number of times before the device is let go.
+   */
+  private async stopOnRelease(trace: ActiveTrace): Promise<void> {
+    for (
+      let attempt = 1;
+      attempt <= MAX_RELEASE_STOP_ATTEMPTS && this.active.has(trace.traceId);
+      attempt++
+    ) {
+      void this.stop(trace.traceId).catch((error: unknown) => {
+        logger.warn(
+          `[performanceTrace] failed to stop ${trace.traceId} on release (attempt ${attempt}): ${errorMessage(error)}`,
+          error,
+        );
+      });
+      // `stop` set it synchronously.
+      await trace.deviceDone;
+    }
+    if (this.active.has(trace.traceId)) {
+      logger.warn(
+        `[performanceTrace] ${trace.traceId} on ${trace.device.deviceId} was never signalled after ` +
+          `${MAX_RELEASE_STOP_ATTEMPTS} stops; it runs until its ${trace.options.timeLimitMs} ms limit`,
+      );
+    }
   }
 
   private async finish(trace: ActiveTrace, signal?: AbortSignal): Promise<PerformanceTraceResult> {
     const recorderStopped = this.stopRecorder(trace, signal);
     trace.deviceDone = recorderStopped.then(
       () => undefined,
-      () => undefined,
+      () => {
+        // Cleared before `deviceDone` settles so a release retry starts a fresh stop.
+        if (this.active.has(trace.traceId)) {
+          this.finishing.delete(trace.traceId);
+        }
+      },
     );
     await recorderStopped;
     this.summarizing.set(trace.traceId, {

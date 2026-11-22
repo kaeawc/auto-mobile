@@ -87,18 +87,18 @@ runs:
   steps:
     - name: "Install JDK"
       if: runner.environment == 'github-hosted'
-      uses: actions/setup-java@v5
+      uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
       with:
         distribution: "zulu"
         java-version: "21"
 
     - name: "Set up jemalloc"
       if: ${{ inputs.malloc-replacement == 'jemalloc' }}
-      uses: kaeawc/setup-jemalloc@v0.0.5
+      uses: kaeawc/setup-jemalloc@8d1b178eec3d6a3e91933852c8d9ca5359a5cac6 # v0.0.5
 
     - name: "Set up tcmalloc"
       if: ${{ inputs.malloc-replacement == 'tcmalloc' }}
-      uses: kaeawc/setup-tcmalloc@v0.0.1
+      uses: kaeawc/setup-tcmalloc@1936191a039fcfbb062df9674c567c1a23ba6c7c # v0.0.1
 
     - name: "Set Gradle User Home"
       shell: ${{ inputs.shell }}
@@ -216,7 +216,7 @@ runs:
         echo "ANDROID_HOME: $ANDROID_HOME"
 
     - name: "Setup Gradle"
-      uses: gradle/actions/setup-gradle@v5.0.2
+      uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
       with:
         gradle-version: ${{ steps.eval_gradle.outputs.version }}
         cache-encryption-key: ${{ inputs.gradle-encryption-key }}
@@ -230,7 +230,7 @@ runs:
     - name: "Restore Android SDK Cache"
       if: runner.environment == 'github-hosted'
       id: cache-android-sdk
-      uses: actions/cache/restore@v5.1.0
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
       with:
         path: |
           ~/.android
@@ -239,14 +239,14 @@ runs:
 
     - name: Setup Android SDK
       if: runner.environment == 'github-hosted' && steps.cache-android-sdk.outputs.cache-hit != 'true'
-      uses: android-actions/setup-android@v3.2.2
+      uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
       with:
         # The action's legacy default requests the removed `tools` package.
         # Pin a current package so macOS/Windows cache misses can bootstrap.
         packages: platform-tools
 
     - name: "Save Android SDK Cache"
-      uses: actions/cache/save@v5.1.0
+      uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
       if: runner.environment == 'github-hosted' && steps.cache-android-sdk.outputs.cache-hit != 'true'
       with:
         path: |
@@ -276,12 +276,12 @@ runs:
     - name: "Check if any JUnit tests reports were created"
       id: junit-reports-exist
       if: always() # always run even if the previous step fails
-      uses: andstor/file-existence-action@v3
+      uses: andstor/file-existence-action@558493d6c74bf472d87c84eab196434afc2fa029 # v3
       with:
         files: "**/build/test-results/testDebugUnitTest/TEST-*.xml"
 
     - name: "Publish Test Report"
-      uses: mikepenz/action-junit-report@v6
+      uses: mikepenz/action-junit-report@a16be3a69023e9bd7e748ede768b3282ea7b30ce # v6
       if: steps.junit-reports-exist.outputs.files_exists == 'true'
       with:
         report_paths: "**/build/test-results/testDebugUnitTest/TEST-*.xml"
@@ -301,7 +301,7 @@ runs:
         fi
 
     - name: "Store Config Cache Report"
-      uses: actions/upload-artifact@v7.0.1
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       if: success()
       with:
         name: config-cache-report-${{ steps.sanitize-name.outputs.sanitized_name }}-${{ runner.os }}${{ inputs.artifact-name-suffix && format('-{0}', inputs.artifact-name-suffix) || '' }}

@@ -5,7 +5,7 @@ import {
   DeviceDataStreamSocketServer,
   installDeviceDataStreamSocketServerForTesting,
   stopDeviceDataStreamSocketServer,
-} from "../../../../src/daemon/deviceDataStreamSocketServer";
+} from "../../../../src/daemon/streams/deviceDataStreamSocketServer";
 import type { BootedDevice } from "../../../../src/models";
 import { createSuccessWebSocketFactory } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";

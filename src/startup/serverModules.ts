@@ -19,12 +19,12 @@ export async function loadServerModules(onLoggerLoaded: (logger: LoadedLogger) =
   const { startDaemon } = await import("../daemon/daemon");
   const { guardDatabaseStartup } = await import("../daemon/daemonStartupGuard");
   const { DefaultDatabaseInitializer } = await import("../db/DatabaseInitializer");
-  const videoRecordingSocketServer = await import("../daemon/videoRecordingSocketServer");
+  const videoRecordingSocketServer = await import("../daemon/streams/videoRecordingSocketServer");
   const deviceGestureRecordingSocketServer =
-    await import("../daemon/deviceGestureRecordingSocketServer");
-  const deviceSnapshotSocketServer = await import("../daemon/deviceSnapshotSocketServer");
-  const appearanceSocketServer = await import("../daemon/appearanceSocketServer");
-  const webrtcStreamSocketServer = await import("../daemon/webrtcStreamSocketServer");
+    await import("../daemon/streams/deviceGestureRecordingSocketServer");
+  const deviceSnapshotSocketServer = await import("../daemon/streams/deviceSnapshotSocketServer");
+  const appearanceSocketServer = await import("../daemon/streams/appearanceSocketServer");
+  const webrtcStreamSocketServer = await import("../daemon/streams/webrtcStreamSocketServer");
   const appearanceSyncScheduler = await import("../daemon/AppearanceSyncScheduler");
   const { FeatureFlagService } = await import("../features/featureFlags/FeatureFlagService");
   const { serverConfig } = await import("../utils/ServerConfig");

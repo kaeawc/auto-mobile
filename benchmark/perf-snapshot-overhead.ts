@@ -31,7 +31,7 @@ import {
   PerformanceMonitor,
   PerformanceDataPusher,
 } from "../src/features/performance/PerformanceMonitor";
-import type { LivePerformanceData } from "../src/daemon/performancePushSocketServer";
+import type { LivePerformanceData } from "../src/daemon/streams/performancePushSocketServer";
 import type { BootedDevice, PerfSnapshot } from "../src/models";
 import { writeFileSync } from "fs";
 

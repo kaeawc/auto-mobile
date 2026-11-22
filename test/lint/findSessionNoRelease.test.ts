@@ -226,7 +226,7 @@ const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 // findSession (a migrated site drops out, as the appearance sweep did). Counts may only shrink;
 // a new pure reader must call findSession, a new admission site needs an explicit entry here.
 const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
-  "webrtcStreamManager.ts#isDaemonSessionLive": 1,
+  "streams/webrtcStreamManager.ts#isDaemonSessionLive": 1,
   // These factories moved from SessionManager; retain each expiring call, including the row read.
   "sessionManager/construction.ts#getSession": 1,
   "sessionManager/wiring.ts#getSession": 1,

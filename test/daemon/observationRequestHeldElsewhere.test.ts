@@ -1,8 +1,8 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
-import type { OnObservationRequestedCallback } from "../../src/daemon/deviceDataStreamSocketServer";
+import { DeviceDataStreamSocketServer } from "../../src/daemon/streams/deviceDataStreamSocketServer";
+import type { OnObservationRequestedCallback } from "../../src/daemon/streams/deviceDataStreamSocketServer";
 import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";

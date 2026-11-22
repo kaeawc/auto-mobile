@@ -6,7 +6,7 @@ import { expect, test } from "bun:test";
 import {
   createDirectModeAppearanceDeviceSource,
   type AppearanceDeviceSource,
-} from "../../src/daemon/appearanceSocketServer";
+} from "../../src/daemon/streams/appearanceSocketServer";
 import { startDirectModeServices } from "../../src/startup/stdioServer";
 
 test("direct-mode services start sockets without host appearance sync", async () => {

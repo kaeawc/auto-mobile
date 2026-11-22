@@ -116,10 +116,10 @@ describe("CtrlProxy manager foreign-forward mutation backstop #12220", () => {
 
   test("#12220 no foreign forward permits a direct installation", async () => {
     evidence({ kind: "none" });
-    adb.setCommandResponse('install "/unused.apk"', commandResult("Success"));
+    adb.setCommandResponse('install -r "/unused.apk"', commandResult("Success"));
     await manager.install("/unused.apk");
     expect(reads).toBe(1);
-    expect(adb.getExecutedCommands()).toContain('install "/unused.apk"');
+    expect(adb.getExecutedCommands()).toContain('install -r "/unused.apk"');
   });
 
   test("#12220 setup checks at entry and after download while nested enable reuses the check", async () => {
@@ -135,11 +135,11 @@ describe("CtrlProxy manager foreign-forward mutation backstop #12220", () => {
       deviceType: "emulator",
       apiLevel: 35,
     });
-    adb.setCommandResponse('install "/unused.apk"', commandResult("Success"));
+    adb.setCommandResponse('install -r "/unused.apk"', commandResult("Success"));
     try {
       expect((await manager.setup()).success).toBe(true);
       expect(reads).toBe(2);
-      expect(adb.getExecutedCommands()).toContain('install "/unused.apk"');
+      expect(adb.getExecutedCommands()).toContain('install -r "/unused.apk"');
       expect(adb.getExecutedCommands()).toContain(
         "shell settings put secure accessibility_enabled 1",
       );

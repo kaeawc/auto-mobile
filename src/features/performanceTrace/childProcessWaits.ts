@@ -1,13 +1,16 @@
 import type { HostChildProcess } from "../../utils/HostCommandExecutor";
 import type { Timer } from "../../utils/SystemTimer";
 
-/** Resolves once the child exits or fails to spawn; never rejects. */
+/**
+ * Resolves once the child has exited and its stdio is drained, or fails to spawn; never rejects.
+ * Waits for `close`, not `exit`: `exit` can fire before the last stdout/stderr chunks arrive.
+ */
 export function waitForChildExit(child: HostChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) {
     return Promise.resolve();
   }
   return new Promise((resolve) => {
-    child.once("exit", () => resolve());
+    child.once("close", () => resolve());
     child.once("error", () => resolve());
   });
 }

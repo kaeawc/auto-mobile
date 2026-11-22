@@ -17,6 +17,12 @@ import {
   type StableTapTargetResult,
 } from "./androidStableTapTarget";
 import { pollSearchUntil } from "./searchUntilPoller";
+import {
+  tapHierarchyAvailability,
+  type TapHierarchyUnavailableError,
+  tapLookupLabel,
+  tapSearchUnavailableField,
+} from "./tapHierarchyUnavailable";
 import { FocusVerifier, type FocusVerificationHints } from "./tapFocusVerifier";
 import { readFreshPlatformHierarchy, returnsRawHierarchyUnfiltered } from "./tapHierarchyRead";
 import { POST_TAP_EFFECT_POLL_MS } from "./tapPostTapSettler";
@@ -99,6 +105,8 @@ interface TapSearchResult {
    */
   refreshedFromDevice: boolean;
   visibilityError?: TapTargetUnavailableError;
+  /** Set when the element was not found and no read in the search returned a usable tree (#18983). */
+  hierarchyUnavailableError?: TapHierarchyUnavailableError;
 }
 
 /** Capabilities used by this phase; dependency readers observe replacements made by tests. */
@@ -631,6 +639,7 @@ export class TapTargetResolver {
     let offScreenRejections = 0;
     let visibilityError: TapTargetUnavailableError | undefined;
     let lastHash = this.host.hashViewHierarchy(viewHierarchy);
+    const availability = tapHierarchyAvailability(viewHierarchy);
 
     let latestViewHierarchy = viewHierarchy;
     let latestScreenSize = this.host.getScreenSizeFromHierarchy(latestViewHierarchy, {
@@ -665,11 +674,7 @@ export class TapTargetResolver {
     ) {
       if (element) {
         visibilityError = invisibleError();
-        logger.warn(
-          `[TapOnElement] Element found but tap target is off-screen, will retry. ` +
-            `bounds=${JSON.stringify(element.bounds)}, ` +
-            `screen=${latestScreenSize?.width}x${latestScreenSize?.height}`,
-        );
+        this.warnInitialOffScreen(element, latestScreenSize);
         selection = { ...selection, element: null };
         element = null;
         offScreenRejections += 1;
@@ -696,6 +701,7 @@ export class TapTargetResolver {
             xr.detect,
           ),
         accept: (refreshedHierarchy) => {
+          availability.record(refreshedHierarchy);
           latestScreenSize = this.host.getScreenSizeFromHierarchy(refreshedHierarchy, {
             observationScreenSize: latestScreenSize,
             display: latestViewHierarchy,
@@ -772,7 +778,19 @@ export class TapTargetResolver {
       // the target being present in the initial hierarchy returns it unchanged.
       refreshedFromDevice: latestViewHierarchy !== viewHierarchy,
       ...(visibilityError && !element ? { visibilityError } : {}),
+      ...tapSearchUnavailableField(tapLookupLabel(options), element, availability, requestCount),
     };
+  }
+
+  private warnInitialOffScreen(
+    element: Element,
+    screenSize: ReturnType<TapPointPlanner["getScreenSizeFromHierarchy"]>,
+  ): void {
+    logger.warn(
+      `[TapOnElement] Element found but tap target is off-screen, will retry. ` +
+        `bounds=${JSON.stringify(element.bounds)}, ` +
+        `screen=${screenSize?.width}x${screenSize?.height}`,
+    );
   }
 
   private reportOffScreenRejections(offScreenRejections: number, element: Element | null): void {

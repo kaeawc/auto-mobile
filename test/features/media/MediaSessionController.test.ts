@@ -13,7 +13,7 @@ import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { wrappedAdbRejection } from "../../helpers/adbRejection";
 
-// Hand-reconstructed dumps; see test/fixtures/android-media-session/README.md.
+// Captured dumps; see test/fixtures/android-media-session/README.md.
 function fixture(name: string): string {
   return readFileSync(
     new URL(`../../fixtures/android-media-session/${name}.txt`, import.meta.url),
@@ -21,9 +21,25 @@ function fixture(name: string): string {
   );
 }
 
-const PLAYING = fixture("dumpsys-media-session-api34-playing");
-const PAUSED = fixture("dumpsys-media-session-api34-paused");
-const IDLE = fixture("dumpsys-media-session-api34-idle");
+const PLAYER_PACKAGE = "dev.jasonpearson.automobile.tvfixture";
+const PLAYER_TAG = "AutoMobileTvFixture";
+/** The system's own Bluetooth sessions: present in every dump, never playing. */
+const OTHER_PACKAGE = "com.google.android.bluetooth";
+
+/**
+ * The emulator has no audio app, and Android only names a media button session for one that is
+ * playing audio, so the captured dumps all read `Media button session is null`. This swaps in the
+ * line a device prints for the player's own session; nothing else in the dump is changed.
+ */
+const withMediaButtonSession = (dump: string): string =>
+  dump.replace(
+    "Media button session is null",
+    `Media button session is ${PLAYER_PACKAGE}/${PLAYER_TAG} (userId=0)`,
+  );
+
+const PLAYING = withMediaButtonSession(fixture("dumpsys-media-session-playing-phone-api34"));
+const PAUSED = withMediaButtonSession(fixture("dumpsys-media-session-paused-phone-api34"));
+const IDLE = fixture("dumpsys-media-session-idle-phone-api34");
 
 type Reply = ExecResult | Error;
 
@@ -73,10 +89,12 @@ describe("AndroidMediaSessionController.getSessions", () => {
   test("filters sessions to appId but keeps the media button session", async () => {
     const { controller } = controllerFor(new ScriptedAdb().dumps(PLAYING));
 
-    const dump = await controller.getSessions({ appId: "com.example.podcasts" });
+    const dump = await controller.getSessions({ appId: OTHER_PACKAGE });
 
-    expect(dump.sessions.map((session) => session.package)).toEqual(["com.example.podcasts"]);
-    expect(dump.mediaButtonSession?.package).toBe("dev.example.player");
+    expect(new Set(dump.sessions.map((session) => session.package))).toEqual(
+      new Set([OTHER_PACKAGE]),
+    );
+    expect(dump.mediaButtonSession?.package).toBe(PLAYER_PACKAGE);
   });
 
   test("a failing dumpsys becomes an ActionableError", async () => {
@@ -102,7 +120,7 @@ describe("AndroidMediaSessionController.waitForState", () => {
     const { controller } = controllerFor(new ScriptedAdb().dumps(PAUSED));
 
     const result = await controller.waitForState({
-      appId: "dev.example.player",
+      appId: PLAYER_PACKAGE,
       mediaState: "playing",
       timeoutMs: 600,
     });
@@ -114,11 +132,11 @@ describe("AndroidMediaSessionController.waitForState", () => {
   });
 
   test("only matches sessions of appId", async () => {
-    // The podcast session is paused; the player is playing.
+    // The player is playing; the Bluetooth sessions are in error.
     const { controller } = controllerFor(new ScriptedAdb().dumps(PLAYING));
 
     const result = await controller.waitForState({
-      appId: "com.example.podcasts",
+      appId: OTHER_PACKAGE,
       mediaState: "playing",
       timeoutMs: 250,
     });
@@ -144,11 +162,11 @@ describe("AndroidMediaSessionController.dispatch", () => {
       .on("shell cmd media_session dispatch pause", ok());
     const { controller } = controllerFor(adb);
 
-    const result = await controller.dispatch({ key: "pause", appId: "dev.example.player" });
+    const result = await controller.dispatch({ key: "pause", appId: PLAYER_PACKAGE });
 
     expect(result).toMatchObject({
       key: "pause",
-      handledBy: { package: "dev.example.player", tag: "PlaybackService", userId: 0 },
+      handledBy: { package: PLAYER_PACKAGE, tag: PLAYER_TAG, userId: 0 },
       previousState: "playing",
       state: "paused",
       stateChanged: true,
@@ -194,9 +212,9 @@ describe("AndroidMediaSessionController.dispatch", () => {
     const adb = new ScriptedAdb().dumps(PLAYING);
     const { controller } = controllerFor(adb);
 
-    await expect(
-      controller.dispatch({ key: "pause", appId: "com.example.podcasts" }),
-    ).rejects.toThrow(/media button session \(dev\.example\.player\/PlaybackService/);
+    await expect(controller.dispatch({ key: "pause", appId: OTHER_PACKAGE })).rejects.toThrow(
+      /media button session \(dev\.jasonpearson\.automobile\.tvfixture\/AutoMobileTvFixture/,
+    );
     expect(adb.commands).toEqual(["shell dumpsys media_session"]);
   });
 
@@ -208,7 +226,7 @@ describe("AndroidMediaSessionController.dispatch", () => {
 
     const result = await controller.dispatch({ key: "play" });
 
-    expect(result.handledBy?.package).toBe("dev.example.player");
+    expect(result.handledBy?.package).toBe(PLAYER_PACKAGE);
     expect(result.previousState).toBeUndefined();
     expect(result.state).toBe("playing");
     expect(result.stateChanged).toBe(false);

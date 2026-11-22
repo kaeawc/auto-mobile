@@ -39,6 +39,7 @@ import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSe
 import { registerAppLinksSessionCleanup } from "./appLinksSessionCleanup";
 import { registerScreenLockSessionCleanup } from "./screenLockSessionCleanup";
 import { registerPowerSessionCleanup } from "./powerSessionCleanup";
+import { registerPerformanceTraceSessionCleanup } from "./performanceTraceSessionCleanup";
 import { registerProfilingSessionCleanup } from "./profilingSessionCleanup";
 import { registerSystemAlertSessionCleanup } from "./systemAlertSessionCleanup";
 import {
@@ -121,16 +122,8 @@ function captureNetworkGapMarker(
   };
 }
 
-function registerFeatureSessionLifecycle(
-  sessionManager: SessionManager,
-  timer: Timer,
-  host: Pick<DaemonSessionLifecycleHost, "markMutationUnrecorded">,
-): void {
-  registerLocationRouteSessionCleanup(sessionManager);
-  registerNetworkStateSessionCleanup(sessionManager, {
-    timer,
-    gapMarkerFor: (sessionId) => captureNetworkGapMarker(sessionManager, host, sessionId),
-  });
+/** The per-feature device-state restores, in their release-listener order. */
+function registerDeviceStateSessionCleanups(sessionManager: SessionManager): void {
   registerStatusBarSessionCleanup(sessionManager);
   registerAppLinksSessionCleanup(sessionManager);
   registerKillProfileSessionCleanup(sessionManager);
@@ -147,7 +140,21 @@ function registerFeatureSessionLifecycle(
   registerScreenLockSessionCleanup(sessionManager);
   registerPowerSessionCleanup(sessionManager);
   registerProfilingSessionCleanup(sessionManager);
+  registerPerformanceTraceSessionCleanup(sessionManager);
   registerSystemAlertSessionCleanup(sessionManager);
+}
+
+function registerFeatureSessionLifecycle(
+  sessionManager: SessionManager,
+  timer: Timer,
+  host: Pick<DaemonSessionLifecycleHost, "markMutationUnrecorded">,
+): void {
+  registerLocationRouteSessionCleanup(sessionManager);
+  registerNetworkStateSessionCleanup(sessionManager, {
+    timer,
+    gapMarkerFor: (sessionId) => captureNetworkGapMarker(sessionManager, host, sessionId),
+  });
+  registerDeviceStateSessionCleanups(sessionManager);
   registerRecordingSessionCleanup(sessionManager, {
     ...defaultRecordingSessionCleanupDeps,
     markDeviceNeedsRecorderRecovery: createRecorderTeardownRecoveryMarker(sessionManager),

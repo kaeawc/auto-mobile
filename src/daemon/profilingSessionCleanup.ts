@@ -12,20 +12,18 @@ import type { BootedDevice } from "../models";
 import { runOutsideRequestContext } from "../utils/AbortContext";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import type { SessionManager, SessionReleaseOptions } from "./sessionManager";
 
 export interface ProfilingSessionCleanupOptions {
   registry?: ProfilingRegistry;
   adbFor?: (device: BootedDevice) => PerfettoAdb;
-  timer?: Pick<Timer, "sleep">;
 }
 
 /**
- * Stop the `captureTrace` recorders and delete the `heapDump` device files a session left behind
- * when it is released or moves off the device (#14113), on the same release and unbound seams as
- * the power-state cleanup. The work is registered as pending device cleanup, so the next session
- * cannot acquire the device while a recorder is still being stopped.
+ * Delete the `heapDump` device files a session left behind when it is released or moves off the
+ * device (#14113), on the same release and unbound seams as the power-state cleanup. The work is
+ * registered as pending device cleanup, so the next session cannot acquire the device while a
+ * file is still being removed. Trace recorders are stopped by `performanceTrace`'s own cleanup.
  */
 export function registerProfilingSessionCleanup(
   manager: Pick<
@@ -42,30 +40,28 @@ export function registerProfilingSessionCleanup(
     releaseOptions?: Pick<SessionReleaseOptions, "deviceIdentityReplaced">,
   ): void => {
     const state = registry.takeOwnedBy(deviceId, sessionId);
-    if (state.traces.length === 0 && state.deviceFiles.length === 0) {
+    if (state.deviceFiles.length === 0) {
       return;
     }
     if (releaseOptions?.deviceIdentityReplaced) {
-      // A different device now answers on this serial; the recorder and files went with the old one.
+      // A different device now answers on this serial; the files went with the old one.
       logger.info(`[profiling] Session ${sessionId}'s ${deviceId} was replaced; not cleaning up`);
       return;
     }
     const device: BootedDevice = { name: deviceId, platform: "android", deviceId };
     // Not part of whichever request triggered the release: its abort must not cut the cleanup short.
     const done = runOutsideRequestContext(async () =>
-      cleanupSessionProfiling(deviceId, state, adbFor(device), {
-        timer: options.timer ?? defaultTimer,
-      }),
+      cleanupSessionProfiling(deviceId, state, adbFor(device)),
     ).catch((error: unknown): ProfilingCleanupReport => {
       logger.warn(
         `[profiling] Cleaning up session ${sessionId}'s profiling state threw: ${errorMessage(error)}`,
         error,
       );
-      return { deviceId, stoppedTraces: [], removedFiles: [], errors: [errorMessage(error)] };
+      return { deviceId, removedFiles: [], errors: [errorMessage(error)] };
     });
     manager.registerPendingDeviceCleanup(deviceId, done, {
-      name: "stop released session's trace recorders and remove profiling files",
-      leftover: "a perfetto recorder or a heap dump file the released session started",
+      name: "remove released session's heap dump files",
+      leftover: "a heap dump file the released session started",
     });
   };
   // A terminal upgrade of a finished release must not touch the device's next owner (#10825).

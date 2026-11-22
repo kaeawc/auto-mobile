@@ -381,7 +381,7 @@ export async function readNativePrototype(
   const { id, platform, resolved } = await resolveExportTarget(params, sources);
   rejectUnexportableSpec(resolved.spec, platform);
   const version = sources.libraryVersion();
-  const capabilities = requiredPrototypeCapabilities(resolved.spec);
+  const capabilities = requiredPrototypeCapabilities(resolved.spec, platform);
   const assets = nativeAssets(platform, id, resolved);
   if (platform === "ios") {
     rejectSwiftEquivalentIds(assets);

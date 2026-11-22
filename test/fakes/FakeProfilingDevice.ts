@@ -9,7 +9,7 @@ type ProfilingAdbPort = {
 };
 
 /**
- * A device that answers the shell commands `captureTrace` and `heapDump` issue, with the device
+ * A device that answers the shell commands Perfetto recording and `heapDump` issue, with the device
  * file system and the host pull target modelled as maps so tests assert end state, not scripts.
  */
 export class FakeProfilingDevice implements ProfilingAdbPort {

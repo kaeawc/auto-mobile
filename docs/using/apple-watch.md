@@ -155,6 +155,10 @@ watch, including `rotateCrown`, notifications and Smart Stack widgets.
 - The runner starts on its own bundled watch app. `launchApp` restarts it targeting the launched
   app. If that restart fails, `launchApp` fails with the reason even though the app launched. A
   runner AutoMobile did not start keeps its target.
+- If a runner AutoMobile started disconnects, `observe`, `tapOn`, `swipeOn` and `pressButton`
+  restart it once for the same app and carry on. If that restart fails, the call fails with the
+  reason; call `startDevice` to restart the runner. A disconnected runner AutoMobile did not start
+  is not restarted: restart it yourself before trying again.
 - No pinch, multi-touch or drag.
 - Prototypes do not run on a watch. To mock up a watch screen, use a watch-sized prototype spec on a
   phone instead (see [Watch-sized mockups](../tools.md#watch-sized-mockups)).

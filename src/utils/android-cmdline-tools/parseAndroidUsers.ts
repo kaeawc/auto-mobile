@@ -4,6 +4,15 @@ import { classifyAndroidUser, type AndroidUser } from "../../models/AndroidUser"
 const USER_INFO = /UserInfo\{(\d+):([^:]+):([0-9a-fA-F]+)\}/;
 const PM_USER_LINE = /UserInfo\{(\d+):([^:]+):([0-9a-fA-F]+)\}\s*(running)?/;
 const START_STATE_LOOKAHEAD_LINES = 10;
+const START_STATE = /State:\s+(\S+)/;
+
+/**
+ * Whether `dumpsys user` reports per-user start states. Android 7 prints no `State:` line, so
+ * its users cannot be told running from stopped; `pm list users` still marks running users.
+ */
+export function dumpsysReportsUserStates(output: string): boolean {
+  return START_STATE.test(output);
+}
 
 function findUserStartState(lines: string[], userLineIndex: number): string | undefined {
   const end = Math.min(userLineIndex + START_STATE_LOOKAHEAD_LINES, lines.length);
@@ -13,7 +22,7 @@ function findUserStartState(lines: string[], userLineIndex: number): string | un
     if (stateLine.match(/UserInfo\{/)) {
       return undefined;
     }
-    const stateMatch = stateLine.match(/State:\s+(\S+)/);
+    const stateMatch = stateLine.match(START_STATE);
     if (stateMatch) {
       return stateMatch[1];
     }

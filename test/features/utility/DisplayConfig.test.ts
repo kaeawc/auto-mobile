@@ -426,51 +426,50 @@ describe("DisplayConfig setConfig", () => {
       shape: "API 25: message on stdout",
       reads: { night: captured("night-mode-unsupported-api25") },
     },
-  ])("Android before 8: cmd uimode night has no shell implementation (#18984), $shape", ({
-    reads,
-  }) => {
+  ])(
+    "Android before 8: cmd uimode night has no shell implementation (#18984), $shape",
+    ({ reads }) => {
+      test("getConfig reads font scale and density and omits theme", async () => {
+        const adbFactory = new FakeAdbClientFactory();
+        seedReads(adbFactory, reads);
 
-    test("getConfig reads font scale and density and omits theme", async () => {
-      const adbFactory = new FakeAdbClientFactory();
-      seedReads(adbFactory, reads);
+        const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
 
-      const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
-
-      expect(result.success).toBe(true);
-      expect(result.current).toMatchObject({ fontScale: 1.0, density: 440 });
-      expect(result.current?.theme).toBeUndefined();
-    });
-
-    test("setting theme is refused with an actionable error and writes nothing", async () => {
-      const adbFactory = new FakeAdbClientFactory();
-      seedReads(adbFactory, reads);
-
-      const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
-        theme: "dark",
+        expect(result.success).toBe(true);
+        expect(result.current).toMatchObject({ fontScale: 1.0, density: 440 });
+        expect(result.current?.theme).toBeUndefined();
       });
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("Android before 8");
-      const commands = adbFactory
-        .getFakeClient()
-        .getCommandCalls()
-        .map((c) => c.command);
-      expect(commands.some((c) => c.startsWith("shell cmd uimode night "))).toBe(false);
-    });
+      test("setting theme is refused with an actionable error and writes nothing", async () => {
+        const adbFactory = new FakeAdbClientFactory();
+        seedReads(adbFactory, reads);
 
-    test("font scale still applies", async () => {
-      const adbFactory = new FakeAdbClientFactory();
-      seedReads(adbFactory, reads);
+        const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
+          theme: "dark",
+        });
 
-      const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
-        fontScale: 1.0,
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Android before 8");
+        const commands = adbFactory
+          .getFakeClient()
+          .getCommandCalls()
+          .map((c) => c.command);
+        expect(commands.some((c) => c.startsWith("shell cmd uimode night "))).toBe(false);
       });
 
-      expect(result.error).toBeUndefined();
-      expect(result.success).toBe(true);
-    });
+      test("font scale still applies", async () => {
+        const adbFactory = new FakeAdbClientFactory();
+        seedReads(adbFactory, reads);
 
-  });
+        const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
+          fontScale: 1.0,
+        });
+
+        expect(result.error).toBeUndefined();
+        expect(result.success).toBe(true);
+      });
+    },
+  );
 
   describe("night mode stays unreadable without the unsupported message (#18984)", () => {
     test("a garbled night-mode line on a supporting device", async () => {

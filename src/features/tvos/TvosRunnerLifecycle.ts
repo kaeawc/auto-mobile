@@ -14,6 +14,7 @@ import { SingleFlight } from "../../utils/cache/SingleFlight";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { TvosRunnerClient } from "./TvosRunnerClient";
+import { launchOnFreeRunnerPort, type RunnerPorts } from "../shared/RunnerPortRetry";
 import { TargetAppForegroundRestore, type TvosForegroundRestore } from "./TvosForegroundRestore";
 import { tvosTargetApps } from "./TvosTargetApps";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -48,7 +49,7 @@ export class TvosRunnerLifecycle {
     private readonly dependencies: {
       artifacts: Pick<TvosRunnerArtifacts, "resolve">;
       launcher: TvosRunnerLauncher;
-      ports: { allocate(deviceId: string): number; release(deviceId: string, port: number): void };
+      ports: RunnerPorts;
       timer?: Timer;
       /** Brings the app under test back in front once a launched runner is up (#18020). */
       foreground?: TvosForegroundRestore;
@@ -159,13 +160,7 @@ export class TvosRunnerLifecycle {
       signal.throwIfAborted();
       const xctestrun = await this.dependencies.artifacts.resolve(signal);
       signal.throwIfAborted();
-      entry.port = this.dependencies.ports.allocate(deviceId);
-      const handle = await this.dependencies.launcher.launch({
-        deviceId,
-        xctestrun,
-        port: entry.port,
-        signal,
-      });
+      const handle = await this.launchOnFreePort(entry, { deviceId, xctestrun, signal });
       entry.stop = handle.stop;
       if (signal.aborted || this.runners.get(deviceId) !== entry) {
         if (this.runners.get(deviceId) !== entry) {
@@ -195,6 +190,25 @@ export class TvosRunnerLifecycle {
     } finally {
       signal.removeEventListener("abort", onAbort);
     }
+  }
+
+  /** Launch on the next free port when another platform's runner answers (#18912). */
+  private launchOnFreePort(
+    entry: OwnedRunner,
+    options: { deviceId: string; xctestrun: string; signal: AbortSignal },
+  ): Promise<{ stop(): void }> {
+    const { deviceId, signal } = options;
+    return launchOnFreeRunnerPort({
+      deviceId,
+      ports: this.dependencies.ports,
+      signal,
+      setPort: (port) => {
+        entry.port = port;
+      },
+      isCurrent: () => this.runners.get(deviceId) === entry,
+      launch: (port) => this.dependencies.launcher.launch({ ...options, port }),
+      logTag: "[TvosRunner]",
+    });
   }
 
   /**
@@ -346,6 +360,7 @@ export function getTvosRunnerLifecycle(): TvosRunnerLifecycle {
             reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
           }),
         release: (deviceId, port) => PortManager.releaseIfAllocated(`tvos:${deviceId}`, port),
+        quarantine: (port) => PortManager.quarantine(port),
       },
     });
     process.once("exit", () => defaultLifecycle?.stopAll());

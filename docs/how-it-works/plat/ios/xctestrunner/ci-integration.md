@@ -51,7 +51,7 @@ compilation.
 ```yaml
 automobile-tests:
   name: "AutoMobile XCTestRunner Tests"
-  runs-on: macos-26
+  runs-on: xcode-27
   needs: [build-for-testing]
   timeout-minutes: 30
   env:
@@ -60,10 +60,10 @@ automobile-tests:
   steps:
     - uses: actions/checkout@v6
 
-    - name: Select Xcode 26.2
+    - name: Select Xcode 27.2
       uses: maxim-lobanov/setup-xcode@v1
       with:
-        xcode-version: "26.2"
+        xcode-version: "27.2"
 
     - name: Setup Bun
       uses: oven-sh/setup-bun@v2

@@ -34,6 +34,8 @@ export interface SessionCacheHost {
     | "trackRotationSessionSetup"
     | "runRotationMutationExclusive"
     | "trackScreenReaderSessionSetup"
+    | "recordRotationOriginals"
+    | "forgetRotationOriginals"
     | "runScreenReaderMutationExclusive"
     | "bumpNetworkConditionGeneration"
     | "runNetworkConditionMutationExclusive"
@@ -294,6 +296,18 @@ export class SessionCache {
 
   getRotation(sessionId: string): RotationSessionState | undefined {
     return this.host.findSession(sessionId)?.cacheData.rotation;
+  }
+
+  /** Durably save the session's first originals (#18847); undefined when persistence is off. */
+  recordRotationOriginals(
+    session: Session,
+    state: RotationSessionState,
+  ): Promise<void> | undefined {
+    return this.host.stateRestore.recordRotationOriginals(session.assignedDevice, state);
+  }
+
+  forgetRotationOriginals(session: Session, state: RotationSessionState): void {
+    this.host.stateRestore.forgetRotationOriginals(session.assignedDevice, state);
   }
 
   trackRotationSessionSetup(

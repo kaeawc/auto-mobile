@@ -10,7 +10,7 @@ Part of [the agent-authored prototype specification](prototype-ux.md).
 | `row`             | Required `children` array, possibly empty; horizontal layout. Optional `repeat` (see List templates below).                                                                                                                                            |
 | `column`          | Required `children` array, possibly empty; vertical layout. Optional `repeat` (see List templates below).                                                                                                                                              |
 | `text`            | Required `text` string, possibly empty.                                                                                                                                                                                                                |
-| `image`           | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                                                                                                                              |
+| `image`           | Exactly one of `asset` or `url` ([Images](prototype-ux-icons.md): Android loads URLs; iOS/web validate only); optional `contentScale`: `fit` (default), `crop`, `fill`.                                                                                |
 | `icon`            | Required built-in `name` below; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                                                                                                                              |
 | `spacer`          | No node-specific properties; size comes from style.                                                                                                                                                                                                    |
 | `adaptive`        | Native-width panes and navigation; see Adaptive layouts.                                                                                                                                                                                               |
@@ -299,7 +299,7 @@ A `textField` may also declare three optional fields:
   `done`.
 
 Multiline text has no IME action, so validation refuses `imeAction` and `onSubmit` with
-`multiline: true`. These need `prototype_text_field_actions_v1`, with the same refusal.
+`multiline: true`; a field with either and no `multiline` is single-line, so Enter runs the action. These need `prototype_text_field_actions_v1`, with the same refusal.
 
 Android draws `trailingIcon` as an `IconButton` in the field's trailing slot. Its `label` is the content description and its tag is
 `<testTag>.trailingIcon`. Android maps `imeAction` to Compose

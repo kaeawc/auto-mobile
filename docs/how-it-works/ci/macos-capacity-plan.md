@@ -190,8 +190,9 @@ job does not skip it.
   that Xcode lacks its Metal Toolchain. Local scripts call `select_pinned_xcode`.
   `test/bats/xcode-version-pin.bats` fails when a workflow job selects another
   version. The CircleCI nightly sweeps and the 26.6 entry of the Build Root SPM
-  Package matrix keep Xcode 26.6, the Swift 6.3 floor, verified. A roll-up job keeps
-  the required check name.
+  Package matrix keep Xcode 26.6, the Swift 6.3 floor, verified; both pin
+  `DEVELOPER_DIR` to that Xcode so `select_pinned_xcode` cannot move them to 27.2.
+  A roll-up job keeps the required check name.
 - Swift Packages builds unsigned on the Mac: its signing flags are false
   whenever the job is routed there, so no certificate is imported into the
   owner's keychains.
@@ -214,7 +215,7 @@ job does not skip it.
   the `green-main` ruleset needs no edit.
 
 **Exception: XCTestRunner Simulator Tests (`run-ios-sim` label or iOS SDK contract inputs).** The
-lane still runs on hosted `macos-26` for same-repo PRs. Its daemon steps start
+lane still runs on hosted `xcode-27` for same-repo PRs. Its daemon steps start
 an AutoMobile daemon on the default port and install gems and Homebrew packages,
 which would collide with the owner's daemon and tooling. Moving
 it needs a dedicated runner user (see owner steps) and an isolated daemon port.
@@ -243,7 +244,10 @@ Routing, in order:
 2. Same-repo PR otherwise, with `AUTOMOBILE_MAC_POOLS_ENABLED=true`: the heavy
    self-hosted lane (the documented fallback, for example if ScreenCaptureKit
    cannot capture on the Namespace VM).
-3. Everything else, including forks: hosted `macos-26` (this job selects no Xcode).
+3. Everything else, including forks: hosted `xcode-27`.
+
+Every placement selects the Xcode 27.2 pin, so the Namespace profile needs Xcode 27.2
+installed before `AUTOMOBILE_NAMESPACE_MACOS_ENABLED` is turned on.
 
 The job keeps one capture retry for the known ScreenCaptureKit flake and a
 30-minute timeout. On the heavy lane it isolates `HOME` like the other
@@ -263,7 +267,7 @@ ports. Use that fallback only with the heavy runner under a dedicated user.
 | Build Xcode Projects (Playground, CtrlProxy)                                   | self-hosted `automobile-mac-heavy`         | `xcode-27`             |
 | Prototype Simulator iOS 27.2                                                   | self-hosted `automobile-mac-heavy`         | `xcode-27`             |
 | iOS Playground Tests                                                           | CircleCI (heavy lane if label-forced)      | CircleCI               |
-| iOS Device Capture to WHEP                                                     | Namespace `auto-mobile-macos`              | `macos-26`             |
+| iOS Device Capture to WHEP                                                     | Namespace `auto-mobile-macos`              | `xcode-27`             |
 | XCTestRunner Simulator Tests (`run-ios-sim`, contract inputs)                  | hosted `xcode-27` (exception, see above)   | `xcode-27`             |
 | merge.yml: Build Desktop App (macOS), Generate/Build Xcode Projects            | CircleCI post-merge, path-gated, coalesced | n/a                    |
 | nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | CircleCI `nightly-macos`                   | n/a                    |

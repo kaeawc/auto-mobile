@@ -98,3 +98,10 @@ export function createDefaultPerformanceTraceManager(): PerformanceTraceManager 
     timer: defaultTimer,
   });
 }
+
+let defaultManager: PerformanceTraceManager | undefined;
+
+/** The daemon's one trace manager, shared by the tool and the session cleanup; built on first use. */
+export function getDefaultPerformanceTraceManager(): PerformanceTraceManager {
+  return (defaultManager ??= createDefaultPerformanceTraceManager());
+}

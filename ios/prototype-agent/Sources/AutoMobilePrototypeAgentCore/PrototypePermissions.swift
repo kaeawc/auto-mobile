@@ -33,7 +33,7 @@ enum PrototypePermissionOutcome: Sendable {
 protocol PrototypeNotificationAuthorizationSource: AnyObject {
     func status() async -> PrototypePermissionState
     /// Prompts only if still notDetermined and returns a fresh settings reading, never the grant Bool.
-    func request() async -> PrototypePermissionOutcome
+    func request(provisional: Bool) async -> PrototypePermissionOutcome
     /// Foreground signals; the module owns status reads and their ordering against request results.
     var changes: AsyncStream<Void> { get }
     /// Releases observations and pending requests. Later reads may restart observation.
@@ -125,7 +125,8 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
         observation = Task { [weak self, source] in
             guard let sequence = self?.permissionSequences["notifications", default: 0] else { return }
             let initial = await source.status()
-            guard let self, !Task.isCancelled, session == generation else { return }
+            // Generation owns late reads across stop/restart; stop also cancels this task.
+            guard let self, session == generation else { return }
             if sequence == permissionSequences["notifications", default: 0] { initialize(initial) }
             for await _ in changes {
                 guard !Task.isCancelled, session == generation else { return }
@@ -153,7 +154,9 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
             }
             let outcome: PrototypePermissionOutcome
             if name == "notifications" {
-                outcome = await notificationRequest(id: id)
+                outcome = await notificationRequest(
+                    id: id, provisional: call.args["options"]?.objectFields?["provisional"] == .bool(true)
+                )
             } else { outcome = .status(.unavailable) }
             guard active(id) else { return .failure(.cancelled, "Permission request cancelled") }
             let state: PrototypePermissionState
@@ -170,7 +173,7 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
         return .success(.object(["results": .object(results)]))
     }
 
-    private func notificationRequest(id: Int) async -> PrototypePermissionOutcome {
+    private func notificationRequest(id: Int, provisional: Bool) async -> PrototypePermissionOutcome {
         let current = await source.status()
         guard active(id) else { return .cancelled }
         if values["notifications"] == nil {
@@ -178,7 +181,7 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
             permissionSequences["notifications", default: 0] += 1
             initialize(current)
         }
-        return current == .notDetermined ? await source.request() : .status(current)
+        return current == .notDetermined ? await source.request(provisional: provisional) : .status(current)
     }
 
     private func active(_ id: Int) -> Bool { !Task.isCancelled && pending?.id == id }

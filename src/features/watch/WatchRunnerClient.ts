@@ -170,6 +170,8 @@ export class WebSocketWatchRunnerClient implements WatchRunnerClient {
   ): Promise<unknown> {
     const timer = this.options.timer ?? defaultTimer;
     const timeoutMs = options?.timeoutMs ?? this.options.timeoutMs ?? 5000;
+    const label = `Watch runner ${command.type}`;
+    let sent = false;
     // One budget covers both handshake and command; correlation entries are removed even on abort.
     const requestId = String(++this.sequence);
     const cancellation = new AbortController();
@@ -193,9 +195,21 @@ export class WebSocketWatchRunnerClient implements WatchRunnerClient {
           return new Promise<unknown>((resolve, reject) => {
             this.pending.set(requestId, { type: command.type, resolve, reject });
             this.socket.send(JSON.stringify({ ...command, requestId }));
+            sent = true;
           });
         },
-        { timer, timeoutMs, signal: requestSignal, label: `Watch runner ${command.type}` },
+        {
+          timer,
+          timeoutMs,
+          signal: requestSignal,
+          label,
+          timeoutError: () =>
+            sent
+              ? new ActionableError(
+                  `${label} timed out after ${timeoutMs}ms. A system screen such as the Smart Stack widget editor or gallery may be blocking the runner; call launchApp or press the home button to recover.`,
+                )
+              : undefined,
+        },
       );
     } finally {
       cancellation.abort();

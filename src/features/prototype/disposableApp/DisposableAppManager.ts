@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../models/describeUnknownError";
 import type { Timer } from "../../../utils/SystemTimer";
+import { throwIfRequestAborted } from "../../../utils/AbortContext";
 import { logger } from "../../../utils/logger";
 import type { PrototypeJson } from "../prototypeJson";
 import {
@@ -38,6 +39,11 @@ const HOUR_MS = 60 * 60 * 1000;
 
 export type DisposableAppIcon = { asset: string } | { backgroundColor: string };
 
+export interface DisposableAppAsset {
+  id: string;
+  bytes: Uint8Array;
+}
+
 export interface DisposableAppStampInput {
   appId: string;
   attachToken?: string;
@@ -46,6 +52,7 @@ export interface DisposableAppStampInput {
   slug: string;
   label: string;
   icon?: DisposableAppIcon;
+  assets?: readonly DisposableAppAsset[];
   spec: PrototypeJson;
   template: DisposableAppTemplate;
   declarations: DisposableAppDeclarations;
@@ -62,6 +69,8 @@ export interface DisposableAppStamper {
   /** Digest of the host's disposable-app signing key; installed apps must match it. */
   signer(): Promise<string>;
   stamp(input: DisposableAppStampInput): Promise<DisposableAppStamped>;
+  /** Frees a stamped artifact once the install attempt ends; omitted when it is a shared cache. */
+  release?(artifactPath: string): Promise<void>;
 }
 
 export interface DisposableAppInstallation {
@@ -73,6 +82,11 @@ export interface DisposableAppInstallation {
 export interface DisposableAppInstaller {
   /** Installs `appId` from `artifactPath`, updating in place and keeping app storage. */
   install(deviceId: string, appId: string, artifactPath: string): Promise<void>;
+  /**
+   * Writes the app's initial storage from `artifactPath` once the host has recorded the install;
+   * omitted when the platform needs no seeding.
+   */
+  seedStorage?(deviceId: string, appId: string, artifactPath: string): Promise<void>;
   /** Clears the installed app's storage. */
   resetStorage(deviceId: string, appId: string): Promise<void>;
   applyPermissions(
@@ -105,6 +119,7 @@ export interface DisposableAppManagerDependencies {
 export interface DisposableAppInstallInput {
   deviceId: string;
   platform: DisposableAppPlatform;
+  assets?: readonly DisposableAppAsset[];
   spec: PrototypeJson;
   app: {
     slug: string;
@@ -164,6 +179,11 @@ export interface DisposableAppUninstallResult {
 
 const REMOVED = Symbol("removed");
 const RENEWED = Symbol("renewed");
+interface RemovalOptions {
+  reason: "requested" | "all" | "expired";
+  reportRemoval?: (appId: string) => void;
+}
+
 type RemovalOutcome = typeof REMOVED | typeof RENEWED | string;
 
 function isoOrNull(epochMs: number | null): string | null {
@@ -206,6 +226,60 @@ export class DisposableAppManager {
     return this.withAppLock(input.deviceId, appId, () => this.installLocked(input, appId));
   }
 
+  /**
+   * Installs the artifact, records the app, then seeds its storage while the artifact still exists.
+   * Recording comes before seeding, so a seeding failure cannot leave the app untracked or keep a
+   * previous install's expiry for the sweep to act on (#16506, #18871).
+   */
+  private async installRecordAndRelease(
+    { stamper, installer }: { stamper: DisposableAppStamper; installer: DisposableAppInstaller },
+    [deviceId, appId]: readonly [string, string],
+    artifactPath: string,
+    record: () => Promise<number | null>,
+  ): Promise<number | null> {
+    try {
+      await installer.install(deviceId, appId, artifactPath);
+      const expiresAt = await record();
+      if (installer.seedStorage) {
+        try {
+          await installer.seedStorage(deviceId, appId, artifactPath);
+        } catch (error) {
+          throw new ActionableError(
+            `${appId} is installed on ${deviceId} (expires ${isoOrNull(expiresAt) ?? "never"}), but its storage was not seeded: ${errorMessage(error)}. Reinstall it with installApp to retry, or uninstall it with uninstallApp.`,
+            { cause: error },
+          );
+        }
+      }
+      return expiresAt;
+    } finally {
+      await stamper.release?.(artifactPath);
+    }
+  }
+
+  /** Records the installed app with a renewed lifetime and returns its expiry. */
+  private async recordInstall(
+    input: DisposableAppInstallInput,
+    appId: string,
+    install: { attachToken: string; template: string; lifetime: number | null },
+  ): Promise<number | null> {
+    const installedAt = this.deps.timer.now();
+    const expiresAt = install.lifetime === null ? null : installedAt + install.lifetime;
+    await this.deps.registry.put(input.deviceId, {
+      appId,
+      slug: input.app.slug,
+      platform: input.platform,
+      label: input.app.label,
+      specId: disposableSpecId(input.spec),
+      attachToken: install.attachToken,
+      specSha256: createHash("sha256").update(JSON.stringify(input.spec)).digest("hex"),
+      template: install.template,
+      signer: await this.support(input.platform).stamper.signer(),
+      installedAt,
+      expiresAt,
+    });
+    return expiresAt;
+  }
+
   private async installLocked(
     input: DisposableAppInstallInput,
     appId: string,
@@ -217,7 +291,11 @@ export class DisposableAppManager {
       input.app.permissions ?? "prompt",
       declarations.permissions,
     );
-    const template = selectDisposableAppTemplate(input.spec, await stamper.templates());
+    const template = selectDisposableAppTemplate(
+      input.spec,
+      await stamper.templates(),
+      input.platform,
+    );
     const existing = (await this.deps.registry.list(input.deviceId)).find(
       (record) => record.appId === appId,
     );
@@ -229,28 +307,17 @@ export class DisposableAppManager {
       slug: input.app.slug,
       label: input.app.label,
       icon: input.app.icon,
+      assets: input.assets,
       spec: input.spec,
       template,
       declarations,
     });
-    await installer.install(input.deviceId, appId, stamped.artifactPath);
-    // Record the app as soon as it is on the device, so a reset or permission failure below cannot
-    // leave it untracked or keep a previous install's expiry for the sweep to act on (#16506).
-    const installedAt = this.deps.timer.now();
-    const expiresAt = lifetime === null ? null : installedAt + lifetime;
-    await this.deps.registry.put(input.deviceId, {
-      appId,
-      slug: input.app.slug,
-      platform: input.platform,
-      label: input.app.label,
-      specId: disposableSpecId(input.spec),
-      attachToken,
-      specSha256: createHash("sha256").update(JSON.stringify(input.spec)).digest("hex"),
-      template: template.name,
-      signer: await stamper.signer(),
-      installedAt,
-      expiresAt,
-    });
+    const expiresAt = await this.installRecordAndRelease(
+      { stamper, installer },
+      [input.deviceId, appId],
+      stamped.artifactPath,
+      () => this.recordInstall(input, appId, { attachToken, template: template.name, lifetime }),
+    );
     if (input.app.reset === true) {
       try {
         await installer.resetStorage(input.deviceId, appId);
@@ -313,17 +380,19 @@ export class DisposableAppManager {
   ): Promise<DisposableAppUninstallResult> {
     if ("appId" in target) {
       assertDisposableAppId(target.appId);
-      const outcome = await this.removeOne(deviceId, platform, target.appId, "requested");
+      const outcome = await this.removeOne(deviceId, platform, target.appId, {
+        reason: "requested",
+      });
       if (typeof outcome === "string") {
         throw new ActionableError(outcome);
       }
       return { removed: [{ appId: target.appId, reason: "requested" }], skipped: [] };
     }
-    const [ids, reason] =
-      "all" in target
-        ? [(await this.list(deviceId, platform)).map((entry) => entry.appId), "all"]
-        : [await this.expiredIds(deviceId, platform), "expired"];
-    return this.removeBulk(deviceId, platform, this.skippedLast(deviceId, ids), reason);
+    if ("expired" in target) {
+      return this.sweepExpired(deviceId, platform);
+    }
+    const ids = (await this.list(deviceId, platform)).map((entry) => entry.appId);
+    return this.removeBulk(deviceId, platform, this.skippedLast(deviceId, ids), { reason: "all" });
   }
 
   /** `ids` with the ones an earlier bulk call skipped on this device moved to the end. */
@@ -353,7 +422,7 @@ export class DisposableAppManager {
     deviceId: string,
     platform: DisposableAppPlatform,
     ids: string[],
-    reason: string,
+    options: RemovalOptions,
   ): Promise<DisposableAppUninstallResult> {
     const result: DisposableAppUninstallResult = { removed: [], skipped: [] };
     const stepMs = this.deps.uninstallStepMs ?? DISPOSABLE_APP_UNINSTALL_STEP_MS;
@@ -365,9 +434,9 @@ export class DisposableAppManager {
         result.pending = ids.slice(index);
         break;
       }
-      const outcome = await this.removeOne(deviceId, platform, appId, reason);
+      const outcome = await this.removeOne(deviceId, platform, appId, options);
       if (outcome === REMOVED) {
-        result.removed.push({ appId, reason });
+        result.removed.push({ appId, reason: options.reason });
       } else if (outcome !== RENEWED) {
         result.skipped.push({ appId, reason: outcome });
       }
@@ -376,12 +445,17 @@ export class DisposableAppManager {
     return result;
   }
 
-  /** The TTL sweep run when a session acquires the device, and by `uninstallApp {expired}`. */
+  /** Sweep registry candidates directly, with no package scan on devices without expired apps. */
   async sweepExpired(
     deviceId: string,
     platform: DisposableAppPlatform,
+    reportRemoval?: (appId: string) => void,
   ): Promise<DisposableAppUninstallResult> {
-    return this.uninstall(deviceId, platform, { expired: true });
+    const ids = await this.expiredIds(deviceId, platform);
+    return this.removeBulk(deviceId, platform, this.skippedLast(deviceId, ids), {
+      reason: "expired",
+      reportRemoval,
+    });
   }
 
   private support(platform: DisposableAppPlatform): DisposableAppPlatformSupport {
@@ -436,7 +510,7 @@ export class DisposableAppManager {
     deviceId: string,
     platform: DisposableAppPlatform,
     appId: string,
-    reason: string,
+    { reason, reportRemoval }: RemovalOptions,
   ): Promise<RemovalOutcome> {
     if (!isDisposableAppId(appId)) {
       return `${appId} is outside the reserved prefix ${DISPOSABLE_APP_ID_PREFIX}, so it was not removed.`;
@@ -445,19 +519,32 @@ export class DisposableAppManager {
       if (reason === "expired" && !(await this.stillExpired(deviceId, platform, appId))) {
         return RENEWED;
       }
-      const { stamper, installer } = this.support(platform);
+      throwIfRequestAborted();
+      const { installer } = this.support(platform);
       const installation = await installer.inspect(deviceId, appId);
+      throwIfRequestAborted();
       if (installation.installed && installation.signer !== undefined) {
-        const expected = await stamper.signer();
+        const expected = await this.support(platform).stamper.signer();
         if (installation.signer !== expected) {
           return `${appId} on ${deviceId} is not signed by this host's disposable-app key, so it was not removed. Remove it with the uninstallApp tool if it is yours.`;
         }
       }
+      throwIfRequestAborted();
+      const report = () => {
+        if (reportRemoval) {
+          reportRemoval(appId);
+        } else {
+          logger.warn(`Removed disposable prototype app ${appId} from ${deviceId} (${reason}).`);
+        }
+      };
       if (installation.installed) {
         await installer.uninstall(deviceId, appId);
+        report();
       }
       await this.deps.registry.remove(deviceId, appId);
-      logger.warn(`Removed disposable prototype app ${appId} from ${deviceId} (${reason}).`);
+      if (!installation.installed) {
+        report();
+      }
       return REMOVED;
     });
   }

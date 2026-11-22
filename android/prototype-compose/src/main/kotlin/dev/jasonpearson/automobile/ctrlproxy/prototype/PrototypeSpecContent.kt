@@ -187,6 +187,8 @@ fun PrototypeRuntimeContent(
         LocalPrototypeStackScrollStores provides scrollStores,
         LocalPrototypeTextEpochs provides snapshot.textEpochs,
         LocalPrototypeScrollRequests provides snapshot.scrollRequests,
+        LocalPrototypeRemoteImages provides runtime.remoteImages,
+        LocalPrototypeRemoteImageActivity provides runtime.remoteImageActivity,
         LocalPrototypeImageCache provides images,
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
@@ -997,6 +999,7 @@ private fun RenderPrototypeNodeContent(
     "divider" -> RenderPrototypeDivider(node, modifier)
     "badge" -> RenderPrototypeBadge(node, modifier)
     "progress" -> RenderPrototypeProgress(node, modifier)
+    "loadingIndicator" -> RenderPrototypeLoadingIndicator(node, modifier)
     "list" ->
       RenderPrototypeLazyList(node, modifier, interact) { RenderPrototypeNode(it, interact) }
     "chart" -> RenderPrototypeChart(node, modifier)
@@ -1126,7 +1129,7 @@ private fun RenderPrototypeTextField(
       if (prototypeTextFieldSecure(source.secure, source.keyboardType))
         PasswordVisualTransformation()
       else VisualTransformation.None
-    val multiline = source.multiline
+    val multiline = prototypeTextFieldMultiline(source.multiline, ime)
     // Omit line options for legacy fields: Compose's default is a growing field.
     if (source.variant == "outlined") {
       if (multiline == null) {
@@ -2092,7 +2095,9 @@ internal fun SemanticsPropertyReceiver.applyPrototypeAuthoredSemantics(
     authored.label?.let { contentDescription = it }
     authored.hint?.let {
       if (!node.source?.onTap.isNullOrEmpty()) onClick(label = it, action = null)
-      else stateDescription = listOfNotNull(state, it).joinToString(", ")
+      // Remote images reserve stateDescription for loading/loaded/error.
+      else if ((node.source as? PrototypeImageNode)?.url == null)
+        stateDescription = listOfNotNull(state, it).joinToString(", ")
     }
   }
 }

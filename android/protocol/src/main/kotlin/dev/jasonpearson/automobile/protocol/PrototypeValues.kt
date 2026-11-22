@@ -268,7 +268,10 @@ internal fun prototypeImageSlotUses(value: JsonElement?): Int {
 /** The node's own image slots: an `image` costs at least 1, a `videoPlayer` its `poster`. */
 internal fun prototypeNodeImageUses(node: JsonObject): Int =
   when ((node["type"] as? JsonPrimitive)?.takeIf { it.isString }?.content) {
-    "image" -> maxOf(1, prototypeImageSlotUses(node["asset"]))
+    "image" ->
+      (if (node["url"] == null) maxOf(1, prototypeImageSlotUses(node["asset"])) else 0) +
+        prototypeImageSlotUses((node["placeholder"] as? JsonObject)?.get("asset")) +
+        prototypeImageSlotUses((node["error"] as? JsonObject)?.get("asset"))
     "videoPlayer" -> prototypeImageSlotUses(node["poster"])
     else -> 0
   }
@@ -392,12 +395,7 @@ object PrototypePageTargetSerializer :
 object PrototypeScalarSerializer :
   PrototypeJsonValueSerializer<PrototypeScalar>("PrototypeScalar") {
   override fun fromJson(value: JsonElement): PrototypeScalar {
-    if (
-      value is JsonObject &&
-        value.size == 1 &&
-        value.keys.single() in setOf("event", "platform", "match")
-    )
-      return PrototypeScalar.Binding(value)
+    if (value is JsonObject && isScalarBinding(value)) return PrototypeScalar.Binding(value)
     val primitive = value as? JsonPrimitive ?: throw SerializationException("Expected scalar")
     if (primitive.isString) return PrototypeScalar.Text(primitive.content)
     primitive.booleanOrNull?.let {
@@ -406,6 +404,12 @@ object PrototypeScalarSerializer :
     val number = primitive.doubleOrNull
     if (number == null || !number.isFinite()) throw SerializationException("Expected finite number")
     return PrototypeScalar.Numeric(number)
+  }
+
+  private fun isScalarBinding(value: JsonObject): Boolean {
+    if (value.size != 1) return false
+    return value.keys.single() in setOf("event", "platform", "match") ||
+      PrototypeGeneratedValues.form(value) != null
   }
 
   override fun toJson(value: PrototypeScalar): JsonElement =

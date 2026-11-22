@@ -175,7 +175,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
   private shakeRequestCount: number = 0;
   private shakeTimeoutHistory: number[] = [];
   private recentAppsRequestCount: number = 0;
-  private rotateHistory: Array<{ orientation: string }> = [];
+  private rotateHistory: Array<{ orientation: string; panel?: "cover" | "inner" }> = [];
   private hingeAngleHistory: number[] = [];
   private hingeAngleResult: CtrlProxyHingeAngleResult | null = null;
   private currentOrientation: string = "portrait";
@@ -469,7 +469,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
   /**
    * Get the history of rotate requests
    */
-  getRotateHistory(): Array<{ orientation: string }> {
+  getRotateHistory(): Array<{ orientation: string; panel?: "cover" | "inner" }> {
     return [...this.rotateHistory];
   }
 
@@ -1174,8 +1174,9 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     orientation: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    panel?: "cover" | "inner",
   ): Promise<CtrlProxyRotateResult> {
-    this.rotateHistory.push({ orientation });
+    this.rotateHistory.push(panel ? { orientation, panel } : { orientation });
     await this.applyDelay("rotate");
     this.checkFailure("rotate");
 

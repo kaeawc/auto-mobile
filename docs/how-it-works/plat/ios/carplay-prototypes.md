@@ -12,8 +12,8 @@ rendering path.
 
 ## CarPlay screen power helper
 
-`ios/carplay-power` (`carplay-power-helper <udid> status|power-on`) reports a booted simulator's
-screens, or makes its TVOut screen the CarPlay car display. It checks private CoreSimulator
+`ios/carplay-power` (`carplay-power-helper <udid> status|power-on|tap <x> <y>`) reports a booted
+simulator's screens, makes its TVOut screen the CarPlay car display, or taps it. It checks private CoreSimulator
 selectors, waits for callbacks, and re-enumerates to verify power state; unavailable APIs produce
 actionable errors.
 
@@ -29,8 +29,34 @@ actionable errors.
 - The TypeScript bridge is injectable and uses `AUTOMOBILE_CARPLAY_POWER_HELPER_PATH`. Its JSON
   lists every screen and a `carPlay` object for TVOut: `found`, nullable `screenID` and
   `powerState`.
-- Capture the car display with `xcrun simctl io <udid> screenshot --display=TVOut`. Touch input on
-  it is not supported (#18730).
+- Capture the car display with `xcrun simctl io <udid> screenshot --display=TVOut`.
+
+## CarPlay touch contract
+
+`carplay-power-helper <udid> tap <x> <y>` sends one tap to the car screen through SimulatorKit's
+Indigo HID messages (`SimDeviceLegacyHIDClient`, loaded from
+`$DEVELOPER_DIR/Library/PrivateFrameworks/SimulatorKit.framework`).
+
+- The CarPlay touch service is Indigo HID target `1`. SimulatorKit uses it for screenType `1`
+  (TVOut) and `2` (Wireless); `CarPlayHID.target` maps any other type to none. Never send to
+  `IndigoHIDTargetForScreen(id)` (`0x40000000 | id`) for a car screen: no virtual service has that
+  target and backboardd aborts on it.
+- Before any HID message the helper re-enumerates the screens and refuses, sending nothing, unless
+  the runtime is iOS 26.x (`unsupported-runtime`), a TVOut screen exists (`no-carplay-screen`), its
+  screenType is 1 or 2 (`unsupported-screen-type`), it is powered on (`carplay-not-powered`), and
+  x, y lie inside its pixel size (`usage`).
+- Each run sends `IndigoHIDMessageToCreateCarPlayService(true)` before the touch, because
+  CoreSimulator HID state does not survive a reboot; creating it again is harmless. Without the
+  service, touches to target 1 are ignored.
+- The touch is `IndigoHIDMessageForMouseNSEvent` left mouse down, an 80 ms hold, then up. The
+  message divides the point by the size it is given, so x, y and the size are both the car screen's
+  pixels (800x480 after `power-on`), the same pixels as a `--display=TVOut` screenshot. A failed
+  send is `hid-failed`. The output is one JSON line, `tapped`: the point, `screenID`, `screenType`,
+  `target`, `width` and `height`.
+- `carPlayTap.ts` runs it through the same exec seam as power-on. `tapCarPlayScreen` first requires
+  the projection probe to report the car display, so a screen that is not projecting is refused
+  before the helper runs. `tapAt` with `display: "carPlay"` calls it; phone-only `tapAt` fields
+  are refused. `tapOn` has no CarPlay selector because nothing reads the car screen's hierarchy.
 
 ## Projection readiness contract
 
@@ -63,9 +89,13 @@ independently. Identity is seed-free, chosen in priority order: `Car[id]`, `CarI
 
 `carPlayProjection.ts` validates the strict JSON over the injectable exec seam with a 15 s timeout.
 `requireCarPlayProjection` probes and refuses capture unless either Car flag is true. Its error
-names the screen and identity, explains the black frame and gives the recovery step. Attachment and power-on alone are not
-enough: TVOut stays untagged without the StarkConfig. A positive tag is a readiness signal, not
-verification of a captured image. No `observe` display selector uses this module yet.
+names the screen and identity, explains the black frame and gives the recovery step. Attachment and
+power-on alone are not enough: TVOut stays untagged without the StarkConfig. A positive tag is a
+readiness signal, not verification of a captured image. `captureCarPlayScreen` runs that check before
+taking a screenshot and passes the probed `displayId` (`carPlayCaptureDisplay`) as `simctl io
+screenshot --display`, so a refused or unpowered screen is never captured.
+`observe({display: "carplay"})` uses the same guard before it selects the single named CarPlay screen
+and captures its PNG.
 
 ## Background
 

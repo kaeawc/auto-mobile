@@ -3,27 +3,25 @@
 Part of [the agent-authored prototype specification](prototype-ux.md).
 
 **Sandbox commerce (#14314).** The `commerce` module (`prototype_platform_commerce_v1`) has two calls.
-The `commerce.purchase` call takes a required `productId` (an identifier of at most 64 characters) and writes
-`{status, transactionId}` into `into`, where `status` is `purchased`, `deferred` or `pending`. A back-out is the
-typed error `cancelled`. The `commerce.restore` call takes no arguments. The `commerce.entitlementsChanged` event and the
-read-only keys `/platform/commerce/entitlements` and `/platform/commerce/lastTransaction` complete the module.
+The `commerce.purchase` call takes a `productId` (an identifier of at most 64 characters) and writes
+`{status, transactionId}` into `into`, where `status` is `purchased`, `deferred` or `pending`. A back-out returns
+`cancelled`. The `commerce.restore` call takes no arguments. The `commerce.entitlementsChanged` event and the
+read-only keys `/platform/commerce/entitlements` and `/platform/commerce/lastTransaction` complete it.
 No argument carries an amount, merchant, key or card: prices come only from the catalog.
 
 The root `commerce` catalog (needs `commerce` in `requires.platform`) is `{backend: "fake", products}` with 1 to
-32 products. Each product has:
+32 products. The block has no merchant, gateway, key, card or URL field. Every `commerce.*` call needs the
+catalog, and a literal `productId` must name one of its products. The contract has no `commerce.checkout`,
+and no production runtime advertises the module.
 
-| Field                    | Constraint                                                                                |
-| ------------------------ | ----------------------------------------------------------------------------------------- |
-| `id`                     | unique identifier                                                                         |
-| `title`                  | —                                                                                         |
-| `kind`                   | `consumable`, `nonConsumable` or `subscription`                                           |
-| `price.amount`           | decimal string, up to two decimal places                                                  |
-| `price.currency`         | upper-case three-letter code                                                              |
-| `period` / `trialPeriod` | subscription only; ISO 8601 duration of whole days, weeks, months or years (`P7D`, `P1M`) |
-
-The block has no merchant, gateway, key, card or URL field.
-Every `commerce.*` call needs the catalog, and a literal `productId` must name one of its products.
-The contract has no `commerce.checkout`, and no production runtime advertises the module.
+| Product field          | Value                                                              |
+| ---------------------- | ------------------------------------------------------------------ |
+| `id`                   | A unique identifier                                                |
+| `title`                | Display name                                                       |
+| `kind`                 | `consumable`, `nonConsumable` or `subscription`                    |
+| `price.amount`         | Decimal string, up to two decimal places                           |
+| `price.currency`       | Upper-case three-letter code                                       |
+| `period`/`trialPeriod` | Subscription only; ISO 8601 duration, days to years (`P7D`, `P1M`) |
 
 The fake store's state follows one reducer, `prototypePurchaseOutcome.ts`. Kotlin and Swift `PrototypePurchaseOutcome`
 copy it, and all three replay `test/fixtures/prototype-purchase/`. The `entitlements` key maps a product id to `active`,
@@ -39,7 +37,7 @@ The store records every result as `lastTransaction`, but only `purchased` grants
 records `declined`. Simulated `entitlementsChanged` events work on a subscription the user holds. The
 `renew` event sets it `active`, and `gracePeriod` and `billingRetry` set those states. The `expire` and
 `refund` events remove an entitlement and also apply to a non-consumable. The module raises
-`commerce.entitlementsChanged` only when the entitlements change.
+`commerce.entitlementsChanged` only when entitlements actually change.
 
 **Secure storage (#14321).** `storage.secure` lists up to eight declared string `state:` keys,
 separate from `storage.keys`. It requires `secureStorage` in `requires.platform` and
@@ -50,7 +48,7 @@ keys stay live-only: this runtime neither persists nor restores them.
 
 Each value is limited to 4096 UTF-8 bytes and excluded from the plaintext document and its byte
 budget. An app-private file under `prototype-storage/secure/` holds a Base64-encoded AES-GCM
-ciphertext with a fresh random 12-byte IV. The 256-bit AES key stays in AndroidKeyStore under
+ciphertext with a fresh 12-byte IV. The 256-bit AES key stays in AndroidKeyStore under
 `dev.automobile.prototype.<slug>-<full-id-sha256>`, without user authentication. The full id also
 authenticates the ciphertext; ProtoViewer isolates duplicate imports by library entry id.
 Writes sync a temporary file before atomic replacement. Missing or unusable keys and corrupt
@@ -59,31 +57,28 @@ ciphertext leave values absent with a fixed warning that carries no payload or e
 The [storage precedence and clearing rules](prototype-ux-storage.md) apply to both stores.
 Reset, `clearStorage` and deletion remove the secure file and its Keystore alias; dismissal retains
 them. Status, inspect, patch conflicts and events (including `change` payloads) omit secure values.
-Storage reports add optional `secure: [{key, present, bytes}]` metadata. Neither values nor
-ciphertext appear in reports or runtime warnings.
+Storage reports add optional `secure: [{key, present, bytes}]` metadata. Values and ciphertext
+never appear in reports or warnings.
 
 Secure keys cannot bind into an emit `context` or, in host validation, a data-write `{state}`
 value. Requests may reference them only with `allowSecureInRequest: true`; otherwise validation
 refuses state bindings and text placeholders in URLs, headers, query values and bodies. See [request bindings](prototype-ux-request.md).
 
 **Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
-event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
-exactly one `/<module>/<key>`. The keys are:
-
-| Key             | Type / range                                                 |
-| --------------- | ------------------------------------------------------------ |
-| `pitchDeg`      | whole degrees, -180 to 180                                   |
-| `rollDeg`       | whole degrees, -180 to 180                                   |
-| `headingDeg`    | whole degrees, 0 to 359                                      |
-| `steps`         | counted since the subscription started                       |
-| `proximityNear` | boolean                                                      |
-| `lightLux`      | whole lux, Android only (no public ambient-light API on iOS) |
-
-A sensor the device lacks leaves its key absent, so it compares as
-missing. The runtimes copy whole-unit rounding from `prototypeSensorReference.ts`. Continuous values use per-key
+event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat: a `/platform` pointer reads
+exactly one `/<module>/<key>`. A sensor the device lacks leaves its key absent, comparing as missing. The
+runtimes copy whole-unit rounding from `prototypeSensorReference.ts`. Continuous values use per-key
 throttling at `1000 / rateHz` ms (`rateHz` 1 to 30). A shake needs 2.7 g or more with a 1000 ms cooldown.
 On iOS, every distinct proximity change publishes immediately; identical consecutive values are ignored.
 The runtimes replay it from `test/fixtures/prototype-sensors/`.
+
+| Key                   | Value                                                        |
+| --------------------- | ------------------------------------------------------------ |
+| `pitchDeg`, `rollDeg` | Whole degrees, -180 to 180                                   |
+| `headingDeg`          | 0 to 359                                                     |
+| `steps`               | Counted since the subscription started                       |
+| `proximityNear`       | Boolean                                                      |
+| `lightLux`            | Whole lux, Android only (no public ambient-light API on iOS) |
 
 The root `sensors` block lists the sensors the device listens to, and needs `sensors` in `requires.platform`.
 In it, `shake`, `steps` and `proximity` take `{}`, while `orientation` (the three degree keys) and `light` take an optional
@@ -93,14 +88,14 @@ using platform sensors, with subscriptions only while the prototype is active an
 remain absent without an `ACTIVITY_RECOGNITION` grant; the module does not request it.
 
 The iOS agent, ProtoViewer and Viewer registries advertise the module using CoreMotion and UIKit proximity monitoring.
-Steps require `NSMotionUsageDescription`, available step counting and motion authorization that is neither
-denied nor restricted. The `CMPedometer` source counts steps from each subscription's start date; the first callback
-already includes steps since that date, and restarting a subscription resets the baseline. Orientation uses
+Steps require `NSMotionUsageDescription`, available step counting, and motion authorization neither
+denied nor restricted. The `CMPedometer` source counts steps from each subscription's start date, including
+the first callback; restarting a subscription resets the baseline. Orientation uses
 magnetic north when available, omitting an invalid heading. CoreMotion acceleration is converted from g to m/s²
 before shake detection. iOS never subscribes to or publishes light readings. Each iOS presentation owns its
 sensor state and subscriptions; motion and proximity hardware are shared until their final user stops.
-Hiding, replacing or re-showing it, even with an identical block or reset, stops its subscriptions and clears
-state, filters and the shake cooldown. Stopped subscriptions cannot publish into a later session.
+Hiding, replacing or re-showing it stops its subscriptions and clears state, filters and the shake cooldown.
+Stopped subscriptions cannot publish into a later session.
 
 **Android biometric runtime support.** The [biometric module](prototype-ux-platform-device.md) is
 registered by Android Activity hosts (SavedPrototypeActivity, ProtoViewer and disposable apps). CtrlProxy overlays omit the capability and
@@ -121,7 +116,7 @@ in `requires.permissions`. The `audioRecorder.start` call takes an optional `max
 and `audioRecorder.cancel` discards the recording. The `/platform/audioRecorder/status` key is `recording`,
 `stopped`, `permission_denied`, `unavailable` or `error` (also delivered as
 `audioRecorder.statusChanged`). The `level` key is 0-1 and updates at most 10 times a second, and `elapsedMs`
-counts the current recording. A press-and-hold control uses the gesture action lists, and playback
+counts the current recording. A press-and-hold control uses the gesture action lists; playback
 uses a `media` audio player. No production runtime advertises the module yet.
 
 **Runtime permissions (#14297).** Canonical names live in `requires.permissions[].name`, and each entry's
@@ -160,18 +155,19 @@ The first status read establishes `/platform/permissions/notifications` asynchro
 Requests and foreground Settings re-reads publish only changed states. A request uses alert,
 sound and badge options only while authorization is `notDetermined`; `options.provisional: true` adds
 provisional authorization without showing a prompt. It then re-reads notification settings
-for its result. Outside an app bundle with a bundle
-identifier, the source returns `unavailable` without accessing UserNotifications. No Info.plist key is
-required.
+for its result.
 
-One request may be in flight per module; a second returns `too_many_in_flight`. Request
-cancellation drops the late result while foreground observation stays active. The registry stops
-observation when its final observer releases it. Permission requests have no platform-call deadline,
+Outside an app bundle with a bundle
+identifier, the source returns `unavailable` without accessing UserNotifications. No Info.plist key is
+required. One request may be in flight per module; a second returns `too_many_in_flight`.
+Cancellation drops the late result while foreground observation stays active until its final observer
+releases the registry. Permission requests have no platform-call deadline,
 including an explicit `timeoutMs`; `statusKey` stays `loading` until a result or cancellation.
 The same state is published at `/platform/notifications/authorization`, including the baseline and
 foreground re-reads, and cleared on stop. An authorization-only binding declares `notifications` in
 `requires.platform` and `requires.permissions` and uses the permissions capability on iOS.
 Other notification state, calls and handlers require the notifications capability.
+Provisional authorization reads as `limited`.
 
 | iOS `UNAuthorizationStatus` | State           |
 | --------------------------- | --------------- |
@@ -187,13 +183,12 @@ CtrlProxy's SavedPrototypeActivity advertise the capability. A plain Activity wi
 ActivityResultRegistry and the CtrlProxy overlay omit it. Camera and microphone: see
 [ProtoViewer](../../protoviewer.md#31-standalone-unprivileged-apps).
 The result is `{results: {<name>: <state>}}`; each result also updates `/platform/permissions/<name>`.
-Bound request lists must name declared permissions, just like literal lists. Only one request can be
-in flight per Activity; a second returns `too_many_in_flight`. A permission prompt waits for the user
-without a platform-call deadline, including an explicit `timeoutMs`; `statusKey` remains `loading`
-until a result or cancellation. Cancellation, Activity destruction and teardown unregister the result
+Bound request lists must also name declared permissions. Only one request can be
+in flight per Activity; a second returns `too_many_in_flight`. A permission prompt waits for the
+user with no platform-call deadline, as on iOS. Cancellation, Activity destruction and teardown unregister the result
 launcher and drop late callbacks. Activity resume re-reads notification authorization and emits only
-changed states. Denial history belongs to each runtime session, is recorded only after a successful
-launch delivers a denial, and is cleared on reset or teardown and whenever a grant is observed.
+changed states. Denial history belongs to each runtime session, recorded only after a successful
+launch delivers a denial, and cleared on reset, teardown, or whenever a grant is observed.
 
 | Android notification authorization                                      | State           |
 | ----------------------------------------------------------------------- | --------------- |
@@ -207,7 +202,7 @@ launch delivers a denial, and is cleared on reset or teardown and whenever a gra
 | API 33+, denial recorded and no rationale (including user-fixed denial) | `blocked`       |
 
 `POST_NOTIFICATIONS` is a runtime permission starting at API 33. Earlier versions never prompt;
-Settings alone controls notification availability. Already-granted and blocked requests return their
+Settings alone controls it. Granted and blocked requests return their
 state without a prompt. This runtime does not publish `/platform/notifications/authorization` or
 advertise the notifications module.
 
@@ -224,36 +219,17 @@ notGrantableOnSimulator and for an Android `photosAdd` denial (`notRevocable`).
 **Notifications (#14280).** The `notifications` module (`prototype_platform_notifications_v1`) has three
 calls:
 
-- `notifications.post` takes the arguments below.
+- `notifications.post` takes `id` (1-128 characters), `channel` (a key-shaped channel id) and `title`
+  (non-blank, at most 128). Its optional arguments are `body` (at most 1024), `largeImage` (an asset id),
+  `style`, `group`, `badge` (whole number 0-9999), `data`, `actions`, `progress`, `silent` and `ongoing`.
+  The `data` argument is JSON, at most 1 KiB, echoed in every event for the notification.
 - `notifications.cancel` takes `id`, `group` or `all: true`.
 - `notifications.setBadge` takes `count` (0-9999).
 
-| Argument     | Required | Constraint                                                      |
-| ------------ | -------- | --------------------------------------------------------------- |
-| `id`         | yes      | 1-128 characters                                                |
-| `channel`    | yes      | key-shaped channel id                                           |
-| `title`      | yes      | non-blank, at most 128                                          |
-| `body`       | no       | at most 1024                                                    |
-| `largeImage` | no       | asset id                                                        |
-| `style`      | no       | see style table below                                           |
-| `group`      | no       | —                                                               |
-| `badge`      | no       | whole number 0-9999                                             |
-| `data`       | no       | JSON, at most 1 KiB, echoed in every event for the notification |
-| `actions`    | no       | see below                                                       |
-| `progress`   | no       | see below                                                       |
-| `silent`     | no       | —                                                               |
-| `ongoing`    | no       | —                                                               |
-
-The `style` argument is discriminated by `type`:
-
-| `type`       | Fields                                                                                                      |
-| ------------ | ----------------------------------------------------------------------------------------------------------- |
-| `bigText`    | —                                                                                                           |
-| `bigPicture` | `image`                                                                                                     |
-| `inbox`      | 1-6 `lines`, optional `summary`                                                                             |
-| `messaging`  | `self`, optional `conversationTitle`, 1-7 `messages` of `{from?, text, image?}` (absent `from` is the user) |
-
-The `actions` argument holds 1-3 buttons of
+The `style` argument is discriminated by `type`: `bigText`,
+`bigPicture` with `image`, `inbox` with 1-6 `lines` and an optional `summary`, or `messaging`. A
+`messaging` style has `self`, an optional `conversationTitle` and 1-7 `messages` of
+`{from?, text, image?}`, where an absent `from` is the user. The `actions` argument holds 1-3 buttons of
 `{id, label, opensApp?, reply?: {placeholder?}}`, and `progress` is `{value: 0..1}` or
 `{indeterminate: true}`. The `post` and `setBadge` calls need `notifications` in `requires.permissions`;
 `cancel` does not. Events are `notifications.opened`, `.action`, `.reply` (marked sensitive, since it
@@ -267,16 +243,9 @@ advertise this module. The `permissions` module above supplies notification auth
 publishes its authorization key without advertising notification delivery calls.
 
 Channels come from a root `notifications` block,
-`{channels: [{id, name, importance, description?, showBadge?}]}`, holding 1-8 channels:
-
-| Field         | Constraint                        |
-| ------------- | --------------------------------- |
-| `id`          | unique, key-shaped                |
-| `name`        | non-blank, at most 64             |
-| `importance`  | `min`, `low`, `default` or `high` |
-| `description` | optional, at most 256             |
-
-The block needs `notifications` in `requires.platform`. A
+`{channels: [{id, name, importance, description?, showBadge?}]}`. It holds 1-8 channels with unique
+key-shaped ids, a non-blank `name` (at most 64), `importance` one of `min`, `low`, `default` or `high`,
+and an optional `description` (at most 256). The block needs `notifications` in `requires.platform`. A
 literal `channel` on `notifications.post` must name a declared channel, and a literal `actions` list
 needs unique ids. The `notifications.cancel` call takes exactly one of `id`, `group` or `all`; the
 runtime checks bound values. On iOS, `min` and `low` map to the passive interruption level and
@@ -285,16 +254,20 @@ runtime checks bound values. On iOS, `min` and `low` map to the passive interrup
 The bounds are named contract limits (`MAX_PROTOTYPE_NOTIFICATION_*`,
 `MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE`) that the call, state and channel rules repeat. Spec validation
 checks literal values only. The limits that apply after placeholders resolve belong to the device
-runtime that posts the notification. They are a reply of at most 1 KiB, a resolved notification of at
-most 5 KiB, and at most 4 updates per second per notification, coalesced to the latest. The per-prototype
-iOS Viewer is the only runtime that posts notifications; no other host posts one, so these limits are not
-enforced elsewhere.
+runtime that posts the notification. The per-prototype iOS Viewer is the only runtime that posts
+notifications; no other host posts one, so these limits are not enforced elsewhere.
+
+| Resolved limit | Value                                                          |
+| -------------- | -------------------------------------------------------------- |
+| Reply          | At most 1 KiB                                                  |
+| Notification   | At most 5 KiB                                                  |
+| Update rate    | At most 4 per second per notification, coalesced to the latest |
 
 The iOS Viewer posts local notifications under its own bundle identity and advertises both
 `prototype_platform_notifications_v1` and `prototype_platform_notifications_scheduled_v1`, so
 `notifications.schedule` specs pass preflight. It uses one request identifier per prototype and notification
 id, and cancels matching delivered and scheduled requests by id, group, or all. Pending requests reserve
-space in the active limit because iOS can deliver them while the Viewer is suspended. The module reports the
+space in the active limit, deliverable while the Viewer is suspended. The module reports the
 Viewer's authorization state. The launch delegate presents foreground notifications and routes taps, buttons
 and replies to the prototype, queuing cold-start responses until its event stream is ready. The injected
 agent directs specs that require notifications to the standalone Viewer.

@@ -429,7 +429,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
       deviceType: "emulator",
       apiLevel: 35,
     });
-    h.adb.setCommandResponse('install "/private/tmp/fake-ctrlproxy.apk"', {
+    h.adb.setCommandResponse('install -r "/private/tmp/fake-ctrlproxy.apk"', {
       stdout: "Success",
       stderr: "",
     } as ExecResult);
@@ -491,7 +491,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
         deviceType: "emulator",
         apiLevel: 35,
       });
-      h.adb.setCommandResponse('install "/private/tmp/fake-ctrlproxy.apk"', {
+      h.adb.setCommandResponse('install -r "/private/tmp/fake-ctrlproxy.apk"', {
         stdout: "Success",
         stderr: "",
       } as ExecResult);
@@ -499,7 +499,7 @@ describe("#12220 foreign CtrlProxy forward at DeviceReadiness readiness", () => 
       await expect(h.manager.ensureDeviceReady("android", h.device.deviceId)).resolves.toEqual(
         h.device,
       );
-      expect(h.adb.getExecutedCommands()).toContain('install "/private/tmp/fake-ctrlproxy.apk"');
+      expect(h.adb.getExecutedCommands()).toContain('install -r "/private/tmp/fake-ctrlproxy.apk"');
       expect(h.adb.getExecutedCommands()).toContain(
         "shell settings put secure accessibility_enabled 1",
       );

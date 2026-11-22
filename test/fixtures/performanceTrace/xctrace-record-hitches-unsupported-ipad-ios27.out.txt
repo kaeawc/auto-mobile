@@ -1,0 +1,7 @@
+Starting recording with the Animation Hitches template. Attaching to: Settings (41022). Time limit: 3.0 s
+Ctrl-C to stop the recording
+Run issues were detected (trace is still ready to be viewed):
+* [Error] Hitches is not supported on this platform.
+
+Recording completed. Saving output file...
+Output file saved as: hitches-att2.trace

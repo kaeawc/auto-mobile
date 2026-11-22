@@ -1,0 +1,7 @@
+Starting recording with the App Launch template. Launching process: com.apple.Preferences. 
+Ctrl-C to stop the recording
+Recording failed with errors. Saving output file...
+Output file saved as: Launch_com.apple.Preferences_2026-11-21_23.37.55_5200D56E.trace
+Run issues were detected (trace is still ready to be viewed):
+* [Error] Path not found 'com.apple.Preferences'
+

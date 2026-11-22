@@ -69,6 +69,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         var tracker = ForegroundTracker()
         var appSwitcherMayBeVisible = false
         private var gestureGeometry: ObservedGestureGeometry?
+        /// Window frames from the last multi-window observation (#18830).
+        var observedWindowFrames: ObservedWindowFrames?
 
         /// Reuse the last completed observation without XCUI reads on the legacy gesture path.
         var observedGestureGeometry: GestureCoordinateGeometry? {
@@ -360,10 +362,25 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                     windowFrame: { self.observedAppWindowFrame() }
                 )
             }
-            let windowedScreenFrame = windowTranslation.map { _ in
-                springBoardScreenFrame() ?? CGRect(
-                    x: 0, y: 0, width: screenMetrics.fallbackWidth, height: screenMetrics.fallbackHeight
+            // An iPad window tiled at the screen origin needs no translation but is still inset,
+            // and other app windows can share the screen with it (#18830).
+            let fallbackScreenFrame = CGRect(
+                x: 0, y: 0, width: screenMetrics.fallbackWidth, height: screenMetrics.fallbackHeight
+            )
+            func isInset(in screen: CGRect) -> Bool {
+                hasMultiPanelMismatch(
+                    app: GestureSize(width: Double(snapshot.frame.width), height: Double(snapshot.frame.height)),
+                    screen: GestureSize(width: Double(screen.width), height: Double(screen.height))
                 )
+            }
+            let mayBeInsetPadWindow = panel == nil && bundleId != "com.apple.springboard"
+                && UIDevice.current.userInterfaceIdiom == .pad && isInset(in: fallbackScreenFrame)
+            let windowedScreenFrame: CGRect? = windowTranslation != nil || mayBeInsetPadWindow
+                ? tracked("screenFrame") { springBoardScreenFrame() } ?? fallbackScreenFrame
+                : nil
+            // UIScreen bounds can be stale (#2683): confirm a tile at the origin against SpringBoard.
+            let insetScreenFrame = windowTranslation != nil ? windowedScreenFrame : windowedScreenFrame.flatMap {
+                isInset(in: $0) ? $0 : nil
             }
 
             // Build hierarchy from snapshot (no more IPC calls - all data is local)
@@ -376,7 +393,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                     truncationReasons: &truncationReasons,
                     keyboardFocus: keyboardFocus,
                     disableAllFiltering: disableAllFiltering,
-                    keyboardScreenBounds: windowedScreenFrame,
+                    keyboardScreenBounds: insetScreenFrame,
                     rootChildFilter: panel.map { selected in
                         { Self.displayId(of: $0) == selected.displayId }
                     }
@@ -479,15 +496,37 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 screenSpaceHierarchy = rootElement
             }
 
-            let finalHierarchy = windowedScreenFrame.map {
-                Self.withRootBounds(screenSpaceHierarchy, ElementBounds(clamping: $0))
+            let windowBounds = ElementBounds(
+                clamping: windowTranslation.map { frame.offsetBy(dx: $0.x, dy: $0.y) } ?? frame
+            )
+            let backgroundWindows = insetScreenFrame.map { screenFrame in
+                tracked("backgroundWindows") {
+                    backgroundAppWindows(
+                        focusedBundleId: bundleId,
+                        focusedFrame: windowBounds,
+                        screenFrame: screenFrame,
+                        truncationReasons: &truncationReasons,
+                        disableAllFiltering: disableAllFiltering
+                    )
+                }
+            } ?? []
+            observedWindowFrames = backgroundWindows.isEmpty ? nil : ObservedWindowFrames(
+                focused: windowBounds,
+                background: backgroundWindows.map { (bundleId: $0.bundleId, frame: $0.frame) }
+            )
+            let finalHierarchy = insetScreenFrame.map {
+                Self.withRootBounds(
+                    Self.mergingBackgroundWindows(backgroundWindows, into: screenSpaceHierarchy),
+                    ElementBounds(clamping: $0)
+                )
             } ?? screenSpaceHierarchy
             let windowInfo = WindowInfo(
                 id: 0,
                 type: 1, // Application window
                 isActive: true,
                 isFocused: true,
-                bounds: ElementBounds(clamping: windowTranslation.map { frame.offsetBy(dx: $0.x, dy: $0.y) } ?? frame)
+                bounds: windowBounds,
+                packageName: backgroundWindows.isEmpty ? nil : bundleId
             )
 
             // Get screen scale and dimensions for coordinate conversion
@@ -541,7 +580,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 fallbackWidth: currentScreenMetrics.fallbackWidth,
                 fallbackHeight: currentScreenMetrics.fallbackHeight,
                 // A windowed app's nodes say nothing about the screen frame read above.
-                elements: windowTranslation == nil ? finalHierarchy.node ?? [] : []
+                elements: insetScreenFrame == nil ? finalHierarchy.node ?? [] : []
             )
             let pixelDimensions = ElementLocator.computePixelDimensions(
                 pointWidth: screenWidth,
@@ -579,7 +618,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 packageName: bundleId,
                 hierarchy: finalHierarchy,
                 windowInfo: windowInfo,
-                windows: [windowInfo],
+                windows: Self.windowInfos(focused: windowInfo, background: backgroundWindows),
                 screenScale: currentScreenMetrics.scale,
                 screenWidth: screenWidth,
                 screenHeight: screenHeight,

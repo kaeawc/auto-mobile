@@ -175,6 +175,8 @@ export interface SetDisplayConfigInput extends AccessibilityDisplayValues, Displ
   factory?: boolean;
 }
 
+type ShellRead = { stdout: string; stderr: string };
+
 /** Process-lifetime baseline for the first night-mode value this tool replaces. */
 export interface ThemeBaselineStore {
   get(deviceId: string): DisplayTheme | undefined;
@@ -873,10 +875,8 @@ export class DisplayConfig {
       this.run(adb, "shell wm density", "density"),
       this.run(adb, "shell cmd uimode night", "night mode"),
     ]);
-    const fontRaw = font.stdout;
-    const densityRaw = density.stdout;
-    const parsedDensity = parseWmDensity(densityRaw);
-    const fontScaleSnapshot = parseFontScaleSnapshot(fontRaw);
+    const parsedDensity = parseWmDensity(density.stdout);
+    const fontScaleSnapshot = parseFontScaleSnapshot(font.stdout);
     const theme = parseNightMode(night.stdout);
     const unreadable: string[] = [];
     if (fontScaleSnapshot === undefined) {
@@ -885,7 +885,6 @@ export class DisplayConfig {
     if (parsedDensity.effective === undefined) {
       unreadable.push("display density");
     }
-    // API 24 prints the unsupported message to stderr with empty stdout; API 25 to stdout.
     if (theme === undefined && !isNightModeUnsupported(night.stdout, night.stderr)) {
       unreadable.push("night mode");
     }
@@ -1033,15 +1032,9 @@ export class DisplayConfig {
    * Read a command's output, rejecting shell-reported failures rather than
    * fabricating a restoration baseline from partial output.
    */
-  private async run(
-    adb: AdbExecutor,
-    command: string,
-    setting: string,
-  ): Promise<{ stdout: string; stderr: string }> {
+  private async run(adb: AdbExecutor, command: string, setting: string): Promise<ShellRead> {
     try {
-      const result = await adb.executeCommand(command, { noRetry: true });
-      const stdout = result.stdout;
-      const stderr = result.stderr ?? "";
+      const { stdout, stderr = "" } = await adb.executeCommand(command, { noRetry: true });
       if (outputLooksLikeShellFailure(stdout, stderr)) {
         throw new Error(`'${command}' reported: ${`${stdout} ${stderr}`.trim()}`);
       }

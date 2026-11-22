@@ -30,14 +30,43 @@ enum PrototypePermissionOutcome: Sendable {
 }
 
 @MainActor
-protocol PrototypeNotificationAuthorizationSource: AnyObject {
+protocol PrototypePermissionAuthority {
     func status() async -> PrototypePermissionState
+    func request() async -> PrototypePermissionOutcome
+    /// Releases pending requests and resources. Later reads may restart the authority.
+    func stop()
+}
+
+@MainActor
+protocol PrototypeNotificationAuthorizationSource: AnyObject, PrototypePermissionAuthority {
     /// Prompts only if still notDetermined and returns a fresh settings reading, never the grant Bool.
     func request(provisional: Bool) async -> PrototypePermissionOutcome
     /// Foreground signals; the module owns status reads and their ordering against request results.
     var changes: AsyncStream<Void> { get }
-    /// Releases observations and pending requests. Later reads may restart observation.
-    func stop()
+}
+
+extension PrototypeNotificationAuthorizationSource {
+    func request() async -> PrototypePermissionOutcome { await request(provisional: false) }
+}
+
+@MainActor
+private struct UsageKeyPermissionAuthority: PrototypePermissionAuthority {
+    let authority: any PrototypePermissionAuthority
+    let available: Bool
+
+    func status() async -> PrototypePermissionState {
+        guard available else { return .unavailable }
+        return await authority.status()
+    }
+
+    func request() async -> PrototypePermissionOutcome {
+        guard available else { return .status(.unavailable) }
+        return await authority.request()
+    }
+
+    func stop() {
+        if available { authority.stop() }
+    }
 }
 
 @MainActor
@@ -46,6 +75,8 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
     let capability = "prototype_platform_permissions_v1"
     let requiredInfoPlistKeys: [String] = []
     private let source: any PrototypeNotificationAuthorizationSource
+    private let authorities: [String: any PrototypePermissionAuthority]
+    private let observedNames: [String]
     private var values: [String: JSONValue] = [:]
     private(set) var observation: Task<Void, Never>?
     private var generation = 0
@@ -56,7 +87,24 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
     private var subscribers: [Int: AsyncStream<PlatformEvent>.Continuation] = [:]
     private var nextSubscriber = 0
 
-    init(source: any PrototypeNotificationAuthorizationSource) { self.source = source }
+    init(
+        source: any PrototypeNotificationAuthorizationSource,
+        authorities: [String: any PrototypePermissionAuthority] = [:],
+        bundle: any PrototypeBundleReader = PrototypeMainBundleReader()
+    ) {
+        self.source = source
+        var registered: [String: any PrototypePermissionAuthority] = ["notifications": source]
+        for (name, authority) in authorities where name != "notifications" {
+            registered[name] = UsageKeyPermissionAuthority(
+                authority: authority,
+                available: PrototypePlatformPermissions.hasRequiredUsageKey(for: name) {
+                    bundle.containsInfoPlistKey($0)
+                }
+            )
+        }
+        self.authorities = registered
+        observedNames = registered.keys.sorted()
+    }
 
     var state: [String: JSONValue] {
         start()
@@ -112,7 +160,7 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
         observation?.cancel()
         observation = nil
         if let pending { finish(pending.id, .failure(.cancelled, "Permission request cancelled")) }
-        source.stop()
+        authorities.values.forEach { $0.stop() }
         subscribers.values.forEach { $0.finish() }
         subscribers.removeAll()
         values.removeAll()
@@ -122,27 +170,36 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
         guard observation == nil else { return }
         let session = generation
         let changes = source.changes
-        observation = Task { [weak self, source] in
-            guard let sequence = self?.permissionSequences["notifications", default: 0] else { return }
-            let initial = await source.status()
-            // Generation owns late reads across stop/restart; stop also cancels this task.
-            guard let self, session == generation else { return }
-            if sequence == permissionSequences["notifications", default: 0] { initialize(initial) }
+        observation = Task { [weak self] in
+            await self?.refresh(session: session, initial: true)
             for await _ in changes {
-                guard !Task.isCancelled, session == generation else { return }
-                let sequence = permissionSequences["notifications", default: 0]
-                let state = await source.status()
-                guard !Task.isCancelled, session == generation else { return }
-                guard sequence == permissionSequences["notifications", default: 0] else { continue }
-                publish("notifications", state)
+                guard !Task.isCancelled, let self else { return }
+                await refresh(session: session, initial: false)
             }
         }
     }
 
-    private func initialize(_ state: PrototypePermissionState) {
+    private func refresh(session: Int, initial: Bool) async {
+        for name in observedNames {
+            guard !Task.isCancelled, session == generation, let authority = authorities[name] else { return }
+            let sequence = permissionSequences[name, default: 0]
+            let state = await authority.status()
+            // Generation owns late reads across stop/restart; stop also cancels the observation task.
+            guard session == generation else { return }
+            if !initial, Task.isCancelled { return }
+            guard sequence == permissionSequences[name, default: 0] else { continue }
+            if initial {
+                initialize(name, state)
+            } else {
+                publish(name, state)
+            }
+        }
+    }
+
+    private func initialize(_ name: String, _ state: PrototypePermissionState) {
         // The framework reads asynchronously. The first reading is a baseline, not a change.
-        values["notifications"] = .string(state.rawValue)
-        subscribers.values.forEach { $0.yield(.stateRefresh(name)) }
+        values[name] = .string(state.rawValue)
+        subscribers.values.forEach { $0.yield(.stateRefresh(self.name)) }
     }
 
     private func perform(_ call: PlatformCall, id: Int) async -> PlatformCallResult {
@@ -153,9 +210,10 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
                 return .failure(.cancelled, "Permission request cancelled")
             }
             let outcome: PrototypePermissionOutcome
-            if name == "notifications" {
-                outcome = await notificationRequest(
-                    id: id, provisional: call.args["options"]?.objectFields?["provisional"] == .bool(true)
+            if let authority = authorities[name] {
+                outcome = await request(
+                    name, from: authority, id: id,
+                    provisional: call.args["options"]?.objectFields?["provisional"] == .bool(true)
                 )
             } else { outcome = .status(.unavailable) }
             guard active(id) else { return .failure(.cancelled, "Permission request cancelled") }
@@ -173,15 +231,23 @@ final class PrototypePermissionsModule: PrototypePlatformModule {
         return .success(.object(["results": .object(results)]))
     }
 
-    private func notificationRequest(id: Int, provisional: Bool) async -> PrototypePermissionOutcome {
-        let current = await source.status()
-        guard active(id) else { return .cancelled }
-        if values["notifications"] == nil {
-            // A request can establish the baseline before the initial read, even if prompting fails.
-            permissionSequences["notifications", default: 0] += 1
-            initialize(current)
+    private func request(
+        _ name: String, from authority: any PrototypePermissionAuthority, id: Int, provisional: Bool
+    )
+        async -> PrototypePermissionOutcome
+    {
+        if name == "notifications" || values[name] == nil {
+            let current = await authority.status()
+            guard active(id) else { return .cancelled }
+            if values[name] == nil {
+                // A request can establish the baseline before the initial read, even if prompting fails.
+                permissionSequences[name, default: 0] += 1
+                initialize(name, current)
+            }
+            if name == "notifications", current != .notDetermined { return .status(current) }
         }
-        return current == .notDetermined ? await source.request(provisional: provisional) : .status(current)
+        if name == "notifications" { return await source.request(provisional: provisional) }
+        return await authority.request()
     }
 
     private func active(_ id: Int) -> Bool { !Task.isCancelled && pending?.id == id }

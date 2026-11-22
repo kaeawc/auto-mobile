@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
-import { VideoStreamSocketServer } from "../../src/daemon/videoStreamSocketServer";
+import { VideoStreamSocketServer } from "../../src/daemon/streams/videoStreamSocketServer";
 import { BaseSocketServer } from "../../src/daemon/socketServer/BaseSocketServer";
-import type { StreamSocketAuthenticator } from "../../src/daemon/streamSocketAuth";
+import type { StreamSocketAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
 import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSource";
 import type { BootedDevice } from "../../src/models";
 import { FakeSocket } from "../fakes/FakeNetServer";

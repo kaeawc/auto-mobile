@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { VideoRecordingSocketServer } from "../../src/daemon/videoRecordingSocketServer";
-import type { StreamSocketAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { VideoRecordingSocketServer } from "../../src/daemon/streams/videoRecordingSocketServer";
+import type { StreamSocketAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
 import type { VideoRecordingConfig, VideoRecordingConfigInput } from "../../src/models";
 import { ActionableError } from "../../src/models";
 

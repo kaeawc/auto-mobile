@@ -36,7 +36,7 @@ import { ForcedRestartBudget } from "../../../../src/ctrlProxy/ForcedRestartBudg
 import {
   DeviceDataStreamSocketServer,
   installDeviceDataStreamSocketServerForTesting,
-} from "../../../../src/daemon/deviceDataStreamSocketServer";
+} from "../../../../src/daemon/streams/deviceDataStreamSocketServer";
 import { SimCtlClient } from "../../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { DevicectlPanelScreenshotSource } from "../../../../src/utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";

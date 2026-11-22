@@ -15,7 +15,7 @@ import { iosDevice } from "./takeScreenshotTestHelpers";
 import {
   DeviceDataStreamSocketServer,
   installDeviceDataStreamSocketServerForTesting,
-} from "../../../src/daemon/deviceDataStreamSocketServer";
+} from "../../../src/daemon/streams/deviceDataStreamSocketServer";
 import { loadSharp } from "../../../src/utils/image/loadSharp";
 
 const defaultGetInstance = IOSCtrlProxyClient.getInstance;

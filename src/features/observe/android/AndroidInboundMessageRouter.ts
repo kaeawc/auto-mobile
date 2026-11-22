@@ -10,7 +10,7 @@ import { deriveSdkNavigationScreenIdentity } from "../sdkScreenIdentity";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
-import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "../../../daemon/streams/deviceDataStreamSocketServer";
 import {
   ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
   metadataForScreenshotFormat,

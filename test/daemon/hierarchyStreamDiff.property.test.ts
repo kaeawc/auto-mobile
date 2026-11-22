@@ -3,7 +3,7 @@ import fc from "fast-check";
 import {
   annotateHierarchyDiff,
   HIERARCHY_DIFF_STATE_KEY,
-} from "../../src/daemon/hierarchyStreamDiff";
+} from "../../src/daemon/streams/hierarchyStreamDiff";
 import type {
   NodeAttributes,
   ViewHierarchyNode,

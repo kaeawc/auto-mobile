@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import {
   PerformanceStreamSocketServer,
   type PerformanceStreamRepository,
-} from "../../src/daemon/performanceStreamSocketServer";
+} from "../../src/daemon/streams/performanceStreamSocketServer";
 import type {
   PerformanceStreamSocketRequest,
   PerformanceStreamSocketResponse,
-} from "../../src/daemon/performanceStreamSocketTypes";
+} from "../../src/daemon/streams/performanceStreamSocketTypes";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { performanceStreamResponseFrameSchema } from "../helpers/wireMessageSchemas";

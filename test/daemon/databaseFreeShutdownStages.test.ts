@@ -14,11 +14,11 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { BaseSocketServer } from "../../src/daemon/socketServer/BaseSocketServer";
-import type { StreamSocketAuthenticator } from "../../src/daemon/streamSocketAuth";
+import type { StreamSocketAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
 import {
   VideoStreamSocketServer,
   setVideoStreamSocketServerForTesting,
-} from "../../src/daemon/videoStreamSocketServer";
+} from "../../src/daemon/streams/videoStreamSocketServer";
 import * as databaseIndexModule from "../../src/db";
 import * as databaseModule from "../../src/db/database";
 import * as dbWriteBarrierModule from "../../src/db/dbWriteBarrier";

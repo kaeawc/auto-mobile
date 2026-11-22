@@ -1,4 +1,4 @@
-import { DEFAULT_THRESHOLDS } from "../../daemon/performancePushSocketServer";
+import { DEFAULT_THRESHOLDS } from "../../daemon/streams/performancePushSocketServer";
 import type { FrameTimePercentiles, MemoryBreakdownMb } from "../../models/PerfSnapshot";
 import type { MonitoredDevice, PerformanceMonitor } from "./PerformanceMonitor";
 import type { SdkFrameSample } from "./SdkFrameMetricsStore";

@@ -70,7 +70,9 @@ class FakeInstallerHost implements AndroidCtrlProxyApkInstallerHost {
     this.ownershipReads++;
   }
   clearAvailabilityCache(): void {}
-  async executeApkStage(): Promise<ExecResult> {
+  readonly stageCommands: string[] = [];
+  async executeApkStage(command?: string): Promise<ExecResult> {
+    this.stageCommands.push(command ?? "");
     this.events.push("install");
     this.attempts++;
     this.onExecute?.();
@@ -157,6 +159,15 @@ describe("CtrlProxy install settling and retries", () => {
     await expect(installer.install("/fake/control-proxy.apk")).rejects.toBe(failure);
     expect(host.attempts).toBe(1);
   });
+
+  test.each(["phone", "automotive"] as const)(
+    "%s install replaces an installed package with -r (#18980)",
+    async (kind) => {
+      const { host, installer } = fixture(kind);
+      await installer.install("/fake/control-proxy.apk");
+      expect(host.stageCommands).toEqual(['install -r "/fake/control-proxy.apk"']);
+    },
+  );
 
   test("device-level errors are never retried", async () => {
     const { host, installer } = fixture();

@@ -61823,6 +61823,14 @@
         "error": {
           "type": "string"
         },
+        "retryable": {
+          "description": "True when the failure is transient and the same call can be retried",
+          "type": "boolean"
+        },
+        "hierarchyUnavailableReason": {
+          "description": "Set when no view hierarchy read during the search was usable (e.g. service_recovering), so the element could not be looked up",
+          "type": "string"
+        },
         "pinnedDisplay": {
           "type": "object",
           "properties": {

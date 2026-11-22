@@ -6,14 +6,22 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
 import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
+import dev.jasonpearson.automobile.protocol.PrototypeCardNode
+import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
 import dev.jasonpearson.automobile.protocol.PrototypeCornerRadius
 import dev.jasonpearson.automobile.protocol.PrototypeFullscreenPlacement
 import dev.jasonpearson.automobile.protocol.PrototypeGlass
+import dev.jasonpearson.automobile.protocol.PrototypeListNode
 import dev.jasonpearson.automobile.protocol.PrototypeModeValue
+import dev.jasonpearson.automobile.protocol.PrototypeRepeat
 import dev.jasonpearson.automobile.protocol.PrototypeSpacerNode
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeStyle
 import dev.jasonpearson.automobile.protocol.PrototypeWindow
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -110,5 +118,109 @@ class PrototypeGlassBackdropTest {
       listOf(outerBackdrop.identity, innerBackdrop.identity),
       layers.sourceOrder.entries.sortedBy { it.value }.map { it.key },
     )
+  }
+
+  @Test
+  @Config(sdk = [33])
+  fun `glass only inside lazy list rows still registers layers for each row`() {
+    val root =
+      mapPrototypeSpec(
+          PrototypeSpec(
+            "glass-rows",
+            PrototypeWindow(PrototypeFullscreenPlacement()),
+            data =
+              buildJsonObject {
+                putJsonArray("items") {
+                  listOf("a", "b").forEach { id -> addJsonObject { put("id", id) } }
+                }
+              },
+            root =
+              PrototypeColumnNode(
+                children =
+                  listOf(
+                    PrototypeListNode(
+                      repeat = PrototypeRepeat(emptyList(), "it", "/items", "id"),
+                      children =
+                        listOf(
+                          PrototypeBoxNode(
+                            children =
+                              listOf(
+                                PrototypeSpacerNode(),
+                                PrototypeSpacerNode(style = PrototypeStyle(surface = "glass")),
+                              ),
+                          ),
+                        ),
+                    ),
+                  ),
+              ),
+          ),
+        )
+        .root
+    val list = root.children.single()
+    assertTrue(list.children.isEmpty())
+    val model = checkNotNull(list.list)
+    val (first, second) = model.rows.mapIndexed { index, item -> model.render(item, index) }
+    val layers = checkNotNull(prototypeGlassLayers(root, HazeState()))
+    val (firstBackdrop, firstGlass) = first.children
+    val (secondBackdrop, secondGlass) = second.children
+    assertEquals(setOf(firstBackdrop.identity), layers.behind[firstGlass.identity])
+    // A later row samples earlier rows like any later sibling, never itself or later rows.
+    assertEquals(
+      setOf(first.identity, secondBackdrop.identity),
+      layers.behind[secondGlass.identity],
+    )
+    assertEquals(2, layers.behind.size)
+    assertTrue(firstBackdrop.identity in layers.sourceOrder)
+    assertTrue(first.identity in layers.sourceOrder)
+  }
+
+  @Test
+  fun `lazy list rows without glass are not mapped for glass layers`() {
+    val root =
+      mapPrototypeSpec(
+          PrototypeSpec(
+            "plain-rows",
+            PrototypeWindow(PrototypeFullscreenPlacement()),
+            data = buildJsonObject { putJsonArray("items") { addJsonObject { put("id", "a") } } },
+            root =
+              PrototypeListNode(
+                repeat = PrototypeRepeat(emptyList(), "it", "/items", "id"),
+                children = listOf(PrototypeSpacerNode()),
+              ),
+          ),
+        )
+        .root
+    assertNull(prototypeGlassLayers(root, HazeState()))
+  }
+
+  @Test
+  fun `a root card without a cornerRadius backs onto Material's default card shape`() {
+    fun shape(root: dev.jasonpearson.automobile.protocol.PrototypeNode) =
+      prototypeRootBackdropShape(
+        mapPrototypeSpec(
+          PrototypeSpec("card", PrototypeWindow(PrototypeFullscreenPlacement()), root = root),
+        ),
+      )
+    val shapes = androidx.compose.material3.Shapes()
+    assertEquals(shapes.medium, shape(PrototypeCardNode(children = listOf(PrototypeSpacerNode()))))
+    assertEquals(
+      RoundedCornerShape(18.dp),
+      shape(
+        PrototypeCardNode(
+          style = PrototypeStyle(cornerRadius = PrototypeCornerRadius.Dp(18.0)),
+          children = listOf(PrototypeSpacerNode()),
+        ),
+      ),
+    )
+    assertEquals(
+      RoundedCornerShape(percent = 50),
+      shape(
+        PrototypeCardNode(
+          style = PrototypeStyle(surface = "glass"),
+          children = listOf(PrototypeSpacerNode()),
+        ),
+      ),
+    )
+    assertEquals(RectangleShape, shape(PrototypeBoxNode(children = listOf(PrototypeSpacerNode()))))
   }
 }

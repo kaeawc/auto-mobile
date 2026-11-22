@@ -62,7 +62,7 @@ jobs:
       version_code: ${{ steps.resolve.outputs.version_code }}
     steps:
       - name: "Checkout code"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           persist-credentials: false
@@ -114,13 +114,13 @@ jobs:
     environment: google-play-internal
     steps:
       - name: "Checkout code"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           persist-credentials: false
 
       - name: "Download ProtoViewer AAB"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: protoviewer-aab
           path: /tmp/protoviewer-aab
@@ -160,7 +160,7 @@ jobs:
     environment: google-play-release
     steps:
       - name: "Checkout code"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           persist-credentials: false
@@ -185,7 +185,7 @@ jobs:
     environment: google-play-release
     steps:
       - name: "Checkout code"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           persist-credentials: false
@@ -211,7 +211,7 @@ jobs:
     environment: google-play-release
     steps:
       - name: "Checkout code"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           persist-credentials: false

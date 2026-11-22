@@ -1,0 +1,124 @@
+import {
+  createDefaultStreamSocketAuthenticator,
+  type StreamSocketAuthenticator,
+} from "./streamSocketAuth";
+import { SocketServerSingleton } from "../socketServerSingleton";
+import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { RequestResponseSocketServer, getSocketPath } from "../socketServer/index";
+import { PerformanceAuditRepository } from "../../db/performanceAuditRepository";
+import {
+  PerformanceStreamSocketRequest,
+  PerformanceStreamSocketResponse,
+} from "./performanceStreamSocketTypes";
+import { PERFORMANCE_STREAM_SOCKET_CONFIG } from "../daemonFiles";
+import {
+  normalizeStreamLimit,
+  normalizeStreamSinceId,
+  normalizeStreamTimestampIso,
+} from "./streamQueryNormalizers";
+
+const DEFAULT_LIMIT = 200;
+
+/**
+ * Narrow view of {@link PerformanceAuditRepository} — exactly the query method the
+ * handler calls. Injected via the constructor so tests can exercise the request
+ * handler with a fake and never resolve the real file-backed database (issue #3067).
+ */
+export type PerformanceStreamRepository = Pick<PerformanceAuditRepository, "listResultsSince">;
+
+/**
+ * Socket server for performance stream polling.
+ * Handles poll command to retrieve performance audit results.
+ */
+export class PerformanceStreamSocketServer extends RequestResponseSocketServer<
+  PerformanceStreamSocketRequest,
+  PerformanceStreamSocketResponse
+> {
+  private readonly authenticator: StreamSocketAuthenticator;
+
+  private readonly auditRepository: PerformanceStreamRepository;
+
+  constructor(
+    socketPath: string = getSocketPath(PERFORMANCE_STREAM_SOCKET_CONFIG),
+    timer: Timer = defaultTimer,
+    auditRepository: PerformanceStreamRepository = new PerformanceAuditRepository(),
+    options: { authenticator?: StreamSocketAuthenticator } = {},
+  ) {
+    super(socketPath, timer, "PerformanceStream");
+    this.auditRepository = auditRepository;
+    this.authenticator =
+      options.authenticator ??
+      createDefaultStreamSocketAuthenticator("performanceStream", { allowObserverSessions: true });
+  }
+
+  protected async handleRequest(
+    request: PerformanceStreamSocketRequest,
+  ): Promise<PerformanceStreamSocketResponse> {
+    this.authenticator.authorize({
+      sessionUuid: typeof request.sessionUuid === "string" ? request.sessionUuid : undefined,
+      deviceId: request.deviceId?.trim() || undefined,
+    });
+
+    if (request.command !== "poll") {
+      throw new Error(`Unsupported performance stream command: ${String(request.command)}`);
+    }
+
+    const query = this.createPollQuery(request);
+    const { sinceTimestamp, sinceId } = query;
+    const results = await this.auditRepository.listResultsSince(query);
+
+    const last = results.length > 0 ? results[results.length - 1] : undefined;
+
+    return {
+      success: true,
+      results,
+      lastTimestamp: last?.timestamp ?? sinceTimestamp,
+      lastId: last?.id ?? sinceId,
+    };
+  }
+
+  private createPollQuery(
+    request: PerformanceStreamSocketRequest,
+  ): Parameters<PerformanceStreamRepository["listResultsSince"]>[0] {
+    const startTime = normalizeStreamTimestampIso(request.startTime, "startTime");
+    const endTime = normalizeStreamTimestampIso(request.endTime, "endTime");
+    const sinceTimestamp = normalizeStreamTimestampIso(request.sinceTimestamp, "sinceTimestamp");
+    const sinceId = normalizeStreamSinceId(request.sinceId);
+    const limit = normalizeStreamLimit(request.limit, DEFAULT_LIMIT);
+
+    return {
+      startTime,
+      endTime,
+      limit,
+      deviceId: request.deviceId?.trim() || undefined,
+      sessionId: request.sessionId?.trim() || undefined,
+      packageName: request.packageName?.trim() || undefined,
+      sinceTimestamp,
+      sinceId,
+    };
+  }
+
+  protected createErrorResponse(
+    _id: string | undefined,
+    error: string,
+  ): PerformanceStreamSocketResponse {
+    return {
+      success: false,
+      error,
+    };
+  }
+}
+
+const socketServer = new SocketServerSingleton<PerformanceStreamSocketServer>();
+
+export function getPerformanceStreamSocketPath(): string {
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(PERFORMANCE_STREAM_SOCKET_CONFIG);
+}
+
+export async function startPerformanceStreamSocketServer(): Promise<void> {
+  await socketServer.start(() => new PerformanceStreamSocketServer());
+}
+
+export async function stopPerformanceStreamSocketServer(): Promise<void> {
+  await socketServer.stop();
+}

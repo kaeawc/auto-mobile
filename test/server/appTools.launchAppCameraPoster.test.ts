@@ -24,7 +24,7 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { toolJson } from "../helpers/toolResponse";
 import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
-import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streams/streamDeviceLifecycleEvents";
 
 isolateToolRegistry();
 const simulator: BootedDevice = {

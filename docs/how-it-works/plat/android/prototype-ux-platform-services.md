@@ -10,10 +10,18 @@ read-only keys `/platform/commerce/entitlements` and `/platform/commerce/lastTra
 No argument carries an amount, merchant, key or card: prices come only from the catalog.
 
 The root `commerce` catalog (needs `commerce` in `requires.platform`) is `{backend: "fake", products}` with 1 to
-32 products. Each product has a unique `id` (an identifier), a `title`, a `kind` (`consumable`, `nonConsumable`
-or `subscription`) and a `price`. The price has a decimal-string `amount` (up to two decimal places) and an
-upper-case three-letter `currency`. Only a subscription may have a `period` or `trialPeriod`, an ISO 8601 duration of
-whole days, weeks, months or years (`P7D`, `P1M`). The block has no merchant, gateway, key, card or URL field.
+32 products. Each product has:
+
+| Field | Constraint |
+| --- | --- |
+| `id` | unique identifier |
+| `title` | — |
+| `kind` | `consumable`, `nonConsumable` or `subscription` |
+| `price.amount` | decimal string, up to two decimal places |
+| `price.currency` | upper-case three-letter code |
+| `period` / `trialPeriod` | subscription only; ISO 8601 duration of whole days, weeks, months or years (`P7D`, `P1M`) |
+
+The block has no merchant, gateway, key, card or URL field.
 Every `commerce.*` call needs the catalog, and a literal `productId` must name one of its products.
 The contract has no `commerce.checkout`, and no production runtime advertises the module.
 
@@ -31,7 +39,7 @@ The store records every result as `lastTransaction`, but only `purchased` grants
 records `declined`. Simulated `entitlementsChanged` events work on a subscription the user holds. The
 `renew` event sets it `active`, and `gracePeriod` and `billingRetry` set those states. The `expire` and
 `refund` events remove an entitlement and also apply to a non-consumable. The module raises
-`commerce.entitlementsChanged` only when the entitlements actually change.
+`commerce.entitlementsChanged` only when the entitlements change.
 
 **Secure storage (#14321).** `storage.secure` lists up to eight declared string `state:` keys,
 separate from `storage.keys`. It requires `secureStorage` in `requires.platform` and
@@ -60,9 +68,18 @@ refuses state bindings and text placeholders in URLs, headers, query values and 
 
 **Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
 event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
-exactly one `/<module>/<key>`. The keys are `pitchDeg` and `rollDeg` (whole degrees, -180 to 180), `headingDeg` (0 to 359),
-`steps` (counted since the subscription started), `proximityNear` (boolean) and `lightLux` (whole lux, Android
-only). There is no public ambient-light API on iOS. A sensor the device lacks leaves its key absent, so it compares as
+exactly one `/<module>/<key>`. The keys are:
+
+| Key | Type / range |
+| --- | --- |
+| `pitchDeg` | whole degrees, -180 to 180 |
+| `rollDeg` | whole degrees, -180 to 180 |
+| `headingDeg` | whole degrees, 0 to 359 |
+| `steps` | counted since the subscription started |
+| `proximityNear` | boolean |
+| `lightLux` | whole lux, Android only (no public ambient-light API on iOS) |
+
+A sensor the device lacks leaves its key absent, so it compares as
 missing. The runtimes copy whole-unit rounding from `prototypeSensorReference.ts`. Continuous values use per-key
 throttling at `1000 / rateHz` ms (`rateHz` 1 to 30). A shake needs 2.7 g or more with a 1000 ms cooldown.
 On iOS, every distinct proximity change publishes immediately; identical consecutive values are ignored.
@@ -145,7 +162,9 @@ sound and badge options only while authorization is `notDetermined`; `options.pr
 provisional authorization without showing a prompt. It then re-reads notification settings
 for its result. Outside an app bundle with a bundle
 identifier, the source returns `unavailable` without accessing UserNotifications. No Info.plist key is
-required. One request may be in flight per module; a second returns `too_many_in_flight`. Request
+required.
+
+One request may be in flight per module; a second returns `too_many_in_flight`. Request
 cancellation drops the late result while foreground observation stays active. The registry stops
 observation when its final observer releases it. Permission requests have no platform-call deadline,
 including an explicit `timeoutMs`; `statusKey` stays `loading` until a result or cancellation.
@@ -153,7 +172,6 @@ The same state is published at `/platform/notifications/authorization`, includin
 foreground re-reads, and cleared on stop. An authorization-only binding declares `notifications` in
 `requires.platform` and `requires.permissions` and uses the permissions capability on iOS.
 Other notification state, calls and handlers require the notifications capability.
-Provisional authorization reads as `limited`.
 
 | iOS `UNAuthorizationStatus` | State           |
 | --------------------------- | --------------- |
@@ -206,17 +224,36 @@ notGrantableOnSimulator and for an Android `photosAdd` denial (`notRevocable`).
 **Notifications (#14280).** The `notifications` module (`prototype_platform_notifications_v1`) has three
 calls:
 
-- `notifications.post` takes `id` (1-128 characters), `channel` (a key-shaped channel id) and `title`
-  (non-blank, at most 128). Its optional arguments are `body` (at most 1024), `largeImage` (an asset id),
-  `style`, `group`, `badge` (whole number 0-9999), `data`, `actions`, `progress`, `silent` and `ongoing`.
-  The `data` argument is JSON, at most 1 KiB, echoed in every event for the notification.
+- `notifications.post` takes the arguments below.
 - `notifications.cancel` takes `id`, `group` or `all: true`.
 - `notifications.setBadge` takes `count` (0-9999).
 
-The `style` argument is discriminated by `type`, like every other union in the spec. It is `bigText`,
-`bigPicture` with `image`, `inbox` with 1-6 `lines` and an optional `summary`, or `messaging`. A
-`messaging` style has `self`, an optional `conversationTitle` and 1-7 `messages` of
-`{from?, text, image?}`, where an absent `from` is the user. The `actions` argument holds 1-3 buttons of
+| Argument | Required | Constraint |
+| --- | --- | --- |
+| `id` | yes | 1-128 characters |
+| `channel` | yes | key-shaped channel id |
+| `title` | yes | non-blank, at most 128 |
+| `body` | no | at most 1024 |
+| `largeImage` | no | asset id |
+| `style` | no | see style table below |
+| `group` | no | — |
+| `badge` | no | whole number 0-9999 |
+| `data` | no | JSON, at most 1 KiB, echoed in every event for the notification |
+| `actions` | no | see below |
+| `progress` | no | see below |
+| `silent` | no | — |
+| `ongoing` | no | — |
+
+The `style` argument is discriminated by `type`:
+
+| `type` | Fields |
+| --- | --- |
+| `bigText` | — |
+| `bigPicture` | `image` |
+| `inbox` | 1-6 `lines`, optional `summary` |
+| `messaging` | `self`, optional `conversationTitle`, 1-7 `messages` of `{from?, text, image?}` (absent `from` is the user) |
+
+The `actions` argument holds 1-3 buttons of
 `{id, label, opensApp?, reply?: {placeholder?}}`, and `progress` is `{value: 0..1}` or
 `{indeterminate: true}`. The `post` and `setBadge` calls need `notifications` in `requires.permissions`;
 `cancel` does not. Events are `notifications.opened`, `.action`, `.reply` (marked sensitive, since it
@@ -230,9 +267,16 @@ advertise this module. The `permissions` module above supplies notification auth
 publishes its authorization key without advertising notification delivery calls.
 
 Channels come from a root `notifications` block,
-`{channels: [{id, name, importance, description?, showBadge?}]}`. It holds 1-8 channels with unique
-key-shaped ids, a non-blank `name` (at most 64), `importance` one of `min`, `low`, `default` or `high`,
-and an optional `description` (at most 256). The block needs `notifications` in `requires.platform`. A
+`{channels: [{id, name, importance, description?, showBadge?}]}`, holding 1-8 channels:
+
+| Field | Constraint |
+| --- | --- |
+| `id` | unique, key-shaped |
+| `name` | non-blank, at most 64 |
+| `importance` | `min`, `low`, `default` or `high` |
+| `description` | optional, at most 256 |
+
+The block needs `notifications` in `requires.platform`. A
 literal `channel` on `notifications.post` must name a declared channel, and a literal `actions` list
 needs unique ids. The `notifications.cancel` call takes exactly one of `id`, `group` or `all`; the
 runtime checks bound values. On iOS, `min` and `low` map to the passive interruption level and

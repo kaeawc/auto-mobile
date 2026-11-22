@@ -216,17 +216,17 @@ load yq-helpers
   run yq -r '.jobs.report.steps[] | select(.name == "Publish time-to-green report") | .env.TTG_CACHE_DIR' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = 'scratch/ci-time-to-green-cache' ]
-  run yq -r '.jobs.report.steps[] | select(.uses == "actions/cache/restore@v5") | [.with.path, .with.key, .with."restore-keys"] | @tsv' "$WF"
+  run yq -r '.jobs.report.steps[] | select((.uses // "") | test("^actions/cache/restore@")) | [.with.path, .with.key, .with."restore-keys"] | @tsv' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = $'scratch/ci-time-to-green-cache\tci-time-to-green-${{ github.run_id }}-${{ github.run_attempt }}\tci-time-to-green-${{ github.run_id }}-' ]
-  run yq -r '.jobs.report.steps[] | select(.uses == "actions/cache/save@v5") | [.if, .with.path] | @tsv' "$WF"
+  run yq -r '.jobs.report.steps[] | select((.uses // "") | test("^actions/cache/save@")) | [.if, .with.path] | @tsv' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = $'always()\tscratch/ci-time-to-green-cache' ]
 }
 
 @test "artifact upload is unconditional with 90-day retention" {
   require_mikefarah_yq
-  run yq -r '.jobs.report.steps[] | select(.uses == "actions/upload-artifact@v6") | [.if, .with.name, .with.path, .with."if-no-files-found", .with."retention-days"] | @tsv' "$WF"
+  run yq -r '.jobs.report.steps[] | select((.uses // "") | test("^actions/upload-artifact@")) | [.if, .with.name, .with.path, .with."if-no-files-found", .with."retention-days"] | @tsv' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = $'always()\tci-time-to-green-report\t${{ runner.temp }}/ci-time-to-green-report/\tignore\t90' ]
 }

@@ -47,6 +47,7 @@
                 sensors: CoreMotionPrototypeSensorSource(),
                 permissions: UNUserNotificationCenterPrototypePermissionsSource(),
                 biometric: LAContextPrototypeBiometricSource(),
+                secureStorage: KeychainPrototypeSecureValueStore(),
                 notifications: notifications
             )
         }

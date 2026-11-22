@@ -131,7 +131,12 @@ export const savedPrototypeErrorMessages: Record<SavedPrototypeErrorCode, string
   not_found: "List saved prototypes and use an id that still exists.",
   unsupported_format: "Update CtrlProxy to support this saved prototype format.",
   internal_error: "Retry the saved prototype request; if it persists, inspect the CtrlProxy logs.",
+  unsupported_capability: "The saved prototype viewer cannot draw a node in this spec.",
 };
+/** The refusal detail for a webView node; CtrlProxy's SavedPrototypeController sends the same text. */
+export function androidSavedWebViewRefusal(path: string): string {
+  return `The webView node at ${path} is not drawn by saved prototypes on Android. Remove the webView node and save again. Nothing was saved.`;
+}
 export function savedPrototypeFailure(result: PrototypeResult): PrototypeSavedOutput {
   if (isSavedPrototypeErrorCode(result.errorCode)) {
     const message = savedPrototypeErrorMessages[result.errorCode];
@@ -216,6 +221,15 @@ export async function performPrototypeSavedAction(
     }
     if (args.action === "save" && hasElementAnchors(args.spec!)) {
       return savedElementAnchorFailure();
+    }
+    const webViewPath = args.action === "save" ? prototypeWebViewNodePath(args.spec!) : undefined;
+    if (webViewPath !== undefined) {
+      // No Android saved-route renderer draws a web view yet (#18906); CtrlProxy refuses it too.
+      return savedPrototypeFailure({
+        success: false,
+        errorCode: "unsupported_capability",
+        error: androidSavedWebViewRefusal(webViewPath),
+      });
     }
     if (args.action === "listSaved") {
       const result = await deps.client.listSaved(args.timeoutMs);
@@ -616,6 +630,25 @@ function savedElementAnchorFailure(): PrototypeSavedOutput {
   });
 }
 
+/**
+ * The per-prototype viewer template has no web view module (#18814); only ProtoViewer draws one,
+ * and saves with pin or icon never route to ProtoViewer (protoViewerHandles).
+ */
+function iosSavedWebViewRefusal(args: PrototypeSavedInput): PrototypeSavedOutput | undefined {
+  const path = prototypeWebViewNodePath(args.spec!);
+  if (path === undefined) {
+    return undefined;
+  }
+  const remedy = protoViewerHandles(args)
+    ? "Install ProtoViewer on the simulator and save again, or remove the webView node."
+    : "Saves with pin or icon do not use ProtoViewer, so remove the webView node and save again.";
+  return {
+    success: false,
+    errorCode: "unsupported_capability",
+    error: `The webView node at ${path} is not supported by the saved prototype viewer. ${remedy} Nothing was saved.`,
+  };
+}
+
 async function saveIosPrototype(
   backend: () => IosSavedPrototypeInstaller,
   udid: string,
@@ -633,14 +666,10 @@ async function saveIosPrototype(
   if (hasElementAnchors(args.spec!)) {
     return savedElementAnchorFailure();
   }
-  const webViewPath = prototypeWebViewNodePath(args.spec!);
-  if (webViewPath !== undefined) {
-    // The per-prototype viewer template has no web view module (#18814); only ProtoViewer draws one.
-    return {
-      success: false,
-      errorCode: "unsupported_capability",
-      error: `The webView node at ${webViewPath} is not supported by the saved prototype viewer. Install ProtoViewer on the simulator and save again, or remove the webView node. Nothing was saved.`,
-    };
+  // The per-prototype viewer template has no web view module (#18814); only ProtoViewer draws one.
+  const webViewRefusal = iosSavedWebViewRefusal(args);
+  if (webViewRefusal) {
+    return webViewRefusal;
   }
   const prepared = await preparePrototypeAssets(
     args.assets ?? [],

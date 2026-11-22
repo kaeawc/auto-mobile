@@ -232,9 +232,6 @@ the Android emulator's host alias. The iOS sample uses the placeholder
 `http://192.168.1.10:8080/greeting`; replace `192.168.1.10` with the machine's LAN address. Both
 samples ship a generated `hero.png` image.
 
-The Android and iOS Playground apps compile these same files and show them on the "Embedded
-Prototype" demo screen, as a working example of the setup above.
-
 On Android emulators, access a running disposable app with `prototype` actions `patch`, `status`,
 `inspect` or `awaitEvent` and its installed spec's `id`. For `status` and `inspect`, optional `id`
 selects the app without filtering returned prototypes. Without it, `status` reads host-local state

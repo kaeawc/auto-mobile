@@ -283,6 +283,8 @@ class WebSocketServer(
     addPrototypeWindowFlags()
     add("prototype_menus_v1")
     add("prototype_tooltip_v1")
+    // M3 Expressive components drawn from stable Compose primitives (#15258).
+    add("prototype_m3_expressive_v1")
     add("prototype_adaptive_v1")
     add("prototype_drawer_v1")
     // request_action honours the semantic actions (expand, collapse, dismiss, select, scroll and
@@ -388,10 +390,16 @@ class WebSocketServer(
     // http or https host. Without it a host refuses a spec that asks for via "device".
     add("prototype_network_device_v1")
     add("prototype_network_upload_v1")
+    add("prototype_remote_image_v1")
     add("prototype_platform_clipboard_v1")
     add("prototype_platform_device_v1")
     add("prototype_platform_v1")
     addAll(platform.registry.capabilities)
+    addPrototypeTextAndMotionFlags()
+  }
+
+  /** Prototype text, motion, effects and collection feature flags. */
+  private fun MutableList<String>.addPrototypeTextAndMotionFlags() {
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
     add("prototype_text_field_options_v1")

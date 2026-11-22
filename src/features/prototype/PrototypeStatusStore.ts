@@ -88,6 +88,7 @@ export interface PrototypeLastResult {
   timers?: PrototypeTimerReport[];
   /** The device's last haptic and sound calls for this prototype, from an `inspect` (#14329). */
   feedbackLog?: PrototypeFeedbackEntry[];
+  images?: { loaded: number; failed: number; pending: number };
   shaderFailures?: Record<string, string>;
   degradedEffects?: DegradedEffect[];
   success: boolean;
@@ -131,6 +132,7 @@ export interface AdoptedPrototype {
   storage?: PrototypeStorageReport;
   timers?: PrototypeTimerReport[];
   feedbackLog?: PrototypeFeedbackEntry[];
+  images?: { loaded: number; failed: number; pending: number };
   shaderFailures?: Record<string, string>;
   degradedEffects?: DegradedEffect[];
   pages: PrototypeEvent["pages"];
@@ -404,6 +406,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...prototypeDegradedEffectsField(prototype.degradedEffects),
       ...(prototype.timers ? { timers: structuredClone(prototype.timers) } : {}),
       ...adoptedFeedbackLog(prototype),
+      images: structuredClone(prototype.images),
       shaderFailures: structuredClone(prototype.shaderFailures),
       success: true,
       timestamp: this.clock.now(),

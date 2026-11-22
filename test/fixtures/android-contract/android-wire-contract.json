@@ -5990,6 +5990,12 @@
         "hasDefault": true
       },
       {
+        "name": "split",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeButtonSplit",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "enabledWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
@@ -8588,6 +8594,14 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeButtonSplit": [
+      {
+        "name": "menu",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeChannel": [
       {
         "name": "kind",
@@ -8968,6 +8982,34 @@
         "type": "list",
         "nullable": true,
         "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeFabMenu": [
+      {
+        "name": "items",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeFabMenuItem": [
+      {
+        "name": "icon",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "label",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "onTap",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeFadeEdges": [
@@ -9432,6 +9474,26 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeRemoteImageCounts": [
+      {
+        "name": "loaded",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "failed",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "pending",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeRequestAppend": [
@@ -10312,6 +10374,12 @@
       {
         "name": "platformRuntime",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypePlatformReport",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "images",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeRemoteImageCounts",
         "nullable": true,
         "hasDefault": true
       }
@@ -11842,6 +11910,12 @@
         "hasDefault": true
       },
       {
+        "name": "menu",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeFabMenu",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "enabledWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
@@ -13126,6 +13200,152 @@
       {
         "name": "enabledWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "loadingIndicator": [
+      {
+        "name": "id",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "testTag",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "contentDescription",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onTap",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "style",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStyle",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "styleWhen",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "visibleWhen",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "shared",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeShared",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "sharedKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "transition",
+        "type": "object:PrototypeTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "press",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypePress",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "animate",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAnimate",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "anchor",
+        "type": "polymorphic",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "span",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "safeAreaPadding",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSafeAreaPadding",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollTransition",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollTransition",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "scrollLinked",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeScrollLinked",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onAppear",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "semantics",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSemantics",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "ios",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeIosNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "android",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeAndroidNamespace",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "keyframes",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "attentionLoop",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeLoop",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "contained",
+        "type": "boolean",
         "nullable": true,
         "hasDefault": true
       }
@@ -15124,6 +15344,12 @@
         "type": "list",
         "nullable": false,
         "hasDefault": false
+      },
+      {
+        "name": "variant",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "select": [

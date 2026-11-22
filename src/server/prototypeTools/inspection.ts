@@ -65,6 +65,13 @@ const devicePrototypeEntrySchema = z.object({
   timers: z.unknown().optional(),
   feedbackLog: z.unknown().optional().transform(parsePrototypeFeedbackLog),
   platformRuntime: z.unknown().optional().transform(parsePrototypePlatformReport),
+  images: z
+    .object({
+      loaded: z.number().int().nonnegative(),
+      failed: z.number().int().nonnegative(),
+      pending: z.number().int().nonnegative(),
+    })
+    .optional(),
   shaderFailures: z.record(z.string(), z.string()).optional().catch(undefined),
   degradedEffects: z.unknown().optional().transform(parsePrototypeDegradedEffects),
 });

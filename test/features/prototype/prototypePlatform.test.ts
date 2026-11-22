@@ -8,6 +8,7 @@ import {
 import {
   PROTOTYPE_SPEC_CAPABILITY_GATES,
   requiredPrototypeCapabilities,
+  prototypeRequiredCapabilities,
 } from "../../../src/features/prototype/prototypeCapabilityGates";
 import {
   PROTOTYPE_PLATFORM_DELIVERED_EVENT_NAME,
@@ -52,6 +53,94 @@ describe("permissions module contract", () => {
       max: 16,
       unique: true,
     });
+  });
+
+  test("request options accept only an optional provisional boolean", () => {
+    const request = (options: unknown) =>
+      spec(
+        {
+          requires: {
+            platform: ["permissions"],
+            permissions: [{ name: "notifications", purpose: "Send updates" }],
+          },
+        },
+        {
+          type: "button",
+          label: "Allow",
+          onTap: [
+            {
+              type: "platform",
+              call: "permissions.request",
+              args: { names: { value: ["notifications"] }, options: { value: options } },
+            },
+          ],
+        },
+      );
+    for (const options of [{}, { provisional: false }, { provisional: true }]) {
+      expect(validatePrototypeSpec(request(options)).success).toBe(true);
+    }
+    for (const options of [
+      null,
+      true,
+      [],
+      "provisional",
+      { provisional: "true" },
+      { unknown: true },
+    ]) {
+      expect(validatePrototypeSpec(request(options)).success).toBe(false);
+    }
+  });
+
+  test("iOS authorization-only reads use permissions without granting notification delivery", () => {
+    const authorization = spec(
+      {
+        requires: {
+          platform: ["notifications"],
+          permissions: [{ name: "notifications", purpose: "Send updates" }],
+        },
+      },
+      { type: "text", text: "{platform:/notifications/authorization}" },
+    );
+    expect(validatePrototypeSpec(authorization).success).toBe(true);
+    const caps = (value: unknown, platform: "ios" | "android") =>
+      prototypeRequiredCapabilities(value, platform).map((gate) => gate.capability);
+    expect(caps(authorization, "ios")).toContain("prototype_platform_permissions_v1");
+    expect(caps(authorization, "ios")).not.toContain("prototype_platform_notifications_v1");
+    expect(caps(authorization, "android")).toContain("prototype_platform_notifications_v1");
+    const variants = [
+      { ...authorization, requires: { platform: ["notifications"] } },
+      {
+        ...authorization,
+        notifications: { channels: [{ id: "updates", name: "Updates", importance: "default" }] },
+      },
+      { ...authorization, root: { type: "text", text: "{platform:/notifications/badge}" } },
+      { ...authorization, platform: { on: { "notifications.opened": [] } } },
+      {
+        ...authorization,
+        root: {
+          type: "button",
+          label: "Cancel",
+          onTap: [
+            {
+              type: "platform",
+              call: "notifications.cancel",
+              args: { all: { value: true } },
+            },
+          ],
+        },
+      },
+    ];
+    for (const value of variants) {
+      expect(caps(value, "ios")).toContain("prototype_platform_notifications_v1");
+    }
+    expect(
+      validatePrototypeSpec({
+        ...authorization,
+        requires: {
+          permissions: [{ name: "notifications", purpose: "Send updates" }],
+        },
+      }).success,
+    ).toBe(false);
   });
 
   test("changed is the only event, and every name has a state in the shared vocabulary", () => {

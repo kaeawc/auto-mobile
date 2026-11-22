@@ -1,5 +1,9 @@
 import { describe, expect, mock, spyOn, test } from "bun:test";
-import { InputKey } from "../../../src/features/action/InputKey";
+import {
+  INPUT_KEY_CODE_MAP,
+  INPUT_LETTER_KEYS,
+  InputKey,
+} from "../../../src/features/action/InputKey";
 import { ActionableError, type BootedDevice } from "../../../src/models";
 import { DeviceLostError } from "../../../src/models/DeviceLostError";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -381,6 +385,30 @@ describe("InputKey", () => {
     ]);
   });
 
+  test("sends letter keys as Android keyevents and letter chords as keycombination", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setAndroidApiLevel(31);
+    const inputKey = new InputKey(androidDevice, { adbFactory: createAdbFactory(fakeAdb) });
+
+    const plain = await inputKey.press("a", 500);
+    const chord = await inputKey.press("h", 500, undefined, { modifiers: ["meta", "alt"] });
+
+    expect(plain).toEqual({ success: true, key: "a", keyCode: "KEYCODE_A" });
+    expect(chord).toEqual({ success: true, key: "h", keyCode: "KEYCODE_H" });
+    expect(fakeAdb.getExecutedCommands()).toEqual([
+      "shell input keyevent KEYCODE_A",
+      "shell input keycombination KEYCODE_META_LEFT KEYCODE_ALT_LEFT KEYCODE_H",
+    ]);
+  });
+
+  test("maps every letter a-z to its Android keycode", () => {
+    for (const letter of INPUT_LETTER_KEYS) {
+      const keyCode: string = INPUT_KEY_CODE_MAP[letter];
+      expect(keyCode).toBe(`KEYCODE_${letter.toUpperCase()}`);
+    }
+    expect(INPUT_LETTER_KEYS).toHaveLength(26);
+  });
+
   test("rejects modifier chords below Android API 31", async () => {
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setAndroidApiLevel(30);
@@ -613,6 +641,27 @@ describe("InputKey", () => {
       keyCode: "enter",
     });
     expect(requestPressKey).toHaveBeenCalledWith("enter", ["meta"], 500, {
+      signal: undefined,
+      onDispatch: undefined,
+    });
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("forwards an iOS letter chord to CtrlProxy unchanged", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    const requestPressKey = mock(async () => ({ success: true }));
+    const inputKey = new InputKey(iosDevice, {
+      adbFactory: createAdbFactory(fakeAdb),
+      timer: new FakeTimer(),
+      iosClientFactory: () => ({ requestPressKey }),
+    });
+
+    const result = await inputKey.press("d", 500, undefined, {
+      modifiers: ["meta", "alt", "meta"],
+    });
+
+    expect(result).toEqual({ success: true, key: "d", keyCode: "d" });
+    expect(requestPressKey).toHaveBeenCalledWith("d", ["meta", "alt"], 500, {
       signal: undefined,
       onDispatch: undefined,
     });

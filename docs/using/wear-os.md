@@ -237,4 +237,6 @@ and reports `pinned: "unsupported"`.
 - Tapping a notification's expanded content or action buttons without a clickable label or
   `notification.replyText` (see [Notifications](#notifications)).
 - Hardware wake by tilt or touch, and a paired phone and watch.
+- `rotate`: the watch display has a fixed orientation. It fails at once with an error that says
+  so and changes no setting. Use a phone, tablet or foldable for orientation tests.
 - Watch-specific prototype components and round-aware prototype layout.

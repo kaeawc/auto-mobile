@@ -338,6 +338,32 @@ describe("prototype saved actions", () => {
     expect(proxy.saveRequests).toEqual([]);
     expect(output.uploadedAssets).toBeUndefined();
   });
+  test("save refuses a webView node with its path before reading or uploading assets", async () => {
+    const page = {
+      type: "webView" as const,
+      url: "https://example.com/post",
+      allowedOrigins: ["https://example.com"],
+    };
+    const output = await save({
+      spec: {
+        ...spec,
+        requires: { platform: ["webview" as const] },
+        root: { type: "column" as const, children: [{ type: "text" as const, text: "Hi" }, page] },
+      },
+      assets,
+      icon: "logo",
+      pin: true,
+    });
+    // Same detail CtrlProxy's SavedPrototypeControllerTest pins for its own refusal.
+    expect(output).toEqual({
+      success: false,
+      errorCode: "unsupported_capability",
+      error: `${savedPrototypeErrorMessages.unsupported_capability} The webView node at root.children[1] is not drawn by saved prototypes on Android. Remove the webView node and save again. Nothing was saved.`,
+    });
+    expect(reader.reads).toEqual([]);
+    expect(proxy.getPrototypeAssetHistory()).toEqual([]);
+    expect(proxy.saveRequests).toEqual([]);
+  });
   test("save accepts bounds anchors", async () => {
     const anchored = {
       ...spec,

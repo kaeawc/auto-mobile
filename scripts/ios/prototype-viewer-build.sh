@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Build an ad-hoc-signed, universal simulator viewer template using the agent's Swift sources.
+# Keychain needs entitlements in the simulator, embedded in each slice's __TEXT section.
 # Usage: scripts/ios/prototype-viewer-build.sh [output-dir] (default scratch/prototype-viewer)
 # Env: PROTOTYPE_VIEWER_ARCHS (default "arm64 x86_64"), PROTOTYPE_VIEWER_MIN_IOS (default 17.0).
 # STAMP POINTS after copying the .app: CFBundleIdentifier, CFBundleDisplayName + CFBundleName
@@ -58,6 +59,7 @@ for arch in "${archs[@]}"; do
     -target "${arch}-apple-ios${min_ios}-simulator" -sdk "${sdk}" \
     -swift-version 6 -warnings-as-errors -O -parse-as-library \
     -module-name AutoMobilePrototypeViewer \
+    -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker "${viewer_root}/Viewer.entitlements" \
     -o "${slice}" ${swift_sources[@]+"${swift_sources[@]}"}
   slices+=("${slice}")
 done

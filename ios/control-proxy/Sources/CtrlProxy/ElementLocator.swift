@@ -566,6 +566,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 rotation: GestureCoordinateGeometry.observationRotation(
                     hierarchyRotation, size: observationSize, app: appSize
                 ),
+                // An inset window's observed points are screen points (#18830), which lets
+                // its gestures take the synthesized route (#18960).
+                windowTranslation: windowTranslation.map { GesturePoint(x: Double($0.x), y: Double($0.y)) },
                 // Live SpringBoard reads see only the cover's frame; keep the observed panel.
                 pinnedToObservation: innerPanelFrame != nil
             )

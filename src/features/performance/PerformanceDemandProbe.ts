@@ -1,15 +1,15 @@
 import {
   getPerformancePushServer,
   type PerformancePushSocketServer,
-} from "../../daemon/performancePushSocketServer";
+} from "../../daemon/streams/performancePushSocketServer";
 import {
   getDeviceDataStreamServer,
   type DeviceDataStreamSocketServer,
-} from "../../daemon/deviceDataStreamSocketServer";
+} from "../../daemon/streams/deviceDataStreamSocketServer";
 import {
   getTelemetryPushServer,
   type TelemetryPushSocketServer,
-} from "../../daemon/telemetryPushSocketServer";
+} from "../../daemon/streams/telemetryPushSocketServer";
 import type { PerformanceDemandProbe } from "./PerformanceMonitorTypes";
 
 interface DemandProbeDependencies {

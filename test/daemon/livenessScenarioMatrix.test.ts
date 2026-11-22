@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/wire/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
-import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
+import { DeviceDataStreamSocketServer } from "../../src/daemon/streams/deviceDataStreamSocketServer";
 import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
 import { typedFrameSchema } from "../helpers/wireMessageSchemas";
 import { routedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";

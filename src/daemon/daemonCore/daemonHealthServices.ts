@@ -2,12 +2,12 @@ import { exitAfterDatabaseHealthFailure } from "../databaseHealthExit";
 import { cleanupDaemonFilesSync } from "../daemonFiles";
 import { writeEmergencyLog } from "../../utils/loggingConfig";
 import { logger } from "../../utils/logger";
-import { DefaultObservationStreamHealth } from "../ObservationStreamHealth";
+import { DefaultObservationStreamHealth } from "../streams/ObservationStreamHealth";
 import {
   getDeviceDataStreamServer,
   stopDeviceDataStreamSocketServer,
   startDeviceDataStreamSocketServer,
-} from "../deviceDataStreamSocketServer";
+} from "../streams/deviceDataStreamSocketServer";
 import type { DaemonCoreServices, DaemonLifecycleState } from "./DaemonCoreState";
 import type { DaemonIdentity } from "./DaemonIdentity";
 import type { DaemonStreams } from "./DaemonStreams";

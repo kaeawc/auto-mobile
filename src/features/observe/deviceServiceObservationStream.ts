@@ -1,4 +1,4 @@
-import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "../../daemon/streams/deviceDataStreamSocketServer";
 import type { ViewHierarchyResult } from "../../models";
 import type { Timer } from "../../utils/SystemTimer";
 import { errorMessage } from "../../utils/describeUnknownError";

@@ -9,7 +9,7 @@ import {
   DeviceDataStreamSocketServer,
   installDeviceDataStreamSocketServerForTesting,
   stopDeviceDataStreamSocketServer,
-} from "../../../src/daemon/deviceDataStreamSocketServer";
+} from "../../../src/daemon/streams/deviceDataStreamSocketServer";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import type { BootedDevice } from "../../../src/models";
 import { PortManager } from "../../../src/utils/PortManager";

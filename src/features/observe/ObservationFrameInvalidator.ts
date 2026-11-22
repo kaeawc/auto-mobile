@@ -1,4 +1,4 @@
-import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "../../daemon/streams/deviceDataStreamSocketServer";
 
 export interface ObservationFrameInvalidator {
   invalidateDeviceFrames(deviceId: string): void;

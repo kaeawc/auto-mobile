@@ -15,7 +15,7 @@ import type { FailureRecorderService } from "./interfaces/FailureRecorderService
 import {
   getFailuresPushServer,
   FailureNotificationPush,
-} from "../../daemon/failuresPushSocketServer";
+} from "../../daemon/streams/failuresPushSocketServer";
 import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
 
 /**

@@ -13,7 +13,7 @@ import {
   DeviceDataStreamSocketServer,
   installDeviceDataStreamSocketServerForTesting,
   stopDeviceDataStreamSocketServer,
-} from "../../../../src/daemon/deviceDataStreamSocketServer";
+} from "../../../../src/daemon/streams/deviceDataStreamSocketServer";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "../../../../src/daemon/daemonFiles";
 import { testOverrides } from "../../../../src/utils/testOverrides";
 import { statSync } from "node:fs";

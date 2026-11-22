@@ -37,7 +37,7 @@ import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKin
 import { AndroidCtrlProxyClient } from "./android";
 import type { CtrlProxyScreenshotResult } from "./ios/types";
 import { captureIosPanelScreenshot, needsIosPanelSelection } from "./ios/CtrlProxyScreenshot";
-import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "../../daemon/streams/deviceDataStreamSocketServer";
 import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { defaultIdGenerator, IdGenerator } from "../../utils/IdGenerator";

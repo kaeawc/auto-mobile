@@ -2,8 +2,8 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DeviceGestureRecordingSocketServer } from "../../src/daemon/deviceGestureRecordingSocketServer";
-import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { DeviceGestureRecordingSocketServer } from "../../src/daemon/streams/deviceGestureRecordingSocketServer";
+import { SessionScopedStreamAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
 import type { DeviceGestureRecordingCommand } from "../../src/daemon/deviceGestureRecordingSocketTypes";
 import type { BootedDevice } from "../../src/models";
 import {

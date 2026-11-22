@@ -34,7 +34,7 @@ import {
   OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS,
   OBSERVATION_SCREENSHOT_NOT_READY_RETRY_AFTER_MS,
   OBSERVATION_SCREENSHOT_URI_TEMPLATE,
-} from "../daemon/observationResourceUris";
+} from "../daemon/streams/observationResourceUris";
 import { stripInternalObservationFields } from "./observationInternalFields";
 import { markImportedPrototypeContent } from "../features/observe/importedPrototypeContent";
 

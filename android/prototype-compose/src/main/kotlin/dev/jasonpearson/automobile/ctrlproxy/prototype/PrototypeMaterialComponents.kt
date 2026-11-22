@@ -133,6 +133,7 @@ internal fun RenderPrototypeFab(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypeFabNode ?: return
+  if (source.menu != null && node.enabled) return RenderPrototypeFabMenu(node, modifier, interact)
   if (!node.enabled) {
     Surface(
       modifier,
@@ -183,6 +184,8 @@ internal fun RenderPrototypeSegmentedButton(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypeSegmentedButtonNode ?: return
+  if (source.variant == "connected")
+    return RenderPrototypeConnectedSegments(node, modifier, interact)
   val actions = source.onTap.orEmpty()
   SingleChoiceSegmentedButtonRow(modifier) {
     source.options.forEachIndexed { index, option ->
@@ -328,6 +331,7 @@ internal fun RenderPrototypeBadge(node: PrototypeRenderNode, modifier: Modifier)
 @Composable
 internal fun RenderPrototypeProgress(node: PrototypeRenderNode, modifier: Modifier) {
   val source = node.source as? PrototypeProgressNode ?: return
+  if (source.variant == "wavy") return RenderPrototypeWavyProgress(node, modifier)
   val fraction = prototypeProgressFraction(node.sliderValue, source.max)
   val circular = source.variant == "circular"
   val indeterminate = source.stateKey == null

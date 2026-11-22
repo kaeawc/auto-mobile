@@ -66,11 +66,21 @@ export async function stopPerfettoRecorder(
   adb: PerfettoAdb,
   timer: Pick<Timer, "sleep">,
   pid: number,
-  { warnings, poll = {}, signal }: PerfettoWaitOptions & { warnings: string[] },
+  {
+    warnings,
+    poll = {},
+    signal,
+    onSignalled,
+  }: PerfettoWaitOptions & {
+    warnings: string[];
+    /** Called once the SIGTERM reached the device, before waiting for the exit. */
+    onSignalled?: () => void;
+  },
 ): Promise<void> {
   const options = { timeoutMs: ADB_TIMEOUT_MS, noRetry: true, signal };
   // Exits 0 either way: an already-finished recorder (its duration elapsed) is not an error.
   await adb.execute(["shell", `kill -TERM ${pid} 2>/dev/null; true`], options);
+  onSignalled?.();
   const attempts = poll.stopPollAttempts ?? 40;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const probe = await adb.execute(

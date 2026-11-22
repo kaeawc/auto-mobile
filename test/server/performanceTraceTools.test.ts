@@ -6,6 +6,7 @@ import { PerformanceTraceManager } from "../../src/features/performanceTrace/Per
 import type { PerformanceTraceRecorder } from "../../src/features/performanceTrace/PerformanceTraceRecorder";
 import {
   createPerformanceTraceHandler,
+  performanceTraceResultSchema,
   performanceTraceSchema,
   registerPerformanceTraceTools,
 } from "../../src/server/performanceTraceTools";
@@ -21,18 +22,23 @@ const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platfor
 
 function fakeManager(stopError?: Error) {
   const stops: string[] = [];
+  const starts: string[] = [];
   const recorder: PerformanceTraceRecorder = {
-    start: async (request) => ({
-      artifactPath: `/artifacts/${request.traceId}.perfetto-trace`,
-      warnings: [],
-      stop: async () => {
-        stops.push(request.traceId);
-        if (stopError) {
-          throw stopError;
-        }
-      },
-      summarize: async () => ({ summary: { durationMs: 900 }, warnings: [] }),
-    }),
+    start: async (request) => (
+      starts.push(request.traceId),
+      {
+        artifactPath: `/artifacts/${request.traceId}.perfetto-trace`,
+        warnings: [],
+        signalled: true,
+        stop: async () => {
+          stops.push(request.traceId);
+          if (stopError) {
+            throw stopError;
+          }
+        },
+        summarize: async () => ({ summary: { durationMs: 900 }, warnings: [] }),
+      }
+    ),
   };
   const manager = new PerformanceTraceManager({
     recorderFor: () => recorder,
@@ -40,7 +46,7 @@ function fakeManager(stopError?: Error) {
     idGenerator: new CountingIdGenerator("t"),
     timer: new FakeTimer(),
   });
-  return { manager, stops };
+  return { manager, stops, starts };
 }
 
 async function call(manager: PerformanceTraceManager, args: Record<string, unknown>) {
@@ -120,5 +126,55 @@ describe("performanceTrace tool (#14102)", () => {
 
     expect(stops).toEqual(["trace-t-1"]);
     expect(manager.activeTraceIds()).toEqual([]);
+  });
+});
+
+describe("performanceTrace categories (#18688)", () => {
+  const issues = (args: Record<string, unknown>) =>
+    performanceTraceSchema.safeParse(args).error?.issues.map((issue) => issue.message) ?? [];
+
+  test("accepts typed categories with a buffer size instead of a template", () => {
+    const ok = { action: "start", categories: ["gfx", "binder_driver"], bufferMb: 64 };
+    expect(performanceTraceSchema.safeParse(ok).success).toBe(true);
+    expect(performanceTraceSchema.safeParse({ ...ok, categories: ["raw"] }).success).toBe(false);
+    expect(performanceTraceSchema.safeParse({ ...ok, categories: [] }).success).toBe(false);
+    expect(performanceTraceSchema.safeParse({ ...ok, bufferMb: 1000 }).success).toBe(false);
+    expect(performanceTraceSchema.safeParse({ ...ok, config: "buffers {}" }).success).toBe(false);
+  });
+
+  test("refuses template with categories, neither, and bufferMb without categories", () => {
+    expect(issues({ action: "start", template: "hitches", categories: ["sched"] })).toEqual([
+      "start takes a template or categories, not both",
+    ]);
+    expect(issues({ action: "start" })).toEqual(["start requires a template or categories"]);
+    expect(issues({ action: "start", template: "hitches", bufferMb: 64 })).toEqual([
+      "bufferMb applies only with categories",
+    ]);
+  });
+
+  test("a categories trace returns a schema-valid result with the resolved categories", async () => {
+    const { manager } = fakeManager();
+
+    const started = await call(manager, {
+      action: "start",
+      categories: ["sched"],
+      appId: "com.example.app",
+    });
+    expect(performanceTraceResultSchema.safeParse(started).success).toBe(true);
+    expect(started).toMatchObject({ categories: ["sched", "app"], bufferMb: 32 });
+    expect(started.template).toBeUndefined();
+
+    const stopped = await call(manager, { action: "stop", traceId: "trace-t-1" });
+    expect(performanceTraceResultSchema.safeParse(stopped).success).toBe(true);
+  });
+
+  test("iOS refuses a categories start through the handler", async () => {
+    const { manager, starts } = fakeManager();
+    const handler = createPerformanceTraceHandler(manager);
+    const iphone: BootedDevice = { deviceId: "sim-1", name: "iPhone", platform: "ios" };
+    await expect(
+      handler(iphone, performanceTraceSchema.parse({ action: "start", categories: ["sched"] })),
+    ).rejects.toThrow("categories are Android (Perfetto) only");
+    expect(starts).toEqual([]);
   });
 });

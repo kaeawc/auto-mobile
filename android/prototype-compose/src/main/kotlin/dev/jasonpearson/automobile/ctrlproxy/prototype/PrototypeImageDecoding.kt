@@ -52,6 +52,13 @@ internal fun prototypeImagePixelBudget(maxPixels: Long, maxBytes: Long, bytesPer
 }
 
 /**
+ * The per-bitmap pixel budget when EXIF [orientation] needs a transformed copy: the source and the
+ * copy are alive together, so a non-identity transform gets half of [pixelBudget] for each.
+ */
+internal fun prototypeImageTransformPixelBudget(pixelBudget: Long, orientation: Int): Long =
+  if (orientation in 2..8) pixelBudget / 2 else pixelBudget
+
+/**
  * EXIF's eight transforms as a row-major Android Matrix, with translation supplied by createBitmap.
  */
 internal fun prototypeImageOrientationMatrix(orientation: Int): List<Float> {

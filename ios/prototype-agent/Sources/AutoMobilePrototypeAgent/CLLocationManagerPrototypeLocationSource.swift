@@ -44,14 +44,24 @@
         }
 
         var servicesEnabled: Bool { CLLocationManager.locationServicesEnabled() }
-        var authorization: PrototypeLocationAuthorization {
+        var permissionAuthorization: PrototypeWhenInUseAuthorization {
             switch manager.authorizationStatus {
             case .notDetermined: .notDetermined
             case .denied: .denied
             case .restricted: .restricted
-            case .authorizedAlways, .authorizedWhenInUse:
+            case .authorizedAlways: .always
+            case .authorizedWhenInUse: .whenInUse
+            @unknown default: .unknown
+            }
+        }
+
+        var authorization: PrototypeLocationAuthorization {
+            switch permissionAuthorization {
+            case .notDetermined: .notDetermined
+            case .denied: .denied
+            case .restricted, .unknown: .restricted
+            case .always, .whenInUse:
                 manager.accuracyAuthorization == .reducedAccuracy ? .authorizedApproximate : .authorizedPrecise
-            @unknown default: .restricted
             }
         }
 

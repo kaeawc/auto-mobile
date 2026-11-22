@@ -161,12 +161,12 @@ describe("Android readiness setup caches", () => {
       h.setEnabled(true);
       h.manager.clearAvailabilityCache();
     });
-    h.adb.setCommandResponse('install "/fake/ctrlproxy.apk"', createExecResult("Success", ""));
+    h.adb.setCommandResponse('install -r "/fake/ctrlproxy.apk"', createExecResult("Success", ""));
     try {
       await h.ready();
       expect(download).toHaveBeenCalledTimes(1);
       expect(enable).toHaveBeenCalledTimes(1);
-      expect(h.adb.getExecutedCommands()).toContain('install "/fake/ctrlproxy.apk"');
+      expect(h.adb.getExecutedCommands()).toContain('install -r "/fake/ctrlproxy.apk"');
       expect(await h.manager.isInstalled()).toBe(true);
       expect(await h.manager.isEnabled()).toBe(true);
       // install, enable and compatibility completion invalidate mutated state;

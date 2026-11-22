@@ -89,7 +89,8 @@ effect). Rules:
   `FLAG_BLUR_BEHIND`. The radius comes from `blur` or the material (ultraThin 8, thin 16, regular 24,
   thick 40 dp), and `tint` overlays the blur at 35% alpha. A failed dialog attach or a card shape
   that the platform cannot match uses the tonal fill. A floating card with a zero blur radius
-  also uses the tonal fill.
+  also uses the tonal fill. The tonal fill stays in place when the window is re-shown, for example
+  after a detach. A card blur is tried again only when a runtime change reshapes the root surface.
 - Node-level `surface: "glass"` (`prototype_glass_v1`) uses Haze to blur earlier sibling layers
   within the spec on Android 12 and later. The `style.glass` variants use 24 dp for `regular`
   and 8 dp for `clear`. An authored tint overlays the blur at 35%. Below API 31 the node draws

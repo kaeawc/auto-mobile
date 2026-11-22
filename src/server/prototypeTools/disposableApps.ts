@@ -1,27 +1,22 @@
 import type { z } from "zod/v4";
+import { defaultDisposableAppManager } from "../../features/prototype/disposableApp/defaultDisposableAppManager";
+export { defaultDisposableAppManager };
 import {
   DisposableAppManager,
   type DisposableAppInstallInput,
   type DisposableAppUninstallTarget,
 } from "../../features/prototype/disposableApp/DisposableAppManager";
 import type { DisposableAppPlatform } from "../../features/prototype/disposableApp/disposableAppId";
-import { FileDisposableAppRegistry } from "../../features/prototype/disposableApp/DisposableAppRegistry";
-import { NodeDisposableAppRegistryStore } from "../../features/prototype/disposableApp/NodeDisposableAppRegistryStore";
-import {
-  AndroidDisposableAppInstaller,
-  androidDisposableAppDevices,
-} from "../../features/prototype/disposableApp/android/AndroidDisposableAppInstaller";
-import { AndroidDisposableAppStamper } from "../../features/prototype/disposableApp/android/AndroidDisposableAppStamper";
-import { createIosDisposableAppSupport } from "../../features/prototype/disposableApp/ios/iosDisposableAppFactory";
+import { preparePrototypeAssets } from "../../features/prototype/prototypeAssetUploader";
 import { requireDisposableAppSimulator } from "../../features/prototype/disposableApp/ios/iosDisposableAppIdentity";
 import type { PrototypeJson } from "../../features/prototype/prototypeJson";
 import type { BootedDevice } from "../../models";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
-import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import type { Timer } from "../../utils/SystemTimer";
 import type { prototypeSchema } from "./schemas";
-import type { PrototypeOutput } from "./types";
+import type { AssetReaders, PrototypeOutput } from "./types";
 
 /**
  * The prototype tool's disposable-app actions (#14184): install a spec as its own app, list the
@@ -34,25 +29,6 @@ export const isDisposableAppAction = (action: string): action is PrototypeDispos
 
 /** The manager calls these actions make; tests inject a manager over fakes. */
 export type PrototypeDisposableApps = Pick<DisposableAppManager, "install" | "list" | "uninstall">;
-
-/** The daemon's manager: Android and iOS support, with the registry under the data dir. */
-export function defaultDisposableAppManager(
-  dependencies: { adbFactory?: AdbClientFactory; timer?: Pick<Timer, "now"> } = {},
-): DisposableAppManager {
-  return new DisposableAppManager({
-    platforms: {
-      ios: createIosDisposableAppSupport(),
-      android: {
-        stamper: new AndroidDisposableAppStamper(),
-        installer: new AndroidDisposableAppInstaller(
-          androidDisposableAppDevices(dependencies.adbFactory),
-        ),
-      },
-    },
-    registry: new FileDisposableAppRegistry(new NodeDisposableAppRegistryStore()),
-    timer: dependencies.timer ?? defaultTimer,
-  });
-}
 
 /**
  * The injected manager, or the daemon's built on the first disposable-app call, so other actions
@@ -88,24 +64,43 @@ function appPlatform(device: BootedDevice): DisposableAppPlatform {
   return device.platform;
 }
 
-function installInput(device: BootedDevice, args: PrototypeArgs): DisposableAppInstallInput {
+async function installInput(
+  device: BootedDevice,
+  args: PrototypeArgs,
+  readers: AssetReaders,
+): Promise<DisposableAppInstallInput> {
+  const prepared = await preparePrototypeAssets(
+    args.assets ?? [],
+    readers.assetFileReader,
+    readers.observationScreenshotReader,
+    readers.env,
+  );
+  if ("error" in prepared) {
+    throw new ActionableError(prepared.error);
+  }
   // The schema requires app and a spec (inline or read from specPath) before dispatch.
   return {
     deviceId: device.deviceId,
     platform: appPlatform(device),
     spec: args.spec as PrototypeJson,
     app: args.app!,
+    assets: prepared.assets,
   };
+}
+
+interface DisposableAppRouteContext {
+  readers: AssetReaders;
+  attachments?: { forget(deviceId: string, appId: string): Promise<void> };
 }
 
 async function run(
   apps: PrototypeDisposableApps,
   device: BootedDevice,
   args: PrototypeArgs,
-  attachments?: { forget(deviceId: string, appId: string): Promise<void> },
+  { readers, attachments }: DisposableAppRouteContext,
 ): Promise<PrototypeOutput> {
   if (args.action === "installApp") {
-    const disposableApp = await apps.install(installInput(device, args));
+    const disposableApp = await apps.install(await installInput(device, args, readers));
     await attachments?.forget(device.deviceId, disposableApp.appId);
     return { success: true, disposableApp };
   }
@@ -125,10 +120,10 @@ export async function disposableAppOutput(
   apps: PrototypeDisposableApps,
   device: BootedDevice,
   args: PrototypeArgs,
-  attachments?: { forget(deviceId: string, appId: string): Promise<void> },
+  context: DisposableAppRouteContext,
 ): Promise<PrototypeOutput> {
   try {
-    return await run(apps, device, args, attachments);
+    return await run(apps, device, args, context);
   } catch (error) {
     logger.warn(`prototype ${args.action} failed on ${device.deviceId}`, error);
     return {

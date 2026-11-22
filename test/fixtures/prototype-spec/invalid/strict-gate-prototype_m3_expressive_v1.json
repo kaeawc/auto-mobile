@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "expressive",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "mode": "day"
+    },
+    "root": {
+      "type": "loadingIndicator"
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_m3_expressive_v1"
+}

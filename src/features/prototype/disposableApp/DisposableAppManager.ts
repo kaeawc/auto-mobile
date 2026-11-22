@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../models/describeUnknownError";
 import type { Timer } from "../../../utils/SystemTimer";
+import { throwIfRequestAborted } from "../../../utils/AbortContext";
 import { logger } from "../../../utils/logger";
 import type { PrototypeJson } from "../prototypeJson";
 import {
@@ -38,6 +39,11 @@ const HOUR_MS = 60 * 60 * 1000;
 
 export type DisposableAppIcon = { asset: string } | { backgroundColor: string };
 
+export interface DisposableAppAsset {
+  id: string;
+  bytes: Uint8Array;
+}
+
 export interface DisposableAppStampInput {
   appId: string;
   attachToken?: string;
@@ -46,6 +52,7 @@ export interface DisposableAppStampInput {
   slug: string;
   label: string;
   icon?: DisposableAppIcon;
+  assets?: readonly DisposableAppAsset[];
   spec: PrototypeJson;
   template: DisposableAppTemplate;
   declarations: DisposableAppDeclarations;
@@ -112,6 +119,7 @@ export interface DisposableAppManagerDependencies {
 export interface DisposableAppInstallInput {
   deviceId: string;
   platform: DisposableAppPlatform;
+  assets?: readonly DisposableAppAsset[];
   spec: PrototypeJson;
   app: {
     slug: string;
@@ -171,6 +179,11 @@ export interface DisposableAppUninstallResult {
 
 const REMOVED = Symbol("removed");
 const RENEWED = Symbol("renewed");
+interface RemovalOptions {
+  reason: "requested" | "all" | "expired";
+  reportRemoval?: (appId: string) => void;
+}
+
 type RemovalOutcome = typeof REMOVED | typeof RENEWED | string;
 
 function isoOrNull(epochMs: number | null): string | null {
@@ -278,7 +291,11 @@ export class DisposableAppManager {
       input.app.permissions ?? "prompt",
       declarations.permissions,
     );
-    const template = selectDisposableAppTemplate(input.spec, await stamper.templates());
+    const template = selectDisposableAppTemplate(
+      input.spec,
+      await stamper.templates(),
+      input.platform,
+    );
     const existing = (await this.deps.registry.list(input.deviceId)).find(
       (record) => record.appId === appId,
     );
@@ -290,6 +307,7 @@ export class DisposableAppManager {
       slug: input.app.slug,
       label: input.app.label,
       icon: input.app.icon,
+      assets: input.assets,
       spec: input.spec,
       template,
       declarations,
@@ -362,17 +380,19 @@ export class DisposableAppManager {
   ): Promise<DisposableAppUninstallResult> {
     if ("appId" in target) {
       assertDisposableAppId(target.appId);
-      const outcome = await this.removeOne(deviceId, platform, target.appId, "requested");
+      const outcome = await this.removeOne(deviceId, platform, target.appId, {
+        reason: "requested",
+      });
       if (typeof outcome === "string") {
         throw new ActionableError(outcome);
       }
       return { removed: [{ appId: target.appId, reason: "requested" }], skipped: [] };
     }
-    const [ids, reason] =
-      "all" in target
-        ? [(await this.list(deviceId, platform)).map((entry) => entry.appId), "all"]
-        : [await this.expiredIds(deviceId, platform), "expired"];
-    return this.removeBulk(deviceId, platform, this.skippedLast(deviceId, ids), reason);
+    if ("expired" in target) {
+      return this.sweepExpired(deviceId, platform);
+    }
+    const ids = (await this.list(deviceId, platform)).map((entry) => entry.appId);
+    return this.removeBulk(deviceId, platform, this.skippedLast(deviceId, ids), { reason: "all" });
   }
 
   /** `ids` with the ones an earlier bulk call skipped on this device moved to the end. */
@@ -402,7 +422,7 @@ export class DisposableAppManager {
     deviceId: string,
     platform: DisposableAppPlatform,
     ids: string[],
-    reason: string,
+    options: RemovalOptions,
   ): Promise<DisposableAppUninstallResult> {
     const result: DisposableAppUninstallResult = { removed: [], skipped: [] };
     const stepMs = this.deps.uninstallStepMs ?? DISPOSABLE_APP_UNINSTALL_STEP_MS;
@@ -414,9 +434,9 @@ export class DisposableAppManager {
         result.pending = ids.slice(index);
         break;
       }
-      const outcome = await this.removeOne(deviceId, platform, appId, reason);
+      const outcome = await this.removeOne(deviceId, platform, appId, options);
       if (outcome === REMOVED) {
-        result.removed.push({ appId, reason });
+        result.removed.push({ appId, reason: options.reason });
       } else if (outcome !== RENEWED) {
         result.skipped.push({ appId, reason: outcome });
       }
@@ -425,12 +445,17 @@ export class DisposableAppManager {
     return result;
   }
 
-  /** The TTL sweep run when a session acquires the device, and by `uninstallApp {expired}`. */
+  /** Sweep registry candidates directly, with no package scan on devices without expired apps. */
   async sweepExpired(
     deviceId: string,
     platform: DisposableAppPlatform,
+    reportRemoval?: (appId: string) => void,
   ): Promise<DisposableAppUninstallResult> {
-    return this.uninstall(deviceId, platform, { expired: true });
+    const ids = await this.expiredIds(deviceId, platform);
+    return this.removeBulk(deviceId, platform, this.skippedLast(deviceId, ids), {
+      reason: "expired",
+      reportRemoval,
+    });
   }
 
   private support(platform: DisposableAppPlatform): DisposableAppPlatformSupport {
@@ -485,7 +510,7 @@ export class DisposableAppManager {
     deviceId: string,
     platform: DisposableAppPlatform,
     appId: string,
-    reason: string,
+    { reason, reportRemoval }: RemovalOptions,
   ): Promise<RemovalOutcome> {
     if (!isDisposableAppId(appId)) {
       return `${appId} is outside the reserved prefix ${DISPOSABLE_APP_ID_PREFIX}, so it was not removed.`;
@@ -494,19 +519,32 @@ export class DisposableAppManager {
       if (reason === "expired" && !(await this.stillExpired(deviceId, platform, appId))) {
         return RENEWED;
       }
-      const { stamper, installer } = this.support(platform);
+      throwIfRequestAborted();
+      const { installer } = this.support(platform);
       const installation = await installer.inspect(deviceId, appId);
+      throwIfRequestAborted();
       if (installation.installed && installation.signer !== undefined) {
-        const expected = await stamper.signer();
+        const expected = await this.support(platform).stamper.signer();
         if (installation.signer !== expected) {
           return `${appId} on ${deviceId} is not signed by this host's disposable-app key, so it was not removed. Remove it with the uninstallApp tool if it is yours.`;
         }
       }
+      throwIfRequestAborted();
+      const report = () => {
+        if (reportRemoval) {
+          reportRemoval(appId);
+        } else {
+          logger.warn(`Removed disposable prototype app ${appId} from ${deviceId} (${reason}).`);
+        }
+      };
       if (installation.installed) {
         await installer.uninstall(deviceId, appId);
+        report();
       }
       await this.deps.registry.remove(deviceId, appId);
-      logger.warn(`Removed disposable prototype app ${appId} from ${deviceId} (${reason}).`);
+      if (!installation.installed) {
+        report();
+      }
       return REMOVED;
     });
   }

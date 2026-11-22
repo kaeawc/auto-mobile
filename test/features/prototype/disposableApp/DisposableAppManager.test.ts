@@ -53,6 +53,34 @@ beforeEach(() => {
 });
 
 describe("DisposableAppManager.install", () => {
+  test("installs an iOS authorization-only spec with the permissions capability", async () => {
+    const permissions = {
+      name: "base",
+      size: 1,
+      capabilities: ["prototype_platform_v1", "prototype_platform_permissions_v1"],
+    };
+    stamper = new FakeDisposableAppStamper([permissions]);
+    manager = new DisposableAppManager({
+      platforms: { ios: { stamper, installer } },
+      registry,
+      timer,
+    });
+    const result = await manager.install({
+      ...input(),
+      platform: "ios",
+      spec: {
+        requires: {
+          platform: ["notifications"],
+          permissions: [{ name: "notifications", purpose: "Send updates" }],
+        },
+        root: { type: "text", text: "{platform:/notifications/authorization}" },
+      },
+    });
+    expect(result.template).toBe("base");
+    expect(result.permissions.declared).toEqual(["notifications"]);
+    expect(stamper.stamped).toHaveLength(1);
+  });
+
   test("refuses an undeclared call permission before stamping or installing", async () => {
     const requires = {
       platform: fixture.requires.platform,
@@ -276,6 +304,26 @@ describe("DisposableAppManager.install", () => {
 });
 
 describe("DisposableAppManager TTL and uninstall", () => {
+  test("sweeps empty and unexpired registries without querying Android packages", async () => {
+    class InstallerWithoutPackageReads extends FakeDisposableAppInstaller {
+      override async installedIds(): Promise<string[]> {
+        throw new Error("Unexpected package listing");
+      }
+
+      override async inspect(): Promise<never> {
+        throw new Error("Unexpected package inspection");
+      }
+    }
+    const sweeper = new DisposableAppManager({
+      platforms: { android: { stamper, installer: new InstallerWithoutPackageReads() } },
+      registry,
+      timer,
+    });
+    expect(await sweeper.sweepExpired(DEVICE, "android")).toEqual({ removed: [], skipped: [] });
+    await manager.install(input({ ttlHours: 1 }));
+    expect(await sweeper.sweepExpired(DEVICE, "android")).toEqual({ removed: [], skipped: [] });
+  });
+
   test("the expiry sweep removes only apps whose TTL has passed", async () => {
     await manager.install(input({ ttlHours: 1 }));
     await manager.install(input({ slug: "keeper", ttlHours: 0 }));

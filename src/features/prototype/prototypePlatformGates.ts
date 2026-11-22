@@ -1,6 +1,7 @@
 import { expandPrototypeComponents } from "./prototypeComponents";
 import { prototypeRealtimeFields } from "./prototypeChannels";
 import { prototypeMediaQueueFields } from "./prototypeMediaQueue";
+import { record } from "./prototypeTemplate";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
   PROTOTYPE_PLATFORM_MODULES,
@@ -63,13 +64,40 @@ function authoredUses(spec: unknown): PrototypePlatformUse[] {
 
 const unique = (paths: string[]): string[] => [...new Set(paths)];
 
+/** iOS permissions publishes this one read without implementing notification delivery. */
+function notificationAuthorizationOnly(spec: unknown, uses: PrototypePlatformUse[]): boolean {
+  const root = record(spec);
+  const requires = record(root?.requires);
+  const permissions = requires?.permissions;
+  const notifications = uses.filter((use) => usedModule(use) === "notifications");
+  return (
+    root?.notifications === undefined &&
+    Array.isArray(permissions) &&
+    permissions.some((permission) => record(permission)?.name === "notifications") &&
+    notifications.some(
+      (use) => use.kind === "read" && use.pointer === "/notifications/authorization",
+    ) &&
+    notifications.every(
+      (use) =>
+        use.kind === "declared" ||
+        (use.kind === "read" && use.pointer === "/notifications/authorization"),
+    )
+  );
+}
+
 /** Authored paths needing `prototype_platform_v1`: every platform construct. */
 export function prototypePlatformFields(spec: unknown): string[] {
   return unique(authoredUses(spec).map((use) => use.path));
 }
 
 /** Authored paths needing one module's capability. */
-export function prototypePlatformModuleFields(spec: unknown, name: string): string[] {
+export function prototypePlatformModuleFields(
+  spec: unknown,
+  name: string,
+  platform?: "android" | "ios",
+): string[] {
+  const uses = authoredUses(spec);
+  const authorizationOnly = platform === "ios" && notificationAuthorizationOnly(spec, uses);
   return unique(
     [
       ...(name === "realtime"
@@ -79,11 +107,39 @@ export function prototypePlatformModuleFields(spec: unknown, name: string): stri
             module: name,
           }))
         : []),
-      ...authoredUses(spec),
+      ...uses,
     ]
-      .filter((use) => usedModule(use) === name)
+      .filter((use) => {
+        const module = usedModule(use);
+        return (authorizationOnly && module === "notifications" ? "permissions" : module) === name;
+      })
       .map((use) => use.path),
   );
+}
+
+/** Authored fields the standalone iOS Viewer degrades to plain local notification content. */
+export function prototypeIosNotificationFallbackPaths(spec: unknown): string[] {
+  const paths = authoredUses(spec).flatMap((use) => {
+    if (
+      use.kind !== "call" ||
+      (use.action.call !== "notifications.post" && use.action.call !== "notifications.schedule")
+    ) {
+      return [];
+    }
+    const args = record(use.action.args);
+    if (!args) {
+      return [];
+    }
+    const style = record(args.style);
+    const styleKind = record(style?.value)?.type;
+    return [
+      ...["largeImage", "progress", "ongoing"]
+        .filter((key) => Object.hasOwn(args, key))
+        .map((key) => `${use.path}.args.${key}`),
+      ...(style && styleKind !== "bigText" ? [`${use.path}.args.style`] : []),
+    ];
+  });
+  return unique(paths);
 }
 
 function unsupported(
@@ -194,9 +250,12 @@ const PROTOTYPE_PLATFORM_MODULE_ONLY_GATES = Object.entries(PROTOTYPE_PLATFORM_M
   ([name, definition]) => [
     {
       capability: definition.capability,
-      fields: (spec: unknown) => prototypePlatformModuleFields(spec, name),
+      fields: (spec: unknown, platform?: "android" | "ios") =>
+        prototypePlatformModuleFields(spec, name, platform),
       unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
-        unsupported(fields, platform, definition.capability, `the ${name} platform module`),
+        platform === "ios" && name === "notifications"
+          ? `The notifications platform module at ${fields[0]} needs ${definition.capability}, which only the standalone iOS Prototype Viewer advertises. Use prototype save with an icon to install the per-prototype Viewer app.`
+          : unsupported(fields, platform, definition.capability, `the ${name} platform module`),
     },
     ...Object.entries(definition.backends ?? {}).map(([backend, { capability }]) => ({
       capability,

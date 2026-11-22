@@ -4,7 +4,7 @@ import {
   PERFORMANCE_TRACE_MIN_TIME_LIMIT_MS,
 } from "./performanceTraceTemplates";
 
-/** The only way a caller shapes a `captureTrace` config; there is no raw-config escape hatch. */
+/** The only way a caller shapes a `performanceTrace` categories config; there is no raw-config escape hatch. */
 export const TRACE_CATEGORIES = [
   "sched",
   "gfx",
@@ -116,7 +116,7 @@ export function resolveTraceConfig(request: TraceConfigRequest): ResolvedTraceCo
 /**
  * Text-format Perfetto TraceConfig built only from the typed categories. `duration_ms` makes the
  * on-device recorder stop itself even if AutoMobile never sends the stop. The `appId` has been
- * validated as a package name by the tool schema, so quoting it cannot break out of the string.
+ * validated by the tool schema (no quotes or spaces), so quoting it cannot break out of the string.
  */
 export function perfettoCategoryConfig(config: ResolvedTraceConfig): string {
   const contributions = config.categories

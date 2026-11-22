@@ -107,21 +107,25 @@ extension ElementLocator {
         func getSystemAlerts(
             appSnapshot: XCUIElementSnapshot,
             truncationReasons: inout Set<String>,
-            keyboardFocus: KeyboardFocus? = nil
+            keyboardFocus: KeyboardFocus? = nil,
+            portraitSpringBoard: PortraitSpringBoardRotation? = nil
         )
             throws -> (alerts: [UIElementInfo], rotation: Int?)
         {
             // Check for alerts in the app's own snapshot tree
             let appAlertSnapshots = collectAlertElements(from: appSnapshot)
-            let appAlerts = appAlertSnapshots.map { snapshot in
-                buildElementInfoFromSnapshot(
-                    snapshot,
-                    depth: 0,
-                    screenBounds: snapshot.frame,
-                    truncationReasons: &truncationReasons,
-                    keyboardFocus: keyboardFocus
-                )
-            }
+            let appAlerts = Self.appSnapshotAlertsInRootSpace(
+                appAlertSnapshots.map { snapshot in
+                    buildElementInfoFromSnapshot(
+                        snapshot,
+                        depth: 0,
+                        screenBounds: snapshot.frame,
+                        truncationReasons: &truncationReasons,
+                        keyboardFocus: keyboardFocus
+                    )
+                },
+                portraitSpringBoard: portraitSpringBoard
+            )
 
             // Also check SpringBoard for alerts not in the app's tree. A system-owned
             // sheet can cover a still-foreground app without appearing anywhere in the
@@ -223,7 +227,8 @@ extension ElementLocator {
             )
             let alerts = capture.alertSnapshots.map { entry in
                 // This path is skipped for foreground SpringBoard, whose app-snapshot alerts
-                // are rotated later with its main tree. App-snapshot alerts never enter here.
+                // take its main tree's rotation in getSystemAlerts. App-snapshot alerts never
+                // enter here, so no alert is rotated twice.
                 let alertOffset = entry.portraitHeight == nil ? offset : .zero
                 let alert = buildElementInfoFromSnapshot(
                     entry.snapshot,
@@ -246,11 +251,11 @@ extension ElementLocator {
             return (alerts, capture.rotation)
         }
 
-        /// Screen frame of the observed app's window, read only for a non-screen-sized app with a
-        /// SpringBoard alert to merge. Like the gesture path's window read, this is a live query
-        /// that can stall on a suspended app; the app snapshot taken just before it has already
-        /// queried the same app, so it adds no new precondition.
-        private func observedAppWindowFrame() -> CGRect? {
+        /// Screen frame of the observed app's window, read only for a non-screen-sized app. Like
+        /// the gesture path's window read, this is a live query that can stall on a suspended
+        /// app; the app snapshot taken just before it has already queried the same app, so it
+        /// adds no new precondition.
+        func observedAppWindowFrame() -> CGRect? {
             guard let bundleId = foregroundBundleId else { return nil }
             do {
                 return try catchingObjCException {
@@ -258,7 +263,20 @@ extension ElementLocator {
                 }
             } catch {
                 Logger(subsystem: "dev.jasonpearson.automobile", category: "ElementLocator")
-                    .warning("app window frame unavailable; SpringBoard alerts stay screen-space: \(error)")
+                    .warning("app window frame unavailable; observe stays window-relative: \(error)")
+                return nil
+            }
+        }
+
+        /// SpringBoard's frame is the screen; read only once an inset app window was found.
+        func springBoardScreenFrame() -> CGRect? {
+            do {
+                return try catchingObjCException {
+                    XCUIApplication.withoutUIInterruptions(bundleIdentifier: "com.apple.springboard").frame
+                }
+            } catch {
+                Logger(subsystem: "dev.jasonpearson.automobile", category: "ElementLocator")
+                    .warning("SpringBoard frame unavailable; using UIScreen bounds for the screen: \(error)")
                 return nil
             }
         }
@@ -353,6 +371,7 @@ extension ElementLocator {
             childIndex: Int = 0,
             keyboardFocus: KeyboardFocus? = nil,
             disableAllFiltering: Bool = false,
+            keyboardScreenBounds: CGRect? = nil,
             enclosingFrame: CGRect? = nil,
             coordinateOffset: CGPoint = .zero,
             rootChildFilter: ((XCUIElementSnapshot) -> Bool)? = nil
@@ -398,19 +417,25 @@ extension ElementLocator {
                     var filteredChildren = children.enumerated().compactMap { idx, child -> UIElementInfo? in
                         // Only the root applies the filter (a two-panel SpringBoard's other panel).
                         if depth == 0, let rootChildFilter, !rootChildFilter(child) { return nil }
+                        // An inset window's keyboard is in screen space (#18830): filter its
+                        // subtree against the screen, not the window.
+                        let childScreenBounds = child.elementType == .keyboard
+                            ? keyboardScreenBounds ?? screenBounds : screenBounds
                         guard shouldIncludeSnapshotChild(
-                            child, enclosingFrame: frame, coordinateOffset: resolved.offset, screenBounds: screenBounds
+                            child, enclosingFrame: frame, coordinateOffset: resolved.offset,
+                            screenBounds: childScreenBounds
                         ) else { return nil }
 
                         return buildElementInfoFromSnapshot(
                             child,
                             depth: depth + 1,
-                            screenBounds: screenBounds,
+                            screenBounds: childScreenBounds,
                             truncationReasons: &truncationReasons,
                             parentPath: currentPath,
                             childIndex: idx,
                             keyboardFocus: keyboardFocus,
                             disableAllFiltering: disableAllFiltering,
+                            keyboardScreenBounds: keyboardScreenBounds,
                             enclosingFrame: frame,
                             coordinateOffset: resolved.offset
                         )

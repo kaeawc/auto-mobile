@@ -246,8 +246,11 @@ overflow or blocked writes close the peer, and events and requests continue with
   a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
   uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs
   from the host's disposable-app key: one requested id is refused with an error, and in a bulk
-  removal the package is reported under `skipped`. Each removal is logged at `warn`. An app that
-  is already gone from the device still has its registry record cleared.
+  removal the package is reported under `skipped`. When the session broker acquires an Android
+  device, it sweeps expired apps within the preparation deadline. The acquisition result reports
+  the removed app IDs, and each removal is logged at `warn`. An app that is already gone from the
+  device still has its registry record cleared. Doctor reports expired apps that are still installed
+  or registered on each connected Android device.
 - **Device commands.** The Android installer runs `adb install -r` (then `pm clear` for `reset`),
   `pm grant` per granted manifest permission, and `pm revoke` plus the `user-set user-fixed` flags
   per denied one, so a denial reads as blocked with no dialog. It refuses a grant and a deny that
@@ -269,16 +272,19 @@ INTERNET), and explicitly enabled components in structured XML. App-owned resour
 references retain the template resource namespace with private-resource access.
 `aapt2 link` resolves those names back to binary resource ids, avoiding unsafe
 binary-manifest string replacement. The spec and assets are baked under
-`assets/prototype/` at stamp time. An `icon.backgroundColor` (`#RRGGBB` or
-`#AARRGGBB`) rewrites the `prototype_icon_background` colour value in the stored
-resource table, in every configuration. That colour backs the adaptive icon and the
-Android 12+ splash screen, so both follow it. The stamp fails if the template has no
-literal colour by that name. An `icon.asset` is refused: the raster foreground
-layer is not stamped yet.
+`assets/prototype/` at stamp time. The adaptive icon and Android 12+ splash share
+`prototype_icon_background`. The host patches it in every configuration using
+`icon.backgroundColor`, the spec's authored `theme.colors.background` (with the
+selected mode's override, using light for system mode), or the template default.
+An `icon.asset` names a PNG or JPEG supplied with the install call. A colour-only
+icon uses a contrasting label monogram. The host places the artwork in the
+adaptive icon safe zone and uses its alpha as the themed icon silhouette.
+It resolves both drawable paths from the compiled resource table and fails
+if a requested resource is missing.
 
 Template signatures are removed before assembly. The resource table stays stored;
 zipalign aligns it before apksigner signs with v2/v3 using a persistent host-owned
 PKCS12 identity. Verification checks the resulting signer before publishing the
 content-addressed cache artifact. The signer certificate SHA-256 is available to
 the installation signing guard. Cache identity covers the template, stamp inputs,
-asset bytes, and signer; cache hits check the saved artifact digest.
+asset bytes, rendered icon layers, and signer; cache hits check the saved artifact digest.

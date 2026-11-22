@@ -69,6 +69,7 @@ final class CommandHandler: CommandHandling {
     let voiceOverToggle: any VoiceOverToggling
     let locationSimulator: any LocationSimulating
     let hingeAngleSetter: any HingeAngleSetting
+    let simulatedOrientationSetter: any SimulatedOrientationSetting
     let accessibilityAuditor: any AccessibilityAuditing
     let appearanceControl: any AppearanceControlling
     let siriControl: any SiriControlling
@@ -91,6 +92,7 @@ final class CommandHandler: CommandHandling {
         voiceOverToggle: any VoiceOverToggling = DefaultVoiceOverToggle(),
         locationSimulator: any LocationSimulating = DefaultLocationSimulator(),
         hingeAngleSetter: any HingeAngleSetting = DefaultHingeAngleSetter(),
+        simulatedOrientationSetter: any SimulatedOrientationSetting = DefaultSimulatedOrientationSetter(),
         accessibilityAuditor: any AccessibilityAuditing = DefaultAccessibilityAuditor(),
         appearanceControl: any AppearanceControlling = DefaultAppearanceControl(),
         siriControl: any SiriControlling = DefaultSiriControl(),
@@ -112,6 +114,7 @@ final class CommandHandler: CommandHandling {
         self.voiceOverToggle = voiceOverToggle
         self.locationSimulator = locationSimulator
         self.hingeAngleSetter = hingeAngleSetter
+        self.simulatedOrientationSetter = simulatedOrientationSetter
         self.accessibilityAuditor = accessibilityAuditor
         self.appearanceControl = appearanceControl
         self.siriControl = siriControl

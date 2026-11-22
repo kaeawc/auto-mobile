@@ -103,6 +103,25 @@ describe("clipContentHiddenRegions (#18675)", () => {
     ).toEqual([region(0, 0, 1000, 600, 30)]);
   });
 
+  test("clips to the runner's host bounds, not a smaller nested host sharing its corner (#18879)", () => {
+    const composeHost = (bottom: number) => ({
+      class: "androidx.compose.ui.platform.ComposeView",
+      bounds: { left: 0, top: 0, right: 1000, bottom },
+    });
+    const flagged: ContentHiddenRegion = {
+      ...region(0, 0, 1000, 1600, 80),
+      hostBounds: { left: 0, top: 0, right: 1000, bottom: 2000 },
+    };
+    expect(
+      clipContentHiddenRegions([flagged], {
+        screenWidth: 1000,
+        screenHeight: 2000,
+        windows: [appWindow],
+        hierarchy: { node: [composeHost(2000), composeHost(200)] },
+      }),
+    ).toEqual([region(0, 0, 1000, 1600, 80)]);
+  });
+
   test("picks the window after the host clip, so a split-screen neighbour cannot erase it", () => {
     const window = (id: number, top: number, bottom: number): ViewHierarchyWindowInfo => ({
       id,

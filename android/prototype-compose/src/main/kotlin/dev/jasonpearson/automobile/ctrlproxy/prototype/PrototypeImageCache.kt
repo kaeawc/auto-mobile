@@ -17,9 +17,6 @@ interface PrototypeDecodedImage {
   val byteCount: Long
 }
 
-/** The size, in pixels, an image will be shown at; the decoder downsamples to at least this. */
-@InternalAutoMobilePrototypeApi data class PrototypeImageTarget(val widthPx: Int, val heightPx: Int)
-
 /** Decodes encoded PNG/JPEG/WebP bytes, or returns null when they cannot be decoded. */
 @InternalAutoMobilePrototypeApi
 fun interface PrototypeImageDecoder {
@@ -167,37 +164,3 @@ internal fun powerOfTwoAtLeast(value: Int): Int {
 }
 
 private const val MAX_BUCKET = 1 shl 14
-
-/**
- * The `inSampleSize` for decoding a [sourceWidth]x[sourceHeight] image for [target]: the largest
- * power of two that keeps both decoded dimensions at least the target's, then larger still while
- * the decoded pixel count would exceed [maxPixels]. A downsampled bitmap is never smaller than the
- * target unless the pixel cap forces it.
- */
-internal fun prototypeImageSampleSize(
-  sourceWidth: Int,
-  sourceHeight: Int,
-  target: PrototypeImageTarget,
-  maxPixels: Long,
-): Int {
-  var sample = 1
-  while (sample < MAX_SAMPLE_SIZE) {
-    val width = sourceWidth / sample
-    val height = sourceHeight / sample
-    val halvable = width / 2 >= target.widthPx && height / 2 >= target.heightPx
-    val tooBig = width.toLong() * height > maxPixels
-    if (!halvable && !tooBig) break
-    sample = sample shl 1
-  }
-  return sample
-}
-
-/** Whether decoding at [sampleSize] stays within [maxPixels]; false for absurd header sizes. */
-internal fun prototypeImageFitsBudget(
-  sourceWidth: Int,
-  sourceHeight: Int,
-  sampleSize: Int,
-  maxPixels: Long,
-): Boolean = (sourceWidth / sampleSize).toLong() * (sourceHeight / sampleSize) <= maxPixels
-
-private const val MAX_SAMPLE_SIZE = 1 shl 6

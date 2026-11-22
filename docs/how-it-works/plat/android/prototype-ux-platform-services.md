@@ -129,7 +129,8 @@ file maps each name to its Android manifest permissions and grant mechanism, and
 | `speech`             | `RECORD_AUDIO`                                   | `pm grant`        | `NSSpeechRecognitionUsageDescription`          | notGrantableOnSimulator |
 
 The `permissions` module (`prototype_platform_permissions_v1`) has one call, `permissions.request` with
-`names` (1-16 unique canonical names). A literal list may only name permissions declared in
+`names` (1-16 unique canonical names) and optional `options: {provisional?: boolean}` (default false).
+Android accepts and ignores these options. A literal list may only name permissions declared in
 `requires.permissions`; a bound list is checked by the runtime. State is `/platform/permissions/<name>`, one
 of `granted`, `denied`, `blocked`, `notDetermined`, `limited`, `restricted` or `unavailable`, and
 `permissions.changed` carries `{name, state}` when a request changes authorization. It also fires when
@@ -139,15 +140,20 @@ runtimes do not advertise the module, since a grant there would go to CtrlProxy 
 iOS standalone hosts and ProtoViewer register `permissions` for `notifications`; borrowed-app sessions
 do not expose the module. Other canonical names return `unavailable`.
 The first status read establishes `/platform/permissions/notifications` asynchronously without prompting.
-Requests and foreground Settings re-reads publish only changed states. A request prompts with alert,
-sound and badge options only while authorization is `notDetermined`, then re-reads notification settings
+Requests and foreground Settings re-reads publish only changed states. A request uses alert,
+sound and badge options only while authorization is `notDetermined`; `options.provisional: true` adds
+provisional authorization without showing a prompt. It then re-reads notification settings
 for its result. Outside an app bundle with a bundle
 identifier, the source returns `unavailable` without accessing UserNotifications. No Info.plist key is
 required. One request may be in flight per module; a second returns `too_many_in_flight`. Request
 cancellation drops the late result while foreground observation stays active. The registry stops
-observation when its final observer releases it. It uses the shared iOS
-platform-call deadline. This module does not publish
-`/platform/notifications/authorization`; `provisional` authorization reads as `limited` here.
+observation when its final observer releases it. Permission requests have no platform-call deadline,
+including an explicit `timeoutMs`; `statusKey` stays `loading` until a result or cancellation.
+The same state is published at `/platform/notifications/authorization`, including the baseline and
+foreground re-reads, and cleared on stop. An authorization-only binding declares `notifications` in
+`requires.platform` and `requires.permissions` and uses the permissions capability on iOS.
+Other notification state, calls and handlers require the notifications capability.
+Provisional authorization reads as `limited`.
 
 | iOS `UNAuthorizationStatus` | State           |
 | --------------------------- | --------------- |
@@ -220,8 +226,8 @@ State is `/platform/notifications/{badge, active, pending, authorization}` plus
 `/platform/notifications/channels/<id>/blocked` (a boolean, readable only for a declared channel). The
 `active` key is at most 24 per prototype, and `authorization` uses the permission vocabulary (`granted`,
 `denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). Android hosts do not
-advertise this module. The `permissions` module above supplies notification authorization without
-publishing the notifications state tree.
+advertise this module. The `permissions` module above supplies notification authorization; iOS also
+publishes its authorization key without advertising notification delivery calls.
 
 Channels come from a root `notifications` block,
 `{channels: [{id, name, importance, description?, showBadge?}]}`. It holds 1-8 channels with unique
@@ -236,8 +242,18 @@ The bounds are named contract limits (`MAX_PROTOTYPE_NOTIFICATION_*`,
 `MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE`) that the call, state and channel rules repeat. Spec validation
 checks literal values only. The limits that apply after placeholders resolve belong to the device
 runtime that posts the notification. They are a reply of at most 1 KiB, a resolved notification of at
-most 5 KiB, and at most 4 updates per second per notification, coalesced to the latest. No runtime
-posts notifications yet, so none of these is enforced today; the host never posts one.
+most 5 KiB, and at most 4 updates per second per notification, coalesced to the latest. The per-prototype
+iOS Viewer is the only runtime that posts notifications; no other host posts one, so these limits are not
+enforced elsewhere.
+
+The iOS Viewer posts local notifications under its own bundle identity and advertises both
+`prototype_platform_notifications_v1` and `prototype_platform_notifications_scheduled_v1`, so
+`notifications.schedule` specs pass preflight. It uses one request identifier per prototype and notification
+id, and cancels matching delivered and scheduled requests by id, group, or all. Pending requests reserve
+space in the active limit because iOS can deliver them while the Viewer is suspended. The module reports the
+Viewer's authorization state. The launch delegate presents foreground notifications and routes taps, buttons
+and replies to the prototype, queuing cold-start responses until its event stream is ready. The injected
+agent directs specs that require notifications to the standalone Viewer.
 
 The module's report (#14277) is `{permission, badge, channels, active, pending}`.
 `prototypeNotificationsReport` builds it from a platform snapshot: Android's active notifications, or

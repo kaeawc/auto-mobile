@@ -5,6 +5,7 @@ import { PROTOTYPE_PLATFORM_CAPABILITY } from "../../../src/features/observe/and
 import {
   PROTOTYPE_SPEC_CAPABILITY_GATES,
   requiredPrototypeCapabilities,
+  prototypeRequiredCapabilities,
 } from "../../../src/features/prototype/prototypeCapabilityGates";
 import {
   PROTOTYPE_PLATFORM_DELIVERED_EVENT_NAME,
@@ -18,6 +19,7 @@ import {
   PROTOTYPE_PLATFORM_MODULE_GATES,
   prototypePlatformFields,
   prototypePlatformModuleFields,
+  prototypeIosNotificationFallbackPaths,
   prototypePlatformUnsupportedMessage,
 } from "../../../src/features/prototype/prototypePlatformGates";
 import {
@@ -47,6 +49,94 @@ describe("permissions module contract", () => {
       max: 16,
       unique: true,
     });
+  });
+
+  test("request options accept only an optional provisional boolean", () => {
+    const request = (options: unknown) =>
+      spec(
+        {
+          requires: {
+            platform: ["permissions"],
+            permissions: [{ name: "notifications", purpose: "Send updates" }],
+          },
+        },
+        {
+          type: "button",
+          label: "Allow",
+          onTap: [
+            {
+              type: "platform",
+              call: "permissions.request",
+              args: { names: { value: ["notifications"] }, options: { value: options } },
+            },
+          ],
+        },
+      );
+    for (const options of [{}, { provisional: false }, { provisional: true }]) {
+      expect(validatePrototypeSpec(request(options)).success).toBe(true);
+    }
+    for (const options of [
+      null,
+      true,
+      [],
+      "provisional",
+      { provisional: "true" },
+      { unknown: true },
+    ]) {
+      expect(validatePrototypeSpec(request(options)).success).toBe(false);
+    }
+  });
+
+  test("iOS authorization-only reads use permissions without granting notification delivery", () => {
+    const authorization = spec(
+      {
+        requires: {
+          platform: ["notifications"],
+          permissions: [{ name: "notifications", purpose: "Send updates" }],
+        },
+      },
+      { type: "text", text: "{platform:/notifications/authorization}" },
+    );
+    expect(validatePrototypeSpec(authorization).success).toBe(true);
+    const caps = (value: unknown, platform: "ios" | "android") =>
+      prototypeRequiredCapabilities(value, platform).map((gate) => gate.capability);
+    expect(caps(authorization, "ios")).toContain("prototype_platform_permissions_v1");
+    expect(caps(authorization, "ios")).not.toContain("prototype_platform_notifications_v1");
+    expect(caps(authorization, "android")).toContain("prototype_platform_notifications_v1");
+    const variants = [
+      { ...authorization, requires: { platform: ["notifications"] } },
+      {
+        ...authorization,
+        notifications: { channels: [{ id: "updates", name: "Updates", importance: "default" }] },
+      },
+      { ...authorization, root: { type: "text", text: "{platform:/notifications/badge}" } },
+      { ...authorization, platform: { on: { "notifications.opened": [] } } },
+      {
+        ...authorization,
+        root: {
+          type: "button",
+          label: "Cancel",
+          onTap: [
+            {
+              type: "platform",
+              call: "notifications.cancel",
+              args: { all: { value: true } },
+            },
+          ],
+        },
+      },
+    ];
+    for (const value of variants) {
+      expect(caps(value, "ios")).toContain("prototype_platform_notifications_v1");
+    }
+    expect(
+      validatePrototypeSpec({
+        ...authorization,
+        requires: {
+          permissions: [{ name: "notifications", purpose: "Send updates" }],
+        },
+      }).success,
+    ).toBe(false);
   });
 
   test("changed is the only event, and every name has a state in the shared vocabulary", () => {
@@ -153,6 +243,42 @@ describe("notifications module contract", () => {
     expect(notifications.calls.schedule.capability).toBe(
       "prototype_platform_notifications_scheduled_v1",
     );
+  });
+
+  test("the iOS notifications gate directs an injected agent to the standalone Viewer", () => {
+    const spec = { requires: { platform: ["notifications"] } };
+    const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+      (entry) => entry.capability === notifications.capability,
+    )!;
+    expect(gate.fields(spec)).toEqual(["requires.platform[0]"]);
+    expect(gate.unsupportedMessage(gate.fields(spec), "ios")).toContain(
+      "the standalone iOS Prototype Viewer",
+    );
+    expect(gate.unsupportedMessage(gate.fields(spec), "android")).toContain("connected CtrlProxy");
+  });
+
+  test("locates iOS notification fields that fall back to plain content", () => {
+    const spec = {
+      root: {
+        type: "button",
+        onTap: [
+          {
+            type: "platform",
+            call: "notifications.post",
+            args: { style: { value: { type: "bigText" } } },
+          },
+          {
+            type: "platform",
+            call: "notifications.schedule",
+            args: { progress: { value: { value: 0.5 } }, style: { state: "style" } },
+          },
+        ],
+      },
+    };
+    expect(prototypeIosNotificationFallbackPaths(spec)).toEqual([
+      "root.onTap[1].args.progress",
+      "root.onTap[1].args.style",
+    ]);
   });
 
   test("a notifications.push handler needs prototype_platform_push_v1 on top of the module", () => {

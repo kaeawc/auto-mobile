@@ -126,7 +126,7 @@ private addresses, and refuse daemon ports on loopback and private addresses (a 
 
 Downloads stop at 8 MiB and have a 30 s ceiling. PNG, JPEG and WebP signatures must decode through
 ImageIO. The header must fit 64 MiB at four bytes per pixel, or eight for sources deeper than 8 bits
-per component or without depth metadata; decoding applies EXIF orientation and downsamples to 2048
+per component or without depth metadata. Decoding applies EXIF orientation and downsamples to 2048
 pixels on the longest edge.
 Decoded images use a 64 MiB memory cache; the app-private URL-hashed disk LRU holds 128 MiB.
 At most six loads run across renderer configurations. Placeholder and error assets or colors render

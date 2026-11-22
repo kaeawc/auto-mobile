@@ -164,6 +164,7 @@ Up to four clauses combine with AND; operators are `contains`, `eq`, `neq`, `gt`
 Clause values read state or a literal string/number. Missing fields and type mismatches do not match.
 Add `reduce: {"op":"count"}` or `{"op":"sum","field":"amount"}` (also `min` or `max`)
 to produce a scalar after limiting; empty reductions return zero. Scalars support `format`.
+
 Use `visibleWhen: {"derived":"cartCount","gt":0}` to show checkout when a derived count is
 positive. Derived conditions compare raw values, before formatting, and update when their inputs
 change. They also work in `enabledWhen`, `errorWhen`, and `styleWhen`. Operators are `equals`,

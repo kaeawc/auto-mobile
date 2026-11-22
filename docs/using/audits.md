@@ -65,7 +65,7 @@ Both checks support Android and iOS Simulator. Calls on physical iOS devices fai
 `performance` measures UI jank and frame time of the foreground app against the configured
 thresholds. Touch latency is measured on Android only. On iOS Simulator, instrument the app with
 auto-mobile-sdk to report frame metrics. The check reports `unsupported` when the app is in the
-background or the simulator receives no fresh frame metrics. `memory` takes a snapshot of
+background or the simulator receives no fresh frame metrics. The `memory` check takes a snapshot of
 `appId` on Android and checks its RSS growth over three seconds on iOS Simulator.
 
 Each result has `passed`, its metrics and its violations; `failed` is set when `failOn` matched.

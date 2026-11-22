@@ -153,11 +153,13 @@ An iPad windowed app (iOS 27 "Windowed Apps", #6635) also produces an app/screen
 size mismatch. There the application frame and the snapshot hierarchy are
 window-relative with origin (0,0), while the app's window element and synthesized
 events use screen space. When the app frame is not screen-sized, observe reads the
-app's `windows.firstMatch.frame`; when that window has the app frame's size and a
-different origin, observe adds the window origin to every window-relative node,
-reports the window's screen frame in `windows`, and reports the screen (the
+app's `windows.firstMatch.frame`. When that window has the app frame's size and a
+different origin, observe adds the window origin to every window-relative node and
+reports the window's screen frame in `windows`. It also reports the screen (the
 SpringBoard frame) as the root's bounds and the screen size, since hosts read the
-screen size from the root. XCTest already reports the keyboard
+screen size from the root.
+
+XCTest already reports the keyboard
 subtree in screen space, so it keeps its bounds and its offscreen filtering uses
 the screen rather than the window. SpringBoard alerts merged into the hierarchy arrive in
 screen space; observe first moves them into the window space so the single shift

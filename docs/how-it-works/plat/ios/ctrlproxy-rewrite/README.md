@@ -159,15 +159,14 @@ reports the window's screen frame in `windows`. It also reports the screen (the
 SpringBoard frame) as the root's bounds and the screen size, since hosts read the
 screen size from the root.
 
-XCTest already reports the keyboard
-subtree in screen space, so it keeps its bounds and its offscreen filtering uses
-the screen rather than the window. SpringBoard alerts merged into the hierarchy arrive in
-screen space; observe first moves them into the window space so the single shift
-returns them to their screen frames. Observed bounds therefore line up with the
-full-screen screenshot, and a point-offset tap, swipe, or drag is a screen point
-delivered unchanged (`appFrameOriginPlusPointOffset`). The gesture path still reads
-the window once per gesture on the mismatch path to keep the app off the
-main-screen rule.
+XCTest already reports the keyboard subtree in screen space, so it keeps its bounds
+and its offscreen filtering uses the screen rather than the window. SpringBoard
+alerts merged into the hierarchy arrive in screen space; observe first moves them
+into the window space so the single shift returns them to their screen frames.
+Observed bounds therefore line up with the full-screen screenshot, and a
+point-offset tap, swipe, or drag is a screen point delivered unchanged
+(`appFrameOriginPlusPointOffset`). The gesture path still reads the window once per
+gesture on the mismatch path to keep the app off the main-screen rule.
 
 Full-screen apps and iPhones have no mismatch and perform no extra read.
 

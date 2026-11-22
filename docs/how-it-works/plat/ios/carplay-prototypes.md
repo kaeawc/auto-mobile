@@ -41,10 +41,10 @@ Indigo HID messages (`SimDeviceLegacyHIDClient`, loaded from
   (TVOut) and `2` (Wireless); `CarPlayHID.target` maps any other type to none. Never send to
   `IndigoHIDTargetForScreen(id)` (`0x40000000 | id`) for a car screen: no virtual service has that
   target and backboardd aborts on it.
-- Before any HID message, the helper re-enumerates the screens; it refuses, sending nothing, unless
-  every condition holds. The conditions: the runtime is iOS 26.x (`unsupported-runtime`), a TVOut
-  screen exists (`no-carplay-screen`), its screenType is 1 or 2 (`unsupported-screen-type`), it is
-  powered on (`carplay-not-powered`), and x, y lie inside its pixel size (`usage`).
+- Before any HID message the helper re-enumerates the screens and refuses, sending nothing, unless
+  the runtime is iOS 26.x (`unsupported-runtime`), a TVOut screen exists (`no-carplay-screen`), and
+  its screenType is 1 or 2 (`unsupported-screen-type`). It also refuses unless the screen is powered
+  on (`carplay-not-powered`) and x, y lie inside its pixel size (`usage`).
 - Each run sends `IndigoHIDMessageToCreateCarPlayService(true)` before the touch, because
   CoreSimulator HID state does not survive a reboot; creating it again is harmless. Without the
   service, touches to target 1 are ignored.
@@ -53,11 +53,10 @@ Indigo HID messages (`SimDeviceLegacyHIDClient`, loaded from
   pixels (800x480 after `power-on`), the same pixels as a `--display=TVOut` screenshot. A failed
   send is `hid-failed`. The output is one JSON line, `tapped`: the point, `screenID`, `screenType`,
   `target`, `width` and `height`.
-- `carPlayTap.ts` runs it through the same exec seam as power-on. First, `tapCarPlayScreen` requires
+- `carPlayTap.ts` runs it through the same exec seam as power-on. `tapCarPlayScreen` first requires
   the projection probe to report the car display, so a screen that is not projecting is refused
-  before the helper runs. Separately, `tapAt` with `display: "carPlay"` calls it; phone-only `tapAt`
-  fields are refused. Finally, `tapOn` has no CarPlay selector because nothing reads the car screen's
-  hierarchy.
+  before the helper runs. In turn, `tapAt` with `display: "carPlay"` calls it; phone-only `tapAt`
+  fields are refused. `tapOn` has no CarPlay selector because nothing reads the car screen's hierarchy.
 
 ## Projection readiness contract
 
@@ -92,11 +91,11 @@ independently. Identity is seed-free, chosen in priority order: `Car[id]`, `CarI
 `requireCarPlayProjection` probes and refuses capture unless either Car flag is true. Its error
 names the screen and identity, explains the black frame and gives the recovery step. Attachment and
 power-on alone are not enough: TVOut stays untagged without the StarkConfig. A positive tag is a
-readiness signal, not verification of a captured image. Before taking a screenshot, `captureCarPlayScreen`
-runs that check and passes the probed `displayId` (`carPlayCaptureDisplay`) as `simctl io
+readiness signal, not verification of a captured image. Then `captureCarPlayScreen` runs that check
+before taking a screenshot and passes the probed `displayId` (`carPlayCaptureDisplay`) as `simctl io
 screenshot --display`, so a refused or unpowered screen is never captured.
-Likewise, `observe({display: "carplay"})` uses the same guard before it selects the single named CarPlay screen
-and captures its PNG.
+Finally, `observe({display: "carplay"})` uses the same guard before it selects the single named
+CarPlay screen and captures its PNG.
 
 ## Background
 

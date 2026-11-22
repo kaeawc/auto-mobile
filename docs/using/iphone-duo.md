@@ -124,8 +124,8 @@ landscape, are tapped as usual.
 `rotate` turns whichever panel is active, in every posture. The inner panel is landscape when the
 device is upright, so `orientation: "portrait"` there gives a 669x951 layout and `"landscape"`
 gives 951x669; Settings rotates on the inner panel too. The home screen on the inner panel turns
-on screen, but reports a size that does not follow it. So `rotate` there can fail with "does not
-rotate on the inner panel". Open an app with `launchApp` and rotate inside it.
+on screen but reports a stale size, so `rotate` there can fail with "does not rotate on the inner
+panel". Open an app with `launchApp` and rotate inside it.
 
 On the cover panel, apps that support landscape (for example Safari) rotate, but Settings and the
 home screen stay portrait, and `rotate` fails with:

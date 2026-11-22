@@ -20,7 +20,7 @@ Payloads contain only `stack`, `screen`, `x` and `y`; coordinates are window-loc
 dp rounded to one decimal. The deepest stack supplies its id and top screen; ties pick the lexicographically lowest stack id. Both are null
 without stacks. The event uses normal sequence allocation, state, pages and
 stacks, never typed text. Authored emits cannot use the
-reserved `prototype_` prefix. Disabling it or closing the runtime stops reports.
+reserved `prototype_` prefix.
 
 ## Value formatters (#14227)
 
@@ -58,36 +58,24 @@ on derived repeat keys and emit names. Missing source fields are allowed and for
 minFraction must not exceed maxFraction when both are supplied. Omitted numeric
 fraction options use Intl/CLDR defaults (currency respects minor units, including
 zero for JPY). Number grouping true/default respects the locale's minimum grouping
-digits; false disables grouping. Compact, currency, and percent do too. Locale defaults to the device locale; timeZone defaults to the
-device zone. Overrides accept a simple BCP 47 tag of at most 35 characters and an
-IANA zone identifier of at most 128 characters. Shape validation does not prove
-that the current engine supports a locale or zone.
+digits; false disables grouping. Compact, currency, and percent do too. Locale and timeZone default to the device's. Overrides accept a simple BCP 47 tag of at most 35 characters and an
+IANA zone identifier of at most 128 characters.
 
 Epoch milliseconds must be finite integers within the Date range. Strings are
 `YYYY-MM-DD` (midnight UTC) or `YYYY-MM-DDTHH:mm:ss[.fraction]Z` / a signed
-`hh:mm` offset. Hours must be 00–23 and minutes/seconds 00–59; hour 24 and
-leap second 60 are rejected. Invalid calendar dates, unzoned date-times, wrong types and
-missing pointers display as the empty string. The host's pure formatter returns
-undefined for invalid inputs; its resolver converts that to an empty string.
+`hh:mm` offset. Hours must be 00–23 and minutes/seconds 00–59. Invalid calendar dates, unzoned date-times, wrong types and
+missing pointers display as the empty string.
 
-Relative formatting takes an injected nowMs snapshot; it never reads the real
-clock. Choose the largest elapsed threshold not exceeding abs(input-nowMs):
+Relative formatting reads an injected nowMs snapshot, never the clock. Choose the largest elapsed threshold not exceeding abs(input-nowMs):
 year=365 days, month=30 days, day=24 hours, hour=60 minutes, minute=60 seconds,
 second=1000 ms. Truncate toward zero. Under one second uses localized "now".
-There are no weeks or calendar-month arithmetic. Callers resolve entry locale
-and zone overrides before formatting, and keep the clock snapshot fixed when
-reproducible output is required.
 
 `prototype_format_v1` gates either derive map, including empty maps, before show
-or the complete patch result. Renderers advertise it only once implemented. Shared `derive/formatters.json` cases define parity: normalize
+or the complete patch result. Shared `derive/formatters.json` cases define parity: normalize
 U+202F and U+00A0 to plain space before comparisons. Exact cases pin supported
 English output; structural cases allow documented CLDR differences in foreign
 currency symbols, narrow relative abbreviations, zero-relative wording and
-non-English data. Add engine overrides only for a measured platform
-difference; the fixture note records the divergence policy and unit thresholds.
-
-`dateTime`, `duration`, `plural` and `fileSize` are not format kinds (invalid). No dependencies are needed: the host uses Intl.NumberFormat,
-Intl.DateTimeFormat and Intl.RelativeTimeFormat.
+non-English data. The fixture note records the divergence policy and unit thresholds.
 
 ## Platform namespaces (#15257)
 
@@ -126,8 +114,7 @@ shape; omission uses a capsule. Base and conditional styles require
 `prototype_scroll_edge_effect_v1`. iOS 26 uses the native scroll edge style;
 iOS 17–25 reuse the scrollability-aware `fadeEdges` mask, 24 dp for soft and
 8 dp for hard. Authored `fadeEdges` lengths override those defaults; `none`
-disables only the default fallback mask or native effect. Explicit `fadeEdges`
-remain applied on every supported iOS version. Android accepts the contract but does not advertise or
+disables only the default fallback mask or native effect. Android accepts the contract but does not advertise or
 render edgeEffect.
 
 In `ios`, `glassGroup: {spacing}` accepts finite 0–200 dp on column, row, box,
@@ -136,7 +123,7 @@ keys use group-scoped glassEffectID, independently of visibility-pair matching;
 nested groups establish a new namespace. Keys must be unique within the nearest
 group and cannot also belong to visibility pairs. Under repeat, including on the
 repeated node, a glass shared key must be a template referencing repeat.key.
-Existing capability rules still apply. `glassUnion` is a 1–64 character ASCII id token
+`glassUnion` is a 1–64 character ASCII id token
 (`[A-Za-z_][A-Za-z0-9_]*`); `glassTransition` is matchedGeometry, materialize or
 identity. Both require a base glass surface on the same node.
 `backgroundExtension: true` is image-only and does not require the image itself
@@ -146,10 +133,9 @@ in platformNotes.
 
 The system's Liquid Glass implementation handles Reduce Transparency and
 Increase Contrast. On iOS 17–25 the device does not advertise
-`prototype_glass_v1`, so the host refuses glass there: there is no simulated
-translucent fill or material substitute. Android advertises the capability on every API level:
+`prototype_glass_v1`, so the host refuses glass there. Android advertises the capability on every API level:
 API 31 and later blur earlier sibling layers (Haze) and older devices draw a tonal scrim instead.
-A glass node without `cornerRadius` is a capsule on Android as on iOS. An Android
+An Android
 renderer advertising glass must report any approximation (clear variant,
 ignored `interactive`) in `platformNotes`.
 
@@ -170,17 +156,14 @@ color and border color use critically damped effects springs.
 | either scheme effects | 1 / 1 / 1                             | 3800 / 1600 / 800                 |
 
 Compose uses `spring(dampingRatio, stiffness)`. SwiftUI uses
-`interpolatingSpring(mass: 1, stiffness: k, damping: 2 * dampingRatio * sqrt(k))`,
-so both renderers use the same physical spring. Reduced motion snaps spatial
-changes and retains effects; motion off snaps everything. Existing motion v2/v3
-capability requirements still apply; iOS advertises the token capability but
-continues to refuse those broader features until its corresponding capabilities
-are available.
+`interpolatingSpring(mass: 1, stiffness: k, damping: 2 * dampingRatio * sqrt(k))`. Reduced motion snaps spatial
+changes and retains effects; motion off snaps everything. iOS advertises the token capability
+but still refuses the motion v2/v3 features it lacks.
 
 ## Disposable apps
 
 A disposable app installs one spec as its own app, with its own package, label, icon, permissions
-and foreground-service types. The host core lives in `src/features/prototype/disposableApp/`.
+and foreground-service types.
 The Android stamper packages a spec into a signed APK. The `prototype` actions `installApp`,
 `listApps` and `uninstallApp` (`{appId}`, `{all: true}` or `{expired: true}`) run on the daemon's
 `DisposableAppManager`, built on the first such call. iOS runs them on
@@ -201,19 +184,22 @@ replace an authenticated live peer. Status and patch conflicts redact `storage.s
 
 Events replay at least once. Activities rebind targets to a process-scoped attach listener.
 The `appInstanceId`, sequence ledger and unacknowledged events persist in app storage across
-process kills. The journal records the package's last update time, and the app discards a journal
-written under another one, so an in-place reinstall (`adb install -r`, which keeps app storage)
-starts a fresh identity and ledger; clearing app data deletes it. The journal is saved off the main
-thread, at most once per event, and a frame reaches the host only after the state it exposes is saved.
-`hello_result` reports identity and an optional
-`showingId`, which changes when the Activity mounts a new runtime. A same-process remount clears
-the dismissal and keeps pending events. Older apps without `showingId` keep process-only identity.
-One daemon-host attacher serves every MCP registration and keeps app/device cursors. `hello` sends
-`appInstanceId` and `lastAcknowledgedSequence` (initially zero), and `{type: "ack", sequence,
-appInstanceId}` acknowledges matching instances after subscriber delivery. Epochs initialize before
-replay. Status reconciles only its app. The 256-event buffer closes on overflow for replay. Device
-cleanup and host disposal close sockets, remove adb forwards and forget device cursors. Uninstall
-and reinstall each forget only that app's cursors.
+process kills. The journal records the package's last update time and is discarded under another
+one, so `adb install -r` (which keeps app storage) starts a fresh identity and ledger. Clearing app
+data deletes it. Saves run off the main thread, at most once per event; a frame reaches the host
+only after the write of the state it exposes completes. A snapshot over the 4 MiB journal limit
+evicts its oldest pending events as dropped, so the ledger still saves; a save that still fails is
+logged and keeps the previous file.
+
+`hello_result` reports identity and an optional `showingId`, which changes when the Activity
+mounts a new runtime. A same-process remount clears the dismissal and keeps pending events. Older
+apps without `showingId` keep process-only identity. One daemon-host attacher serves every MCP
+registration and keeps app/device cursors. `hello` sends `appInstanceId` and
+`lastAcknowledgedSequence` (initially zero); `{type: "ack", sequence, appInstanceId}` acknowledges
+matching instances after subscriber delivery. Epochs initialize before replay. Status reconciles
+only its app. The 256-event buffer closes on overflow for replay. Device cleanup and host disposal
+close sockets, remove adb forwards and forget device cursors. Uninstall and reinstall each forget
+only that app's cursors.
 
 The app stores up to 200 unacknowledged events and replays them on the next hello. The host
 de-duplicates replays by sequence within the connection and coordinator. The app drops the oldest
@@ -222,7 +208,7 @@ missing events. A separate writer uses a 256-frame queue and five-second write d
 overflow or blocked writes close the peer, and events and requests continue with replay retained.
 
 - **Identity.** The package is `dev.jasonpearson.automobile.app.<slug>_<sha256(slug) 8 hex>`.
-  Hyphens in the slug become underscores because Android package segments allow only
+  Slug hyphens become underscores, as Android package segments allow only
   `[A-Za-z0-9_]`. A slug is lowercase hyphen-separated words of at most 48 characters that start
   with a letter. The prefix is never agent-chosen, so a disposable app cannot replace a real one.
 - **Permissions** come only from the spec's root `requires`. `INTERNET` is always declared.
@@ -236,21 +222,22 @@ overflow or blocked writes close the peer, and events and requests continue with
 - **Template.** The host picks the smallest flavor whose capabilities cover
   `requiredPrototypeCapabilities(spec)`. If none does, it refuses and names the missing capabilities
   and the closest flavor.
-- **Registry.** The registry file `disposable-apps.json` under the AutoMobile data dir keys records
+- **Registry.** `disposable-apps.json` under the AutoMobile data dir keys records
   by device id. Each record holds appId, slug, platform, label, spec sha256, template, signer,
-  installedAt and expiresAt. The host serializes writes and makes them atomic. It skips a corrupt
-  file or record with a warning. An install writes its record, with the new expiresAt, once
-  the package is on the device and before seeding, reset or permissions. If one of those fails, the
-  error says the app is installed without that step, and the sweep still sees the current TTL.
+  installedAt and expiresAt. Writes are serialized and atomic. A corrupt file or
+  record is skipped with a warning. An install writes its record and new expiresAt once the package
+  is on the device, before seeding, reset or permissions. If one of those fails, the error says the
+  app is installed without that step. Grants and revokes run one at a time without rollback, so a
+  permission failure can leave them partly applied; the sweep still sees the current TTL.
 - **Lifecycle.** `ttlHours` defaults to 72, accepts 0 to 720, and 0 means no expiry. Re-installing
   a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
   uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs
   from the host's disposable-app key: one requested id is refused with an error, and in a bulk
   removal the package is reported under `skipped`. When the session broker acquires an Android
   device, it sweeps expired apps within the preparation deadline. The acquisition result reports
-  the removed app IDs, and each removal is logged at `warn`. An app that is already gone from the
-  device still has its registry record cleared. Doctor reports expired apps that are still installed
-  or registered on each connected Android device.
+  the removed app IDs, and each removal is logged at `warn`. A record whose app is already gone
+  from the device is still cleared. Doctor reports expired apps that are still installed or
+  registered on each connected Android device.
 - **Device commands.** The Android installer runs `adb install -r` (then `pm clear` for `reset`),
   `pm grant` per granted manifest permission, and `pm revoke` plus the `user-set user-fixed` flags
   per denied one, so a denial reads as blocked with no dialog. It refuses a grant and a deny that
@@ -272,15 +259,15 @@ INTERNET), and explicitly enabled components in structured XML. App-owned resour
 references retain the template resource namespace with private-resource access.
 `aapt2 link` resolves those names back to binary resource ids, avoiding unsafe
 binary-manifest string replacement. The spec and assets are baked under
-`assets/prototype/` at stamp time. The adaptive icon and Android 12+ splash share
+`assets/prototype/` at stamp time.
+
+The adaptive icon and Android 12+ splash share
 `prototype_icon_background`. The host patches it in every configuration using
 `icon.backgroundColor`, the spec's authored `theme.colors.background` (with the
 selected mode's override, using light for system mode), or the template default.
 An `icon.asset` names a PNG or JPEG supplied with the install call. A colour-only
 icon uses a contrasting label monogram. The host places the artwork in the
-adaptive icon safe zone and uses its alpha as the themed icon silhouette.
-It resolves both drawable paths from the compiled resource table and fails
-if a requested resource is missing.
+adaptive icon safe zone and uses its alpha as the themed icon silhouette. A missing drawable resource fails the stamp.
 
 Template signatures are removed before assembly. The resource table stays stored;
 zipalign aligns it before apksigner signs with v2/v3 using a persistent host-owned

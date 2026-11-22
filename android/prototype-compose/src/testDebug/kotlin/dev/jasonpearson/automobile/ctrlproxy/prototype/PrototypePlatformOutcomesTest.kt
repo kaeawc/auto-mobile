@@ -83,7 +83,9 @@ class PrototypePlatformOutcomesTest {
       runtime.echo(step.getValue("args").jsonObject, step.getValue("call").jsonPrimitive.content)
       runCurrent()
       val expected = step.getValue("expected").jsonObject
-      val event = events.last { it.name == PrototypePlatform.CALL_EVENT_NAME }.payload!!.jsonObject
+      val event =
+        checkNotNull(events.last { it.name == PrototypePlatform.CALL_EVENT_NAME }.payload)
+          .jsonObject
       assertEquals(expected["error"], event["error"])
       if (expected.containsKey("result")) {
         assertEquals(expected["result"], runtime.current.spec.data?.get("result"))
@@ -110,9 +112,7 @@ class PrototypePlatformOutcomesTest {
       runCurrent()
       assertEquals(
         JsonPrimitive("invalid_args"),
-        events
-          .last { it.name == PrototypePlatform.CALL_EVENT_NAME }
-          .payload!!
+        checkNotNull(events.last { it.name == PrototypePlatform.CALL_EVENT_NAME }.payload)
           .jsonObject
           .getValue("error")
           .jsonObject["code"],

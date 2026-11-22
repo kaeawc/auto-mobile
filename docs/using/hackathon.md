@@ -130,11 +130,11 @@ with `injectAudioInput` before tapping Record.
   To rehearse a failure, use `outcome:{error:{code:"unavailable", message:"Try again"}}`. Choose
   exactly one mode per request from `advanceTimeMs`, `event`, and `call` with `outcome`. The call's
   module must be declared in `requires.platform` and support simulation. The runtime must advertise
-  `prototype_platform_outcomes_v1`. A result can be any JSON value. An error message is optional
-  and can be up to 200 characters. The full outcome must fit within 4096 UTF-8 bytes. Each call
-  uses its queue in order (up to 16 outcomes).
-  Once the queue is empty the call runs normally. Showing the prototype again or closing it clears
-  its queues.
+  `prototype_platform_outcomes_v1`.
+- **Outcome queue limits.** A result can be any JSON value. An error message is optional and can
+  be up to 200 characters. The full outcome must fit within 4096 UTF-8 bytes. Each call uses its
+  queue in order (up to 16 outcomes). Once the queue is empty the call runs normally. Showing the
+  prototype again or closing it clears its queues.
 
 ## Known limits
 

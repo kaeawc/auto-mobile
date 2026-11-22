@@ -47,7 +47,7 @@
             let model = PrototypeModel(
                 mode: .standalone,
                 runtime: .embedded,
-                storage: loaded == nil ? nil : storage.coordinator(),
+                storage: loaded == nil ? nil : storage.coordinator(secure: registry.secureStorage),
                 registry: registry
             )
             super.init(model: model, contentEnabled: loaded != nil)

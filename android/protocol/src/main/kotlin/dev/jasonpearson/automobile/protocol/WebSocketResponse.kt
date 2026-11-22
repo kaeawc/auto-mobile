@@ -992,6 +992,8 @@ enum class SavedPrototypeErrorCode {
   @SerialName("unsupported_format") UNSUPPORTED_FORMAT,
   @SerialName("internal_error") INTERNAL_ERROR,
   @SerialName("render_failed") RENDER_FAILED,
+  /** The spec has a node the saved viewer cannot draw, such as `webView` (#18906). */
+  @SerialName("unsupported_capability") UNSUPPORTED_CAPABILITY,
 }
 
 @Serializable

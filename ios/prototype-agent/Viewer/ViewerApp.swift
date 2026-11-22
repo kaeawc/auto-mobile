@@ -25,7 +25,7 @@ struct PrototypeViewerApp: App {
         let model = PrototypeModel(
             mode: .standalone,
             runtime: .iosViewer,
-            storage: PrototypeStorageCoordinator.fileBacked(),
+            storage: PrototypeStorageCoordinator.fileBacked(secure: registry.secureStorage),
             registry: registry
         )
         model.setDeviceDark(UITraitCollection.current.userInterfaceStyle == .dark)

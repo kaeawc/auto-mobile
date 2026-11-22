@@ -165,7 +165,11 @@ final class PrototypeAgent: NSObject {
             return
         }
 
-        let agent = PrototypeAgent(mode: .standalone, runtime: .disposableApp, registry: .feedbackModules())
+        let agent = PrototypeAgent(
+            mode: .standalone,
+            runtime: .disposableApp,
+            registry: .feedbackModules(secureStorage: KeychainPrototypeSecureValueStore())
+        )
         instance = agent
         agent.boot()
     }
@@ -240,7 +244,7 @@ final class PrototypeAgent: NSObject {
         model = PrototypeModel(
             mode: mode,
             runtime: runtime,
-            storage: PrototypeStorageCoordinator.fileBacked(),
+            storage: PrototypeStorageCoordinator.fileBacked(secure: registry.secureStorage),
             registry: registry.withTestHooks(environment: environment)
         )
         outbox = PrototypeEventOutbox(mode: mode)

@@ -45,6 +45,7 @@ import {
 
 const CTRL_PROXY_INSTALL_TIMEOUT_MS = 120_000;
 const CTRL_PROXY_PULL_TIMEOUT_MS = 120_000;
+const CTRL_PROXY_STAGED_APK_PATH = "/data/local/tmp/auto-mobile-ctrl-proxy-installed.apk";
 const CTRL_PROXY_INSTALL_ATTEMPTS = 3;
 
 interface InstallReadinessOptions {
@@ -591,9 +592,7 @@ export class AndroidCtrlProxyApkInstaller {
 
     try {
       throwIfAborted();
-      await this.host.adb.executeCommand(`pull "${apkPath}" "${localApkPath}"`, {
-        timeoutMs: CTRL_PROXY_PULL_TIMEOUT_MS,
-      });
+      await this.pullInstalledApk(apkPath, localApkPath, signal);
       const apkBuffer = await fs.readFile(localApkPath);
       const sha256 = crypto.createHash("sha256").update(apkBuffer).digest("hex");
       return {
@@ -623,6 +622,57 @@ export class AndroidCtrlProxyApkInstaller {
         // Temp-dir cleanup is best-effort; checksum fallback already completed or returned.
         logger.debug(
           `[CTRL_PROXY] Failed to remove temporary APK hash directory: ${errorMessage(cleanupError)}`,
+          cleanupError,
+        );
+      }
+    }
+  }
+
+  /**
+   * Pull the installed APK to the host. Older adbd (seen on API 24, which also lacks
+   * `sha256sum`) cannot pull straight from `/data/app`: the shell user cannot list
+   * it, so pull reports "remote object does not exist" although the APK itself is
+   * world-readable. Staging a copy in `/data/local/tmp` works on those releases.
+   */
+  private async pullInstalledApk(
+    apkPath: string,
+    localApkPath: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    try {
+      await this.host.adb.executeCommand(`pull "${apkPath}" "${localApkPath}"`, {
+        timeoutMs: CTRL_PROXY_PULL_TIMEOUT_MS,
+      });
+      return;
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (this.host.statusInspectionDeviceError(error)) {
+        throw error;
+      }
+      logger.warn(
+        `[CTRL_PROXY] Direct pull of installed APK failed, retrying from a ${CTRL_PROXY_STAGED_APK_PATH} copy: ${errorMessage(error)}`,
+      );
+    }
+
+    signal?.throwIfAborted();
+    try {
+      await this.host.adb.executeCommand(
+        `shell cp ${shellQuote(apkPath)} ${shellQuote(CTRL_PROXY_STAGED_APK_PATH)}`,
+      );
+      signal?.throwIfAborted();
+      await this.host.adb.executeCommand(`pull "${CTRL_PROXY_STAGED_APK_PATH}" "${localApkPath}"`, {
+        timeoutMs: CTRL_PROXY_PULL_TIMEOUT_MS,
+      });
+    } finally {
+      try {
+        await this.host.adb.executeCommand(
+          `shell rm -f ${shellQuote(CTRL_PROXY_STAGED_APK_PATH)}`,
+          { noRetry: true },
+        );
+      } catch (cleanupError) {
+        // A leftover staged copy is overwritten by the next hash; it does not affect the result.
+        logger.debug(
+          `[CTRL_PROXY] Failed to remove staged APK copy: ${errorMessage(cleanupError)}`,
           cleanupError,
         );
       }

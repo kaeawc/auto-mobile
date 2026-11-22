@@ -6,6 +6,7 @@ import {
   loadJobSteps,
   type WorkflowDefinition,
   type WorkflowStep,
+  usesAction,
 } from "../helpers/workflowSteps";
 
 type JobStep = { jobId: string; step: WorkflowStep };
@@ -103,7 +104,7 @@ describe("workflow cache paths", () => {
     test(`${jobId} keeps the self-hosted dependency cache alive after home cleanup`, () => {
       const steps = loadJobSteps(".github/workflows/pull_request.yml", jobId);
       const cache = steps.find((step) => String(step.with?.path).includes("org.swift.swiftpm"));
-      expect(cache?.uses).toBe("actions/cache@v5");
+      expect(usesAction(cache?.uses)).toBe("actions/cache");
       expect(cache?.with?.path).toBe(
         "${{ runner.environment == 'self-hosted' && '../../_temp/automobile-swiftpm-cache' || '~/Library/Caches/org.swift.swiftpm' }}\n" +
           "${{ runner.environment != 'self-hosted' && '~/.swiftpm/cache' || '' }}\n",

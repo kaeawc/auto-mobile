@@ -12,6 +12,7 @@ import {
   prototypeSchema,
   registerPrototypeTools,
 } from "../../src/server/prototypeTools";
+import { loadJimp } from "../../src/utils/image/loadJimp";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakePrototypeAgentClient } from "../fakes/FakePrototypeAgentClient";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
@@ -26,7 +27,11 @@ import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 const HOUR = 60 * 60 * 1000;
 const android: BootedDevice = { deviceId: "apps-android", platform: "android", name: "Fake" };
-const ios: BootedDevice = { deviceId: "apps-ios", platform: "ios", name: "Fake" };
+const iphone: BootedDevice = {
+  deviceId: "00008030-001C195E0A91802E",
+  platform: "ios",
+  name: "Fake iPhone",
+};
 const specText = fs.readFileSync(
   path.join(import.meta.dir, "../fixtures/prototype-spec/valid/platform-requires.json"),
   "utf8",
@@ -37,11 +42,14 @@ const appId = disposableAppId("android", "feedly");
 
 describe("prototype disposable app actions (#14184)", () => {
   // The lazily imported runtime is a one-time process cost, not part of any test's budget.
+  let iconBytes: Buffer;
   beforeAll(async () => {
     await import("../../src/server/prototypeTools/runtime");
     // So is compiling the tool's input and output schemas on their first parse.
     prototypeSchema.parse({ action: "installApp", spec, app });
     prototypeOutputSchema.parse({ success: true });
+    const Jimp = await loadJimp();
+    iconBytes = await new Jimp({ width: 2, height: 2, color: 0x123456ff }).getBuffer("image/png");
   });
   let restore: () => void;
   let dispose: () => void;
@@ -75,10 +83,9 @@ describe("prototype disposable app actions (#14184)", () => {
       store: new InMemoryPrototypeStatusStore(timer),
       timer,
       clock: timer,
-      assetFileReader: new FakePrototypeAssetFileReader().addFile(
-        "/specs/app.json",
-        Buffer.from(specText),
-      ),
+      assetFileReader: new FakePrototypeAssetFileReader()
+        .addFile("/specs/app.json", Buffer.from(specText))
+        .addFile("/specs/icon.png", iconBytes),
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
       lifecycle: {
         subscribeSessionRelease: () => () => {},
@@ -120,6 +127,19 @@ describe("prototype disposable app actions (#14184)", () => {
     });
     expect(stamper.stamped[0]?.icon).toEqual({ backgroundColor: "#2E59BF" });
     expect(installer.installs).toHaveLength(1);
+  });
+
+  test("installApp passes the supplied icon bytes through to the stamper", async () => {
+    const icon = { asset: "logo" };
+    const output = await call({
+      action: "installApp",
+      spec,
+      app: { ...app, icon },
+      assets: [{ id: "logo", path: "/specs/icon.png" }],
+    });
+    expect(output.success).toBe(true);
+    expect(stamper.stamped[0]?.icon).toEqual(icon);
+    expect(stamper.stamped[0]?.assets?.[0]).toMatchObject({ id: "logo", bytes: iconBytes });
   });
 
   test("installApp reads specPath, and a re-install of the slug is an in-place update", async () => {
@@ -184,10 +204,10 @@ describe("prototype disposable app actions (#14184)", () => {
     expect(forgotten).toEqual([]);
   });
 
-  test("iOS refuses with an actionable message until its stamper lands", async () => {
-    const output = await call({ action: "listApps" }, ios);
+  test("installApp directs physical iPhones to ProtoViewer before stamping", async () => {
+    const output = await call({ action: "installApp", spec, app }, iphone);
     expect(output.success).toBe(false);
-    expect(output.error).toContain("not available on ios yet");
+    expect(output.error).toContain("Use ProtoViewer on a physical iPhone");
   });
 
   test("schema requires app and a spec source, and exactly one uninstall target", () => {

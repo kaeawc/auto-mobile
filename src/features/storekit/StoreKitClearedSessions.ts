@@ -8,12 +8,22 @@
  * This ledger tells the two apart: a confirmed `clear` marks the bundle clean, and any later
  * state-changing action unmarks it before it is sent. It is in memory, so after a daemon restart
  * nothing is marked and the keep-booted reset falls back to erasing the simulator.
+ *
+ * Each `markTouched` bumps the bundle's generation (#18843). A caller that decides to mark a bundle
+ * clean from a reply takes the generation before sending and passes it to `markCleared`, so a
+ * reply that lands after an overlapping call touched the bundle cannot mark it clean.
  */
 export interface StoreKitClearedSessions {
-  /** A `clear` (tool or reset) confirmed the bundle's StoreKit state reset and its session ended. */
-  markCleared(deviceId: string, bundleId: string): void;
-  /** A state-changing action is about to be sent for the bundle. */
-  markTouched(deviceId: string, bundleId: string): void;
+  /**
+   * A `clear` (tool or reset) confirmed the bundle's StoreKit state reset and its session ended.
+   * With `sinceGeneration`, marks only when no `markTouched` happened after that generation was
+   * read; returns whether the bundle was marked.
+   */
+  markCleared(deviceId: string, bundleId: string, sinceGeneration?: number): boolean;
+  /** A state-changing action is about to be sent for the bundle; returns its new generation. */
+  markTouched(deviceId: string, bundleId: string): number;
+  /** The bundle's current generation: how many state-changing actions this daemon sent for it. */
+  generation(deviceId: string, bundleId: string): number;
   /** Whether a confirmed clear happened with no state-changing action since. */
   isCleared(deviceId: string, bundleId: string): boolean;
   /** Whether this daemon sent a state-changing action for the bundle since its last confirmed clear. */
@@ -23,15 +33,27 @@ export interface StoreKitClearedSessions {
 export class InMemoryStoreKitClearedSessions implements StoreKitClearedSessions {
   private readonly cleared = new Set<string>();
   private readonly touched = new Set<string>();
+  private readonly generations = new Map<string, number>();
 
-  markCleared(deviceId: string, bundleId: string): void {
+  markCleared(deviceId: string, bundleId: string, sinceGeneration?: number): boolean {
+    if (sinceGeneration !== undefined && sinceGeneration !== this.generation(deviceId, bundleId)) {
+      return false;
+    }
     this.cleared.add(key(deviceId, bundleId));
     this.touched.delete(key(deviceId, bundleId));
+    return true;
   }
 
-  markTouched(deviceId: string, bundleId: string): void {
+  markTouched(deviceId: string, bundleId: string): number {
+    const next = this.generation(deviceId, bundleId) + 1;
+    this.generations.set(key(deviceId, bundleId), next);
     this.cleared.delete(key(deviceId, bundleId));
     this.touched.add(key(deviceId, bundleId));
+    return next;
+  }
+
+  generation(deviceId: string, bundleId: string): number {
+    return this.generations.get(key(deviceId, bundleId)) ?? 0;
   }
 
   isCleared(deviceId: string, bundleId: string): boolean {

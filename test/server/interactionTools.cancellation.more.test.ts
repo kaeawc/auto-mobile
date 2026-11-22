@@ -19,6 +19,7 @@ import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { type InteractionToolDependencies } from "../../src/server/interactionTools";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeAndroidXrDetector } from "../fakes/FakeAndroidXrDetector";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
@@ -280,7 +281,8 @@ describe("registered interaction handlers honor cancellation", () => {
       AndroidCtrlProxyClient.prototype,
       "requestSettingsPut",
     ).mockResolvedValue({ success: false, totalTimeMs: 0 });
-    interactionDeps.rotateFactory = () => new Rotate(device, { adb, timer });
+    interactionDeps.rotateFactory = () =>
+      new Rotate(device, { adb, timer, options: { xrDetector: new FakeAndroidXrDetector() } });
     const observed = bypassObservation();
     try {
       await expect(

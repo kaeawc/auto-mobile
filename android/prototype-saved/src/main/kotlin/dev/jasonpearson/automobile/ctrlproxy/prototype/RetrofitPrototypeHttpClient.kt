@@ -136,29 +136,15 @@ class RetrofitPrototypeHttpClient(
   /** Expected non-errors, such as a body that is not JSON. */
   private val debug: (String) -> Unit = { Log.d(TAG, it) },
   private val policy: PrototypeDestinationPolicy = PrototypeEgressPolicy(),
-) : PrototypeHttpClient {
+) :
+  PrototypeHttpClient,
+  PrototypeRemoteImageTransport by PrototypeRemoteImageHttpTransport(
+    policy,
+    { policy -> createService(client, policy, image = true) },
+  ) {
   internal var uploadBodies = PrototypeUploadRequestBodies(clock)
 
-  private val service: PrototypeHttpService =
-    Retrofit.Builder()
-      .baseUrl(PLACEHOLDER_BASE_URL.toHttpUrl())
-      .callFactory(
-        TimeoutCallFactory(
-          client
-            .newBuilder()
-            .followRedirects(false)
-            .followSslRedirects(false)
-            .retryOnConnectionFailure(false)
-            // Direct connections keep the checked DNS address and the destination socket aligned.
-            .proxy(Proxy.NO_PROXY)
-            .connectionPool(ConnectionPool())
-            .addNetworkInterceptor(PrototypeEgressInterceptor(policy))
-            .build(),
-          policy,
-        ),
-      )
-      .build()
-      .create(PrototypeHttpService::class.java)
+  private val service = createService(client, policy)
 
   override suspend fun execute(request: PrototypeHttpRequest): PrototypeRequestResponse {
     val started = clock()
@@ -405,6 +391,47 @@ class RetrofitPrototypeHttpClient(
   }
 
   internal companion object {
+    private fun createService(
+      client: OkHttpClient,
+      destinationPolicy: PrototypeDestinationPolicy,
+      image: Boolean = false,
+    ): PrototypeHttpService =
+      Retrofit.Builder()
+        .baseUrl(PLACEHOLDER_BASE_URL.toHttpUrl())
+        .callFactory(
+          TimeoutCallFactory(
+            client
+              .newBuilder()
+              .apply {
+                if (image) {
+                  cookieJar(okhttp3.CookieJar.NO_COOKIES)
+                  interceptors().add(0, PrototypeRemoteImageResponseInterceptor)
+                  addNetworkInterceptor { chain ->
+                    chain.proceed(
+                      chain
+                        .request()
+                        .newBuilder()
+                        .removeHeader("Cookie")
+                        .removeHeader("Referer")
+                        .build(),
+                    )
+                  }
+                }
+              }
+              .followRedirects(false)
+              .followSslRedirects(false)
+              .retryOnConnectionFailure(false)
+              // Direct connections keep the checked DNS address and the destination socket aligned.
+              .proxy(Proxy.NO_PROXY)
+              .connectionPool(ConnectionPool())
+              .addNetworkInterceptor(PrototypeEgressInterceptor(destinationPolicy))
+              .build(),
+            destinationPolicy,
+          ),
+        )
+        .build()
+        .create(PrototypeHttpService::class.java)
+
     /** Literal private-range IPv4 hosts, `localhost` and `*.local`; no DNS lookup is made. */
     fun isLocalNetworkHost(host: String): Boolean {
       if (host == "localhost" || host.endsWith(".local")) return true

@@ -50,6 +50,7 @@ class CommandAdvertisementTest {
       "prototype_timers_v1",
       "prototype_platform_simulation_v1",
       "prototype_tooltip_v1",
+      "prototype_m3_expressive_v1",
       "prototype_pager_state_key_v1",
       "prototype_flow_grid_v1",
       "prototype_pager_options_v1",
@@ -61,6 +62,7 @@ class CommandAdvertisementTest {
       "prototype_network_v1",
       "prototype_network_device_v1",
       "prototype_network_upload_v1",
+      "prototype_remote_image_v1",
       "prototype_platform_clipboard_v1",
       "prototype_platform_device_v1",
       "prototype_platform_test_v1",
@@ -110,6 +112,7 @@ class CommandAdvertisementTest {
       "prototype_custom_shaders_v1",
       "prototype_appearance_v1",
       "prototype_backdrop_v1",
+      "prototype_glass_v1",
       "prototype_platform_window_controls_v1",
       "prototype_hide_keyboard_v1",
       "prototype_persistence_replay_v1",
@@ -240,6 +243,7 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_window_metadata_v1"))
     assertTrue(commands.contains("prototype_menus_v1"))
     assertTrue(commands.contains("prototype_tooltip_v1"))
+    assertTrue(commands.contains("prototype_m3_expressive_v1"))
     assertTrue(commands.contains("prototype_drawer_v1"))
     assertTrue(commands.contains("screenshot_hide_prototype_v1"))
     assertTrue(commands.contains("sdk_capabilities_user_id_v1"))

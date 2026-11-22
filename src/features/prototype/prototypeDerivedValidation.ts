@@ -91,6 +91,9 @@ function derivedReadError(
 ): PrototypeValidationError | undefined {
   let first: PrototypeValidationError | undefined;
   mapBindableFields(value, path, (text, at, kind) => {
+    if (kind === "derivedCondition" && typeof text === "string" && !Object.hasOwn(derived, text)) {
+      first ??= fail(at, `Unknown derived value ${JSON.stringify(text)}`);
+    }
     if (kind === "text" && typeof text === "string") {
       for (const { pointer: name } of dataPlaceholderSpans(text, "derived:", (name) =>
         STATE_KEY.test(name),

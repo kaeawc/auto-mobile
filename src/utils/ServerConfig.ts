@@ -38,6 +38,7 @@ class ServerConfig {
   private _memPerfAuditEnabled: boolean = false;
   private _predictiveUiEnabled: boolean = false;
   private _iosSdkObservationBridgeEnabled: boolean = true;
+  private _iosAxBridgeEnabled: boolean = false;
   private _rawElementSearchEnabled: boolean = false;
   private _planExecutionLockScope: PlanExecutionLockScope = "session";
   private _videoRecordingDefaults: VideoRecordingConfigInput = {};
@@ -109,6 +110,14 @@ class ServerConfig {
 
   isPredictiveUiEnabled(): boolean {
     return this._predictiveUiEnabled;
+  }
+
+  setIosAxBridgeEnabled(enabled: boolean): void {
+    this._iosAxBridgeEnabled = enabled;
+  }
+
+  isIosAxBridgeEnabled(): boolean {
+    return this._iosAxBridgeEnabled;
   }
 
   setIosSdkObservationBridgeEnabled(enabled: boolean): void {

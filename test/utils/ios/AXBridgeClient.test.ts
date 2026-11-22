@@ -76,3 +76,28 @@ describe("TransportAXBridgeClient", () => {
     );
   });
 });
+
+test("an exited transport rejects future actions immediately", async () => {
+  const { transport, client, timer } = setup();
+  transport.emitExit();
+  await expect(client.invokeAction({ actionName: "Edit" })).rejects.toThrow("closed");
+  expect(timer.getPendingTimeouts()).toEqual([]);
+});
+
+test("send failure clears the request timer and returns an actionable error", async () => {
+  class BrokenTransport extends FakeAXBridgeTransport {
+    override send(): void {
+      throw new Error("broken pipe");
+    }
+  }
+  const timer = new FakeTimer();
+  const client = new TransportAXBridgeClient(
+    new BrokenTransport(),
+    new FakeIdGenerator(["a"]),
+    timer,
+  );
+  await expect(client.invokeAction({ actionName: "Edit" })).rejects.toThrow(
+    "Could not send the AXBridge action",
+  );
+  expect(timer.getPendingTimeouts()).toEqual([]);
+});

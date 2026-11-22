@@ -283,6 +283,8 @@ class WebSocketServer(
     addPrototypeWindowFlags()
     add("prototype_menus_v1")
     add("prototype_tooltip_v1")
+    // M3 Expressive components drawn from stable Compose primitives (#15258).
+    add("prototype_m3_expressive_v1")
     add("prototype_adaptive_v1")
     add("prototype_drawer_v1")
     // request_action honours the semantic actions (expand, collapse, dismiss, select, scroll and
@@ -362,6 +364,7 @@ class WebSocketServer(
     // it expects a string and fails the whole show, and draws a role-named stop transparent, so
     // hosts refuse such a spec for a device lacking this flag.
     add("prototype_theme_modes_v1")
+    add("prototype_glass_v1")
     add("prototype_flow_grid_v1")
     // Prototype specs honour pager axis, spacing, peek padding and fixed page sizes. Hosts refuse
     // these options on older APKs, which otherwise silently render a horizontal full-page pager.
@@ -387,10 +390,16 @@ class WebSocketServer(
     // http or https host. Without it a host refuses a spec that asks for via "device".
     add("prototype_network_device_v1")
     add("prototype_network_upload_v1")
+    add("prototype_remote_image_v1")
     add("prototype_platform_clipboard_v1")
     add("prototype_platform_device_v1")
     add("prototype_platform_v1")
     addAll(platform.registry.capabilities)
+    addPrototypeTextAndMotionFlags()
+  }
+
+  /** Prototype text, motion, effects and collection feature flags. */
+  private fun MutableList<String>.addPrototypeTextAndMotionFlags() {
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
     add("prototype_text_field_options_v1")
@@ -449,8 +458,7 @@ class WebSocketServer(
     // APK ignores the request field and follows the device silently, so a
     // host sends it, and expects the report, only when this flag is present.
     add("prototype_appearance_v1")
-    // show_prototype honours window.backdrop (#15126): API 31+ blur-behind, else a tonal fill; the
-    // show result reports backdrop blur or fallback.
+    // show_prototype honours window.backdrop (#15126) and reports the applied blur or tonal fill.
     add("prototype_backdrop_v1")
     add("prototype_platform_window_controls_v1")
     add("prototype_hide_keyboard_v1")

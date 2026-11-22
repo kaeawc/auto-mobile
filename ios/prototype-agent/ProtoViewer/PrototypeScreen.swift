@@ -30,9 +30,10 @@ struct PrototypeScreen: View {
     @State private var watchdog = PrototypeRenderWatchdog(clock: SystemPrototypeClock())
 
     @State private var diagnostics: ViewerDiagnostics
+    // The renderer uses registry identity to decide when to replace its presentation.
+    @State private var registry: PrototypePlatformRegistry
     private let copyText: @MainActor (String) -> Void
 
-    private let registry: PrototypePlatformRegistry
     private let network: PrototypeNetworkConfiguration
 
     init(
@@ -51,7 +52,13 @@ struct PrototypeScreen: View {
         ))
         self.copyText = copyText
         self.onClose = onClose
-        self.registry = registry
+        if let secureStorage = registry.secureStorage {
+            _registry = State(
+                initialValue: registry.withSecureStorage(store.scopedSecureStorage(secureStorage, for: entry.libraryId))
+            )
+        } else {
+            _registry = State(initialValue: registry)
+        }
         self.onLoaded = onLoaded
         self.onLoadFailed = onLoadFailed
         self.store = store
@@ -166,6 +173,7 @@ struct PrototypeScreen: View {
                         reportLoad(.failed)
                     }
                 )
+                .standaloneStorage(registry: registry)
                 .onAppearanceChange { chromeAppearance = $0 }
                 .onFirstRender {
                     guard importRefusal == nil else { return }
@@ -218,7 +226,9 @@ struct PrototypeScreen: View {
         pending = nil
         loadReport.begin()
         do {
-            if action == .reset { try store.resetStorage(entry.libraryId) }
+            if action == .reset {
+                try store.resetStorage(entry.libraryId, secureStorage: registry.secureStorage)
+            }
             revision += 1
             error = nil
             load()

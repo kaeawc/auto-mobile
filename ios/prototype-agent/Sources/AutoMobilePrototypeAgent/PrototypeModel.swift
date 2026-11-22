@@ -486,6 +486,8 @@
             // Stored values replace the spec's for the keys it lists before the first draw, and emit
             // nothing (#12526); the session only receives the result.
             let prepared = storage?.prepare(spec)
+            (platformRegistry.modules["secureStorage"] as? PrototypeSecureStorageModule)?
+                .restored(locked: prepared?.locked ?? [])
             // Drop buffered location/sensor events from the old session while keeping global and
             // host-supplied streams alive. New state must be seeded before the first draw.
             var carriedRealtime: JSONValue?
@@ -866,7 +868,7 @@
                 "id": spec?.id as Any? ?? NSNull(),
                 "pages": pages,
                 "stacks": stacks.mapValues(\.wireObject),
-                "state": JSONValue.object(state).foundationObject,
+                "state": JSONValue.object(session.publicState).foundationObject,
                 "assets": assets.keys.sorted(),
                 "lastSequence": session.lastSequence,
             ]

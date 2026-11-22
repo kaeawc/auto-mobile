@@ -224,11 +224,13 @@ describe.skipIf(process.platform === "win32")("request-owned native descendants"
     writeFileSync(
       script,
       `import { DefaultHostCommandExecutor } from ${JSON.stringify(path.resolve(import.meta.dir, "../../src/utils/HostCommandExecutor.ts"))};
-import { writeFileSync } from "node:fs";
+import { renameSync, writeFileSync } from "node:fs";
 const host = new DefaultHostCommandExecutor();
 const sleep = host.spawn("sleep", ["30"], { stdio: ["ignore", "pipe", "pipe"] });
 const cat = host.spawn("cat", [], { stdio: ["pipe", "pipe", "pipe"] });
-writeFileSync(${JSON.stringify(file)}, JSON.stringify({ sleep: sleep.pid, cat: cat.pid }));
+// Write then rename so the test never observes a created-but-empty file.
+writeFileSync(${JSON.stringify(file + ".tmp")}, JSON.stringify({ sleep: sleep.pid, cat: cat.pid }));
+renameSync(${JSON.stringify(file + ".tmp")}, ${JSON.stringify(file)});
 setInterval(() => {}, 1000);
 `,
     );

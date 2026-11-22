@@ -366,7 +366,7 @@ function withRecordErrors(
     };
   }
   throw new ActionableError(
-    `xctrace could not record the ${template} trace: ${errors.join("; ")}. ` +
+    `xctrace could not record the ${template} trace: ${errors.join("; ").replace(/\.$/, "")}. ` +
       `The artifact at ${artifactPath} has no run data.`,
   );
 }

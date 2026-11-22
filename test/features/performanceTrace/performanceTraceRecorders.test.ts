@@ -337,8 +337,10 @@ describe("xctrace recorder (#14102)", () => {
     const error = await recording.summarize().catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ActionableError);
-    expect((error as Error).message).toContain("Hitches is not supported on this platform.");
-    expect((error as Error).message).toContain("/artifacts/trace-2.trace");
+    expect((error as Error).message).toContain(
+      "Hitches is not supported on this platform. The artifact",
+    );
+    expect((error as Error).message).toContain(join("/artifacts", "trace-2.trace"));
   });
 
   test("keeps xctrace error lines that arrive after exit but before close (#18790)", async () => {

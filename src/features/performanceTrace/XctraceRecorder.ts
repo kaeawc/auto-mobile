@@ -85,6 +85,7 @@ const EXPORT_MAX_BUFFER = 64 * 1024 * 1024;
 const RECORDING_STARTED = /Ctrl-C to stop the recording|Starting recording/i;
 
 interface RecordTarget {
+  /** A bundle id, or a simulator `.app` path when the app resolves to one. */
   launchBundleId?: string;
   attachPid?: number;
 }

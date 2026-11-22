@@ -341,6 +341,34 @@ describe("xctrace recorder (#14102)", () => {
     expect((error as Error).message).toContain("/artifacts/trace-2.trace");
   });
 
+  test("keeps xctrace error lines that arrive after exit but before close (#18790)", async () => {
+    const { host, recorder, timer } = xctrace();
+    host.startOutput =
+      "Starting recording with the App Launch template. Ctrl-C to stop the recording\n";
+    const recording = await recorder.start({ ...iosRequest, template: "hitches" });
+    const child = host.spawned[0]!.child;
+    child.kill = () => {
+      child.emit("exit", 0, null);
+      timer.setTimeout(() => {
+        child.stderr.emit(
+          "data",
+          fixture("xctrace-record-launch-bundle-id-path-not-found-ios27.out.txt"),
+        );
+        child.emit("close", 0, null);
+      }, 50);
+      return true;
+    };
+    host.executeCommand = async () => {
+      throw new Error(fixture("xctrace-export-malformed.stderr.txt"));
+    };
+    await recording.stop();
+
+    const error = await recording.summarize().catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ActionableError);
+    expect((error as Error).message).toContain("Path not found 'com.apple.Preferences'");
+  });
+
   test("keeps recorder errors as warnings when the trace is readable", async () => {
     const { host, recorder } = xctrace();
     host.startOutput = fixture("xctrace-record-hitches-unsupported-ipad-ios27.out.txt");
@@ -406,7 +434,7 @@ describe("xctrace recorder (#14102)", () => {
       child.kill = () => true;
       const started = timer.now();
       timer.setTimeout(() => child[stream].emit("data", "Saving output file..."), 4000);
-      timer.setTimeout(() => child.emit("exit", 0, null), 8000);
+      timer.setTimeout(() => child.emit("close", 0, null), 8000);
       await recording.stop();
       expect(timer.now() - started).toBe(8000);
       expect(child[stream].listenerCount("data")).toBe(0);
@@ -418,7 +446,7 @@ describe("xctrace recorder (#14102)", () => {
     const { host, recorder, timer } = xctrace(4321, { artifactBytes: async () => ++bytes });
     const recording = await recorder.start(iosRequest);
     host.spawned[0]!.child.kill = () => true;
-    timer.setTimeout(() => host.spawned[0]!.child.emit("exit", 0, null), 12000);
+    timer.setTimeout(() => host.spawned[0]!.child.emit("close", 0, null), 12000);
     await recording.stop();
     expect(bytes).toBeGreaterThan(3);
   });

@@ -982,7 +982,35 @@ class PrototypeController(
     PrototypeTrace.asyncSection(PrototypeTrace.SYNC_APPEARANCE) {
       syncAppearance(runtime, model)
       syncTextFieldFocus(runtime, model)
+      syncBackdropShape(runtime, model)
     }
+  }
+
+  /**
+   * A runtime change can reshape a floating root (an 18dp radius patched to 0), so its card blur
+   * window must clip to the new shape. The window is replaced only when the shape changed; a failed
+   * replace keeps the old request and is retried on the next change.
+   */
+  private suspend fun syncBackdropShape(runtime: PrototypeRuntime, model: PrototypeRenderModel) {
+    val surface = surfaceOf(runtime) ?: return
+    val request = surface.request
+    if (request.backdrop == null || request.placement !is PrototypePlacement.Floating) return
+    val shape = prototypeRootBackdropShape(model)
+    if (shape == request.backdropShape) return
+    val updated = request.copy(backdropShape = shape)
+    val host = surface.host
+    val applied =
+      !host.isShowing ||
+        try {
+          host.replace(updated.copy(animateEnter = false))
+        } catch (error: CancellationException) {
+          throw error
+        } catch (error: Exception) {
+          Log.w("PrototypeController", "Prototype host failed to reshape its backdrop", error)
+          false
+        }
+    if (applied) surface.request = updated
+    else Log.w("PrototypeController", "Prototype host failed to reshape its backdrop")
   }
 
   /**

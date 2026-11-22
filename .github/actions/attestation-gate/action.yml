@@ -16,7 +16,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: oven-sh/setup-bun@v2
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       with:
         bun-version: 1.4.4
     - name: Install dependencies
@@ -32,7 +32,7 @@ runs:
         ATTESTATION_COMMIT_SHA: ${{ inputs.commit-sha }}
         AUTOMOBILE_LOG_SINK: stderr
       run: bun scripts/ci/attestation-gate.ts --tier "$ATTESTATION_TIER"
-    - uses: actions/upload-artifact@v6
+    - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
       if: always()
       with:
         name: attestation-shadow-${{ inputs.tier }}-${{ github.run_id }}-${{ github.run_attempt }}

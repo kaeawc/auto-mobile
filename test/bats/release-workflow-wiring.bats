@@ -78,7 +78,7 @@
 
   run yq -r '
     .jobs."verify-and-release".steps[]
-    | select(.uses == "actions/download-artifact@v7")
+    | select((.uses // "") | test("^actions/download-artifact@"))
     | .with.name + "\t" + .with."run-id" + "\t" + .with."github-token" + "\t" + .with.repository' "$workflow"
   [ "$status" -eq 0 ]
 
@@ -336,7 +336,7 @@
     [ "$output" = "7" ]
 
     # Every upload in the builder (the ProtoViewer AAB and mapping too) honours the retention input.
-    run yq -r '.jobs.build.steps[] | select(.uses == "actions/upload-artifact@v6") | .with."retention-days"' "$workflow"
+    run yq -r '.jobs.build.steps[] | select((.uses // "") | test("^actions/upload-artifact@")) | .with."retention-days"' "$workflow"
     [ "$status" -eq 0 ]
     [ -n "$output" ]
     [ "$(sort -u <<<"$output")" = '${{ inputs.artifact-retention-days }}' ]
@@ -1231,7 +1231,7 @@ load yq-helpers
     run grep -Eq '^  (pull_request_target|push|schedule):' "$builder"
     [ "$status" -ne 0 ]
     # Pull-request runs never upload: the upload step is gated on the workflow_call input, empty here.
-    run yq -r '.jobs.build.steps[] | select(.uses == "actions/upload-artifact@v6") | .if' "$builder"
+    run yq -r '.jobs.build.steps[] | select((.uses // "") | test("^actions/upload-artifact@")) | .if' "$builder"
     [ "$output" = '${{ inputs.upload-artifact }}' ]
   done
 }

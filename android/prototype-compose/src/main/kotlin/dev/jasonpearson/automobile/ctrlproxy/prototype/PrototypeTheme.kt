@@ -713,10 +713,20 @@ internal fun prototypeCornerShape(shapes: Shapes, radius: PrototypeCornerRadius)
       )
   }
 
-/** The root surface shape at show time, using the renderer's corner and theme tokens. */
+/**
+ * The root surface shape, using the renderer's corner and theme tokens. A card without a
+ * `cornerRadius` draws Material's default card shape (`shapes.medium`), so its backdrop matches it.
+ */
 @InternalAutoMobilePrototypeApi
-fun prototypeRootBackdropShape(model: PrototypeRenderModel): Shape =
-  prototypeSurfaceShape(prototypeShapes(model.theme?.shapes), model.root.style.source)
+fun prototypeRootBackdropShape(model: PrototypeRenderModel): Shape {
+  val shapes = prototypeShapes(model.theme?.shapes)
+  val style = model.root.style.source
+  return if (
+    model.root.role == "card" && style.cornerRadius == null && style.glassMaterial() == null
+  )
+    shapes.medium
+  else prototypeSurfaceShape(shapes, style)
+}
 
 /**
  * A node's surface shape. Without a `cornerRadius` it is a rectangle, except for a glass surface,

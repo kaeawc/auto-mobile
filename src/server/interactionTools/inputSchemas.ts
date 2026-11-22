@@ -102,7 +102,7 @@ const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
         key: z
           .enum(sendKeysKeyValues)
           .describe(
-            "Raw key or semantic IME key. Semantic next/previous/done/search/send/go ignore modifiers",
+            "Raw key, letter a-z, or semantic IME key. Semantic next/previous/done/search/send/go ignore modifiers. On an iOS simulator a letter with modifiers is a system shortcut (meta+h home) and needs no focused field",
           ),
         modifiers: z
           .array(z.enum(INPUT_KEY_MODIFIERS))

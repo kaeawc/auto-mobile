@@ -1,21 +1,24 @@
 import AdmZip from "adm-zip";
 import { ActionableError } from "../../../../models/ActionableError";
 import { assertZipEntriesContained } from "../../../../utils/workers/assertZipEntriesContained";
-import { patchArscColors } from "./androidArscColors";
+import type { DisposableAppAsset } from "../DisposableAppManager";
+import type { AndroidIconLayers } from "./AndroidIconRenderer";
+import { patchArscColors, resolveArscDrawablePaths } from "./androidArscColors";
 
-export interface AndroidStampAsset {
-  id: string;
-  bytes: Uint8Array;
-}
+export const ANDROID_ICON_DRAWABLES = {
+  foreground: "prototype_icon_foreground",
+  monochrome: "prototype_icon_monochrome",
+} as const;
 /** What a stamp bakes into the template beside the relinked manifest. */
 export interface AndroidStampContent {
   spec: string;
   attachToken?: string;
   /** Development-only opt-in to expose attach on physical Android devices. */
   allowPhysicalDeviceAttach?: boolean;
-  assets: readonly AndroidStampAsset[];
+  assets: readonly DisposableAppAsset[];
   /** ARGB values for named template `color` resources, e.g. the icon and splash background. */
   colors?: ReadonlyMap<string, number>;
+  iconLayers?: AndroidIconLayers;
 }
 export interface AndroidStampZip {
   assemble(template: Buffer, linked: Buffer, content: AndroidStampContent): Buffer;
@@ -54,10 +57,32 @@ export class DefaultAndroidStampZip implements AndroidStampZip {
     if (!resources) {
       throw new ActionableError("Template APK has no resources.arsc.");
     }
-    resources.setData(patchArscColors(resources.getData(), colors));
+    const arsc = resources.getData();
+    if (content.iconLayers) {
+      this.replaceIconLayers(zip, arsc, content.iconLayers);
+    }
+    resources.setData(patchArscColors(arsc, colors));
     resources.header.method = 0;
     return zip.toBuffer();
   }
+  private replaceIconLayers(zip: AdmZip, arsc: Buffer, layers: AndroidIconLayers): void {
+    const paths = resolveArscDrawablePaths(arsc, Object.values(ANDROID_ICON_DRAWABLES));
+    const replaced = new Set<string>();
+    for (const layer of ["foreground", "monochrome"] as const) {
+      for (const path of paths.get(ANDROID_ICON_DRAWABLES[layer])!) {
+        const entry = zip.getEntry(path);
+        if (!entry || replaced.has(path)) {
+          throw new ActionableError(
+            `Template APK needs a distinct file for each icon layer: ${path}. Repackage the template.`,
+          );
+        }
+        entry.setData(layers[layer]);
+        entry.header.method = 0;
+        replaced.add(path);
+      }
+    }
+  }
+
   private addAttachAssets(zip: AdmZip, content: AndroidStampContent): void {
     if (content.attachToken !== undefined) {
       zip.addFile("assets/prototype/attach-token", Buffer.from(content.attachToken));

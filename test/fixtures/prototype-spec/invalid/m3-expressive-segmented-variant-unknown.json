@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "expressive",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "mode": "day"
+    },
+    "root": {
+      "type": "segmentedButton",
+      "testTag": "mode",
+      "stateKey": "mode",
+      "variant": "joined",
+      "options": [
+        {
+          "value": "day",
+          "label": "Day"
+        },
+        {
+          "value": "week",
+          "label": "Week"
+        },
+        {
+          "value": "month",
+          "label": "Month"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.variant"
+}

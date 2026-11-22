@@ -16,16 +16,27 @@ class FakeRecorder implements PerformanceTraceRecorder {
   readonly started: StartPerformanceTraceRequest[] = [];
   readonly stops: string[] = [];
   stopError?: Error;
+  /** Fail the next stops before the recorder is signalled (adb gone before the SIGTERM). */
+  unsignalledFailures = 0;
   summaryGate?: Promise<void>;
   summarizeStarted?: () => void;
 
   async start(request: StartPerformanceTraceRequest): Promise<RecordingPerformanceTrace> {
     this.started.push(request);
+    let signalled = false;
     return {
       artifactPath: `${request.artifactDir}/${request.traceId}.perfetto-trace`,
       warnings: ["start warning"],
+      get signalled() {
+        return signalled;
+      },
       stop: async () => {
         this.stops.push(request.traceId);
+        if (this.unsignalledFailures > 0) {
+          this.unsignalledFailures -= 1;
+          throw new Error("adb: device offline before SIGTERM");
+        }
+        signalled = true;
         if (this.stopError) {
           throw this.stopError;
         }
@@ -157,5 +168,127 @@ describe("PerformanceTraceManager (#14102)", () => {
     release();
     await stopping;
     expect(traces.lookup(started.traceId)?.result.summary).toEqual({ durationMs: 1_500 });
+  });
+});
+
+const iphone: BootedDevice = { deviceId: "sim-1", name: "iPhone", platform: "ios" };
+
+describe("PerformanceTraceManager categories (#18688)", () => {
+  test("a categories start resolves the config, hands it to the recorder and echoes it", async () => {
+    const { manager: traces, recorder } = manager();
+
+    const started = await traces.start(pixel, {
+      categories: ["gfx", "binder_driver"],
+      bufferMb: 64,
+      appId: "com.example.app",
+      timeLimitMs: 10_000,
+    });
+
+    expect(recorder.started[0]?.template).toBeUndefined();
+    expect(recorder.started[0]).toMatchObject({
+      categoryConfig: {
+        categories: ["gfx", "binder_driver", "app"],
+        appId: "com.example.app",
+        bufferMb: 64,
+        maxDurationMs: 10_000,
+      },
+    });
+    expect(started).toMatchObject({ categories: ["gfx", "binder_driver", "app"], bufferMb: 64 });
+    expect(started.template).toBeUndefined();
+  });
+
+  test("a template start carries no categories", async () => {
+    const { manager: traces } = manager();
+    const started = await traces.start(pixel, hitches);
+    expect(started.categories).toBeUndefined();
+    expect(started.bufferMb).toBeUndefined();
+  });
+
+  test("categories on iOS are refused before any recorder runs", async () => {
+    const { manager: traces, recorder } = manager();
+    await expect(
+      traces.start(iphone, { categories: ["sched"], timeLimitMs: 10_000 }),
+    ).rejects.toThrow("categories are Android (Perfetto) only");
+    expect(recorder.started).toEqual([]);
+  });
+
+  test("refuses both or neither shape, bufferMb with a template, and app without an appId", async () => {
+    const { manager: traces, recorder } = manager();
+    await expect(traces.start(pixel, { ...hitches, categories: ["sched"] })).rejects.toThrow(
+      "exactly one of template or categories",
+    );
+    await expect(traces.start(pixel, { timeLimitMs: 10_000 })).rejects.toThrow(
+      "exactly one of template or categories",
+    );
+    await expect(traces.start(pixel, { ...hitches, bufferMb: 64 })).rejects.toThrow(
+      "bufferMb applies only to a categories trace",
+    );
+    await expect(traces.start(pixel, { categories: ["app"], timeLimitMs: 10_000 })).rejects.toThrow(
+      "needs an appId",
+    );
+    expect(recorder.started).toEqual([]);
+  });
+
+  test("a stop that fails before the recorder is signalled keeps the trace for a retry", async () => {
+    const { manager: traces, recorder } = manager();
+    recorder.unsignalledFailures = 1;
+    await traces.start(pixel, { ...hitches, ownerSessionUuid: "s1" });
+
+    await expect(traces.stop("trace-t-1")).rejects.toThrow("before SIGTERM");
+    expect(traces.activeTraceIds()).toEqual(["trace-t-1"]);
+    await expect(traces.start(pixel, hitches)).rejects.toThrow("already recording");
+
+    expect(await traces.stop("trace-t-1")).toMatchObject({ state: "stopped" });
+    expect(recorder.stops).toEqual(["trace-t-1", "trace-t-1"]);
+    expect(traces.activeTraceIds()).toEqual([]);
+  });
+
+  test("release cleanup leaves an unsignalled trace registered, and a later release stops it", async () => {
+    const { manager: traces, recorder } = manager();
+    recorder.unsignalledFailures = 1;
+    await traces.start(pixel, { ...hitches, ownerSessionUuid: "s1" });
+
+    await traces.stopSessionTracesOnDevice("s1", "emulator-5554");
+    expect(traces.activeTraceIds()).toEqual(["trace-t-1"]);
+
+    await traces.stopSessionTracesOnDevice("s1", "emulator-5554");
+    expect(traces.activeTraceIds()).toEqual([]);
+  });
+
+  test("a session's stop on one device leaves its traces elsewhere and other sessions' alone", async () => {
+    const { manager: traces, recorder } = manager();
+    await traces.start(pixel, { ...hitches, ownerSessionUuid: "s1" });
+    await traces.start(tablet, { ...hitches, ownerSessionUuid: "s1" });
+
+    await traces.stopSessionTracesOnDevice("s2", "emulator-5554");
+    await traces.stopSessionTracesOnDevice("s1", "emulator-5554");
+
+    expect(recorder.stops).toEqual(["trace-t-1"]);
+    expect(traces.activeTraceIds()).toEqual(["trace-t-2"]);
+  });
+
+  test("release resolves once the recorder is stopped, without waiting for the summary", async () => {
+    const { manager: traces, recorder } = manager();
+    let release!: () => void;
+    recorder.summaryGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await traces.start(pixel, { ...hitches, ownerSessionUuid: "s1" });
+
+    await traces.stopTracesForSession("s1");
+    expect(traces.activeTraceIds()).toEqual([]);
+    const summary = traces.stop("trace-t-1");
+
+    release();
+    expect(await summary).toMatchObject({ summary: { durationMs: 1_500 } });
+    expect(recorder.stops).toEqual(["trace-t-1"]);
+  });
+
+  test("overlapping starts on one device cannot both reach the recorder", async () => {
+    const { manager: traces, recorder } = manager();
+    const first = traces.start(pixel, hitches);
+    await expect(traces.start(pixel, hitches)).rejects.toThrow("still starting");
+    await first;
+    expect(recorder.started).toHaveLength(1);
   });
 });

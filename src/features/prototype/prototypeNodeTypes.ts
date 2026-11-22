@@ -50,4 +50,5 @@ export const PROTOTYPE_NODE_TYPES = [
   "webView",
   "castButton",
   "cameraPreview",
+  "loadingIndicator",
 ] as const;

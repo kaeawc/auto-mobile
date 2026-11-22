@@ -148,6 +148,23 @@ Users:
     expectedCommandFragments: ["shell dumpsys user", "shell pm list users"],
   },
   {
+    name: "falls back to pm output when dumpsys reports no user states (Android 7)",
+    outcomes: [
+      `Users:
+  UserInfo{0:null:13} serialNo=0
+    Created: <unknown>
+    Last logged in: +51m5s264ms ago
+    Has profile owner: false
+
+  Device policy global restrictions:
+    null`,
+      `Users:
+\tUserInfo{0:Owner:13} running`,
+    ],
+    expectedUsers: [{ ...owner, flags: 0x13 }],
+    expectedCommandFragments: ["shell dumpsys user", "shell pm list users"],
+  },
+  {
     name: "falls back to pm output when dumpsys throws",
     outcomes: [
       new Error("dumpsys user failed"),

@@ -146,6 +146,7 @@ export const SAVED_PROTOTYPE_ERROR_CODES = [
   "unsupported_format",
   "internal_error",
   "render_failed",
+  "unsupported_capability",
 ] as const;
 export type SavedPrototypeErrorCode = (typeof SAVED_PROTOTYPE_ERROR_CODES)[number];
 export function isSavedPrototypeErrorCode(value: unknown): value is SavedPrototypeErrorCode {

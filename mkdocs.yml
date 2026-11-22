@@ -467,6 +467,7 @@ nav:
           - "Prototype user-test sessions": how-it-works/prototype-user-test-sessions.md
           - "Prototype SDK support matrix": how-it-works/prototype-sdk-matrix.md
           - "Prototype camera and media guide": how-it-works/prototype-camera-media.md
+          - "Prototype media runtime placement": how-it-works/prototype-media.md
           - "Prototype web renderer":
               - "Overview": how-it-works/prototype-web-renderer.md
               - "Browser, Android and iOS parity checks": how-it-works/prototype-web-renderer-checks.md

@@ -24,6 +24,14 @@ class PrototypeWebViewImportTest {
   }
 
   @Test
+  fun `node path names the first webView whatever the network switch`() {
+    val spec = Json.parseToJsonElement(fixture).jsonObject
+    assertEquals("root.children[1]", PrototypeWebView.nodePath(spec))
+    val plain = Json.parseToJsonElement("""{"root":{"type":"text","text":"Hi"}}""").jsonObject
+    assertNull(PrototypeWebView.nodePath(plain))
+  }
+
+  @Test
   fun `opaque data and action payloads are not nodes`() {
     val spec =
       """{"data":{"type":"webView"},"root":{"type":"button","onTap":[{"type":"emit","payload":{"type":"webView"}}]}}"""

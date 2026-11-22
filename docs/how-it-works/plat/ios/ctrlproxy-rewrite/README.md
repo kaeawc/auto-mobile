@@ -174,13 +174,19 @@ Candidates are the apps the runner has launched or observed, plus the common sys
 at most once every 10 s; SpringBoard's tree names no app windows. Each candidate in
 `.runningForeground` whose window is on screen and not wholly behind the focused window
 is snapshotted, moved into screen space, and its nodes whose centre the focused window
-covers are dropped. Those window roots go first under the root, before the focused
-app's children, and `windows` lists the focused window first, then each other window
-with `isFocused: false`; with more than one window every entry carries `packageName`.
+covers are dropped.
+
+Those window roots go first under the root, before the focused app's children. Each
+carries its owner (`automobile:iosWindowPackage`) and an `automobile:iosWindowLayer`
+behind every focused window, so it never ranks above the focused app. Navigation
+identity drops these roots. `windows` lists the focused window first, then each other
+window with `isFocused: false`; with more than one window every entry carries
+`packageName`.
+
 Every app in a tiled or floating layout stays `.runningForeground`, so the focused app is
 the tracked one: launching an app, or a tap delivered inside another observed window,
-makes it the focused app. An app opened outside the runner that is not a common system
-app is not found.
+makes it the focused app. Any foreground switch drops the observed window frames. An app
+opened outside the runner that is not a common system app is not found.
 
 Full-screen apps and iPhones have no mismatch and perform no extra read.
 

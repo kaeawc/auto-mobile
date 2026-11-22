@@ -68,8 +68,8 @@ the complete result of `show`, `patch` and `replaceNode`).
 - On these four writes only (#18826), `{object: {name: binding}}` writes an object. It has 1 to
   `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` members named like path keys, and each member is one of the
   five flat forms above or a generated binding (below). Members do not nest and resolve in sorted
-  name order, so a `{generate}` member precedes a `{lastGenerated}` one by name on every platform; a
-  generated member needs `prototype_data_actions_v2` too and counts in the static `lastGenerated`
+  name order, so a `{generate}` member precedes a `{lastGenerated}` one by name on every platform.
+  A generated member needs `prototype_data_actions_v2` too and counts in the static `lastGenerated`
   check. A repeat binds `{item}`/`{index}` members per row. A missing member source fails the write
   like a top-level one. An `upsertData` `key` must start with
   a member name, and must resolve non-null when that member is a `{value}` literal. The

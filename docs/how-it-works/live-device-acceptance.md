@@ -31,9 +31,9 @@ ARGS=(
   --ios-simulator-name "Acceptance iPhone 17"
   --ios-simulator-uuid "00000000-0000-0000-0000-000000000000"
   --ios-same-name-sibling-uuid "00000000-0000-0000-0000-000000000001"
-  --ios-runtime "com.apple.CoreSimulator.SimRuntime.iOS-26-0"
+  --ios-runtime "com.apple.CoreSimulator.SimRuntime.iOS-27-2"
   --ios-device-type "com.apple.CoreSimulator.SimDeviceType.iPhone-17"
-  --ios-min-os-version "25.0" --ios-max-os-version "26.0"
+  --ios-min-os-version "27.0" --ios-max-os-version "27.2"
   --operator-key-file scratch/live-device-acceptance/operator.key
   --ownership-manifest scratch/live-device-acceptance/ownership.json
 )

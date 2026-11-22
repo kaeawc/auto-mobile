@@ -28,4 +28,4 @@ audio. Host-mic passthrough is not used.
   environment cannot reach the gRPC port.
 - Open questions that need a real emulator (#13634):
   - The minimum emulator version that ships both RPCs, and whether every CI image meets it.
-  - Whether `injectAudio` fails loudly or silently no-ops on an emulator launched with `-no-audio`.
+  - Answered: `injectAudio` silently succeeds on an emulator launched with `-no-audio` (see the shaped doc).

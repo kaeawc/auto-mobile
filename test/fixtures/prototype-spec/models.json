@@ -250,6 +250,7 @@
     ]
   },
   "conditionFilled": {
+    "derived": "cartCount",
     "key": "enabled",
     "equals": true,
     "notEquals": false,
@@ -553,6 +554,7 @@
     "aspectRatio": "1:1",
     "mode": "photo"
   },
+  "nodeLoadingIndicator": { "type": "loadingIndicator", "contained": true },
   "nodeDialog": {
     "type": "dialog",
     "openWhen": {
@@ -943,7 +945,9 @@
         }
       }
     },
-    "into": "/data/response",
+    "into": "/data/points",
+    "where": { "field": "id", "equals": { "value": 1 } },
+    "member": "response",
     "statusKey": "status",
     "via": "host",
     "allowSecureInRequest": false,

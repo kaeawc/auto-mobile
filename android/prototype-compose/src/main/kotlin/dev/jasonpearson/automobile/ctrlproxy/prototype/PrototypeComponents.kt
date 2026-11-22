@@ -130,6 +130,7 @@ internal fun RenderPrototypeButton(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypeButtonNode ?: return
+  if (source.split != null) return RenderPrototypeSplitButton(node, modifier, interact)
   val context = LocalContext.current
   val tvNavigation =
     remember(context) { context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) }
@@ -228,7 +229,7 @@ internal fun prototypeForeground(node: PrototypeRenderNode): Color =
 
 /** The node-level semantics already carry the label, so the drawn text adds none of its own. */
 @Composable
-private fun PrototypeComponentLabel(node: PrototypeRenderNode) {
+internal fun PrototypeComponentLabel(node: PrototypeRenderNode) {
   Text(node.text, Modifier.clearAndSetSemantics {}, color = prototypeForeground(node))
 }
 
@@ -345,7 +346,9 @@ internal fun RenderPrototypeCard(
   modifier: Modifier,
   content: @Composable ColumnScope.() -> Unit,
 ) {
-  val container = prototypeThemedColor(node.style.background, node.style.source.background)
+  val container =
+    if (node.style.source.glassMaterial() != null) Color.Transparent
+    else prototypeThemedColor(node.style.background, node.style.source.background)
   when ((node.source as? PrototypeCardNode)?.variant) {
     "elevated" ->
       ElevatedCard(

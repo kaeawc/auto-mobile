@@ -52,6 +52,9 @@ interface PrototypeChannelSink {
 
   /** Route, callback or `statusKey` actions to apply with [event] as the handler's event. */
   suspend fun run(channel: String, actions: JsonArray, event: JsonElement)
+
+  /** An unexpected throw from the sink or a transport, isolated so the channels keep running. */
+  fun warn(message: String) = Unit
 }
 
 /**
@@ -115,11 +118,23 @@ class PrototypeChannelController(
   private val dirty = linkedSetOf<String>()
   private var flush: Job? = null
   private var started = false
-  // Set before close() waits for the lock, so work suspended in a sink call sees it at once.
+  // Set by beginClose() or before close() waits for the lock, so work suspended in a sink call (or
+  // still waiting for the lock) sees it at once.
   @Volatile private var closing = false
+  // close() has started; a later close() returns at once.
+  @Volatile private var closeStarted = false
 
   init {
     scope.launch { for (work in inbox) lock.withLock { if (!closing) report { work() } } }
+  }
+
+  /**
+   * Dismissal began. Takes no lock, so it holds at once: work still waiting for the lock (a send
+   * queued behind a blocked flush, a transport callback, a timer) does nothing, and [close] then
+   * closes the connections.
+   */
+  fun beginClose() {
+    closing = true
   }
 
   /** The current snapshot of [channel], or null when it is not declared. */
@@ -156,15 +171,20 @@ class PrototypeChannelController(
     }
   }
 
-  /** `realtime.connect`: null once connecting (or already live), else why not. */
-  suspend fun connect(channel: String): PrototypeChannelError? = lock.withLock {
-    val slot = slots[channel] ?: return@withLock unknown(channel)
-    if (!closing && !slot.status.active) {
-      slot.attempt = 0
-      connect(slot)
+  /**
+   * `realtime.connect`: null once connecting (or already live), else why not. [wanted] is checked
+   * under the lock, so a call whose caller gave up while it waited for the lock does nothing.
+   */
+  suspend fun connect(channel: String, wanted: () -> Boolean = { true }): PrototypeChannelError? =
+    lock.withLock {
+      val slot = slots[channel] ?: return@withLock unknown(channel)
+      if (!wanted()) return@withLock abandoned()
+      if (!closing && !slot.status.active) {
+        slot.attempt = 0
+        connect(slot)
+      }
+      null
     }
-    null
-  }
 
   /** `realtime.disconnect`: closes the connection with 1000 and drops queued sends. */
   suspend fun disconnect(channel: String): PrototypeChannelError? = lock.withLock {
@@ -179,23 +199,38 @@ class PrototypeChannelController(
     null
   }
 
-  /** `realtime.send`: sent when open, queued while (re)connecting, refused otherwise. */
-  suspend fun send(channel: String, data: String): PrototypeChannelError? = lock.withLock {
+  /**
+   * `realtime.send`: sent when open, queued while (re)connecting, refused otherwise. [wanted] is
+   * checked under the lock, so a caller that gave up while waiting for it sends nothing.
+   */
+  suspend fun send(
+    channel: String,
+    data: String,
+    wanted: () -> Boolean = { true },
+  ): PrototypeChannelError? = lock.withLock {
     val slot = slots[channel] ?: return@withLock unknown(channel)
+    if (closing || !wanted()) {
+      return@withLock PrototypeChannelError(
+        PrototypeChannelError.NETWORK,
+        "The channels are closed",
+      )
+    }
     sendError(slot, data)
   }
 
   /** Dismiss or reset: closes every connection; the sink hears nothing more. */
   suspend fun close() {
-    if (closing) return
+    if (closeStarted) return
+    closeStarted = true
     closing = true
-    // closing is already set, so a later close() returns at once: this cleanup must finish even if
-    // the caller is cancelled while a sink call holds the lock.
+    // A later close() returns at once, so this cleanup must finish even if the caller is cancelled
+    // while a sink call holds the lock.
     withContext(NonCancellable) {
       lock.withLock {
         flush?.cancel()
         window.clear()
-        slots.values.forEach(::abandon)
+        // One connection whose close throws must not leave the others open.
+        slots.values.forEach { slot -> report { abandon(slot) } }
         slots.clear()
       }
       inbox.close()
@@ -273,6 +308,7 @@ class PrototypeChannelController(
         throw error
       } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
         // A transport that cannot start is a failed attempt: it backs off like a dropped one.
+        onError(error)
         val reason = PrototypeChannelError(PrototypeChannelError.NETWORK, error.message ?: "$error")
         return ended(slot, null, null, reason)
       }
@@ -474,6 +510,9 @@ class PrototypeChannelController(
     delay(millis)
     lock.withLock { if (!closing) report { work() } }
   }
+
+  private fun abandoned() =
+    PrototypeChannelError(PrototypeChannelError.NETWORK, "The caller stopped waiting")
 
   private fun isCurrent(slot: Slot, generation: Long): Boolean =
     !closing && slots[slot.id] === slot && slot.generation == generation

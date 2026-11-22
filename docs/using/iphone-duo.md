@@ -119,6 +119,29 @@ Screen geometry is stale after a posture change: observe reports rotation 0 and 
 Call `observe`, then retry the tap. Apps that are laid out for the reported size, in portrait or
 landscape, are tapped as usual.
 
+## Rotating a panel
+
+`rotate` turns whichever panel is active, in every posture. The inner panel is landscape when the
+device is upright, so `orientation: "portrait"` there gives a 669x951 layout and `"landscape"`
+gives 951x669; Settings rotates on the inner panel too. The home screen on the inner panel turns
+on screen, but reports a size that does not follow it, so `rotate` there can fail with "does not
+rotate on the inner panel"; open an app with `launchApp` and rotate inside it. On the cover panel,
+apps that support landscape (for example Safari) rotate, but Settings and the home screen stay
+portrait, and `rotate` fails with:
+
+```text
+The foreground app or screen does not rotate on the cover panel (the screen size did not change). Open the device to its inner panel (unfold the hinge) and retry there, or keep the current orientation.
+```
+
+After a failed rotate the previous orientation is put back, so the next app does not open rotated.
+
+Rotating a panel works only on the iOS Simulator. On a physical iPhone Duo, `rotate` changes
+nothing and fails with:
+
+```text
+Rotating an iPhone Duo panel is only supported on the iOS Simulator; it has not been verified on a physical device.
+```
+
 ## Home-screen icons after an unfold
 
 After an unfold, the home screen reports app icon positions that do not match what it draws. As a

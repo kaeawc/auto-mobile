@@ -69,7 +69,7 @@ import {
   simulatorProfiles,
   type SimulatorDeviceTypeProfileSource,
 } from "./SimulatorDeviceTypeProfiles";
-import { parseSimulatorDisplays, type SimulatorDisplay } from "./SimulatorDisplays";
+import { parseSimulatorScreens, type SimulatorScreens } from "./SimulatorDisplays";
 import type { DeviceDisplays } from "../../models/DisplayPanel";
 import { type TransitionalSimulator } from "../../models/TransitionalSimulator";
 import { SimctlUnavailableError } from "./SimctlUnavailableError";
@@ -650,8 +650,12 @@ export class SimCtlClient implements SimCtl {
     return this.simCtlInventory.getDeviceInfo(udid);
   }
 
-  readDeviceDisplays(udid: string, signal?: AbortSignal): Promise<DeviceDisplays | undefined> {
-    return this.simCtlInventory.readDeviceDisplays(udid, signal);
+  readDeviceDisplays(
+    udid: string,
+    signal?: AbortSignal,
+    enumerateTimeoutMs?: number,
+  ): Promise<DeviceDisplays | undefined> {
+    return this.simCtlInventory.readDeviceDisplays(udid, signal, enumerateTimeoutMs);
   }
 
   bootSimulator(udid: string): Promise<BootedDevice> {
@@ -906,13 +910,17 @@ export class SimCtlClient implements SimCtl {
     throw new ActionableError("Unable to determine screen size from provided data.");
   }
 
-  async enumerateDisplays(
+  async enumerateDisplays(...args: Parameters<SimCtlClient["enumerateScreens"]>) {
+    return (await this.enumerateScreens(...args)).integrated;
+  }
+
+  async enumerateScreens(
     deviceId: string,
     timeoutMs?: number,
     signal?: AbortSignal,
-  ): Promise<SimulatorDisplay[]> {
+  ): Promise<SimulatorScreens> {
     const result = await this.executeCommandArgs(["io", deviceId, "enumerate"], timeoutMs, signal);
-    return parseSimulatorDisplays(result.stdout);
+    return parseSimulatorScreens(result.stdout);
   }
   screenshot(deviceId: string, display?: string, signal?: AbortSignal): Promise<Buffer> {
     return this.simCtlScreenshot.screenshot(deviceId, display, signal);

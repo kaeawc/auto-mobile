@@ -214,6 +214,11 @@ class PrototypeController(
   private val storage: PrototypeStoragePersistence? = null,
   /** The transports behind `request` actions (#12528). */
   private val httpClients: PrototypeHttpClients = PrototypeHttpClients.Unavailable,
+  /**
+   * The transports behind `channels` (#14269); each shown prototype gets its own `realtime` module.
+   * Null leaves `channels` without a module.
+   */
+  private val realtime: PrototypeRealtimeConfig? = null,
   /** Where requests wait for their response; they are cancelled when their prototype ends. */
   private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
   /** Device-compiled uniform declarations, checked even for hidden/styleWhen nodes. */
@@ -436,7 +441,7 @@ class PrototypeController(
           hiddenReason = shownHiddenReason(shown),
           pages = shown.runtime.current.pages,
           stacks = shown.runtime.current.stacks,
-          backdrop = shown.request.backdrop?.mode?.wire,
+          backdrop = shown.host.appliedBackdrop?.wire,
           displayId = shown.request.displayId,
           degradedEffects =
             prototypeEffectReport(
@@ -690,6 +695,7 @@ class PrototypeController(
           if (preservePages) previous?.runtime?.current?.stacks.orEmpty() else emptyMap(),
         storage = opened.session,
         httpClients = httpClients,
+        realtime = realtime,
         uploadAssets = uploadAssets,
         platform = platform,
         platformLimiter = platformLimiter,
@@ -713,16 +719,18 @@ class PrototypeController(
         isSuspended = { scope.suspended },
         bringToFront = reused != null && request.transition != "none" && request.motion != "none",
         theme = theme,
+        backdropShape =
+          if (request.backdrop != null && request.placement is PrototypePlacement.Floating)
+            prototypeRootBackdropShape(mappedSpec)
+          else request.backdropShape,
         motionActivity = runtime.motionActivity,
         exitResources = exitResources,
         exitMetadata = { surfaceMetadata(runtime, request, theme.value) },
         onHostDismiss = { interact(runtime, PrototypeInteraction.HostDismiss) },
         onHostBack = { interact(runtime, PrototypeInteraction.Back) },
         content = {
-          PrototypeBackdropLayer(request.backdrop) {
-            PrototypeRuntimeContent(runtime, images, fonts) { interaction ->
-              interact(runtime, interaction)
-            }
+          PrototypeRuntimeContent(runtime, images, fonts) { interaction ->
+            interact(runtime, interaction)
           }
         },
       )
@@ -1212,6 +1220,7 @@ class PrototypeController(
     val runtime = surface.runtime
     val id = runtime.current.spec.id
     return PrototypeStatusEntry(
+      images = runtime.remoteImageActivity.counts(),
       id = id,
       persistent = runtime.persistent,
       state = runtime.publicState,

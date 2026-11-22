@@ -134,8 +134,7 @@ internal object PrototypeSpecInput {
         ?: PrototypeKeyframesRules.validate(context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: PrototypeStorageValidation.error(value.jsonObject)
-        ?: dataActionErrors(context, value)
-        ?: requestActionErrors(context)
+        ?: actionErrors(value, context)
         ?: nodeVocabularyErrors(value, context)
         ?: swipeActionsErrors(context)
         ?: PrototypeBarScrollRules.error(context)
@@ -156,9 +155,16 @@ internal object PrototypeSpecInput {
     }
   }
 
+  private fun actionErrors(value: JsonElement, context: Context): PrototypeSpecError? =
+    PrototypeGeneratedValues.error(context.actions)
+      ?: PrototypeStorageValidation.keyedBindingError(value.jsonObject, context)
+      ?: dataActionErrors(context, value)
+      ?: requestActionErrors(context)
+
   private fun structuralError(value: JsonElement, context: Context): PrototypeSpecError? =
     PrototypeLazyListRules.limitError(value)
       ?: walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
+      ?: PrototypeRemoteImages.error(value.jsonObject, context.nodes)
       ?: excludeAccessoryReferences(context)
       ?: PrototypeRouteRules.error(value.jsonObject, context)
       ?: PrototypeSharedElementRules.error(context)

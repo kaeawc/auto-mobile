@@ -29,6 +29,11 @@ import {
   protoViewerLabelProblem,
   type ProtoViewerResult,
 } from "./protoViewerContract";
+import {
+  PROTOVIEWER_OLDEST_SUPPORTED,
+  protoViewerSupportWindowWarning,
+  type ProtoViewerOldestSupported,
+} from "./protoViewerSupportWindow";
 
 export const PROTOVIEWER_IMPORTED_WARNING =
   "ProtoViewer treats this prototype as imported: its requests stay off until someone turns on network for imported prototypes in ProtoViewer's settings, and it is not attached to this host (no awaitEvent, patch or inspect).";
@@ -73,11 +78,17 @@ export interface ProtoViewerInput {
 }
 
 export interface ProtoViewerRouteDependencies {
+  platform?: "android" | "ios";
   device: ProtoViewerDevice;
   assetFileReader: PrototypeAssetFileReader;
   observationScreenshotReader: PrototypeObservationScreenshotReader;
   /** The device's display inventory, to name the panel a result landed on. */
   displays?: DeviceDisplays;
+  /**
+   * The oldest release in the support window; defaults to the one derived from the release
+   * registry. Null means no window is known, so no build is flagged.
+   */
+  oldestSupported?: ProtoViewerOldestSupported | null;
 }
 
 /**
@@ -158,11 +169,14 @@ async function saveInProtoViewer(
     return bundle.failure;
   }
   const timeoutMs = args.timeoutMs ?? PROTOVIEWER_DEFAULT_TIMEOUT_MS;
-  const gate = await capabilityGate(spec, deps.device, timeoutMs, signal);
-  if (gate !== undefined) {
-    return gate === UNREACHABLE ? undefined : gate;
+  const gate = await capabilityGate(spec, deps, timeoutMs, signal);
+  if (gate === UNREACHABLE) {
+    return undefined;
   }
-  return await deviceCall(
+  if ("refusal" in gate) {
+    return gate.refusal;
+  }
+  const output = await deviceCall(
     () => deps.device.importBundle(bundle.bytes, label.label, timeoutMs, signal),
     (error) => {
       // An absent entry point or unusable app storage means nothing was imported; retain the
@@ -173,9 +187,38 @@ async function saveInProtoViewer(
     deps.displays,
     args.display,
   );
+  return withSupportWindowWarning(output, gate.report, deps.oldestSupported);
+}
+
+/**
+ * Appends the support-window warning (#14156) to a successful import. It only uses a report the
+ * handshake already read, so a spec that needs no capability costs no extra device round trip.
+ */
+function withSupportWindowWarning(
+  output: ProtoViewerOutput | undefined,
+  report: ProtoViewerCapabilityReport | undefined,
+  oldestSupported: ProtoViewerOldestSupported | null | undefined,
+): ProtoViewerOutput | undefined {
+  if (output?.success !== true || report === undefined) {
+    return output;
+  }
+  const oldest = oldestSupported === undefined ? PROTOVIEWER_OLDEST_SUPPORTED : oldestSupported;
+  const warning = protoViewerSupportWindowWarning(report, oldest ?? undefined);
+  if (warning === undefined) {
+    return output;
+  }
+  return {
+    ...output,
+    warning: output.warning === undefined ? warning : `${output.warning} ${warning}`,
+  };
 }
 
 const UNREACHABLE = Symbol("unreachable");
+
+type CapabilityGateResult =
+  | typeof UNREACHABLE
+  | { refusal: ProtoViewerOutput }
+  | { report: ProtoViewerCapabilityReport | undefined };
 
 /**
  * The capability handshake (#14156): before pushing, compare what the spec needs with what the
@@ -185,13 +228,14 @@ const UNREACHABLE = Symbol("unreachable");
  */
 async function capabilityGate(
   spec: PrototypeSpec,
-  device: ProtoViewerDevice,
+  deps: Pick<ProtoViewerRouteDependencies, "device" | "platform">,
   timeoutMs: number,
   signal?: AbortSignal,
-): Promise<ProtoViewerOutput | typeof UNREACHABLE | undefined> {
-  const required = requiredPrototypeCapabilities(spec);
+): Promise<CapabilityGateResult> {
+  const { device, platform } = deps;
+  const required = requiredPrototypeCapabilities(spec, platform);
   if (required.length === 0) {
-    return undefined;
+    return { report: undefined };
   }
   let report = await readCapabilities(device, { timeoutMs, signal });
   let missing = missingCapabilities(required, report);
@@ -202,7 +246,9 @@ async function capabilityGate(
   if (report === UNREACHABLE) {
     return UNREACHABLE;
   }
-  return report === undefined || missing.length === 0 ? undefined : updateFailure(report, missing);
+  return report === undefined || missing.length === 0
+    ? { report }
+    : { refusal: updateFailure(report, missing) };
 }
 
 async function readCapabilities(

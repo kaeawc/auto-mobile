@@ -22,6 +22,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeCheckboxNode
 import dev.jasonpearson.automobile.protocol.PrototypeChipNode
 import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
 import dev.jasonpearson.automobile.protocol.PrototypeCondition
+import dev.jasonpearson.automobile.protocol.PrototypeDataWhere
 import dev.jasonpearson.automobile.protocol.PrototypeDatePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeDecrementAction
 import dev.jasonpearson.automobile.protocol.PrototypeDerivedRows
@@ -42,6 +43,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeListItemNode
 import dev.jasonpearson.automobile.protocol.PrototypeListItemSwitch
 import dev.jasonpearson.automobile.protocol.PrototypeListItemTrailing
 import dev.jasonpearson.automobile.protocol.PrototypeListNode
+import dev.jasonpearson.automobile.protocol.PrototypeLoadingIndicatorNode
 import dev.jasonpearson.automobile.protocol.PrototypeMapNode
 import dev.jasonpearson.automobile.protocol.PrototypeMenuEntry
 import dev.jasonpearson.automobile.protocol.PrototypeMenuNode
@@ -427,6 +429,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeImageNode ->
       copy(
+        url = url?.let(instance::interpolate),
         semantics = semantics,
         onAppear = onAppear,
         onTap = onTap,
@@ -566,6 +569,21 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         label = instance.display(label),
+        split =
+          split?.let { authored ->
+            authored.copy(
+              menu =
+                authored.menu.map { item ->
+                  if (item is PrototypeMenuEntry)
+                    item.copy(
+                      label = instance.display(item.label),
+                      trailingText = item.trailingText?.let(instance::display),
+                      onTap = item.onTap?.map { it.bound(instance) },
+                    )
+                  else item
+                },
+            )
+          },
       )
     is PrototypeSliderNode ->
       copy(
@@ -683,6 +701,18 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         label = label?.let(instance::display),
+        menu =
+          menu?.let { authored ->
+            authored.copy(
+              items =
+                authored.items.map {
+                  it.copy(
+                    label = instance.display(it.label),
+                    onTap = it.onTap.map { action -> action.bound(instance) },
+                  )
+                },
+            )
+          },
       )
     is PrototypeSegmentedButtonNode ->
       copy(
@@ -797,6 +827,15 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
       )
+    is PrototypeLoadingIndicatorNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
     is PrototypeListNode -> this // Nested lists in repeat templates are rejected by validation.
     is PrototypeChartNode ->
       copy(
@@ -867,18 +906,21 @@ private fun PrototypeSwipeAction.bound(instance: RepeatInstance) =
 private fun PrototypeAppBarAction.bound(instance: RepeatInstance) =
   copy(label = instance.display(label), onTap = onTap?.map { it.bound(instance) })
 
-private fun PrototypeRequestAction.boundRequest(instance: RepeatInstance) =
-  copy(
+private fun PrototypeRequestAction.boundRequest(instance: RepeatInstance): PrototypeRequestAction {
+  val where = where
+  return copy(
     url = instance.interpolate(url),
     headers = headers?.mapValues { (_, entry) -> instance.requestEntry(entry) },
     query = query?.mapValues { (_, entry) -> instance.requestEntry(entry) },
     body = body?.let(instance::dataValue),
     into = into?.let(instance::dataPath),
+    where = where?.boundWhere(instance),
     append = append?.let { it.copy(to = instance.dataPath(it.to)) },
     statusKey = statusKey?.let(instance::interpolate),
     onSuccess = onSuccess?.map { it.bound(instance) },
     onError = onError?.map { it.bound(instance) },
   )
+}
 
 private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
   when (this) {
@@ -933,14 +975,23 @@ private fun RepeatInstance.routeParams(params: Map<String, JsonElement>): Map<St
 private fun PrototypeAction.boundDataAction(instance: RepeatInstance): PrototypeAction? =
   when (this) {
     is PrototypeSetDataAction ->
-      copy(path = instance.dataPath(path), value = instance.dataValue(value))
+      copy(
+        path = instance.dataPath(path),
+        value = instance.dataValue(value),
+        where = where?.boundWhere(instance),
+      )
     is PrototypePrependDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
     is PrototypeAppendDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
-    is PrototypeRemoveDataAction -> copy(path = instance.dataPath(path))
+    is PrototypeRemoveDataAction ->
+      copy(path = instance.dataPath(path), where = where?.boundWhere(instance))
     else -> null
   }
+
+/** A keyed selector binds `{item}` / `{index}` like a request's `where`. */
+private fun PrototypeDataWhere.boundWhere(instance: RepeatInstance) =
+  copy(equals = instance.dataValue(equals))
 
 /** Only a whole `{index}` segment binds in a data path; the validator refuses anything else. */
 private fun RepeatInstance.dataPath(path: String): String =

@@ -351,7 +351,9 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
     try {
       const physical = await this.deps.readDisplaySize();
       signal?.throwIfAborted();
-      const rotated = result.rotation === 1 || result.rotation === 3;
+      // No dimensions came with the hierarchy, but a degraded read may still carry its rotation.
+      const rotation = result.rotation ?? result.viewHierarchy?.rotation;
+      const rotated = rotation === 1 || rotation === 3;
       result.screenSize = rotated
         ? { width: physical.height, height: physical.width }
         : { ...physical };

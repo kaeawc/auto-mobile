@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { ActionableError, type BootedDevice } from "../../models";
+import { toActionableError } from "../../models/ActionableError";
 import type {
   HostChildProcess,
   HostCommandExecutor,
@@ -46,9 +47,20 @@ export type IosAppPidResolver = (
   signal?: AbortSignal,
 ) => Promise<number | undefined>;
 
+/**
+ * Resolves what `xctrace record --launch` should start for `appId`: the `.app` path on a simulator,
+ * where xctrace rejects a bundle id as "Path not found" (#18790). `undefined` keeps the bundle id.
+ */
+export type IosLaunchTargetResolver = (
+  device: BootedDevice,
+  appId: string,
+  signal?: AbortSignal,
+) => Promise<string | undefined>;
+
 export interface XctraceRecorderDependencies {
   host: XctraceHost;
   resolvePid: IosAppPidResolver;
+  resolveLaunchTarget?: IosLaunchTargetResolver;
   timer: Timer;
   /** Host Xcode and simulator versions, checked against known-broken pairs; omitted skips the check. */
   environment?: XctraceEnvironment;
@@ -67,6 +79,7 @@ const DEFAULT_STOP_TIMEOUT_MS = 60_000;
 const DEFAULT_STOP_MAX_MS = 180_000;
 const EXPORT_TIMEOUT_MS = 120_000;
 const LIST_TEMPLATES_TIMEOUT_MS = 30_000;
+const RECORD_OUTPUT_MAX_CHARS = 8_000;
 const EXPORT_MAX_BUFFER = 64 * 1024 * 1024;
 /** `xctrace record` prints this once the recorder is capturing. */
 const RECORDING_STARTED = /Ctrl-C to stop the recording|Starting recording/i;
@@ -114,6 +127,7 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
       stdio: ["ignore", "pipe", "pipe"],
     });
     const exited = waitForChildExit(child);
+    const output = captureChildOutput(child);
     try {
       await waitForChildOutput(child, RECORDING_STARTED, {
         timer: this.deps.timer,
@@ -128,7 +142,11 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
         { cause: error },
       );
     }
-    return this.recording(child, exited, artifactPath, { template: request.template, warnings });
+    return this.recording(child, exited, artifactPath, {
+      template: request.template,
+      warnings,
+      output,
+    });
   }
 
   /** Refuse up front on an Xcode and simulator pair where xctrace cannot finalise (#16999). */
@@ -208,7 +226,7 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
       return {};
     }
     if (template === "appLaunch") {
-      return { launchBundleId: appId };
+      return { launchBundleId: (await this.launchTarget(device, appId, request.signal)) ?? appId };
     }
     const pid = await this.deps.resolvePid(device, appId, request.signal);
     if (pid !== undefined) {
@@ -223,15 +241,51 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
     return {};
   }
 
+  private async launchTarget(
+    device: BootedDevice,
+    appId: string,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    try {
+      return await this.deps.resolveLaunchTarget?.(device, appId, signal);
+    } catch (error) {
+      signal?.throwIfAborted();
+      throw toActionableError(
+        error,
+        `Cannot find ${appId} on ${device.deviceId} to launch it under xctrace; is it installed?`,
+      );
+    }
+  }
+
   private recording(
     child: HostChildProcess,
     exited: Promise<void>,
     artifactPath: string,
-    { template, warnings }: { template: PerformanceTraceTemplate; warnings: string[] },
+    {
+      template,
+      warnings,
+      output,
+    }: { template: PerformanceTraceTemplate; warnings: string[]; output: ChildOutputCapture },
   ): RecordingPerformanceTrace {
     const { timer, host } = this.deps;
     const stopTimeoutMs = this.deps.stopTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS;
     let signalled = false;
+    const stopChild = async () => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        signalled = true;
+        return;
+      }
+      const finalized = waitForXctraceFinalization(child, exited, {
+        timer,
+        artifactPath,
+        artifactBytes: this.deps.artifactBytes ?? traceArtifactBytes,
+        stopTimeoutMs,
+        stopMaxMs: this.deps.stopMaxMs ?? DEFAULT_STOP_MAX_MS,
+      });
+      child.kill("SIGINT");
+      signalled = true;
+      await finalized;
+    };
     return {
       artifactPath,
       warnings,
@@ -239,24 +293,81 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
         return signalled;
       },
       stop: async () => {
-        if (child.exitCode !== null || child.signalCode !== null) {
-          signalled = true;
-          return;
+        try {
+          await stopChild();
+        } finally {
+          output.detach();
         }
-        const finalized = waitForXctraceFinalization(child, exited, {
-          timer,
-          artifactPath,
-          artifactBytes: this.deps.artifactBytes ?? traceArtifactBytes,
-          stopTimeoutMs,
-          stopMaxMs: this.deps.stopMaxMs ?? DEFAULT_STOP_MAX_MS,
-        });
-        child.kill("SIGINT");
-        signalled = true;
-        await finalized;
       },
-      summarize: (signal) => summarizeXctrace(host, artifactPath, template, signal),
+      summarize: async (signal) => {
+        const summarized = await summarizeXctrace(host, artifactPath, template, signal);
+        return withRecordErrors(
+          summarized,
+          xctraceRecordErrors(output.read()),
+          artifactPath,
+          template,
+        );
+      },
     };
   }
+}
+
+interface ChildOutputCapture {
+  read(): string;
+  /** Stop listening; the captured text stays readable. */
+  detach(): void;
+}
+
+/** Keeps the tail of what `xctrace record` prints, for the errors it reports after it starts. */
+function captureChildOutput(child: HostChildProcess): ChildOutputCapture {
+  let captured = "";
+  const onData = (chunk: Buffer | string) => {
+    captured = (captured + chunk.toString()).slice(-RECORD_OUTPUT_MAX_CHARS);
+  };
+  child.stdout?.on("data", onData);
+  child.stderr?.on("data", onData);
+  return {
+    read: () => captured,
+    detach: () => {
+      child.stdout?.off("data", onData);
+      child.stderr?.off("data", onData);
+    },
+  };
+}
+
+/**
+ * The `* [Error] ...` lines of `xctrace record`'s "Run issues were detected" block. Its exit code
+ * is not reliable: an unsupported Animation Hitches recording attached to an app exits 0 (#18790).
+ */
+export function xctraceRecordErrors(output: string): string[] {
+  const errors = [...output.matchAll(/^\s*\*\s*\[Error\]\s*(.+?)\s*$/gm)].map((match) => match[1]!);
+  return [...new Set(errors)];
+}
+
+/**
+ * An unreadable or empty trace with recorder errors failed to record, so it throws instead of
+ * returning a successful empty summary; recorder errors on a readable trace stay warnings.
+ */
+function withRecordErrors(
+  summarized: { summary: PerformanceTraceSummary; warnings: string[] },
+  errors: string[],
+  artifactPath: string,
+  template: PerformanceTraceTemplate,
+): { summary: PerformanceTraceSummary; warnings: string[] } {
+  if (errors.length === 0) {
+    return summarized;
+  }
+  const recorded = Object.keys(summarized.summary).length > 0;
+  if (recorded) {
+    return {
+      summary: summarized.summary,
+      warnings: [...summarized.warnings, ...errors.map((error) => `xctrace reported: ${error}`)],
+    };
+  }
+  throw new ActionableError(
+    `xctrace could not record the ${template} trace: ${errors.join("; ")}. ` +
+      `The artifact at ${artifactPath} has no run data.`,
+  );
 }
 
 async function exportXml(

@@ -14,14 +14,14 @@ The root `commerce` catalog (needs `commerce` in `requires.platform`) is `{backe
 catalog, and a literal `productId` must name one of its products. The contract has no `commerce.checkout`,
 and no production runtime advertises the module.
 
-| Product field          | Value                                                                |
-| ----------------------- | --------------------------------------------------------------------- |
-| `id`                    | A unique identifier                                                   |
-| `title`                 | Display name                                                          |
-| `kind`                  | `consumable`, `nonConsumable` or `subscription`                       |
-| `price.amount`          | Decimal string, up to two decimal places                              |
-| `price.currency`        | Upper-case three-letter code                                          |
-| `period`/`trialPeriod`  | Subscription only; ISO 8601 duration, days to years (`P7D`, `P1M`)    |
+| Product field          | Value                                                              |
+| ---------------------- | ------------------------------------------------------------------ |
+| `id`                   | A unique identifier                                                |
+| `title`                | Display name                                                       |
+| `kind`                 | `consumable`, `nonConsumable` or `subscription`                    |
+| `price.amount`         | Decimal string, up to two decimal places                           |
+| `price.currency`       | Upper-case three-letter code                                       |
+| `period`/`trialPeriod` | Subscription only; ISO 8601 duration, days to years (`P7D`, `P1M`) |
 
 The fake store's state follows one reducer, `prototypePurchaseOutcome.ts`. Kotlin and Swift `PrototypePurchaseOutcome`
 copy it, and all three replay `test/fixtures/prototype-purchase/`. The `entitlements` key maps a product id to `active`,
@@ -72,13 +72,13 @@ throttling at `1000 / rateHz` ms (`rateHz` 1 to 30). A shake needs 2.7 g or more
 On iOS, every distinct proximity change publishes immediately; identical consecutive values are ignored.
 The runtimes replay it from `test/fixtures/prototype-sensors/`.
 
-| Key                   | Value                                                      |
-| ---------------------- | ------------------------------------------------------------ |
-| `pitchDeg`, `rollDeg`  | Whole degrees, -180 to 180                                   |
-| `headingDeg`           | 0 to 359                                                      |
-| `steps`                | Counted since the subscription started                       |
-| `proximityNear`        | Boolean                                                       |
-| `lightLux`             | Whole lux, Android only (no public ambient-light API on iOS) |
+| Key                   | Value                                                        |
+| --------------------- | ------------------------------------------------------------ |
+| `pitchDeg`, `rollDeg` | Whole degrees, -180 to 180                                   |
+| `headingDeg`          | 0 to 359                                                     |
+| `steps`               | Counted since the subscription started                       |
+| `proximityNear`       | Boolean                                                      |
+| `lightLux`            | Whole lux, Android only (no public ambient-light API on iOS) |
 
 The root `sensors` block lists the sensors the device listens to, and needs `sensors` in `requires.platform`.
 In it, `shake`, `steps` and `proximity` take `{}`, while `orientation` (the three degree keys) and `light` take an optional
@@ -257,11 +257,11 @@ checks literal values only. The limits that apply after placeholders resolve bel
 runtime that posts the notification. The per-prototype iOS Viewer is the only runtime that posts
 notifications; no other host posts one, so these limits are not enforced elsewhere.
 
-| Resolved limit | Value                                             |
-| --------------- | --------------------------------------------------- |
-| Reply           | At most 1 KiB                                        |
-| Notification    | At most 5 KiB                                        |
-| Update rate     | At most 4 per second per notification, coalesced to the latest |
+| Resolved limit | Value                                                          |
+| -------------- | -------------------------------------------------------------- |
+| Reply          | At most 1 KiB                                                  |
+| Notification   | At most 5 KiB                                                  |
+| Update rate    | At most 4 per second per notification, coalesced to the latest |
 
 The iOS Viewer posts local notifications under its own bundle identity and advertises both
 `prototype_platform_notifications_v1` and `prototype_platform_notifications_scheduled_v1`, so

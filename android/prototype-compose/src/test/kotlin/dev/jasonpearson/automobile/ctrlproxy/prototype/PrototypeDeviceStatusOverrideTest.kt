@@ -124,6 +124,43 @@ class PrototypeDeviceStatusOverrideTest {
     assertEquals(json("""{"volume":40,"ringer":"silent"}"""), tracker.state.value)
   }
 
+  @Test
+  fun `a whole-number seed written as a decimal equals the integer reading`() = runTest {
+    assertEquals(emptyList<JsonElement>(), seededEvents("""{"level":80.0}"""))
+  }
+
+  @Test
+  fun `a decimal seed of a different whole number emits one change`() = runTest {
+    assertEquals(
+      listOf(Json.parseToJsonElement("""{"level":79,"state":"unplugged"}""")),
+      seededEvents("""{"level":79.0}"""),
+    )
+  }
+
+  /** The `battery.changed` data a seed delivers through the tracker and the real debounce. */
+  private suspend fun TestScope.seededEvents(seed: String): List<JsonElement> {
+    val tracker = DeviceStatusTracker(json("""{"level":80,"state":"unplugged"}"""))
+    val source =
+      object : PrototypeDeviceStatusSource {
+        override val state = tracker.state
+
+        override fun close() = Unit
+      }
+    val events = mutableListOf<JsonElement>()
+    val job = launch {
+      PrototypeDeviceStatusModule(DeviceStatusKind.BATTERY, source).events.collect {
+        events += it.data
+      }
+    }
+    runCurrent()
+    tracker.mode(DeviceStatusMode.FAKE)
+    assertNull(tracker.seed(DeviceStatusKind.BATTERY, json(seed)))
+    advanceTimeBy(1_000)
+    runCurrent()
+    job.cancel()
+    return events
+  }
+
   private fun json(text: String) = Json.parseToJsonElement(text).jsonObject
 
   /**

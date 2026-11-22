@@ -5,6 +5,8 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpecError
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.doubleOrNull
 
 enum class DeviceStatusMode {
   REAL,
@@ -56,10 +58,21 @@ class DeviceStatusOverride(private val platform: String) {
       PrototypePlatformCalls.stateSeedError(module, platform, key, value)?.let {
         return PrototypeSpecError("seed.$key", it)
       }
-      if (value is JsonNull) values.remove(key) else values[key] = value
+      if (value is JsonNull) values.remove(key) else values[key] = canonical(value)
     }
     val next = JsonObject(values)
     if (next != shown) shown = next
     return null
+  }
+
+  /**
+   * A whole number in integer form, so a seed of `80.0` equals the reading `80` (`JsonPrimitive`
+   * compares the literal text, unlike the TypeScript reference's numeric equality).
+   */
+  private fun canonical(value: JsonElement): JsonElement {
+    val primitive = value as? JsonPrimitive ?: return value
+    val number = primitive.takeUnless { it.isString }?.doubleOrNull ?: return value
+    val whole = number.toLong()
+    return if (number.isFinite() && whole.toDouble() == number) JsonPrimitive(whole) else value
   }
 }

@@ -201,6 +201,9 @@ The `webView` node (contract only: no renderer draws it and no runtime advertise
   prototype with a refusal, and turning it on restores rendering. The refusal names the first `webView` depth first
   in a fixed order (adaptive slots, a list's `header` and `footer`, `child`, `children`, then `screens` by key),
   pinned by `test/fixtures/prototype-spec/webview-import/cases.json`. An MCP `open` gets one outcome per load.
+- A CtrlProxy saved prototype (`save` on Android, and on iOS without ProtoViewer) refuses a spec with a `webView`
+  node with `errorCode: "unsupported_capability"` naming the node path, before any upload or install. The host
+  and CtrlProxy's saved-prototype store both refuse it.
 - `onNavigate` and `onBlockedNavigation` are action lists. `{type: "platform", call: "webview.back"}` and
   `webview.reload` take `args: {node}`; a literal `node` must be the id of a `webView` node ("Unknown webView").
   The `webview` module has no state; its `webview.navigate` event exists so a simulation can deliver it.

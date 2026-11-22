@@ -93,6 +93,12 @@ extension JSONValue {
 struct PrototypeSession {
     var design: PrototypeDesign { spec?.theme?.design ?? .platform }
     private(set) var spec: PrototypeSpec?
+    /// Status/inspect and event snapshots never expose secure values or a dismissed session's state.
+    var publicState: [String: JSONValue] {
+        guard let spec else { return [:] }
+        return PrototypeSecureStorageRules.redact(state: state, secure: spec.storage?.secure ?? [])
+    }
+
     private(set) var state: [String: JSONValue] = [:] {
         didSet {
             if tracksStateRevisions { refreshDerivedState(since: oldValue) }
@@ -919,7 +925,8 @@ struct PrototypeSession {
         }
         let current = dataRevision
         if let refusal = PrototypePatch.stateGuard(
-            ops: ops, baseRevision: baseRevision, revision: current, stateRevisions: stateRevisions, state: state
+            ops: ops, baseRevision: baseRevision, revision: current, stateRevisions: stateRevisions, state: state,
+            secure: spec.storage?.secure ?? []
         ) {
             return (refusal, [])
         }
@@ -986,16 +993,23 @@ struct PrototypeSession {
     }
 
     /// One key keeps the `{key, value}` payload of `change`; several send `{keys, values}`. The
-    /// event's `state` always carries the full final state.
+    /// event's `state` carries the final public state. Secure changes retain key names only.
     private mutating func emitStateChange(_ keys: [String]) -> [PrototypeEvent] {
         guard let first = keys.first else { return [] }
         showChangeErrors(keys)
-        let payload: JSONValue = if keys.count == 1 {
-            .object(["key": .string(first), "value": state[first] ?? .null])
+        let values = PrototypeSecureStorageRules.redact(
+            state: Dictionary(uniqueKeysWithValues: keys.map { ($0, state[$0] ?? .null) }),
+            secure: spec?.storage?.secure ?? []
+        )
+        let payload: JSONValue
+        if keys.count == 1 {
+            var fields: [String: JSONValue] = ["key": .string(first)]
+            fields["value"] = values[first]
+            payload = .object(fields)
         } else {
-            .object([
+            payload = .object([
                 "keys": .array(keys.map(JSONValue.string)),
-                "values": .object(Dictionary(uniqueKeysWithValues: keys.map { ($0, state[$0] ?? .null) })),
+                "values": .object(values),
             ])
         }
         return emit(kind: "emit", name: "change", payload: payload).map {
@@ -1290,7 +1304,7 @@ struct PrototypeSession {
             wireKind: kind,
             name: name,
             payload: payload,
-            state: state,
+            state: publicState,
             pages: pages,
             stacks: stacks,
             resolvedContext: context,

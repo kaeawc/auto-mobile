@@ -98,6 +98,16 @@ struct DemosTab: View {
 
                 Section("UI Components") {
                     NavigationLink {
+                        EmbeddedPrototypeDemo()
+                    } label: {
+                        DemoRow(
+                            title: "Embedded Prototype",
+                            description: "A prototype drawn in-app by the native renderer library",
+                            icon: "rectangle.on.rectangle"
+                        )
+                    }
+
+                    NavigationLink {
                         FormDemo()
                     } label: {
                         DemoRow(

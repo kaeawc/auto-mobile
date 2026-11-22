@@ -40,6 +40,22 @@ if [[ "${PROTOVIEWER_CLEARTEXT:-1}" == 1 ]]; then
   cleartext_flags=(-D PROTOVIEWER_ALLOW_CLEARTEXT)
   bundle_id_suffix=".dev"
 fi
+cp "${viewer_root}/Info.plist" "${app}/Info.plist"
+plutil -replace MinimumOSVersion -string "${min_ios}" "${app}/Info.plist"
+store_bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "${app}/Info.plist")"
+bundle_id="${store_bundle_id}${bundle_id_suffix}"
+plutil -replace CFBundleIdentifier -string "${bundle_id}" "${app}/Info.plist"
+plutil -lint "${app}/Info.plist"
+
+# Link simulator Keychain entitlements into every slice, using the stamped app ID.
+entitlements="${viewer_root}/ProtoViewer.entitlements"
+if [[ -n "${bundle_id_suffix}" ]]; then
+  entitlements="${out_dir}/ProtoViewer.entitlements"
+  cp "${viewer_root}/ProtoViewer.entitlements" "${entitlements}"
+  plutil -replace application-identifier -string "${bundle_id}" "${entitlements}"
+  plutil -replace keychain-access-groups.0 -string "${bundle_id}" "${entitlements}"
+fi
+
 # One executable module, including Core + Agent Swift, never Loader.c or an asset catalog.
 swift_sources=()
 while IFS= read -r -d '' file; do
@@ -60,16 +76,12 @@ for arch in "${archs[@]}"; do
     -swift-version 6 -warnings-as-errors -O -parse-as-library \
     ${cleartext_flags[@]+"${cleartext_flags[@]}"} \
     -module-name AutoMobileProtoViewer \
+    -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker "${entitlements}" \
     -o "${slice}" ${swift_sources[@]+"${swift_sources[@]}"}
   slices+=("${slice}")
 done
 lipo -create ${slices[@]+"${slices[@]}"} -output "${app}/ProtoViewer"
 lipo_verify_archs "${app}/ProtoViewer" "${archs[@]}"
-cp "${viewer_root}/Info.plist" "${app}/Info.plist"
-plutil -replace MinimumOSVersion -string "${min_ios}" "${app}/Info.plist"
-store_bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "${app}/Info.plist")"
-plutil -replace CFBundleIdentifier -string "${store_bundle_id}${bundle_id_suffix}" "${app}/Info.plist"
-plutil -lint "${app}/Info.plist"
 # Required-reason API declarations ship at the bundle root (#14151); the privacy-manifest guard
 # (scripts/ios/check-privacy-manifests.ts) keeps them equal to the APIs these sources use.
 cp "${viewer_root}/PrivacyInfo.xcprivacy" "${app}/PrivacyInfo.xcprivacy"

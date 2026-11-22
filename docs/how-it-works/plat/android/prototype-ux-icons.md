@@ -34,9 +34,7 @@ The loader contract caps each download at 8 MiB, Android memory at one-eighth of
 and iOS memory at 64 MiB. The per-app disk cache holds 128 MiB keyed by URL; concurrent loads are capped at six.
 The accessibility state-description contract is `loading|loaded|error`; inspect's per-prototype
 image counts are `{loaded, failed, pending}`. URLs must never enter accessibility text, observe or
-events.
-
-Android loads device URLs through the request transport with strict public-address egress checks,
+events. Android loads device URLs through the request transport with strict public-address egress checks,
 DNS and socket validation, and the asset renderer's sampled layout-size decoder. Loading and errors draw the authored asset or color fallback; crossfade
 respects reduced motion. Inspect reports counts for mounted remote image instances as `images`.
 Loopback HTTP is enabled only in debug builds, excluding protected daemon ports. Embedded apps
@@ -140,7 +138,7 @@ can show something the device produced:
 
 ## Rendering assets (#9301)
 
-An `image` node draws its asset with `contentScale`: `fit` letterboxes, `crop` fills the box and clips, `fill` stretches. Bytes are decoded off the main thread with `BitmapFactory` and `inSampleSize`, downsampled to the node's laid-out size (screen size when an axis wraps) and never above 4 Mi pixels or 16 MiB per bitmap. Sampling reserves 8 bytes per pixel for high-bit-depth images; unreadable dimensions, axes over 65,536 pixels and over-budget sampled sizes are refused before pixel decoding. Sampling preserves EXIF rotation and mirroring. The decoded-bitmap cache keys on asset id and a power-of-two size bucket and evicts least recently used first. It holds at most 32 MiB of decoded pixels (a larger single bitmap is drawn but not retained). A replaced, removed or cleared asset drops its decoded copies immediately and showing nodes reload; uploading a previously missing id fills the placeholder.
+An `image` node draws its asset with `contentScale`: `fit` letterboxes, `crop` fills the box and clips, `fill` stretches. Bytes are decoded off the main thread with `BitmapFactory` and `inSampleSize`, downsampled to the node's laid-out size (screen size when an axis wraps) and never above 4 Mi pixels or 16 MiB per bitmap. Sampling reserves 8 bytes per pixel for high-bit-depth images; unreadable dimensions, axes over 65,536 pixels and over-budget sampled sizes are refused before pixel decoding. EXIF rotation and mirroring are preserved after sampling. The decoded-bitmap cache keys on asset id and a power-of-two size bucket and evicts least recently used first. It holds at most 32 MiB of decoded pixels (a larger single bitmap is drawn but not retained). A replaced, removed or cleared asset drops its decoded copies immediately and showing nodes reload; uploading a previously missing id fills the placeholder.
 
 A nav item draws its `image` when ready, then its built-in `icon`, then a gray square. While an image decodes the node shows a plain gray box. A gray box with a broken-image glyph marks an unknown id, undecodable bytes, or a file the OS evicted from the cache directory (the store lists it but `read` returns null).
 

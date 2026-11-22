@@ -137,19 +137,20 @@ transition as a real tap, including on part identifiers.
   precedence.
 - **Back stack.** Back-stack entries stay mounted, transparent, non-interactive and
   accessibility-hidden, preserving scroll positions on pop within the bounded stack depth; the agent
-  releases removed entries after motion. Navigation posts a screen-changed accessibility notification
-  targeting the new native screen container after layout; accessibility escape uses the same animated
-  pop path. Wrap a stack in a box to animate its own visibility.
-- **Inbound links.** Inbound `links` require only `prototype_links_v1` and resolve against registered
-  `amp-` schemes in the app's `CFBundleURLTypes`; host OAuth and web URLs never enter the link inbox.
-  The capability is advertised only after URL delivery is installed for such a scheme. Matching links
-  bind captures and typed query values into the tap executor, including `setStack`; Back returns to
-  the entry below the linked screen. Kind `link_opened` with payload `{url,entry}` precedes actions;
-  kind `link_unmatched` with payload `{url}` runs none. Both have `name: null`, and URLs omit every
-  declared secret query value. An absent optional binding refuses the complete action list after
-  acceptance. Injected agents intercept scene and application URL delegate callbacks, preserving host
-  callbacks; cold URLs wait for the first spec before rendering. ProtoViewer forwards its existing
-  `onOpenURL` callback and registers `amp-demo` for prototype links alongside its separate MCP scheme.
+  releases removed entries after motion. Inbound `links` require only `prototype_links_v1` and resolve
+  against registered `amp-` schemes in the app's `CFBundleURLTypes`; host OAuth and web URLs never enter
+  the link inbox. The capability is advertised only after URL delivery is installed for such a scheme.
+  Matching links bind captures and typed query values
+  into the tap executor, including `setStack`; Back returns to the entry below the linked screen.
+  Kind `link_opened` with payload `{url,entry}` precedes actions; kind `link_unmatched` with payload
+  `{url}` runs none. Both have `name: null`, and URLs omit every declared secret query value.
+  An absent optional binding refuses the complete action list after acceptance.
+  Injected agents intercept scene and application URL delegate callbacks, preserving host callbacks;
+  cold URLs wait for the first spec before rendering. ProtoViewer forwards its existing `onOpenURL`
+  callback and registers `amp-demo` for prototype links alongside its separate MCP scheme.
+  Navigation posts a screen-changed accessibility notification targeting the new native screen
+  container after layout; accessibility escape uses the same animated pop path. Wrap a stack in a box
+  to animate its own visibility.
 - **Text content transitions.** Text nodes accept `contentTransition: "numeric" | "crossfade" | "none"` (default `none`). Non-`none` requires `prototype_content_transition_v1`. Numeric changes roll only changed characters up for an increase and down for a decrease; formatting is stripped to digits, the first decimal point and a leading minus. Missing or equal numeric values crossfade; identical text stays still. Spans crossfade as a whole. Roll uses a spring (Android damping 0.8, stiffness 380; iOS duration 0.35 s, bounce 0.15); fades take 200 ms. Accessibility and observe expose the new text immediately. Android reduced motion uses fades and motion off snaps; iOS content transitions snap under reduced motion or motion off.
 
 - **Motion** matches Android (#10442, #10439): `visibleWhen` nodes fade/expand, `transition`

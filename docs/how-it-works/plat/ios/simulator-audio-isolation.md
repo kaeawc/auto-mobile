@@ -40,8 +40,8 @@ The measurements that would settle this, and the other unmeasured behavior, are 
 
 No rejected route fails loudly, and nothing relevant is logged at the default level.
 
-- Editing the plist during simulator shutdown does not pin it; the service rewrites the plist
-  at boot. The host default UID replaces an unknown UID while `useHostDefault*Device` stays
+- Editing the plist while the simulator is shut down does not pin it; the service rewrites the plist
+  at boot. An unknown UID is replaced by the host default UID while `useHostDefault*Device` stays
   `false`. A device the router rejects (BlackHole 2ch) resets the whole plist to the built-ins with
   both flags back to `true`.
 - Routing to the device that is already the default is accepted and leaves `useHostDefault*Device`

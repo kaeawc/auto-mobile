@@ -153,21 +153,19 @@ An iPad windowed app (iOS 27 "Windowed Apps", #6635) also produces an app/screen
 size mismatch. There the application frame and the snapshot hierarchy are
 window-relative with origin (0,0), while the app's window element and synthesized
 events use screen space. When the app frame is not screen-sized, observe reads the
-app's `windows.firstMatch.frame`. When that window has the app frame's size and a
-different origin, observe adds the window origin to every window-relative node. It
-also reports the window's screen frame in `windows`, and reports the screen (the
+app's `windows.firstMatch.frame`; when that window has the app frame's size and a
+different origin, observe adds the window origin to every window-relative node,
+reports the window's screen frame in `windows`, and reports the screen (the
 SpringBoard frame) as the root's bounds and the screen size, since hosts read the
-screen size from the root.
-
-XCTest already reports the keyboard subtree in screen space, so it keeps its bounds
-and its offscreen filtering uses the screen rather than the window. SpringBoard
-alerts merged into the hierarchy arrive in screen space; observe first moves them
-into the window space so the single shift returns them to their screen frames.
-
-Observed bounds therefore line up with the full-screen screenshot, and a
-point-offset tap, swipe, or drag is a screen point delivered unchanged
-(`appFrameOriginPlusPointOffset`). The gesture path still reads the window once
-per gesture on the mismatch path to keep the app off the main-screen rule.
+screen size from the root. XCTest already reports the keyboard
+subtree in screen space, so it keeps its bounds and its offscreen filtering uses
+the screen rather than the window. SpringBoard alerts merged into the hierarchy arrive in
+screen space; observe first moves them into the window space so the single shift
+returns them to their screen frames. Observed bounds therefore line up with the
+full-screen screenshot, and a point-offset tap, swipe, or drag is a screen point
+delivered unchanged (`appFrameOriginPlusPointOffset`). The gesture path still reads
+the window once per gesture on the mismatch path to keep the app off the
+main-screen rule.
 
 Full-screen apps and iPhones have no mismatch and perform no extra read.
 

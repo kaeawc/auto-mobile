@@ -24,9 +24,9 @@ them and what a headless host constrains.
 ## Decision
 
 Keep option 1 as the supported route and reject option 2. Pursue option 3 only after two
-measurements on a drained host with two real loopback pairs. The guest must hear its pinned
-device while the other simulator stays silent, and a daemon-owned helper must receive frames
-under the Microphone permission. If either fails, stay on option 1.
+measurements on a drained host with two real loopback pairs: the guest hears its pinned device
+while the other simulator stays silent, and a daemon-owned helper receives frames under the
+Microphone permission. If either fails, stay on option 1.
 
 ## Consequences
 

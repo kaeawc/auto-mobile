@@ -59,6 +59,50 @@ class BitmapPrototypeImageDecoderTest {
     assertEquals(24, decoded.height)
   }
 
+  @Test
+  fun `EXIF orientations five to eight choose the sample size for the swapped target`() {
+    // Stored 4096x2048, displayed 2048x4096. Sampling against the swapped 512x1024 target gives
+    // 2; the unswapped 1024x512 target would allow 4 and decode a 512x1024 bitmap.
+    val decoded =
+      requireNotNull(
+        largeDecoder.decode(
+          orientedJpeg(4096, 2048, ExifInterface.ORIENTATION_ROTATE_90),
+          PrototypeImageTarget(1024, 512),
+        ),
+      )
+    assertEquals(1024, decoded.width)
+    assertEquals(2048, decoded.height)
+  }
+
+  @Test
+  fun `EXIF orientation one samples against the unswapped target`() {
+    val decoded =
+      requireNotNull(
+        largeDecoder.decode(
+          orientedJpeg(4096, 2048, ExifInterface.ORIENTATION_NORMAL),
+          PrototypeImageTarget(1024, 512),
+        ),
+      )
+    assertEquals(1024, decoded.width)
+    assertEquals(512, decoded.height)
+  }
+
+  /** Budgets high enough that only the display target drives sample-size selection. */
+  private val largeDecoder =
+    BitmapPrototypeImageDecoder(maxPixels = Long.MAX_VALUE, maxDecodedBytes = Long.MAX_VALUE)
+
+  private fun orientedJpeg(width: Int, height: Int, orientation: Int): ByteArray {
+    val jpeg = temp.newFile()
+    val source = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    jpeg.outputStream().use { assertTrue(source.compress(Bitmap.CompressFormat.JPEG, 100, it)) }
+    source.recycle()
+    ExifInterface(jpeg.path).apply {
+      setAttribute(ExifInterface.TAG_ORIENTATION, orientation.toString())
+      saveAttributes()
+    }
+    return jpeg.readBytes()
+  }
+
   companion object {
     private lateinit var encoded: ByteArray
 

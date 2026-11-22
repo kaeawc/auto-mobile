@@ -12,6 +12,10 @@ struct ForegroundTracker {
     /// do not each fan out to ~40 state IPCs (issue #5474). Reset to 0 on any explicit switch.
     var lastSystemAppSweepMiss: UInt64 = 0
 
+    /// Timestamp (uptime nanos) of the last sweep of the common system apps for windows sharing
+    /// an iPad screen with the focused one (#18830). Bounds that fan-out to one per TTL.
+    var lastBackgroundWindowSweep: UInt64 = 0
+
     mutating func trackObserved(_ bundleId: String) {
         observedBundleIds.insert(bundleId)
     }

@@ -103,6 +103,7 @@
 		39AA033BD73C67F66C6EABEA /* PrototypeTestPlatformModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CC5CABBF9DC546A2DDE1E4E /* PrototypeTestPlatformModule.swift */; };
 		3A2A9A65828D3CD103C00BE1 /* StatusSheetDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA12565BE3936B47614D8005 /* StatusSheetDemo.swift */; };
 		3D8D8CC43D6338FD4D61F842 /* PrototypeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21C2E27DE1CEF36FEF2C6AE4 /* PrototypeSession.swift */; };
+		3DAC88E01AF441B24DEDD0CB /* PrototypeRemoteImageDiskCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F608B6DC13CF5EEB227387 /* PrototypeRemoteImageDiskCache.swift */; };
 		3ECEDE0267DF08815044CFE5 /* PrototypeRealtimeModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8F266FB669C94B188E02E76 /* PrototypeRealtimeModule.swift */; };
 		3F0DA35E0E0DAC4607B1106B /* PrototypeRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E9134250AEFE1B860518C4D /* PrototypeRoutes.swift */; };
 		3FBA048AE724A3174AFB11C8 /* PrototypeChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C49166A583575982B51BCE /* PrototypeChart.swift */; };
@@ -116,6 +117,7 @@
 		4546703D0511A96D6060F587 /* CrayonSketch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0972F015B9B7D85BD6F3270 /* CrayonSketch.swift */; };
 		45756DF3D547CFA3CDC563AF /* ViewerDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B88F4E27CBB38CF0611ADF73 /* ViewerDiagnostics.swift */; };
 		45F5B5B7444D90C37F6DBE0C /* PrototypeLibraryStartupCleanup.swift in Sources */ = {isa = PBXBuildFile; fileRef = C740CCF39214B27F93C8356F /* PrototypeLibraryStartupCleanup.swift */; };
+		466B6279610D9BA0CC8ADB41 /* PrototypeRemoteImageSlots.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64C3F509776B7E2EB1446893 /* PrototypeRemoteImageSlots.swift */; };
 		46A0E5E7499CD1CBB67CC3E3 /* PrototypeCastEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7841D3B0E53373B40D20BF30 /* PrototypeCastEvents.swift */; };
 		4728B171C05093B3318F3D26 /* SdkContractMultiSceneScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10BB45FB502CB3E8B5B01BB5 /* SdkContractMultiSceneScenario.swift */; };
 		47CBEE4091D331840EE09154 /* PrototypeStackRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE45DDC62C4113D106E58E27 /* PrototypeStackRoutes.swift */; };
@@ -249,6 +251,7 @@
 		A88FAEB9DB1540A92291FE72 /* PrototypeAssetRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 411F6ECEE9350BB747E082B6 /* PrototypeAssetRegistrar.swift */; };
 		A897166C2C1E5B8E31EB9C13 /* PrototypeLibraryImageHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE843891D4840C37E573658E /* PrototypeLibraryImageHeader.swift */; };
 		A977966847F8A2BF0C70AB3D /* PrototypeBarScrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17E4EBFF81A585432FB85B80 /* PrototypeBarScrollView.swift */; };
+		A97E3ED717D3FAE78E8766C4 /* KeychainPrototypeSecureValueStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8475A5D72610289582CD7FF9 /* KeychainPrototypeSecureValueStore.swift */; };
 		AA4E1AEAB6BF86BBA9CD72D1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = DCD7113FE9637ADCD706C582 /* PrivacyInfo.xcprivacy */; };
 		AA71A3F4939558B77A6F6F03 /* NWPathConnectivitySource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B0EA0CD9F63E031B01FA46B /* NWPathConnectivitySource.swift */; };
 		AB47B5E3B7EAFB4B6B0CB54A /* PrototypePurchaseOutcome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A23BF6CBF66ED858A41789DD /* PrototypePurchaseOutcome.swift */; };
@@ -275,6 +278,7 @@
 		B64005B9C13A8EF3E9783A81 /* SdkContractWebViewScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D043B8B93E4A3AA9A5007EC /* SdkContractWebViewScenario.swift */; };
 		B653E9286E4BBD5C406C7145 /* PrototypeLoadingStates.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9E6178585B22EC6501E479B /* PrototypeLoadingStates.swift */; };
 		B73660170723595B44749E9F /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51580F5FC5ADCD5576885563 /* Typography.swift */; };
+		B76C8236DBDB34EEC88853E0 /* PrototypeRemoteImageMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25306293F9BD20DBACCCDBC /* PrototypeRemoteImageMemory.swift */; };
 		B7C631C27ACDB4452E469D9A /* PrototypeSheetDrag.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BC20D5CA3336ABBA47617E8 /* PrototypeSheetDrag.swift */; };
 		B7E21FE090BF632D99FBC8C5 /* PrototypeLibraryImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD269F854EA314E86E665BA6 /* PrototypeLibraryImportService.swift */; };
 		B8D94B24C8C4244CCA347E74 /* PrototypeRequestResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9C28F17E603001DCE63D5B0 /* PrototypeRequestResolver.swift */; };
@@ -310,6 +314,7 @@
 		CA6DDB01CB5AFB754DC48661 /* PrototypeStorageRestore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87A7C6B282AC469C60A877A4 /* PrototypeStorageRestore.swift */; };
 		CAA5741BCBDF15BD0646B07C /* PrototypeEmbeddedEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01927961AA06DDDC055B09CD /* PrototypeEmbeddedEvent.swift */; };
 		CC51AAB3B7EDFA8AEC67350F /* PrototypeAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = A186CFA47E3239C9E4AE7B44 /* PrototypeAppearance.swift */; };
+		CCE44A8A29839A0F85942BD0 /* PrototypeSecureStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE9A5D8D5C87EA0604024841 /* PrototypeSecureStorage.swift */; };
 		CCE732EDB27B8BEAAC7FDFF6 /* SdkContractObservationScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60A7309625B075243845F7B6 /* SdkContractObservationScenario.swift */; };
 		CCECD490C4A0C793B6371FC0 /* PrototypeGesturePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7796A2E4B8BC6A2E282E1FE /* PrototypeGesturePlan.swift */; };
 		CE1A4CF4125A485731B7ECC0 /* PrototypeStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 679E22ECD16F6B5F410B2DC8 /* PrototypeStrings.swift */; };
@@ -338,6 +343,7 @@
 		DC7BD003A4950F8E8DEB690C /* Prototypes in Resources */ = {isa = PBXBuildFile; fileRef = E598B294AC2C22ED0B063CDC /* Prototypes */; };
 		DF80AA4FB1D096DE46ADD543 /* PrototypeConnectionRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BD2C7003F1210358E41D195 /* PrototypeConnectionRegistry.swift */; };
 		E0937EE85F758D62BC5866A2 /* StoreKitDemoFormattingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82280F80610B7E163605220A /* StoreKitDemoFormattingTests.swift */; };
+		E0D79400AB551A5F58EC63C4 /* PrototypeRemoteImageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F84BFA22FE791A2DEE2499 /* PrototypeRemoteImageView.swift */; };
 		E30DFD1C67A603364E608853 /* UIKitLinkOpener.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41A53101DB2E337643BECFB /* UIKitLinkOpener.swift */; };
 		E323A624A85F960D06576193 /* PrototypeViewerLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85A5513F82500821AC574ED4 /* PrototypeViewerLayout.swift */; };
 		E39816C09D658A40B8F04436 /* PrototypeStylePolishView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F71A189300D2E54CF30DD69 /* PrototypeStylePolishView.swift */; };
@@ -368,6 +374,7 @@
 		FB48F5D78522210E27ABCFD5 /* PrototypeSecureStorageRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A66BDD94AE39E75123D5D1DE /* PrototypeSecureStorageRules.swift */; };
 		FBDB98A651F326045FC34913 /* PrototypeRenderWatchdog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A25C3CA1C698F66795004D42 /* PrototypeRenderWatchdog.swift */; };
 		FC193AA6A277427D89453421 /* PrototypeSystemHostResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD89512C9C9B03EBC4C0E1C8 /* PrototypeSystemHostResolver.swift */; };
+		FC45D0C89545B4BB2EF2F689 /* PrototypeRemoteImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF822BCD6C0754F062D11D3 /* PrototypeRemoteImageLoader.swift */; };
 		FD8E9E13E608FF69A90C4518 /* PrototypeChannelTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B31041D09F7833CFF84AAB67 /* PrototypeChannelTransport.swift */; };
 		FD9D242ED1E6D662A62B6D64 /* PrototypeLibraryExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F334E732077DB39157DAECB /* PrototypeLibraryExporter.swift */; };
 		FE95F0F57D34532B87A918C2 /* PrototypeBundleZipWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13041821036797F6EF7D331B /* PrototypeBundleZipWriter.swift */; };
@@ -513,6 +520,7 @@
 		43C86058E173CC39A565133C /* PrototypeStackTransition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeStackTransition.swift; sourceTree = "<group>"; };
 		4766DF3A358FB251797AF66B /* PrototypeLinksRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeLinksRuntime.swift; sourceTree = "<group>"; };
 		47DA84EBF5445CF3DAAA97C8 /* PrototypeTimers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeTimers.swift; sourceTree = "<group>"; };
+		47F608B6DC13CF5EEB227387 /* PrototypeRemoteImageDiskCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeRemoteImageDiskCache.swift; sourceTree = "<group>"; };
 		47FE35406C9F081BB6BA2082 /* PrototypeIconEffects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeIconEffects.swift; sourceTree = "<group>"; };
 		490C20B43D03F5B1B407098B /* StoreKitDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitDemo.swift; sourceTree = "<group>"; };
 		49E28AFFD4105B7D21F2A435 /* PrototypeLazyModalRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeLazyModalRows.swift; sourceTree = "<group>"; };
@@ -558,12 +566,14 @@
 		628C8C4F667DABFB0466D0BE /* PrototypeLocationRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeLocationRules.swift; sourceTree = "<group>"; };
 		62EE8EE972813ED0ADC3489E /* PrototypeStateValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeStateValidator.swift; sourceTree = "<group>"; };
 		64A2661489B1FC2ED783093B /* PrototypeMcpInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeMcpInbox.swift; sourceTree = "<group>"; };
+		64C3F509776B7E2EB1446893 /* PrototypeRemoteImageSlots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeRemoteImageSlots.swift; sourceTree = "<group>"; };
 		64FD18EC8D1B9A665615C374 /* SettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTab.swift; sourceTree = "<group>"; };
 		65BF1D8D8C70893C2F834501 /* AutoMobilePrototype.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = AutoMobilePrototype.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		65EE8BB70F2E60267F413019 /* PrototypeDerivedRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeDerivedRuntime.swift; sourceTree = "<group>"; };
 		66DFEA0EF24727CA28E0FCE8 /* PrototypeAdaptive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeAdaptive.swift; sourceTree = "<group>"; };
 		679E22ECD16F6B5F410B2DC8 /* PrototypeStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeStrings.swift; sourceTree = "<group>"; };
 		6832B4473F28F2540F82E439 /* SdkContractRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractRunner.swift; sourceTree = "<group>"; };
+		6AF822BCD6C0754F062D11D3 /* PrototypeRemoteImageLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeRemoteImageLoader.swift; sourceTree = "<group>"; };
 		6CE49BA8A5C694644104CA62 /* PrototypeMenus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeMenus.swift; sourceTree = "<group>"; };
 		6CF4AE2E3B75AC24CF7B717F /* SdkContractBatchTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractBatchTap.swift; sourceTree = "<group>"; };
 		6F363A84327DC55C5BB8CCFD /* PrototypeHostChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeHostChrome.swift; sourceTree = "<group>"; };
@@ -593,6 +603,7 @@
 		82280F80610B7E163605220A /* StoreKitDemoFormattingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitDemoFormattingTests.swift; sourceTree = "<group>"; };
 		8303A71EDC6BC38DF5246F3F /* PrototypeBundleContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeBundleContract.swift; sourceTree = "<group>"; };
 		83553CC860F82C04394BCB69 /* PrototypeDrawerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeDrawerView.swift; sourceTree = "<group>"; };
+		8475A5D72610289582CD7FF9 /* KeychainPrototypeSecureValueStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainPrototypeSecureValueStore.swift; sourceTree = "<group>"; };
 		8522D605D095B89DA58FF266 /* PrototypePlatformRateLimiter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypePlatformRateLimiter.swift; sourceTree = "<group>"; };
 		85A0A1109BB4CA137B428C85 /* PrototypeLibraryModuleRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeLibraryModuleRule.swift; sourceTree = "<group>"; };
 		85A5513F82500821AC574ED4 /* PrototypeViewerLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeViewerLayout.swift; sourceTree = "<group>"; };
@@ -751,6 +762,7 @@
 		E06A613BDB933BAAE60DE177 /* PrototypeWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeWebView.swift; sourceTree = "<group>"; };
 		E1286C06A0D35DD2290935F6 /* PrototypeRequestEgressCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeRequestEgressCheck.swift; sourceTree = "<group>"; };
 		E1B25FBAC5217DE05EA701CF /* ShantellSans.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = ShantellSans.ttf; sourceTree = "<group>"; };
+		E25306293F9BD20DBACCCDBC /* PrototypeRemoteImageMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeRemoteImageMemory.swift; sourceTree = "<group>"; };
 		E36CCA31979717E4A6A47AA7 /* CrayonGrain.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = CrayonGrain.metal; sourceTree = "<group>"; };
 		E40DD68F934F5F0D2981ACA1 /* Playground.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Playground.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E598B294AC2C22ED0B063CDC /* Prototypes */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Prototypes; path = "../../samples/prototype-embedding/ios/Prototypes"; sourceTree = SOURCE_ROOT; };
@@ -768,10 +780,12 @@
 		ED5AA5056D70CB85AC31BA03 /* PrototypePatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypePatch.swift; sourceTree = "<group>"; };
 		EE45DDC62C4113D106E58E27 /* PrototypeStackRoutes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeStackRoutes.swift; sourceTree = "<group>"; };
 		EE6AC2F596D1C0E7DB9F1EF0 /* PrototypeSensorSharing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeSensorSharing.swift; sourceTree = "<group>"; };
+		EE9A5D8D5C87EA0604024841 /* PrototypeSecureStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeSecureStorage.swift; sourceTree = "<group>"; };
 		EF0F64652214F20B26630AA8 /* PrototypeDeviceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeDeviceState.swift; sourceTree = "<group>"; };
 		EF611ACFB6B4CA1380FB8F46 /* PrototypeTapDisambiguator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeTapDisambiguator.swift; sourceTree = "<group>"; };
 		F09DCFC03257AAE253C6F76B /* PrototypeEmbeddedOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeEmbeddedOptions.swift; sourceTree = "<group>"; };
 		F1C9D1EEE41200250E89F8AB /* PrototypeMediaPool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeMediaPool.swift; sourceTree = "<group>"; };
+		F1F84BFA22FE791A2DEE2499 /* PrototypeRemoteImageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeRemoteImageView.swift; sourceTree = "<group>"; };
 		F2657DDE703AE838B34AF879 /* PrototypeSensitiveSinkRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeSensitiveSinkRules.swift; sourceTree = "<group>"; };
 		F41A53101DB2E337643BECFB /* UIKitLinkOpener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIKitLinkOpener.swift; sourceTree = "<group>"; };
 		F4A53249CDBBDE97574E1B22 /* PrototypeFadeEdges.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeFadeEdges.swift; sourceTree = "<group>"; };
@@ -854,6 +868,7 @@
 				09FD70C5FFEE587BEDDBEC39 /* PrototypeModel.swift */,
 				7FBBD06D84799539D50054DE /* PrototypeNamespaceView.swift */,
 				29B6F60ED56A189273FF3F94 /* PrototypeOverlayFocus.swift */,
+				F1F84BFA22FE791A2DEE2499 /* PrototypeRemoteImageView.swift */,
 				52EE8EF93EDEFF0E3650598A /* PrototypeRenderer.swift */,
 				A074B76DD64850A7EBC37C94 /* PrototypeScrollMotionView.swift */,
 				FD1A3B6CF6C713CA046D05A8 /* PrototypeSearchBarView.swift */,
@@ -1007,6 +1022,7 @@
 			isa = PBXGroup;
 			children = (
 				F834BB66D27D904C821677FE /* AutoMobilePrototypeCapabilities.swift */,
+				8475A5D72610289582CD7FF9 /* KeychainPrototypeSecureValueStore.swift */,
 				4B0EA0CD9F63E031B01FA46B /* NWPathConnectivitySource.swift */,
 				87E9D86A8565B0615A31C4E0 /* PrototypeAccessibility.swift */,
 				818E183BBC313154549CCAA5 /* PrototypeAccessibilityGrouping.swift */,
@@ -1185,7 +1201,11 @@
 				B8F266FB669C94B188E02E76 /* PrototypeRealtimeModule.swift */,
 				DF88C9549715E4B0A280F41F /* PrototypeRecordingMode.swift */,
 				3DFE5254AE59D16A06947704 /* PrototypeRefresh.swift */,
+				47F608B6DC13CF5EEB227387 /* PrototypeRemoteImageDiskCache.swift */,
+				6AF822BCD6C0754F062D11D3 /* PrototypeRemoteImageLoader.swift */,
+				E25306293F9BD20DBACCCDBC /* PrototypeRemoteImageMemory.swift */,
 				9F372B804320DB6F27EB98D3 /* PrototypeRemoteImages.swift */,
+				64C3F509776B7E2EB1446893 /* PrototypeRemoteImageSlots.swift */,
 				A25C3CA1C698F66795004D42 /* PrototypeRenderWatchdog.swift */,
 				1110DF71E11AE5F1F04142A3 /* PrototypeRepeat.swift */,
 				37393DD3B23C61B34F5F971D /* PrototypeRequestDriver.swift */,
@@ -1201,6 +1221,7 @@
 				86883568C54B6548EA9C9F3C /* PrototypeScalarText.swift */,
 				70E50DE79CB5C719FCF859D1 /* PrototypeScreenBudget.swift */,
 				DE1C9E1F1EAC5CEE78190250 /* PrototypeScrollMotion.swift */,
+				EE9A5D8D5C87EA0604024841 /* PrototypeSecureStorage.swift */,
 				A66BDD94AE39E75123D5D1DE /* PrototypeSecureStorageRules.swift */,
 				F2657DDE703AE838B34AF879 /* PrototypeSensitiveSinkRules.swift */,
 				A592D9EEB3D15A27166C0CB7 /* PrototypeSensorRules.swift */,
@@ -1540,6 +1561,7 @@
 				831EC73F5E08A1B69A515B7F /* AutoMobilePrototypeView.swift in Sources */,
 				E9313268346F690E192BAF2E /* CLLocationManagerPrototypeLocationSource.swift in Sources */,
 				A7D5DC570615EAFB4C92BFF4 /* CoreMotionPrototypeSensorSource.swift in Sources */,
+				A97E3ED717D3FAE78E8766C4 /* KeychainPrototypeSecureValueStore.swift in Sources */,
 				57EBA5DF55F26B67FE37F122 /* LAContextPrototypeBiometricSource.swift in Sources */,
 				AA71A3F4939558B77A6F6F03 /* NWPathConnectivitySource.swift in Sources */,
 				9C7B2BD3B293E8211125EB3F /* ProtoViewerLayout.swift in Sources */,
@@ -1743,6 +1765,11 @@
 				3ECEDE0267DF08815044CFE5 /* PrototypeRealtimeModule.swift in Sources */,
 				9CCD400F276F71C1E5A91F38 /* PrototypeRecordingMode.swift in Sources */,
 				C88CAF9BE224A0A2AFAFA804 /* PrototypeRefresh.swift in Sources */,
+				3DAC88E01AF441B24DEDD0CB /* PrototypeRemoteImageDiskCache.swift in Sources */,
+				FC45D0C89545B4BB2EF2F689 /* PrototypeRemoteImageLoader.swift in Sources */,
+				B76C8236DBDB34EEC88853E0 /* PrototypeRemoteImageMemory.swift in Sources */,
+				466B6279610D9BA0CC8ADB41 /* PrototypeRemoteImageSlots.swift in Sources */,
+				E0D79400AB551A5F58EC63C4 /* PrototypeRemoteImageView.swift in Sources */,
 				41964ACDF0859150E26F7865 /* PrototypeRemoteImages.swift in Sources */,
 				FBDB98A651F326045FC34913 /* PrototypeRenderWatchdog.swift in Sources */,
 				C2E309CD8923E75575D5B70A /* PrototypeRenderer.swift in Sources */,
@@ -1762,6 +1789,7 @@
 				BE7751CCABFB4BA9FE65978F /* PrototypeScrollMotion.swift in Sources */,
 				A7CB10A6F1F356488A25FB80 /* PrototypeScrollMotionView.swift in Sources */,
 				625AE036AB76BE3020CD2090 /* PrototypeSearchBarView.swift in Sources */,
+				CCE44A8A29839A0F85942BD0 /* PrototypeSecureStorage.swift in Sources */,
 				FB48F5D78522210E27ABCFD5 /* PrototypeSecureStorageRules.swift in Sources */,
 				668EB04685CB0B7E4761E719 /* PrototypeSensitiveSinkRules.swift in Sources */,
 				347C596DEFDE56EC07FE4522 /* PrototypeSensorRules.swift in Sources */,

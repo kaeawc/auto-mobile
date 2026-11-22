@@ -1,5 +1,5 @@
 import type { Socket } from "node:net";
-import type { FramesDroppedMessage } from "../deviceDataStream/streamContracts";
+import type { FramesDroppedMessage } from "../streams/deviceDataStream/streamContracts";
 
 /** A threshold, not a maximum frame size: one full screenshot can itself exceed this. */
 export const PUSH_SOCKET_WRITABLE_LIMIT_BYTES = 8 * 1024 * 1024;

@@ -13,7 +13,7 @@ import {
   VIDEO_STREAM_SOCKET_CONFIG,
   resolveWebRtcStreamSocketPath,
 } from "../../src/daemon/daemonFiles";
-import type { WebRtcStreamSocketRequest } from "../../src/daemon/webrtcStreamSocketTypes";
+import type { WebRtcStreamSocketRequest } from "../../src/daemon/streams/webrtcStreamSocketTypes";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";

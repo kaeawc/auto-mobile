@@ -5,14 +5,14 @@ import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
   type StreamAuthorizeInput,
-} from "../../src/daemon/streamSocketAuth";
+} from "../../src/daemon/streams/streamSocketAuth";
 import { FakeFailuresStreamRepository } from "../fakes/FakeFailuresStreamRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FailuresStreamSocketServer } from "../../src/daemon/failuresStreamSocketServer";
+import { FailuresStreamSocketServer } from "../../src/daemon/streams/failuresStreamSocketServer";
 import type {
   FailuresStreamSocketRequest,
   FailuresStreamSocketResponse,
-} from "../../src/daemon/failuresStreamSocketTypes";
+} from "../../src/daemon/streams/failuresStreamSocketTypes";
 
 /**
  * Fake repository — records the last query each handler forwards so the tests can

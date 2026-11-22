@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   AppearanceSocketServer,
   type AppearanceSocketServerDependencies,
-} from "../../src/daemon/appearanceSocketServer";
+} from "../../src/daemon/streams/appearanceSocketServer";
 import type { AppearanceSocketRequest } from "../../src/daemon/wire/appearanceSocketTypes";
 import type { AppearanceConfig } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";

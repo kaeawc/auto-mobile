@@ -4,7 +4,7 @@ import type { NavigationGraphSummary } from "../utils/interfaces/NavigationGraph
 import type {
   NavigationGraphStreamData,
   OnNavigationGraphRequestedCallback,
-} from "./deviceDataStreamSocketServer";
+} from "./streams/deviceDataStreamSocketServer";
 
 /**
  * Minimal exporter contract the on-demand navigation-graph request handler needs.

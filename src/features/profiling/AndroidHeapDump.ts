@@ -58,37 +58,15 @@ const PULL_TIMEOUT_MS = 300_000;
 /** The `am` entry points that dump a heap, in the order they are tried. */
 const DUMP_COMMANDS = ["am dumpheap", "cmd activity dumpheap"] as const;
 
-/** `pkgFlags=[ ... ]` and `privateFlags=[ ... ]` tokens from `dumpsys package`. */
-function packageFlagTokens(output: string): { parsed: boolean; tokens: Set<string> } {
-  const flagLines = output
-    .split("\n")
-    .map((line) => /^(pkgFlags|privateFlags)=\[(.*)\]$/.exec(line.trim()))
-    .filter((match): match is RegExpExecArray => match !== null);
-  return {
-    parsed: flagLines.some((match) => match[1] === "pkgFlags"),
-    tokens: new Set(flagLines.flatMap((match) => match[2].trim().split(/\s+/).filter(Boolean))),
-  };
-}
-
-/**
- * Whether the package can be heap-dumped: `true` when it is debuggable or flags itself
- * profileable, `false` when its flags parse and show neither, `undefined` when the output has no
- * flags line to judge (let `am dumpheap` decide).
- */
-export function classifyHeapDumpEligibility(output: string): boolean | undefined {
-  const { parsed, tokens } = packageFlagTokens(output);
-  if (!parsed) {
-    return undefined;
-  }
-  return tokens.has("DEBUGGABLE") || [...tokens].some((token) => /PROFILEABLE/i.test(token));
-}
-
 const NOT_DEBUGGABLE_OUTPUT = /not debuggable|not profileable|SecurityException/i;
+const NATIVE_UNAVAILABLE_OUTPUT = /^Native heap dump not available/;
+const NATIVE_PLACEHOLDER_PROBE_BYTES = 64;
 const NOT_RUNNING_OUTPUT = /unknown process|process .*not found|no such process|not running/i;
 
 /**
- * Dump an Android app's heap (#14113): check the app is debuggable or profileable, run
- * `am dumpheap [-n] <pkg> <device path>`, read the file's size back to know the dump finished,
+ * Dump an Android app's heap (#14113): check the app is installed, run
+ * `am dumpheap [-n] <pkg> <device path>` (its refusal of a non-debuggable, non-profileable app is
+ * the only eligibility check: `dumpsys package` prints no profileable flag, #18747), read the file's size back to know the dump finished,
  * pull it to the host and delete the device copy. The device path is registered first, so a
  * session released mid-dump still has its file removed.
  */
@@ -108,6 +86,9 @@ export class AndroidHeapDump {
     });
     try {
       const attempts = await this.runDump(request, remotePath);
+      if (request.native) {
+        await this.assertNativeDumpWritten(request, remotePath);
+      }
       await adb.execute(["pull", remotePath, hostPath], {
         timeoutMs: PULL_TIMEOUT_MS,
         noRetry: true,
@@ -148,9 +129,6 @@ export class AndroidHeapDump {
     if (/Unable to find package|Package \[.*\] .*not found/i.test(result.stdout)) {
       throw new ActionableError(`${request.appId} is not installed on ${request.deviceId}.`);
     }
-    if (classifyHeapDumpEligibility(result.stdout) === false) {
-      throw new HeapDumpRefusedError(request.appId, "its package flags show neither");
-    }
   }
 
   private async runDump(request: HeapDumpRequest, remotePath: string): Promise<HeapDumpAttempt[]> {
@@ -190,6 +168,25 @@ export class AndroidHeapDump {
     }
     this.classifyDumpOutput(request, output);
     return output;
+  }
+
+  /**
+   * Without a malloc-debug build `am dumpheap -n` exits 0 and writes a small text file saying the
+   * native heap is unavailable (#18747); that is a refusal, not a dump.
+   */
+  private async assertNativeDumpWritten(
+    request: HeapDumpRequest,
+    remotePath: string,
+  ): Promise<void> {
+    const head = await this.deps.adb.execute(
+      ["shell", `head -c ${NATIVE_PLACEHOLDER_PROBE_BYTES} ${remotePath}`],
+      { timeoutMs: ADB_TIMEOUT_MS, noRetry: true, signal: request.signal },
+    );
+    if (NATIVE_UNAVAILABLE_OUTPUT.test(head.stdout)) {
+      throw new ActionableError(
+        `native_heap_dump_unavailable: ${request.appId} on ${request.deviceId} has no native heap to dump (the device reports "Native heap dump not available"). Enable malloc debug on a rooted device, or dump the Java heap without native.`,
+      );
+    }
   }
 
   private classifyDumpOutput(request: HeapDumpRequest, output: string): void {

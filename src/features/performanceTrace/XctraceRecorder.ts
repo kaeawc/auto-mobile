@@ -8,6 +8,7 @@ import type {
 } from "../../utils/HostCommandExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
 import type {
   PerformanceTraceRecorder,
@@ -80,6 +81,8 @@ const DEFAULT_STOP_MAX_MS = 180_000;
 const EXPORT_TIMEOUT_MS = 120_000;
 const LIST_TEMPLATES_TIMEOUT_MS = 30_000;
 const RECORD_OUTPUT_MAX_CHARS = 8_000;
+/** How long `stop()` waits for stdio to close after xctrace already exited on its own. */
+const EXITED_DRAIN_TIMEOUT_MS = 5_000;
 const EXPORT_MAX_BUFFER = 64 * 1024 * 1024;
 /** `xctrace record` prints this once the recorder is capturing. */
 const RECORDING_STARTED = /Ctrl-C to stop the recording|Starting recording/i;
@@ -273,7 +276,9 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
     let signalled = false;
     const stopChild = async () => {
       if (child.exitCode !== null || child.signalCode !== null) {
+        // Already ended (e.g. at its time limit): no signal, but let trailing stderr drain.
         signalled = true;
+        await waitForDrain(exited, timer, EXITED_DRAIN_TIMEOUT_MS);
         return;
       }
       const finalized = waitForXctraceFinalization(child, exited, {
@@ -313,17 +318,37 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
   }
 }
 
+/**
+ * Waits for `exited` (close-backed) so trailing output drains, bounded by `timeoutMs`; a missed
+ * deadline only logs, since the recording itself already ended.
+ */
+async function waitForDrain(exited: Promise<void>, timer: Timer, timeoutMs: number): Promise<void> {
+  try {
+    await raceWithDeadline(exited, { timer, timeoutMs, label: "xctrace output drain" });
+  } catch (error) {
+    logger.warn(
+      `[performanceTrace] xctrace exited but its output did not close: ${errorMessage(error)}; recorder errors may be incomplete`,
+      error,
+    );
+  }
+}
+
 interface ChildOutputCapture {
   read(): string;
   /** Stop listening; the captured text stays readable. */
   detach(): void;
 }
 
-/** Keeps the tail of what `xctrace record` prints, for the errors it reports after it starts. */
+/**
+ * Keeps the tail of what `xctrace record` prints, for the errors it reports after it starts.
+ * Decodes UTF-8 on the streams so a multibyte character split across chunks stays intact.
+ */
 function captureChildOutput(child: HostChildProcess): ChildOutputCapture {
   let captured = "";
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
   const onData = (chunk: Buffer | string) => {
-    captured = (captured + chunk.toString()).slice(-RECORD_OUTPUT_MAX_CHARS);
+    captured = (captured + String(chunk)).slice(-RECORD_OUTPUT_MAX_CHARS);
   };
   child.stdout?.on("data", onData);
   child.stderr?.on("data", onData);

@@ -54,6 +54,7 @@ data class DemoIndexNavigation(
   val onNavigateToCollapsingComposer: () -> Unit = {},
   val onNavigateToSharedRowIdList: () -> Unit = {},
   val onNavigateToControlShapes: () -> Unit = {},
+  val onNavigateToEmbeddedPrototype: () -> Unit = {},
   val onNavigateBack: () -> Unit = {},
 )
 
@@ -78,6 +79,7 @@ fun DemoIndexScreen(navigation: DemoIndexNavigation) {
           navigation.onNavigateToBugRepro,
           navigation.onNavigateToHandledException,
           navigation.onNavigateToNetworkTest,
+          navigation.onNavigateToEmbeddedPrototype,
         ) +
         toolingDemos(
           navigation.onNavigateToDesignSystem,
@@ -229,6 +231,7 @@ private fun diagnosticDemos(
   onNavigateToBugRepro: () -> Unit,
   onNavigateToHandledException: () -> Unit,
   onNavigateToNetworkTest: () -> Unit,
+  onNavigateToEmbeddedPrototype: () -> Unit,
 ): List<DemoEntry> =
   listOf(
     DemoEntry(
@@ -258,6 +261,13 @@ private fun diagnosticDemos(
       description = "HTTP requests, failures, and random user images.",
       buttonLabel = "Open Network Test",
       onClick = onNavigateToNetworkTest,
+    ),
+    DemoEntry(
+      id = "demo_embedded_prototype",
+      title = "Embedded Prototype",
+      description = "A prototype drawn in-app by the native renderer library.",
+      buttonLabel = "Open Embedded Prototype",
+      onClick = onNavigateToEmbeddedPrototype,
     ),
   )
 

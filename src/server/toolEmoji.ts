@@ -44,7 +44,7 @@ export const TOOL_EMOJI: Readonly<Record<string, ToolEmojiEntry>> = Object.freez
   hoverAt: tool("🖱️"),
   pinchOn: tool("🤌"),
   multiTouch: tool("🖐️"),
-  sendKeys: tool("🔤"),
+  sendKeys: tool("🔤", "docs/using/send-keys.md"),
   focusNavigate: tool("🕹️"),
   setUIState: tool("☑️"),
   selectAllText: tool("📝"),
@@ -149,7 +149,6 @@ export const TOOL_EMOJI: Readonly<Record<string, ToolEmojiEntry>> = Object.freez
   exportPlan: tool("📤"),
   videoRecording: tool("🎥"),
   performanceTrace: tool("📈", "docs/using/performance-trace.md"),
-  captureTrace: tool("🔬"),
   heapDump: tool("🧠"),
   // Accessibility & tooling
   accessibility: tool("🦮"),

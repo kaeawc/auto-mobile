@@ -83,27 +83,55 @@ internal object SavedPrototypeActivityDependencies {
   @Volatile var httpClients: () -> PrototypeHttpClients = ::defaultHttpClients
 
   private fun defaultHttpClients(): PrototypeHttpClients =
-    PrototypeHttpClients.forSavedPrototype(RetrofitPrototypeHttpClient(OkHttpClient()))
+    PrototypeHttpClients.forSavedPrototype(PrototypeDeviceNetwork.device)
+
+  /** The transports behind a saved prototype's `channels` (#14269): device only. */
+  @Volatile var realtime: () -> PrototypeRealtimeConfig? = ::defaultRealtime
+
+  private fun defaultRealtime(): PrototypeRealtimeConfig =
+    PrototypeRealtimeConfig(
+      PrototypeChannelTransports.forSavedPrototype(OkHttpPrototypeChannelTransport(OkHttpClient())),
+    )
 
   /** Both public routes adapt the saved transports, including the typed host refusal. */
-  fun network(): PrototypeNetwork {
+  fun network(context: Context): PrototypeNetwork {
     val clients = httpClients()
-    fun adapt(client: PrototypeHttpClient) = EmbeddedHttpClient { request ->
-      client.execute(
-        PrototypeHttpRequest(
-          request.requestId,
-          request.prototypeId,
-          request.method,
-          request.url,
-          request.headers,
-          request.body,
-          request.timeoutMs,
-          request.uploadBody,
-          request.onUploadProgress,
+    fun adapt(
+      client: PrototypeHttpClient,
+      images: PrototypeRemoteImageLoader? = null,
+    ): EmbeddedHttpClient =
+      object : EmbeddedHttpClient, PrototypeRemoteImageProvider {
+        override val remoteImages = images
+
+        override suspend fun execute(
+          request: dev.jasonpearson.automobile.prototype.PrototypeHttpRequest,
+        ) =
+          client.execute(
+            PrototypeHttpRequest(
+              request.requestId,
+              request.prototypeId,
+              request.method,
+              request.url,
+              request.headers,
+              request.body,
+              request.timeoutMs,
+              request.uploadBody,
+              request.onUploadProgress,
+            ),
+          )
+      }
+    return PrototypeNetwork(
+      device =
+        adapt(
+          clients.device,
+          clients.remoteImages
+            ?: (clients.device as? PrototypeRemoteImageProvider)?.remoteImages
+            ?: if (clients.device === PrototypeDeviceNetwork.device)
+              PrototypeDeviceNetwork.images(context)
+            else null,
         ),
-      )
-    }
-    return PrototypeNetwork(device = adapt(clients.device), hostHandler = adapt(clients.host))
+      hostHandler = adapt(clients.host),
+    )
   }
 
   fun reset() {
@@ -115,5 +143,6 @@ internal object SavedPrototypeActivityDependencies {
     clock = System::currentTimeMillis
     eventSink = defaultEventSink
     httpClients = ::defaultHttpClients
+    realtime = ::defaultRealtime
   }
 }

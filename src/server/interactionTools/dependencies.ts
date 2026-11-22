@@ -30,6 +30,7 @@ import type { SessionKeyboardProfileHost } from "../sessionKeyboardProfile";
 import type { ProgressCallback } from "../toolRegistry";
 import type { HeadlessPrototypeInputDependencies } from "./headlessPrototypeInput";
 import type { HeadUnitInteractionFactory, HeadUnitTemplateSourceFactory } from "./headUnitHandlers";
+import type { CarPlayTapFactory } from "./carPlayHandlers";
 
 export interface SendKeysRunnerCommandSource {
   getSupportedCommands(): Promise<string[] | null>;
@@ -81,6 +82,8 @@ export interface InteractionToolDependencies {
   headUnitInteractionFactory?: HeadUnitInteractionFactory;
   /** tapOn with display "headUnit" (#17842): the projected apps' template snapshots. */
   headUnitTemplateSourceFactory?: HeadUnitTemplateSourceFactory;
+  /** tapAt with display "carPlay" (#18730): the projection probe and the CarPlay HID helper. */
+  carPlayTapFactory?: CarPlayTapFactory;
   rotateFactory?: (device: BootedDevice, options?: RotateOptions) => RotateLike;
   setPostureFactory?: (device: BootedDevice) => SetPostureLike;
   keyboardFactory?: (device: BootedDevice) => Pick<Keyboard, "execute">;

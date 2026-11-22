@@ -267,7 +267,7 @@ export const tapAtSchema = withJsonSchemaOverride(
         .string()
         .optional()
         .describe(
-          'Target panel key, role, or active; "headUnit" taps the Android Auto head unit at x, y in head-unit pixels',
+          'Target panel key, role, or active; "headUnit" taps the Android Auto head unit at x, y in head-unit pixels; "carPlay" taps an iOS 26.x simulator\'s CarPlay screen at x, y in its pixels',
         ),
       x: coordinatePointInputSchema().shape.x.optional(),
       y: coordinatePointInputSchema().shape.y.optional(),

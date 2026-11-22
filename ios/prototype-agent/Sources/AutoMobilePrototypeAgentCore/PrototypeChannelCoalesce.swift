@@ -26,14 +26,19 @@ enum PrototypeChannelCoalescer {
 
     /// Reduce each consecutive run of same-target writes to its last frame within one flush window.
     static func coalesce(_ frames: [[JSONValue]]) -> [[JSONValue]] {
-        var kept: [[JSONValue]] = []
+        keptIndices(frames).map { frames[$0] }
+    }
+
+    /// Retain frame identity for callers whose event context lives beside each action array.
+    static func keptIndices(_ frames: [[JSONValue]]) -> [Int] {
+        var kept: [Int] = []
         var previous: Set<[UInt8]>?
-        for frame in frames {
+        for (index, frame) in frames.enumerated() {
             let signature = signature(frame)
             if let signature, signature == previous {
-                kept[kept.count - 1] = frame
+                kept[kept.count - 1] = index
             } else {
-                kept.append(frame)
+                kept.append(index)
             }
             previous = signature
         }

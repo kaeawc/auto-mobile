@@ -106,7 +106,6 @@ object ValidTools {
         "videoRecording",
         "performanceAudit",
         "performanceTrace",
-        "captureTrace",
         "heapDump",
         "appLifecycle",
         "displayConfig",

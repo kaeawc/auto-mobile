@@ -73,6 +73,9 @@ describe("CarPlay screen power", () => {
       "unsupported-runtime",
       "no-carplay-screen",
       "power-on-failed",
+      "unsupported-screen-type",
+      "carplay-not-powered",
+      "hid-failed",
     ]) {
       const powerer = new DefaultCarPlayScreenPowerer(
         async () => {

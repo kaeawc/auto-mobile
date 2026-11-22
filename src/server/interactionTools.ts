@@ -21,7 +21,10 @@ import {
   homeScreenHandler,
   systemTrayHandler,
 } from "./interactionToolHandlers";
-import type { InteractionToolDependencies } from "./interactionTools/dependencies";
+import type {
+  InteractionHandlerOptions,
+  InteractionToolDependencies,
+} from "./interactionTools/dependencies";
 import {
   headlessSendKeysHandler,
   headlessTapOnHandler,
@@ -32,6 +35,7 @@ import {
   headUnitTapAtHandler,
   headUnitTapOnHandler,
 } from "./interactionTools/headUnitHandlers";
+import { CARPLAY_DISPLAY, carPlayTapAtHandler } from "./interactionTools/carPlayHandlers";
 import { HEAD_UNIT_DISPLAY } from "../features/androidAuto/HeadUnitInteraction";
 import { withTvosHomeScreen } from "./tvosHomeScreen";
 import { withTvosOpenLink } from "./tvosOpenLink";
@@ -325,6 +329,29 @@ function headlessSendKeysRouting(deps: InteractionToolDependencies) {
   };
 }
 
+/**
+ * tapAt display "headUnit" (#17842) taps the Android Auto head unit and "carPlay" (#18730) the iOS
+ * simulator's CarPlay screen; every other call is the phone tap.
+ */
+function routeTapAt(
+  device: Parameters<typeof tapAtHandler>[0],
+  args: Parameters<typeof tapAtHandler>[1],
+  options: InteractionHandlerOptions & { deps: InteractionToolDependencies },
+) {
+  if (args.display === HEAD_UNIT_DISPLAY) {
+    return headUnitTapAtHandler(
+      device,
+      args,
+      options.deps.headUnitInteractionFactory,
+      options.signal,
+    );
+  }
+  if (args.display === CARPLAY_DISPLAY) {
+    return carPlayTapAtHandler(device, args, options.deps.carPlayTapFactory, options.signal);
+  }
+  return tapAtHandler(device, args, options);
+}
+
 export function registerInteractionTools(deps: InteractionToolDependencies = {}) {
   // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
   // are defined at module scope (each with an
@@ -430,9 +457,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     tapAtSchema,
     {
       handler: (device, args, progress, signal) =>
-        args.display === HEAD_UNIT_DISPLAY
-          ? headUnitTapAtHandler(device, args, deps.headUnitInteractionFactory, signal)
-          : tapAtHandler(device, args, { progress, signal, deps }),
+        routeTapAt(device, args, { progress, signal, deps }),
       defaultEnabled: true,
       supportsProgress: true,
       ...PLAN_SKELETON,

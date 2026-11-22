@@ -266,7 +266,23 @@ describe("iOS saved prototype tool actions", () => {
       errorCode: "unsupported_capability",
       error: expect.stringContaining("root.children[1]"),
     });
-    expect(refused.error).toContain("ProtoViewer");
+    expect(refused.error).toContain("Install ProtoViewer");
+    expect(installer.calls).toEqual([]);
+  });
+  test("iOS save with pin or icon refuses a webView node without promising ProtoViewer", async () => {
+    const page = {
+      type: "webView",
+      url: "https://example.com/post",
+      allowedOrigins: ["https://example.com"],
+    };
+    const webSpec = { ...spec, requires: { platform: ["webview"] }, root: page };
+    for (const extra of [{ pin: true as const }, { icon: "logo" }]) {
+      const refused = await save({ spec: webSpec, assets, ...extra });
+      expect(refused).toMatchObject({ success: false, errorCode: "unsupported_capability" });
+      expect(refused.error).toContain("root");
+      expect(refused.error).not.toContain("Install ProtoViewer");
+      expect(refused.error).toContain("do not use ProtoViewer");
+    }
     expect(installer.calls).toEqual([]);
   });
 

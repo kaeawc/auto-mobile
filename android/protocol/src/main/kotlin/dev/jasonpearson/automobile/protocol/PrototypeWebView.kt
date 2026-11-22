@@ -28,11 +28,18 @@ object PrototypeWebView {
    * order shared with Swift: adaptive slots (adaptive only), `header` then `footer` (list only),
    * `child`, `children`, then `screens` by UTF-16 key order. JSON key order never matters.
    */
-  fun importError(spec: JsonObject, networkAllowed: Boolean): ImportError? {
-    if (networkAllowed) return null
+  fun importError(spec: JsonObject, networkAllowed: Boolean): ImportError? =
+    if (networkAllowed) null else nodePath(spec)?.let(::ImportError)
+
+  /**
+   * The path of the spec's first `webView` node under `root`, in the [importError] order, or null
+   * when it has none. Saved prototypes refuse such a spec: no saved route draws a web view
+   * (#18906).
+   */
+  fun nodePath(spec: JsonObject): String? {
     val root = spec["root"] as? JsonObject ?: return null
-    fun first(node: JsonObject, path: String): ImportError? =
-      if (node.text("type") == "webView") ImportError(path)
+    fun first(node: JsonObject, path: String): String? =
+      if (node.text("type") == "webView") path
       else importChildren(node, path).firstNotNullOfOrNull { (child, at) -> first(child, at) }
     return first(root, "root")
   }

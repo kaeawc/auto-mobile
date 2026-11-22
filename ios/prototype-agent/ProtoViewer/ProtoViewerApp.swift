@@ -33,7 +33,8 @@ struct ProtoViewerApp: App {
             let supported = Set(capabilities)
             let store = try PrototypeLibraryStore(
                 root: root, storageRoot: storage, blocklist: PrototypeDefaultsContentBlocklist(),
-                supportedCapabilities: supported
+                supportedCapabilities: supported,
+                secureStorage: PrototypePlatformRegistry.system.secureStorage
             )
             // Retry deletes of hidden content that failed earlier, so it never holds library quota.
             do { try store.purgeHidden() }

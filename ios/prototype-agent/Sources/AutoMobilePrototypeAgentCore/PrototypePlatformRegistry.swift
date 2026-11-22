@@ -100,8 +100,10 @@ public final class PrototypePlatformRegistry {
 
     let modules: [String: any PrototypePlatformModule]
     private var observers = 0
+    private var embeddedRegistry: PrototypePlatformRegistry?
     private let parent: PrototypePlatformRegistry?
-    private let presentationModules: [any PrototypePlatformModule]
+    // Only presentation registries own these modules, even when the list is empty.
+    private let presentationModules: [any PrototypePlatformModule]?
 
     func retainSources() {
         observers += 1
@@ -113,7 +115,7 @@ public final class PrototypePlatformRegistry {
         observers -= 1
         if observers == 0 {
             if parent == nil { modules.values.forEach { $0.stop() } }
-            else { presentationModules.forEach { $0.stop() } }
+            else { presentationModules?.forEach { $0.stop() } }
         }
         // Global status streams outlive any one presentation; scoped streams stop independently.
         parent?.releaseSources()
@@ -130,13 +132,13 @@ public final class PrototypePlatformRegistry {
         }
         self.modules = accepted
         parent = nil
-        presentationModules = []
+        presentationModules = nil
     }
 
     private init(
         modules: [String: any PrototypePlatformModule],
-        parent: PrototypePlatformRegistry?,
-        presentationModules: [any PrototypePlatformModule]
+        parent: PrototypePlatformRegistry,
+        presentationModules: [any PrototypePlatformModule]? = nil
     ) {
         self.modules = modules
         self.parent = parent
@@ -146,7 +148,7 @@ public final class PrototypePlatformRegistry {
     /// A model owns this registry's snapshots and streams for its lifetime. Read-only device status
     /// remains global; authored sensor/location configuration and pending calls are presentation-local.
     func forPresentation() -> PrototypePlatformRegistry {
-        if let parent { return parent.forPresentation() }
+        if presentationModules != nil, let parent { return parent.forPresentation() }
         var scoped = modules
         var owned: [any PrototypePlatformModule] = []
         if let sensors = modules["sensors"] as? PrototypeSensorsModule {
@@ -165,6 +167,12 @@ public final class PrototypePlatformRegistry {
             owned.append(module)
         }
         return PrototypePlatformRegistry(modules: scoped, parent: self, presentationModules: owned)
+    }
+
+    private init(acceptedModules: [String: any PrototypePlatformModule]) {
+        modules = acceptedModules
+        parent = nil
+        presentationModules = nil
     }
 
     public func configure(locationBlock: JSONValue?) {
@@ -209,7 +217,7 @@ public final class PrototypePlatformRegistry {
         guard PrototypeTestHooks.isEnabled(environment: environment) else { return self }
         var registered = modules
         if registered["test"] == nil { registered["test"] = PrototypeTestPlatformModule() }
-        return PrototypePlatformRegistry(modules: registered, parent: nil, presentationModules: [])
+        return PrototypePlatformRegistry(acceptedModules: registered)
     }
 
     // Production membership lives here so pure core tests exercise the same factories as UIKit.
@@ -224,7 +232,8 @@ public final class PrototypePlatformRegistry {
         location: (any PrototypeLocationSource)? = nil,
         sensors: (any PrototypeSensorSource)? = nil,
         permissions: (any PrototypeNotificationAuthorizationSource)? = nil,
-        biometric: (any PrototypeBiometricSource)? = nil
+        biometric: (any PrototypeBiometricSource)? = nil,
+        secureStorage: (any PrototypeSecureValueStore)? = nil
     )
         -> PrototypePlatformRegistry
     {
@@ -238,6 +247,7 @@ public final class PrototypePlatformRegistry {
         if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
         if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
         if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
+        if let secureStorage { modules.append(PrototypeSecureStorageModule(store: secureStorage)) }
         if let permissions { modules.append(PrototypePermissionsModule(source: permissions)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
@@ -253,6 +263,7 @@ public final class PrototypePlatformRegistry {
         sensors: (any PrototypeSensorSource)? = nil,
         permissions: (any PrototypeNotificationAuthorizationSource)? = nil,
         biometric: (any PrototypeBiometricSource)? = nil,
+        secureStorage: (any PrototypeSecureValueStore)? = nil,
         notifications: (any NotificationCenterClient)? = nil,
         webView: PrototypeWebViewModule? = nil
     )
@@ -267,10 +278,32 @@ public final class PrototypePlatformRegistry {
         if let location { modules.append(PrototypeLocationModule(source: location, bundle: bundle)) }
         if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
         if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
+        if let secureStorage { modules.append(PrototypeSecureStorageModule(store: secureStorage)) }
         if let permissions { modules.append(PrototypePermissionsModule(source: permissions)) }
         if let notifications { modules.append(PrototypeNotificationsModule(client: notifications)) }
         if let webView { modules.append(webView) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
+    }
+
+    var secureStorage: (any PrototypeSecureValueStore)? {
+        (modules["secureStorage"] as? PrototypeSecureStorageModule)?.store
+    }
+
+    func withSecureStorage(_ store: any PrototypeSecureValueStore) -> PrototypePlatformRegistry {
+        if presentationModules != nil, let parent { return parent.withSecureStorage(store) }
+        let module = PrototypeSecureStorageModule(store: store)
+        var scoped = modules
+        scoped[module.name] = module
+        return PrototypePlatformRegistry(modules: scoped, parent: self)
+    }
+
+    /// Embedded presentations cannot access the host application's Keychain through this runtime.
+    var withoutSecureStorage: PrototypePlatformRegistry {
+        guard modules["secureStorage"] != nil else { return self }
+        if let embeddedRegistry { return embeddedRegistry }
+        let registry = PrototypePlatformRegistry(acceptedModules: modules.filter { $0.key != "secureStorage" })
+        embeddedRegistry = registry
+        return registry
     }
 
     var snapshot: [String: JSONValue] {

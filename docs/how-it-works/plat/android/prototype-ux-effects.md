@@ -210,6 +210,9 @@ The Android app shell and CtrlProxy accessibility overlay omit the module.
   `webview.back` and `webview.reload` take `args: {node}` and require an attached node.
 - Android shares the system WebView data store across the app process. ProtoViewer library Reset
   and Delete wipe it. Web data clearing through MCP `clearStorage` is a follow-up.
+- A CtrlProxy saved prototype (`save` on Android, and on iOS without ProtoViewer) refuses a spec with a `webView`
+  node with `errorCode: "unsupported_capability"` naming the node path, before any upload or install. The host
+  and CtrlProxy's saved-prototype store both refuse it.
 
 ## Charts (#14209)
 

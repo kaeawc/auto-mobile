@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
+import dev.jasonpearson.automobile.protocol.PrototypeWebView
 import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
 import dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode
 import dev.jasonpearson.automobile.protocol.SavedPrototypeInfo
@@ -17,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 class SavedPrototypeController(
   private val store: SavedPrototypeStore,
@@ -147,6 +149,9 @@ class SavedPrototypeController(
         "${validation.error.path}: ${validation.error.message}",
       )
     }
+    webViewPath(specJson)?.let { path ->
+      return refusal(SavedPrototypeErrorCode.UNSUPPORTED_CAPABILITY, webViewRefusal(path))
+    }
     val ids = (prototypeAssetReferences(spec.root) + listOfNotNull(icon)).distinct()
     val copied = mutableListOf<SavedPrototypeAsset>()
     val missing = mutableListOf<String>()
@@ -270,3 +275,12 @@ internal fun SavedPrototypeRejection.errorCode(): SavedPrototypeErrorCode =
     SavedPrototypeRejection.STORAGE_FAILURE -> SavedPrototypeErrorCode.STORAGE_FAILURE
     SavedPrototypeRejection.UNSUPPORTED_EXISTING -> SavedPrototypeErrorCode.UNSUPPORTED_EXISTING
   }
+
+/** The first `webView` node path of a validated spec; no saved route draws a web view (#18906). */
+internal fun webViewPath(specJson: String): String? =
+  (Json.parseToJsonElement(specJson) as? JsonObject)?.let(PrototypeWebView::nodePath)
+
+/** The same text as the host's `androidSavedWebViewRefusal`, so either refusal reads alike. */
+internal fun webViewRefusal(path: String): String =
+  "The webView node at $path is not drawn by saved prototypes on Android. " +
+    "Remove the webView node and save again. Nothing was saved."

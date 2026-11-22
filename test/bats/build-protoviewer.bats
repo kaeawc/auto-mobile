@@ -15,6 +15,7 @@ setup() {
   mkdir -p "${FIXTURE}/ios/prototype-agent/Shaders"
   touch "${FIXTURE}/ios/prototype-agent/Shaders/PrototypeEffects.metal"
   cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/Info.plist" \
+    "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/ProtoViewer.entitlements" \
     "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy" "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
   cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/"*.xcstrings "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
   touch "${FIXTURE}/ios/prototype-agent/ProtoViewer/ProtoViewerApp.swift" \
@@ -47,7 +48,20 @@ elif [[ "$3" == swiftc ]]; then
   [[ "$*" == *'/ProtoViewer/ProtoViewerApp.swift'* ]]
   [[ "$*" != *'/Viewer/ViewerApp.swift'* && "$*" != *'Loader.c'* ]]
   [[ "${BUILD_TEST_FAILURE:-}" != compiler ]] || exit 1
+  while [[ "$1" != -Xlinker ]]; do shift; done
+  [[ "$1 $2 $3 $4 $5 $6 $7" == '-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker' ]]
+  entitlements="$8"
   while [[ "$1" != -o ]]; do shift; done
+  python3 - "$entitlements" "$(dirname "$2")/ProtoViewer.app/Info.plist" <<'PY'
+from pathlib import Path
+import plistlib
+import sys
+
+entitlements, metadata = (plistlib.loads(Path(path).read_bytes()) for path in sys.argv[1:])
+bundle_id = metadata['CFBundleIdentifier']
+assert entitlements['application-identifier'] == bundle_id
+assert entitlements['keychain-access-groups'][0] == bundle_id
+PY
   printf 'slice\n' > "$2"
 else
   [[ "$1 $2 $3" == '--sdk macosx swift' ]]
@@ -75,13 +89,30 @@ if [[ "$1 ${3:-} ${4:-} ${5:-}" == '-extract raw -o -' ]]; then
   python3 -c 'import plistlib, sys; print(plistlib.load(open(sys.argv[2], "rb"))[sys.argv[1]])' "$2" "$6"
   exit 0
 fi
-[[ "$1" == -replace || "$1" == -lint ]]
+if [[ "$1" == -replace && "$3" == -string ]]; then
+  python3 - "$2" "$4" "$5" <<'PY'
+from pathlib import Path
+import plistlib
+import sys
+
+key, value, filename = sys.argv[1:]
+path = Path(filename)
+metadata = plistlib.loads(path.read_bytes())
+if key == 'keychain-access-groups.0':
+    metadata['keychain-access-groups'][0] = value
+else:
+    metadata[key] = value
+path.write_bytes(plistlib.dumps(metadata))
+PY
+  exit 0
+fi
+[[ "$1" == -lint ]]
 SCRIPT
   cat > "${MOCK_BIN}/codesign" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$*" >> "$BUILD_LOG"
-[[ "$1 $2 $3 $4" == '--force --sign - '* ]]
+printf 'codesign %s\n' "$*" >> "$BUILD_LOG"
+[[ $# -eq 4 && "$1 $2 $3" == '--force --sign -' && -f "$4/ProtoViewer" ]]
 SCRIPT
   chmod +x "${MOCK_BIN}/"{xcrun,lipo,plutil,codesign}
   export PATH="${MOCK_BIN}:${PATH}"
@@ -107,7 +138,7 @@ SCRIPT
   [[ "$output" == *' -verify_arch arm64'* ]]
   [[ "$output" == *' -verify_arch x86_64'* ]]
   [[ "$output" != *'-verify_arch arm64 x86_64'* ]]
-  [[ "$output" == *'--force --sign - '* ]]
+  [[ "$output" == *"codesign --force --sign - $OUT/ProtoViewer.app"* ]]
 }
 
 @test "plist declares prototype and JSON imports without ATS file sharing or compiled icon keys" {

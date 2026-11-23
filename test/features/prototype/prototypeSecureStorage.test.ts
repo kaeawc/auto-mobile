@@ -267,6 +267,18 @@ describe("secure data-write values", () => {
     ).toBeUndefined();
   });
 
+  test("an object value refuses a derived member over secure state", () => {
+    const root = {
+      ...spec(),
+      derive: { tokenText: { of: { state: "token" }, format: { number: {} } } },
+    };
+    const value = { object: { label: { value: "x" }, secret: { derived: "tokenText" } } };
+    expect(error({ ...writes[1], value }, root)).toEqual({
+      path: "root.onTap[0].value.object.secret",
+      message: "Secure storage key state:token cannot be written to data",
+    });
+  });
+
   test("public values, literals and specs without secure keys pass; opt-in does not apply", () => {
     for (const action of writes) {
       expect(error({ ...action, value: { state: "remember" } })).toBeUndefined();

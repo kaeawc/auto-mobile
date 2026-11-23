@@ -1,3 +1,4 @@
+import type { IosSimulatorNetworkShaper } from "../ios/IosSimulatorNetworkShaper";
 import type { IosCameraPosterRegistry } from "../ios/IosCameraPosterRegistry";
 import type { IosCameraPosterDylibProvider } from "../ios/IosCameraPosterDylibProvider";
 import type { IosRequestedHingeAngleStore } from "../../device/DuoHingeLayout";
@@ -214,6 +215,8 @@ export interface DeviceStateDependencies {
   ) => Promise<RequestedDeviceStates>;
   /** iOS Simulator network-extension controller; defaults to the installed controller. */
   networkFilterBridge?: NetworkFilterBridge;
+  /** Device-wide iOS Simulator network shaper (#19045); defaults to the boot-injected one. */
+  iosNetworkShaper?: IosSimulatorNetworkShaper;
   /**
    * iOS Simulator per-app rules: the session ownership for the rule command in
    * flight. Absent (or returning `undefined`) outside a session, where iOS app

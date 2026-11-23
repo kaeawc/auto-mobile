@@ -12,6 +12,11 @@ export const REQUIRED_PACKED_RUNTIME_ASSETS: readonly string[] = [
   "dist/vendor/libwebp/win32-x64/dwebp.exe",
   // The iOS Simulator camera poster dylib is compiled on demand from this source.
   "ios/CameraPosterInjection/Injection/CameraPosterInjection.m",
+  // The iOS Simulator network shaper dylib is compiled on demand from these (#19045).
+  "ios/NetworkShaper/netshape.c",
+  "ios/NetworkShaper/libdns_services.tbd",
+  // The vendored shaper source's MIT notice ships with it.
+  "ios/NetworkShaper/LICENSE",
 ];
 
 /**

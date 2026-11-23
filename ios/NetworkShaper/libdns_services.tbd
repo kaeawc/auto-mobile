@@ -1,0 +1,8 @@
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ arm64-ios-simulator, x86_64-ios-simulator ]
+install-name:    '/usr/lib/libdns_services.dylib'
+exports:
+  - targets:     [ arm64-ios-simulator, x86_64-ios-simulator ]
+    symbols:     [ _dnssd_getaddrinfo_result_get_address, _dnssd_getaddrinfo_result_get_hostname ]
+...

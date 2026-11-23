@@ -16,6 +16,7 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeNetworkFilterBridge, type FakeRuleCommand } from "../fakes/FakeNetworkFilterBridge";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { FakeIosSimulatorNetworkShaper } from "../fakes/FakeIosSimulatorNetworkShaper";
 
 isolateToolRegistry();
 
@@ -40,6 +41,8 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
   let timer: FakeTimer;
   let manager: SessionManager;
   let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+  let shaper: FakeIosSimulatorNetworkShaper;
+  let deviceWideRestores: string[];
 
   const call = async (tool: string, args: Record<string, unknown>, device = simulator()) => {
     const response = await ToolRegistry.getTool(tool)!.deviceAwareHandler!(device, args);
@@ -80,6 +83,8 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
     warn = spyOn(logger, "warn").mockImplementation(() => {});
     bridge = new FakeNetworkFilterBridge();
     bridge.setState("ready");
+    shaper = new FakeIosSimulatorNetworkShaper();
+    deviceWideRestores = [];
     timer = new FakeTimer();
     timer.setCurrentTime(1_759_900_000_000);
     const client = new IosAppNetworkRuleClient(bridge);
@@ -88,7 +93,11 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
       keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
       biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
       restorers: {
-        networkCondition: () => ({ restore: async () => {} }),
+        networkCondition: (device) => ({
+          restore: async (profile) => {
+            deviceWideRestores.push(`${device.deviceId}:${profile}`);
+          },
+        }),
         clock: () => ({ restore: async () => {} }),
         iosAppNetworkRule: {
           reset: async (rule) => {
@@ -110,7 +119,7 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
     );
     DaemonState.getInstance().initialize(manager, pool);
     ToolRegistry.clearTools();
-    registerUtilityTools({ networkFilterBridge: bridge });
+    registerUtilityTools({ networkFilterBridge: bridge, iosNetworkShaper: shaper });
     await manager.createSession(SESSION, SIM, "ios");
   }
 
@@ -171,6 +180,46 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
         ["renew", SESSION, 1],
       ]);
       expect(timer.getSleepCallCount()).toBe(0);
+    },
+  );
+
+  for (const order of ["device-wide first", "app rule first"] as const) {
+    arranged(
+      `release restores both a device-wide degrade and an app rule (${order}, #19045)`,
+      async () => {
+        const deviceWide = () =>
+          call("setDeviceState", { sessionUuid: SESSION, networkCondition: { profile: "3g" } });
+        if (order === "device-wide first") {
+          await deviceWide();
+          await offline();
+        } else {
+          await offline();
+          await deviceWide();
+        }
+        expect(manager.getNetworkCondition(SESSION)).toMatchObject({ deviceWide: true });
+
+        await manager.releaseSession(SESSION);
+
+        expectFencedResets(["apply", "reset"]);
+        expect(deviceWideRestores).toEqual([`${SIM}:none`]);
+      },
+    );
+  }
+
+  arranged(
+    "resetting the app rule keeps the device-wide restore for release (#19045)",
+    async () => {
+      await call("setDeviceState", { sessionUuid: SESSION, networkCondition: { profile: "3g" } });
+      await offline();
+      await restore();
+      expect(manager.getNetworkCondition(SESSION)).toEqual({
+        initialProfile: "none",
+        deviceWide: true,
+      });
+
+      await manager.releaseSession(SESSION);
+
+      expect(deviceWideRestores).toEqual([`${SIM}:none`]);
     },
   );
 

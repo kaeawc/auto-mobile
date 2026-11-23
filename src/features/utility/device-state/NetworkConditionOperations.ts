@@ -2,7 +2,6 @@ import {
   NETWORK_CONDITION_PROFILES,
   IOS_PHYSICAL_NETWORK_CONDITION_UNSUPPORTED_ERROR,
   iosSimulatorNetworkConditionError,
-  IOS_SIMULATOR_NETWORK_CONDITION_APP_REQUIRED_ERROR,
   IOS_SIMULATOR_NETWORK_CONDITION_SESSION_REQUIRED_ERROR,
   IOS_APP_NETWORK_CONDITION_LIMITATIONS,
   iosUnsupportedNetworkConditionError,
@@ -46,6 +45,11 @@ import {
   type NetworkFilterBridge,
   type NetworkFilterStatus,
 } from "../../networkFilter/NetworkFilterBridge";
+import type { IosSimulatorNetworkShaper } from "../ios/IosSimulatorNetworkShaper";
+import {
+  applyIosShaperNetworkCondition,
+  readIosShaperNetworkCondition,
+} from "./IosShaperNetworkCondition";
 import {
   IOS_APP_NETWORK_RULE_LEASE_MS,
   IosAppNetworkRuleClient,
@@ -60,6 +64,8 @@ interface NetworkConditionOperationsDependencies {
   timer: () => Timer;
   networkFilterBridge: () => NetworkFilterBridge;
   iosAppNetworkRule: () => IosAppNetworkRuleCommandContext | undefined;
+  /** Device-wide iOS Simulator shaping (#19045). */
+  iosNetworkShaper: () => IosSimulatorNetworkShaper;
 }
 
 interface EmulatorNetworkConditionRequest {
@@ -150,6 +156,13 @@ export class NetworkConditionOperations {
         capability: "unsupported",
         error: IOS_PHYSICAL_NETWORK_CONDITION_UNSUPPORTED_ERROR,
       };
+    }
+    const shaped = await readIosShaperNetworkCondition(
+      this.dependencies.iosNetworkShaper(),
+      this.dependencies.device().deviceId,
+    );
+    if (shaped) {
+      return shaped;
     }
     const status = await this.readNetworkFilterStatus();
     const controller = this.networkFilterController(status);
@@ -464,9 +477,10 @@ export class NetworkConditionOperations {
   }
 
   /**
-   * iOS Simulator: take one explicitly named app offline, or restore it, through
-   * the leased network-extension rule (#10264). Device-wide requests and every
-   * profile but `offline`/`none` are refused without contacting the controller.
+   * iOS Simulator: without `appId`, shape the whole simulator through the
+   * boot-injected socket shaper (#19045). With `appId`, take that one app offline,
+   * or restore it, through the leased network-extension rule (#10264); every
+   * profile but `offline`/`none` is refused there without contacting the controller.
    */
   private async setIosNetworkCondition(
     input: SetNetworkConditionInput,
@@ -492,7 +506,11 @@ export class NetworkConditionOperations {
       error,
     });
     if (!input.appId) {
-      return refused(IOS_SIMULATOR_NETWORK_CONDITION_APP_REQUIRED_ERROR, { scope: "device" });
+      return applyIosShaperNetworkCondition(
+        this.dependencies.iosNetworkShaper(),
+        this.dependencies.device().deviceId,
+        input,
+      );
     }
     const kind = classifyNetworkConditionRequest(input);
     const isReset = kind === "reset";

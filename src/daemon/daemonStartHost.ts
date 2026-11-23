@@ -50,6 +50,8 @@ export interface DaemonStartHost {
   startHttpIngress(): Promise<void>;
   /** Drop per-session appearance rows no rehydrated or recoverable session owns (#10976). */
   sweepStaleAppearanceConfigs(rehydration: RehydrationSummary): Promise<void>;
+  /** Unshape iOS Simulators a crashed or stopped daemon on this data dir left shaped (#19045). */
+  sweepStaleNetworkShaperProfiles(): Promise<void>;
   /** Mark unconfirmed recorders before sessions can bind; never await background recovery. */
   redriveRecorderTeardowns(): Promise<boolean>;
   /** Create the control socket server over this daemon's state and start accepting clients. */

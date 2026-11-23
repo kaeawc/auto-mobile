@@ -766,6 +766,7 @@ export class LivenessScenario {
       prepareHttpToken: () => void steps.push("prepareHttpToken"),
       publishHttpToken: () => void steps.push("publishHttpToken"),
       sweepStaleAppearanceConfigs: async () => void steps.push("sweepStaleAppearanceConfigs"),
+      sweepStaleNetworkShaperProfiles: async () => {},
       redriveRecorderTeardowns: async () => true,
       bindControlSocket: async () => {
         steps.push("bindControlSocket");

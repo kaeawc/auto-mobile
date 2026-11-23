@@ -67,4 +67,13 @@ final class TapSupportTests: XCTestCase {
         let samples = data.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)).map { Int16(littleEndian: $0) } }
         XCTAssertEqual(samples, [0, 32767, -32767, 32767, 16383])
     }
+
+    func testSilenceFillHoldsBackTheLagUntilStopFlushesIt() {
+        // A tick at 980 ms wrote 830 ms; stopping at 1000 ms owes the withheld tail.
+        XCTAssertEqual(SilenceFill.dueFrames(elapsedMs: 1000, lagMs: 150, sampleRate: 1000, framesWritten: 830), 20)
+        XCTAssertEqual(SilenceFill.dueFrames(elapsedMs: 1000, lagMs: 0, sampleRate: 1000, framesWritten: 830), 170)
+        XCTAssertEqual(SilenceFill.dueFrames(elapsedMs: 100, lagMs: 0, sampleRate: 1000, framesWritten: 0), 100)
+        XCTAssertEqual(SilenceFill.dueFrames(elapsedMs: 100, lagMs: 150, sampleRate: 1000, framesWritten: 0), 0)
+        XCTAssertEqual(SilenceFill.dueFrames(elapsedMs: 1000, lagMs: 0, sampleRate: 1000, framesWritten: 2000), 0)
+    }
 }

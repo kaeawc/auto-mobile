@@ -25,7 +25,7 @@ to 8653. It holds that port while the emulator runs, so you need no extra launch
 ## iOS Simulators
 
 `captureAudio` records only the target simulator, with no driver: other simulators and Mac apps
-are not heard. The result's `route` is `process-tap`. If the captures are silent while the app plays,
+are not heard. That holds only when the result's `route` is `process-tap`. If the captures are silent while the app plays,
 give the app that runs AutoMobile **System Audio Recording** permission (System Settings > Privacy
 and Security > Screen and System Audio Recording).
 
@@ -38,7 +38,8 @@ Mac once:
 
 `AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER` overrides the `audio-loopback-helper` executable both tools
 use. A helper without process-tap support makes `captureAudio` read the Mac's default output instead
-(`route: host-loopback`). That output must then be a loopback device, and it hears every simulator.
+(`route: host-loopback`). So does a failed lookup of the simulator's process. That output must then
+be a loopback device, and it hears every simulator. Check `route` before you trust the isolation.
 
 Injection limits:
 

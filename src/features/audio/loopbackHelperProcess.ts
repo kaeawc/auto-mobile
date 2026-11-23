@@ -116,20 +116,35 @@ export async function startLoopbackHelper(options: {
     markReady = resolve;
   });
   let pending = "";
+  const handleLine = (line: string) => {
+    if (line.startsWith(LOOPBACK_READY_PREFIX)) {
+      logger.debug(`audio-loopback-helper: ${line}`);
+      markReady();
+    } else if (line.startsWith(LOOPBACK_ERROR_PREFIX)) {
+      report = parseError(line);
+    } else if (line.trim()) {
+      logger.debug(`audio-loopback-helper: ${line}`);
+    }
+  };
   child.stderr.on("data", (chunk: Uint8Array | string) => {
     pending += chunk.toString();
     const lines = pending.split("\n");
     pending = lines.pop() ?? "";
-    for (const line of lines) {
-      if (line.startsWith(LOOPBACK_READY_PREFIX)) {
-        logger.debug(`audio-loopback-helper: ${line}`);
-        markReady();
-      } else if (line.startsWith(LOOPBACK_ERROR_PREFIX)) {
-        report = parseError(line);
-      } else if (line.trim()) {
-        logger.debug(`audio-loopback-helper: ${line}`);
+    lines.forEach(handleLine);
+  });
+  // The exit event can arrive before the stderr pipe has delivered its last bytes, so the error
+  // report that classifies the exit is complete only once stderr has ended.
+  const stderrEnded = new Promise<void>((resolve) => {
+    const finish = () => {
+      if (pending) {
+        handleLine(pending);
+        pending = "";
       }
-    }
+      resolve();
+    };
+    child.stderr.once("end", finish);
+    child.stderr.once("close", finish);
+    child.stderr.once("error", () => resolve());
   });
   const { onStdout } = options;
   let sinkBusy = false;
@@ -155,7 +170,7 @@ export async function startLoopbackHelper(options: {
   const exited = new Promise<number | null>((resolve) => {
     child.once("exit", (code) => {
       exitCode = code;
-      resolve(code);
+      void stderrEnded.then(() => resolve(code));
     });
     child.once("error", (error) => {
       report ??= { code: "spawn_failed", message: error.message };

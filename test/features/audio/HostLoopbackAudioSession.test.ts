@@ -171,6 +171,15 @@ describe("HostLoopbackAudioSession injection", () => {
     expect(String(error.message)).toContain("MacBook Pro Microphone");
   });
 
+  test("a stderr report delivered after the exit event still classifies the failure", async () => {
+    const { session } = setup((helper) => {
+      helper.exitThenReport(2, "no_loopback_input", "The default input is not a loopback device.");
+    });
+    const error = await session.injectAudio(sineTone({ durationMs: 10 })).catch((caught) => caught);
+    expect(error).toMatchObject({ code: "audio_injection_unsupported" });
+    expect(String(error.message)).toContain("not a loopback device");
+  });
+
   test("a helper that fails mid-playback rejects done with audio_loopback_failed", async () => {
     const { session, helpers } = setup();
     const injection = await session.injectAudio(sineTone({ durationMs: 10, sampleRate: 8_000 }), {

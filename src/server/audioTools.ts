@@ -280,8 +280,10 @@ const captureAudioTool = defineDeviceTool({
     "returns its host path. Assert loosely (silent or not, duration within a margin); loaded hosts " +
     "can glitch real-time audio. A simulator is recorded with a Core Audio process tap of its own " +
     "processes (route process-tap), so other simulators and host apps are not heard; no loopback " +
-    "device is needed. An audio-loopback helper without tap support falls back to the host's " +
-    "loopback default output (route host-loopback), which mixes every simulator. Physical devices are refused.",
+    "device is needed. Only that route isolates the simulator. If the helper lacks tap support or " +
+    "the simulator's launchd_sim process is not found, capture falls back to the host's loopback " +
+    "default output (route host-loopback), which mixes every simulator and host app. Check route. " +
+    "Physical devices are refused.",
   input: captureAudioInput,
   options: {
     defaultEnabled: false,

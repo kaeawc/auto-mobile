@@ -13,9 +13,19 @@ export class FakeLoopbackHelperProcess extends EventEmitter implements LoopbackH
   readonly signals: Array<NodeJS.Signals | undefined> = [];
   stdinEnded = false;
   readonly stdin: Writable;
+  /** Set by tests that deliver stderr themselves after the exit event. */
+  private holdStderr = false;
 
   constructor(readonly args: string[]) {
     super();
+    // A real process's stderr pipe ends with it, whoever emitted the exit.
+    this.on("exit", () => {
+      setImmediate(() => {
+        if (!this.holdStderr) {
+          this.stderr.end();
+        }
+      });
+    });
     this.stdin = new Writable({
       highWaterMark: 1,
       write: (chunk: Buffer, _encoding, callback) => {
@@ -37,11 +47,24 @@ export class FakeLoopbackHelperProcess extends EventEmitter implements LoopbackH
     this.stderr.write(`audio-loopback-error: ${code} ${message}\n`);
   }
 
-  /** Exits, then closes stdout a turn later, as a real process's pipe may still be draining. */
+  /** Exits, then closes stdout a turn later, as a real process's pipes may still be draining. */
   exit(code: number | null): void {
     setImmediate(() => {
       this.emit("exit", code);
       setImmediate(() => this.stdout.end());
+    });
+  }
+
+  /** Exits first, then delivers a final stderr line and closes the pipes a turn later. */
+  exitThenReport(code: number | null, code2: string, message: string): void {
+    this.holdStderr = true;
+    setImmediate(() => {
+      this.emit("exit", code);
+      setImmediate(() => {
+        this.stderr.write(`audio-loopback-error: ${code2} ${message}\n`);
+        this.stderr.end();
+        this.stdout.end();
+      });
     });
   }
 

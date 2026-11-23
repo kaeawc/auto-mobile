@@ -1,3 +1,4 @@
+import { commandFailureDetails } from "../CommandError";
 import { errorMessage } from "../describeUnknownError";
 import type { HostCommandExecutor } from "../HostCommandExecutor";
 import { logger } from "../logger";
@@ -28,8 +29,13 @@ export async function findLaunchdSimPid(
     });
     return parsePgrepPid(result.stdout);
   } catch (error) {
-    // pgrep exits 1 when nothing matches: the simulator is not booted on this host.
-    logger.debug(`[iOS] no launchd_sim process for ${udid}: ${errorMessage(error)}`);
+    if (commandFailureDetails(error).exitCode === 1) {
+      // pgrep exits 1 when nothing matches: the simulator is not booted on this host.
+      logger.debug(`[iOS] no launchd_sim process for ${udid}: ${errorMessage(error)}`);
+    } else {
+      // A timeout or a missing pgrep is unexpected, and the caller falls back to host loopback.
+      logger.warn(`[iOS] launchd_sim lookup for ${udid} failed: ${errorMessage(error)}`, error);
+    }
     return undefined;
   }
 }

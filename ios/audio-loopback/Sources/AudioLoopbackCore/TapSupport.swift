@@ -90,3 +90,12 @@ extension Pcm16Mono {
         return data
     }
 }
+
+/// How much silence a capture owes to keep its length equal to the wall clock.
+public enum SilenceFill {
+    /// Frames still owed at `elapsedMs`, holding back the newest `lagMs` (audio may still be in flight);
+    /// a stop passes 0 so the withheld quiet tail is flushed too.
+    public static func dueFrames(elapsedMs: Int, lagMs: Int, sampleRate: Int, framesWritten: Int) -> Int {
+        max(0, (elapsedMs - lagMs) * sampleRate / 1000 - framesWritten)
+    }
+}

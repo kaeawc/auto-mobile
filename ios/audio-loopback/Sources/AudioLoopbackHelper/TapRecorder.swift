@@ -85,7 +85,7 @@ final class TapRecorder: @unchecked Sendable {
         DispatchQueue.global().async { [self] in
             _ = try? FileHandle.standardInput.readToEnd()
             queue.async { [self] in
-                finish(code: 0)
+                finishFlushingQuietTail()
             }
         }
     }
@@ -126,11 +126,27 @@ final class TapRecorder: @unchecked Sendable {
         guard active == nil || now < lastTap || Int((now - lastTap) / 1_000_000) > Self.lagMs else {
             return
         }
-        let elapsedMs = Int((now - startNanos) / 1_000_000)
-        let due = (elapsedMs - Self.lagMs) * sampleRate / 1000 - framesWritten
+        padSilence(lagMs: Self.lagMs)
+    }
+
+    /// Writes the silence owed up to now, minus the newest `lagMs`.
+    private func padSilence(lagMs: Int) {
+        let elapsedMs = Int((DispatchTime.now().uptimeNanoseconds - startNanos) / 1_000_000)
+        let due = SilenceFill.dueFrames(
+            elapsedMs: elapsedMs, lagMs: lagMs, sampleRate: sampleRate, framesWritten: framesWritten
+        )
         if due > 0 {
             write([Float](repeating: 0, count: due))
         }
+    }
+
+    /// A stop (stdin closed) keeps the whole capture: the quiet tail `lagMs` withholds is silence, not loss.
+    private func finishFlushingQuietTail() {
+        guard !done else {
+            return
+        }
+        padSilence(lagMs: 0)
+        finish(code: 0)
     }
 
     private func refresh() {

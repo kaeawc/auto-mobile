@@ -132,8 +132,10 @@ Android devices, and Apple platforms other than iOS, do not support camera poste
 - On iOS Simulator, the poster applies at each app's next launch, from
   `launchApp`, the home screen or XCUITest. The call returns
   `method: "ios_simulator_dyld_injection"`, `path`, `deviceWide` and
-  `relaunchRequired: true`. Relaunch running apps, also after clearing; iOS
-  ignores `surface`. `deviceWide: false` means only `launchApp` applies it.
+  `relaunchRequired: true`. Relaunch running apps; iOS ignores `surface`.
+  `deviceWide: false` means only `launchApp` applies it; the warning says why.
+  After clearing, use `launchApp` with `coldBoot: true` to remove the poster
+  from a running app.
 
 `startDevice` accepts mutually exclusive `cameraPosterPath` or
 `cameraPosterQr: { text }`. Android requires a stopped emulator; iOS Simulator also

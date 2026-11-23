@@ -119,6 +119,7 @@ test("dylib preflight failure is reported at set time and keeps the previous pos
 function deviceWideSetup(failure?: Error) {
   const registry = new FakeIosCameraPosterRegistry();
   const activated: string[] = [];
+  const deactivated: string[] = [];
   const deps = {
     registry,
     dylibProvider: new FakeIosCameraPosterDylibProvider(),
@@ -130,9 +131,10 @@ function deviceWideSetup(failure?: Error) {
           throw failure;
         }
       },
+      deactivate: async (udid: string) => void deactivated.push(udid),
     },
   };
-  return { registry, activated, deps };
+  return { registry, activated, deactivated, deps };
 }
 
 test("a set poster is turned on device-wide for apps launched any way", async () => {
@@ -148,12 +150,15 @@ test("a device-wide failure keeps the poster for launchApp and says so", async (
   const result = await writeIosCameraPoster(simulator, { mode: "image", path: image }, h.deps);
   expect(result).toMatchObject({ supported: true, deviceWide: false, path: image });
   expect(result.error).toBeUndefined();
-  expect(result.warning).toBe(IOS_CAMERA_POSTER_LAUNCH_ONLY_WARNING);
+  expect(result.warning).toBe(`${IOS_CAMERA_POSTER_LAUNCH_ONLY_WARNING} launchctl refused`);
   expect(h.registry.get(simulator.deviceId)).toEqual({ kind: "image", path: image });
 });
 
-test("clear never touches the device-wide environment", async () => {
+test("clear waits for the device-wide launchd environment to be restored", async () => {
   const h = deviceWideSetup();
+  h.registry.set(simulator.deviceId, { kind: "image", path: image });
   await writeIosCameraPoster(simulator, { mode: "clear" }, h.deps);
   expect(h.activated).toEqual([]);
+  expect(h.deactivated).toEqual([simulator.deviceId]);
+  expect(h.registry.get(simulator.deviceId)).toBeUndefined();
 });

@@ -24,27 +24,55 @@ setenv` for three variables. Every process launchd starts afterwards inherits th
 
 - `AM_CAMERA_POSTER_DYLIB`: the poster library.
 - `AM_CAMERA_POSTER_CONFIG`: `<AutoMobile data dir>/ios-camera-poster/devices/<udid>.json`.
-- `DYLD_INSERT_LIBRARIES`: the gate library, `libAMCameraPosterGate.dylib`, merged into any value
-  already set. It is set last, so no process loads the gate before it can find the poster library.
+- `DYLD_INSERT_LIBRARIES`: the gate library, merged into any value `launchctl getenv` shows. It
+  is set last, so no process loads the gate before it can find the poster library.
+
+launchd inserts a stable copy of the gate,
+`<AutoMobile data dir>/ios-camera-poster-active/libAMCameraPosterGate.dylib`, not the build cache
+entry, so no cache cleanup removes a library launchd names. On an iOS 27.2 simulator a missing
+inserted library does not stop a launch: dyld skips it.
 
 The gate (`CameraPosterGate.c`) links only libSystem because every new process loads it. It loads
-the poster library only into a process that meets three conditions. Its executable path contains
-`.app/` (apps and app extensions). It has AVFoundation loaded. It has a poster source: the
-per-launch variables, or a readable config file. Other processes are unchanged.
+the poster library only into a process that meets three conditions. Its executable is a
+user-installed app or extension, under the device's `data/Containers/Bundle/Application/`.
+It has AVFoundation loaded. It has a poster source: the per-launch variables, or a readable
+config file. System apps and daemons under the runtime root, SpringBoard included, never load
+the poster.
 
 The config file holds `{"path": …}` for an image or `{"qr": …}` for a QR. The poster library
 reads it when the process starts if neither per-launch variable is set. The registry mirrors
 each record into this file (`DeviceConfigMirroringIosCameraPosterRegistry`): a set writes it
-atomically, and every clear removes it. A new poster, or a clear, therefore reaches the next
-launch of each app without another launchd change. The launchd variables last until the
-simulator shuts down; with no config file the gate does nothing. Daemon startup removes the
-whole `devices` directory, because the previous daemon's posters died with its registry.
+atomically, and every clear removes it at once. A new poster therefore reaches the next launch
+of each app without another launchd change.
+
+### Undo
+
+Each activation is recorded in `ios-camera-poster-active/devices/<udid>.json`
+(`IosCameraPosterActivationStore`): the gate path and the `DYLD_INSERT_LIBRARIES` value before
+activation. Every clear path (`setDeviceState` clear, `killDevice`, session release or rebind) goes
+through the registry, which then calls `deactivate`. It removes only the gate entry from
+`DYLD_INSERT_LIBRARIES`, keeping any other inserted library, or unsets the variable when nothing
+else is left. It then unsets both poster variables and drops the record. `setDeviceState` clear
+waits for this; the other paths finish it in the background. Daemon startup removes the
+`devices` config directory and undoes every recorded activation, because the previous daemon's
+posters died with its registry.
+
+### Boots
+
+A boot resets the launchd environment. After every boot AutoMobile verifies (`SimCtlBoot`
+notifies `simulatorBootHooks`), the daemon re-activates a poster the registry still holds, or
+undoes a stale record.
+
+A simulator booted with `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES` holds that value in launchd_sim's
+own environment. `launchctl getenv` does not show it, and launchd keeps it over a later
+`launchctl setenv` (verified on iOS 27.2). Activation reads it with `ps -E` on launchd_sim
+(`SimulatorBootEnvironment`). When it names any library other than the gate, activation fails.
 
 `setDeviceState` and `startDevice` report `deviceWide: true` when activation succeeded. A
 failure is logged, the poster stays recorded for `launchApp`, and the result carries
-`deviceWide: false` with a warning that only `launchApp` applies it. Activation never runs on
-clear. A caller that injects its own dylib provider (a test fake) gets activation only by also
-injecting an activator.
+`deviceWide: false` with a warning that only `launchApp` applies it, and why. A failed
+re-activation after a boot is logged. A caller that injects its own dylib provider (a test fake)
+gets activation only by also injecting an activator.
 
 ## Injected camera
 

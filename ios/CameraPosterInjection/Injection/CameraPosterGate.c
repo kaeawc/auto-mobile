@@ -1,8 +1,9 @@
-// Boot-environment gate for the camera poster (#19047). A simulator booted with this library in
-// DYLD_INSERT_LIBRARIES loads it into every process launchd_sim starts, so it links nothing but
-// libSystem and does nothing unless the process is an app (or app extension) that already loaded
-// AVFoundation and a poster source is configured. Only then does it load the poster library
-// that AM_CAMERA_POSTER_DYLIB names.
+// Launchd-environment gate for the camera poster (#19047). With this library in the simulator's
+// DYLD_INSERT_LIBRARIES every process launchd_sim starts loads it, so it links nothing but
+// libSystem and does nothing unless the process is a user-installed app (or one of its
+// extensions) that already loaded AVFoundation and a poster source is configured. Only then does
+// it load the poster library that AM_CAMERA_POSTER_DYLIB names. System apps and daemons
+// (SpringBoard, Camera, anything under the runtime root) never load the poster.
 #include <dlfcn.h>
 #include <limits.h>
 #include <mach-o/dyld.h>
@@ -11,10 +12,13 @@
 #include <string.h>
 #include <unistd.h>
 
-static int AMIsAppProcess(void) {
+// Installed apps live in the device's data/Containers/Bundle/Application/<UUID>/<Name>.app; system
+// apps live under the runtime root (/Applications, /System, /usr), which never contains that path.
+static int AMIsUserAppProcess(void) {
     char path[PATH_MAX];
     uint32_t size = sizeof(path);
-    return _NSGetExecutablePath(path, &size) == 0 && strstr(path, ".app/") != NULL;
+    if (_NSGetExecutablePath(path, &size) != 0) return 0;
+    return strstr(path, "/data/Containers/Bundle/Application/") != NULL && strstr(path, ".app/") != NULL;
 }
 
 static int AMHasAVFoundation(void) {
@@ -34,7 +38,7 @@ static int AMHasPosterSource(void) {
 }
 
 __attribute__((constructor)) static void AMGate(void) {
-    if (!AMIsAppProcess() || !AMHasAVFoundation() || !AMHasPosterSource()) return;
+    if (!AMIsUserAppProcess() || !AMHasAVFoundation() || !AMHasPosterSource()) return;
     const char *library = getenv("AM_CAMERA_POSTER_DYLIB");
     if (!library || !*library) return;
     if (!dlopen(library, RTLD_NOW | RTLD_GLOBAL)) {

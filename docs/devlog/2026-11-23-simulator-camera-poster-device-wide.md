@@ -43,5 +43,13 @@ icons. After `setDeviceState cameraPoster clear`, the same tap showed no camera.
 - App extensions started through ExtensionKit are not covered. Covering them needs the
   boot-environment path, which can share one boot with other injected libraries because
   `DYLD_INSERT_LIBRARIES` takes a colon-separated list.
-- Every process on the simulator loads the gate until it shuts down. The gate does nothing
-  without a config file.
+- Every process on the simulator loads the gate until the poster is cleared. The gate does
+  nothing without a config file, and loads the poster only into user-installed apps.
+- Review of #19114 added the undo: every clear path, and the next daemon start, restore the
+  launchd environment from a recorded activation. The gate is inserted from a stable copy outside
+  the build cache.
+- A boot resets launchd's environment, so the poster is re-activated after every boot
+  AutoMobile verifies. A boot-time `DYLD_INSERT_LIBRARIES` (`simctl boot` with
+  `SIMCTL_CHILD_*`) lives in launchd_sim's own environment: `launchctl getenv` does not show it,
+  and launchd keeps it over `launchctl setenv`. Such a simulator reports `deviceWide: false`
+  until both libraries can share one boot environment.

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { DeviceConfigMirroringIosCameraPosterRegistry } from "../../../../src/features/utility/ios/DeviceConfigMirroringIosCameraPosterRegistry";
 import {
   IosCameraPosterDeviceConfig,
@@ -34,7 +34,7 @@ class FakeConfigFileSystem implements PosterConfigFileSystem {
   rmSync(path: string, options: { force: true; recursive?: boolean }): void {
     this.calls.push(`rm${options.recursive ? " -r" : ""} ${path}`);
     for (const file of [...this.files.keys()]) {
-      if (file === path || (options.recursive && file.startsWith(`${path}/`))) {
+      if (file === path || (options.recursive && file.startsWith(`${path}${sep}`))) {
         this.files.delete(file);
       }
     }
@@ -93,4 +93,25 @@ test("a config write failure still records the poster for per-launch injection",
   );
   expect(() => registry.set(udid, { kind: "image", path: "/p.png" })).not.toThrow();
   expect(registry.get(udid)).toEqual({ kind: "image", path: "/p.png" });
+});
+
+test("clear also restores the simulator's launchd environment, and a failure there never throws", async () => {
+  const { config } = setup();
+  const restored: string[] = [];
+  let fail = false;
+  const registry = new DeviceConfigMirroringIosCameraPosterRegistry(
+    new FakeIosCameraPosterRegistry(),
+    config,
+    async (id) => {
+      restored.push(id);
+      if (fail) {
+        throw new Error("launchctl refused");
+      }
+    },
+  );
+  registry.clear(udid);
+  fail = true;
+  expect(() => registry.clear(udid)).not.toThrow();
+  await Promise.resolve();
+  expect(restored).toEqual([udid, udid]);
 });

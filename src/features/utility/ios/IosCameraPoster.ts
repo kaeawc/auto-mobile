@@ -31,7 +31,7 @@ export interface IosCameraPosterDependencies {
   /** Preflighted when a poster is set, so a missing compiler or source fails here, not at launchApp. */
   dylibProvider?: IosCameraPosterDylibProvider;
   /** Turns the poster on for apps launched any way, not only by launchApp (#19047). */
-  deviceWide?: Pick<IosCameraPosterDeviceWide, "activate">;
+  deviceWide?: Pick<IosCameraPosterDeviceWide, "activate" | "deactivate">;
 }
 
 export async function writeIosCameraPoster(
@@ -53,6 +53,8 @@ export async function writeIosCameraPoster(
   try {
     if (input.mode === "clear") {
       registry.clear(device.deviceId);
+      // Awaited so the launchd environment is back to its pre-poster state when clear returns.
+      await deviceWideActivator(deps)?.deactivate(device.deviceId);
       return { ...base, warning: IOS_CAMERA_POSTER_RELAUNCH_WARNING };
     }
     const recordable = await recordablePosterPath(input, deps);
@@ -64,14 +66,15 @@ export async function writeIosCameraPoster(
       device.deviceId,
       input.mode === "image" ? { kind: "image", path } : { kind: "qr", text: input.text, path },
     );
-    const deviceWide = await activateDeviceWide(device.deviceId, deviceWideActivator(deps));
+    const failure = await activateDeviceWide(device.deviceId, deviceWideActivator(deps));
     return {
       ...base,
       path,
-      deviceWide,
-      warning: deviceWide
-        ? IOS_CAMERA_POSTER_RELAUNCH_WARNING
-        : IOS_CAMERA_POSTER_LAUNCH_ONLY_WARNING,
+      deviceWide: failure === undefined,
+      warning:
+        failure === undefined
+          ? IOS_CAMERA_POSTER_RELAUNCH_WARNING
+          : [IOS_CAMERA_POSTER_LAUNCH_ONLY_WARNING, failure].filter(Boolean).join(" "),
     };
   } catch (error) {
     logger.warn(`Failed to record iOS camera poster: ${errorMessage(error)}`, error);
@@ -85,24 +88,27 @@ export async function writeIosCameraPoster(
  */
 function deviceWideActivator(
   deps: IosCameraPosterDependencies,
-): Pick<IosCameraPosterDeviceWide, "activate"> | undefined {
+): Pick<IosCameraPosterDeviceWide, "activate" | "deactivate"> | undefined {
   return deps.deviceWide ?? (deps.dylibProvider ? undefined : defaultIosCameraPosterDeviceWide());
 }
 
-/** Per-launch injection still applies when this fails, so the poster stays recorded. */
+/**
+ * Per-launch injection still applies when this fails, so the poster stays recorded. Returns why
+ * it failed, or undefined once the poster is on device-wide.
+ */
 async function activateDeviceWide(
   udid: string,
   deviceWide: Pick<IosCameraPosterDeviceWide, "activate"> | undefined,
-): Promise<boolean> {
+): Promise<string | undefined> {
   if (!deviceWide) {
-    return false;
+    return "";
   }
   try {
     await deviceWide.activate(udid);
-    return true;
+    return undefined;
   } catch (error) {
     logger.warn(`Device-wide iOS camera poster failed on ${udid}: ${errorMessage(error)}`, error);
-    return false;
+    return errorMessage(error);
   }
 }
 

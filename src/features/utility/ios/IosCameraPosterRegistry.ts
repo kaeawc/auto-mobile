@@ -33,4 +33,9 @@ export const iosCameraPosterRegistry: IosCameraPosterRegistry =
   new DeviceConfigMirroringIosCameraPosterRegistry(
     new InMemoryIosCameraPosterRegistry(),
     iosCameraPosterDeviceConfig,
+    // Lazy, so importing the registry starts no simctl client.
+    async (udid) => {
+      const { defaultIosCameraPosterDeviceWide } = await import("./IosCameraPosterDeviceWide");
+      await defaultIosCameraPosterDeviceWide().deactivate(udid);
+    },
   );

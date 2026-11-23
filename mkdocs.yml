@@ -285,6 +285,7 @@ nav:
           - "Apple simulator sessions": using/device-ownership-apple.md
           - "Listing device images": using/device-images.md
           - "Reaching a host server": using/port-reverse.md
+          - "iOS Simulator network activity": using/ios-network-activity.md
       - "CI and shared hosts":
           - "Managed Macs and CI runners": using/managed-macs.md
           - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
@@ -407,6 +408,7 @@ nav:
           - "iOS Simulator camera poster": how-it-works/plat/ios/simulator-camera-poster.md
           - "iOS Simulator Dynamic Island and backlight": how-it-works/plat/ios/simulator-island-and-backlight.md
           - "iOS Simulator framebuffer capture": how-it-works/plat/ios/simulator-framebuffer-capture.md
+          - "iOS Simulator network activity": how-it-works/plat/ios/simulator-network-activity.md
           - "iOS keep-booted reset": how-it-works/ios-keep-booted-reset.md
           - "iOS CarPlay template snapshots": how-it-works/plat/ios/carplay-template-snapshot.md
           - "iOS CarPlay prototypes": how-it-works/plat/ios/carplay-prototypes.md
@@ -513,6 +515,7 @@ nav:
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-23: Read Simulator network activity with host tools": devlog/2026-11-23-simulator-network-activity-host-tools.md
       - "2026-11-23: Docs readability in the pre-push shell lane": devlog/2026-11-23-docs-readability-prepush.md
       - "2026-11-23: Simulator Dynamic Island and backlight through defaults and JXA": devlog/2026-11-23-simulator-island-and-backlight.md
       - "2026-11-23: Capture Simulator video from the device framebuffer": devlog/2026-11-23-simulator-framebuffer-capture.md

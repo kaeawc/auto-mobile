@@ -4,6 +4,7 @@ import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { chargeMotionNode } from "./prototypeMotionBudget";
 import { PrototypeScreenBudget, prototypeScreenBudgetMessage } from "./prototypeScreenBudget";
 import { effectUses } from "./prototypeEffects";
+import { imageUses } from "./prototypeImageUses";
 import { prototypeNodeChildren } from "./prototypeNodeChildren";
 import { PrototypeRepeatData, projectPrototypeDataItem } from "./prototypeData";
 import contract from "../../../schemas/prototype-spec-contract.json";
@@ -375,7 +376,12 @@ function scopeOf(node: Raw, path: string, data: PrototypeRepeatData): Scope | un
     return undefined;
   }
   const source = record(repeat.items);
-  const rawItems = typeof source?.path === "string" ? data.source(source.path) : undefined;
+  const rawItems =
+    typeof source?.path === "string"
+      ? data.source(source.path)
+      : typeof source?.derived === "string"
+        ? data.derived[source.derived]
+        : undefined;
   return {
     sourceItems: Array.isArray(rawItems) ? rawItems : undefined,
     path,
@@ -482,7 +488,7 @@ function innerScope(node: Raw, path: string, outer: Scope, index: number): Scope
     binding: { alias: String(repeat.as), index: true, outerAlias: outer.binding.alias },
     outerItem,
     pathBound: "field",
-    items: derivedValidationItems(rows, repeat.derive).map((row) => ({
+    items: derivedValidationItems(rows.map(projectPrototypeDataItem), repeat.derive).map((row) => ({
       ...row,
       ...fields,
       $outerIndex: index,
@@ -712,47 +718,6 @@ interface Budget {
   videoNodes: number;
 }
 
-/**
- * What one image slot costs against `MAX_PROTOTYPE_IMAGES`: an asset id costs 1, and a
- * `{light, dark}` pair costs 2 when the two modes name different assets (#11218). Absent is 0.
- */
-export function imageSlotUses(value: unknown): number {
-  if (typeof value === "string") {
-    return 1;
-  }
-  const pair = record(value);
-  if (!pair) {
-    return 0;
-  }
-  // A data-bound slot names a device media item, not an uploaded asset: it costs no image budget.
-  if (typeof pair.data === "string") {
-    return 0;
-  }
-  return typeof pair.light === "string" && typeof pair.dark === "string" && pair.light !== pair.dark
-    ? 2
-    : 1;
-}
-
-/** The node's own image slots: an `image` costs at least 1, a `videoPlayer` its `poster`. */
-export function nodeImageUses(node: Raw): number {
-  if (node.type === "image") {
-    return (
-      (node.url === undefined ? Math.max(1, imageSlotUses(node.asset)) : 0) +
-      imageSlotUses(record(node.placeholder)?.asset) +
-      imageSlotUses(record(node.error)?.asset)
-    );
-  }
-  return node.type === "videoPlayer" ? imageSlotUses(node.poster) : 0;
-}
-
-function imageUses(node: Raw): number {
-  if (node.type === "image" || node.type === "videoPlayer") {
-    return nodeImageUses(node);
-  }
-  const items = Array.isArray(node.items) ? (node.items as unknown[]) : [];
-  return items.reduce<number>((sum, item) => sum + imageSlotUses(record(item)?.image), 0);
-}
-
 /** Charges one expanded node against every budget; returns the first limit it breaks. */
 function chargeExpandedNode(
   node: Raw,
@@ -791,32 +756,57 @@ function expansionScope(
     : scopeOf(node, path, data);
 }
 
+function expansionInstanceScope(
+  scope: Scope | undefined,
+  outer: Scope | undefined,
+  instance: number,
+): Scope | undefined {
+  return scope
+    ? {
+        ...scope,
+        items: scope.items.slice(instance, instance + 1),
+        sourceItems: (scope.sourceItems ?? scope.items).slice(instance, instance + 1),
+      }
+    : outer;
+}
+
 /** Walks the expanded tree; an overflow inside a template is reported at its `repeat`. */
 function expandedErrors(
   node: Raw,
   path: string,
   budget: Budget,
-  { data, repeatPath, outer }: { data: PrototypeRepeatData; repeatPath?: string; outer?: Scope },
+  {
+    data,
+    repeatPath,
+    outer,
+    templateCounted = false,
+  }: {
+    data: PrototypeRepeatData;
+    repeatPath?: string;
+    outer?: Scope;
+    templateCounted?: boolean;
+  },
 ): RepeatError | undefined {
-  const overflow = chargeExpandedNode(node, path, budget, repeatPath ?? path);
+  const overflow = templateCounted
+    ? undefined
+    : chargeExpandedNode(node, path, budget, repeatPath ?? path);
   if (overflow) {
     return overflow;
   }
   const scope = expansionScope(node, path, { data, outer });
-  const instances = scope && node.type !== "list" ? scope.items.length : 1;
+  const instances = scope
+    ? node.type === "list"
+      ? Math.max(1, scope.items.length)
+      : scope.items.length
+    : 1;
   const nestedPath = scope ? `${path}.repeat` : repeatPath;
   for (let instance = 0; instance < instances; instance++) {
-    const single = scope
-      ? {
-          ...scope,
-          items: scope.items.slice(instance, instance + 1),
-          sourceItems: (scope.sourceItems ?? scope.items).slice(instance, instance + 1),
-        }
-      : outer;
+    const single = expansionInstanceScope(scope, outer, instance);
     const error = expandedChildErrors(node, path, budget, {
       data,
       repeatPath: nestedPath,
       outer: single,
+      templateCounted: node.type === "list" ? instance > 0 : scope ? false : templateCounted,
     });
     if (error) {
       return error;
@@ -830,13 +820,25 @@ function expandedChildErrors(
   node: Raw,
   path: string,
   budget: Budget,
-  options: { data: PrototypeRepeatData; repeatPath?: string; outer?: Scope },
+  options: {
+    data: PrototypeRepeatData;
+    repeatPath?: string;
+    outer?: Scope;
+    templateCounted?: boolean;
+  },
 ): RepeatError | undefined {
   const stack = record(node.screens) !== undefined;
   if (stack) {
     budget.screens.enterStack();
   }
   for (const child of childrenOf(node, path)) {
+    if (
+      node.type === "list" &&
+      options.templateCounted &&
+      !child.path.startsWith(`${path}.children[`)
+    ) {
+      continue;
+    }
     const screen = stack && child.path.startsWith(`${path}.screens[`);
     if (screen) {
       budget.screens.enterScreen();
@@ -898,7 +900,9 @@ function collectScopes(
   const field = record(record(node.repeat)?.items)?.field;
   const own =
     typeof field === "string" && outer
-      ? outer.items.map((_item, index) => innerScope(node, path, outer, index))
+      ? Array.from({ length: Math.max(1, outer.items.length) }, (_item, index) =>
+          innerScope(node, path, outer, index),
+        )
       : [scopeOf(node, path, data)];
   for (const scope of own) {
     if (scope) {

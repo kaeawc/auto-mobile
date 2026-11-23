@@ -125,7 +125,7 @@ final class PrototypePlatformDriver {
         calls[id] = Task { [weak self] in
             guard !Task.isCancelled else { return }
             let result: PlatformCallResult
-            let name = String(job.call.call.split(separator: ".").first ?? "")
+            let name = job.call.moduleName
             let resolved: (any PrototypePlatformModule)? = name == "realtime" ? realtime : registry.modules[name]
             if let module = resolved {
                 switch module.availability() {

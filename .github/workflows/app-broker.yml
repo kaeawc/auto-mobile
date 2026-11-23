@@ -11,8 +11,9 @@
 # stays for a manual run from the Actions tab. Both are checked the same way.
 # Callers: the actors listed in the APP_BROKER_ACTORS repository variable (comma-separated logins),
 # else the repository owner.
-# Install or update: `app-broker.sh workflow [--ref SHA]` prints this file with the action pinned to
-# a kaeawc/waaagh commit; commit it as .github/workflows/app-broker.yml in the target repository.
+# Install: `app-broker.sh workflow` prints this file with the action pinned to the commit of the
+# newest kaeawc/waaagh release tag (`@<sha> # vX.Y.Z`); commit it as .github/workflows/app-broker.yml
+# in the target repository. Update: the repository's Dependabot (github-actions) bumps the pin.
 name: app-broker
 
 on:
@@ -66,7 +67,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Act as the App
-        uses: kaeawc/waaagh/actions/app-broker@61b6bbf54ec4361f54094d5370363e6a4911d61d # main
+        uses: kaeawc/waaagh/actions/app-broker@805b65be6d0ca4435eff23247f7805ca8cbf4478 # v0.1.0
         with:
           app-id: ${{ secrets.GH_APP_ID }}
           private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}

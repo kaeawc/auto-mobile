@@ -21,12 +21,16 @@ import { logger } from "../utils/logger";
 import { shellQuote } from "../utils/shellQuote";
 import { ActionableError, BootedDevice, ExecResult } from "../models";
 import { Timer } from "../utils/SystemTimer";
+import { exponentialBackoff } from "../utils/Backoff";
 import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT, CTRL_PROXY_PACKAGE } from "./constants";
 import { CtrlProxyInspectionError } from "./CtrlProxyInspectionError";
 
-// API 36 can take about 6 seconds to bind CtrlProxy after a force-stop; allow
-// another 2 seconds for scheduler and adb polling delay before giving up.
-export const REBIND_BIND_WAIT_BUDGET_MS = 8_000;
+// API 36 takes about 6 seconds to bind CtrlProxy after a force-stop, and a slow
+// device (software-emulated CPU, API 24) took 15-25 seconds from onServiceConnected to a
+// listening server (#18981). The wait ends early on bound, crashed or absent, so a long
+// budget only costs time when the framework keeps reporting the service as starting;
+// escalating to a force-stop before it ends restarts a service that is still booting.
+export const REBIND_BIND_WAIT_BUDGET_MS = 45_000;
 /**
  * Bound on each device write in the rebind's mutating section (remove, force-stop,
  * re-add, restore). Those writes run under a private signal because the caller's
@@ -64,7 +68,11 @@ export class AndroidCtrlProxyRebind {
   private static readonly REBIND_FORCE_STOP_SETTLE_MS = 100;
 
   // Poll the framework while it binds the new process.
-  private static readonly REBIND_HEALTH_POLL_MS = 200;
+  private static readonly REBIND_HEALTH_POLL = exponentialBackoff({
+    initialDelayMs: 200,
+    multiplier: 2,
+    maxDelayMs: 2_000,
+  });
 
   private static readonly REBIND_BIND_GRACE_MS = REBIND_BIND_WAIT_BUDGET_MS;
 
@@ -120,7 +128,11 @@ export class AndroidCtrlProxyRebind {
       throw new ActionableError(output);
     }
     // `dumpsys accessibility` lists every user's state in id order; read the setup user's, not user 0's.
-    const diagnostic = AndroidCtrlProxyRebind.userStateBlock(output, await this.host.setupUser());
+    const user = await this.host.setupUser();
+    const diagnostic = AndroidCtrlProxyRebind.userStateBlock(output, user);
+    if (!AndroidCtrlProxyRebind.LABELLED_SECTIONS.test(diagnostic)) {
+      return this.legacyAccessibilityServiceState(diagnostic, user);
+    }
 
     const boundServices = AndroidCtrlProxyRebind.accessibilityServiceSection(
       diagnostic,
@@ -156,6 +168,37 @@ export class AndroidCtrlProxyRebind {
             ? "bound"
             : "unbound";
     logger.debug(`[CTRL_PROXY] Accessibility service binding status: ${state}`);
+    return state;
+  }
+
+  // API 28+ dumps print labelled "Enabled services" / "Bound services" sections.
+  private static readonly LABELLED_SECTIONS = /^[\t ]*Enabled services:/m;
+
+  /**
+   * API 27 and older print only `services:{...}` (the bound services) in each user
+   * state, with no enabled, binding or crashed sections (#18981). Read enablement
+   * from the secure setting instead. A configured service that is not bound yet is
+   * reported as binding: the framework is starting it, and a slow cold start takes
+   * tens of seconds before it binds. The binding grace and the post-rebind wait
+   * bound that, so a service that never binds is still rebound.
+   */
+  private async legacyAccessibilityServiceState(
+    diagnostic: string,
+    user: number | undefined,
+  ): Promise<AccessibilityServiceState> {
+    const isBound = AndroidCtrlProxyRebind.isCtrlProxyBound(
+      AndroidCtrlProxyRebind.accessibilityServiceSection(diagnostic, "services"),
+    );
+    const result = await this.host.adb.executeCommand(
+      settingsCommand(user, "get secure enabled_accessibility_services"),
+    );
+    const isEnabled = AndroidCtrlProxyRebind.accessibilityServices(result.stdout).includes(
+      CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT,
+    );
+    const isBinding = isEnabled && !isBound;
+    this.recordBindingObservation(isBinding);
+    const state: AccessibilityServiceState = !isEnabled ? "absent" : isBound ? "bound" : "binding";
+    logger.debug(`[CTRL_PROXY] Accessibility service binding status (legacy dumpsys): ${state}`);
     return state;
   }
 
@@ -564,7 +607,7 @@ export class AndroidCtrlProxyRebind {
 
   private async waitForHealthyAfterRebind(): Promise<boolean> {
     const startedAt = this.host.timer.now();
-    for (;;) {
+    for (let attempt = 1; ; attempt++) {
       const state = await this.accessibilityServiceState();
       if (state === "bound") {
         return true;
@@ -577,7 +620,7 @@ export class AndroidCtrlProxyRebind {
         return false;
       }
       await this.host.timer.sleep(
-        Math.min(AndroidCtrlProxyRebind.REBIND_HEALTH_POLL_MS, remainingMs),
+        Math.min(AndroidCtrlProxyRebind.REBIND_HEALTH_POLL.delayForAttempt(attempt), remainingMs),
       );
     }
   }

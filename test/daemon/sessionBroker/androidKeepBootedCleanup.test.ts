@@ -20,7 +20,11 @@ import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeDeviceMutationJournal } from "../../fakes/FakeDeviceMutationJournal";
 import { ANDROID_RESET_DEVICE } from "./fixtures/androidReset";
-import { androidBaselineRig, androidPackageDump } from "./fixtures/androidMutationBaseline";
+import {
+  NIGHT_MODE_UNSUPPORTED_RESULTS,
+  androidBaselineRig,
+  androidPackageDump,
+} from "./fixtures/androidMutationBaseline";
 import type { AndroidResetStrategy } from "../../../src/daemon/sessionBroker/androidBaselineReset";
 
 const SESSION = { resourceId: "resource-a", sessionId: "session-a" };
@@ -307,6 +311,28 @@ describe("Android unconditional keep-booted cleaning", () => {
       "Android cleaning did not restore live display state: display:density, display:night-mode",
     );
   });
+
+  test.each(NIGHT_MODE_UNSUPPORTED_RESULTS)(
+    "skips the night-mode read and restore on Android before 8 (%s)",
+    async (_shape, result) => {
+      const { adb } = androidBaselineRig();
+      adb.setCommandResponse("shell cmd uimode night", result);
+      const context = {
+        scope: SCOPE,
+        signal: new AbortController().signal,
+        assertOwned: async () => {},
+      };
+      const port = new AndroidDeviceMutationResetPort(adb);
+      const baseline = await port.capture(context);
+      adb.clearHistory();
+      await port.cleanBaseline(baseline, context);
+      const nightCommands = adb
+        .getExecutedCommands()
+        .filter((command) => command.startsWith("shell cmd uimode night"));
+      expect(nightCommands.length).toBeGreaterThan(0);
+      expect(new Set(nightCommands)).toEqual(new Set(["shell cmd uimode night"]));
+    },
+  );
 
   test("matching live display state needs no reversions", async () => {
     const { adb, reverted, clean } = await displayRig();

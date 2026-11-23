@@ -107,3 +107,13 @@ export function parseAppliedDisplayRotation(
   }
   return rotations.get(options.displayId ?? 0) ?? null;
 }
+
+/**
+ * Parse `SurfaceOrientation:` from `dumpsys input`, the default display's applied rotation on
+ * API 24-27 images whose `dumpsys window` carries no `mRotation=` (issue #19063). Returns the
+ * first value, which is the default display's viewport.
+ */
+export function parseInputSurfaceOrientation(dumpsysInputOutput: string): number | null {
+  const match = dumpsysInputOutput.match(/^\s*SurfaceOrientation:\s*([0-3])\s*$/m);
+  return match ? Number(match[1]) : null;
+}

@@ -1,0 +1,45 @@
+MEDIA SESSION SERVICE (dumpsys media_session)
+
+3 sessions listeners.
+Global priority session is com.android.server.telecom/HeadsetMediaButton (userId=0)
+  HeadsetMediaButton com.android.server.telecom/HeadsetMediaButton (userId=0)
+    ownerPid=533, ownerUid=1000, userId=0
+    package=com.android.server.telecom
+    launchIntent=null
+    mediaButtonReceiver=null
+    active=false
+    flags=65537
+    rating type=0
+    controllers: 0
+    state=null
+    audioAttrs=AudioAttributes: usage=USAGE_VOICE_COMMUNICATION content=CONTENT_TYPE_SPEECH flags=0x800 tags= bundle=null
+    volumeType=1, controlType=2, max=0, current=0
+    metadata: null
+    queueTitle=null, size=0
+User Records:
+Record for full_user=0
+  Volume key long-press listener: null
+  Volume key long-press listener package: 
+  Media key listener: null
+  Media key listener package: 
+  OnMediaKeyEventDispatchedListener: added 0 listener(s)
+  OnMediaKeyEventSessionChangedListener: added 1 listener(s)
+    from com.android.bluetooth
+  Last MediaButtonReceiver: null
+  Media button session is null
+  Sessions Stack - have 1 sessions:
+    AutoMobileTvFixture dev.jasonpearson.automobile.tvfixture/AutoMobileTvFixture (userId=0)
+      ownerPid=4889, ownerUid=10167, userId=0
+      package=dev.jasonpearson.automobile.tvfixture
+      launchIntent=null
+      mediaButtonReceiver=null
+      active=true
+      flags=0
+      rating type=0
+      controllers: 1
+      state=PlaybackState {state=2, position=0, buffered position=0, speed=0.0, updated=147616, actions=639, custom actions=[], active item id=-1, error=null}
+      audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_UNKNOWN flags=0x800 tags= bundle=null
+      volumeType=1, controlType=2, max=0, current=0
+      metadata: size=3, description=Opening Titles, null, null
+      queueTitle=null, size=0
+Audio playback (lastly played comes first)

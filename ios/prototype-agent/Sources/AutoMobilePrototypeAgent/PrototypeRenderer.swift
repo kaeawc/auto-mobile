@@ -430,7 +430,7 @@
                 PrototypeGridLayout(
                     columns: node.columns ?? .fixed(1), spacing: style?.spacing ?? 0, runSpacing: style?.runSpacing
                 ) {
-                    ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+                    ForEach(node.drawnChildren(holds: model.holds), id: \.identity) { entry in
                         NodeView(node: entry.node, model: model, inStackSlot: true)
                             .layoutValue(key: PrototypeGridSpanKey.self, value: entry.node.span ?? 1)
                     }
@@ -552,7 +552,7 @@
         }
 
         @ViewBuilder private var children: some View {
-            ForEach(node.drawnChildren(holds: model.holds, stacks: model.stacks), id: \.offset) { entry in
+            ForEach(node.drawnChildren(holds: model.holds, stacks: model.stacks), id: \.identity) { entry in
                 NodeView(node: entry.node, model: model, inStackSlot: true)
             }
         }
@@ -571,7 +571,7 @@
         private func weightedStack(axis: PrototypeAxis) -> some View {
             // Button priority applies to direct children only, not buttons wrapped in boxes.
             PrototypeWeightedStackLayout(axis: axis, spacing: style?.spacing ?? 0) {
-                ForEach(node.drawnChildren(holds: model.holds, stacks: model.stacks), id: \.offset) { entry in
+                ForEach(node.drawnChildren(holds: model.holds, stacks: model.stacks), id: \.identity) { entry in
                     NodeView(node: entry.node, model: model, inStackSlot: true, stackAxis: axis)
                         .layoutValue(key: PrototypeWeightKey.self, value: weight(of: entry.node))
                         .layoutPriority(axis == .horizontal && entry.node.type == "button" ? 1 : 0)
@@ -588,7 +588,7 @@
             let mode = style?.arrangement ?? "start"
             let outer = mode == "spaceAround" || mode == "spaceEvenly"
             if outer { Spacer(minLength: 0).layoutValue(key: PrototypeWeightKey.self, value: 1) }
-            ForEach(Array(nodes.enumerated()), id: \.element.offset) { index, entry in
+            ForEach(Array(nodes.enumerated()), id: \.element.identity) { index, entry in
                 if index > 0, mode.hasPrefix("space") {
                     Spacer(minLength: 0).layoutValue(key: PrototypeWeightKey.self, value: 1)
                 }
@@ -802,7 +802,11 @@
         }
 
         @ViewBuilder private var imageView: some View {
-            if let id = palette.asset(node.asset), let image = model.assets[id] {
+            if node.url != nil, node.via == "host" {
+                EmptyView()
+            } else if let url = node.url {
+                PrototypeRemoteImageView(node: node, model: model, url: interpolated(url))
+            } else if let id = palette.asset(node.asset), let image = model.assets[id] {
                 let resizable = Image(uiImage: image).resizable()
                 switch node.contentScale {
                 case "crop": resizable.aspectRatio(contentMode: .fill).clipped()
@@ -1828,7 +1832,7 @@
         var body: some View {
             ScrollView(.horizontal) {
                 HStack(spacing: CGFloat(PrototypeCarousel.spacing(node))) {
-                    ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+                    ForEach(node.drawnChildren(holds: model.holds), id: \.identity) { entry in
                         NodeView(node: entry.node, model: model)
                             .frame(width: CGFloat(PrototypeCarousel.itemWidth(node)))
                     }

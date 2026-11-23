@@ -39,8 +39,10 @@ import { parsePrototypeHiddenReason } from "../../features/prototype/prototypeHi
 import { PROTOTYPE_ZOOM_RENDERING_GATE } from "../../features/prototype/prototypeZoomTransition";
 import {
   prototypePlatformNotes,
+  prototypeRuntimeNotes,
   prototypeStringsFallbackNotes,
 } from "../../features/prototype/prototypePlatformNotes";
+import { parsePrototypePlatformReport } from "../../features/prototype/prototypePlatformReport";
 import { type PrototypeSpec } from "../../features/prototype/prototypeSpec";
 import { recordPrototypeTextShow } from "../../features/prototype/prototypeTextTarget";
 import { type PrototypeWindowChrome } from "../../features/prototype/prototypeWindowChrome";
@@ -169,7 +171,12 @@ export async function performPrototypeAction(
             ? target.android.supportsCommand(PROTOTYPE_PATCH_CAPABILITY)
             : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
         specRefusal: async (spec) =>
-          (await specCapabilityRefusal(target, spec, signal, { env: dependencies.env }))?.error ??
+          (
+            await specCapabilityRefusal(target, spec, signal, {
+              env: dependencies.env,
+              platform: device.platform === "android" ? "android" : "ios",
+            })
+          )?.error ??
           (await cachedPrototypeShaderAssetProblem(
             spec,
             device.deviceId,
@@ -402,7 +409,10 @@ async function showAdviceOutput(
   {
     result,
     signal,
-  }: { result: Pick<PrototypeResult, "success" | "screenRound">; signal?: AbortSignal },
+  }: {
+    result: Pick<PrototypeResult, "success" | "screenRound" | "platformRuntime">;
+    signal?: AbortSignal;
+  },
 ): Promise<
   Pick<
     PrototypeOutput,
@@ -417,7 +427,7 @@ async function showAdviceOutput(
 > {
   const { success, screenRound: deviceScreenRound } = result;
   return {
-    ...(await platformNotesOutput(args, device, dependencies.target, success)),
+    ...(await platformNotesOutput(args, device, dependencies.target, result)),
     ...(args.action === "show" && success ? prototypeAccessibilityOutput(args.spec) : {}),
     ...(args.action === "show" && success ? prototypePlaceholderOutput(args.spec) : {}),
     ...(await prototypeScreenShapeOutput(
@@ -437,9 +447,9 @@ async function platformNotesOutput(
   args: z.infer<typeof prototypeSchema>,
   device: BootedDevice,
   target: PrototypeTarget,
-  success: boolean,
+  result: Pick<PrototypeResult, "success" | "platformRuntime">,
 ): Promise<Pick<PrototypeOutput, "platformNotes">> {
-  if (args.action !== "show" || !success) {
+  if (args.action !== "show" || !result.success) {
     return {};
   }
   const androidZoom =
@@ -455,30 +465,46 @@ async function platformNotesOutput(
         : target.ios?.supportsCapability(capability) === true,
     deviceOsMajor(device),
   );
+  const report = parsePrototypePlatformReport(result.platformRuntime);
+  if (report) {
+    notes.push(...prototypeRuntimeNotes(device.platform === "ios" ? "ios" : "android", report));
+  }
   notes.push(...prototypeStringsFallbackNotes(args.spec as PrototypeSpec, args.locale));
-  const gestures = device.platform === "ios" ? prototypeGestureFields(args.spec) : [];
-  if (gestures.length > 0) {
-    notes.push({
-      platform: "ios",
-      construct: "node.gestures",
-      effect: "substituted",
-      paths: gestures.slice(0, 20),
-      ...(gestures.length > 20 ? { total: gestures.length } : {}),
-      detail: [
-        ...(gestures.some((path) => path.endsWith(".onLongPress"))
-          ? [
-              "Long-press uses the platform default threshold (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).",
-            ]
-          : []),
-        ...(gestures.some((path) => path.endsWith(".onDoubleTap"))
-          ? [
-              "The double-tap window is the system's. With onDoubleTap, onTap fires only after that window elapses.",
-            ]
-          : []),
-      ].join(" "),
-    });
+  if (device.platform === "ios") {
+    const gestureNote = iosGestureNote(args.spec);
+    if (gestureNote) {
+      notes.push(gestureNote);
+    }
   }
   return notes.length > 0 ? { platformNotes: notes } : {};
+}
+
+function iosGestureNote(
+  spec: unknown,
+): NonNullable<PrototypeOutput["platformNotes"]>[number] | undefined {
+  const gestures = prototypeGestureFields(spec);
+  if (gestures.length === 0) {
+    return undefined;
+  }
+  return {
+    platform: "ios",
+    construct: "node.gestures",
+    effect: "substituted",
+    paths: gestures.slice(0, 20),
+    ...(gestures.length > 20 ? { total: gestures.length } : {}),
+    detail: [
+      ...(gestures.some((path) => path.endsWith(".onLongPress"))
+        ? [
+            "Long-press uses the platform default threshold (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).",
+          ]
+        : []),
+      ...(gestures.some((path) => path.endsWith(".onDoubleTap"))
+        ? [
+            "The double-tap window is the system's. With onDoubleTap, onTap fires only after that window elapses.",
+          ]
+        : []),
+    ].join(" "),
+  };
 }
 
 /**

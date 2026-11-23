@@ -321,4 +321,89 @@ final class PrototypeLazyListTests: XCTestCase {
         XCTAssertFalse(result.wroteInto)
         XCTAssertEqual(result.meta.error?.message, PrototypeRequestOutcome.noRoomForMeta)
     }
+
+    private func rowText(_ json: String, index: Int) throws -> String? {
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(json.utf8))
+        let row = try XCTUnwrap(PrototypeLazyList.resolvedRow(node: spec.root, data: spec.data, index: index))
+        return row.json.objectFields?["text"]?.stringValue
+    }
+
+    private func lazySpec(text: String, data: String) -> String {
+        #"{"id":"rb","window":{"placement":{"type":"fullscreen"}},"data":"# + data
+            +
+            #","root":{"type":"list","repeat":{"items":{"path":"/posts"},"as":"row","key":"id"},"children":[{"type":"text","text":""#
+            + text + #""}]}}"#
+    }
+
+    func testLazyTextPreservesPlatformSnapshotWhileDeferringData() throws {
+        let json = lazySpec(
+            text: "{platform:/name}: {data:/rows/{index}/name}",
+            data: #"{"rows":[{"name":"Zero"},{"name":"One"}],"posts":[{"id":"a"},{"id":"b"}]}"#
+        )
+        let authored = try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
+        let root = try XCTUnwrap(authored.objectFields?["root"])
+        let resolved = PrototypeDataResolver.resolveRoot(root, data: nil, platform: ["name": .string("iOS")])
+        guard case let .array(children)? = resolved.objectFields?["children"] else {
+            return XCTFail("Expected a lazy row template")
+        }
+        XCTAssertEqual(
+            children.first?.objectFields?["text"],
+            .string("iOS: {data:/rows/{index}/name}")
+        )
+        let node = try JSONDecoder().decode(PrototypeNode.self, from: JSONEncoder().encode(resolved))
+        let row = try XCTUnwrap(PrototypeLazyList.resolvedRow(
+            node: node, data: authored.objectFields?["data"]?.objectFields, index: 1
+        ))
+        XCTAssertEqual(row.json.objectFields?["text"], .string("iOS: One"))
+    }
+
+    func testRowValuesLookingLikeDataOrPlatformTokensStayLiteral() throws {
+        let json = lazySpec(
+            text: "{row.name}",
+            data: #"{"other":"Expanded","posts":[{"id":"a","name":"{data:/other}"},{"id":"b","name":"{platform:/name}"}]}"#
+        )
+        XCTAssertEqual(try rowText(json, index: 0), "{data:/other}")
+        XCTAssertEqual(try rowText(json, index: 1), "{platform:/name}")
+    }
+
+    func testPlatformTextSurvivesTheFullBuildPathIntoLazyRows() throws {
+        let json = lazySpec(
+            text: "Device {platform:/device/widthClass} {row.id}",
+            data: #"{"posts":[{"id":"a"}]}"#
+        )
+        let authored = try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
+        let root = try PrototypeSpec.buildRoot(
+            XCTUnwrap(authored.objectFields?["root"]), data: authored.objectFields?["data"]?.objectFields,
+            menuState: [:], strings: nil, locales: [],
+            platform: ["device": .object(["widthClass": .string("compact")])]
+        )
+        let row = try XCTUnwrap(PrototypeLazyList.resolvedRow(
+            node: root, data: authored.objectFields?["data"]?.objectFields, index: 0
+        ))
+        XCTAssertEqual(row.json.objectFields?["text"], .string("Device compact a"))
+    }
+
+    func testRowIndexBindsInsideDataPointerBeforeResolving() throws {
+        let json = lazySpec(
+            text: "{data:/rows/{index}/name}",
+            data: #"{"rows":[{"name":"Zero"},{"name":"One"}],"posts":[{"id":"a"},{"id":"b"}]}"#
+        )
+        XCTAssertEqual(try rowText(json, index: 1), "One")
+    }
+
+    func testRowFieldBindsInsideDataPointerBeforeResolving() throws {
+        let json = lazySpec(
+            text: "{data:/byId/{row.id}/title}",
+            data: #"{"byId":{"a":{"title":"Alpha"},"b":{"title":"Beta"}},"posts":[{"id":"a"},{"id":"b"}]}"#
+        )
+        XCTAssertEqual(try rowText(json, index: 1), "Beta")
+    }
+
+    func testSubstitutedDataValueStaysLiteral() throws {
+        let json = lazySpec(
+            text: "{data:/note} {row.id}",
+            data: #"{"note":"{row.x} {index}","posts":[{"id":"a","x":"BOUND"}]}"#
+        )
+        XCTAssertEqual(try rowText(json, index: 0), "{row.x} {index} a")
+    }
 }

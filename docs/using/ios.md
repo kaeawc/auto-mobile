@@ -38,6 +38,10 @@ drives.
   and no input is sent. Swipes that move right away, such as paging the home
   screen, and drags inside apps work as usual. To rearrange icons or open Split
   View, do it by hand.
+- On an iPad with more than one app window on screen, the first tap into a window
+  that is not focused only brings that window to the front; the control under it
+  does not react. `tapOn` still reports success. Call `tapOn` again to activate the
+  control. Taps in the focused window work as usual.
 
 ## Running on a Mac host or CI
 

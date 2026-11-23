@@ -1,3 +1,4 @@
+import type { PrototypeRuntimeKind } from "./prototypePlatformReport";
 import {
   PROTOTYPE_REMOTE_IMAGE_CAPABILITY,
   prototypeRemoteImageFields,
@@ -50,6 +51,8 @@ import {
 } from "./prototypeSharedElement";
 import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
 import {
+  prototypeNestedRepeatFields,
+  prototypeNestedRepeatUnsupportedMessage,
   prototypeDeriveFields,
   prototypeDeriveUnsupportedMessage,
   prototypeFormatFields,
@@ -71,6 +74,7 @@ import {
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_FORMAT_CAPABILITY,
   PROTOTYPE_DERIVE_CAPABILITY,
+  PROTOTYPE_NESTED_REPEAT_CAPABILITY,
   PROTOTYPE_STACK_PATTERNS_CAPABILITY,
   PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
@@ -256,7 +260,11 @@ import {
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
   readonly fields: (spec: unknown, platform?: "android" | "ios") => string[];
-  readonly unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") => string;
+  readonly unsupportedMessage: (
+    fields: readonly string[],
+    platform: "android" | "ios",
+    runtime?: PrototypeRuntimeKind,
+  ) => string;
 }
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
@@ -360,6 +368,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_SEMANTICS_CAPABILITY,
     fields: prototypeSemanticsFields,
     unsupportedMessage: prototypeSemanticsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_NESTED_REPEAT_CAPABILITY,
+    fields: prototypeNestedRepeatFields,
+    unsupportedMessage: prototypeNestedRepeatUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_DERIVE_CAPABILITY,

@@ -5,10 +5,11 @@ with `platform: "watchos"`.
 
 ## `observe`
 
-`observe` returns a screenshot. With the automation runner connected, it also returns the target
-app's view hierarchy and on-screen system alerts, even when the app is not in the foreground. Those
-alerts include the notification permission prompt, short look and long look, the last with action
-buttons.
+`observe` returns a screenshot. With the runner connected, it also returns the app's view hierarchy
+and on-screen system alerts, such as notification looks, even with the app in the background.
+
+During a short look, `observe` and `tapOn` wait up to 2 seconds for the long look and its buttons.
+Tap a compact banner's title to open its long look.
 
 - If AutoMobile cannot read the hierarchy, the result carries `hierarchyUnavailable` and no
   hierarchy fields.
@@ -37,17 +38,17 @@ the watch screen fails with `tap is outside the watch screen`.
 
 Outside the Smart Stack, both results include `effect: {screenChanged, basis}`. AutoMobile checks
 the screen for about 1 second after the tap. `basis` is `viewHierarchy changed`,
-`viewHierarchy unchanged` or `insufficient observation data`. AutoMobile never retries the tap. A
+`viewHierarchy unchanged`, `system alert dismissed` (the tap closed an alert) or
+`insufficient observation data`. AutoMobile never retries the tap. A
 changed screen does not prove the intended control responded, so `observe` when it matters.
 
-When a system or app alert, such as the notification permission prompt, covers the app, `tapOn`
-refuses a target outside the alert. The error names the alert title and its buttons. Tap one of
-those buttons, for example `tapOn` with `text: "Allow"`, then retry.
+When an alert covers the app, `tapOn` refuses a target outside it. The error names the alert title
+and its buttons. Tap one, for example `text: "Allow"`, then retry.
 `tapAt` has no such guard: a point under an alert taps the alert.
 
-With the host app not in the foreground and no Smart Stack open, `tapAt` taps the watch face at the
-given point. Whether such a tap opens a complication is unverified, so `observe` after. There,
-`tapOn` still needs the host app foregrounded.
+With the host app in the background and no Smart Stack open, `tapAt` taps the watch face. Whether
+that opens a complication is unverified, so `observe` after. Outside a notification look or the
+Smart Stack, `tapOn` needs the host app foregrounded.
 
 ### Smart Stack widgets
 
@@ -147,8 +148,8 @@ permission prompt may appear first.
   `success: true` with a `warning` noting that notifications are authorized, not denied.
   Background the app with `pressButton` `home`, then post again if you need the banner.
 - When no delivery verdict is available, success means the simulator accepted the push.
-- A banner disappears after a few seconds. Call `observe` right after the push to inspect its short
-  look; the long look exposes its action buttons.
+- A banner lasts a few seconds: `observe` right after the push. For a compact banner,
+  tap its title, then `observe` the long look ([`observe`](#observe)).
 
 ## App management
 

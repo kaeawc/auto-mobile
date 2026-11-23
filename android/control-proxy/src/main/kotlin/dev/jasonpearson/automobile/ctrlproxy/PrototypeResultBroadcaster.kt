@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
+import dev.jasonpearson.automobile.protocol.PrototypePlatformReport
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
@@ -116,20 +117,15 @@ internal class PrototypeResultBroadcaster(
     stacks: Map<String, PrototypeStackSnapshot>,
     hiddenReason: PrototypeHiddenReason?,
   ) =
-    emitShown(requestId) { screenRound ->
-      prototypeResultFrame(
-        requestId,
-        true,
-        null,
-        missingAssets,
-        appearance,
-        pages = pages,
-        stacks = stacks,
-        hiddenReason = hiddenReason,
-        screenRound = screenRound,
-        backdrop = shownBackdrops.remove(requestId.orEmpty()),
-      )
-    }
+    sendShownDegraded(
+      requestId,
+      missingAssets,
+      appearance,
+      pages,
+      stacks,
+      hiddenReason,
+      emptyList(),
+    )
 
   override suspend fun sendShownDegraded(
     requestId: String?,
@@ -139,6 +135,7 @@ internal class PrototypeResultBroadcaster(
     stacks: Map<String, PrototypeStackSnapshot>,
     hiddenReason: PrototypeHiddenReason?,
     degradedEffects: List<PrototypeDegradedEffect>,
+    platformRuntime: PrototypePlatformReport?,
   ) =
     emitShown(requestId) { screenRound ->
       prototypeResultFrame(
@@ -153,6 +150,7 @@ internal class PrototypeResultBroadcaster(
         screenRound = screenRound,
         backdrop = shownBackdrops.remove(requestId.orEmpty()),
         degradedEffects = degradedEffects,
+        platformRuntime = platformRuntime,
       )
     }
 

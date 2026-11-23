@@ -1,3 +1,5 @@
+import { createReadStream } from "node:fs";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { ActionableError, type BootedDevice } from "../../models";
 import { toActionableError } from "../../models/ActionableError";
@@ -8,6 +10,7 @@ import type {
 } from "../../utils/HostCommandExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
 import type {
   PerformanceTraceRecorder,
@@ -33,8 +36,23 @@ import {
   XCTRACE_SUMMARY_SCHEMAS,
   type XctraceToc,
 } from "./xctraceExport";
+import {
+  summarizeTimeProfileStream,
+  type TimeProfileStreamSummary,
+} from "./xctraceTimeProfileStream";
 import { waitForChildExit, waitForChildOutput } from "./childProcessWaits";
 import { traceArtifactBytes, waitForXctraceFinalization } from "./xctraceFinalization";
+
+/** File access for table exports too large to hold in memory (the `time-profile` table, #18791). */
+export interface XctraceExportFiles {
+  open(path: string): AsyncIterable<string | Uint8Array>;
+  remove(path: string): Promise<void>;
+}
+
+const defaultExportFiles: XctraceExportFiles = {
+  open: (path) => createReadStream(path, { encoding: "utf8" }),
+  remove: (path) => rm(path, { force: true }),
+};
 
 export interface XctraceHost extends HostCommandExecutor {
   spawn(file: string, args: string[], options?: HostSpawnOptions): HostChildProcess;
@@ -80,6 +98,8 @@ const DEFAULT_STOP_MAX_MS = 180_000;
 const EXPORT_TIMEOUT_MS = 120_000;
 const LIST_TEMPLATES_TIMEOUT_MS = 30_000;
 const RECORD_OUTPUT_MAX_CHARS = 8_000;
+/** How long `stop()` waits for stdio to close after xctrace already exited on its own. */
+const EXITED_DRAIN_TIMEOUT_MS = 5_000;
 const EXPORT_MAX_BUFFER = 64 * 1024 * 1024;
 /** `xctrace record` prints this once the recorder is capturing. */
 const RECORDING_STARTED = /Ctrl-C to stop the recording|Starting recording/i;
@@ -273,7 +293,9 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
     let signalled = false;
     const stopChild = async () => {
       if (child.exitCode !== null || child.signalCode !== null) {
+        // Already ended (e.g. at its time limit): no signal, but let trailing stderr drain.
         signalled = true;
+        await waitForDrain(exited, timer, EXITED_DRAIN_TIMEOUT_MS);
         return;
       }
       const finalized = waitForXctraceFinalization(child, exited, {
@@ -301,7 +323,7 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
         }
       },
       summarize: async (signal) => {
-        const summarized = await summarizeXctrace(host, artifactPath, template, signal);
+        const summarized = await summarizeXctrace(host, artifactPath, template, { signal });
         return withRecordErrors(
           summarized,
           xctraceRecordErrors(output.read()),
@@ -313,17 +335,37 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
   }
 }
 
+/**
+ * Waits for `exited` (close-backed) so trailing output drains, bounded by `timeoutMs`; a missed
+ * deadline only logs, since the recording itself already ended.
+ */
+async function waitForDrain(exited: Promise<void>, timer: Timer, timeoutMs: number): Promise<void> {
+  try {
+    await raceWithDeadline(exited, { timer, timeoutMs, label: "xctrace output drain" });
+  } catch (error) {
+    logger.warn(
+      `[performanceTrace] xctrace exited but its output did not close: ${errorMessage(error)}; recorder errors may be incomplete`,
+      error,
+    );
+  }
+}
+
 interface ChildOutputCapture {
   read(): string;
   /** Stop listening; the captured text stays readable. */
   detach(): void;
 }
 
-/** Keeps the tail of what `xctrace record` prints, for the errors it reports after it starts. */
+/**
+ * Keeps the tail of what `xctrace record` prints, for the errors it reports after it starts.
+ * Decodes UTF-8 on the streams so a multibyte character split across chunks stays intact.
+ */
 function captureChildOutput(child: HostChildProcess): ChildOutputCapture {
   let captured = "";
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
   const onData = (chunk: Buffer | string) => {
-    captured = (captured + chunk.toString()).slice(-RECORD_OUTPUT_MAX_CHARS);
+    captured = (captured + String(chunk)).slice(-RECORD_OUTPUT_MAX_CHARS);
   };
   child.stdout?.on("data", onData);
   child.stderr?.on("data", onData);
@@ -385,6 +427,40 @@ async function exportXml(
   ).stdout;
 }
 
+interface ExportSource {
+  host: HostCommandExecutor;
+  files: XctraceExportFiles;
+  artifactPath: string;
+  signal?: AbortSignal;
+}
+
+/**
+ * `time-profile` is the one table that outgrows a stdout buffer (110 MB for a 10 s all-processes
+ * run), so export it to a file beside the trace and stream it, removing the file afterwards.
+ */
+async function summarizeTimeProfileExport(
+  source: ExportSource,
+  xpath: string,
+): Promise<TimeProfileStreamSummary> {
+  const { host, files, artifactPath, signal } = source;
+  const outputPath = `${artifactPath}.time-profile.xml`;
+  try {
+    await exportXml(
+      host,
+      ["--input", artifactPath, "--xpath", xpath, "--output", outputPath],
+      signal,
+    );
+    return await summarizeTimeProfileStream(files.open(outputPath), signal);
+  } finally {
+    await files.remove(outputPath).catch((error: unknown) => {
+      logger.warn(
+        `[performanceTrace] could not remove ${outputPath}: ${errorMessage(error)}`,
+        error,
+      );
+    });
+  }
+}
+
 function isEmptyRun(toc: XctraceToc): boolean {
   return toc.durationMs === 0 && toc.schemas.length === 0;
 }
@@ -402,13 +478,21 @@ function timeProfilerSummaryWarnings(
   return [];
 }
 
+function tocFailureWarning(error: unknown): string {
+  const unreadable = /malformed|missing/i.test(errorMessage(error))
+    ? " The trace is unreadable (xctrace did not finalize it); do not rely on the artifact."
+    : "";
+  return `xctrace export --toc failed: ${errorMessage(error)}.${unreadable}`;
+}
+
 /** Summarise a finished `.trace` through `xctrace export`: the TOC, then the template's table. */
 export async function summarizeXctrace(
   host: HostCommandExecutor,
   artifactPath: string,
   template: PerformanceTraceTemplate,
-  signal?: AbortSignal,
+  options: { signal?: AbortSignal; files?: XctraceExportFiles } = {},
 ): Promise<{ summary: PerformanceTraceSummary; warnings: string[] }> {
+  const { signal, files = defaultExportFiles } = options;
   const warnings: string[] = [];
   let toc;
   try {
@@ -416,13 +500,7 @@ export async function summarizeXctrace(
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn(`[performanceTrace] xctrace export --toc failed: ${errorMessage(error)}`, error);
-    const unreadable = /malformed|missing/i.test(errorMessage(error))
-      ? " The trace is unreadable (xctrace did not finalize it); do not rely on the artifact."
-      : "";
-    return {
-      summary: {},
-      warnings: [`xctrace export --toc failed: ${errorMessage(error)}.${unreadable}`],
-    };
+    return { summary: {}, warnings: [tocFailureWarning(error)] };
   }
   if (isEmptyRun(toc)) {
     return {
@@ -448,12 +526,9 @@ export async function summarizeXctrace(
     return { summary, warnings };
   }
   try {
-    const xpath = `/trace-toc/run[@number="1"]/data/table[@schema="${schema}"]`;
-    const rows = await parseXctraceTable(
-      await exportXml(host, ["--input", artifactPath, "--xpath", xpath], signal),
-    );
-    Object.assign(summary, summarizeXctraceTable(template, rows));
-    warnings.push(...timeProfilerSummaryWarnings(template, rows.length, summary));
+    const table = await summarizeTable({ host, files, artifactPath, signal }, template, schema);
+    Object.assign(summary, table.summary);
+    warnings.push(...table.warnings);
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn(
@@ -463,4 +538,25 @@ export async function summarizeXctrace(
     warnings.push(`xctrace export of "${schema}" failed: ${errorMessage(error)}`);
   }
   return { summary, warnings };
+}
+
+async function summarizeTable(
+  source: ExportSource,
+  template: PerformanceTraceTemplate,
+  schema: string,
+): Promise<{ summary: Partial<PerformanceTraceSummary>; warnings: string[] }> {
+  const xpath = `/trace-toc/run[@number="1"]/data/table[@schema="${schema}"]`;
+  if (template === "timeProfiler") {
+    const streamed = await summarizeTimeProfileExport(source, xpath);
+    const summary = { topFunctions: streamed.topFunctions };
+    return {
+      summary,
+      warnings: timeProfilerSummaryWarnings(template, streamed.sampleCount, summary),
+    };
+  }
+  const { host, artifactPath, signal } = source;
+  const rows = await parseXctraceTable(
+    await exportXml(host, ["--input", artifactPath, "--xpath", xpath], signal),
+  );
+  return { summary: summarizeXctraceTable(template, rows), warnings: [] };
 }

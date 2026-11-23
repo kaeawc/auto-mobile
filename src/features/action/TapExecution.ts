@@ -10,12 +10,7 @@ import type { AndroidOrIosPlatform, ElementSelectionResult } from "../../models"
 import { requireAndroidOrIosPlatform } from "../../models";
 import type { DisplayFence, ObservedActionResult } from "./BaseVisualChange";
 import { describeFocusTarget } from "./tapFocusIdentity";
-import {
-  markFocusFailure,
-  resolvedElementLayer,
-  withResolvedLayer,
-  type TapOnFocusResult,
-} from "./tapFocusResult";
+import { resolvedElementLayer, withResolvedLayer, type TapOnFocusResult } from "./tapFocusResult";
 import { TapPointPlanner } from "./tapPointPlanner";
 import { wasHierarchyReadDuringCall } from "../observe/observationReadScope";
 import { freshTapHierarchy } from "./freshTapHierarchy";
@@ -28,7 +23,6 @@ import { hasAccessibilityAction } from "../utility/elementProperties";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange } from "./BaseVisualChange";
 import {
-  ActionableError,
   BootedDevice,
   Element,
   isFalsy,
@@ -60,6 +54,7 @@ import { TapGestureDispatcher } from "./TapGestureDispatcher";
 import { appendNoChangeWarning, heldMismatch } from "./tapActivationTargetWarnings";
 import { type TapOnFocusOutcome } from "./TapSemanticLinks";
 import { recordXrNodeClick, settleXrNodeClick, type XrClickRecord } from "./xrPanelNodeClick";
+import { tapFailureResult } from "./tapFailureResult";
 
 function dispatchRouteFields(route: string | undefined): { dispatchRoute?: string } {
   if (route === undefined) {
@@ -525,6 +520,9 @@ export class TapExecution {
     if (!searchOutcome.selection.element) {
       if (searchOutcome.visibilityError) {
         throw searchOutcome.visibilityError;
+      }
+      if (searchOutcome.hierarchyUnavailableError) {
+        throw searchOutcome.hierarchyUnavailableError;
       }
       await this.host.handleElementNotFound(options, {
         observeResult,
@@ -1001,36 +999,8 @@ export class TapExecution {
     };
   }
 
-  readScopeFailureResult(
-    requestedAction: NonNullable<TapOnElementOptions["action"]>,
-    action: TapOnElementOptions["action"],
-    error: unknown,
-    {
-      searchUntilStats,
-      debugContext,
-    }: {
-      searchUntilStats?: SearchUntilStats;
-      debugContext: Awaited<ReturnType<typeof buildElementSearchDebugContext>>;
-    },
-  ): TapOnFocusResult {
-    const errorMsg = errorMessage(error);
-    return markFocusFailure(
-      requestedAction,
-      {
-        success: false,
-        action,
-        error: `Failed to perform tap on element: ${errorMsg}`,
-        element: {
-          bounds: { left: 0, top: 0, right: 0, bottom: 0 },
-        } as Element,
-        ...(searchUntilStats ? { searchUntil: searchUntilStats } : {}),
-        ...(error instanceof ActionableError && error.containerFailure
-          ? { containerFailure: error.containerFailure }
-          : {}),
-        ...(debugContext ? { debug: { elementSearch: debugContext } } : {}),
-      },
-      error,
-    );
+  readScopeFailureResult(...args: Parameters<typeof tapFailureResult>): TapOnFocusResult {
+    return tapFailureResult(...args);
   }
 
   /**

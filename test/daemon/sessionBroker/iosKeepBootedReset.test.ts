@@ -54,6 +54,10 @@ class FakeFastMutations extends FakeDeviceMutationResetPort implements IosKeepBo
       (entry.kind === "device-setting" && entry.key === "appearance")
     );
   }
+  readonly overlayBatches: DeviceMutationInput[][] = [];
+  async revertRenderOverlays(entries: readonly DeviceMutationInput[]): Promise<void> {
+    this.overlayBatches.push([...entries]);
+  }
   sanitizeCount = 0;
   sanitizeError?: Error;
   sanitizedBaseline?: DeviceBaseline;
@@ -268,6 +272,26 @@ describe("iOS keep-booted best-effort cleaning", () => {
     expect(rig.mutations.reverted.map((entry) => entry.kind)).toEqual(["preference", "clipboard"]);
     expect(rig.mutations.sanitizeCount).toBe(1);
     expect(rig.state.eraseCalls).toBe(0);
+  });
+
+  test("every render overlay row of the device restores in one batched call (#19016)", async () => {
+    const rig = await harness();
+    for (const key of ["renderOverlay:blendedLayers", "renderOverlay:cacheHits"]) {
+      await rig.journal.record(SCOPE, {
+        kind: "device-setting",
+        key,
+        priorValue: { state: "present", value: false },
+        toolName: "displayConfig",
+      });
+    }
+    await recordClipboard(rig);
+    expect(await rig.run()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    expect(rig.mutations.overlayBatches).toHaveLength(1);
+    expect(rig.mutations.overlayBatches[0]?.map((entry) => entry.key).sort()).toEqual([
+      "renderOverlay:blendedLayers",
+      "renderOverlay:cacheHits",
+    ]);
+    expect(rig.mutations.reverted.map((entry) => entry.kind)).toEqual(["clipboard"]);
   });
 
   test("a fallback-forcing opaque journal row erases instead of reporting a clean keep-booted reset", async () => {

@@ -22,6 +22,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import type { IosResetHealthPort } from "./iosKeepBootedReset";
 import { IosDeviceMutationResetPort } from "./mutations/iosResetPort";
 import { RunnerStoreKitSessionReset } from "./iosStoreKitSessionReset";
+import { OsascriptSimulatorRenderOverlayControl } from "../../utils/ios-cmdline-tools/SimulatorRenderOverlays";
 
 export function nativeIosMutationResetPort(
   simctl: Pick<SimCtl, "executeCommandArgs" | "startCommandArgs"> &
@@ -42,6 +43,7 @@ export function nativeIosMutationResetPort(
       }),
       files: { realpath, remove: (path) => rm(path, { recursive: true, force: false }) },
       storeKit: new RunnerStoreKitSessionReset(),
+      renderOverlays: new OsascriptSimulatorRenderOverlayControl(),
       pasteboard: {
         assertSettled: (deviceId) => {
           if (pending.has(deviceId)) {

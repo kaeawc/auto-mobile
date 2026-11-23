@@ -255,3 +255,12 @@ test("a replacing show forgets the budgets of the prototypes it removed (#18804)
   specs.endShow("d", second, { id: "other", spec: { data: {} } });
   expect(specs.budgetOf("d", "feed")).toBe(PROTOTYPE_BASE_BUDGET);
 });
+
+test("abandoning tracking keeps the accepted show's budget for later writes (#18804)", () => {
+  const specs = new PrototypeShownSpecs();
+  const ticket = specs.beginShow("d", "feed", true, "android");
+  specs.endShow("d", ticket, { id: "feed", spec: { data: {} }, budget: PROTOTYPE_LARGE_BUDGET });
+  specs.abandon("d");
+  expect(specs.read("d", "feed").kind).toBe("unknown");
+  expect(specs.budgetOf("d", "feed")).toBe(PROTOTYPE_LARGE_BUDGET);
+});

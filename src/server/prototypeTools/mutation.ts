@@ -275,23 +275,18 @@ async function performMutation(
           // Last abort check before the grant, the event epoch and the device send.
           signal?.throwIfAborted();
           await appLayerGrant(prototypeTarget, device, args, { dependencies, signal })?.();
+          // The budget lookup and the grant suspend: a newer same-id show may have dispatched first,
+          // and this older spec must not follow it onto the device.
+          if (isSuperseded(commits, scope, target, generation)) {
+            return "superseded";
+          }
           // Last step before dispatch: a refusal, a failed upload, a lost race or a failed grant
           // must leave the event epoch of a prototype still on screen alone (#11394).
           startFreshShowEvents(events, scope, source, { target, args, inPlace });
           ordering.startedFreshEvents = args.action === "show" && !inPlace;
-          if (args.action === "show" && target.id) {
-            dependencies.store.beginShowDispatch(scope.deviceId, target.id);
-          }
           // From here the show is issued to the device: it may be on screen, so it is never withdrawn.
-          ordering.sent = true;
-          if (args.action === "show") {
-            ordering.specTicket = store.shownSpecs.beginShow(
-              scope.deviceId,
-              target.id,
-              args.replaceOthers,
-              device.platform === "android" ? "android" : "ios",
-            );
-          }
+          markShowIssued(ordering, { store, dependencies, args, device });
+          return undefined;
         },
       }),
     ).then(renderShowOutcome);
@@ -707,6 +702,31 @@ function commitMutation(
  * A newer show of the same id on this device started after this one, so it owns host status and
  * event buffers; this call reports only its own outcome and commits nothing.
  */
+function markShowIssued(
+  ordering: ShowOrdering,
+  issued: {
+    store: PrototypeStatusStore;
+    dependencies: PrototypeHandlerDependencies;
+    args: { action: PrototypeMutation; replaceOthers?: boolean };
+    device: BootedDevice;
+  },
+): void {
+  const { store, dependencies, args, device } = issued;
+  const { scope, target } = ordering;
+  if (args.action === "show" && target.id) {
+    dependencies.store.beginShowDispatch(scope.deviceId, target.id);
+  }
+  ordering.sent = true;
+  if (args.action === "show") {
+    ordering.specTicket = store.shownSpecs.beginShow(
+      scope.deviceId,
+      target.id,
+      args.replaceOthers,
+      device.platform === "android" ? "android" : "ios",
+    );
+  }
+}
+
 function supersededResult(
   dependencies: PrototypeHandlerDependencies,
   outcome: CommitOutcome,

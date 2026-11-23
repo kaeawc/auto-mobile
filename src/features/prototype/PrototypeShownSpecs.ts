@@ -329,8 +329,9 @@ export class PrototypeShownSpecs {
     if (!state) {
       return;
     }
+    // Budgets stay: the device still holds what the accepted show allowed, and later device data
+    // writes reported to the status store are validated with it until a show replaces it.
     state.entries.clear();
-    state.budgets.clear();
     state.dataWrites.clear();
     state.poisonedThrough = state.issued;
     state.epoch = ++this.sequence;

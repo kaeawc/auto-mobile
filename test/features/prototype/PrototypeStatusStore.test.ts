@@ -510,6 +510,26 @@ describe("patch spec and data hooks", () => {
     expect(store.status(scope).prototypes[0].data).toEqual({ ...data, flag: true });
     expect(store.shownSpecs.read(scope.deviceId, "panel").kind).toBe("known");
   });
+  test("a show in flight does not drop the large budget for later device writes (#18804)", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    const data = { rows: Array.from({ length: 2001 }, (_, id) => ({ id })), flag: false };
+    const ticket = store.shownSpecs.beginShow(scope.deviceId, "panel");
+    store.shownSpecs.endShow(scope.deviceId, ticket, {
+      id: "panel",
+      spec: { data },
+      budget: PROTOTYPE_LARGE_BUDGET,
+    });
+    store.record(scope, "show", { id: "panel" }, { result: ok, details: { data } });
+    store.shownSpecs.beginShow(scope.deviceId, "other");
+    const write = (revision: number) =>
+      store.recordEvent(scope, {
+        ...event(revision, "panel", "change", "/data/flag"),
+        payload: { op: "set", value: true, revision },
+      });
+    write(1);
+    write(2);
+    expect(store.status(scope).prototypes[0].data).toEqual({ ...data, flag: true });
+  });
   test.each(["dismissed", "dismiss", "all", "clearDevice", "clearSession"])(
     "%s removes tracked specs",
     (hook) => {

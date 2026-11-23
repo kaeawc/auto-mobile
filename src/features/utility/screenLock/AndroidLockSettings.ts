@@ -1,4 +1,5 @@
 import type { BootedDevice } from "../../../models";
+import { toActionableError } from "../../../models/ActionableError";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   defaultAdbClientFactory,
@@ -142,8 +143,9 @@ const SYSTEM_USER: LockUserResolver = async () => 0;
 /**
  * User 0 everywhere except Android Automotive, where the system user is headless and the driver
  * (often user 10) is the foreground user: a lock set on user 0 never reaches the driver (#19060).
- * Both the write and the read-back use the one resolved user, so they cannot disagree (#19014).
- * Falls back to user 0 when the foreground user cannot be read.
+ * Throws an `ActionableError` when the foreground user cannot be read: falling back to user 0
+ * would put the lock on the headless system user and read it back from there, reporting a
+ * success the driver never sees (#19070).
  */
 export function createLockUserResolver(
   adb: AdbExecutor,
@@ -156,21 +158,31 @@ export function createLockUserResolver(
     try {
       return (await new AndroidUserTargetResolver(adb).resolve({ currentUser: true })).userId;
     } catch (error) {
-      logger.warn(
-        `[screenLock] foreground user unreadable, using user 0: ${errorMessage(error)}`,
+      throw toActionableError(
         error,
+        "Could not read the Android Automotive foreground user for the screen lock",
       );
-      return 0;
     }
   };
 }
 
-/** {@link LockSettingsClient} over adb: `locksettings` writes, `dumpsys lock_settings` reads. */
+/**
+ * {@link LockSettingsClient} over adb: `locksettings` writes, `dumpsys lock_settings` reads.
+ * One client serves one operation: the user is resolved once, on first use, and every set,
+ * clear and read-back of that client targets it, so they cannot disagree (#19014, #19070).
+ */
 export class AdbLockSettingsClient implements LockSettingsClient {
+  private resolvedUser: Promise<number> | undefined;
+
   constructor(
     private readonly adb: LockSettingsAdb,
-    private readonly resolveUser: LockUserResolver = SYSTEM_USER,
+    private readonly resolveUserOnce: LockUserResolver = SYSTEM_USER,
   ) {}
+
+  private resolveUser(): Promise<number> {
+    this.resolvedUser ??= this.resolveUserOnce();
+    return this.resolvedUser;
+  }
 
   async read(): Promise<LockSettingsReading> {
     const userId = await this.resolveUser();

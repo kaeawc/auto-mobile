@@ -53,6 +53,8 @@ import type { ScreenLockDeviceStateDependencies } from "../screenLock/ScreenLock
 import type { PowerState, SetPowerInput } from "../power/PowerTypes";
 import type { PowerDeviceStateDependencies } from "../power/PowerOperations";
 import type { CurrentDisplayState } from "./CurrentDisplayState";
+import type { NetworkActivityState } from "../networkActivity/NetworkActivityTypes";
+import type { NetworkActivityReader } from "../networkActivity/NetworkActivityOperations";
 
 /** Static panel inventory plus, on an Android foldable, the live posture and active panel. */
 export type DeviceStateDisplays = NonNullable<BootedDevice["displays"]> & {
@@ -74,6 +76,7 @@ export interface DeviceStateResult {
   sensors?: DeviceSensorsState;
   screenLock?: ScreenLockState;
   power?: PowerState;
+  networkActivity?: NetworkActivityState;
   /** Requested fields skipped because the current platform cannot support them. */
   unsupported?: DeviceStateField[];
   error?: string;
@@ -109,6 +112,7 @@ export const DEVICE_STATE_READABLE_FIELDS = [
   "sensors",
   "screenLock",
   "power",
+  "networkActivity",
 ] as const;
 
 export type DeviceStateField = (typeof DEVICE_STATE_READABLE_FIELDS)[number];
@@ -158,6 +162,7 @@ export interface SelectedDeviceStates {
   sensors?: DeviceSensorsState;
   screenLock?: ScreenLockState;
   power?: PowerState;
+  networkActivity?: NetworkActivityState;
 }
 
 /**
@@ -214,6 +219,8 @@ export interface DeviceStateDependencies {
   screenLock?: ScreenLockDeviceStateDependencies;
   /** Android battery, Doze, standby, saver and thermal seams (#14084); a session supplies `mutation`. */
   power?: PowerDeviceStateDependencies;
+  /** iOS Simulator per-process sockets and traffic (#19020); defaults to host ps/lsof/nettop. */
+  networkActivity?: NetworkActivityReader;
 }
 
 export type RequestedDeviceStates = Pick<

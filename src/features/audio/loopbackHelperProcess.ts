@@ -56,7 +56,7 @@ function parseError(line: string): HelperReport {
 }
 
 /** A tool error that keeps the helper's own failure code, so a caller can react to one. */
-export class LoopbackHelperError extends EmulatorAudioError {
+class LoopbackHelperError extends EmulatorAudioError {
   constructor(
     code: EmulatorAudioErrorCode,
     message: string,
@@ -67,12 +67,17 @@ export class LoopbackHelperError extends EmulatorAudioError {
   }
 }
 
+/** Whether the helper refused its command line: a released helper older than the command asked for. */
+export function isLoopbackUsageError(error: unknown): boolean {
+  return error instanceof LoopbackHelperError && error.helperCode === "usage";
+}
+
 /** The tool error for a helper report; a missing loopback device or simulator is "unsupported". */
 export function loopbackError(
   operation: LoopbackOperation,
   report: HelperReport | undefined,
   exitCode: number | null,
-): LoopbackHelperError {
+): EmulatorAudioError {
   const unsupported: Record<LoopbackOperation, [string[], EmulatorAudioErrorCode]> = {
     inject: [["no_loopback_input"], "audio_injection_unsupported"],
     capture: [["no_loopback_output", "no_simulator"], "audio_capture_unsupported"],

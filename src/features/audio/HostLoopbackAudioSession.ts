@@ -16,7 +16,7 @@ import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { EmulatorAudioSession } from "./EmulatorAudioService";
 import {
-  LoopbackHelperError,
+  isLoopbackUsageError,
   startLoopbackHelper,
   type LoopbackHelperProcess,
   type LoopbackHelperSpawner,
@@ -327,7 +327,7 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
         );
         return { helper, route: "process-tap" };
       } catch (error) {
-        if (!(error instanceof LoopbackHelperError && error.helperCode === "usage")) {
+        if (!isLoopbackUsageError(error)) {
           throw error;
         }
         logger.info(

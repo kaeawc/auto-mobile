@@ -321,9 +321,14 @@ class PrototypeController(
   /** One cap on requests in flight for every surface this controller shows. */
   private val requestLimiter = PrototypeRequestLimiter()
 
+  /**
+   * [request] records what the host applied, so its backdrop is the tonal fallback after a failed
+   * card blur attach; [authoredBackdrop] is the spec's own plan, requested again on a reshape.
+   */
   private class Surface(
     val runtime: PrototypeRuntime,
     @Volatile var request: PrototypeRequest,
+    val authoredBackdrop: PrototypeBackdropPlan?,
     val theme: MutableStateFlow<PrototypeShownTheme>,
     val appearanceOverride: PrototypeAppearanceOverride?,
     val localeOverride: String?,
@@ -764,11 +769,13 @@ class PrototypeController(
     reused?.runtime?.close()
     idle.cancel()
     val retainedRequest =
-      if (interactive.bringToFront) interactive.copy(bringToFront = false) else interactive
+      (if (interactive.bringToFront) interactive.copy(bringToFront = false) else interactive)
+        .withAppliedBackdrop(surfaceHost)
     val surface =
       Surface(
         runtime,
         retainedRequest,
+        interactive.backdrop,
         theme,
         appearance,
         locale,
@@ -977,7 +984,44 @@ class PrototypeController(
     PrototypeTrace.asyncSection(PrototypeTrace.SYNC_APPEARANCE) {
       syncAppearance(runtime, model)
       syncTextFieldFocus(runtime, model)
+      syncBackdropShape(runtime, model)
     }
+  }
+
+  /**
+   * A runtime change can reshape a floating root (an 18dp radius patched to 0), so its card blur
+   * window or tonal fallback must clip to the new shape. The window is replaced only when the shape
+   * changed, requesting the authored backdrop again so a card blur that fell back is retried once
+   * per reshape; the stored request then records the backdrop the host applied. A failed replace
+   * keeps the old request and is retried on the next change.
+   */
+  private suspend fun syncBackdropShape(runtime: PrototypeRuntime, model: PrototypeRenderModel) {
+    val surface = surfaceOf(runtime) ?: return
+    val request = surface.request
+    if (request.backdrop == null || request.placement !is PrototypePlacement.Floating) return
+    val shape = prototypeRootBackdropShape(model)
+    if (shape == request.backdropShape) return
+    val updated = request.copy(backdrop = surface.authoredBackdrop, backdropShape = shape)
+    val host = surface.host
+    val applied =
+      !host.isShowing ||
+        try {
+          host.replace(updated.copy(animateEnter = false))
+        } catch (error: CancellationException) {
+          throw error
+        } catch (error: Exception) {
+          Log.w("PrototypeController", "Prototype host failed to reshape its backdrop", error)
+          false
+        }
+    if (applied) surface.request = updated.withAppliedBackdrop(host)
+    else Log.w("PrototypeController", "Prototype host failed to reshape its backdrop")
+  }
+
+  /** A card blur attach can fall back to the tonal backdrop; record the mode the host drew. */
+  private fun PrototypeRequest.withAppliedBackdrop(host: PrototypeHost): PrototypeRequest {
+    val plan = backdrop ?: return this
+    val mode = host.appliedBackdrop?.takeIf { host.isShowing } ?: return this
+    return if (plan.mode == mode) this else copy(backdrop = plan.copy(mode = mode))
   }
 
   /**

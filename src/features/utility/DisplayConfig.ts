@@ -31,6 +31,8 @@ import {
 } from "./AndroidDisplayGeometry";
 import { DEFAULT_FONT_SCALE, type DisplayTheme, type FontScaleInput } from "./displayConfigTypes";
 import {
+  ANDROID_THEME_UNSUPPORTED_ERROR,
+  isNightModeUnsupported,
   nightModeArg,
   parseFontScaleSnapshot,
   parseNightMode,
@@ -172,6 +174,8 @@ export interface SetDisplayConfigInput extends AccessibilityDisplayValues, Displ
   /** With `reset`: also force platform defaults whatever baselines were recorded (#15337). */
   factory?: boolean;
 }
+
+type ShellRead = { stdout: string; stderr: string };
 
 /** Process-lifetime baseline for the first night-mode value this tool replaces. */
 export interface ThemeBaselineStore {
@@ -765,6 +769,9 @@ export class DisplayConfig {
       const raw = await this.readRawValues(adb);
       previous = raw.restorableValues;
       physicalDensity = raw.physicalDensity;
+      if (input.theme !== undefined && raw.values.theme === undefined) {
+        return this.unsupported(ANDROID_THEME_UNSUPPORTED_ERROR);
+      }
     } catch (error) {
       logger.warn(`[DisplayConfig] setConfig pre-read failed: ${errorMessage(error)}`, error);
       return {
@@ -863,14 +870,14 @@ export class DisplayConfig {
     restorableValues: DisplayConfigValues;
     physicalDensity: number | undefined;
   }> {
-    const [fontRaw, densityRaw, nightRaw] = await Promise.all([
+    const [font, density, night] = await Promise.all([
       this.run(adb, "shell settings get system font_scale", "font scale"),
       this.run(adb, "shell wm density", "density"),
       this.run(adb, "shell cmd uimode night", "night mode"),
     ]);
-    const parsedDensity = parseWmDensity(densityRaw);
-    const fontScaleSnapshot = parseFontScaleSnapshot(fontRaw);
-    const theme = parseNightMode(nightRaw);
+    const parsedDensity = parseWmDensity(density.stdout);
+    const fontScaleSnapshot = parseFontScaleSnapshot(font.stdout);
+    const theme = parseNightMode(night.stdout);
     const unreadable: string[] = [];
     if (fontScaleSnapshot === undefined) {
       unreadable.push("font scale");
@@ -878,7 +885,7 @@ export class DisplayConfig {
     if (parsedDensity.effective === undefined) {
       unreadable.push("display density");
     }
-    if (theme === undefined) {
+    if (theme === undefined && !isNightModeUnsupported(night.stdout, night.stderr)) {
       unreadable.push("night mode");
     }
     if (unreadable.length > 0) {
@@ -1022,18 +1029,16 @@ export class DisplayConfig {
   }
 
   /**
-   * Read a command's stdout, rejecting shell-reported failures rather than
+   * Read a command's output, rejecting shell-reported failures rather than
    * fabricating a restoration baseline from partial output.
    */
-  private async run(adb: AdbExecutor, command: string, setting: string): Promise<string> {
+  private async run(adb: AdbExecutor, command: string, setting: string): Promise<ShellRead> {
     try {
-      const result = await adb.executeCommand(command, { noRetry: true });
-      const stdout = result.stdout;
-      const stderr = result.stderr ?? "";
+      const { stdout, stderr = "" } = await adb.executeCommand(command, { noRetry: true });
       if (outputLooksLikeShellFailure(stdout, stderr)) {
         throw new Error(`'${command}' reported: ${`${stdout} ${stderr}`.trim()}`);
       }
-      return stdout;
+      return { stdout, stderr };
     } catch (error) {
       throw new ActionableError(`${setting}: failed to read '${command}': ${errorMessage(error)}`, {
         cause: error,

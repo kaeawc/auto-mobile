@@ -143,7 +143,7 @@ class PrototypeExpressiveComponentsTest {
     }
     compose.onNodeWithTag("create.items.0").assertDoesNotExist()
     compose.mainClock.autoAdvance = false
-    compose.onNodeWithTag("create").performClick()
+    compose.onNodeWithTag("create.toggle").performClick()
     repeat(2) { compose.mainClock.advanceTimeByFrame() }
     for (index in 0..2) compose.onNodeWithTag("create.items.$index").assertExists()
     compose.mainClock.advanceTimeBy(2_000)
@@ -152,12 +152,55 @@ class PrototypeExpressiveComponentsTest {
   }
 
   @Test
+  fun `fab toggle part tag stays on the fab and closes the open menu`() {
+    val node = model(fab)
+    render(motion = false) {
+      RenderPrototypeFab(node, Modifier.testTag("create")) { interactions += it }
+    }
+    compose.onNodeWithTag("create.toggle").assert(hasContentDescription("Create")).performClick()
+    compose.onNodeWithTag("create.items.0").assertExists()
+    compose.onNodeWithTag("create.toggle").performClick()
+    compose.onNodeWithTag("create.items.0").assertDoesNotExist()
+    assertTrue(interactions.isEmpty())
+  }
+
+  @Test
+  fun `menu expansion and split corner report motion until they settle`() {
+    val activity = PrototypeMotionActivity()
+    val split =
+      model(
+        PrototypeButtonNode(
+          testTag = "send",
+          label = "Send",
+          split = PrototypeButtonSplit(listOf(PrototypeMenuEntry("Draft"))),
+        ),
+      )
+    compose.setContent {
+      CompositionLocalProvider(
+        LocalPrototypeMotion provides true,
+        LocalPrototypeMotionActivity provides activity,
+      ) {
+        MaterialTheme { RenderPrototypeButton(split, Modifier) { interactions += it } }
+      }
+    }
+    compose.waitForIdle()
+    assertEquals(PrototypeMotionState.Settled, activity.snapshot())
+    compose.mainClock.autoAdvance = false
+    compose.onNodeWithTag("send.menu").performClick()
+    repeat(3) { compose.mainClock.advanceTimeByFrame() }
+    assertTrue("menu is mid-expansion: ${activity.snapshot()}", activity.snapshot().active > 0)
+    compose.mainClock.advanceTimeBy(2_000)
+    compose.waitForIdle()
+    assertEquals(PrototypeMotionState.Settled, activity.snapshot())
+  }
+
+  @Test
   fun `fab menu items run their actions and close the menu`() {
     val node = model(fab)
     render(motion = false) {
       RenderPrototypeFab(node, Modifier.testTag("create")) { interactions += it }
     }
-    compose.onNodeWithTag("create").performClick()
+    compose.onNodeWithTag("create.toggle").performClick()
     for (index in 0..2) compose.onNodeWithTag("create.items.$index").assertExists()
     compose.onNodeWithTag("create.items.1").performClick()
     assertEquals(

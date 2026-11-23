@@ -38,8 +38,10 @@ fails the call before anything reaches the device.
    `unknown`) and `originalIdentifier` for renewals.
 3. `setSimulatedError` makes the next `buy` fail with that error, and is cleared after it.
    Purchases the app starts itself keep failing until the next `buy`, `clear` or another `load`.
-   On an iOS 26 or newer simulator the runner's host app must be installed before `load`;
-   AutoMobile installs it when it starts the runner.
+   On an iOS 26 or newer simulator, AutoMobile tries to install the runner's host app when it
+   starts the runner. This is best-effort: if the runner build has no host app bundle or the
+   install fails, AutoMobile logs a warning and `buy` and `expire` return `unsupported_device`.
+   Check that the runner build includes its host app and read the installation warning.
 4. `clear` resets the session, returns the final transactions and ends the session.
 
 The session lasts as long as the runner, until `clear` or until your device session is released.

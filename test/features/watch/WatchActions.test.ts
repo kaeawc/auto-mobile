@@ -25,6 +25,8 @@ import type { BootedDevice, Element } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";
 import * as watchActions from "../../../src/features/watch/WatchActions";
 import xcuiHierarchy from "../../fixtures/watchos-xcuitest/hierarchy.json";
+import dismissed from "../../fixtures/watchos-xcuitest/notification-dismissed-app-not-foreground.json";
+import { WatchRunnerError } from "../../../src/features/watch/WatchRunnerError";
 
 function effectTimer() {
   const timer = new FakeTimer();
@@ -624,7 +626,7 @@ describe("watch actions with Smart Stack", () => {
   );
   const cellId =
     "StackCollectionViewComplicationCell -- 93A18F3B-D642-41DA-B6A4-F312ED9DB584 -- ProbeApp -- ProbeWidgetXYZ -- dev.probe.app -- dev.probe.app-dev.probe.app.widget-probe-0";
-  function useDump(text: string, failure = false) {
+  function useDump(text: string, failure = false, hierarchyError?: Error) {
     class StackClient extends FakeWatchRunnerClient {
       override async request(
         command: WatchCommand,
@@ -632,6 +634,9 @@ describe("watch actions with Smart Stack", () => {
         options?: { timeoutMs?: number },
       ): Promise<unknown> {
         const result = await super.request(command, signal, options);
+        if (command.type === "hierarchy" && hierarchyError) {
+          throw hierarchyError;
+        }
         if (command.type === "face" && command.op === "dump") {
           if (failure) {
             throw new Error("unsupported face command");
@@ -645,7 +650,8 @@ describe("watch actions with Smart Stack", () => {
     client = new StackClient();
     unregister = watchRunners.register(device.deviceId, client);
   }
-  test("tapAt sends exactly one normalized face tap and no app command", async () => {
+  // Each Smart Stack tap reads the runner hierarchy once to rule out a system alert over the stack.
+  test("tapAt sends exactly one normalized face tap and no app tap", async () => {
     useDump(dump);
     expect(await watchTapAt(device.deviceId, { x: 93.5, y: 146.25 })).toEqual({
       success: true,
@@ -655,11 +661,12 @@ describe("watch actions with Smart Stack", () => {
     });
     expect(client.commands).toEqual([
       { type: "face", op: "dump" },
+      { type: "hierarchy" },
       { type: "face", op: "tap", x: 0.5, y: 146.25 / 223 },
     ]);
   });
   test.each([{ text: "T28" }, { elementId: cellId }])(
-    "tapOn matches widget %j without app hierarchy or tap",
+    "tapOn matches widget %j without an app tap",
     async (selector) => {
       useDump(dump);
       const result = await watchTapOn(device.deviceId, { action: "tap", ...selector });
@@ -670,10 +677,21 @@ describe("watch actions with Smart Stack", () => {
       });
       expect(client.commands).toEqual([
         { type: "face", op: "dump" },
+        { type: "hierarchy" },
         { type: "face", op: "tap", x: 0.5, y: 146.25 / 223 },
       ]);
     },
   );
+  test("app_not_foreground from the alert probe keeps the Smart Stack tap", async () => {
+    useDump(dump, false, new WatchRunnerError(dismissed.error, dismissed.errorCode));
+    const result = await watchTapOn(device.deviceId, { action: "tap", text: "T28" });
+    expect(result).toMatchObject({ success: true, element: { "resource-id": cellId } });
+    expect(client.commands).toEqual([
+      { type: "face", op: "dump" },
+      { type: "hierarchy" },
+      { type: "face", op: "tap", x: 0.5, y: 146.25 / 223 },
+    ]);
+  });
   test("a single tapOn runs the Smart Stack preflight exactly once (#17803)", async () => {
     useDump(
       readFileSync(

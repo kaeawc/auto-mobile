@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { DUMPSYS_MAX_BUFFER } from "../../../src/utils/android-cmdline-tools/dumpsysLimits";
 import { createExecResult } from "../../../src/utils/execResult";
@@ -317,4 +319,21 @@ test("launchApp's process reader forwards the bound through fake exec for a larg
   expect(state.isRunning).toBe(true);
   expect(state.processes).toEqual([{ pid: 1234, processName: "com.example.app", userId: 0 }]);
   expect(state.stdout).toBe(stdout);
+});
+
+describe("findAndroidPackageProcesses on Android Automotive (#19061)", () => {
+  // Captured from an API 34 ext9 AAOS emulator: a system-uid app of the driver user 10 prints
+  // its uid as `u10s1000`, which the parser used to skip, so terminateApp saw it as not running.
+  test("matches a system-uid process of a secondary user (u10s1000)", () => {
+    const dump = readFileSync(
+      join(
+        import.meta.dir,
+        "../../fixtures/android-process-state/dumpsys-activity-processes-car-settings-user10-automotive-api34.txt",
+      ),
+      "utf8",
+    );
+    expect(findAndroidPackageProcesses(dump, "com.android.car.settings")).toEqual([
+      expect.objectContaining({ processName: "com.android.car.settings", userId: 10 }),
+    ]);
+  });
 });

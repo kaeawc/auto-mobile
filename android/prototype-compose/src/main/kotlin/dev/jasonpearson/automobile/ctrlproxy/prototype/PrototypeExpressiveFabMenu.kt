@@ -34,7 +34,9 @@ import dev.jasonpearson.automobile.protocol.PrototypeFabNode
 /**
  * A FAB whose tap opens a menu of 2-6 items stacked above it (`fab.menu`). The FAB runs its own
  * `onTap` (if any) and toggles the menu; an item tap closes the menu, then runs the item's `onTap`.
- * Items are tagged `<testTag>.items.<index>`. While open the FAB shows a close icon.
+ * The FAB is tagged `<testTag>.toggle` and items `<testTag>.items.<index>`: the node tag sits on
+ * the outer layout, whose bounds include the items while open. While open the FAB shows a close
+ * icon.
  */
 @Composable
 internal fun RenderPrototypeFabMenu(
@@ -119,6 +121,7 @@ private fun PrototypeFabMenuButton(
   val label = node.text.takeIf { source.label != null }
   val fab = Modifier.semantics {
     contentDescription = node.contentDescription ?: label ?: source.icon
+    prototypePartTag(node.testTag, "toggle")?.let { testTag = it }
   }
   when {
     label != null ->

@@ -6,8 +6,8 @@ import {
   playbackStateForCode,
 } from "../../../src/features/media/MediaSessionDumpParser";
 
-// The fixtures are hand-reconstructed from the AOSP dump code, not device captures;
-// see test/fixtures/android-media-session/README.md.
+// Captured with `adb shell dumpsys media_session` on emulators; the player is the repository's
+// tv-fixture app. See test/fixtures/android-media-session/README.md.
 function fixture(name: string): string {
   return readFileSync(
     new URL(`../../fixtures/android-media-session/${name}.txt`, import.meta.url),
@@ -16,119 +16,160 @@ function fixture(name: string): string {
 }
 
 const parser = new AospMediaSessionDumpParser();
-const PLAYER = { package: "dev.example.player", tag: "PlaybackService", userId: 0 };
+const PLAYER = {
+  package: "dev.jasonpearson.automobile.tvfixture",
+  tag: "AutoMobileTvFixture",
+  userId: 0,
+};
 const PLAYER_ACTIONS = [
   "stop",
   "pause",
   "play",
+  "rewind",
   "skip_to_previous",
   "skip_to_next",
-  "seek_to",
+  "fast_forward",
   "play_pause",
 ];
+const METADATA = {
+  title: "Opening Titles",
+  description: "Opening Titles, null, null",
+  size: 3,
+};
 
 describe("AospMediaSessionDumpParser", () => {
-  test("API 34: named state codes, two sessions and the media button session", () => {
-    const dump = parser.parse(fixture("dumpsys-media-session-api34-playing"));
+  test("API 34: named state codes, the player among the system's own sessions", () => {
+    const dump = parser.parse(fixture("dumpsys-media-session-playing-phone-api34"));
 
-    expect(dump.mediaButtonSession).toEqual(PLAYER);
-    expect(dump.sessions).toEqual([
-      {
-        ...PLAYER,
-        active: true,
-        state: "playing",
-        stateCode: 3,
-        positionMs: 42150,
-        positionUpdatedAtMs: 1834567,
-        speed: 1,
-        actions: PLAYER_ACTIONS,
-        metadata: {
-          title: "Night Drive",
-          artist: "Example Artist",
-          album: "Example Album",
-          description: "Night Drive, Example Artist, Example Album",
-          size: 7,
-        },
-        isMediaButtonSession: true,
-      },
-      {
-        package: "com.example.podcasts",
-        tag: "MediaSession",
-        userId: 0,
-        active: false,
-        state: "paused",
-        stateCode: 2,
-        positionMs: 1205000,
-        positionUpdatedAtMs: 1790012,
-        speed: 0,
-        actions: [
-          "pause",
-          "play",
-          "rewind",
-          "fast_forward",
-          "seek_to",
-          "play_pause",
-          "set_playback_speed",
-        ],
-        metadata: {
-          title: "Episode 12: Testing",
-          artist: "The Test Podcast",
-          description: "Episode 12: Testing, The Test Podcast, null",
-          size: 4,
-        },
-        isMediaButtonSession: false,
-      },
+    expect(dump.mediaButtonSession).toBeNull();
+    expect(dump.sessions.map((session) => session.package)).toEqual([
+      "com.android.server.telecom",
+      PLAYER.package,
+      "com.google.android.bluetooth",
+      "com.google.android.bluetooth",
+      "com.google.android.bluetooth",
+      "com.google.android.bluetooth",
     ]);
-  });
-
-  test("API 34: the dump after a pause dispatch reads paused at speed 0", () => {
-    const dump = parser.parse(fixture("dumpsys-media-session-api34-paused"));
-
-    expect(dump.sessions[0]).toMatchObject({
-      ...PLAYER,
-      state: "paused",
-      stateCode: 2,
-      positionMs: 44980,
-      speed: 0,
-    });
-  });
-
-  test("API 30: bare numeric state codes and numeric volume types", () => {
-    const dump = parser.parse(fixture("dumpsys-media-session-api30-playing"));
-
-    expect(dump.mediaButtonSession).toEqual(PLAYER);
-    expect(dump.sessions).toHaveLength(1);
-    expect(dump.sessions[0]).toMatchObject({
+    expect(dump.sessions[1]).toEqual({
       ...PLAYER,
       active: true,
       state: "playing",
       stateCode: 3,
-      positionMs: 7310,
-      speed: 1,
+      positionMs: 0,
+      positionUpdatedAtMs: 2_058_612,
+      speed: 0,
       actions: PLAYER_ACTIONS,
-      metadata: { title: "Night Drive", artist: "Example Artist", album: "Example Album", size: 7 },
-      isMediaButtonSession: true,
+      metadata: METADATA,
+      isMediaButtonSession: false,
     });
   });
 
-  test("API 28: metadata without a space after the colon and a null album", () => {
-    const dump = parser.parse(fixture("dumpsys-media-session-api28-playing"));
+  test("API 34: a Bluetooth session in ERROR carries the error state and no actions", () => {
+    const dump = parser.parse(fixture("dumpsys-media-session-idle-phone-api34"));
 
-    expect(dump.sessions[0]).toMatchObject({
+    expect(dump.sessions[1]).toMatchObject({
+      package: "com.google.android.bluetooth",
+      tag: "BluetoothMediaBrowserService",
+      active: false,
+      state: "error",
+      stateCode: 7,
+      positionUpdatedAtMs: 58_253,
+      actions: [],
+    });
+  });
+
+  test("API 34: the dump after a pause key reads paused at speed 0", () => {
+    const dump = parser.parse(fixture("dumpsys-media-session-paused-phone-api34"));
+
+    expect(dump.sessions.find((session) => session.package === PLAYER.package)).toMatchObject({
       ...PLAYER,
-      state: "playing",
-      positionMs: 125000,
-      speed: 1.25,
-      metadata: { title: "Night Drive", artist: "Example Artist", size: 5 },
+      state: "paused",
+      stateCode: 2,
+      positionUpdatedAtMs: 2_060_728,
+      speed: 0,
+      metadata: METADATA,
     });
-    expect(dump.sessions[0].metadata?.album).toBeUndefined();
   });
 
-  test("no sessions and a null media button session", () => {
-    expect(parser.parse(fixture("dumpsys-media-session-api34-idle"))).toEqual({
-      sessions: [],
-      mediaButtonSession: null,
+  test("with no app playing, only system sessions remain and none is the media button session", () => {
+    const dump = parser.parse(fixture("dumpsys-media-session-idle-phone-api34"));
+
+    expect(dump.mediaButtonSession).toBeNull();
+    expect(dump.sessions.some((session) => session.package === PLAYER.package)).toBe(false);
+    expect(dump.sessions.every((session) => !session.active)).toBe(true);
+  });
+
+  test("API 30: bare numeric state codes and numeric volume types", () => {
+    const dump = parser.parse(fixture("dumpsys-media-session-playing-phone-api30"));
+
+    expect(dump.mediaButtonSession).toBeNull();
+    expect(dump.sessions.find((session) => session.package === PLAYER.package)).toEqual({
+      ...PLAYER,
+      active: true,
+      state: "playing",
+      stateCode: 3,
+      positionMs: 0,
+      positionUpdatedAtMs: 144_051,
+      speed: 0,
+      actions: PLAYER_ACTIONS,
+      metadata: METADATA,
+      isMediaButtonSession: false,
     });
+  });
+
+  test("API 30: the system's YouTube sessions report numeric state 0 as none", () => {
+    const dump = parser.parse(fixture("dumpsys-media-session-idle-phone-api30"));
+
+    expect(
+      dump.sessions
+        .filter(
+          (session) =>
+            session.package.startsWith("com.google.android.youtube") ||
+            session.package.startsWith("com.google.android.apps.youtube"),
+        )
+        .map((session) => [session.state, session.stateCode, session.speed]),
+    ).toEqual([
+      ["none", 0, 1],
+      ["none", 0, 1],
+    ]);
+  });
+
+  test("API 33: a paused player with numeric state 2", () => {
+    const dump = parser.parse(fixture("dumpsys-media-session-paused-phone-api33"));
+
+    expect(dump.sessions.at(-1)).toMatchObject({
+      ...PLAYER,
+      state: "paused",
+      stateCode: 2,
+      positionUpdatedAtMs: 277_755,
+    });
+  });
+
+  test("a TV image lists only the player; Automotive adds its own local player", () => {
+    const tv = parser.parse(fixture("dumpsys-media-session-playing-tv-api36"));
+    expect(tv.sessions.map((session) => [session.package, session.state])).toEqual([
+      [PLAYER.package, "playing"],
+    ]);
+
+    const car = parser.parse(fixture("dumpsys-media-session-playing-automotive-api34"));
+    expect(car.sessions.map((session) => session.package)).toContain(
+      "com.android.car.media.localmediaplayer",
+    );
+    expect(car.sessions.find((session) => session.package === PLAYER.package)?.state).toBe(
+      "playing",
+    );
+  });
+
+  test("the media button session line names the session it marks", () => {
+    const dump = parser.parse(
+      fixture("dumpsys-media-session-playing-phone-api34").replace(
+        "Media button session is null",
+        `Media button session is ${PLAYER.package}/${PLAYER.tag} (userId=0)`,
+      ),
+    );
+
+    expect(dump.mediaButtonSession).toEqual(PLAYER);
+    expect(dump.sessions.filter((session) => session.isMediaButtonSession)).toHaveLength(1);
   });
 
   test("a session that never set a playback state or metadata", () => {

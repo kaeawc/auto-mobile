@@ -248,15 +248,22 @@ final class PrototypeViewerLinkDeliveryTests: XCTestCase {
         func receiveInboundLink(_ url: String) { urls.append(url) }
     }
 
-    func testViewerURLCallbackLeavesRegisteredSchemesToTheDelegateHook() throws {
-        let inbox = PrototypeInboundLinkInbox()
-        let target = Target()
-        inbox.attach(target)
+    func testViewerURLCallbackDeliversOnlyWhatTheDelegateHookMissed() throws {
+        var ledger = PrototypeHookedURLLedger()
+        // Hook ran (UIKit calls the hooked scene delegate first, then SwiftUI's onOpenURL): no second delivery.
+        ledger.recordHook("amp-demo://post/41")
+        XCTAssertFalse(ledger.callbackShouldDeliver("amp-demo://post/41"))
+        // Hook never ran (iOS 27.2 SwiftUI lifecycle): the callback delivers, every time.
+        XCTAssertTrue(ledger.callbackShouldDeliver("amp-demo://post/41"))
+        XCTAssertTrue(ledger.callbackShouldDeliver("amp-demo://post/42"))
+        // The record stays bounded when the callback never consumes a hook delivery.
+        for index in 0 ... PrototypeHookedURLLedger.capacity {
+            ledger.recordHook("amp-demo://post/\(index)")
+        }
+        XCTAssertTrue(ledger.callbackShouldDeliver("amp-demo://post/0"))
+        XCTAssertFalse(ledger.callbackShouldDeliver("amp-demo://post/1"))
         let url = try XCTUnwrap(URL(string: "amp-demo://post/41"))
-        // UIKit calls the hooked scene delegate first, then SwiftUI's onOpenURL with the same URL.
-        if PrototypeInboundLinkSchemes.accepts(url, schemes: ["amp-demo"]) { inbox.receive(url.absoluteString) }
-        if PrototypeViewerURLRoute.route(url) != .delegateOwned { inbox.receive(url.absoluteString) }
-        XCTAssertEqual(target.urls, ["amp-demo://post/41"])
+        XCTAssertEqual(PrototypeViewerURLRoute.route(url), .delegateOwned)
         XCTAssertEqual(
             try PrototypeViewerURLRoute.route(XCTUnwrap(URL(string: "https://host/post/41"))),
             .delegateOwned

@@ -25,7 +25,8 @@ struct ProtoViewerApp: App {
             ).appendingPathComponent("Inbox", isDirectory: true)
             let store = try PrototypeLibraryStore(
                 root: root, storageRoot: storage, blocklist: PrototypeDefaultsContentBlocklist(),
-                secureStorage: PrototypePlatformRegistry.system.secureStorage
+                secureStorage: PrototypePlatformRegistry.system.secureStorage,
+                supportedCapabilities: Set(capabilities)
             )
             // Retry deletes of hidden content that failed earlier, so it never holds library quota.
             do { try store.purgeHidden() }

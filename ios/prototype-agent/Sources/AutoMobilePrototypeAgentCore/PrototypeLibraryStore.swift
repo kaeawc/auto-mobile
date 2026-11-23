@@ -23,6 +23,9 @@ final class PrototypeLibraryStore {
     private let libraryId: () -> String
     private let blocklist: (any PrototypeContentBlocklist)?
     private let secureStorage: (any PrototypeSecureValueStore)?
+    /// The app's advertised capabilities, including delivery-derived ones such as
+    /// `prototype_links_v1`; every add and load validates against this set.
+    let supportedCapabilities: Set<String>
 
     init(
         root: URL, storageRoot: URL,
@@ -30,10 +33,12 @@ final class PrototypeLibraryStore {
         clock: any PrototypeClock = SystemPrototypeClock(),
         libraryId: @escaping () -> String = { UUID().uuidString.lowercased() },
         blocklist: (any PrototypeContentBlocklist)? = nil,
-        secureStorage: (any PrototypeSecureValueStore)? = nil
+        secureStorage: (any PrototypeSecureValueStore)? = nil,
+        supportedCapabilities: Set<String> = Set(AutoMobilePrototypeCapabilities.supported)
     )
         throws
     {
+        self.supportedCapabilities = supportedCapabilities
         self.root = root.standardizedFileURL
         self.storageRoot = storageRoot.standardizedFileURL
         self.files = files
@@ -318,11 +323,8 @@ final class PrototypeLibraryStore {
         return entry
     }
 
-    func validate(
-        _ bytes: Data, supportedCapabilities: Set<String> = Set(AutoMobilePrototypeCapabilities.supported)
-    )
-        throws
-    {
+    func validate(_ bytes: Data, supportedCapabilities override: Set<String>? = nil) throws {
+        let supportedCapabilities = override ?? supportedCapabilities
         do {
             try PrototypeSpecStrictValidator.validate(data: bytes, library: true)
             let (value, _) = try PrototypeContractValidator.inspect(data: PrototypeStrictJSON.prepare(bytes))

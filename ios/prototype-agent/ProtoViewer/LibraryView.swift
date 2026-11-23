@@ -256,7 +256,7 @@ struct LibraryView: View {
         switch PrototypeViewerURLRoute.route(url) {
         case .mcp: break
         case .share: receive(url, source: .share); return
-        case .delegateOwned: return
+        case .delegateOwned: PrototypeURLDelivery.receiveFromViewCallback(url); return
         }
         // Even malformed MCP URLs are consumed: they must never enter the share-file alert path.
         guard let command = PrototypeMcpRequest.parse(url) else {

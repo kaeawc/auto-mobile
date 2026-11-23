@@ -66,10 +66,11 @@ actor PrototypeMcpInbox {
         files = PrototypeLibraryDiskFileSystem()
         importBundle = { url, label in
             let bytes = try PrototypeLibraryFileReader().read(url)
-            let store = try PrototypeLibraryStore(root: libraryRoot, storageRoot: storageRoot)
-            var importer = PrototypeLibraryImporter(store: store)
-            if let report { importer.supportedCapabilities = Set(report.capabilities) }
-            return try importer.importData(bytes, source: .mcp, label: label)
+            let store = try PrototypeLibraryStore(
+                root: libraryRoot, storageRoot: storageRoot,
+                supportedCapabilities: Set(report?.capabilities ?? AutoMobilePrototypeCapabilities.supported)
+            )
+            return try PrototypeLibraryImporter(store: store).importData(bytes, source: .mcp, label: label)
         }
         entries = {
             try PrototypeLibraryStore(

@@ -22,13 +22,16 @@ final class PrototypeLibraryImportTests: XCTestCase {
         } catch { XCTFail("Warmup: \(error)") }
     }
 
-    private func store(_ files: PrototypeLibraryFakeFileSystem) throws -> PrototypeLibraryStore {
+    private func store(
+        _ files: PrototypeLibraryFakeFileSystem,
+        supportedCapabilities: Set<String> = Set(AutoMobilePrototypeCapabilities.supported)
+    ) throws -> PrototypeLibraryStore {
         var sequence = 0
         return try PrototypeLibraryStore(
             root: root, storageRoot: storage, files: files, clock: PrototypeLibraryFakeClock(), libraryId: {
                 sequence += 1
                 return String(format: "00000000-0000-0000-0000-%012d", sequence)
-            }
+            }, supportedCapabilities: supportedCapabilities
         )
     }
 
@@ -284,6 +287,25 @@ final class PrototypeLibraryImportTests: XCTestCase {
             .init(spec: bundle.spec, assets: { _ in nil }, fonts: { _ in nil }), requires: bundle.requires
         ))
         XCTAssertNoThrow(try importer.importData(advisory, source: .file))
+    }
+
+    func testStoreAddAndLoadValidateWithTheAppsAdvertisedCapabilities() throws {
+        let links = PrototypeAgentProtocol.linksCapability
+        let linksSpec = Data(
+            #"{"id":"links","window":{"placement":{"type":"fullscreen"}},"requires":["prototype_links_v1"],"links":[],"root":{"type":"text","text":"Links"}}"#
+                .utf8
+        )
+        let files = PrototypeLibraryFakeFileSystem()
+        let advertised = Set(AutoMobilePrototypeCapabilities.supported).union([links])
+        let library = try store(files, supportedCapabilities: advertised)
+        let entry = try PrototypeLibraryImporter(store: library).importData(linksSpec, source: .mcp, label: "Links")
+        XCTAssertEqual(try library.load(entry.libraryId).spec, linksSpec)
+
+        // The same stored entry stays unloadable for a viewer that lacks the delivery capability.
+        let older = try store(files, supportedCapabilities: Set(AutoMobilePrototypeCapabilities.supported))
+        XCTAssertThrowsError(try older.load(entry.libraryId)) {
+            XCTAssertEqual($0 as? PrototypeLibraryImportFailure, .needsNewerViewer(missing: [links]))
+        }
     }
 
     func testImageBudgetsRejectZeroOversizedOverflowAndProbeFailuresBeforeCommit() throws {

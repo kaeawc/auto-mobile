@@ -34,11 +34,10 @@ actor PrototypeLibraryImportService {
         read = { try PrototypeLibraryFileReader().read($0) }
         commit = { bytes, source in
             let store = try PrototypeLibraryStore(
-                root: root, storageRoot: storageRoot, blocklist: PrototypeDefaultsContentBlocklist()
+                root: root, storageRoot: storageRoot, blocklist: PrototypeDefaultsContentBlocklist(),
+                supportedCapabilities: supportedCapabilities
             )
-            var importer = PrototypeLibraryImporter(store: store)
-            importer.supportedCapabilities = supportedCapabilities
-            try importer.importData(bytes, source: source)
+            try PrototypeLibraryImporter(store: store).importData(bytes, source: source)
         }
         cleanup = { try PrototypeLibraryInbox(root: inbox).cleanup($0) }
         self.warning = warning

@@ -25,12 +25,33 @@ enum PrototypeInboundLinkSchemes {
 enum PrototypeViewerURLRoute: Equatable {
     case mcp
     case share
-    /// The installed delegate hook already delivered it; routing it again would deliver it twice.
+    /// A registered scheme goes to the inbox unless the delegate hook already delivered it
+    /// (`PrototypeHookedURLLedger`); other URLs belong to the host.
     case delegateOwned
 
     static func route(_ url: URL) -> Self {
         if url.scheme?.lowercased() == "automobile-proto" { return .mcp }
         return url.isFileURL ? .share : .delegateOwned
+    }
+}
+
+/// SwiftUI hands every URL to `onOpenURL`, but the delegate hook can miss it: on iOS 27.2 SwiftUI
+/// installs its scene delegate without `-setDelegate:`, so the hook never runs. The hook records what
+/// it delivered, and the view callback delivers only the URLs the hook did not.
+struct PrototypeHookedURLLedger {
+    static let capacity = 16
+    private var delivered: [String] = []
+
+    mutating func recordHook(_ url: String) {
+        delivered.append(url)
+        if delivered.count > Self.capacity { delivered.removeFirst() }
+    }
+
+    /// True when the view callback must deliver `url` itself; consumes a matching hook delivery.
+    mutating func callbackShouldDeliver(_ url: String) -> Bool {
+        guard let index = delivered.firstIndex(of: url) else { return true }
+        delivered.remove(at: index)
+        return false
     }
 }
 

@@ -9,6 +9,7 @@
         static let inbox = PrototypeInboundLinkInbox()
         private static var installed = false
         private static var methods: Set<String> = []
+        private static var ledger = PrototypeHookedURLLedger()
 
         static var registeredSchemes: [String] {
             PrototypeInboundLinkSchemes
@@ -25,6 +26,14 @@
         static func receive(_ url: URL) {
             // Document imports remain owned by the host. ProtoViewer separates its MCP URLs at its callback.
             guard PrototypeInboundLinkSchemes.accepts(url, schemes: registeredSchemes) else { return }
+            ledger.recordHook(url.absoluteString)
+            inbox.receive(url.absoluteString)
+        }
+
+        /// For a SwiftUI `onOpenURL` callback: delivers a registered-scheme URL the hook missed.
+        static func receiveFromViewCallback(_ url: URL) {
+            guard PrototypeInboundLinkSchemes.accepts(url, schemes: registeredSchemes),
+                  ledger.callbackShouldDeliver(url.absoluteString) else { return }
             inbox.receive(url.absoluteString)
         }
 

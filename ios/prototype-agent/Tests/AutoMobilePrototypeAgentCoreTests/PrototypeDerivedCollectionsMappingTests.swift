@@ -102,14 +102,13 @@ final class PrototypeDerivedCollectionsMappingTests: XCTestCase {
            {"type":"setData","path":"/data/copy","value":{"derived":"tokenAlias"}}
          ]}}
         """#
-        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(json.utf8))
-        var session = PrototypeSession()
-        session.show(spec)
-        _ = session.setStates([("token", .string("example secret"))])
-        XCTAssertEqual(session.spec?.derivedValues["tokenAlias"], .string("example secret"))
-        let events = try session.run(XCTUnwrap(spec.root.onTap))
-        XCTAssertTrue(events.isEmpty)
-        XCTAssertEqual(session.data?["copy"], .string("original"))
+        // Validation follows the derived binding to its secure source, so the spec never loads (#19013).
+        XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: Data(json.utf8))) { error in
+            XCTAssertEqual(error as? PrototypeLoadError, .invalidSpec(
+                path: "root.onTap[0].value",
+                message: "Secure storage key state:token cannot be sent in data actions"
+            ))
+        }
     }
 
     func testStateKeyComparisonRequiresDeriveCapabilityWithoutDeclarations() throws {

@@ -35,12 +35,12 @@ Android, in the written user profile), and never for other domains.
 
 `user_files` on an iOS Simulator stages files through the managed Files fixture
 app `dev.jasonpearson.automobile.FilesFixture`. Writes go only to
-`Documents/automobile/<namespace>`, and reset deletes only that namespace. Without the fixture app, the call explains how to install it. A staged file may not show up in a document picker. Physical iOS devices and
-listing or reading user files on iOS are not supported.
+`Documents/automobile/<namespace>`, and reset deletes only that namespace. Without the fixture app, the call explains how to install it. A staged file may not show in a document picker. Physical iOS devices and listing or reading iOS user files are not supported.
 
 On Android, `putAppFile` accepts an optional `userId` (a non-negative integer) to
-target a work or secondary profile. Without it, AutoMobile uses the only user the app is installed for. With several candidates it prefers the foreground app's
-user, then the current user. If that is still ambiguous, the error lists the candidate IDs for `userId`.
+target a work or secondary profile. Without it, AutoMobile uses the only user the app is
+installed for. With several candidates it prefers the foreground app's user, then the
+current user. If that is still ambiguous, the error lists the candidate IDs.
 
 Private `documents`/`cache`/`tmp` containers require a debuggable app.
 `externalFiles` writes to the app's external files directory for the chosen user.
@@ -64,14 +64,19 @@ iOS URIs have no user query.
     session clears on release;
   - Android power constraints (`power`: battery, battery saver, Doze, standby
     buckets, Data Saver, thermal status), which the session restores on release;
-  - a camera poster (`cameraPoster`); see [Camera posters](#camera-posters).
+  - a camera poster (`cameraPoster`); see [Camera posters](#camera-posters);
+  - the iOS Simulator keyboard (`keyboard`): `hardwareKeyboard: false` shows the
+    software keyboard; `true` connects the hardware one (`hardwareLayout`: `ansi`,
+    `iso` or `jis`). `language` (such as `fr_FR`) adds a keyboard. An unavailable
+    language fails. A focused field keeps its keyboard until refocused. Reset
+    restores the prior state;
 - `biometricAuth` simulates a match or failure on supported emulators and iOS
   simulators, and every result in apps that embed the AutoMobile SDK.
 - `wakeAndUnlock` wakes an Android device and unlocks it with an optional PIN.
 - `postNotification` creates a notification for notification-flow tests. On a watchOS or
   Apple TV simulator, provide the app’s bundle ID as `appId` to deliver a push to that app.
-  A single iOS notification shows no app name, so `systemTray` can match it by
-  `appId` only when it was posted with `postNotification`; otherwise omit `appId`.
+  A single iOS notification shows no app name, so `systemTray` matches `appId` only for
+  notifications posted with `postNotification`; otherwise omit `appId`.
 - `clipboard` sets, reads, pastes, or clears clipboard content.
 
 ## Phone calls and SMS
@@ -108,7 +113,7 @@ the app. It returns this result without an error, with or without the SDK or a
 }
 ```
 
-This is not a failure: check `supported` and `reason`, and drive the in-call state with `call`, `cancel` and `busy`. Every other failure
+This is not a failure: check `supported` and `reason`, and use `call`, `cancel` and `busy` for the in-call state. Every other failure
 (missing `phoneNumber`, no SDK, an SDK rejection, an unsupported device) returns a
 tool error.
 
@@ -151,9 +156,9 @@ An iOS poster lasts until one of these happens:
 - the session that holds the simulator is released or switches device;
 - the daemon restarts.
 
-A later session on the same simulator starts without a poster.
+A later session on that simulator starts without one.
 
-Setting an iOS poster needs Xcode. AutoMobile builds the injection library from the
+An iOS poster needs Xcode. AutoMobile builds the injection library from the
 packaged source on first use, for Intel and Apple silicon simulators. A missing
 Xcode or library fails `startDevice` or `setDeviceState` and records nothing,
 rather than failing the later `launchApp`. To skip the build, set
@@ -250,8 +255,8 @@ fails, at the next capture on that emulator:
 | `userdata-wiped`           | The userdata image was re-created, for example by `-wipe-data` |
 | `avd-changed`              | The AVD itself                                                 |
 
-Capture the fixture again with `fixture: true` to replace it. Pass
-`fixture: true` on restore to require a fixture:
+Capture again with `fixture: true` to replace a fixture. Pass `fixture: true` on
+restore to require one:
 
 | Restore of                     | Refused with                   |
 | ------------------------------ | ------------------------------ |
@@ -264,7 +269,7 @@ is invalidated, when you delete it, or when `deleteDevice` destroys its AVD.
 
 ### Deleting a snapshot
 
-Delete any snapshot, fixture or not, by name:
+Delete any snapshot by name:
 
 ```json
 {
@@ -273,9 +278,8 @@ Delete any snapshot, fixture or not, by name:
 }
 ```
 
-Run it on the snapshot's own device, as for a restore; AutoMobile refuses a
-snapshot of another device or AVD. The result has `deleted: true` once the snapshot and
-its data are gone. A VM snapshot whose in-AVD payload cannot be deleted now
+Run it on the snapshot's own device, as for a restore; AutoMobile refuses another
+device's or AVD's snapshot. The result has `deleted: true` once the snapshot is gone. A VM snapshot whose in-AVD payload cannot be deleted now
 returns `deleted: false` with `pendingReclaim: true`. Delete it again, or
 capture any snapshot on that emulator, to finish it.
 
@@ -311,8 +315,7 @@ that AVD deletes the flagged snapshots.
 #### Cleaning up orphaned in-AVD snapshots
 
 `orphanedAvdSnapshots` skips the emulator's `default_boot` quick-boot state.
-AutoMobile never deletes orphans automatically, since one may be a snapshot
-someone made by hand.
+AutoMobile never deletes orphans automatically; one may be a hand-made snapshot.
 
 Each entry reports `avdName`, `snapshotName`, `sizeBytes` and `directoryPath`.
 **Use `directoryPath`** for anything that touches the filesystem: it is the
@@ -330,6 +333,3 @@ With the emulator stopped, delete the reported directory directly:
 ```bash
 rm -rf "<directoryPath>"
 ```
-
-Check what is there first with `du -sh "<directoryPath>"`, or list every in-AVD
-snapshot of one AVD with `du -sh "$(dirname "<directoryPath>")"/*`.

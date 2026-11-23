@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AKLastIDMSEnvironment</key>
+	<integer>0</integer>
+	<key>AKLastLocale</key>
+	<string>en_US</string>
+	<key>AddingEmojiKeybordHandled</key>
+	<true/>
+	<key>AppleKeyboards</key>
+	<array>
+		<string>en_US@sw=QWERTY;hw=Automatic</string>
+		<string>emoji@sw=Emoji</string>
+		<string>fr_FR@sw=AZERTY-French;hw=Automatic</string>
+		<string>de_DE@sw=QWERTZ-German;hw=Automatic</string>
+		<string>ja_JP-Kana@sw=Kana;hw=Automatic</string>
+		<string>zh_Hans-Pinyin@sw=Pinyin-Simplified;hw=Automatic</string>
+	</array>
+	<key>AppleKeyboardsExpanded</key>
+	<integer>1</integer>
+	<key>AppleLanguages</key>
+	<array>
+		<string>en-US</string>
+		<string>zh-Hans-US</string>
+	</array>
+	<key>AppleLanguagesSchemaVersion</key>
+	<integer>5400</integer>
+	<key>AppleLocale</key>
+	<string>en_US</string>
+	<key>ApplePasscodeKeyboards</key>
+	<array>
+		<string>en_US</string>
+		<string>emoji</string>
+	</array>
+	<key>PKLogNotificationServiceResponsesKey</key>
+	<false/>
+	<key>com.apple.gms.availability.key</key>
+	<array>
+		<integer>0</integer>
+	</array>
+	<key>com.apple.gms.availability.unifiedReasons</key>
+	<data>
+	eyJjb20uYXBwbGUuU2V0dGluZ3MuQXBwbGVJbnRlbGxpZ2VuY2UuUGFydG5lci5DaGF0
+	R1BUIjpbeyJ1bmF2YWlsYWJsZSI6eyJfMCI6eyJwYXJ0bmVyTm90U2VsZWN0ZWQiOnt9
+	fX19XX0=
+	</data>
+	<key>com.apple.gms.availability.useCaseReadiness</key>
+	<data>
+	e30=
+	</data>
+	<key>com.apple.gms.enhancedSiri.lastUpdated</key>
+	<date>2026-11-23T18:26:26Z</date>
+	<key>com.apple.gms.enhancedSiri.reasons</key>
+	<array>
+		<integer>1</integer>
+	</array>
+</dict>
+</plist>

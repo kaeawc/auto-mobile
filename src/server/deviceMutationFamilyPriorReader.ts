@@ -10,6 +10,7 @@ import { OrchestrationMutationPriorReader } from "./deviceMutationOrchestrationP
 import { LocalizationMutationPriorReader } from "./deviceMutationLocalizationPriorReader";
 import { PermissionMutationPriorReader } from "./deviceMutationPermissionPriorReader";
 import { StoreKitMutationPriorReader } from "./deviceMutationStoreKitPriorReader";
+import { KeyboardMutationPriorReader } from "./deviceMutationKeyboardPriorReader";
 
 /**
  * Asks each tool family's reader in turn; the first that observes a prior wins. A reader reports
@@ -26,6 +27,7 @@ export class FamilyMutationPriorReader implements MutationPriorReader {
       new PermissionMutationPriorReader(),
       new LocalizationMutationPriorReader(),
       new StoreKitMutationPriorReader(),
+      new KeyboardMutationPriorReader(),
     ],
   ) {}
 

@@ -11714,6 +11714,38 @@
           "required": ["supported"],
           "additionalProperties": {}
         },
+        "keyboard": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "verified": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "method": {
+              "$ref": "#/$defs/__schema7"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema8"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema9"
+            },
+            "hardwareKeyboard": {
+              "type": "boolean"
+            },
+            "hardwareLayout": {
+              "type": "string",
+              "enum": ["ansi", "iso", "jis"]
+            },
+            "language": {
+              "type": "string"
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
         "networkActivity": {
           "type": "object",
           "properties": {
@@ -47910,6 +47942,27 @@
           },
           "additionalProperties": false
         },
+        "keyboard": {
+          "description": "iOS Simulator hardware keyboard (connect or disconnect, with its layout) and keyboard language. A session restores the hardware keyboard to connected and the previous keyboard and language lists on reset.",
+          "type": "object",
+          "properties": {
+            "hardwareKeyboard": {
+              "description": "Connect (true) or disconnect (false) the simulated hardware keyboard. Disconnected, a focused text field always shows the software keyboard; connected, iOS hides it after the first hardware key event.",
+              "type": "boolean"
+            },
+            "hardwareLayout": {
+              "description": "Physical layout reported for the hardware keyboard (default ansi).",
+              "type": "string",
+              "enum": ["ansi", "iso", "jis"]
+            },
+            "language": {
+              "description": "Keyboard identifier to add and select, such as en_US, fr_FR, de_DE or ja_JP. It also appends the language to AppleLanguages.",
+              "type": "string",
+              "pattern": "^[A-Za-z]{2,3}(?:[_-][A-Za-z0-9]{2,8})*$"
+            }
+          },
+          "additionalProperties": false
+        },
         "deviceCondition": {
           "description": "Session-scoped root/integrity/fault test fixtures (behind the 'device-condition' feature flag). Every applied condition restores to a clean state on release, rebind or lease expiry. Send it in its own call, not combined with other setDeviceState fields.",
           "type": "object",
@@ -49128,6 +49181,38 @@
               "type": "boolean"
             },
             "errorCode": {
+              "type": "string"
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
+        "keyboard": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "verified": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "method": {
+              "$ref": "#/$defs/__schema7"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema8"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema9"
+            },
+            "hardwareKeyboard": {
+              "type": "boolean"
+            },
+            "hardwareLayout": {
+              "type": "string",
+              "enum": ["ansi", "iso", "jis"]
+            },
+            "language": {
               "type": "string"
             }
           },

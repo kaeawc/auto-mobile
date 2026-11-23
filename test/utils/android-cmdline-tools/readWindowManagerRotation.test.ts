@@ -136,7 +136,7 @@ describe("readWindowManagerRotation", () => {
 
       expect(await readWindowManagerRotation(adb, { displayId, signal })).toBe(1);
       expect(WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND).toBe(
-        'shell dumpsys window | grep -i "mRotation="',
+        'shell dumpsys window | grep -i "mRotation=" || dumpsys input | grep "SurfaceOrientation:"',
       );
       expect(adb.getExecutedCommands()).toEqual([
         WINDOW_MANAGER_ROTATION_COMMAND,
@@ -182,6 +182,25 @@ describe("readWindowManagerRotation", () => {
 
     await expect(readWindowManagerRotation(adb, { displayId: 99 })).rejects.toBe(error);
     expect(adb.getExecutedCommands()).toEqual([WINDOW_MANAGER_ROTATION_COMMAND]);
+  });
+
+  test("reads SurfaceOrientation from the captured API 24/27 dump that has no mRotation (#19063)", async () => {
+    const fixtureDir = join(__dirname, "..", "..", "fixtures", "android-rotation-legacy");
+    for (const api of [24, 27]) {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(WINDOW_MANAGER_ROTATION_COMMAND, createExecResult("no rotation", ""));
+      adb.setCommandResponse(
+        WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND,
+        createExecResult(
+          readFileSync(
+            join(fixtureDir, `api${api}-dumpsys-input-surface-orientation-landscape.txt`),
+            "utf8",
+          ),
+          "",
+        ),
+      );
+      expect(await readWindowManagerRotation(adb)).toBe(1);
+    }
   });
 
   test("propagates the fallback command error", async () => {

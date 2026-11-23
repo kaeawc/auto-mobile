@@ -800,6 +800,7 @@
     "data-object-invalid-member-name.json",
     "data-object-last-generated-unset.json",
     "data-object-match-member.json",
+    "data-object-member-unknown-derived.json",
     "data-object-nested.json",
     "data-object-upsert-key-not-member.json",
     "data-repeat-bad-pointer.json",

@@ -122,20 +122,22 @@ enum PrototypeSecureStorageRules {
         }
     }
 
-    static func validateDataAction(_ fields: [String: JSONValue], path: String, secure: [String]) throws {
+    static func validateDataAction(
+        _ fields: [String: JSONValue], path: String, secure: [String], derive: [String: JSONValue] = [:]
+    )
+        throws
+    {
         guard ["setData", "appendData", "prependData", "upsertData", "removeData"]
             .contains(fields["type"]?.stringValue ?? "") else { return }
         let candidates: [(JSONValue?, String)] = [
             (fields["where"]?.objectFields?["equals"], "\(path).where.equals"),
             (fields["value"], "\(path).value"),
         ]
-        // `{object}` members (#18826) read state like a top-level value.
+        // `{object}` members (#18826) read state, directly or through `{derived}`, like a top-level value.
         let members = fields["value"]?.objectFields?["object"]?.objectFields ?? [:]
         let memberCandidates = members.keys.sorted().map { (members[$0], "\(path).value.object.\($0)") }
         for (value, at) in candidates + memberCandidates {
-            if let key = value?.objectFields?["state"]?.stringValue,
-               let leaked = secureKey(for: key, secure: secure)
-            {
+            if let binding = value?.objectFields, let leaked = bindingKey(binding, secure: secure, derive: derive) {
                 throw PrototypeContractValidator.invalid(
                     at,
                     "Secure storage key \(leaked) cannot be sent in data actions"

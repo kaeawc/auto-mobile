@@ -19,6 +19,9 @@ class PrototypeObjectDataValueTest {
 
       override fun data(pointer: String): JsonElement? =
         if (pointer == "/todos/0/title") JsonPrimitive("Walk dog") else null
+
+      override fun derived(name: String): JsonElement? =
+        if (name == "label") JsonPrimitive("BUY MILK") else null
     }
 
   private fun binding(text: String): JsonObject = Json.parseToJsonElement(text).jsonObject
@@ -75,6 +78,31 @@ class PrototypeObjectDataValueTest {
         inputs,
       ) is PrototypeDataValue.Failure,
     )
+  }
+
+  @Test
+  fun derivedMembersResolveLikeTopLevelDerivedValues() {
+    val top =
+      PrototypeDataWriter.resolveValue(binding("""{"derived":"label"}"""), inputs)
+        as PrototypeDataValue.Resolved
+    val member =
+      PrototypeDataWriter.resolveValue(binding("""{"object":{"t":{"derived":"label"}}}"""), inputs)
+        as PrototypeDataValue.Resolved
+    assertEquals(buildJsonObject { put("t", top.value) }, member.value)
+    assertTrue(
+      PrototypeDataWriter.resolveValue(binding("""{"object":{"t":{"derived":"nope"}}}"""), inputs)
+        is PrototypeDataValue.Failure,
+    )
+  }
+
+  @Test
+  fun unknownDerivedMemberIsRefusedAtLoad() {
+    val failure =
+      PrototypeSpecValidator.validate(
+        """{"id":"todo","window":{"placement":{"type":"fullscreen"}},"state":{"ratio":0.25},"derive":{"label":{"of":{"state":"ratio"},"format":{"percent":{}}}},"data":{"todo":{}},"root":{"type":"button","label":"Save","onTap":[{"type":"setData","path":"/data/todo","value":{"object":{"t":{"derived":"missing"}}}}]}}""",
+      ) as PrototypeSpecValidation.Failure
+    assertEquals("root.onTap[0].value.object.t.derived", failure.error.path)
+    assertEquals("Unknown derived value \"missing\"", failure.error.message)
   }
 
   @Test

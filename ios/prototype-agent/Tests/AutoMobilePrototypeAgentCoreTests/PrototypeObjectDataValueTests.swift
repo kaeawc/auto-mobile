@@ -11,6 +11,11 @@ final class PrototypeObjectDataValueTests: XCTestCase {
         func state(_ key: String) -> JSONValue? { key == "draft" ? .string("Buy milk") : nil }
         func page(_: String) -> Int? { nil }
         func data(_ pointer: String) -> JSONValue? { pointer == "/todos/0/title" ? .string("Walk dog") : nil }
+        func derived(_ name: String) -> JSONValue? { name == "label" ? .string("BUY MILK") : nil }
+    }
+
+    private func load(_ text: String) throws {
+        _ = try JSONDecoder().decode(PrototypeSpec.self, from: Data(text.utf8))
     }
 
     private func json(_ text: String) throws -> JSONValue {
@@ -70,6 +75,65 @@ final class PrototypeObjectDataValueTests: XCTestCase {
         guard case .failure = try PrototypeDataWrite.resolveValue(
             json(#"{"object":{"t":{"object":{"u":{"value":1}}}}}"#), inputs: Inputs()
         ) else { return XCTFail("nested") }
+    }
+
+    func testDerivedMembersResolveLikeTopLevelDerivedValues() throws {
+        let top = try PrototypeDataWrite.resolveValue(json(#"{"derived":"label"}"#), inputs: Inputs()).get()
+        let member = try PrototypeDataWrite.resolveValue(
+            json(#"{"object":{"t":{"derived":"label"}}}"#), inputs: Inputs()
+        ).get()
+        XCTAssertEqual(member, .object(["t": top]))
+        guard case .failure = try PrototypeDataWrite.resolveValue(
+            json(#"{"object":{"t":{"derived":"nope"}}}"#), inputs: Inputs()
+        ) else { return XCTFail("unknown derived member") }
+    }
+
+    func testUnknownDerivedMemberIsRefusedAtLoad() throws {
+        XCTAssertThrowsError(try load("""
+        {"id":"todo","window":{"placement":{"type":"fullscreen"}},"state":{"ratio":0.25},
+         "derive":{"label":{"of":{"state":"ratio"},"format":{"percent":{}}}},"data":{"todo":{}},
+         "root":{"type":"button","label":"Save","onTap":[
+           {"type":"setData","path":"/data/todo","value":{"object":{"t":{"derived":"missing"}}}}]}}
+        """)) { error in
+            XCTAssertEqual(
+                error as? PrototypeLoadError,
+                .invalidSpec(path: "root.onTap[0].value.object.t.derived", message: #"Unknown derived value "missing""#)
+            )
+        }
+    }
+
+    func testADerivedMemberOverSecureStateIsRefused() throws {
+        let derive: [String: JSONValue] = try [
+            "tokenText": json(#"{"of":{"state":"token"},"format":{"number":{}}}"#),
+            "draftText": json(#"{"of":{"state":"draft"},"format":{"number":{}}}"#),
+        ]
+        for type in ["setData", "appendData", "prependData", "upsertData"] {
+            XCTAssertThrowsError(try PrototypeSecureStorageRules.validateDataAction([
+                "type": .string(type), "path": .string("/data/rows"),
+                "value": json(#"{"object":{"title":{"derived":"draftText"},"secret":{"derived":"tokenText"}}}"#),
+            ], path: "action", secure: ["state:token"], derive: derive), type) {
+                XCTAssertTrue(String(describing: $0).contains("action.value.object.secret"), type)
+            }
+            XCTAssertNoThrow(try PrototypeSecureStorageRules.validateDataAction([
+                "type": .string(type), "path": .string("/data/rows"),
+                "value": json(#"{"object":{"title":{"derived":"draftText"}}}"#),
+            ], path: "action", secure: ["state:token"], derive: derive), type)
+        }
+        XCTAssertThrowsError(try load("""
+        {"id":"secure-member","window":{"placement":{"type":"fullscreen"}},
+         "state":{"token":"","remember":false},"data":{"rows":[]},
+         "requires":{"platform":["secureStorage"]},
+         "storage":{"version":1,"keys":["state:remember"],"secure":["state:token"]},
+         "derive":{"tokenText":{"of":{"state":"token"},"format":{"number":{}}}},
+         "root":{"type":"button","label":"Copy","onTap":[
+           {"type":"appendData","path":"/data/rows","value":{"object":{"t":{"derived":"tokenText"}}}}]}}
+        """)) { error in
+            guard case let .invalidSpec(path, message)? = error as? PrototypeLoadError else {
+                return XCTFail("\(error)")
+            }
+            XCTAssertEqual(path, "root.onTap[0].value.object.t")
+            XCTAssertEqual(message, "Secure storage key state:token cannot be sent in data actions")
+        }
     }
 
     func testRepeatItemAndIndexMembersBindPerRow() throws {

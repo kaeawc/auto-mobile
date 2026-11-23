@@ -82,6 +82,7 @@ const buttonClasses: Record<string, ObservationActionClass> = {
   rotary_nudge_left: "inPlace",
   rotary_nudge_right: "inPlace",
   rotary_select: "navigation",
+  siri: "navigation",
 };
 const submittingKeys = ["enter", "done", "go", "search", "send"];
 const inPlaceKeys = [

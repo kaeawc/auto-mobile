@@ -35,7 +35,12 @@ import {
   headUnitTapAtHandler,
   headUnitTapOnHandler,
 } from "./interactionTools/headUnitHandlers";
-import { CARPLAY_DISPLAY, carPlayTapAtHandler } from "./interactionTools/carPlayHandlers";
+import {
+  CARPLAY_DISPLAY,
+  carPlayPressButtonHandler,
+  carPlayTapAtHandler,
+  refuseCarPlayOnlyButton,
+} from "./interactionTools/carPlayHandlers";
 import { HEAD_UNIT_DISPLAY } from "../features/androidAuto/HeadUnitInteraction";
 import { withTvosHomeScreen } from "./tvosHomeScreen";
 import { withTvosOpenLink } from "./tvosOpenLink";
@@ -157,7 +162,7 @@ const NAV_PLAN_SKELETON = { ...NAV, ...PLAN_SKELETON } as const;
 export const pressButtonTool = defineDeviceTool({
   name: "pressButton",
   description:
-    "Press a device or navigation button. On tvOS, use up/down/left/right to navigate focus, select, menu, home or playPause; durationMs long-presses any remote button (100-10000 ms); steps are unsupported. On Android (TV remotes), up/down/left/right/select send D-pad keys and playPause, fastForward, rewind, next and previous send media keys; select with durationMs is a long press of D-pad center (API 35+). On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. Android Automotive only: rotary_rotate_cw / rotary_rotate_ccw (steps detents), rotary_nudge_up/down/left/right and rotary_select drive a rotary controller; other devices refuse them. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
+    'Press a device or navigation button. On tvOS, use up/down/left/right to navigate focus, select, menu, home or playPause; durationMs long-presses any remote button (100-10000 ms); steps are unsupported. On Android (TV remotes), up/down/left/right/select send D-pad keys and playPause, fastForward, rewind, next and previous send media keys; select with durationMs is a long press of D-pad center (API 35+). On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. Android Automotive only: rotary_rotate_cw / rotary_rotate_ccw (steps detents), rotary_nudge_up/down/left/right and rotary_select drive a rotary controller; other devices refuse them. display "carPlay" (iOS 26.x simulator, after startDevice carPlay with headUnitInputs) sends back, home, siri and the rotary_* knob inputs to the CarPlay head unit; siri works only there. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.',
   input: pressButtonInput,
   options: {
     outputSchema: pressButtonResultSchema,
@@ -351,6 +356,36 @@ function routeTapAt(
   return tapAtHandler(device, args, options);
 }
 
+/**
+ * pressButton display "headUnit" (#17842) acts on the Android Auto head unit and "carPlay"
+ * (#19059) on the iOS simulator's CarPlay head unit; every other call is the phone press, which
+ * refuses CarPlay-only buttons.
+ */
+async function routePressButton(
+  device: Parameters<typeof pressButtonHandler>[0],
+  args: Parameters<typeof pressButtonHandler>[1],
+  options: InteractionHandlerOptions & { deps: InteractionToolDependencies },
+) {
+  if (args.display === HEAD_UNIT_DISPLAY) {
+    return headUnitPressButtonHandler(
+      device,
+      args,
+      options.deps.headUnitInteractionFactory,
+      options.signal,
+    );
+  }
+  if (args.display === CARPLAY_DISPLAY) {
+    return carPlayPressButtonHandler(
+      device,
+      args,
+      options.deps.carPlayInputFactory,
+      options.signal,
+    );
+  }
+  refuseCarPlayOnlyButton(args);
+  return pressButtonHandler(device, args, options);
+}
+
 export function registerInteractionTools(deps: InteractionToolDependencies = {}) {
   // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
   // are defined at module scope (each with an
@@ -385,11 +420,8 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     selectAllTextHandler(device, args, { progress, signal, deps }),
   );
 
-  // display "headUnit" (#17842) acts on the Android Auto head unit; every other call is unchanged.
   pressButtonTool.register(ToolRegistry, (device, args, progress, signal) =>
-    args.display === HEAD_UNIT_DISPLAY
-      ? headUnitPressButtonHandler(device, args, deps.headUnitInteractionFactory, signal)
-      : pressButtonHandler(device, args, { progress, signal, deps }),
+    routePressButton(device, args, { progress, signal, deps }),
   );
 
   ToolRegistry.registerDeviceAware(

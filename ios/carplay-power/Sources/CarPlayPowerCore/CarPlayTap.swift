@@ -28,7 +28,51 @@ public protocol CarPlayHIDBackend {
     /// A left-mouse event at x, y in the car screen's pixels, normalized by width and height.
     func sendTouch(_ phase: CarPlayTouchPhase, target: UInt32, x: Double, y: Double, width: Double, height: Double)
         throws
+    /// A button event for a HID usage (`IndigoHIDMessageForHIDArbitrary`), pressed or released.
+    func sendUsage(_ phase: CarPlayTouchPhase, target: UInt32, page: UInt32, usage: UInt32) throws
+    /// One scroll event of `delta` lines on the vertical axis
+    /// (`IndigoHIDMessageForScrollEventFromHIDEventRef`).
+    func sendScroll(target: UInt32, delta: Double) throws
     func hold(milliseconds: Int)
+}
+
+/// The powered car screen a HID message may go to, and its target.
+struct PoweredCarScreen {
+    let device: SimulatorDevice
+    let screen: SimulatorScreen
+    let target: UInt32
+
+    /// Refuses unless the TVOut car screen is a TVOut or Wireless screen type, powered on, on an
+    /// iOS 26.x runtime. `action` names what was refused, e.g. "CarPlay taps".
+    static func require(_ screens: any SimulatorScreenBackend, udid: String, action: String) throws -> Self {
+        let device = try screens.selectBootedDevice(udid: udid)
+        guard Int(device.runtimeVersion.split(separator: ".").first ?? "") == 26 else {
+            throw CarPlayPowerError(
+                .unsupportedRuntime,
+                "\(action) need an iOS 26.x runtime (found \(device.runtimeVersion)); only its CarPlay HID service is verified."
+            )
+        }
+        guard let screen = try screens.screens().first(where: { $0.name == CarPlayPowerController.carScreenName })
+        else {
+            throw CarPlayPowerError(
+                .noCarPlayScreen,
+                "No TVOut screen; use an iPhone simulator on an iOS 26.x runtime."
+            )
+        }
+        guard let target = CarPlayHID.target(screenType: screen.screenType) else {
+            throw CarPlayPowerError(
+                .unsupportedScreenType,
+                "TVOut reports screenType \(screen.screenType), not a CarPlay screen type (1 or 2); nothing was sent."
+            )
+        }
+        guard screen.powerState == 1 else {
+            throw CarPlayPowerError(
+                .carPlayNotPowered,
+                "The CarPlay screen is powered off; run carplay-power-helper power-on after booting, then retry."
+            )
+        }
+        return PoweredCarScreen(device: device, screen: screen, target: target)
+    }
 }
 
 /// JSON contract of `tap`: the point sent, in car-screen pixels, and the screen and target it went to.
@@ -60,27 +104,9 @@ public struct CarPlayTapController {
     /// Refuses, sending nothing, unless the TVOut car screen is a TVOut or Wireless screen type,
     /// powered on, on an iOS 26.x runtime, and x, y lie inside it.
     public func tap(udid: String, x: Double, y: Double) throws -> CarPlayTapResult {
-        let device = try screens.selectBootedDevice(udid: udid)
-        try Self.requireTapRuntime(device.runtimeVersion)
-        guard let screen = try screens.screens().first(where: { $0.name == CarPlayPowerController.carScreenName })
-        else {
-            throw CarPlayPowerError(
-                .noCarPlayScreen,
-                "No TVOut screen; use an iPhone simulator on an iOS 26.x runtime."
-            )
-        }
-        guard let target = CarPlayHID.target(screenType: screen.screenType) else {
-            throw CarPlayPowerError(
-                .unsupportedScreenType,
-                "TVOut reports screenType \(screen.screenType), not a CarPlay screen type (1 or 2); no touch was sent."
-            )
-        }
-        guard screen.powerState == 1 else {
-            throw CarPlayPowerError(
-                .carPlayNotPowered,
-                "The CarPlay screen is powered off; run carplay-power-helper power-on after booting, then retry."
-            )
-        }
+        let car = try PoweredCarScreen.require(screens, udid: udid, action: "CarPlay taps")
+        let screen = car.screen
+        let target = car.target
         guard x.isFinite, y.isFinite, x >= 0, y >= 0, x < screen.width, y < screen.height else {
             throw CarPlayPowerError(
                 .usage,
@@ -96,14 +122,5 @@ public struct CarPlayTapController {
             x: x, y: y, screenID: screen.id, screenType: screen.screenType, target: target,
             width: screen.width, height: screen.height
         ))
-    }
-
-    static func requireTapRuntime(_ version: String) throws {
-        guard Int(version.split(separator: ".").first ?? "") == 26 else {
-            throw CarPlayPowerError(
-                .unsupportedRuntime,
-                "CarPlay taps need an iOS 26.x runtime (found \(version)); only its CarPlay HID service is verified."
-            )
-        }
     }
 }

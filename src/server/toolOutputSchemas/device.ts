@@ -257,6 +257,7 @@ const deviceStateOutputFields = {
       mode: z.enum(["image", "qr", "clear"]).optional(),
       method: z.enum(["android_emulator_console", "ios_simulator_dyld_injection"]).optional(),
       relaunchRequired: z.boolean().optional(),
+      deviceWide: z.boolean().optional(),
       surface: z.enum(["wall", "table"]).optional(),
       path: z.string().optional(),
     })

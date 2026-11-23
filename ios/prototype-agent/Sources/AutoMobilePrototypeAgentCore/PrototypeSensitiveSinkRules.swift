@@ -254,6 +254,26 @@ enum PrototypeSensitiveSinkRules {
                 Copy(into: into, intoState: intoState, source: source, from: from)
             }
             let value = action.value["value"]
+            // An `{object}` value (#18826) reads every member, so each member adds its own copies.
+            if !intoState, let members = value?.objectFields?["object"]?.objectFields {
+                return members.keys.sorted().flatMap { name -> [Copy] in
+                    let member = members[name]?.objectFields
+                    if let member, member["derived"] != nil {
+                        return PrototypeDerivedValidator.sources(member, entries: derive).flatMap { binding in
+                            ["data", "state"].compactMap { source in
+                                binding[source]?.stringValue.map { copy(source, $0) }
+                            }
+                        }
+                    }
+                    for source in ["data", "state"] {
+                        if let from = member?[source]?.stringValue { return [copy(source, from)] }
+                    }
+                    return repeatCopies(
+                        nodes: nodes, action: action, text: nil,
+                        readsItem: member?["item"]?.stringValue != nil, into: into, intoState: false
+                    )
+                }
+            }
             let read = value?.objectFields
             if let from = read?["platform"]?.stringValue { return [copy("platform", from)] }
             if !intoState, let read {

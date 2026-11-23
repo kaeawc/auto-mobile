@@ -126,19 +126,20 @@ probes, and error codes.
 
 ## Camera posters
 
-A camera poster puts an image or QR code in front of the camera. Physical iOS and
-Android devices, and Apple platforms other than iOS, do not support camera posters.
+A camera poster puts an image or QR code in front of the camera. Only Android
+emulators and iOS Simulators support camera posters.
 
 `setDeviceState` `cameraPoster` accepts `mode: "image"` with a host PNG/JPG/JPEG
 `path`, `mode: "qr"` with `text`, or `mode: "clear"`.
 
 - Android emulators update the virtual-scene poster live (`surface: "wall"` or
   `"table"`).
-- On iOS Simulator, the call records the poster for each app's next `launchApp`.
-  It returns `method: "ios_simulator_dyld_injection"`, `path` when set, and
-  `relaunchRequired: true`. Relaunch running apps; iOS ignores `surface`. After
-  clearing, use `launchApp` with `coldBoot: true` to remove the poster from a
-  running app.
+- On iOS Simulator, the poster applies at each app's next launch, from
+  `launchApp`, the home screen or XCUITest. The call returns
+  `method: "ios_simulator_dyld_injection"`, `path`, `deviceWide` and
+  `relaunchRequired: true`: relaunch running apps, after clearing with
+  `launchApp` `coldBoot: true`. iOS ignores `surface`. `deviceWide: false`
+  means only `launchApp` applies it; `warning` says why.
 
 `startDevice` accepts mutually exclusive `cameraPosterPath` or
 `cameraPosterQr: { text }`. Android requires a stopped emulator; iOS Simulator also

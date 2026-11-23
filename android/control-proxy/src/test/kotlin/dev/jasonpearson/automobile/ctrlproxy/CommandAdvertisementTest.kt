@@ -60,6 +60,7 @@ class CommandAdvertisementTest {
       "prototype_design_platform_v1",
       "prototype_data_actions_v1",
       "prototype_data_actions_v2",
+      "prototype_data_actions_v3",
       "prototype_network_v1",
       "prototype_network_device_v1",
       "prototype_network_upload_v1",
@@ -209,6 +210,7 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_data_model_v1"))
     assertTrue(commands.contains("prototype_data_actions_v1"))
     assertTrue(commands.contains("prototype_data_actions_v2"))
+    assertTrue(commands.contains("prototype_data_actions_v3"))
     assertTrue(commands.contains("prototype_network_v1"))
     assertTrue(commands.contains("prototype_network_device_v1"))
     assertTrue(commands.contains("prototype_network_upload_v1"))

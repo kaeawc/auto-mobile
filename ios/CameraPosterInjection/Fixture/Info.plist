@@ -12,6 +12,20 @@
     <key>CFBundleSupportedPlatforms</key><array><string>iPhoneSimulator</string></array>
     <key>UIDeviceFamily</key><array><integer>1</integer></array>
     <key>UILaunchScreen</key><dict/>
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key><false/>
+        <key>UISceneConfigurations</key>
+        <dict>
+            <key>UIWindowSceneSessionRoleApplication</key>
+            <array>
+                <dict>
+                    <key>UISceneConfigurationName</key><string>Default</string>
+                    <key>UISceneDelegateClassName</key><string>CameraFixture.SceneDelegate</string>
+                </dict>
+            </array>
+        </dict>
+    </dict>
     <key>NSCameraUsageDescription</key><string>Verify simulator camera poster injection.</string>
 </dict>
 </plist>

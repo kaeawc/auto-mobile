@@ -38,6 +38,8 @@ export interface DeviceCameraPosterState {
   path?: string;
   method?: "android_emulator_console" | "ios_simulator_dyld_injection";
   relaunchRequired?: boolean;
+  /** iOS: the poster reaches apps launched any way (home screen, XCUITest), not only launchApp. */
+  deviceWide?: boolean;
   /** Console acceptance is not a camera read-back, so this is never set to true. */
   verified?: boolean;
   warning?: string;

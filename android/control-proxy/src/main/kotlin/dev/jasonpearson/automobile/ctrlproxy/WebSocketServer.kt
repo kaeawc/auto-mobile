@@ -382,6 +382,8 @@ class WebSocketServer(
     // for a device lacking this flag. Advertised only together with prototype_data_model_v1.
     add("prototype_data_actions_v1")
     add("prototype_data_actions_v2")
+    // `{object}` data-action values built from member bindings (#18826).
+    add("prototype_data_actions_v3")
     // The request action (#12528): an HTTP call from a tap, run by the host (via "host") or by the
     // device itself (via "device"), that writes /data and moves a status key. Older APKs reject the
     // action as unknown. Advertised only together with prototype_data_model_v1, since the

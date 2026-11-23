@@ -306,6 +306,8 @@ object PrototypeDataWriter {
       return it
     }
     return when {
+      "object" in binding ->
+        PrototypeObjectDataValue.resolve(binding.getValue("object") as? JsonObject, inputs)
       "value" in binding -> PrototypeDataValue.Resolved(binding.getValue("value"))
       "state" in binding -> {
         val key = binding.getValue("state").jsonPrimitive.content
@@ -317,16 +319,7 @@ object PrototypeDataWriter {
       }
       "data" in binding || "derived" in binding ->
         PrototypeDataBindings.resolveDataOrDerived(binding, inputs)
-      "platform" in binding || "event" in binding -> {
-        val source = if ("platform" in binding) "platform" else "event"
-        val pointer = binding.getValue(source).jsonPrimitive.content
-        val value = if (source == "platform") inputs.platform(pointer) else inputs.event(pointer)
-        value?.let(PrototypeDataValue::Resolved)
-          ?: PrototypeDataBindings.failure(
-            PrototypeDataWriteErrorCode.NOT_FOUND,
-            "Data pointer $pointer does not exist",
-          )
-      }
+      "platform" in binding || "event" in binding -> resolveSourcePointer(binding, inputs)
       else ->
         PrototypeDataBindings.failure(
           PrototypeDataWriteErrorCode.INVALID_VALUE,
@@ -334,6 +327,23 @@ object PrototypeDataWriter {
         )
     }
   }
+}
+
+/** `{platform}` and `{event}` read a pointer from their source; a missing one is `not_found`. */
+private fun resolveSourcePointer(
+  binding: EmitContextBinding,
+  inputs: EmitContextInputs,
+): PrototypeDataValue {
+  val source = if ("platform" in binding) "platform" else "event"
+  val pointer = binding.getValue(source).jsonPrimitive.content
+  val value = if (source == "platform") inputs.platform(pointer) else inputs.event(pointer)
+  return value?.let(PrototypeDataValue::Resolved)
+    ?: PrototypeDataValue.Failure(
+      PrototypeDataWriteError(
+        PrototypeDataWriteErrorCode.NOT_FOUND,
+        "Data pointer $pointer does not exist",
+      ),
+    )
 }
 
 sealed interface PrototypeDataValue {

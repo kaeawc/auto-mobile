@@ -256,6 +256,29 @@ describe("secure data-write values", () => {
     });
   }
 
+  test("an object value refuses a secure member at the member's path (#18826)", () => {
+    const value = { object: { label: { value: "x" }, secret: { state: "token" } } };
+    expect(error({ ...writes[1], value })).toEqual({
+      path: "root.onTap[0].value.object.secret",
+      message: "Secure storage key state:token cannot be written to data",
+    });
+    expect(
+      error({ ...writes[1], value: { object: { label: { state: "remember" } } } }),
+    ).toBeUndefined();
+  });
+
+  test("an object value refuses a derived member over secure state", () => {
+    const root = {
+      ...spec(),
+      derive: { tokenText: { of: { state: "token" }, format: { number: {} } } },
+    };
+    const value = { object: { label: { value: "x" }, secret: { derived: "tokenText" } } };
+    expect(error({ ...writes[1], value }, root)).toEqual({
+      path: "root.onTap[0].value.object.secret",
+      message: "Secure storage key state:token cannot be written to data",
+    });
+  });
+
   test("public values, literals and specs without secure keys pass; opt-in does not apply", () => {
     for (const action of writes) {
       expect(error({ ...action, value: { state: "remember" } })).toBeUndefined();

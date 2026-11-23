@@ -29,6 +29,9 @@ const SETTING_FIELDS: Readonly<
   magnification: { arg: true, android: "magnification", ios: "magnification" },
   magnificationScale: { arg: 3, android: "magnificationScale", ios: "magnificationScale" },
   extraDim: { arg: true, android: "extraDim", ios: "extraDim" },
+  // iOS Simulator only (#19018); Android refuses them before any device call.
+  dynamicIsland: { arg: "hidden", android: null, ios: "dynamicIsland" },
+  backlight: { arg: false, android: null, ios: "backlight" },
 };
 
 /** Schema fields that select a device or modify the call rather than a display setting. */
@@ -95,7 +98,14 @@ describe("displayConfig mutation journaling covers every field (#14790)", () => 
       "density",
       "nightMode",
     ]);
-    expect(keysFor({ reset: true }, "ios")).toEqual(["contentSize", "nightMode"]);
+    // An iOS reset can also show the island and relight the display (#19018).
+    expect(keysFor({ reset: true }, "ios")).toEqual([
+      "contentSize",
+      "nightMode",
+      "dynamicIsland",
+      "backlight",
+    ]);
+    expect(keysFor({ reset: "factory" }, "ios")).toEqual(["dynamicIsland", "backlight"]);
   });
 
   test("several geometry fields record the opaque intent once", () => {

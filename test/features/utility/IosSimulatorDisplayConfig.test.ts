@@ -13,6 +13,7 @@ import {
 import type { SimCtl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeSimulatorRenderOverlayControl } from "../../fakes/FakeSimulatorRenderOverlayControl";
 
 type SimctlRunner = Pick<SimCtl, "executeCommandArgs">;
 
@@ -61,6 +62,7 @@ function simulatorConfig(
 ) {
   return new DisplayConfig(simulator, {
     simctl,
+    renderOverlays: new FakeSimulatorRenderOverlayControl(),
     themeBaselines: new Map(),
     accessibilityBaselines: new Map(),
     contentSizeBaselines: baselines,

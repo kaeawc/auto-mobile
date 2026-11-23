@@ -32,6 +32,11 @@ import {
 } from "../../../utils/ios-cmdline-tools/SimulatorDynamicIsland";
 import { iosBiometricEnrollmentTarget, iosBiometricRevertArgs } from "./iosBiometricRevert";
 import { STOREKIT_MUTATION_KIND, type IosStoreKitSessionReset } from "./storeKitSession";
+import { simulatorKeyboardRevert } from "./simulatorKeyboardMutation";
+import { revertSimulatorKeyboard } from "./iosKeyboardRevert";
+import type { SimulatorKeyboardBridge } from "../../../utils/ios/SimulatorKeyboardBridge";
+import type { SimulatorRenderOverlayControl } from "../../../utils/ios-cmdline-tools/SimulatorRenderOverlays";
+import { renderOverlayFromKey, restoreRenderOverlays } from "./renderOverlayMutation";
 import {
   IOS_ACCESSIBILITY_RESIDUE_DOMAIN,
   IOS_KEYBOARD_DEFAULTS_DOMAIN,
@@ -187,16 +192,21 @@ async function iosGlobalSettingObservations(xml: string): Promise<DeviceBaseline
   });
 }
 
+/** The Simulator-only rows (overlays #19016, island and backlight #19018), or undefined. */
+function canRestoreSimulatorRow(mutation: DeviceMutationInput): boolean | undefined {
+  const prior = mutation.priorValue;
+  const boolean = prior.state === "present" && typeof prior.value === "boolean";
+  if (renderOverlayFromKey(mutation.key) !== undefined || mutation.key === "backlight") {
+    return boolean;
+  }
+  return mutation.key === "dynamicIsland" ? prior.state === "absent" || boolean : undefined;
+}
+
 function canRestoreIosSetting(mutation: DeviceMutationInput): boolean {
   const prior = mutation.priorValue;
-  // The Simulator's Dynamic Island default and display backlight (#19018).
-  if (mutation.key === "dynamicIsland") {
-    return (
-      prior.state === "absent" || (prior.state === "present" && typeof prior.value === "boolean")
-    );
-  }
-  if (mutation.key === "backlight") {
-    return prior.state === "present" && typeof prior.value === "boolean";
+  const simulatorRow = canRestoreSimulatorRow(mutation);
+  if (simulatorRow !== undefined) {
+    return simulatorRow;
   }
   if (prior.state !== "present") {
     // An absent Simulator accessibility default is off, and a restore deletes it again.
@@ -237,6 +247,10 @@ export interface IosMutationResetDependencies {
   trustStore: UserTrustStoreReader;
   residue: IosResidueInspector;
   storeKit: IosStoreKitSessionReset;
+  /** CoreSimulator hardware keyboard and keyboard language calls (#19017). */
+  keyboard: SimulatorKeyboardBridge;
+  /** Simulator render overlays (#19016); without it a journaled overlay row cannot revert. */
+  renderOverlays?: Pick<SimulatorRenderOverlayControl, "set">;
   /** Relights a Simulator whose session turned the display off (#19018). */
   backlight?: SimulatorBacklight;
 }
@@ -294,6 +308,8 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         return canRestoreIosSetting(mutation);
       case "biometric-enrollment":
         return iosBiometricEnrollmentTarget(mutation) !== undefined;
+      case "keyboard":
+        return simulatorKeyboardRevert(mutation) !== undefined;
       case "preference":
         return (
           mutation.key.split(":").length === 2 &&
@@ -461,6 +477,11 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
       case "biometric-enrollment":
         await this.revertBiometricEnrollment(mutation, context);
         break;
+      case "keyboard":
+        await revertSimulatorKeyboard(mutation, context, this.dependencies.keyboard, (args) =>
+          this.command(context, args),
+        );
+        break;
       case STOREKIT_MUTATION_KIND:
         await context.assertOwned();
         await this.dependencies.storeKit.clear(udid, mutation.key, context.signal);
@@ -476,6 +497,10 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
     prior: unknown,
     context: DeviceMutationResetContext,
   ): Promise<void> {
+    if (mutation.kind === "device-setting" && renderOverlayFromKey(mutation.key) !== undefined) {
+      await this.revertRenderOverlays([mutation], context);
+      return;
+    }
     if (mutation.kind !== "device-setting" || mutation.key !== "backlight") {
       await this.revertByCommand(mutation, context);
     } else {
@@ -514,6 +539,14 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
       context.signal.throwIfAborted();
       await context.assertOwned();
     }
+  }
+
+  /** Restore the overlay rows of one device in a single CoreSimulator call. */
+  async revertRenderOverlays(
+    mutations: readonly DeviceMutationInput[],
+    context: DeviceMutationResetContext,
+  ): Promise<void> {
+    await restoreRenderOverlays(this.dependencies.renderOverlays, this.timer, mutations, context);
   }
 
   private async revertBiometricEnrollment(

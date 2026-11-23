@@ -756,6 +756,8 @@ describe("DisplayConfig physical iOS theme through the runner (#14092)", () => {
       fontScale: false,
       density: false,
       theme: true,
+      dynamicIsland: false,
+      backlight: false,
       increaseContrast: false,
       reduceMotion: false,
       boldText: false,
@@ -830,7 +832,13 @@ describe("DisplayConfig iOS Simulator theme support", () => {
     const simctl = new FakeSimctl();
     const result = await createDisplayConfig(iosSimulator, { simctl }).getConfig();
 
-    expect(result.supported).toEqual({ fontScale: true, density: false, theme: true });
+    expect(result.supported).toEqual({
+      fontScale: true,
+      density: false,
+      theme: true,
+      dynamicIsland: true,
+      backlight: true,
+    });
   });
 
   test("reads the current appearance through the SimCtlClient seam", async () => {
@@ -840,7 +848,8 @@ describe("DisplayConfig iOS Simulator theme support", () => {
     const result = await createDisplayConfig(iosSimulator, { simctl }).getConfig();
 
     expect(result.success).toBe(true);
-    expect(result.current).toEqual({ theme: "dark" });
+    // The fake answers the island default read with no output, the unset (visible) state.
+    expect(result.current).toEqual({ theme: "dark", dynamicIsland: "visible" });
     // The read is issued as an argv array via the seam, not a raw simctl spawn.
     expect(simctlArgvCalls(simctl)).toContainEqual(["ui", iosSimulator.deviceId, "appearance"]);
   });

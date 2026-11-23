@@ -5,6 +5,7 @@ export const prototypeRenderLimits = {
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS: 2000,
   MAX_PROTOTYPE_DATA_POINTER_LENGTH: 256,
   MAX_PROTOTYPE_LIST_ITEMS: 2000,
+  MAX_PROTOTYPE_INNER_REPEAT_ITEMS: 100,
   MAX_PROTOTYPE_NODES: 2000,
   MAX_PROTOTYPE_SPEC_NODES: 10000,
   MAX_PROTOTYPE_STRING_KEYS: 512,
@@ -22,7 +23,7 @@ export const PROTOTYPE_WIDTH_CLASS_BREAKPOINTS = [600, 840] as const;
 export const prototypeContractPatternSources = {
   pathKey: "^[A-Za-z_][A-Za-z0-9_]*$(?![\\s\\S])",
   stateKey: "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])",
-  boundKey: "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:route\\.[A-Za-z_][A-Za-z0-9_]*|index|(?!route\\.)[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])",
+  boundKey: "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:route\\.[A-Za-z_][A-Za-z0-9_]*|index|outerIndex|(?!route\\.)[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])",
   color: "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$(?![\\s\\S])",
   blankText: "^[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$(?![\\s\\S])",
   numberToken: "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$(?![\\s\\S])",

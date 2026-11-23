@@ -80,6 +80,10 @@ if [[ $(basename "$0") == swift && ${1:-} == test && ${2:-} == list ]]; then
 elif [[ $(basename "$0") == swift && ${1:-} == test ]]; then
   if [[ "$PWD" == */control-proxy ]]; then
     echo "control-proxy swift $*" >> "${PREPUSH_IOS_COMMAND_LOG}"
+    if [[ "$*" == *'CtrlProxyTests\.'* ]]; then
+      echo "Executed ${CTRL_PROXY_UNIT_TEST_COUNT:-1266} tests, with 0 failures (0 unexpected)"
+      exit "${CTRL_PROXY_UNIT_TEST_FAILURE:-0}"
+    fi
     echo "Executed ${WATCH_POLICY_TEST_COUNT:-68} tests, with 0 failures (0 unexpected)"
     exit "${WATCH_POLICY_TEST_FAILURE:-0}"
   fi
@@ -187,6 +191,34 @@ commit_changed_swift_file() {
   [ "$status" -eq 0 ]
   grep -Fx 'control-proxy swift test -Xswiftc -warnings-as-errors --filter CtrlProxyWatchPolicyTests' "${command_log}"
   grep -F 'CtrlProxy watch policy tests=pass:0' "${command_log}"
+}
+
+@test "runs the simulator-free CtrlProxyTests target and attests it" {
+  create_real_git_fixture
+  install_attestation_recorder
+  run env PATH="${fixture_bin}:${PATH}" PREPUSH_IOS_BASE_REF="${fixture_base_ref}" \
+    PREPUSH_IOS_COMMAND_LOG="${command_log}" \
+    bash "${fixture_root}/scripts/prepush-ios.sh"
+  [ "$status" -eq 0 ]
+  grep -Fx 'control-proxy swift test -Xswiftc -warnings-as-errors --filter CtrlProxyTests\.' "${command_log}"
+  grep -F 'CtrlProxy unit tests=pass:0' "${command_log}"
+}
+
+@test "CtrlProxyTests gate rejects a shrunken target and propagates failures without attesting" {
+  create_real_git_fixture
+  install_attestation_recorder
+  run env PATH="${fixture_bin}:${PATH}" PREPUSH_IOS_BASE_REF="${fixture_base_ref}" \
+    PREPUSH_IOS_COMMAND_LOG="${command_log}" CTRL_PROXY_UNIT_TEST_COUNT=999 \
+    bash "${fixture_root}/scripts/prepush-ios.sh"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"CtrlProxyTests filter executed 999 tests; expected at least 1000"* ]]
+  : > "${command_log}"
+  run env PATH="${fixture_bin}:${PATH}" PREPUSH_IOS_BASE_REF="${fixture_base_ref}" \
+    PREPUSH_IOS_COMMAND_LOG="${command_log}" CTRL_PROXY_UNIT_TEST_FAILURE=23 \
+    bash "${fixture_root}/scripts/prepush-ios.sh"
+  [ "$status" -eq 23 ]
+  run grep -F 'attestation ' "${command_log}"
+  [ "$status" -ne 0 ]
 }
 
 @test "watch policy test failure propagates even with enough executed tests" {

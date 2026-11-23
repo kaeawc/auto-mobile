@@ -12,6 +12,7 @@ To add one, copy the [template](template.md).
 
 | Date       | Kind     | Entry                                                                                                                              |
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-11-23 | decision | [Keyboard control through CoreSimulator](2026-11-23-simulator-keyboard-coresimulator.md)                                           |
 | 2026-11-23 | decision | [XR headset hand and eye input over emulator gRPC](2026-11-23-xr-headset-hand-and-eye-input.md)                                    |
 | 2026-11-21 | concept  | [iOS Simulator audio routing open questions](2026-11-21-ios-simulator-audio-routing-open-questions.md)                             |
 | 2026-11-21 | decision | [Prototype media runtime placement spike](2026-11-21-prototype-media-runtime-placement-spike.md)                                   |

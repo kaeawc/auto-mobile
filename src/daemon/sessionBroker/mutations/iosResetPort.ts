@@ -23,6 +23,8 @@ import type { BaselineChange } from "./baseline";
 import { parseNotifyutilState } from "../../../utils/ios-cmdline-tools/notifyutil";
 import { iosBiometricEnrollmentTarget, iosBiometricRevertArgs } from "./iosBiometricRevert";
 import { STOREKIT_MUTATION_KIND, type IosStoreKitSessionReset } from "./storeKitSession";
+import { simulatorKeyboardRevert } from "./simulatorKeyboardMutation";
+import type { SimulatorKeyboardBridge } from "../../../utils/ios/SimulatorKeyboardBridge";
 import {
   IOS_ACCESSIBILITY_RESIDUE_DOMAIN,
   IOS_KEYBOARD_DEFAULTS_DOMAIN,
@@ -196,6 +198,8 @@ export interface IosMutationResetDependencies {
   trustStore: UserTrustStoreReader;
   residue: IosResidueInspector;
   storeKit: IosStoreKitSessionReset;
+  /** CoreSimulator hardware keyboard and keyboard language calls (#19017). */
+  keyboard: SimulatorKeyboardBridge;
 }
 
 interface IosAppGroupCleanup {
@@ -251,6 +255,8 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         return canRestoreIosSetting(mutation);
       case "biometric-enrollment":
         return iosBiometricEnrollmentTarget(mutation) !== undefined;
+      case "keyboard":
+        return simulatorKeyboardRevert(mutation) !== undefined;
       case "preference":
         return (
           mutation.key.split(":").length === 2 &&
@@ -418,6 +424,9 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
       case "biometric-enrollment":
         await this.revertBiometricEnrollment(mutation, context);
         break;
+      case "keyboard":
+        await this.revertKeyboard(mutation, context);
+        break;
       case STOREKIT_MUTATION_KIND:
         await context.assertOwned();
         await this.dependencies.storeKit.clear(udid, mutation.key, context.signal);
@@ -460,6 +469,75 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
     );
     if (parseNotifyutilState(result.stdout) !== enrolled) {
       throw new ActionableError("iOS biometric enrollment did not read back as restored");
+    }
+  }
+
+  /**
+   * The hardware keyboard goes back to its boot state. A language change is undone by selecting
+   * the prior keyboard (the running keyboard ignores a `defaults` write of the selection alone),
+   * then writing back, or deleting, the keyboard list, language list and selection that call
+   * rewrites.
+   */
+  private async revertKeyboard(
+    mutation: DeviceMutationInput,
+    context: DeviceMutationResetContext,
+  ): Promise<void> {
+    const target = simulatorKeyboardRevert(mutation);
+    if (!target) {
+      throw new ActionableError("iOS cannot restore an unreadable keyboard state");
+    }
+    const udid = context.scope.deviceId;
+    await context.assertOwned();
+    if (target.kind === "hardware") {
+      await this.dependencies.keyboard.setHardwareKeyboard(udid, target.connected, target.layout, {
+        signal: context.signal,
+      });
+    } else {
+      await this.dependencies.keyboard.setKeyboardLanguage(udid, target.language, {
+        signal: context.signal,
+      });
+      for (const [domain, preference, value] of [
+        [".GlobalPreferences", "AppleKeyboards", target.prior.keyboards],
+        [".GlobalPreferences", "AppleLanguages", target.prior.languages],
+        ["com.apple.keyboard.preferences", "KeyboardLastUsed", target.prior.current],
+      ] as const) {
+        await this.restoreDefault(context, domain, preference, value);
+      }
+    }
+    await context.assertOwned();
+  }
+
+  /** Writes a string or string-array default back, or deletes one that was unset. */
+  private async restoreDefault(
+    context: DeviceMutationResetContext,
+    domain: string,
+    preference: string,
+    value: string | readonly string[] | null,
+  ): Promise<void> {
+    const udid = context.scope.deviceId;
+    if (value !== null) {
+      const typed = typeof value === "string" ? ["-string", value] : ["-array", ...value];
+      await this.command(context, [
+        "spawn",
+        udid,
+        "defaults",
+        "write",
+        domain,
+        preference,
+        ...typed,
+      ]);
+      return;
+    }
+    try {
+      await this.command(context, ["spawn", udid, "defaults", "delete", domain, preference]);
+    } catch (error) {
+      if (!looksLikeMissingIosDefault(error)) {
+        throw toActionableError(error, "iOS keyboard reset command failed");
+      }
+      // An absent default already satisfies the requested deletion.
+      logger.debug(`iOS keyboard default already absent: ${errorMessage(error)}`);
+      context.signal.throwIfAborted();
+      await context.assertOwned();
     }
   }
 

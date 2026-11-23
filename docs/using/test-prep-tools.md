@@ -64,7 +64,15 @@ iOS URIs have no user query.
     session clears on release;
   - Android power constraints (`power`: battery, battery saver, Doze, standby
     buckets, Data Saver, thermal status), which the session restores on release;
-  - a camera poster (`cameraPoster`); see [Camera posters](#camera-posters).
+  - a camera poster (`cameraPoster`); see [Camera posters](#camera-posters);
+  - the iOS Simulator keyboard (`keyboard`): `hardwareKeyboard: false` makes every
+    focused text field show the software keyboard, `true` (with an optional
+    `hardwareLayout` of `ansi`, `iso` or `jis`) connects the hardware keyboard, and
+    `language` (for example `fr_FR`, `de_DE` or `ja_JP`) adds and selects that
+    keyboard. A text field that is already focused keeps its keyboard until it is
+    focused again. A language the simulator has no keyboard for fails the call. The
+    session reconnects the hardware keyboard and restores the previous keyboards and
+    languages on reset.
 - `biometricAuth` simulates a match or failure on supported emulators and iOS
   simulators, and every result in apps that embed the AutoMobile SDK.
 - `wakeAndUnlock` wakes an Android device and unlocks it with an optional PIN.

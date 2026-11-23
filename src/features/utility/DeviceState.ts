@@ -23,6 +23,7 @@ import { NetworkConditionOperations } from "./device-state/NetworkConditionOpera
 import { DoNotDisturbOperations } from "./device-state/DoNotDisturbOperations";
 import type { DoNotDisturbState } from "./device-state/DoNotDisturbState";
 import { BiometricOperations } from "./device-state/BiometricOperations";
+import { KeyboardOperations } from "./device-state/KeyboardState";
 import type { BiometricEnrollment, BiometricEnrollmentState } from "./device-state/BiometricState";
 import { ClockOperations } from "./device-state/ClockOperations";
 import { createScreenLockOperations } from "./screenLock/ScreenLockOperations";
@@ -187,8 +188,14 @@ export class DeviceState {
 
   private readonly power: ReturnType<typeof createPowerOperations>;
 
+  private readonly keyboard: KeyboardOperations;
+
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
+    this.keyboard = new KeyboardOperations({
+      device: () => this.device,
+      bridge: dependencies.simulatorKeyboard,
+    });
     this.iosDisplayInfoSource = dependencies.iosDisplayInfoSource;
     this.iosHingeAngleStore = dependencies.iosHingeAngleStore;
     this.screenLock = createScreenLockOperations(
@@ -433,6 +440,9 @@ export class DeviceState {
         : {}),
       ...(input.screenLock ? { screenLock: await this.screenLock.write(input.screenLock) } : {}),
       ...(input.power ? { power: await this.power.write(input.power) } : {}),
+      ...(input.keyboard
+        ? { keyboard: await this.keyboard.write(input.keyboard, getAbortSignal()) }
+        : {}),
     };
   }
 

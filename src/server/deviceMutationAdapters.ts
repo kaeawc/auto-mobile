@@ -16,6 +16,10 @@ import {
 import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/types";
 import { storeKitMutation } from "../daemon/sessionBroker/mutations/storeKitSession";
 import { isRecord } from "./pipeline/isRecord";
+import {
+  SIMULATOR_HARDWARE_KEYBOARD_KEY,
+  SIMULATOR_KEYBOARD_LANGUAGE_KEY,
+} from "../daemon/sessionBroker/mutations/simulatorKeyboardMutation";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
 import { dataToolMutations, isCoreDataRead } from "./deviceMutationDataAdapters";
 import { appearanceToolMutations } from "./deviceMutationAppearanceAdapters";
@@ -177,6 +181,16 @@ function deviceStateMutations(args: Record<string, unknown>, platform?: Platform
     });
   if (isRecord(args.connectivity)) {
     mutations.push(...Object.keys(args.connectivity).map((key) => mutation("device-setting", key)));
+  }
+  if (isRecord(args.keyboard)) {
+    mutations.push(
+      ...(args.keyboard.hardwareKeyboard !== undefined
+        ? [mutation("keyboard", SIMULATOR_HARDWARE_KEYBOARD_KEY)]
+        : []),
+      ...(args.keyboard.language !== undefined
+        ? [mutation("keyboard", SIMULATOR_KEYBOARD_LANGUAGE_KEY)]
+        : []),
+    );
   }
   const power = devicePowerMutations(args);
   mutations.push(

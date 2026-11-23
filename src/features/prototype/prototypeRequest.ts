@@ -20,6 +20,8 @@ import {
 } from "./prototypeDataWrite";
 import type { PrototypeRequestMethod } from "./prototypeRequestProtocol";
 import type { PrototypeDataActionValue } from "./prototypeActionValues";
+import type { PrototypeRuntimeKind } from "./prototypePlatformReport";
+import { prototypeRuntimeRefusalGuidance } from "./prototypeRuntimeRefusal";
 
 /**
  * Host-side rules for the `request` action (#12523). The contract types its fields; this module
@@ -56,34 +58,39 @@ function unsupported(
   fields: readonly string[],
   platform: "android" | "ios",
   capability: string,
-  { what, fallback }: { what: string; fallback: string },
+  { what, fallback, runtime }: { what: string; fallback: string; runtime?: PrototypeRuntimeKind },
 ): string {
-  const device = platform === "android" ? "connected CtrlProxy" : "connected iOS prototype agent";
-  const update =
-    platform === "android"
-      ? "Update the connected CtrlProxy"
-      : "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version";
+  const { device, advice } = prototypeRuntimeRefusalGuidance(platform, runtime);
   const more = fields.length > 1 ? ` (and ${fields.length - 1} more)` : "";
-  return `The ${device} does not advertise ${capability}, so it cannot run ${what} at ${fields[0]}${more}. Nothing was shown. ${update}, ${fallback}.`;
+  // The Android disposable shell supplies no transport for either request path.
+  const next =
+    platform === "android" && runtime === "disposableApp"
+      ? "Show the spec in CtrlProxy to use network requests, or load data with a /data patch instead"
+      : `${advice}, ${fallback}`;
+  return `The ${device} does not advertise ${capability}, so it cannot run ${what} at ${fields[0]}${more}. Nothing was shown. ${next}.`;
 }
 
 export function prototypeNetworkUnsupportedMessage(
   fields: readonly string[],
   platform: "android" | "ios",
+  runtime?: PrototypeRuntimeKind,
 ): string {
   return unsupported(fields, platform, PROTOTYPE_NETWORK_CAPABILITY, {
     what: "the request action",
     fallback: "or load data with a /data patch instead",
+    runtime,
   });
 }
 
 export function prototypeNetworkDeviceUnsupportedMessage(
   fields: readonly string[],
   platform: "android" | "ios",
+  runtime?: PrototypeRuntimeKind,
 ): string {
   return unsupported(fields, platform, PROTOTYPE_NETWORK_DEVICE_CAPABILITY, {
     what: 'a request with via "device"',
     fallback: 'or use via "host", which the host executes',
+    runtime,
   });
 }
 

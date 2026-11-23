@@ -433,14 +433,18 @@ enum PrototypePlatformValidator {
             try PrototypeDerivedValidator.validateReferences(
                 PrototypeDerivedValidator.bindingReferences(fields, path: path), entries: declared.derive
             )
-            try PrototypeSecureStorageRules.validateDataAction(fields, path: path, secure: declared.secureKeys)
+            try PrototypeSecureStorageRules.validateDataAction(
+                fields, path: path, secure: declared.secureKeys, derive: declared.derive
+            )
             try PrototypeSecureStorageRules.validateEmit(
                 fields, path: path, secure: declared.secureKeys, derive: declared.derive
             )
             try PrototypeSecureStorageRules.validateRequest(
                 fields, path: path, secure: declared.secureKeys, derive: declared.derive
             )
-            try PrototypeSecureStorageRules.validateBindings(fields, path: path, secure: declared.secureKeys)
+            try PrototypeSecureStorageRules.validateBindings(
+                fields, path: path, secure: declared.secureKeys, derive: declared.derive
+            )
             if fields["type"] == nil {
                 if case let .string(pointer)? = fields["platform"] {
                     try read(pointer, path: "\(path).platform", declared: declared)

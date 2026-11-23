@@ -79,9 +79,13 @@ enum PrototypeSecureStorageRules {
         }
     }
 
-    /// Secure `{state}` bindings cannot leave through push/replace/setStack route params or platform-call args.
-    /// Only state bindings are resolved here; literal strings do not expand placeholders.
-    static func validateBindings(_ fields: [String: JSONValue], path: String, secure: [String]) throws {
+    /// Secure `{state}` bindings, and `{derived}` bindings over secure state, cannot leave through
+    /// push/replace/setStack route params or platform-call args. Literal strings do not expand placeholders.
+    static func validateBindings(
+        _ fields: [String: JSONValue], path: String, secure: [String], derive: [String: JSONValue] = [:]
+    )
+        throws
+    {
         guard !secure.isEmpty, case let .string(type)? = fields["type"] else { return }
         switch type {
         case "push", "replace":
@@ -89,6 +93,7 @@ enum PrototypeSecureStorageRules {
                 fields["params"],
                 path: "\(path).params",
                 secure: secure,
+                derive: derive,
                 destination: "route params"
             )
         case "setStack":
@@ -96,25 +101,27 @@ enum PrototypeSecureStorageRules {
             for (index, entry) in entries.enumerated() {
                 try validateBindingMap(
                     entry.objectFields?["params"], path: "\(path).path[\(index)].params", secure: secure,
-                    destination: "route params"
+                    derive: derive, destination: "route params"
                 )
             }
         case "platform":
-            try validateBindingMap(fields["args"], path: "\(path).args", secure: secure, destination: "platform args")
+            try validateBindingMap(
+                fields["args"], path: "\(path).args", secure: secure, derive: derive, destination: "platform args"
+            )
         default:
             return
         }
     }
 
     private static func validateBindingMap(
-        _ value: JSONValue?, path: String, secure: [String], destination: String
+        _ value: JSONValue?, path: String, secure: [String], derive: [String: JSONValue], destination: String
     )
         throws
     {
         let bindings = value?.objectFields ?? [:]
         for name in bindings.keys.sorted() {
-            guard case let .string(key)? = bindings[name]?.objectFields?["state"],
-                  let leaked = secureKey(for: key, secure: secure) else { continue }
+            guard let binding = bindings[name]?.objectFields,
+                  let leaked = bindingKey(binding, secure: secure, derive: derive) else { continue }
             throw PrototypeContractValidator.invalid(
                 PrototypeLimits.dataMemberPath(path, key: name),
                 "Secure storage key \(leaked) cannot be sent in \(destination)"
@@ -122,16 +129,18 @@ enum PrototypeSecureStorageRules {
         }
     }
 
-    static func validateDataAction(_ fields: [String: JSONValue], path: String, secure: [String]) throws {
+    static func validateDataAction(
+        _ fields: [String: JSONValue], path: String, secure: [String], derive: [String: JSONValue] = [:]
+    )
+        throws
+    {
         guard ["setData", "removeData"].contains(fields["type"]?.stringValue ?? "") else { return }
         let candidates: [(JSONValue?, String)] = [
             (fields["where"]?.objectFields?["equals"], "\(path).where.equals"),
             (fields["value"], "\(path).value"),
         ]
         for (value, at) in candidates {
-            if let key = value?.objectFields?["state"]?.stringValue,
-               let leaked = secureKey(for: key, secure: secure)
-            {
+            if let binding = value?.objectFields, let leaked = bindingKey(binding, secure: secure, derive: derive) {
                 throw PrototypeContractValidator.invalid(
                     at,
                     "Secure storage key \(leaked) cannot be sent in data actions"
@@ -179,6 +188,8 @@ enum PrototypeSecureStorageRules {
         }
     }
 
+    /// The first secure key a `{state}` binding, or the state inputs of a `{derived}` binding, can read. Derived
+    /// entries read only data, state and literals, so one level of resolution covers every source.
     private static func bindingKey(
         _ binding: [String: JSONValue], secure: [String], derive: [String: JSONValue]
     )

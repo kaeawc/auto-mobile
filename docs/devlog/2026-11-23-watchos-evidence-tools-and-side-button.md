@@ -9,9 +9,9 @@
 
 Apple TV simulators gained `videoRecording` and `compareScreenshot` through `simctl io recordVideo`
 and `simctl io screenshot` (#16725). Apple Watch simulators had neither, and `executePlan` on a
-watch recorded no video, so a watch run left no screen-level evidence. sim-rs drives watch
-simulators directly (Digital Crown, side button, Double Tap and Wrist Flick through SimulatorKit
-HID) and uses AutoMobile to check the screen afterwards. `pressButton` on a watch accepts only
+watch recorded no video, so a watch run left no screen-level evidence. The sim-rs project drives watch
+simulators directly through SimulatorKit HID: Digital Crown, side button, Double Tap and Wrist
+Flick. It uses AutoMobile to check the screen afterwards. `pressButton` on a watch accepts only
 `home`.
 
 ## Options
@@ -42,8 +42,8 @@ default display (a watch has one screen) and refuses audio. A comparison takes t
 has no screenshot command. Without a runner, or when the runner's app is not in the foreground,
 only the full screen compares. A watch plan records one video like tvOS.
 
-The side button stays unsupported and is documented as a limit. The runner has no API for it, and
-the HID path would make `pressButton` depend on a helper AutoMobile does not ship, built from
+The side button stays unsupported and is documented as a limit. The runner has no API for it. The
+HID path would make `pressButton` depend on a helper AutoMobile does not ship. That helper uses
 private SimulatorKit calls that only a macOS host with a watch simulator can check.
 
 ## Consequences

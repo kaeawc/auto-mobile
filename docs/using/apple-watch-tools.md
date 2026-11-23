@@ -70,9 +70,7 @@ shows its text about 2 seconds after the final Done tap, so wait before matching
 10, maximum 100). Each `lookFor` step drags about one row, so reads overlap and miss nothing
 nearby. You cannot set coordinates or duration.
 
-`pressButton` supports `home` only, which presses the Digital Crown. Any other button, including
-`power` for the side button, fails with `press <button> is not supported by the watchOS runner`.
-There is no way to press the side button on a watch yet.
+`pressButton` supports `home` only.
 
 ## `rotateCrown`
 
@@ -182,27 +180,8 @@ host app tap.
 | `minPriority`                      | `V`/`D` debug and up, `I` info and up, `W` default and up (the unified log has no warning level), `E` error and fault, `F` fault only |
 | `tags`, `buffers`, `includeSystem` | Android-only; ignored with a warning                                                                                                  |
 
-## `videoRecording` and `compareScreenshot`
-
-`videoRecording` records the watch screen like an iOS Simulator's, for up to 3600 seconds. `audio`
-is not supported; a start with `audio: true` fails with
-`audio is not supported for Apple Watch recordings; record without audio.`
-
-`compareScreenshot` records and compares named screenshot baselines of the watch screen. A watch
-baseline is kept per screenshot size; density, font scale and theme are always `null` in its
-profile.
-
-- Without the automation runner, only the full screen is compared. A `target` or `mask` is
-  refused; call `startDevice` to prepare the runner.
-- With the runner, `target` and `mask` take an `elementId` or a `rect` in points, the units
-  `observe` reports. When the runner's app is not in the foreground, for example on the watch
-  face, the full screen still compares but a `target` or `mask` is refused; launch the app with
-  `launchApp` first.
-- A watch has no system bars, so `ignoreSystemBars` has no effect.
-
 ## `executePlan`
 
 `executePlan` replays a plan on a watch with `platform: "watchos"`, including one `recordToolCalls`
 recorded on a watch. Each step runs as the same tool called directly. A step whose tool does not
-accept a watch fails with the standard refusal. A plan on a watch records one video of the run, as
-on an iOS Simulator.
+accept a watch fails with the standard refusal. Plans on a watch record video.

@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.PrototypeRouteRuntime
+import dev.jasonpearson.automobile.protocol.PrototypeRuntimeBudget
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
@@ -187,8 +188,9 @@ class PrototypeStoragePersistence(
    */
   suspend fun open(
     spec: PrototypeSpec,
+    budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
     fits: (PrototypeSpec) -> Boolean = { true },
-  ): PrototypeStorageOpen = prepare(spec, null, fits).also { it.commit() }
+  ): PrototypeStorageOpen = prepare(spec, null, fits, budget).also { it.commit() }
 
   /**
    * Like [open] but side-effect-free: nothing on disk changes until [PrototypeStorageOpen.commit].
@@ -201,6 +203,8 @@ class PrototypeStoragePersistence(
      */
     unsaved: PrototypeStoredValues? = null,
     fits: (PrototypeSpec) -> Boolean = { true },
+    /** The runtime's budget (#18804); restored data values must fit it. */
+    budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
   ): PrototypeStorageOpen {
     val sinceEpoch = registry?.epoch(spec.id)
     val loaded = withContext(io) { store.load(spec.id) }
@@ -219,7 +223,7 @@ class PrototypeStoragePersistence(
         )
     val secureValues =
       PrototypeSecureStoragePreparation(spec, withContext(io) { secure?.load(spec.id) }, unsaved)
-    var restore = PrototypeStorageRestorer.restore(secureValues.restored, stored)
+    var restore = PrototypeStorageRestorer.restore(secureValues.restored, stored, budget)
     if ((restore.applied.isNotEmpty() || secureValues.applied) && !fits(restore.spec)) {
       secureValues.reject()
       warn.warn("Stored values of ${spec.id} no longer fit the spec, using the spec's", null)

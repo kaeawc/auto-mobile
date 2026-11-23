@@ -20,6 +20,8 @@ export interface Rule {
   integer?: boolean;
   min?: number;
   max?: number;
+  /** A runtime-budget limit name whose budget value replaces `max` (#18804). */
+  maxLimit?: string;
   maxBytes?: number;
   maxDepth?: number;
   unique?: boolean;

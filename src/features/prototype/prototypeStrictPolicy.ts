@@ -11,9 +11,11 @@ import {
   prototypeDataPathPointer,
   prototypeDataPlaceholders,
   prototypePlatformPlaceholders,
+  PrototypeRepeatData,
 } from "./prototypeData";
 import { parsePrototypeStorageKey } from "./prototypeStorage";
 import { prototypeShaderFields } from "./prototypeShaders";
+import { PROTOTYPE_LARGE_BUDGET, type PrototypeRuntimeBudget } from "./prototypeRuntimeBudget";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { repeatErrors, repeatFieldReferences, repeatKeyInstances } from "./prototypeRepeat";
@@ -40,6 +42,8 @@ export interface PrototypeStrictOptions {
   library?: boolean;
   /** Complete uploaded asset inventory, when statically known. */
   shareAssetIds?: readonly string[];
+  /** The target runtime's budget (#18804); the base budget when absent. */
+  budget?: PrototypeRuntimeBudget;
 }
 
 /** Host/device capability negotiation and the additional unprivileged import boundary. */
@@ -145,7 +149,12 @@ export function prototypeSensitiveSinkScan(spec: unknown): {
   sinkFields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   // Direct warning callers may precede repeat validation. Keep their authored-text scan
   // for invalid repeats; the binder (including the budget probe) requires valid repeats.
-  const validRepeats = repeatErrors(spec) === undefined;
+  // The validator already applied the target's list budget; this only asks if repeats are sound.
+  const validRepeats =
+    repeatErrors(
+      spec,
+      new PrototypeRepeatData(object(spec)?.data, PROTOTYPE_LARGE_BUDGET.MAX_PROTOTYPE_LIST_ITEMS),
+    ) === undefined;
   if (validRepeats) {
     const budgetError = secureScanBudgetError(spec, sinkFields);
     if (budgetError) {

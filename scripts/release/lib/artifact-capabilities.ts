@@ -88,6 +88,8 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
       "Device realtime channels are contract-only; the iOS agent does not implement device transport yet",
     prototype_platform_v1:
       "iOS agent validates platform specs but has no module registry yet (#14296)",
+    prototype_large_budget_v1:
+      "The larger runtime budget is for Android activity-hosted runtimes only; the iOS agent keeps the base limits (#18804)",
   },
 };
 

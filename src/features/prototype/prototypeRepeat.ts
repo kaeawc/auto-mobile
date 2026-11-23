@@ -648,12 +648,15 @@ const MAX_REPEAT_ITEMS =
   contract.definitions.repeat.fields.items.rule.options.find((option) => option.kind === "array")
     ?.max ?? Infinity;
 
-function resolvedRepeatItemsError(items: unknown, node: Raw, at: string): RepeatError | undefined {
+function resolvedRepeatItemsError(
+  items: unknown,
+  node: Raw,
+  { at, listItems }: { at: string; listItems: number },
+): RepeatError | undefined {
   if (!Array.isArray(items)) {
     return fail(at, "Repeat path does not resolve to an array");
   }
-  const maximum =
-    node.type === "list" ? contract.limits.MAX_PROTOTYPE_LIST_ITEMS : MAX_REPEAT_ITEMS;
+  const maximum = node.type === "list" ? listItems : MAX_REPEAT_ITEMS;
   if (items.length > maximum) {
     return fail(at, `Repeat path resolves to more than ${maximum} items`);
   }
@@ -674,12 +677,12 @@ function repeatSourceErrors(node: Raw, path: string, state: RepeatState): Repeat
     ? state.data.derived[String(source.derived)]
     : state.data.source(String(source.path));
   const at = `${path}.repeat.items.${derived ? "derived" : "path"}`;
-  const error = resolvedRepeatItemsError(items, node, at);
+  const error = resolvedRepeatItemsError(items, node, { at, listItems: state.data.listItems });
   if (error) {
     return error;
   }
   state.cells += derived
-    ? new PrototypeRepeatData({ rows: items }).cells("/rows")
+    ? new PrototypeRepeatData({ rows: items }, state.data.listItems).cells("/rows")
     : state.data.cells(String(source.path));
   return state.cells > contract.limits.MAX_PROTOTYPE_REPEAT_PATH_CELLS
     ? fail(at, "Repeat path cell limit exceeded")

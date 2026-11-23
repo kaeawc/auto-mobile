@@ -133,14 +133,21 @@ internal object PrototypeDataValues {
 /** Per-call caches; JSON values are read-only and projected rows are shared, never mutated. */
 internal class PrototypeRepeatData(
   private val data: JsonObject?,
+  /** The list item limit of the target runtime's budget (#18804). */
+  val listItems: Int = PrototypeRuntimeBudget.BASE.maxListItems,
   private val evaluateDerived: () -> Map<String, JsonElement?> = { emptyMap() },
 ) {
   val derived by lazy(evaluateDerived)
 
   companion object {
-    fun fromSpec(spec: JsonElement?): PrototypeRepeatData {
+    fun fromSpec(
+      spec: JsonElement?,
+      listItems: Int = PrototypeRuntimeBudget.BASE.maxListItems,
+    ): PrototypeRepeatData {
       val root = spec as? JsonObject ?: JsonObject(emptyMap())
-      return PrototypeRepeatData(root["data"] as? JsonObject) { PrototypeDerive.fromSpec(root) }
+      return PrototypeRepeatData(root["data"] as? JsonObject, listItems) {
+        PrototypeDerive.fromSpec(root)
+      }
     }
   }
 
@@ -172,10 +179,7 @@ internal class PrototypeRepeatData(
         .orEmpty()
         .filterIsInstance<JsonObject>()
         .take(
-          maxOf(
-            PrototypeSpecValidator.maxRepeatItems,
-            PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS,
-          ),
+          maxOf(PrototypeSpecValidator.maxRepeatItems, listItems),
         )
         .sumOf { item ->
           maxOf(
@@ -193,10 +197,7 @@ internal class PrototypeRepeatData(
         .orEmpty()
         .filterIsInstance<JsonObject>()
         .take(
-          maxOf(
-            PrototypeSpecValidator.maxRepeatItems,
-            PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS,
-          ),
+          maxOf(PrototypeSpecValidator.maxRepeatItems, listItems),
         )
         .map { PrototypeDataValues.project(it) }
     }
@@ -363,7 +364,7 @@ object PrototypeDataResolver {
     resolveRoot(
       root,
       data,
-      PrototypeRepeatData(data),
+      PrototypeRepeatData(data, PrototypeRuntimeBudget.LARGE.maxListItems),
       platform,
       ResolveMode(Pass.ALL, shield = false),
     )
@@ -430,7 +431,7 @@ object PrototypeDataResolver {
         resolveRoot(
           root,
           spec.data,
-          PrototypeRepeatData(spec.data),
+          PrototypeRepeatData(spec.data, PrototypeRuntimeBudget.LARGE.maxListItems),
           platform,
           ResolveMode(Pass.ALL, shield),
         ),

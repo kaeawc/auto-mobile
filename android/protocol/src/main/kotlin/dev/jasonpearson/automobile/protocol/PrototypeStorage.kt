@@ -128,7 +128,12 @@ object PrototypeStorageRestorer {
   val maxSecureValueBytes: Int =
     PrototypeSpecContract.limits.getValue("MAX_PROTOTYPE_SECURE_VALUE_BYTES").jsonPrimitive.int
 
-  fun restore(spec: PrototypeSpec, stored: PrototypeStoredValues?): PrototypeStorageRestore {
+  /** [budget] is the runtime's (#18804): a restored data value must fit the data it joins. */
+  fun restore(
+    spec: PrototypeSpec,
+    stored: PrototypeStoredValues?,
+    budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
+  ): PrototypeStorageRestore {
     if (stored == null) return PrototypeStorageRestore(spec, emptyList(), emptyList())
     val block = spec.storage
     val listed = block?.keys.orEmpty().toSet()
@@ -148,7 +153,7 @@ object PrototypeStorageRestorer {
             dropped += PrototypeStorageDrop(key, PrototypeStorageDropReason.VERSION)
             continue
           }
-          else -> restoreOne(restored, spec, key, value)
+          else -> restoreOne(restored, spec, key, value, budget)
         }
       if (next == null) dropped += PrototypeStorageDrop(key, PrototypeStorageDropReason.MISMATCH)
       else {
@@ -266,6 +271,7 @@ object PrototypeStorageRestorer {
     authored: PrototypeSpec,
     storageKey: String,
     value: JsonElement,
+    budget: PrototypeRuntimeBudget,
   ): PrototypeSpec? =
     // A stored stack path lives in the runtime, not the spec: only its shape is checked here, and
     // the runtime starts the stack at `start` when its screens or params no longer fit (#14188).
@@ -294,6 +300,7 @@ object PrototypeStorageRestorer {
             (PrototypeDataWriter.apply(
                 restored.data,
                 PrototypeDataWrite.Set("/data${key.pointer}", value),
+                budget,
               ) as? PrototypeDataWriteResult.Success)
               ?.let { restored.copy(data = it.data) }
         }

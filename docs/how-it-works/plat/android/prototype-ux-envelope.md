@@ -45,8 +45,34 @@ response cap (256 KiB) stays below both.
 The byte, node, depth, image, storage and in-flight limits
 are independent of row count: they bound frame size, memory and tree cost, and none of them grows with lazy
 rows. A row carries at most `MAX_PROTOTYPE_REPEAT_PATH_CELLS` / `MAX_PROTOTYPE_LIST_ITEMS` (32) scalar fields
-across a full list. Host validation is linear in rows (`benchmark/prototype-feed-limits.ts`). Feeds beyond these caps page or trim with `maxItems`; per-runtime
-budgets and multi-spec apps are not part of the contract.
+across a full list. Host validation is linear in rows (`benchmark/prototype-feed-limits.ts`). Feeds beyond these caps page or trim with `maxItems`;
+multi-spec apps are not part of the contract.
+
+Runtime budgets (#18804). The contract `limits` are the base budget. A runtime that advertises
+`prototype_large_budget_v1` validates against that entry of the contract's `runtimeBudgets` table
+instead. The limits not listed there, including nodes, depth and images per screen, stay the same in
+every runtime.
+
+| Limit                            | Base budget: overlay, iOS agent | `prototype_large_budget_v1`: disposable app, ProtoViewer, embedding app |
+| -------------------------------- | ------------------------------- | ----------------------------------------------------------------------- |
+| `MAX_PROTOTYPE_LIST_ITEMS`       | 2000                            | 10000                                                                   |
+| `MAX_PROTOTYPE_DATA_ARRAY_ITEMS` | 2000                            | 10000                                                                   |
+| `MAX_PROTOTYPE_SPEC_BYTES`       | 1048576 (1 MiB)                 | 4194304 (4 MiB)                                                         |
+| `MAX_PROTOTYPE_DATA_BYTES`       | 786432 (768 KiB)                | 3145728 (3 MiB)                                                         |
+| `MAX_PROTOTYPE_DATA_WRITE_BYTES` | 786432 (768 KiB)                | 3145728 (3 MiB)                                                         |
+
+A rule with `maxLimit` takes its bound from the named limit of the runtime's budget, and its literal
+`max` is the base value. The `list`, `appendData` and `upsertData` `maxItems` rules use it. Tool input
+and `specPath` files admit the large budget. A show then refuses a spec over the base budget on a
+runtime without the capability. `requiredPrototypeCapabilities` lists the capability for such a spec,
+including one whose data action literal is over the base budget.
+
+On the device, the validator and the runtime's state and data writes check the runtime's own budget.
+The host mirrors device data writes and validates patches with the budget of the runtime the spec was
+shown on. ProtoViewer's library store saves and reloads specs with ProtoViewer's budget. ProtoViewer
+bundles keep their own 1 MiB `spec.json` cap. The web library keeps the base budget and does not
+advertise the capability. See the
+[devlog entry](../../../devlog/2026-11-19-prototype-runtime-budgets.md).
 
 Stack-screen budgets (#14213). Renderers draw only a stack's top screen, so node and image bounds
 apply per screen rather than to every screen at once. The `MAX_PROTOTYPE_SPEC_NODES` /

@@ -51,6 +51,11 @@ struct PrototypeEgressPolicy: Sendable {
         (1 ... 65535).contains(port) && checkHost(host, port: port, requiresIP: false) ? .allow : .block
     }
 
+    /// Image loopback may bypass host classification, but never port restrictions.
+    func checkImagePort(_ port: Int) -> Decision {
+        (1 ... 65535).contains(port) && !daemonPorts.contains(port) ? .allow : .block
+    }
+
     static func isIPLiteral(_ host: String) -> Bool {
         let host = normalized(host)
         return ipv4(host) != nil || ipv6(host) != nil

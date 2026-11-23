@@ -115,9 +115,13 @@ public final class GesturePerformer: GesturePerforming {
         )
             -> Int?
         {
-            let decision = GestureDeliveryRoute.decide(
-                target: target, forced: forced, geometry: elementLocator.gestureCoordinateGeometry
-            )
+            func decide(_ geometry: GestureCoordinateGeometry?) -> GestureDeliveryRoute.Decision {
+                GestureDeliveryRoute.decide(target: target, forced: forced, geometry: geometry)
+            }
+            let decision = decide(elementLocator.gestureRouteGeometry { geometry in
+                if case .synthesizedEventRecord = decide(geometry).route { return true }
+                return false
+            })
             // One line per gesture: tells a stale tracker (keepPinned) from a missing observation.
             let pinned = pinnedApplication.bundleId ?? "none"
             let tracked = elementLocator.foregroundBundleId ?? "none"
@@ -142,7 +146,17 @@ public final class GesturePerformer: GesturePerforming {
             guard let orientation = unpinnedSynthesisOrientation(kind: kind, target: target, forced: forced) else {
                 return false
             }
-            return try catchingObjCException { () -> Bool in
+            return try synthesizeOneFinger(orientation: orientation, start: start, end: end, duration: duration)
+        }
+
+        /// Synthesizes one already-routed one-finger contact. Returns false when the private
+        /// synthesis symbols are unavailable.
+        func synthesizeOneFinger(
+            orientation: Int, start: GesturePoint, end: GesturePoint, duration: TimeInterval
+        )
+            throws -> Bool
+        {
+            try catchingObjCException { () -> Bool in
                 GesturePhaseDiagnostics.current?.begin("synthesizedGesture")
                 defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
                 var errorMessage: NSString?

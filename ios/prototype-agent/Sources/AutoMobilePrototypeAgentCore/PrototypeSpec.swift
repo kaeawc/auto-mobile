@@ -252,6 +252,11 @@ struct PrototypeSpec: Decodable {
         try PrototypeLimits.guardAuthoredTree(raw)
         try PrototypeScrollMotion.validate(raw, data: data)
         try PrototypeRequestValidator.validate(raw, state: menuState)
+        if PrototypeStrictCapabilities.required(["root": raw]).contains(PrototypeAgentProtocol.nestedRepeatCapability) {
+            var repeats = PrototypeStrictRepeats(data: data, derivedValues: values)
+            try repeats.templates(raw.objectFields ?? [:], path: "root")
+            try repeats.expanded(raw.objectFields ?? [:], path: "root")
+        }
         try PrototypeLimits.guardRepeatPathCells(raw, data: data, derivedValues: values)
         try PrototypeMenus.validateAuthoredText(raw)
         try PrototypeLoadingStates.validate(raw)
@@ -1009,6 +1014,7 @@ final class PrototypeNode: Decodable {
     let canGoBackKey: String?
     /// Internal identity stamped after authored-spec validation.
     let repeatKey: String?
+    let repeatIdentity: String?
     let detents: [Detent]?
     let scrim: PrototypeModeValue?
     let dragHandle: Bool?
@@ -1099,6 +1105,7 @@ final class PrototypeNode: Decodable {
         case reverse, stickToEnd, atEndKey, onStartReached
         case navigationStateKey, titleKey, canGoBackKey
         case repeatKey = "_repeatKey"
+        case repeatIdentity = "_repeatIdentity"
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
              routes,
              linkify, contentTransition,
@@ -1182,6 +1189,7 @@ final class PrototypeNode: Decodable {
         canGoBackKey = try container.decodeIfPresent(String.self, forKey: .canGoBackKey)
         onStartReached = try container.decodeIfPresent([PrototypeAction].self, forKey: .onStartReached)
         repeatKey = try container.decodeIfPresent(String.self, forKey: .repeatKey)
+        repeatIdentity = try container.decodeIfPresent(String.self, forKey: .repeatIdentity)
         axis = try container.decodeIfPresent(String.self, forKey: .axis)
         if decodedType == "menu" {
             items = nil

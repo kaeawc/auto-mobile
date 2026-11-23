@@ -122,6 +122,7 @@
 		47CBEE4091D331840EE09154 /* PrototypeStackRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE45DDC62C4113D106E58E27 /* PrototypeStackRoutes.swift */; };
 		48ECF933CC00A7EE5DC97512 /* PrototypeSpecStrictValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD8D1DA42F2B5F1AB48B820D /* PrototypeSpecStrictValidator.swift */; };
 		494562C668093C47AA59F6F6 /* PrototypeKeyframesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2331B4E5E71AB72C06613AE /* PrototypeKeyframesView.swift */; };
+		496227EE6F80555D75F3FD0A /* PrototypeNestedRepeats.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9E4FB2E8CAB67B235106758 /* PrototypeNestedRepeats.swift */; };
 		498DCD2C91237BB72412A5A3 /* PrototypeTapDisambiguator.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF611ACFB6B4CA1380FB8F46 /* PrototypeTapDisambiguator.swift */; };
 		49C381E5236B8ED07EC6897C /* EmbeddingSamplePrototype.swift in Sources */ = {isa = PBXBuildFile; fileRef = B21BEB5DB26C9F52C1F0AEED /* EmbeddingSamplePrototype.swift */; };
 		4AA17DF7CDD1CA5DD3F980E9 /* PrototypeSharedElementPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24536FEE77E8C3DAB0386D09 /* PrototypeSharedElementPlan.swift */; };
@@ -696,6 +697,7 @@
 		B9150DAA759171549ADC63AB /* PrototypeStyleShadowLayers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeStyleShadowLayers.swift; sourceTree = "<group>"; };
 		B91970C8B3007EDBE7E3965E /* PrototypeMenuViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeMenuViews.swift; sourceTree = "<group>"; };
 		B93458BF76B5A18331D4F230 /* PrototypeViewerHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeViewerHost.swift; sourceTree = "<group>"; };
+		B9E4FB2E8CAB67B235106758 /* PrototypeNestedRepeats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeNestedRepeats.swift; sourceTree = "<group>"; };
 		BA5D44A565808C7FE556DDEA /* CoreMotionPrototypeSensorSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreMotionPrototypeSensorSource.swift; sourceTree = "<group>"; };
 		BD89512C9C9B03EBC4C0E1C8 /* PrototypeSystemHostResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeSystemHostResolver.swift; sourceTree = "<group>"; };
 		BD8D1DA42F2B5F1AB48B820D /* PrototypeSpecStrictValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeSpecStrictValidator.swift; sourceTree = "<group>"; };
@@ -1186,6 +1188,7 @@
 				304B81A3E63DEBD39EDDB647 /* PrototypeMotionV3.swift */,
 				F4D53BEA2CB6EA439E5C9210 /* PrototypeNamespacePolicy.swift */,
 				B6B212588E2440163041DE5F /* PrototypeNativePresentationHitRegion.swift */,
+				B9E4FB2E8CAB67B235106758 /* PrototypeNestedRepeats.swift */,
 				EABDA8D882C610043D8809B4 /* PrototypeNotificationRules.swift */,
 				FEA26A7B691DF2F55A549B51 /* PrototypeNotificationsModule.swift */,
 				A92157FC62EE26CC4694D9C4 /* PrototypeNotificationsReport.swift */,
@@ -1752,6 +1755,7 @@
 				2A2F9180A3D38C20956EB782 /* PrototypeNamespacePolicy.swift in Sources */,
 				0BA4FBD965FF59BC303B8176 /* PrototypeNamespaceView.swift in Sources */,
 				1D04CBB4955DEF4C1F17DC65 /* PrototypeNativePresentationHitRegion.swift in Sources */,
+				496227EE6F80555D75F3FD0A /* PrototypeNestedRepeats.swift in Sources */,
 				FA31418CDB6D7AE94C921DFE /* PrototypeNotificationRules.swift in Sources */,
 				0670337083BD4CFDBAF675C5 /* PrototypeNotificationsModule.swift in Sources */,
 				7F71DB4784D63FADFBB8B6C1 /* PrototypeNotificationsReport.swift in Sources */,

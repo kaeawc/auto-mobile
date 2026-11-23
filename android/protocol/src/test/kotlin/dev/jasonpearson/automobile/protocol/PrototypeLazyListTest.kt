@@ -91,6 +91,36 @@ class PrototypeLazyListTest {
   }
 
   @Test
+  fun `root defers lazy template text while resolving conditions and repeat sources`() {
+    val root =
+      obj(
+        """{"type":"list","repeat":{"items":{"path":"/rows"},"as":"row","key":"id"},"children":[{"type":"column","visibleWhen":{"data":"/show","equals":true},"repeat":{"items":{"path":"/extras"},"as":"extra"},"children":[{"type":"text","text":"{data:/rows/{index}/name} {data:/posts/{row.id}/title}"}]}]}""",
+      )
+    val data = obj("""{"rows":[],"show":true,"extras":[{"id":"x"}]}""")
+    val resolved = PrototypeDataResolver.resolveRoot(root, data)
+    val template = resolved.getValue("children").jsonArray.single().jsonObject
+    assertEquals(obj("""{"all":[]}"""), template["visibleWhen"])
+    assertEquals(data["extras"], template.getValue("repeat").jsonObject["items"])
+    assertEquals(
+      root.getValue("children").jsonArray.single().jsonObject["children"],
+      template["children"],
+    )
+  }
+
+  @Test
+  fun `lazy text preserves the platform snapshot while deferring data`() {
+    val root =
+      obj(
+        """{"type":"list","repeat":{"items":{"path":"/items"},"as":"item","key":"id"},"children":[{"type":"text","text":"{platform:/name}: {data:/items/{index}/name}"}]}""",
+      )
+    val resolved = PrototypeDataResolver.resolveRoot(root, null, obj("""{"name":"Android"}"""))
+    assertEquals(
+      JsonPrimitive("Android: {data:/items/{index}/name}"),
+      resolved.getValue("children").jsonArray.single().jsonObject["text"],
+    )
+  }
+
+  @Test
   fun `extend trims before array budget and failures leave input unchanged`() {
     val size = PrototypeSpecValidator.MAX_PROTOTYPE_DATA_ARRAY_ITEMS - 20
     val before = JsonObject(mapOf("items" to JsonArray((0 until size).map(::JsonPrimitive))))

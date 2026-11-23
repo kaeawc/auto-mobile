@@ -56,6 +56,7 @@ final class PrototypeLimitsTests: XCTestCase {
         XCTAssertEqual(PrototypeLimits.maxDataPointerLength, limits["MAX_PROTOTYPE_DATA_POINTER_LENGTH"])
         XCTAssertEqual(PrototypeLimits.maxDataBytes, limits["MAX_PROTOTYPE_DATA_BYTES"])
         XCTAssertEqual(PrototypeLimits.maxListItems, limits["MAX_PROTOTYPE_LIST_ITEMS"])
+        XCTAssertEqual(PrototypeLimits.maxInnerRepeatItems, limits["MAX_PROTOTYPE_INNER_REPEAT_ITEMS"])
         XCTAssertGreaterThanOrEqual(PrototypeLimits.maxDataArrayItems, PrototypeLimits.maxListItems)
         XCTAssertEqual(PrototypeLimits.maxDataWriteBytes, limits["MAX_PROTOTYPE_DATA_WRITE_BYTES"])
         XCTAssertEqual(PrototypeLimits.maxRepeatPathCells, limits["MAX_PROTOTYPE_REPEAT_PATH_CELLS"])
@@ -337,9 +338,15 @@ final class PrototypeLimitsTests: XCTestCase {
 
     func testNestedObjectRepeatIsRefusedOnlyAtDecode() throws {
         let leaf = JSONValue.object(["type": .string("text"), "text": .string("ok")])
-        let root = literalRepeat(literalRepeat(leaf, items: [.object([:])]), items: [.object([:])])
-        try PrototypeLimits.guardAuthoredTree(root)
-        XCTAssertEqual(try rejection(pathRepeatSpec(root)), "root.children[0].repeat: Nested repeat is not supported")
+        for count in [0, 1] {
+            let root = literalRepeat(
+                literalRepeat(leaf, items: [.object([:])]), items: Array(repeating: .object([:]), count: count)
+            )
+            try PrototypeLimits.guardAuthoredTree(root)
+            XCTAssertEqual(
+                try rejection(pathRepeatSpec(root)), "root.children[0].repeat: Nested repeat is not supported"
+            )
+        }
     }
 
     func testDataSubstitutionBoundaryAndLiteralPins() throws {

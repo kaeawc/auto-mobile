@@ -24,9 +24,12 @@ import {
 import type { AndroidKeepBootedResetPort } from "./androidKeepBootedReset";
 import {
   ANDROID_CERTIFIABLE_KINDS,
+  ANDROID_NIGHT_MODE_READ,
+  type AndroidBaselineCommand,
   captureAndroidMutationBaseline,
   isAndroidResetFile,
 } from "./androidMutationBaseline";
+import { isNightModeUnsupported } from "../../features/utility/displayConfigParsers";
 import { settingsBackedRawMutations } from "./androidSettingsBackedRevert";
 import { appLocaleJournalAppId, appLocalePrior } from "./appLocaleJournalKey";
 import {
@@ -56,6 +59,8 @@ interface AndroidRevertCommand {
   timeoutMs?: number;
   retryable?: boolean;
   wakeSleptScreen?: boolean;
+  /** Output the device prints when it has no implementation; the step is skipped. */
+  unsupported?: (stdout: string, stderr: string) => boolean;
 }
 
 const NOTIFICATIONS_CANCELLED_MARKER = "posted-notifications-cancelled";
@@ -153,9 +158,12 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
   }
 
   capture(context: DeviceMutationResetContext): Promise<DeviceBaseline> {
-    return captureAndroidMutationBaseline((command, timeoutMs) =>
-      this.execute(command, context, { timeoutMs }),
-    );
+    return captureAndroidMutationBaseline(this.baselineCommand(context));
+  }
+
+  private baselineCommand(context: DeviceMutationResetContext): AndroidBaselineCommand {
+    return (command, timeoutMs, options) =>
+      this.execute(command, context, { timeoutMs, unsupported: options?.unsupported });
   }
 
   async cleanBaseline(
@@ -163,14 +171,12 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     context: DeviceMutationResetContext,
     journalEntries: readonly DeviceMutationEntry[] = [],
   ): Promise<void> {
-    await cleanAndroidBaseline(
-      baseline,
-      context,
-      (command, timeoutMs) => this.execute(command, context, { timeoutMs }),
-      { revert: (mutation) => this.revert(mutation, context), journalEntries },
-    );
+    await cleanAndroidBaseline(baseline, context, this.baselineCommand(context), {
+      revert: (mutation) => this.revert(mutation, context),
+      journalEntries,
+    });
     const output = await this.execute("shell cmd clipboard clear", context, {
-      optionalClipboard: true,
+      unsupported: this.clipboardUnsupported,
     });
     if (this.unsupportedClipboard(output)) {
       logger.warn("Android cleaning skipped unsupported clipboard clear");
@@ -178,6 +184,9 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       throw new ActionableError("Android clipboard cleaning command failed");
     }
   }
+
+  private readonly clipboardUnsupported = (stdout: string, stderr: string): boolean =>
+    this.unsupportedClipboard(`${stdout}\n${stderr}`);
 
   private unsupportedClipboard(output: string): boolean {
     return /Unknown command:|Can't find service:|No shell command implementation|Service .* not found/i.test(
@@ -206,14 +215,17 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     ) {
       return;
     }
-    for (const { command, success, confirms, timeoutMs, retryable, wakeSleptScreen } of commands) {
+    for (const step of commands) {
+      const { command, success, confirms, timeoutMs, retryable, wakeSleptScreen } = step;
       const output = await this.execute(command, context, {
         timeoutMs,
-        optionalClipboard: mutation.kind === "clipboard",
         retryable,
+        unsupported: step.unsupported,
       });
-      if (mutation.kind === "clipboard" && this.unsupportedClipboard(output)) {
-        logger.warn("Android cleaning skipped unsupported journal clipboard clear");
+      if (step.unsupported?.(output, "")) {
+        logger.warn(
+          `Android cleaning skipped unsupported ${mutation.kind}:${mutation.key} restore`,
+        );
         continue;
       }
       if (!this.confirmed(output, { success, confirms })) {
@@ -322,9 +334,13 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     // Legacy callers without a deadline retain one attempt; reset deadlines turn this into a floor.
     {
       timeoutMs = 2000,
-      optionalClipboard = false,
       retryable = true,
-    }: { timeoutMs?: number; optionalClipboard?: boolean; retryable?: boolean } = {},
+      unsupported,
+    }: {
+      timeoutMs?: number;
+      retryable?: boolean;
+      unsupported?: (stdout: string, stderr: string) => boolean;
+    } = {},
   ): Promise<string> {
     try {
       const dispatch = async (attemptTimeoutMs: number) => {
@@ -365,7 +381,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
             );
       context.signal.throwIfAborted();
       await context.assertOwned();
-      if (optionalClipboard && this.unsupportedClipboard(`${result.stdout}\n${result.stderr}`)) {
+      if (unsupported?.(result.stdout, result.stderr)) {
         return `${result.stdout}\n${result.stderr}`;
       }
       if (result.error || result.stderr.trim()) {
@@ -587,7 +603,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     return key === "display:night-mode" &&
       typeof prior === "string" &&
       ["yes", "no", "auto"].includes(prior)
-      ? [{ command: `shell cmd uimode night ${prior}` }]
+      ? [{ command: `${ANDROID_NIGHT_MODE_READ} ${prior}`, unsupported: isNightModeUnsupported }]
       : null;
   }
 
@@ -608,7 +624,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
   private clipboardCommands({ priorValue }: DeviceMutationInput): AndroidRevertCommand[] | null {
     const prior = priorValue.state === "present" ? priorValue.value : undefined;
     return priorValue.state === "absent" || prior === "" || prior === null
-      ? [{ command: "shell cmd clipboard clear" }]
+      ? [{ command: "shell cmd clipboard clear", unsupported: this.clipboardUnsupported }]
       : null;
   }
 

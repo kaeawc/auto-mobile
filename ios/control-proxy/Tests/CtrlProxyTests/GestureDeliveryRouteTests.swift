@@ -326,6 +326,97 @@ final class GestureDeliveryRouteTests: XCTestCase {
         XCTAssertEqual(panel.refreshed(to: placement(windowAt: nil)).geometry, panel.geometry)
     }
 
+    // MARK: - One route decision per command, no live read on the synthesized route (#19050)
+
+    func testDoubleTapDecidesItsRouteOnceForBothContacts() throws {
+        var routes = 0
+        var contacts: [Int] = []
+        let delivered = try UnpinnedGestureSynthesis.tap(
+            doubleTap: true,
+            route: {
+                routes += 1
+                return 1
+            },
+            deliver: { orientation in
+                contacts.append(orientation)
+                return true
+            },
+            wait: { _ in }
+        )
+        XCTAssertTrue(delivered)
+        XCTAssertEqual(routes, 1)
+        XCTAssertEqual(contacts, [1, 1])
+    }
+
+    func testRoutedTapWithoutASynthesizedRouteDeliversNothing() throws {
+        XCTAssertFalse(try UnpinnedGestureSynthesis.tap(
+            doubleTap: true, route: { nil },
+            deliver: { _ in
+                XCTFail("no contact without a route")
+                return true
+            },
+            wait: { _ in XCTFail("no gap without a route") }
+        ))
+    }
+
+    private func synthesizes(_ target: GestureApplicationTarget) -> (GestureCoordinateGeometry) -> Bool {
+        { geometry in
+            if case .synthesizedEventRecord = GestureDeliveryRoute.decide(
+                target: target, forced: nil, geometry: geometry
+            ).route { return true }
+            return false
+        }
+    }
+
+    func testGestureAfterASynthesizedOneNeverQueriesTheApp() {
+        // The first gesture may have backgrounded the app; a live query could block ~90 s (#10624).
+        var cached = observed(floating(), windowAt: CGPoint(x: 196, y: 320))
+        cached.usedByGesture = true
+        for target in [GestureApplicationTarget.keepPinned, unpinned] {
+            let next = cached.routed(synthesizes: synthesizes(target)) { _ in
+                XCTFail("synthesized route must not read the app window")
+                return nil
+            }
+            XCTAssertEqual(next.geometry, cached.geometry)
+        }
+        var fullScreen = observed(
+            GestureCoordinateGeometry(app: iPad, screen: iPad, observation: iPad, rotation: 0), windowAt: nil
+        )
+        fullScreen.usedByGesture = true
+        _ = fullScreen.routed(synthesizes: synthesizes(unpinned)) { _ in
+            XCTFail("an unpinned full-screen app must not be re-read")
+            return nil
+        }
+    }
+
+    func testFirstGestureUsesTheObservationAndMarksItUsed() {
+        let cached = observed(
+            GestureCoordinateGeometry(app: iPad, screen: iPad, observation: iPad, rotation: 0), windowAt: nil
+        )
+        let next = cached.routed(synthesizes: synthesizes(.keepPinned)) { _ in
+            XCTFail("the first gesture routes on the observation")
+            return nil
+        }
+        XCTAssertTrue(next.usedByGesture)
+        XCTAssertEqual(next.geometry, cached.geometry)
+    }
+
+    func testCoordinateRouteReReadsAndPicksUpAWindowTiledSinceObserve() {
+        var cached = observed(
+            GestureCoordinateGeometry(app: iPad, screen: iPad, observation: iPad, rotation: 0), windowAt: nil
+        )
+        cached.usedByGesture = true
+        var reads = 0
+        let next = cached.routed(synthesizes: synthesizes(.keepPinned)) { screen in
+            reads += 1
+            XCTAssertEqual(screen, self.iPad)
+            return self.placement(windowAt: CGPoint(x: 392, y: 0))
+        }
+        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(next.geometry.windowTranslation, GesturePoint(x: 392, y: 0))
+        XCTAssertTrue(synthesizes(.keepPinned)(next.geometry))
+    }
+
     // MARK: - Drag and pinch (#10858)
 
     func testEveryGestureKindSharesTheSameDecisionInputs() {

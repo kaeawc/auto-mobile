@@ -75,6 +75,26 @@ struct ObservedGestureGeometry {
         next.placement = live
         return next
     }
+
+    /// The cache a gesture command routes on (#19050). The first command after an observation
+    /// uses it as observed. A later one re-reads the window placement only when the cached
+    /// geometry keeps the `XCUICoordinate` path, which queries the same app live anyway, so the
+    /// re-read adds no new stall. A command the cache already routes synthesized never queries
+    /// the app: its points are screen points wherever the window has moved, and a live query to
+    /// an app the previous gesture backgrounded can block the runner for ~90 s (#10624, #10858).
+    func routed(
+        synthesizes: (GestureCoordinateGeometry) -> Bool,
+        livePlacement: (GestureSize) -> ObservedWindowPlacement?
+    )
+        -> Self
+    {
+        var next = self
+        if usedByGesture, placement != nil, !synthesizes(geometry), let live = livePlacement(geometry.screen) {
+            next = refreshed(to: live)
+        }
+        next.usedByGesture = true
+        return next
+    }
 }
 
 @MainActor
@@ -121,25 +141,23 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             layout.gesture?.current(bundleId: foregroundBundleId, generation: DeviceRotation.changeGeneration)
         }
 
-        /// The geometry a gesture routes on. The first gesture after an observation uses it as
-        /// observed. On an iPad an earlier gesture may have moved, retiled or maximized the
-        /// window since, so later gestures re-read the window placement first: the same two
-        /// reads observe makes, and only for an iPad app window (#19050).
-        func routedGestureGeometry() -> GestureCoordinateGeometry? {
-            guard observedGestureGeometry != nil, var cached = layout.gesture else { return nil }
-            if cached.usedByGesture, let previous = cached.placement,
-               let live = liveWindowPlacement(screen: cached.geometry.screen)
-            {
-                cached = cached.refreshed(to: live)
-                if cached.placement != previous {
-                    logger.info(
-                        "gesture geometry refreshed: window moved inset=\(cached.geometry.insetWindow, privacy: .public)"
-                    )
-                }
+        /// The geometry a gesture command routes on, read once per command (#19050; see
+        /// `ObservedGestureGeometry.routed`). `synthesizes` says whether a geometry takes the
+        /// synthesized route for this command's target.
+        func routedGestureGeometry(
+            synthesizes: (GestureCoordinateGeometry) -> Bool
+        )
+            -> GestureCoordinateGeometry?
+        {
+            guard observedGestureGeometry != nil, let cached = layout.gesture else { return nil }
+            let next = cached.routed(synthesizes: synthesizes) { liveWindowPlacement(screen: $0) }
+            if next.placement != cached.placement {
+                logger.info(
+                    "gesture geometry refreshed: window moved inset=\(next.geometry.insetWindow, privacy: .public)"
+                )
             }
-            cached.usedByGesture = true
-            layout.gesture = cached
-            return cached.geometry
+            layout.gesture = next
+            return next.geometry
         }
 
         private func liveWindowPlacement(screen: GestureSize) -> ObservedWindowPlacement? {
@@ -735,7 +753,10 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         public init() {}
 
         var observedGestureGeometry: GestureCoordinateGeometry? { nil }
-        func routedGestureGeometry() -> GestureCoordinateGeometry? { nil }
+        func routedGestureGeometry(
+            synthesizes _: (GestureCoordinateGeometry) -> Bool
+        )
+            -> GestureCoordinateGeometry? { nil }
 
         public func refreshGeometry() throws -> RefreshGeometryResponse.Geometry? {
             _ = try getViewHierarchy()

@@ -48,7 +48,7 @@ export function isRenderOverlay(value: string): value is RenderOverlay {
 
 /** `SimDeviceState.booted`. */
 const SIM_DEVICE_STATE_BOOTED = 3;
-const NOT_BOOTED_MARKER = "AUTOMOBILE_SIMULATOR_NOT_BOOTED";
+const NOT_BOOTED_MARKER = "automobile-simulator-not-booted";
 
 /**
  * Loads CoreSimulator into an `osascript` JavaScript process, so a private-API crash or Xcode

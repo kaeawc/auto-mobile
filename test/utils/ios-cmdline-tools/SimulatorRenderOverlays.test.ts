@@ -119,7 +119,7 @@ describe("CoreSimulator render overlay bridge (#19016)", () => {
 
   test("a write to a shut-down Simulator is a typed actionable error", async () => {
     const failure = Object.assign(new Error("Command failed: /usr/bin/osascript ..."), {
-      stderr: "execution error: Error: AUTOMOBILE_SIMULATOR_NOT_BOOTED (-2700)",
+      stderr: "execution error: Error: automobile-simulator-not-booted (-2700)",
       code: 1,
     });
     const control = new OsascriptSimulatorRenderOverlayControl(

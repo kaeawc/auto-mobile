@@ -37,6 +37,7 @@ enum PrototypeStrictBindings {
             "secure",
             "keyboardType",
             "imeAction",
+            "allowedOrigins",
         ].contains($0.key) }
         if fields["type"] == .string("adaptive") { own["items"] = fields["items"] }
         if fields["type"] == .string("menu") { own["items"] = .array([]) }

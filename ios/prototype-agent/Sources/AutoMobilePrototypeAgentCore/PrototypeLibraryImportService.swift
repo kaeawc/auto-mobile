@@ -25,9 +25,7 @@ actor PrototypeLibraryImportService {
     }
 
     init(
-        root: URL,
-        storageRoot: URL,
-        inbox: URL,
+        root: URL, storageRoot: URL, inbox: URL,
         supportedCapabilities: Set<String> = Set(AutoMobilePrototypeCapabilities.supported),
         warning: @escaping @Sendable (String) -> Void
     ) {

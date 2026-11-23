@@ -726,6 +726,10 @@
             apply { $0.openLink(url, registeredSchemes: registeredSchemes) }
         }
 
+        func webViewNavigation(_ update: PrototypeWebViewNavigation.Update) {
+            apply(activity: !update.actions.isEmpty) { $0.control(own: update.writes, then: update.actions) }
+        }
+
         func run(_ actions: [PrototypeAction]) {
             consumeDeadTap()
             apply { $0.run(actions) }

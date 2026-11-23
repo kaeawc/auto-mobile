@@ -610,6 +610,7 @@ private fun prototypeNodeText(
       node.title?.let { interpolatePrototypeText(it, localState, inPager) }.orEmpty()
     is PrototypeTooltipNode -> interpolatePrototypeText(node.text, localState, inPager)
     is PrototypeSnackbarNode -> interpolatePrototypeText(node.text, localState, inPager)
+    is PrototypeWebViewNode -> interpolatePrototypeText(node.url, localState, inPager)
     else -> ""
   }
 

@@ -58,6 +58,7 @@ actor PrototypeMcpInbox {
 
     init(
         root: URL, libraryRoot: URL, storageRoot: URL, now: @escaping @Sendable () -> Date = { Date() },
+        supportedCapabilities: Set<String> = Set(AutoMobilePrototypeCapabilities.supported),
         report: PrototypeMcpCapabilitiesReport? = nil, warning: @escaping @Sendable (String) -> Void
     ) {
         self.root = root
@@ -67,8 +68,7 @@ actor PrototypeMcpInbox {
         importBundle = { url, label in
             let bytes = try PrototypeLibraryFileReader().read(url)
             let store = try PrototypeLibraryStore(
-                root: libraryRoot, storageRoot: storageRoot,
-                supportedCapabilities: Set(report?.capabilities ?? AutoMobilePrototypeCapabilities.supported)
+                root: libraryRoot, storageRoot: storageRoot, supportedCapabilities: supportedCapabilities
             )
             return try PrototypeLibraryImporter(store: store).importData(bytes, source: .mcp, label: label)
         }

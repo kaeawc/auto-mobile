@@ -22,10 +22,8 @@ final class PrototypeLibraryStore {
     private let clock: any PrototypeClock
     private let libraryId: () -> String
     private let blocklist: (any PrototypeContentBlocklist)?
+    private let supportedCapabilities: Set<String>
     private let secureStorage: (any PrototypeSecureValueStore)?
-    /// The app's advertised capabilities, including delivery-derived ones such as
-    /// `prototype_links_v1`; every add and load validates against this set.
-    let supportedCapabilities: Set<String>
 
     init(
         root: URL, storageRoot: URL,
@@ -33,18 +31,18 @@ final class PrototypeLibraryStore {
         clock: any PrototypeClock = SystemPrototypeClock(),
         libraryId: @escaping () -> String = { UUID().uuidString.lowercased() },
         blocklist: (any PrototypeContentBlocklist)? = nil,
-        secureStorage: (any PrototypeSecureValueStore)? = nil,
-        supportedCapabilities: Set<String> = Set(AutoMobilePrototypeCapabilities.supported)
+        supportedCapabilities: Set<String> = Set(AutoMobilePrototypeCapabilities.supported),
+        secureStorage: (any PrototypeSecureValueStore)? = nil
     )
         throws
     {
-        self.supportedCapabilities = supportedCapabilities
         self.root = root.standardizedFileURL
         self.storageRoot = storageRoot.standardizedFileURL
         self.files = files
         self.clock = clock
         self.libraryId = libraryId
         self.blocklist = blocklist
+        self.supportedCapabilities = supportedCapabilities
         self.secureStorage = secureStorage
         guard !self.storageRoot.path.hasPrefix(self.root.path + "/"),
               !self.root.path.hasPrefix(self.storageRoot.path + "/"), self.storageRoot != self.root
@@ -323,13 +321,16 @@ final class PrototypeLibraryStore {
         return entry
     }
 
-    func validate(_ bytes: Data, supportedCapabilities override: Set<String>? = nil) throws {
-        let supportedCapabilities = override ?? supportedCapabilities
+    func validate(
+        _ bytes: Data, supportedCapabilities: Set<String>? = nil
+    )
+        throws
+    {
         do {
             try PrototypeSpecStrictValidator.validate(data: bytes, library: true)
             let (value, _) = try PrototypeContractValidator.inspect(data: PrototypeStrictJSON.prepare(bytes))
             let missing = PrototypeStrictCapabilities.required(value.objectFields ?? [:])
-                .subtracting(supportedCapabilities).sorted()
+                .subtracting(supportedCapabilities ?? self.supportedCapabilities).sorted()
             if !missing.isEmpty { throw PrototypeLibraryImportFailure.needsNewerViewer(missing: missing) }
         } catch let failure as PrototypeLibraryImportFailure { throw failure }
         catch let failure as PrototypeLibraryFailure { throw failure }

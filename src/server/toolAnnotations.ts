@@ -117,7 +117,6 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   seedContent: entry("Seed System Content", destructiveDevice),
   sendSms: entry("Simulate SMS", controlDevice),
   setActiveDevice: entry("Set Active Device", setHost),
-  shareSheet: entry("Control Share Sheet", controlDevice),
   shake: entry("Shake", controlDevice),
   swipeAt: entry("Swipe at Coordinates", destructiveDevice),
   swipeOn: entry("Swipe Screen Element", destructiveDevice),
@@ -161,6 +160,8 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   appLifecycle: entry("Control App Lifecycle", destructiveDevice),
   changeLocalization: entry("Change Locale", destructiveDevice),
   clipboard: entry("Control Clipboard", destructiveDevice),
+  // Selecting the Copy action overwrites the clipboard, like clipboard.
+  shareSheet: entry("Control Share Sheet", destructiveDevice),
   siri: entry("Activate Siri", destructiveDevice),
   crashApp: entry("Crash App", destructiveDevice),
   criticalSection: entry("Run Critical Section", destructiveDevice),

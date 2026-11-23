@@ -32,6 +32,9 @@ import {
 } from "../../../utils/ios-cmdline-tools/SimulatorDynamicIsland";
 import { iosBiometricEnrollmentTarget, iosBiometricRevertArgs } from "./iosBiometricRevert";
 import { STOREKIT_MUTATION_KIND, type IosStoreKitSessionReset } from "./storeKitSession";
+import { simulatorKeyboardRevert } from "./simulatorKeyboardMutation";
+import { revertSimulatorKeyboard } from "./iosKeyboardRevert";
+import type { SimulatorKeyboardBridge } from "../../../utils/ios/SimulatorKeyboardBridge";
 import type { SimulatorRenderOverlayControl } from "../../../utils/ios-cmdline-tools/SimulatorRenderOverlays";
 import { renderOverlayFromKey, restoreRenderOverlays } from "./renderOverlayMutation";
 import {
@@ -244,6 +247,8 @@ export interface IosMutationResetDependencies {
   trustStore: UserTrustStoreReader;
   residue: IosResidueInspector;
   storeKit: IosStoreKitSessionReset;
+  /** CoreSimulator hardware keyboard and keyboard language calls (#19017). */
+  keyboard: SimulatorKeyboardBridge;
   /** Simulator render overlays (#19016); without it a journaled overlay row cannot revert. */
   renderOverlays?: Pick<SimulatorRenderOverlayControl, "set">;
   /** Relights a Simulator whose session turned the display off (#19018). */
@@ -303,6 +308,8 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         return canRestoreIosSetting(mutation);
       case "biometric-enrollment":
         return iosBiometricEnrollmentTarget(mutation) !== undefined;
+      case "keyboard":
+        return simulatorKeyboardRevert(mutation) !== undefined;
       case "preference":
         return (
           mutation.key.split(":").length === 2 &&
@@ -469,6 +476,11 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
       }
       case "biometric-enrollment":
         await this.revertBiometricEnrollment(mutation, context);
+        break;
+      case "keyboard":
+        await revertSimulatorKeyboard(mutation, context, this.dependencies.keyboard, (args) =>
+          this.command(context, args),
+        );
         break;
       case STOREKIT_MUTATION_KIND:
         await context.assertOwned();

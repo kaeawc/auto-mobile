@@ -96,6 +96,25 @@ export function isRunnerHierarchyCaptureFailed(failure: { errorCode?: string }):
 }
 
 /**
+ * The runner refused a drag (`dragPath`, `dragAndDrop`) whose first point is on a hittable
+ * SpringBoard icon: synthesized touches open the icon's context menu but never lift it (#18859).
+ * Refused before any input, so nothing ran. The Swift side is
+ * `GesturePerformer.GestureError.springBoardIconDrag`; newer runners only, with no wording fallback.
+ */
+export const RUNNER_SPRINGBOARD_ICON_DRAG_CODE = "springboard_icon_drag";
+
+/** True when a runner failure says the drag was refused because it starts on a SpringBoard icon. */
+export function isRunnerSpringBoardIconDrag(failure: { errorCode?: string }): boolean {
+  return failure.errorCode === RUNNER_SPRINGBOARD_ICON_DRAG_CODE;
+}
+
+/** Host message for that refusal; the runner's own description follows when it sent one. */
+export function springBoardIconDragMessage(tool: string, runnerError: string | undefined): string {
+  const base = `${tool} is not supported on iOS when it starts on a SpringBoard icon (home screen or dock): synthesized touches open the icon's context menu but never lift it. No input was sent.`;
+  return runnerError ? `${base} Runner: ${runnerError}` : base;
+}
+
+/**
  * The runner refused a command with `runner_busy` before queuing it: the command never ran, so
  * the refusal is a definite non-execution and safe to retry, unlike a lost or late reply.
  */

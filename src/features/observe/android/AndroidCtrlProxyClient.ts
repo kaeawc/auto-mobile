@@ -64,7 +64,7 @@ import {
   MapDeviceClientRegistry,
   type DeviceClientRegistry,
 } from "../../../ctrlProxy/deviceClientRegistry";
-import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "../../../daemon/streams/deviceDataStreamSocketServer";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import { ActionableError, BootedDevice, toActionableError } from "../../../models";
 import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/PerformanceTracker";

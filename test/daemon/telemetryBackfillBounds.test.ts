@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { boundBackfillEventText } from "../../src/daemon/telemetryPushSocketServer";
+import { boundBackfillEventText } from "../../src/daemon/streams/telemetryPushSocketServer";
 import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecorder";
 import { BODY_TRUNCATION_LIMIT } from "../../src/utils/truncateBodyText";
 

@@ -13,7 +13,7 @@ import { z } from "zod/v4";
 import { deleteInternalToolParams } from "../../daemon/wire/constants";
 import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { SessionReleaseBroadcaster } from "../../daemon/sessionReleaseBroadcast";
-import { getDaemonStreamDeviceLifecycleEmitter } from "../../daemon/streamDeviceLifecycleEvents";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../../daemon/streams/streamDeviceLifecycleEvents";
 import {
   DefaultDeviceWindowCacheInvalidator,
   type DeviceWindowCacheInvalidator,
@@ -682,7 +682,10 @@ function earlyOutput(
   args: z.infer<typeof prototypeSchema>,
 ): Promise<PrototypeOutput> {
   return isDisposableAppAction(args.action)
-    ? disposableAppOutput(routes.disposableApps(), device, args, routes.disposableAgent)
+    ? disposableAppOutput(routes.disposableApps(), device, args, {
+        readers: routes.assetReaders,
+        attachments: routes.disposableAgent,
+      })
     : hostOnlyOutput(routes.hostOnly, args, routes.assetReaders, routes.shareFiles);
 }
 

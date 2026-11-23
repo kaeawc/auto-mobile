@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "expressive",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "mode": "day"
+    },
+    "root": {
+      "type": "progress",
+      "variant": "wave"
+    }
+  },
+  "expectedPath": "root.variant"
+}

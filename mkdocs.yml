@@ -329,6 +329,7 @@ nav:
       - "observe": using/observe.md
       - "tapAt": using/tap-at.md
       - "swipeOn": using/swipe-on.md
+      - "sendKeys": using/send-keys.md
       - "Environment variables": using/environment-variables.md
       - "Usage data": metrics/usage-data.md
   - "How it Works":
@@ -466,6 +467,7 @@ nav:
           - "Prototype user-test sessions": how-it-works/prototype-user-test-sessions.md
           - "Prototype SDK support matrix": how-it-works/prototype-sdk-matrix.md
           - "Prototype camera and media guide": how-it-works/prototype-camera-media.md
+          - "Prototype media runtime placement": how-it-works/prototype-media.md
           - "Prototype web renderer":
               - "Overview": how-it-works/prototype-web-renderer.md
               - "Browser, Android and iOS parity checks": how-it-works/prototype-web-renderer-checks.md
@@ -507,10 +509,13 @@ nav:
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-21: iOS Simulator audio routing open questions": devlog/2026-11-21-ios-simulator-audio-routing-open-questions.md
+      - "2026-11-21: Prototype media runtime placement spike": devlog/2026-11-21-prototype-media-runtime-placement-spike.md
       - "2026-11-20: Fixture capture mode": devlog/2026-11-20-fixture-capture-mode.md
       - "2026-11-19: iOS Simulator audio isolation": devlog/2026-11-19-ios-simulator-audio-isolation.md
       - "2026-11-19: Committed page bundle and one export budget": devlog/2026-11-19-prototype-web-page-bundle.md
       - "2026-11-19: Headless CarPlay on TVOut with a StarkConfig": devlog/2026-11-19-headless-carplay-tvout-stark.md
+      - "2026-11-19: Material 3 Expressive components drawn from stable primitives": devlog/2026-11-19-m3-expressive-stable-primitives.md
       - "2026-11-18: Tasks eligibility from measured tool durations": devlog/2026-11-18-tasks-eligibility-from-measured-durations.md
       - "2026-11-17: Docs navigation grouped by task and platform": devlog/2026-11-17-docs-navigation-by-task.md
       - "2026-11-17: Material 3 Expressive component availability at the pinned Compose BOM": devlog/2026-11-17-m3-expressive-component-availability.md

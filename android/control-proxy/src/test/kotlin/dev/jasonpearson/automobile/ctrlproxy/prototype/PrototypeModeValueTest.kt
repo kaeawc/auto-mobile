@@ -264,8 +264,9 @@ class PrototypeModeValueTest {
   @Test
   fun `an image asset pair draws the asset for the mode`() {
     val image = PrototypeImageNode(asset = PrototypeModeValue.Modes("logo-light", "logo-dark"))
-    assertEquals("logo-light", prototypeModeValue(image.asset, dark = false))
-    assertEquals("logo-dark", prototypeModeValue(image.asset, dark = true))
+    val asset = requireNotNull(image.asset)
+    assertEquals("logo-light", prototypeModeValue(asset, dark = false))
+    assertEquals("logo-dark", prototypeModeValue(asset, dark = true))
     val item = PrototypeItem("Home", image = PrototypeModeValue.Modes("home", "home-dark"))
     assertEquals("home", item.image?.let { prototypeModeValue(it, dark = false) })
     assertEquals("home-dark", item.image?.let { prototypeModeValue(it, dark = true) })

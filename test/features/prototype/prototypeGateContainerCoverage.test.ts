@@ -156,6 +156,7 @@ const fixtures: Record<string, Node> = {
   prototype_icon_effects_v1: { type: "icon", name: "home", effect: { type: "bounce" } },
   prototype_routes_v1: { ...label, onTap: [{ type: "pop", stack: "nav", force: true }] },
   prototype_style_polish_v2: { ...label, style: { cornerStyle: "continuous" } },
+  prototype_m3_expressive_v1: { type: "loadingIndicator" },
   prototype_tooltip_v1: {
     type: "tooltip",
     text: "Tip",
@@ -176,6 +177,7 @@ const fixtures: Record<string, Node> = {
     child: { type: "spacer" },
   },
   prototype_strings_v1: { ...label, text: "{t:title}" },
+  prototype_remote_image_v1: { type: "image", url: "https://example.com/image.png" },
   prototype_semantics_v1: { ...label, semantics: { heading: true } },
   prototype_nested_repeat_v1: {
     type: "column",

@@ -135,6 +135,13 @@ const lastResultSchema = z.object({
     .optional()
     .describe("Effects omitted or frozen by the device, with their paths and reasons"),
   storage: prototypeStorageOutputField,
+  images: z
+    .object({
+      loaded: z.number().int().nonnegative(),
+      failed: z.number().int().nonnegative(),
+      pending: z.number().int().nonnegative(),
+    })
+    .optional(),
   shaderFailures: z.record(z.string(), z.string()).optional(),
   timers: z
     .array(
@@ -403,12 +410,7 @@ export const prototypeOutputSchema = z.object({
     .optional()
     .describe("Android: whether the shortcut was seen on the home screen after a pin or update."),
   errorCode: z
-    .enum([
-      ...SAVED_PROTOTYPE_ERROR_CODES,
-      "unsupported_capability",
-      "unsupported_platform",
-      "invalid_url",
-    ])
+    .enum([...SAVED_PROTOTYPE_ERROR_CODES, "unsupported_platform", "invalid_url"])
     .optional(),
   revision: z
     .number()

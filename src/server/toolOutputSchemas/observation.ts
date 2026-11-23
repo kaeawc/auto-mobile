@@ -576,7 +576,12 @@ export const observeResultSchema = z
       ),
     hierarchyUnavailable: z
       .object({
-        platform: z.union([z.literal("watchos"), z.literal("tvos"), z.literal("visionos")]),
+        platform: z.union([
+          z.literal("watchos"),
+          z.literal("tvos"),
+          z.literal("visionos"),
+          z.literal("ios"),
+        ]),
         message: z.string(),
         appNotRunning: z
           .object({ bundleId: z.string() })
@@ -589,7 +594,8 @@ export const observeResultSchema = z
       .describe(
         "Apple Watch, Apple TV and Apple Vision Pro simulators: this observation is a screenshot with screenSize; the view " +
           "hierarchy is not available without a connected watchOS, tvOS or visionOS window-app runner. viewHierarchy, skeleton, context, elements " +
-          "and the other element fields are absent, not empty: their absence does not mean an empty screen.",
+          "and the other element fields are absent, not empty: their absence does not mean an empty screen. " +
+          "On iOS, this field identifies a screenshot-only CarPlay observation.",
       ),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),

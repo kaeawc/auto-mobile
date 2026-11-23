@@ -30,6 +30,17 @@ When the screenshot is gone, the read returns JSON with code `OBSERVATION_NOT_RE
 
 With no `evictedBecause`, the id is unknown. In every case, call `observe` again.
 
+## CarPlay on an iOS simulator
+
+Call `observe({deviceId: "<simulator UDID>", display: "carplay"})` to capture the projecting CarPlay
+screen. The result includes a PNG `screenshotPath`, a `screenSize` in physical pixels, and a
+`hierarchyUnavailable` note. Omit hierarchy and screenshot processing options such as `project`,
+`raw`, `waitFor`, `crop`, and `screenshotOptions`. Leave `screenshot` unset or request `"settled"`.
+
+If capture is refused, enable and power on CarPlay, open its window in Simulator, and confirm
+that one CarPlay screen is connected. If the probe is unavailable, set
+[`AUTOMOBILE_CARPLAY_PROJECTION_PROBE_PATH`](environment-variables.md) to its executable's absolute path.
+
 ## Apps with several scenes on iOS
 
 When an iOS app has more than one connected scene, `observe` and the element-based

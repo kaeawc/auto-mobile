@@ -34,6 +34,7 @@ portable test/utils/ios/carPlayProjection.test.ts                        # JSON 
 portable test/utils/ios/carPlayCapture.test.ts                           # injected probe and screenshot only
 portable test/utils/ios/carPlayScreenPower.test.ts                       # JSON contract and injected exec only; no host processes
 portable test/utils/ios/carPlayDisplay.test.ts                           # fake powerer, probe and timer only; no host processes
+portable test/utils/ios/carPlayTap.test.ts                               # JSON contract, fake probe and injected exec only; no host processes
 portable test/utils/ios/healthKitSeeder*.test.ts                         # HealthKit seeder over fake runner, sheet, builder and FakeTimer; temp dirs only
 portable test/utils/ios/simctlHealthSimulatorRunner.test.ts              # injected exec only; no simctl runs
 
@@ -76,6 +77,8 @@ portable test/utils/iosDeviceResourceHazards.test.ts                    # pure h
 portable test/utils/iosDeviceResourceImpact.test.ts                     # pure catalog metadata and documentation parity, no iOS host
 
 # Fakes are shared by platform-neutral suites; their self-tests guard that drift.
+portable test/features/performance/IosStartupMeasurement.test.ts        # fake simctl and timer over captured logs
+portable test/features/performance/iosSceneReadyParsing.test.ts          # pure unified-log parser over captured fixtures
 portable test/fakes/FakeIOSCtrlProxy.test.ts                             # fake used outside iOS-only suites
 portable test/fakes/FakeIosVoiceOverDetector.test.ts                     # fake used outside iOS-only suites
 
@@ -134,3 +137,7 @@ macos test/utils/runtimeCompatibility.test.ts                            # impor
 macos test/devices/appleTvVisionRuntimeSupportedDeviceTypes.test.ts      # imports only the tvOS and visionOS provisioner checks
 
 portable test/features/observe/ios/CtrlProxyAccessibilityFocus.test.ts # delegate and decoder use the fake harness
+
+portable test/utils/ios/AXBridgeSessions.test.ts # injected preflight and launcher only
+portable test/utils/ios/AXBridgeProcessLauncher.test.ts # fake child streams and FakeTimer only
+portable test/utils/ios/AXBridgeClient.test.ts # fake transport and FakeTimer only

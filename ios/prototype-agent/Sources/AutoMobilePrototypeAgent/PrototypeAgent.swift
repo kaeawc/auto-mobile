@@ -165,7 +165,10 @@ final class PrototypeAgent: NSObject {
             return
         }
 
-        let agent = PrototypeAgent(mode: .standalone, registry: .feedbackModules())
+        let agent = PrototypeAgent(
+            mode: .standalone,
+            registry: .feedbackModules(secureStorage: KeychainPrototypeSecureValueStore())
+        )
         instance = agent
         agent.boot()
     }
@@ -238,7 +241,7 @@ final class PrototypeAgent: NSObject {
         // No concrete permission-needing modules are approved for injection yet (#14289).
         model = PrototypeModel(
             mode: mode,
-            storage: PrototypeStorageCoordinator.fileBacked(),
+            storage: PrototypeStorageCoordinator.fileBacked(secure: registry.secureStorage),
             registry: registry.withTestHooks(environment: environment)
         )
         outbox = PrototypeEventOutbox(mode: mode)
@@ -700,6 +703,7 @@ final class PrototypeAgent: NSObject {
 
     private func showPrototype(_ message: [String: Any], result: ProtocolResult) throws {
         let spec = try decode(PrototypeSpec.self, message["spec"])
+        if let refusal = model.platformRegistry.notificationRefusal(for: spec) { return result(false, refusal) }
         // The host resolves element anchors to bounds (#9316); drawing one that it did not
         // would silently misplace the node, so the show is refused and nothing changes.
         if let path = spec.root.unresolvedAnchorPath() {

@@ -16,8 +16,8 @@ const SCANNED_DIRS = ["src/server", "src/daemon"];
 const ALLOWLIST: Record<string, number> = {
   "src/daemon/deviceSnapshotManager.ts": 1,
   "src/daemon/videoRecordingManager.ts": 1,
-  "src/daemon/videoStreamSocketDefaults.ts": 1,
-  "src/daemon/webrtcStreamManager.ts": 1,
+  "src/daemon/streams/videoStreamSocketDefaults.ts": 1,
+  "src/daemon/streams/webrtcStreamManager.ts": 1,
   "src/server/videoRecordingSegments.ts": 1,
 };
 

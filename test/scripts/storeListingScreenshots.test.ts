@@ -66,9 +66,21 @@ describe("screenshot plan", () => {
 
   test("steps fix the clock, seed the sample library and end with a settled capture", () => {
     plan.forEach((shot) => {
-      const tools = shot.steps.flatMap((step) => (step.kind === "mcp" ? [step.tool] : []));
+      const drive = toDrivePlan(shot);
+      const tools = drive.map((step) => step.tool);
+      expect(drive).toHaveLength(shot.steps.length - 1);
       expect(tools[0]).toBe(shot.profile.platform === "android" ? "getAndroid" : "getApple");
-      expect(tools).toContain("statusBar");
+      const overrides = drive.filter((step) => step.tool === "statusBar");
+      expect(overrides).toHaveLength(shot.profile.platform === "android" ? 2 : 1);
+      expect(drive[1]).toEqual(overrides[0]);
+      expect(drive[1]?.args.platform).toBe(shot.profile.platform);
+      if (shot.profile.platform === "android") {
+        const reassert = tools.lastIndexOf("statusBar");
+        expect(overrides[1]).toEqual(overrides[0]);
+        expect(reassert).toBe(drive.length - 2);
+        expect(reassert).toBeGreaterThan(tools.lastIndexOf("launchApp"));
+        expect(reassert).toBeGreaterThan(tools.lastIndexOf("tapOn"));
+      }
       expect(tools).not.toContain("putAppFile");
       expect(tools.indexOf("prototype")).toBeGreaterThan(tools.indexOf("terminateApp"));
       const last = shot.steps[shot.steps.length - 1];
@@ -92,11 +104,21 @@ describe("screenshot plan", () => {
     ]);
   });
 
-  test("Android opens More options for chat-scroll before tapping Share", () => {
+  test("Android opens More options for chat before tapping Share", () => {
     const shot = plan.find((entry) => entry.id === "android-phone-light-share");
     expect(shot?.steps.filter((step) => step.kind === "mcp" && step.tool === "tapOn")).toEqual([
-      { kind: "mcp", tool: "tapOn", args: { selector: { text: "More options for chat-scroll" } } },
+      { kind: "mcp", tool: "tapOn", args: { selector: { text: "More options for chat" } } },
       { kind: "mcp", tool: "tapOn", args: { selector: { text: "Share" } } },
+    ]);
+  });
+
+  test.each([
+    ["ios-iphone-69-light-import", "Settings"],
+    ["android-phone-light-import", "Import"],
+  ])("%s taps %s", (id, text) => {
+    const shot = plan.find((entry) => entry.id === id);
+    expect(shot?.steps.filter((step) => step.kind === "mcp" && step.tool === "tapOn")).toEqual([
+      { kind: "mcp", tool: "tapOn", args: { selector: { text } } },
     ]);
   });
 
@@ -150,10 +172,15 @@ describe("screenshot plan", () => {
     });
   });
 
-  test("the default loader inlines each corpus spec", () => {
+  test("the default loader inlines template-chat as the featured sample", () => {
+    expect(FEATURED).toEqual({
+      file: "test/fixtures/prototype-spec/valid/template-chat.json",
+      label: "chat",
+    });
     const save = plan[0]!.steps.find((step) => step.kind === "mcp" && step.tool === "prototype");
-    expect(save?.kind === "mcp" ? save.args.spec : undefined).toMatchObject({
-      id: expect.any(String),
+    expect(save?.kind === "mcp" ? save.args : undefined).toMatchObject({
+      label: "chat",
+      spec: { id: "template-chat" },
     });
   });
 

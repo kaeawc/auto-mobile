@@ -6,14 +6,14 @@ import {
   type ObservationStreamAndroidClient,
   type ObservationStreamDevice,
   type ObservationStreamIosClient,
-} from "../../src/daemon/observationInitialFrame";
+} from "../../src/daemon/streams/observationInitialFrame";
 import {
   DefaultObservationInitialFrameCoordinator,
   INITIAL_FRAME_FRESHNESS_WINDOW_MS,
   INITIAL_FRAME_CAPTURE_DEADLINE_MS,
   INITIAL_FRAME_CAPTURE_SLOT_BACKSTOP_MS,
-} from "../../src/daemon/observationInitialFrameCoordinator";
-import type { InitialFrameSubscriber } from "../../src/daemon/deviceDataStreamSocketServer";
+} from "../../src/daemon/streams/observationInitialFrameCoordinator";
+import type { InitialFrameSubscriber } from "../../src/daemon/streams/deviceDataStreamSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ActionableError } from "../../src/models/ActionableError";
 import { logger } from "../../src/utils/logger";

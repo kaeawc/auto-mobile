@@ -17,7 +17,7 @@ import {
   DEFAULT_PROTOTYPE_ASSET_TIMEOUT_MS,
   MAX_PROTOTYPE_ASSET_COUNT,
 } from "../features/prototype/prototypeAssets";
-import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "./observationResourceUris";
+import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "./streams/observationResourceUris";
 import { WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS } from "../features/observe/waitForTimeout";
 import { PROTOVIEWER_DEFAULT_TIMEOUT_MS } from "../features/prototype/protoViewer/protoViewerDevice";
 import {

@@ -71,7 +71,7 @@ describe("wireSessionLifecycle", () => {
     wireSessionLifecycle(manager, timer, hostWith([]));
 
     // The location, network, App Links, device-condition, iOS camera poster, kill-profile, emulator sensor, emulator audio, display-profile, keyboard-profile, port-reverse, Android Auto, status bar, performance, screen
-    // lock, system-alert, BLE peripheral, power, profiling and recording cleanups register first (each takes a release listener and an unbound
+    // lock, system-alert, BLE peripheral, power, profiling, performance trace and recording cleanups register first (each takes a release listener and an unbound
     // listener), then the daemon's own, in this order.
     expect(order).toEqual([
       "onSessionRelease",
@@ -112,6 +112,13 @@ describe("wireSessionLifecycle", () => {
       "onSessionDeviceUnbound",
       "onSessionRelease",
       "onSessionDeviceUnbound",
+      "onSessionRelease",
+      "onSessionDeviceUnbound",
+      "onSessionRelease",
+      "onSessionDeviceUnbound",
+      // AXBridge follows the existing feature hooks without reordering them.
+      "onSessionCreated",
+      "onDeviceOwnershipChange",
       "onSessionRelease",
       "onSessionDeviceUnbound",
       "onDeviceOwnershipChange",

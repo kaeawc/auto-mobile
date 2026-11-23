@@ -1,4 +1,4 @@
-import type { FailuresStreamRepository } from "../../src/daemon/failuresStreamSocketServer";
+import type { FailuresStreamRepository } from "../../src/daemon/streams/failuresStreamSocketServer";
 
 type NotificationsQuery = Parameters<FailuresStreamRepository["getNotificationsSince"]>[0];
 type GroupsQuery = Parameters<FailuresStreamRepository["getAggregatedGroups"]>[0];

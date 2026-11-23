@@ -356,17 +356,23 @@ internal class PrototypeNodeMapping(
     val style =
       old?.style?.takeIf { it.source === resolved || it.source == resolved }
         ?: mapPrototypeStyle(resolved)
+    val remoteUrl =
+      (node as? PrototypeImageNode)?.url?.let { interpolatePrototypeText(it, localState, inPager) }
+    fun accessibleText(value: String?): String? = value?.takeUnless {
+      remoteUrl != null && remoteUrl.isNotEmpty() && it.contains(remoteUrl)
+    }
     val mapped =
       PrototypeRenderNode(
         role,
         text,
-        node.testTag,
+        accessibleText(node.testTag),
         node.visibleWhen?.holds(localState, validity, derivedValues) ?: true,
         style,
         node.safeAreaPadding,
         prototypeNodeIconName(node),
         children,
-        (if (derive.isEmpty()) node
+        (if (node is PrototypeImageNode && node.url != null) node.copy(url = remoteUrl)
+          else if (derive.isEmpty()) node
           else
             PrototypeDerivedText.bindNode(node) {
               interpolatePrototypeText(it, derivedState, readLater = true)
@@ -404,13 +410,19 @@ internal class PrototypeNodeMapping(
         minute = prototypeStateInt(state, (node as? PrototypeTimePickerNode)?.minuteKey),
         contentDescription =
           (node.semantics?.label ?: node.contentDescription)?.let {
-            interpolatePrototypeText(it, localState, inPager)
+            accessibleText(interpolatePrototypeText(it, localState, inPager))
           },
         semantics =
           node.semantics?.let { semantics ->
             semantics.copy(
-              label = semantics.label?.let { interpolatePrototypeText(it, localState, inPager) },
-              hint = semantics.hint?.let { interpolatePrototypeText(it, localState, inPager) },
+              label =
+                semantics.label?.let {
+                  accessibleText(interpolatePrototypeText(it, localState, inPager))
+                },
+              hint =
+                semantics.hint?.let {
+                  accessibleText(interpolatePrototypeText(it, localState, inPager))
+                },
             )
           },
         spans =
@@ -566,6 +578,7 @@ internal fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeWebViewNode -> "webView"
     is PrototypeCastButtonNode -> "castButton"
     is PrototypeCameraPreviewNode -> "cameraPreview"
+    is PrototypeLoadingIndicatorNode -> "loadingIndicator"
   }
 
 private fun prototypeNodeText(

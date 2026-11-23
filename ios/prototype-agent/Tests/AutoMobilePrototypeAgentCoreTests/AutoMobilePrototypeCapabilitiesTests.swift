@@ -3,6 +3,59 @@ import Foundation
 import XCTest
 
 final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
+    func testAuthorizationOnlyBindingsUsePermissionsCapability() throws {
+        let data = Data("""
+        {"id":"authorization","window":{"placement":{"type":"fullscreen"}},
+         "requires":{"platform":["notifications"],
+           "permissions":[{"name":"notifications","purpose":"Send updates"}]},
+         "root":{"type":"text","text":"{platform:/notifications/authorization}"}}
+        """.utf8)
+        let spec = try XCTUnwrap(JSONDecoder().decode(JSONValue.self, from: data).objectFields)
+        let supported: Set<String> = ["prototype_platform_v1", "prototype_platform_permissions_v1"]
+        XCTAssertEqual(PrototypeStrictCapabilities.required(spec), supported)
+        XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data, supportedCapabilities: supported))
+        var condition = spec
+        condition["root"] = .object([
+            "type": .string("text"), "text": .string("Allowed"),
+            "visibleWhen": .object(["platform": .string("/notifications/authorization"), "equals": .string("granted")]),
+        ])
+        XCTAssertEqual(PrototypeStrictCapabilities.required(condition), supported)
+        XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(
+            data: JSONEncoder().encode(JSONValue.object(condition)), supportedCapabilities: supported
+        ))
+        var noDeclaration = spec
+        noDeclaration["requires"] = .object(["permissions": .array([
+            .object(["name": .string("notifications"), "purpose": .string("Send updates")]),
+        ])])
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(
+            data: JSONEncoder().encode(JSONValue.object(noDeclaration)), supportedCapabilities: supported
+        ))
+
+        var noPermission = spec
+        noPermission["requires"] = .object(["platform": .array([.string("notifications")])])
+        var otherState = spec
+        otherState["root"] = .object(["type": .string("text"), "text": .string("{platform:/notifications/badge}")])
+        var handler = spec
+        handler["platform"] = .object(["on": .object(["notifications.opened": .array([])])])
+        var call = spec
+        call["root"] = .object([
+            "type": .string("button"), "label": .string("Cancel"), "onTap": .array([.object([
+                "type": .string("platform"), "call": .string("notifications.cancel"),
+                "args": .object(["all": .object(["value": .bool(true)])]),
+            ])]),
+        ])
+        var configured = spec
+        configured["notifications"] = .object(["channels": .array([.object([
+            "id": .string("updates"), "name": .string("Updates"), "importance": .string("default"),
+        ])])])
+        for variant in [noPermission, otherState, handler, call, configured] {
+            XCTAssertTrue(PrototypeStrictCapabilities.required(variant).contains("prototype_platform_notifications_v1"))
+            XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(
+                data: JSONEncoder().encode(JSONValue.object(variant)), supportedCapabilities: supported
+            ))
+        }
+    }
+
     func testUploadAndDeviceTransportAreAdvertisedTogetherAtTheMinimumOS() {
         struct MinimumOS: OSVersionProvider { let majorVersion = 17 }
         for capability in [
@@ -73,6 +126,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // not through the static list this test reads.
         // no renderer yet, and so do device media items (#14192).
         var exclusions: Set<String> = [
+            "prototype_remote_image_v1", // Validation only; no remote image loader is implemented.
             // Realtime transport, routing and lifecycle remain owed by the runtime slices.
             "prototype_platform_realtime_v1", "prototype_platform_realtime_device_v1",
             "prototype_platform_test_v1",
@@ -112,7 +166,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_mediaLibrary_save_v1",
             // Contract only; the fake identity provider runtime is owed (#14303).
             "prototype_platform_auth_v1",
-            // Contract only; the Keychain-backed secure storage runtime is owed (#14321).
+            // Registered by the Viewer and standalone registries, not the static list.
             "prototype_platform_secureStorage_v1",
             // Contract only; the voice-note recorder runtimes are owed (#14194).
             "prototype_platform_audioRecorder_v1",
@@ -133,6 +187,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_custom_shaders_v1",
             "prototype_choreography_v1",
             "prototype_loops_v1", // Attention loops are Android only until #14684.
+            // M3 Expressive components (#15258) are drawn on Android only; SwiftUI approximations are owed.
+            "prototype_m3_expressive_v1",
             "prototype_motion_v3", // Motion v2 does not include motion v3 or window choreography.
             "prototype_window_motion_v1",
             "prototype_platform_haptics_v1", "prototype_platform_sound_v1",

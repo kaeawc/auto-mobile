@@ -16,7 +16,7 @@ reported in `missingAssets`. Bytes, MIME types, cache paths and screenshot handl
 properties.
 
 The remote-image contract requires `prototype_remote_image_v1` for any `url`, `placeholder`,
-`error`, `crossfade` or `via` field. Android and iOS advertise it and load device-routed images; web support is validation only.
+`error`, `crossfade` or `via` field. Android and iOS advertise and implement it; web supports validation only.
 Refused specs must replace `url` and remote-image options with a bundled `asset`.
 `url` is 1–2048 UTF-16 units and supports state, data, repeat and route text bindings.
 Only a whole-field binding skips static URL checks; literal text outside it still requires a valid URL.
@@ -34,7 +34,7 @@ The loader contract caps each download at 8 MiB, Android memory at one-eighth of
 and iOS memory at 64 MiB. The per-app disk cache holds 128 MiB keyed by URL; concurrent loads are capped at six.
 The accessibility state-description contract is `loading|loaded|error`; inspect's per-prototype
 image counts are `{loaded, failed, pending}`. URLs must never enter accessibility text, observe or
-events. iOS implements URL loading, crossfade, caches and accessibility state; iOS inspect image counts remain unimplemented.
+events. iOS does not report inspect image counts yet.
 
 Android loads device URLs through the request transport with strict public-address egress checks,
 DNS and socket validation, and the asset renderer's sampled layout-size decoder. Loading and errors draw the authored asset or color fallback; crossfade

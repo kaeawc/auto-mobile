@@ -77,14 +77,14 @@ final class FramebufferCaptureSession: @unchecked Sendable {
         let interval = DispatchTimeInterval.nanoseconds(1_000_000_000 / max(fps, 1))
         timer.schedule(deadline: .now(), repeating: interval, leeway: .milliseconds(2))
         timer.setEventHandler { [weak self] in self?.tick() }
-        self.timer = timer
+        queue.sync { self.timer = timer }
         timer.resume()
     }
 
     func stop() {
-        timer?.cancel()
-        timer = nil
         queue.sync {
+            timer?.cancel()
+            timer = nil
             stopped = true
             pipeline?.stop()
             pipeline = nil

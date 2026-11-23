@@ -28,25 +28,29 @@ second, so a rotation or display reconfiguration that replaces it is picked up.
 ## Encoding
 
 A timer polls the surface at `--simulator-fps`. `IOSurfaceGetSeed` changes on
-every frame CoreSimulator draws, so `FramebufferFrameGate` encodes a frame only
-when the seed or surface changes, or when a keyframe is requested on the control
-channel. A static screen sends nothing until a viewer's PLI or the daemon's
-liveness probe asks for a keyframe, which re-encodes the unchanged surface.
+every frame CoreSimulator draws. `FramebufferFrameGate` encodes a frame only
+when the seed or surface changes, or when the control channel requests a
+keyframe. A static screen sends nothing until a viewer's PLI or the daemon's
+liveness probe requests a keyframe, which re-encodes the unchanged surface.
 
-The surface is wrapped with `CVPixelBufferCreateWithIOSurface`, without a copy,
-and fed to the shared `EncodePipeline`. Sizing follows the physical-device path:
-the encoder is created at the H.264 Level 4.2 or `--max-long-side` target and
-VideoToolbox scales the surface into it (970x2112 for a 1206x2622 surface). The
-encoder reads the live surface, so a frame drawn during an encode can tear.
+On this path the helper never emits capture-idle. A static screen stays fresh
+through keyframe requests: the gate re-encodes on any request, and a late joiner
+gets `requestKeyFrameForWaitingSubscriber`.
+
+The helper wraps the surface with `CVPixelBufferCreateWithIOSurface`, without a
+copy, and feeds it to the shared `EncodePipeline`. Sizing follows the
+physical-device path. The encoder targets H.264 Level 4.2 or `--max-long-side`,
+and VideoToolbox scales the surface into it (970x2112 for a 1206x2622 surface).
+The encoder reads the live surface, so a frame drawn during an encode can tear.
 
 ## Choosing the path
 
 The production capture factory enables framebuffer capture. For a Simulator
 stream without audio, `IosH264Source` starts the helper with the device UDID
-first. When that helper exits or errors before its first record (a released
-helper without `--simulator-udid`, or a CoreSimulator API missing on that Xcode),
-the source logs a warning, remembers the failure for its lifetime, and uses the
-ScreenCaptureKit window path. Audio streams always use the window path, because
+first. If the helper exits or errors before its first record, the source logs a
+warning and remembers the failure for its lifetime. It then uses the
+ScreenCaptureKit window path. Two causes are a released helper without
+`--simulator-udid` and a CoreSimulator API missing on that Xcode. Audio streams always use the window path, because
 only ScreenCaptureKit captures Simulator audio. A failure after the first record
 goes through the normal running reconnect, which tries the framebuffer again.
 

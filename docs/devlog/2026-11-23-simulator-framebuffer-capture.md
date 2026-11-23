@@ -44,9 +44,9 @@ Measured on the same host (Xcode 27.2, iPhone 17, iOS 27.2, host load average
 | Framebuffer helper, static screen for 4 s | 2 records (first frame, one forced keyframe) |
 | `-framebufferSurface` call                | 384 µs                                       |
 
-Screenshots were not moved. `simctl io screenshot` already needs no window (about
-470 to 540 ms per warm call); a PNG encoded from the surface in-process took 94 to
-155 ms after 110 to 820 ms of CoreSimulator setup. The images had the same size;
+Screenshots were not moved. `simctl io screenshot` already needs no window and
+takes about 470 to 540 ms per warm call. A PNG encoded from the surface
+in-process took 94 to 155 ms, after 110 to 820 ms of CoreSimulator setup. The images had the same size;
 11.7% of pixels differed by more than 8/255, mostly the Dynamic Island (black in
 the framebuffer, wallpaper in `simctl`) and small color shifts in saturated areas.
 

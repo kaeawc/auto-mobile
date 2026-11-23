@@ -98,7 +98,7 @@ runs:
 
     - name: "Set up tcmalloc"
       if: ${{ inputs.malloc-replacement == 'tcmalloc' }}
-      uses: kaeawc/setup-tcmalloc@1936191a039fcfbb062df9674c567c1a23ba6c7c # v0.0.1
+      uses: kaeawc/setup-tcmalloc@6dee5c29acb803bf944211bcc3a8b72f1857bcec # v0.0.2
 
     - name: "Set Gradle User Home"
       shell: ${{ inputs.shell }}

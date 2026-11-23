@@ -5,6 +5,7 @@ import {
 import { DISPLAY_KEYS } from "../features/utility/DefaultDeviceSettingsAccess";
 import { DISPLAY_GEOMETRY_FIELDS } from "../features/utility/AndroidDisplayGeometry";
 import { ACCESSIBILITY_DISPLAY_FIELDS } from "../features/utility/AccessibilityDisplayPreferences";
+import { SCREEN_CONTROL_FIELDS } from "../features/utility/IosSimulatorScreenControls";
 import type { DeviceSettingKey } from "../models/DeviceSettingDefaults";
 import type { Platform } from "../models";
 import { opaqueIntentKey } from "../daemon/sessionBroker/mutations/types";
@@ -71,9 +72,23 @@ function settingMutations(args: Record<string, unknown>, platform?: Platform): T
           .filter((key) => key !== "density")
           .map((key) => (key === "fontScale" ? "contentSize" : key))
       : keys;
-  return [...new Set(journaled), ...geometryKeys(args, platform)].map((key) =>
-    mutation("device-setting", key),
-  );
+  return [
+    ...new Set(journaled),
+    ...geometryKeys(args, platform),
+    ...screenControlKeys(args, platform),
+  ].map((key) => mutation("device-setting", key));
+}
+
+/**
+ * The iOS Simulator Dynamic Island and backlight (#19018), journaled as settings the iOS reset
+ * port restores. A reset can change both, so it records them too; other platforms refuse them.
+ */
+function screenControlKeys(args: Record<string, unknown>, platform?: Platform): string[] {
+  return platform === "ios"
+    ? SCREEN_CONTROL_FIELDS.filter(
+        (field) => args.reset === true || args.reset === "factory" || args[field] !== undefined,
+      )
+    : [];
 }
 
 /**

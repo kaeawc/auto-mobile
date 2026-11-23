@@ -21,9 +21,19 @@ import type { DeviceMutationResetContext, DeviceMutationResetPort } from "./rese
 import { DEVICE_MUTATION_KINDS, type DeviceBaseline, type DeviceMutationInput } from "./types";
 import type { BaselineChange } from "./baseline";
 import { parseNotifyutilState } from "../../../utils/ios-cmdline-tools/notifyutil";
+import {
+  OsascriptSimulatorBacklight,
+  type SimulatorBacklight,
+} from "../../../utils/ios-cmdline-tools/SimulatorBacklight";
+import {
+  DYNAMIC_ISLAND_DEFAULTS_DOMAIN,
+  DYNAMIC_ISLAND_SUPPRESSED_KEY,
+  hiddenDynamicIslands,
+} from "../../../utils/ios-cmdline-tools/SimulatorDynamicIsland";
 import { iosBiometricEnrollmentTarget, iosBiometricRevertArgs } from "./iosBiometricRevert";
 import { STOREKIT_MUTATION_KIND, type IosStoreKitSessionReset } from "./storeKitSession";
 import { simulatorKeyboardRevert } from "./simulatorKeyboardMutation";
+import { revertSimulatorKeyboard } from "./iosKeyboardRevert";
 import type { SimulatorKeyboardBridge } from "../../../utils/ios/SimulatorKeyboardBridge";
 import {
   IOS_ACCESSIBILITY_RESIDUE_DOMAIN,
@@ -137,6 +147,29 @@ function accessibilityDefaultCommand(udid: string, key: string, prior: unknown):
   ];
 }
 
+/**
+ * The settings stored as one boolean default: the accessibility preferences, and the Simulator's
+ * Dynamic Island default in SpringBoard's domain (#19018).
+ */
+function boolDefaultCommand(udid: string, key: string, prior: unknown): string[] | undefined {
+  const accessibilityKey = iosAccessibilityDefaultKey(key);
+  if (accessibilityKey) {
+    return accessibilityDefaultCommand(udid, accessibilityKey, prior);
+  }
+  if (key !== "dynamicIsland") {
+    return undefined;
+  }
+  return [
+    "spawn",
+    udid,
+    "defaults",
+    prior === undefined ? "delete" : "write",
+    DYNAMIC_ISLAND_DEFAULTS_DOMAIN,
+    DYNAMIC_ISLAND_SUPPRESSED_KEY,
+    ...(prior === undefined ? [] : ["-bool", prior === true ? "YES" : "NO"]),
+  ];
+}
+
 function iosGlobalSettingKey(key: string): string | undefined {
   return Object.entries(IOS_GLOBAL_SETTING_KEYS).find(([setting]) => setting === key)?.[1];
 }
@@ -159,6 +192,15 @@ async function iosGlobalSettingObservations(xml: string): Promise<DeviceBaseline
 
 function canRestoreIosSetting(mutation: DeviceMutationInput): boolean {
   const prior = mutation.priorValue;
+  // The Simulator's Dynamic Island default and display backlight (#19018).
+  if (mutation.key === "dynamicIsland") {
+    return (
+      prior.state === "absent" || (prior.state === "present" && typeof prior.value === "boolean")
+    );
+  }
+  if (mutation.key === "backlight") {
+    return prior.state === "present" && typeof prior.value === "boolean";
+  }
   if (prior.state !== "present") {
     // An absent Simulator accessibility default is off, and a restore deletes it again.
     return (
@@ -200,6 +242,8 @@ export interface IosMutationResetDependencies {
   storeKit: IosStoreKitSessionReset;
   /** CoreSimulator hardware keyboard and keyboard language calls (#19017). */
   keyboard: SimulatorKeyboardBridge;
+  /** Relights a Simulator whose session turned the display off (#19018). */
+  backlight?: SimulatorBacklight;
 }
 
 interface IosAppGroupCleanup {
@@ -425,7 +469,9 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         await this.revertBiometricEnrollment(mutation, context);
         break;
       case "keyboard":
-        await this.revertKeyboard(mutation, context);
+        await revertSimulatorKeyboard(mutation, context, this.dependencies.keyboard, (args) =>
+          this.command(context, args),
+        );
         break;
       case STOREKIT_MUTATION_KIND:
         await context.assertOwned();
@@ -433,8 +479,35 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         await context.assertOwned();
         break;
       default:
-        await this.revertByCommand(mutation, context);
+        await this.revertOther(mutation, prior, context);
     }
+  }
+
+  private async revertOther(
+    mutation: DeviceMutationInput,
+    prior: unknown,
+    context: DeviceMutationResetContext,
+  ): Promise<void> {
+    if (mutation.kind !== "device-setting" || mutation.key !== "backlight") {
+      await this.revertByCommand(mutation, context);
+    } else {
+      await this.revertBacklight(prior === true, context);
+    }
+    if (mutation.kind === "device-setting" && mutation.key === "dynamicIsland") {
+      // A later simctl screenshot re-hides only an island that is still meant to be hidden.
+      hiddenDynamicIslands.set(context.scope.deviceId, prior === true);
+    }
+  }
+
+  /** simctl cannot set the backlight; CoreSimulator can (#19018). */
+  private async revertBacklight(active: boolean, context: DeviceMutationResetContext) {
+    await context.assertOwned();
+    await (this.dependencies.backlight ?? new OsascriptSimulatorBacklight()).setActive(
+      context.scope.deviceId,
+      active,
+      context.signal,
+    );
+    await context.assertOwned();
   }
 
   private async revertByCommand(
@@ -469,75 +542,6 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
     );
     if (parseNotifyutilState(result.stdout) !== enrolled) {
       throw new ActionableError("iOS biometric enrollment did not read back as restored");
-    }
-  }
-
-  /**
-   * The hardware keyboard goes back to its boot state. A language change is undone by selecting
-   * the prior keyboard (the running keyboard ignores a `defaults` write of the selection alone),
-   * then writing back, or deleting, the keyboard list, language list and selection that call
-   * rewrites.
-   */
-  private async revertKeyboard(
-    mutation: DeviceMutationInput,
-    context: DeviceMutationResetContext,
-  ): Promise<void> {
-    const target = simulatorKeyboardRevert(mutation);
-    if (!target) {
-      throw new ActionableError("iOS cannot restore an unreadable keyboard state");
-    }
-    const udid = context.scope.deviceId;
-    await context.assertOwned();
-    if (target.kind === "hardware") {
-      await this.dependencies.keyboard.setHardwareKeyboard(udid, target.connected, target.layout, {
-        signal: context.signal,
-      });
-    } else {
-      await this.dependencies.keyboard.setKeyboardLanguage(udid, target.language, {
-        signal: context.signal,
-      });
-      for (const [domain, preference, value] of [
-        [".GlobalPreferences", "AppleKeyboards", target.prior.keyboards],
-        [".GlobalPreferences", "AppleLanguages", target.prior.languages],
-        ["com.apple.keyboard.preferences", "KeyboardLastUsed", target.prior.current],
-      ] as const) {
-        await this.restoreDefault(context, domain, preference, value);
-      }
-    }
-    await context.assertOwned();
-  }
-
-  /** Writes a string or string-array default back, or deletes one that was unset. */
-  private async restoreDefault(
-    context: DeviceMutationResetContext,
-    domain: string,
-    preference: string,
-    value: string | readonly string[] | null,
-  ): Promise<void> {
-    const udid = context.scope.deviceId;
-    if (value !== null) {
-      const typed = typeof value === "string" ? ["-string", value] : ["-array", ...value];
-      await this.command(context, [
-        "spawn",
-        udid,
-        "defaults",
-        "write",
-        domain,
-        preference,
-        ...typed,
-      ]);
-      return;
-    }
-    try {
-      await this.command(context, ["spawn", udid, "defaults", "delete", domain, preference]);
-    } catch (error) {
-      if (!looksLikeMissingIosDefault(error)) {
-        throw toActionableError(error, "iOS keyboard reset command failed");
-      }
-      // An absent default already satisfies the requested deletion.
-      logger.debug(`iOS keyboard default already absent: ${errorMessage(error)}`);
-      context.signal.throwIfAborted();
-      await context.assertOwned();
     }
   }
 
@@ -581,9 +585,9 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         String(prior),
       ];
     }
-    const accessibilityKey = iosAccessibilityDefaultKey(mutation.key);
-    if (accessibilityKey) {
-      return accessibilityDefaultCommand(udid, accessibilityKey, prior);
+    const defaultsCommand = boolDefaultCommand(udid, mutation.key, prior);
+    if (defaultsCommand) {
+      return defaultsCommand;
     }
     const preference = iosGlobalSettingKey(mutation.key);
     if (!preference) {

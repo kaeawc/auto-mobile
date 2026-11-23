@@ -1,10 +1,8 @@
-import { realpath } from "node:fs/promises";
-import path from "node:path";
 import { z } from "zod/v4";
-import { AMBIENT_ENV, readEnvTrimmed } from "../../config/env";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { runExecSeam } from "../ExecSeam";
 import { execFileAsync, type ExecFileAsync } from "../HostCommandExecutor";
+import { resolveDeveloperDirectory } from "../ios-cmdline-tools/SimulatorBacklight";
 
 /**
  * Physical layout of the simulated hardware keyboard. CoreSimulator takes the Apple USB keyboard
@@ -86,20 +84,6 @@ const outputSchema = z.union([
 ]);
 
 const CALL_TIMEOUT_MS = 30_000;
-
-/**
- * The active Xcode developer directory, as CoreSimulator wants it: `DEVELOPER_DIR` (an `.app`
- * path means its `Contents/Developer`), else the `xcode-select` link.
- */
-export async function resolveDeveloperDirectory(
-  env: NodeJS.ProcessEnv = process.env,
-  resolve: (target: string) => Promise<string> = realpath,
-): Promise<string> {
-  const selected = await resolve(
-    readEnvTrimmed(AMBIENT_ENV.DEVELOPER_DIR, env) || "/var/db/xcode_select_link",
-  );
-  return selected.endsWith(".app") ? path.join(selected, "Contents/Developer") : selected;
-}
 
 function failureMessage(code: string, udid: string): string {
   switch (code) {

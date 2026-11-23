@@ -56,6 +56,8 @@ const displayConfigValuesOutputSchema = z
     magnification: z.boolean().optional(),
     magnificationScale: z.number().optional(),
     extraDim: z.boolean().optional(),
+    dynamicIsland: z.enum(["hidden", "visible"]).optional(),
+    backlight: z.boolean().optional(),
   })
   .passthrough();
 
@@ -84,6 +86,8 @@ export const displayConfigResultSchema = z
         magnification: accessibilityDisplaySupportOutputSchema.optional(),
         magnificationScale: accessibilityDisplaySupportOutputSchema.optional(),
         extraDim: accessibilityDisplaySupportOutputSchema.optional(),
+        dynamicIsland: z.boolean().optional(),
+        backlight: z.boolean().optional(),
       })
       .passthrough(),
     supportNotes: z

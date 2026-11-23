@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   OsascriptSimulatorKeyboardBridge,
   SIMULATOR_KEYBOARD_JXA,
-  resolveDeveloperDirectory,
 } from "../../../src/utils/ios/SimulatorKeyboardBridge";
 import type { ExecFileAsync } from "../../../src/utils/HostCommandExecutor";
 
@@ -99,25 +98,5 @@ describe("OsascriptSimulatorKeyboardBridge", () => {
     await expect(bridge.setKeyboardLanguage(UDID, "fr_FR")).rejects.toThrow(
       `Simulator keyboard call failed on ${UDID}`,
     );
-  });
-});
-
-describe("resolveDeveloperDirectory", () => {
-  test("DEVELOPER_DIR naming an Xcode app resolves to its Contents/Developer", async () => {
-    const resolved = await resolveDeveloperDirectory(
-      { DEVELOPER_DIR: "/Applications/Xcode-27.2.0.app" },
-      async (target) => target,
-    );
-    expect(resolved).toBe(DEVELOPER_DIR);
-  });
-
-  test("without DEVELOPER_DIR the xcode-select link is followed", async () => {
-    const seen: string[] = [];
-    const resolved = await resolveDeveloperDirectory({}, async (target) => {
-      seen.push(target);
-      return DEVELOPER_DIR;
-    });
-    expect(seen).toEqual(["/var/db/xcode_select_link"]);
-    expect(resolved).toBe(DEVELOPER_DIR);
   });
 });

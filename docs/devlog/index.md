@@ -13,6 +13,7 @@ To add one, copy the [template](template.md).
 | Date       | Kind     | Entry                                                                                                                              |
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-11-23 | decision | [Keyboard control through CoreSimulator](2026-11-23-simulator-keyboard-coresimulator.md)                                           |
+| 2026-11-23 | decision | [Simulator Dynamic Island and backlight through defaults and JXA](2026-11-23-simulator-island-and-backlight.md)                    |
 | 2026-11-23 | decision | [Capture Simulator video from the device framebuffer](2026-11-23-simulator-framebuffer-capture.md)                                 |
 | 2026-11-23 | decision | [No consumer keep rule for prototype icons](2026-11-23-prototype-icon-keep-rule.md)                                                |
 | 2026-11-23 | decision | [XR headset hand and eye input over emulator gRPC](2026-11-23-xr-headset-hand-and-eye-input.md)                                    |

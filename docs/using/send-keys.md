@@ -30,7 +30,10 @@ A letter with modifiers is a keyboard shortcut:
 
 - **iOS simulator:** the chord is sent as the simulator's hardware keyboard, so
   system shortcuts reach SpringBoard and no text field needs focus. The result
-  does not confirm what the shortcut did; observe the screen afterwards.
+  does not confirm what the shortcut did; observe the screen afterwards. The
+  exception is `meta+h`: it succeeds only once the home screen shows, and fails
+  with "was not delivered" on a simulator that ignores it (iPhone Duo). Use
+  `homeScreen` or `pressButton home` there.
 - **iOS physical device:** a key command needs a focused text field. Without
   one, the command fails; tap a field first or pass `selector`.
 - **Android:** a letter without modifiers is a key event. A chord needs Android

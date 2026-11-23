@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import { registerIosCameraPosterSessionCleanup } from "../../src/daemon/iosCameraPosterSessionCleanup";
-import { InMemoryIosCameraPosterRegistry } from "../../src/features/utility/ios/IosCameraPosterRegistry";
+import {
+  InMemoryIosCameraPosterRegistry,
+  type IosCameraPosterRegistry,
+} from "../../src/features/utility/ios/IosCameraPosterRegistry";
 import { FakeSessionCleanupManager } from "../fakes/FakeSessionCleanupManager";
 
 const simA = "11111111-2222-3333-4444-555555555555";
@@ -9,11 +12,26 @@ const simB = "66666666-7777-8888-9999-000000000000";
 function setup() {
   const manager = new FakeSessionCleanupManager();
   const registry = new InMemoryIosCameraPosterRegistry();
-  registerIosCameraPosterSessionCleanup(manager, registry);
+  const hooks = {
+    calls: [] as string[],
+    watched: undefined as Pick<IosCameraPosterRegistry, "get"> | undefined,
+    resetStale: () => void hooks.calls.push("resetStale"),
+    watchBoots: (watched: Pick<IosCameraPosterRegistry, "get">) => {
+      hooks.calls.push("watchBoots");
+      hooks.watched = watched;
+    },
+  };
+  registerIosCameraPosterSessionCleanup(manager, hooks, registry);
   registry.set(simA, { kind: "image", path: "/a.png" });
   registry.set(simB, { kind: "qr", text: "b", path: "/b.png" });
-  return { manager, registry };
+  return { manager, registry, hooks };
 }
+
+test("registration resets stale device-wide state, then watches boots with the same registry", () => {
+  const h = setup();
+  expect(h.hooks.calls).toEqual(["resetStale", "watchBoots"]);
+  expect(h.hooks.watched).toBe(h.registry);
+});
 
 test("a session release forgets only its simulator's poster", () => {
   const h = setup();

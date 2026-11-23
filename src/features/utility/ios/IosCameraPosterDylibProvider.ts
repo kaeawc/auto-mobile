@@ -1,4 +1,4 @@
-import { ENV, readEnvRaw } from "../../../config/env";
+import { ENV, readEnvRaw, type EnvVarSpec } from "../../../config/env";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,11 +32,28 @@ export interface IosCameraPosterDylibDependencies {
   sourcePaths?: string[];
   /** Where this module runs from; its ancestors are searched for the packaged or checkout source. */
   moduleDirectory?: string;
+  /** Which library to build; the poster library by default. */
+  library?: IosCameraPosterLibrarySpec;
+}
+
+/** One simulator library built from a shipped source file. */
+export interface IosCameraPosterLibrarySpec {
+  /** Repository- and package-relative source path. */
+  source: string;
+  output: string;
+  /** Extra clang arguments between the architectures and the source. */
+  compileArgs: readonly string[];
+  /** Env names that override the built library and the source; absent means no override. */
+  dylibOverrideEnv?: EnvVarSpec;
+  sourceOverrideEnv?: EnvVarSpec;
 }
 
 /** Shipped in the npm package (package.json `files`) and present in a repo checkout. */
 export const IOS_CAMERA_POSTER_SOURCE =
   "ios/CameraPosterInjection/Injection/CameraPosterInjection.m";
+/** The libSystem-only gate a device-wide boot environment inserts into every process (#19047). */
+export const IOS_CAMERA_POSTER_GATE_SOURCE =
+  "ios/CameraPosterInjection/Injection/CameraPosterGate.c";
 /**
  * Both simulator slices: Apple silicon and Intel hosts, and an arm64 host whose Node runs under
  * Rosetta (where process.arch would name the wrong simulator architecture).
@@ -47,14 +64,44 @@ const BUILD_FLAVOR = "sim-universal";
 const XCODE_HINT =
   "Install Xcode and run xcode-select --install, or set AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB to a prebuilt libAMCameraPoster.dylib";
 
+export const IOS_CAMERA_POSTER_LIBRARY: IosCameraPosterLibrarySpec = {
+  source: IOS_CAMERA_POSTER_SOURCE,
+  output: "libAMCameraPoster.dylib",
+  compileArgs: [
+    "-dynamiclib",
+    "-fobjc-arc",
+    ...[
+      "Foundation",
+      "UIKit",
+      "AVFoundation",
+      "CoreImage",
+      "CoreMedia",
+      "CoreVideo",
+      "ImageIO",
+      "UniformTypeIdentifiers",
+    ].flatMap((framework) => ["-framework", framework]),
+  ],
+  dylibOverrideEnv: ENV.IOS_CAMERA_POSTER_DYLIB,
+  sourceOverrideEnv: ENV.IOS_CAMERA_POSTER_SOURCE,
+};
+
+/** Links only libSystem: every process on a device-wide simulator loads it. */
+export const IOS_CAMERA_POSTER_GATE_LIBRARY: IosCameraPosterLibrarySpec = {
+  source: IOS_CAMERA_POSTER_GATE_SOURCE,
+  output: "libAMCameraPosterGate.dylib",
+  compileArgs: ["-dynamiclib"],
+};
+
 /** Source-addressed, atomic simulator dylib builds; no compiler is invoked until a poster launch. */
 export class DefaultIosCameraPosterDylibProvider implements IosCameraPosterDylibProvider {
   private readonly fs: PosterFileSystem;
   private readonly runner: HostCommandExecutor;
   private readonly env: NodeJS.ProcessEnv;
   private readonly flights = new SingleFlight<string, string>();
+  private readonly library: IosCameraPosterLibrarySpec;
 
   constructor(private readonly deps: IosCameraPosterDylibDependencies = {}) {
+    this.library = deps.library ?? IOS_CAMERA_POSTER_LIBRARY;
     this.fs = deps.fileSystem ?? new DefaultFileSystem();
     this.runner = deps.runner ?? new DefaultHostCommandExecutor();
     this.env = deps.env ?? process.env;
@@ -62,7 +109,9 @@ export class DefaultIosCameraPosterDylibProvider implements IosCameraPosterDylib
 
   async ensure(): Promise<string> {
     try {
-      const override = readEnvRaw(ENV.IOS_CAMERA_POSTER_DYLIB, this.env);
+      const override = this.library.dylibOverrideEnv
+        ? readEnvRaw(this.library.dylibOverrideEnv, this.env)
+        : undefined;
       if (override !== undefined) {
         const path = resolvePathFromDaemonLaunchWorkingDirectory(override, this.env);
         if (!override || !(await this.isFile(path))) {
@@ -81,7 +130,7 @@ export class DefaultIosCameraPosterDylibProvider implements IosCameraPosterDylib
         (this.deps.directory ?? (() => getTempDir("ios-camera-poster")))(),
         `${digest}-${BUILD_FLAVOR}`,
       );
-      const output = join(directory, "libAMCameraPoster.dylib");
+      const output = join(directory, this.library.output);
       return await this.flights.run(output, () => this.build(source, directory, output));
     } catch (error) {
       throw toActionableError(error, "Unable to prepare the iOS Simulator camera poster dylib");
@@ -96,15 +145,17 @@ export class DefaultIosCameraPosterDylibProvider implements IosCameraPosterDylib
   }
 
   private async findSource(): Promise<string> {
-    const override = readEnvRaw(ENV.IOS_CAMERA_POSTER_SOURCE, this.env);
+    const { source, sourceOverrideEnv } = this.library;
+    const override = sourceOverrideEnv ? readEnvRaw(sourceOverrideEnv, this.env) : undefined;
     const candidates =
       override !== undefined
         ? [override]
         : (this.deps.sourcePaths ?? [
             ...sourcePathsFromModule(
               this.deps.moduleDirectory ?? dirname(fileURLToPath(import.meta.url)),
+              source,
             ),
-            resolvePathFromDaemonLaunchWorkingDirectory(IOS_CAMERA_POSTER_SOURCE, this.env),
+            resolvePathFromDaemonLaunchWorkingDirectory(source, this.env),
           ]);
     for (const candidate of candidates) {
       const path = resolvePathFromDaemonLaunchWorkingDirectory(candidate, this.env);
@@ -113,7 +164,7 @@ export class DefaultIosCameraPosterDylibProvider implements IosCameraPosterDylib
       }
     }
     throw new ActionableError(
-      `iOS camera poster source not found (${IOS_CAMERA_POSTER_SOURCE} beside the installed package or in a repo checkout). Reinstall the package, set AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE to CameraPosterInjection.m, or set AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB to a prebuilt libAMCameraPoster.dylib.`,
+      `iOS camera poster source not found (${source} beside the installed package or in a repo checkout). Reinstall the package, set AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE to CameraPosterInjection.m, or set AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB to a prebuilt libAMCameraPoster.dylib.`,
     );
   }
 
@@ -137,18 +188,7 @@ export class DefaultIosCameraPosterDylibProvider implements IosCameraPosterDylib
         "iphonesimulator",
         "clang",
         ...IOS_CAMERA_POSTER_ARCHS.flatMap((arch) => ["-arch", arch]),
-        "-dynamiclib",
-        "-fobjc-arc",
-        ...[
-          "Foundation",
-          "UIKit",
-          "AVFoundation",
-          "CoreImage",
-          "CoreMedia",
-          "CoreVideo",
-          "ImageIO",
-          "UniformTypeIdentifiers",
-        ].flatMap((framework) => ["-framework", framework]),
+        ...this.library.compileArgs,
         "-mios-simulator-version-min=17.0",
         source,
         "-o",
@@ -183,6 +223,9 @@ export class DefaultIosCameraPosterDylibProvider implements IosCameraPosterDylib
 
 export const iosCameraPosterDylibProvider: IosCameraPosterDylibProvider =
   new DefaultIosCameraPosterDylibProvider();
+
+export const iosCameraPosterGateProvider: IosCameraPosterDylibProvider =
+  new DefaultIosCameraPosterDylibProvider({ library: IOS_CAMERA_POSTER_GATE_LIBRARY });
 
 /**
  * Walk ancestors so source modules and bundled dist/src chunks find the same file: the package

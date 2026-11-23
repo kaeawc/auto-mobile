@@ -29,6 +29,7 @@ portable test/features/audit/IosOnDemandAuditEngines.test.ts              # fake
 portable test/features/utility/ios/*.test.ts  # registry, env construction and injected compiler/filesystem only
 portable test/features/action/iosRotateFloatingWindow.test.ts           # pure rotate verification over captured iPad values
 portable test/daemon/iosCameraPosterSessionCleanup.test.ts  # fake session manager and in-memory registry only
+portable test/utils/ios-cmdline-tools/simulatorBootHooks.test.ts  # in-process listener set only; no simctl
 
 portable test/utils/ios/carPlayProjection.test.ts                        # JSON contract and injected exec only; no host processes
 portable test/utils/ios/carPlayCapture.test.ts                           # injected probe and screenshot only

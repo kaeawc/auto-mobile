@@ -36,6 +36,7 @@ import { Mutex } from "async-mutex";
 import { type IdGenerator } from "../IdGenerator";
 
 import { type SimulatorAppPresenter } from "./SimulatorAppPresenter";
+import { simulatorBootHooks, type SimulatorBootHooks } from "./simulatorBootHooks";
 
 export interface SimCtlBootContext {
   timer: Timer;
@@ -70,6 +71,8 @@ export interface SimCtlBootContext {
   observationSequence: DiscoveryObservationSequence;
   /** Drop the cached simulator listing; a boot changes the state it recorded. */
   invalidateDeviceListCache(): void;
+  /** Told after each verified boot, so launchd-environment state can be restored (default: shared). */
+  bootHooks?: Pick<SimulatorBootHooks, "notifyBooted">;
 }
 /** Trailing options for `SimCtlBoot.runCoordinatedBoot`. */
 interface CoordinatedBootOptions<T> {
@@ -475,6 +478,11 @@ export class SimCtlBoot {
    * On a failed verification the device is shut down, a bounded backoff is
    * awaited through the injected {@link Timer}, and the boot is retried.
    */
+  private confirmBooted(udid: string): void {
+    this.context.invalidateDeviceListCache();
+    (this.context.bootHooks ?? simulatorBootHooks).notifyBooted(udid);
+  }
+
   async bootAndVerify(udid: string, deadlineMs: number): Promise<AppleDevice> {
     const { maxAttempts, retryBackoffMs } = this.context.bootOptions;
     let lastFailure = "";
@@ -511,7 +519,7 @@ export class SimCtlBoot {
       if (target?.state === "Booted") {
         // A listing taken between the first invalidation and this confirmation may have cached
         // a Booting row; drop it too so the bind that follows reads the Booted state.
-        this.context.invalidateDeviceListCache();
+        this.confirmBooted(udid);
         return target;
       }
 

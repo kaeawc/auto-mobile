@@ -526,6 +526,7 @@ nav:
       - "2026-11-23: Keyboard control through CoreSimulator": devlog/2026-11-23-simulator-keyboard-coresimulator.md
       - "2026-11-23: Simulator Dynamic Island and backlight through defaults and JXA": devlog/2026-11-23-simulator-island-and-backlight.md
       - "2026-11-23: Capture Simulator video from the device framebuffer": devlog/2026-11-23-simulator-framebuffer-capture.md
+      - "2026-11-23: Device-wide camera poster through the launchd environment": devlog/2026-11-23-simulator-camera-poster-device-wide.md
       - "2026-11-23: No consumer keep rule for prototype icons": devlog/2026-11-23-prototype-icon-keep-rule.md
       - "2026-11-23: iOS Simulator network shaping through a boot-injected socket shaper": devlog/2026-11-23-ios-simulator-boot-injected-network-shaper.md
       - "2026-11-23: Generate the devlog index and nav from the entries": devlog/2026-11-23-generated-devlog-index.md

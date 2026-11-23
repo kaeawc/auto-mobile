@@ -143,7 +143,8 @@ test("largest files sort by descending size and ascending path, truncate without
   expect(evaluate(1000, 100).package.largestFiles).toEqual(
     runtimeFiles
       .map(({ path, size }) => ({ path, size }))
-      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+      .slice(0, 10),
   );
   expect(evaluate(100).package.largestFiles).toEqual([]);
 });

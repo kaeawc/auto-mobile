@@ -64,6 +64,7 @@ function simulatorConfig(
     themeBaselines: new Map(),
     accessibilityBaselines: new Map(),
     contentSizeBaselines: baselines,
+    screenControls: { islandSupport: { supportsDynamicIsland: async () => true } },
   });
 }
 

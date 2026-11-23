@@ -351,10 +351,17 @@ export class DisplayConfig {
   /** The Simulator's theme and text size, or a physical device's theme from the runner. */
   private async getIosConfig(): Promise<DisplayConfigResult> {
     try {
-      const current = this.isIosSimulator()
-        ? { ...(await this.iosSimulator().read()), ...(await this.screenControls().read()) }
-        : await this.readIosThemeSnapshot();
-      return this.withAccessibilityRead(current, await this.accessibility().read());
+      if (!this.isIosSimulator()) {
+        return this.withAccessibilityRead(
+          await this.readIosThemeSnapshot(),
+          await this.accessibility().read(),
+        );
+      }
+      const controls = this.screenControls();
+      const island = await controls.supportsDynamicIsland();
+      const current = { ...(await this.iosSimulator().read()), ...(await controls.read(island)) };
+      const result = this.withAccessibilityRead(current, await this.accessibility().read());
+      return { ...result, supported: { ...result.supported, dynamicIsland: island } };
     } catch (error) {
       logger.warn(`[DisplayConfig] getConfig failed (iOS): ${errorMessage(error)}`, error);
       return this.failure(errorMessage(error));

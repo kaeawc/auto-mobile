@@ -5,6 +5,7 @@ import type {
 } from "./DisplayConfig";
 import { mergeGeometryChange } from "./displayConfigInput";
 import {
+  DYNAMIC_ISLAND_UNSUPPORTED_ERROR,
   SCREEN_CONTROL_FIELDS,
   type IosSimulatorScreenControls,
   type IosSimulatorScreenValues,
@@ -24,6 +25,12 @@ export async function setWithScreenControls(
   controls: IosSimulatorScreenControls,
   identity: { deviceId: string; platform: "android" | "ios"; supported: DisplayConfigSupport },
 ): Promise<DisplayConfigResult> {
+  const island = await controls.supportsDynamicIsland();
+  const supported = { ...identity.supported, dynamicIsland: island };
+  if (!island && input.dynamicIsland !== undefined) {
+    // Refused before any field of the request changes the device.
+    return { success: false, ...identity, supported, error: DYNAMIC_ISLAND_UNSUPPORTED_ERROR };
+  }
   const rest: SetDisplayConfigInput = Object.fromEntries(
     Object.entries(input).filter(
       ([key, value]) =>
@@ -38,5 +45,10 @@ export async function setWithScreenControls(
     ...(input.dynamicIsland !== undefined ? { dynamicIsland: input.dynamicIsland } : {}),
     ...(input.backlight !== undefined ? { backlight: input.backlight } : {}),
   };
-  return mergeGeometryChange(display, await controls.set(screen, input.reset === true), identity);
+  const merged = mergeGeometryChange(
+    display,
+    await controls.set(screen, input.reset === true),
+    identity,
+  );
+  return { ...merged, supported: { ...merged.supported, dynamicIsland: island } };
 }

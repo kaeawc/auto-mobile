@@ -36,3 +36,7 @@ The island control depends on SpringBoard keeping that default name, and the bac
 selector name and `SimServiceContext`. A rename makes the island write a no-op and the backlight
 call fail with a CoreSimulator error. The backlight call loads the host's shared
 CoreSimulator, so it works under any installed Xcode.
+
+The JXA call passes null for the NSError out-parameter. On that simulator, shut down, passing a
+`Ref()` made the failed backlight call crash osascript with SIGSEGV (exit 139); null returned NO
+cleanly. The script therefore checks that the device is booted and reports error codes as JSON.

@@ -103,22 +103,36 @@ export class SimCtlScreenshot {
     if (!hiddenDynamicIslands.has(deviceId)) {
       return;
     }
+    let child: ChildProcess | undefined;
+    let settled = false;
     try {
       await raceWithDeadline(
         () =>
           new Promise<void>((resolve, reject) => {
-            const child = this.context.spawnProcess(
+            child = this.context.spawnProcess(
               "xcrun",
               buildSimctlArgs(hideDynamicIslandArgs(deviceId)),
             );
-            child.once("error", reject);
-            child.once("close", (code) =>
-              code === 0 ? resolve() : reject(new Error(`defaults write exited ${code}`)),
-            );
+            child.once("error", (error) => {
+              settled = true;
+              reject(error);
+            });
+            child.once("close", (code) => {
+              settled = true;
+              if (code === 0) {
+                resolve();
+              } else {
+                reject(new Error(`defaults write exited ${code}`));
+              }
+            });
           }),
         { timer: this.context.timer, timeoutMs: 5_000, label: "Dynamic Island re-hide" },
       );
     } catch (error) {
+      if (child !== undefined && !settled) {
+        // The deadline passed with the spawned re-hide still running: stop that child only.
+        child.kill("SIGKILL");
+      }
       // The capture already succeeded; the island stays visible until displayConfig hides it again.
       logger.warn(
         `Re-hiding the Dynamic Island on ${deviceId} failed: ${errorMessage(error)}`,

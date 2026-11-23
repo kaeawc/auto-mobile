@@ -55,6 +55,7 @@ function createDisplayConfig(device: BootedDevice, dependencies: DisplayConfigDe
   return new DisplayConfig(device, {
     themeBaselines: new Map(),
     geometry: { registry: new DisplayProfileRestoreRegistry(), invalidate: () => {} },
+    screenControls: { islandSupport: { supportsDynamicIsland: async () => true } },
     ...dependencies,
   });
 }

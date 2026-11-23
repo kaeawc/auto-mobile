@@ -35,10 +35,13 @@ drives.
 On a simulator, `displayConfig` hides the Dynamic Island for layout checks and
 turns the display off and on without a lock gesture:
 
-- `dynamicIsland: "hidden"` hides the island; `"visible"` shows it again. Only
-  device types with a Dynamic Island change (iPhone 14 Pro and later, except the
-  16e and 17e). Screen recordings and the Simulator window show the change;
-  screenshots never include the island.
+- `dynamicIsland: "hidden"` hides the island; `"visible"` shows it again.
+  Screen recordings and the Simulator window show the change; screenshots never
+  include the island.
+- Only models with a Dynamic Island support it: iPhone 14 Pro and later, except
+  the 16e and 17e. On other models `supported.dynamicIsland` is `false` and a
+  `dynamicIsland` request fails without changing anything. Use a model with an
+  island.
 - `backlight: false` turns the display off: the device locks and shows the dimmed
   Lock Screen. `backlight: true` lights the Lock Screen; unlock it with
   `wakeAndUnlock`.
@@ -56,13 +59,13 @@ Android and physical iOS devices refuse both fields.
   screen, and drags inside apps work as usual. To rearrange icons or open Split
   View, do it by hand.
 - On an iPad with more than one app window on screen, the first tap into a window
-  that is not focused only brings that window to the front; the control under it
-  does not react. `tapOn` still reports success. Call `tapOn` again to activate the
-  control. Taps in the focused window work as usual. `tapOn` taps a control in a
-  window behind the focused one at a point at least 24 points clear of the focused
-  window; when the control has no such point it fails and names both windows.
-  Move the focused window, or tap a visible part of the other window with `tapAt`
-  to focus it first.
+  that is not focused only brings that window to the front. The control under it
+  does not react, but `tapOn` still reports success. Call `tapOn` again to
+  activate the control. Taps in the focused window work as usual.
+- `tapOn` taps a control in a window behind the focused one at a point at least
+  24 points clear of the focused window. When the control has no such point, it
+  fails and names both windows. Move the focused window first, or focus the other
+  window by tapping a visible part of it with `tapAt`.
 
 ## Running on a Mac host or CI
 

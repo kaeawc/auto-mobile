@@ -1,4 +1,5 @@
 import { registerDeviceIncarnationListener } from "../deviceIncarnation";
+import type { SimulatorDynamicIslandSupport } from "./SimulatorBacklight";
 
 /**
  * The SpringBoard default that hides the Dynamic Island. `-[SimDevice
@@ -45,3 +46,29 @@ export const hiddenDynamicIslands = {
     }
   },
 };
+
+const islandSupport = new Map<string, boolean>();
+
+registerDeviceIncarnationListener({
+  name: "ios-simulator-dynamic-island-support",
+  onDeviceIdentityReplaced: (deviceId) => islandSupport.delete(deviceId),
+  // A Simulator's device type is fixed for its UDID.
+  onDeviceIncarnationChanged: () => {},
+});
+
+/** Remembers per UDID whether its device type has a Dynamic Island; failed reads are not kept. */
+export function cachedDynamicIslandSupport(
+  source: SimulatorDynamicIslandSupport,
+): SimulatorDynamicIslandSupport {
+  return {
+    supportsDynamicIsland: async (udid, signal) => {
+      const known = islandSupport.get(udid);
+      if (known !== undefined) {
+        return known;
+      }
+      const supported = await source.supportsDynamicIsland(udid, signal);
+      islandSupport.set(udid, supported);
+      return supported;
+    },
+  };
+}

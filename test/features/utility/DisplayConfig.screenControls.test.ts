@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import { DisplayConfig } from "../../../src/features/utility/DisplayConfig";
+import { DYNAMIC_ISLAND_UNSUPPORTED_ERROR } from "../../../src/features/utility/IosSimulatorScreenControls";
 import type { SimCtl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -43,7 +44,7 @@ class FakeSimulator implements Pick<SimCtl, "executeCommandArgs"> {
   };
 }
 
-function config(device: BootedDevice, simctl: FakeSimulator) {
+function config(device: BootedDevice, simctl: FakeSimulator, island = true) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   return new DisplayConfig(device, {
@@ -53,6 +54,7 @@ function config(device: BootedDevice, simctl: FakeSimulator) {
     accessibilityBaselines: new Map(),
     screenControls: {
       timer,
+      islandSupport: { supportsDynamicIsland: async () => island },
       backlight: {
         setActive: async (_udid, active) => {
           simctl.blanked = !active;
@@ -101,6 +103,39 @@ describe("displayConfig Dynamic Island and backlight (#19018)", () => {
 
     expect(result.success).toBe(true);
     expect(result.applied).toMatchObject({ dynamicIsland: "visible", backlight: true });
+  });
+
+  test("a model without a Dynamic Island reports it unsupported and reads no island", async () => {
+    const result = await config(simulator, new FakeSimulator(), false).getConfig();
+
+    expect(result.supported).toMatchObject({ dynamicIsland: false, backlight: true });
+    expect(result.current).not.toHaveProperty("dynamicIsland");
+    expect(result.current).toMatchObject({ backlight: true });
+  });
+
+  test("dynamicIsland on a model without one is refused before any field changes", async () => {
+    const simctl = new FakeSimulator();
+
+    const result = await config(simulator, simctl, false).setConfig({
+      theme: "dark",
+      dynamicIsland: "hidden",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.supported).toMatchObject({ dynamicIsland: false });
+    expect(result.error).toBe(DYNAMIC_ISLAND_UNSUPPORTED_ERROR);
+    expect(simctl.appearance).toBe("light");
+    expect(simctl.calls).toEqual([]);
+  });
+
+  test("backlight on a model without a Dynamic Island still applies", async () => {
+    const simctl = new FakeSimulator();
+
+    const result = await config(simulator, simctl, false).setConfig({ backlight: false });
+
+    expect(result.success).toBe(true);
+    expect(result.supported).toMatchObject({ dynamicIsland: false, backlight: true });
+    expect(result.applied).toEqual({ backlight: false });
   });
 
   test("reset combined with dynamicIsland is contradictory", async () => {

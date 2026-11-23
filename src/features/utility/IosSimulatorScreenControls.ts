@@ -2,6 +2,7 @@ import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import {
   OsascriptSimulatorBacklight,
   type SimulatorBacklight,
+  type SimulatorDynamicIslandSupport,
 } from "../../utils/ios-cmdline-tools/SimulatorBacklight";
 import { parseNotifyutilState } from "../../utils/ios-cmdline-tools/notifyutil";
 import { looksLikeMissingIosDefault } from "../preferences/preferenceValues";
@@ -12,9 +13,12 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
   DYNAMIC_ISLAND_DEFAULTS_DOMAIN,
   DYNAMIC_ISLAND_SUPPRESSED_KEY,
+  cachedDynamicIslandSupport,
   hiddenDynamicIslands,
   hideDynamicIslandArgs,
 } from "../../utils/ios-cmdline-tools/SimulatorDynamicIsland";
+
+const defaultIslandSupport = cachedDynamicIslandSupport(new OsascriptSimulatorBacklight());
 
 export { DYNAMIC_ISLAND_DEFAULTS_DOMAIN, DYNAMIC_ISLAND_SUPPRESSED_KEY };
 /** SpringBoard posts 1 once the display is off and 0 while it is lit. */
@@ -35,7 +39,14 @@ export interface IosSimulatorScreenChange {
   previous: IosSimulatorScreenValues;
   applied: IosSimulatorScreenValues;
   errors: string[];
+  /** False when the Simulator's device type has no Dynamic Island. */
+  supported: { dynamicIsland: boolean };
 }
+
+/** Refusal for a `dynamicIsland` request on a model without one (iPhone SE, 16e, 17e). */
+export const DYNAMIC_ISLAND_UNSUPPORTED_ERROR =
+  "dynamicIsland is not supported on this Simulator: its device type has no Dynamic Island " +
+  "(for example iPhone SE, 16e or 17e). Use an iPhone 14 Pro or later model.";
 
 /** True when a request names a Dynamic Island or backlight value. */
 export function hasScreenControlField(input: IosSimulatorScreenValues): boolean {
@@ -48,6 +59,8 @@ const BACKLIGHT_SETTLE_ATTEMPTS = 12;
 
 export interface IosSimulatorScreenControlsDependencies {
   backlight?: SimulatorBacklight;
+  /** Reads the device type's Dynamic Island capability; defaults to CoreSimulator, cached. */
+  islandSupport?: SimulatorDynamicIslandSupport;
   timer?: Timer;
 }
 
@@ -56,6 +69,7 @@ type SimctlRunner = Pick<SimCtl, "executeCommandArgs">;
 /** Dynamic Island visibility and display backlight of one iOS Simulator (#19018). */
 export class IosSimulatorScreenControls {
   private readonly backlight: SimulatorBacklight;
+  private readonly islandSupport: SimulatorDynamicIslandSupport;
   private readonly timer: Timer;
 
   constructor(
@@ -64,12 +78,30 @@ export class IosSimulatorScreenControls {
     dependencies: IosSimulatorScreenControlsDependencies = {},
   ) {
     this.backlight = dependencies.backlight ?? new OsascriptSimulatorBacklight();
+    this.islandSupport = dependencies.islandSupport ?? defaultIslandSupport;
     this.timer = dependencies.timer ?? defaultTimer;
   }
 
-  async read(): Promise<IosSimulatorScreenValues> {
+  /**
+   * Whether this Simulator's device type has a Dynamic Island. An unreadable capability counts
+   * as supported, so the island default is still read and written as before.
+   */
+  async supportsDynamicIsland(): Promise<boolean> {
+    try {
+      return await this.islandSupport.supportsDynamicIsland(this.udid);
+    } catch (error) {
+      logger.warn(
+        `[DisplayConfig] Dynamic Island capability read failed on ${this.udid}: ${errorMessage(error)}`,
+        error,
+      );
+      return true;
+    }
+  }
+
+  async read(supported?: boolean): Promise<IosSimulatorScreenValues> {
+    const island = supported ?? (await this.supportsDynamicIsland());
     const [dynamicIsland, backlight] = await Promise.all([
-      this.readDynamicIsland(),
+      island ? this.readDynamicIsland() : undefined,
       this.readBacklight(),
     ]);
     return {
@@ -121,18 +153,37 @@ export class IosSimulatorScreenControls {
    * in `errors` beside the values read before the change.
    */
   async set(input: IosSimulatorScreenValues, reset = false): Promise<IosSimulatorScreenChange> {
-    const previous = await this.read();
+    const island = await this.supportsDynamicIsland();
+    if (!island && input.dynamicIsland !== undefined && !reset) {
+      return {
+        previous: {},
+        applied: {},
+        errors: [DYNAMIC_ISLAND_UNSUPPORTED_ERROR],
+        supported: { dynamicIsland: false },
+      };
+    }
+    const previous = await this.read(island);
     const target = reset ? resetTarget(previous) : input;
-    const errors: string[] = [];
-    if (target.dynamicIsland !== undefined) {
-      errors.push(...(await this.writeDynamicIsland(target.dynamicIsland)));
+    const islandErrors =
+      target.dynamicIsland === undefined ? [] : await this.writeDynamicIsland(target.dynamicIsland);
+    const backlightErrors =
+      target.backlight === undefined ? [] : await this.writeBacklight(target.backlight);
+    const applied = await this.read(island);
+    const mismatches = verify(target, applied);
+    if (
+      target.dynamicIsland !== undefined &&
+      islandErrors.length === 0 &&
+      applied.dynamicIsland === target.dynamicIsland
+    ) {
+      // Only an island this tool verifiably hid is re-hidden after a simctl screenshot.
+      hiddenDynamicIslands.set(this.udid, target.dynamicIsland === "hidden");
     }
-    if (target.backlight !== undefined) {
-      errors.push(...(await this.writeBacklight(target.backlight)));
-    }
-    const applied = await this.read();
-    errors.push(...verify(target, applied));
-    return { previous, applied, errors };
+    return {
+      previous,
+      applied,
+      errors: [...islandErrors, ...backlightErrors, ...mismatches],
+      supported: { dynamicIsland: island },
+    };
   }
 
   private async readDynamicIsland(): Promise<DynamicIslandState | undefined> {
@@ -172,7 +223,6 @@ export class IosSimulatorScreenControls {
             DYNAMIC_ISLAND_DEFAULTS_DOMAIN,
             DYNAMIC_ISLAND_SUPPRESSED_KEY,
           ];
-    hiddenDynamicIslands.set(this.udid, state === "hidden");
     try {
       await this.simctl.executeCommandArgs(args);
       return [];

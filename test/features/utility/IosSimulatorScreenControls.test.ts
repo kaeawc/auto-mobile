@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DYNAMIC_ISLAND_UNSUPPORTED_ERROR,
   IosSimulatorScreenControls,
   hasScreenControlField,
 } from "../../../src/features/utility/IosSimulatorScreenControls";
@@ -17,6 +18,8 @@ class FakeSpringBoard implements Pick<SimCtl, "executeCommandArgs"> {
   blanked = false;
   readonly calls: string[][] = [];
   failWrites = false;
+  /** A write that exits 0 but SpringBoard never stores. */
+  dropWrites = false;
 
   executeCommandArgs: SimCtl["executeCommandArgs"] = async (args) => {
     this.calls.push(args);
@@ -39,7 +42,7 @@ class FakeSpringBoard implements Pick<SimCtl, "executeCommandArgs"> {
       throw new Error("CoreSimulator service unavailable");
     }
     if (tool === "defaults" && verb === "write") {
-      this.suppressed = args.at(-1) === "YES";
+      this.suppressed = this.dropWrites ? this.suppressed : args.at(-1) === "YES";
       return createExecResult("", "");
     }
     if (tool === "defaults" && verb === "delete") {
@@ -95,8 +98,10 @@ function controls(
   springBoard: FakeSpringBoard,
   backlight: SimulatorBacklight,
   timer = autoTimer(),
+  island = true,
 ) {
-  return new IosSimulatorScreenControls(UDID, springBoard, { backlight, timer });
+  const islandSupport = { supportsDynamicIsland: async () => island };
+  return new IosSimulatorScreenControls(UDID, springBoard, { backlight, timer, islandSupport });
 }
 
 function autoTimer(): FakeTimer {
@@ -126,6 +131,7 @@ describe("IosSimulatorScreenControls (#19018)", () => {
       previous: { dynamicIsland: "visible", backlight: true },
       applied: { dynamicIsland: "hidden", backlight: true },
       errors: [],
+      supported: { dynamicIsland: true },
     });
     expect(shown.applied.dynamicIsland).toBe("visible");
     // Only a hidden island is re-hidden after a simctl screenshot.
@@ -223,6 +229,7 @@ describe("IosSimulatorScreenControls (#19018)", () => {
       previous: { dynamicIsland: "hidden", backlight: false },
       applied: { dynamicIsland: "visible", backlight: true },
       errors: [],
+      supported: { dynamicIsland: true },
     });
     expect(backlight.calls).toEqual([true]);
   });
@@ -236,6 +243,73 @@ describe("IosSimulatorScreenControls (#19018)", () => {
     expect(result.errors).toEqual([]);
     expect(springBoard.writes()).toEqual([]);
     expect(backlight.calls).toEqual([]);
+  });
+
+  test("a failed island write leaves the island out of the screenshot re-hide set", async () => {
+    hiddenDynamicIslands.set(UDID, false);
+    const springBoard = new FakeSpringBoard();
+    springBoard.failWrites = true;
+
+    await controls(springBoard, new FakeBacklight(springBoard)).set({ dynamicIsland: "hidden" });
+
+    expect(hiddenDynamicIslands.has(UDID)).toBe(false);
+  });
+
+  test("an island write that does not read back hidden is not marked hidden", async () => {
+    hiddenDynamicIslands.set(UDID, false);
+    const springBoard = new FakeSpringBoard();
+    springBoard.dropWrites = true;
+
+    const result = await controls(springBoard, new FakeBacklight(springBoard)).set({
+      dynamicIsland: "hidden",
+    });
+
+    expect(result.errors).toEqual(["Dynamic Island remained visible after requesting hidden"]);
+    expect(hiddenDynamicIslands.has(UDID)).toBe(false);
+  });
+
+  test("a model without a Dynamic Island refuses the request and writes nothing", async () => {
+    hiddenDynamicIslands.set(UDID, false);
+    const springBoard = new FakeSpringBoard();
+    const subject = controls(springBoard, new FakeBacklight(springBoard), autoTimer(), false);
+
+    const result = await subject.set({ dynamicIsland: "hidden" });
+
+    expect(result.supported).toEqual({ dynamicIsland: false });
+    expect(result.errors).toEqual([DYNAMIC_ISLAND_UNSUPPORTED_ERROR]);
+    expect(springBoard.calls).toEqual([]);
+    expect(hiddenDynamicIslands.has(UDID)).toBe(false);
+  });
+
+  test("a model without a Dynamic Island reads and resets only the backlight", async () => {
+    const springBoard = new FakeSpringBoard();
+    springBoard.suppressed = true;
+    springBoard.blanked = true;
+    const backlight = new FakeBacklight(springBoard);
+    const subject = controls(springBoard, backlight, autoTimer(), false);
+
+    expect(await subject.read()).toEqual({ backlight: false });
+    const result = await subject.set({}, true);
+
+    expect(result.previous).toEqual({ backlight: false });
+    expect(result.applied).toEqual({ backlight: true });
+    expect(result.supported).toEqual({ dynamicIsland: false });
+    expect(springBoard.writes()).toEqual([]);
+  });
+
+  test("an unreadable capability counts as supported", async () => {
+    const springBoard = new FakeSpringBoard();
+    const subject = new IosSimulatorScreenControls(UDID, springBoard, {
+      backlight: new FakeBacklight(springBoard),
+      timer: autoTimer(),
+      islandSupport: {
+        supportsDynamicIsland: async () => {
+          throw new Error("osascript timed out");
+        },
+      },
+    });
+
+    expect(await subject.supportsDynamicIsland()).toBe(true);
   });
 
   test("hasScreenControlField names only the two fields", () => {

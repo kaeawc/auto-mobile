@@ -16,15 +16,21 @@ struct PrototypeHttpRequest: Equatable, Sendable {
     /// The client stops reading, and fails with `too_large`, once a 2xx body crosses this. A non-2xx
     /// body is never read, so the cap does not apply to it.
     let maxResponseBytes: Int
+    /// Keeps image egress restrictions through pinned transport redirects.
+    let isRemoteImage: Bool
 
     /// The call a job describes. A string body is sent as is with `Content-Type: text/plain;
     /// charset=utf-8`; any other JSON value is sent as JSON with `Content-Type: application/json`.
     /// An author-set content type (any letter case) wins in both cases. GET and HEAD send no body.
-    init(job: PrototypeRequestJob, maxResponseBytes: Int = PrototypeLimits.maxResponseBytes) {
+    init(
+        job: PrototypeRequestJob, maxResponseBytes: Int = PrototypeLimits.maxResponseBytes,
+        isRemoteImage: Bool = false
+    ) {
         method = job.method
         url = job.url
         timeoutMs = job.effectiveTimeoutMs
         self.maxResponseBytes = maxResponseBytes
+        self.isRemoteImage = isRemoteImage
         var headers = job.headers
         var body: Data?
         if let value = job.body, job.method.allowsBody {

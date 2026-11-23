@@ -92,8 +92,10 @@ extension ElementLocator {
         let appSize = GestureSize(width: Double(appFrame.width), height: Double(appFrame.height))
         let screenSize = GestureSize(width: Double(screenFrame.width), height: Double(screenFrame.height))
         guard appSize.isValid, appFrame.origin.x.isFinite, appFrame.origin.y.isFinite else { return nil }
+        // A screen-sized snapshot is already in screen space; adding its origin would offset
+        // every node a second time.
         guard hasMultiPanelMismatch(app: appSize, screen: screenSize) else {
-            return WindowPlacement(origin: appFrame.origin, scale: 1)
+            return WindowPlacement(origin: .zero, scale: 1)
         }
         guard let window = windowFrame(), !hasZeroArea(window) else { return nil }
         let tolerance: CGFloat = 1
@@ -112,13 +114,42 @@ extension ElementLocator {
         )
     }
 
+    /// `backgroundWindowPlacement`, recording `backgroundWindowUnplacedReason` when the window
+    /// cannot be placed, so observe says a window was left out instead of dropping it silently.
+    nonisolated static func backgroundWindowPlacement(
+        appFrame: CGRect,
+        screenFrame: CGRect,
+        truncationReasons: inout Set<String>,
+        windowFrame: () -> CGRect?
+    )
+        -> WindowPlacement?
+    {
+        let placement = backgroundWindowPlacement(
+            appFrame: appFrame,
+            screenFrame: screenFrame,
+            windowFrame: windowFrame
+        )
+        if placement == nil { truncationReasons.insert(backgroundWindowUnplacedReason) }
+        return placement
+    }
+
+    /// Truncation reason for a visible background window left out because it could not be placed.
+    nonisolated static let backgroundWindowUnplacedReason = "background_window_unplaced"
+
     /// Smallest scale accepted for a background window; anything smaller is not the focus shrink.
     nonisolated static let minBackgroundWindowScale: CGFloat = 0.5
 
-    /// Move a background window's window-relative tree onto the screen.
+    /// Move a background window's window-relative tree onto the screen. A keyboard, and a
+    /// keyboard-hosting window, are already in screen space and keep their bounds, as in
+    /// `translatedToScreen`.
     nonisolated static func placedOnScreen(_ element: UIElementInfo, by placement: WindowPlacement) -> UIElementInfo {
         guard !placement.isIdentity else { return element }
-        return mappingBounds(element, rootBounds: nil) { placement.screenBounds($0) }
+        let appBounds = element.bounds
+        return mappingBounds(
+            element,
+            rootBounds: nil,
+            skipSubtree: { isScreenSpaceSubtree($0, appBounds: appBounds) }
+        ) { placement.screenBounds($0) }
     }
 
     /// Whether a window is on screen and not wholly behind the focused window, which is in front.
@@ -302,6 +333,7 @@ extension ElementLocator {
                 guard let placement = Self.backgroundWindowPlacement(
                     appFrame: snapshot.frame,
                     screenFrame: screenFrame,
+                    truncationReasons: &truncationReasons,
                     windowFrame: {
                         catchingObjCExceptionNonThrowing({ app.windows.firstMatch.frame }, fallback: nil)
                     }
@@ -330,7 +362,9 @@ extension ElementLocator {
         private static let backgroundWindowSweepTtlNanos: UInt64 = 10_000_000_000
 
         /// After a tap, track the background app whose observed window the tap landed in, since
-        /// iPadOS focused it; both apps stay `.runningForeground`, so state cannot tell.
+        /// iPadOS focused it; both apps stay `.runningForeground`, so state cannot tell. That tap
+        /// only focuses the window and does not reach the control under it (#19075); the caller
+        /// taps again rather than this runner retrying, which could activate a control twice.
         func noteTap(x: Double, y: Double) {
             guard let bundleId = layout.takeTappedBackgroundOwner(x: x, y: y) else { return }
             switchForegroundApp(bundleId: bundleId)

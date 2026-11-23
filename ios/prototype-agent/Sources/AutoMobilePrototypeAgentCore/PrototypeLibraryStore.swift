@@ -22,6 +22,7 @@ final class PrototypeLibraryStore {
     private let clock: any PrototypeClock
     private let libraryId: () -> String
     private let blocklist: (any PrototypeContentBlocklist)?
+    private let supportedCapabilities: Set<String>
     private let secureStorage: (any PrototypeSecureValueStore)?
 
     init(
@@ -30,6 +31,7 @@ final class PrototypeLibraryStore {
         clock: any PrototypeClock = SystemPrototypeClock(),
         libraryId: @escaping () -> String = { UUID().uuidString.lowercased() },
         blocklist: (any PrototypeContentBlocklist)? = nil,
+        supportedCapabilities: Set<String> = Set(AutoMobilePrototypeCapabilities.supported),
         secureStorage: (any PrototypeSecureValueStore)? = nil
     )
         throws
@@ -40,6 +42,7 @@ final class PrototypeLibraryStore {
         self.clock = clock
         self.libraryId = libraryId
         self.blocklist = blocklist
+        self.supportedCapabilities = supportedCapabilities
         self.secureStorage = secureStorage
         guard !self.storageRoot.path.hasPrefix(self.root.path + "/"),
               !self.root.path.hasPrefix(self.storageRoot.path + "/"), self.storageRoot != self.root
@@ -319,7 +322,7 @@ final class PrototypeLibraryStore {
     }
 
     func validate(
-        _ bytes: Data, supportedCapabilities: Set<String> = Set(AutoMobilePrototypeCapabilities.supported)
+        _ bytes: Data, supportedCapabilities: Set<String>? = nil
     )
         throws
     {
@@ -327,7 +330,7 @@ final class PrototypeLibraryStore {
             try PrototypeSpecStrictValidator.validate(data: bytes, library: true)
             let (value, _) = try PrototypeContractValidator.inspect(data: PrototypeStrictJSON.prepare(bytes))
             let missing = PrototypeStrictCapabilities.required(value.objectFields ?? [:])
-                .subtracting(supportedCapabilities).sorted()
+                .subtracting(supportedCapabilities ?? self.supportedCapabilities).sorted()
             if !missing.isEmpty { throw PrototypeLibraryImportFailure.needsNewerViewer(missing: missing) }
         } catch let failure as PrototypeLibraryImportFailure { throw failure }
         catch let failure as PrototypeLibraryFailure { throw failure }

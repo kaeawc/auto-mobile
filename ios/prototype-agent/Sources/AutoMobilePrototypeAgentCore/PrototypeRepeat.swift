@@ -365,6 +365,7 @@ enum PrototypeRepeat {
         case .string("image")?:
             string("asset", &fields)
             string("url", &fields)
+        case .string("webView")?: string("url", &fields)
         case .string("listItem")?:
             string("headline", &fields)
             string("supporting", &fields)
@@ -530,7 +531,15 @@ extension PrototypeRepeat {
         {
             throw PrototypeLimits.violation("\(path).repeat", "Nested repeat is not supported")
         }
-        for name in ["onTap", "onLongPress", "onDoubleTap", "onEndReached", "onAppear"] {
+        for name in [
+            "onTap",
+            "onLongPress",
+            "onDoubleTap",
+            "onEndReached",
+            "onAppear",
+            "onNavigate",
+            "onBlockedNavigation",
+        ] {
             try validateEmitActions(fields[name], path: "\(path).\(name)", scope: scope)
         }
         if let linkify = fields["linkify"]?.objectFields {

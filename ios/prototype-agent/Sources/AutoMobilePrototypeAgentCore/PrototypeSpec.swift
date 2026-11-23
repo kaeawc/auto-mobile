@@ -1004,6 +1004,10 @@ final class PrototypeNode: Decodable {
     let navigationStateKey: String?
     let titleKey: String?
     let canGoBackKey: String?
+    let webViewURL: String?
+    let webViewOrigins: [String]
+    let webViewOnNavigate: [JSONValue]
+    let webViewOnBlockedNavigation: [JSONValue]
     /// Internal identity stamped after authored-spec validation.
     let repeatKey: String?
     let repeatIdentity: String?
@@ -1095,7 +1099,7 @@ final class PrototypeNode: Decodable {
         case refresh, header, footer, spacing, contentPadding, onEndReached, endThreshold, maxItems
         case listRepeat = "repeat"
         case reverse, stickToEnd, atEndKey, onStartReached
-        case navigationStateKey, titleKey, canGoBackKey
+        case navigationStateKey, titleKey, canGoBackKey, allowedOrigins, onNavigate, onBlockedNavigation
         case repeatKey = "_repeatKey"
         case repeatIdentity = "_repeatIdentity"
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
@@ -1179,6 +1183,12 @@ final class PrototypeNode: Decodable {
         navigationStateKey = try container.decodeIfPresent(String.self, forKey: .navigationStateKey)
         titleKey = try container.decodeIfPresent(String.self, forKey: .titleKey)
         canGoBackKey = try container.decodeIfPresent(String.self, forKey: .canGoBackKey)
+        webViewURL = type == "webView" ? try container.decodeIfPresent(String.self, forKey: .url) : nil
+        webViewOrigins = type == "webView" ? try container.decode([String].self, forKey: .allowedOrigins) : []
+        webViewOnNavigate = type == "webView"
+            ? try container.decodeIfPresent([JSONValue].self, forKey: .onNavigate) ?? [] : []
+        webViewOnBlockedNavigation = type == "webView"
+            ? try container.decodeIfPresent([JSONValue].self, forKey: .onBlockedNavigation) ?? [] : []
         onStartReached = try container.decodeIfPresent([PrototypeAction].self, forKey: .onStartReached)
         repeatKey = try container.decodeIfPresent(String.self, forKey: .repeatKey)
         repeatIdentity = try container.decodeIfPresent(String.self, forKey: .repeatIdentity)

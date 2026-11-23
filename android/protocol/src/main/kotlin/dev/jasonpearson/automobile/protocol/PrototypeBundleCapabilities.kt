@@ -151,8 +151,7 @@ internal object PrototypeBundleCapabilities {
   }
 
   private fun repeatCapabilities(repeat: JsonObject?, caps: MutableSet<String>) {
-    if ((repeat?.get("items") as? JsonObject)?.containsKey("field") == true)
-      caps.add("prototype_nested_repeat_v1")
+    if (PrototypeNestedRepeat.requiresCapability(repeat)) caps.add("prototype_nested_repeat_v1")
     if (repeat?.containsKey("derive") == true) caps.add("prototype_format_v1")
     if ((repeat?.get("items") as? JsonObject)?.containsKey("derived") == true)
       caps.add("prototype_derive_v1")

@@ -29,6 +29,13 @@ export const CTRL_PROXY_REQUEST_FIELDS: {
     event: "required",
     data: "required",
   },
+  queue_prototype_call_outcome: {
+    type: "required",
+    requestId: "required",
+    id: "required",
+    call: "required",
+    outcome: "required",
+  },
   advance_prototype_clock: {
     type: "required",
     requestId: "required",

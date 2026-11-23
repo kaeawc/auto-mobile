@@ -177,6 +177,49 @@ describe("prototype simulate and timer reports", () => {
     expect(agent.requests).toEqual([]);
   });
 
+  test("queues the same host request over Android and iOS only when capable", async () => {
+    const request = { id: "panel", call: "test.echo", outcome: { result: null } };
+    const input = { action: "simulate", ...request };
+    for (const device of [android, ios]) {
+      expect(await call(device, input)).toMatchObject({
+        success: false,
+        error: expect.stringContaining("prototype_platform_outcomes_v1"),
+      });
+    }
+    expect(proxy.queueCallOutcomeRequests).toEqual([]);
+    expect(agent.requests).toEqual([]);
+
+    proxy.setSupportedCommands(["prototype_platform_outcomes_v1"]);
+    agent.handshake.capabilities.push(
+      "prototype_platform_outcomes_v1",
+      "queue_prototype_call_outcome",
+    );
+    for (const device of [android, ios]) {
+      expect(await call(device, input)).toMatchObject({ success: true });
+    }
+    expect(proxy.queueCallOutcomeRequests).toEqual([request]);
+    expect(agent.requests).toContainEqual({ type: "queue_prototype_call_outcome", body: request });
+  });
+
+  test("call and outcome are paired and exclude other simulate fields", () => {
+    const base = { action: "simulate", id: "panel" };
+    const call = "test.echo";
+    const outcome = { error: { code: "unavailable" } };
+    expect(prototypeSchema.safeParse({ ...base, call, outcome }).success).toBe(true);
+    for (const fields of [
+      { call },
+      { outcome },
+      { call, outcome, data: {} },
+      { call, outcome, transport: "auto" },
+      { call, outcome, advanceTimeMs: 10 },
+      { call, outcome, event: "test.tick", data: {} },
+      { call, outcome, action: "status" },
+      { call, outcome: { result: null, error: outcome.error } },
+    ]) {
+      expect(prototypeSchema.safeParse({ ...base, ...fields }).success).toBe(false);
+    }
+  });
+
   test("simulate needs id and bounded integer advanceTimeMs", () => {
     for (const input of [
       { action: "simulate", id: "proto" },

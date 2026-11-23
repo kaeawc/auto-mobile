@@ -55,7 +55,12 @@ export interface PrototypeTarget {
   android?: AndroidPrototypeTransport;
   ios?: Pick<
     IosPrototypeTransport,
-    "supportsCapability" | "status" | "clearStorage" | "advanceClock" | "simulatePlatformEvent"
+    | "supportsCapability"
+    | "status"
+    | "clearStorage"
+    | "advanceClock"
+    | "simulatePlatformEvent"
+    | "queueCallOutcome"
   >;
 }
 export interface PrototypeToolDependencies {

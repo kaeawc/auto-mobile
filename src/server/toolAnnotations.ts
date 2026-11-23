@@ -117,6 +117,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   seedContent: entry("Seed System Content", destructiveDevice),
   sendSms: entry("Simulate SMS", controlDevice),
   setActiveDevice: entry("Set Active Device", setHost),
+  shareSheet: entry("Control Share Sheet", controlDevice),
   shake: entry("Shake", controlDevice),
   swipeAt: entry("Swipe at Coordinates", destructiveDevice),
   swipeOn: entry("Swipe Screen Element", destructiveDevice),

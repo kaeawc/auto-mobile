@@ -60,12 +60,12 @@ Android and physical iOS devices refuse both fields.
   View, do it by hand.
 - On an iPad with more than one app window on screen, the first tap into a window
   that is not focused only brings that window to the front. The control under it
-  does not react, but `tapOn` still reports success. Call `tapOn` again to
-  activate the control. Taps in the focused window work as usual.
-- `tapOn` taps a control in a window behind the focused one at a point at least
-  24 points clear of the focused window. When the control has no such point, it
-  fails and names both windows. Move the focused window first, or focus the other
-  window by tapping a visible part of it with `tapAt`.
+  does not react, yet `tapOn` still reports success. Call `tapOn` again to activate
+  the control. Taps in the focused window work as usual.
+- For a control in a window behind the focused one, `tapOn` taps at a point at
+  least 24 points clear of the focused window. When the control has no such point,
+  `tapOn` fails and names both windows. Move the focused window, or tap a visible
+  part of the other window with `tapAt` to focus it first.
 
 ## Running on a Mac host or CI
 

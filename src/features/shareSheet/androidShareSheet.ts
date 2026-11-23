@@ -20,6 +20,12 @@ interface AndroidShareRow extends ShareRow {
   primaryLabel?: string;
   /** In the intentresolver suggested-apps row, which repeats targets from the full app list. */
   suggested?: boolean;
+  /**
+   * The accessibility collection index of the list item holding the row (`row:column`), from the
+   * row itself or its nearest indexed ancestor. The index belongs to the adapter position, so it
+   * survives a scroll: it identifies a row across pages without measuring other rows (#19099).
+   */
+  listPosition?: string;
 }
 
 interface AndroidShareSheet {
@@ -41,10 +47,24 @@ type Properties = {
   clickable?: boolean | string;
   enabled?: boolean | string;
   text?: string;
+  "collection-row-index"?: number | string;
+  "collection-column-index"?: number | string;
 };
 
 function isHidden(value: Properties["visible-to-user"]): boolean {
   return value === false || value === "false";
+}
+
+function collectionIndex(value: number | string | undefined): number | undefined {
+  const index = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  return typeof index === "number" && Number.isInteger(index) && index >= 0 ? index : undefined;
+}
+
+function collectionPosition(properties: Properties): string | undefined {
+  const row = collectionIndex(properties["collection-row-index"]);
+  return row === undefined
+    ? undefined
+    : `${row}:${collectionIndex(properties["collection-column-index"]) ?? 0}`;
 }
 
 function nodeLabel(properties: Properties): string | undefined {
@@ -118,6 +138,35 @@ function insideContainer(containerId: string) {
   };
 }
 
+/**
+ * Follows a depth-first traversal inside the list and returns the collection position of the
+ * current node, or of its nearest indexed ancestor.
+ */
+function collectionPositions() {
+  const positions: Array<string | undefined> = [];
+  return (properties: Properties, depth: number, inList: boolean): string | undefined => {
+    positions.length = depth;
+    positions[depth] = inList
+      ? (collectionPosition(properties) ?? positions[depth - 1])
+      : undefined;
+    return positions[depth];
+  };
+}
+
+/** Actions are neither suggested apps nor list items, so they carry neither trait. */
+function withListTraits(
+  row: AndroidShareRow,
+  { isAction, suggested, position }: { isAction: boolean; suggested: boolean; position?: string },
+): AndroidShareRow {
+  return isAction
+    ? row
+    : {
+        ...row,
+        ...(suggested ? { suggested: true } : {}),
+        ...(position === undefined ? {} : { listPosition: position }),
+      };
+}
+
 function extractRows(
   root: ViewHierarchyNode,
   list: ViewHierarchyNode,
@@ -128,6 +177,7 @@ function extractRows(
   let listDepth = Infinity;
   const inActionRow = insideContainer("android:id/chooser_action_row");
   const inSuggestedApps = insideContainer(SUGGESTED_APPS_ID);
+  const positionAt = collectionPositions();
   let skipDepth = Infinity;
   parser.traverseNode(root, (node: ViewHierarchyNode, depth: number) => {
     if (depth > skipDepth) {
@@ -142,19 +192,21 @@ function extractRows(
       skipDepth = depth;
       return;
     }
+    const inList = listDepth !== Infinity;
+    const position = positionAt(properties, depth, inList);
     const id = searchableNativeId(properties);
     const actionRow = inActionRow(id, depth);
     const suggested = inSuggestedApps(id, depth);
     if (!isTruthy(properties.clickable)) {
       return;
     }
-    const scope = { host, inList: listDepth !== Infinity, depthInList: depth - listDepth };
+    const scope = { host, inList, depthInList: depth - listDepth };
     const isAction = actionRow || ACTION_IDS.has(id ?? "");
     const row = isAction
       ? extractActionRow(node, properties, parser)
       : extractTargetRow(node, properties, scope, parser);
     if (row) {
-      rows.push(suggested && !isAction ? { ...row, suggested: true } : row);
+      rows.push(withListTraits(row, { isAction, suggested, position }));
       skipDepth = depth;
     }
   });

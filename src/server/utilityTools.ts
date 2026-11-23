@@ -851,6 +851,22 @@ interface RegisterUtilityToolsOptions extends SetActiveDeviceSeams {
   iosNetworkShaper?: IosSimulatorNetworkShaper;
 }
 
+/** The device-state fields setDeviceState applies, taken from the tool arguments. */
+function toSetDeviceStateInput(args: SetDeviceStateArgs): SetDeviceStateInput {
+  return {
+    doNotDisturb: args.doNotDisturb,
+    biometrics: args.biometrics,
+    connectivity: args.connectivity,
+    networkCondition: args.networkCondition,
+    location: args.location,
+    clock: args.clock,
+    cameraPoster: args.cameraPoster,
+    screenLock: args.screenLock,
+    power: args.power,
+    keyboard: args.keyboard,
+  };
+}
+
 export function registerUtilityTools(options: RegisterUtilityToolsOptions = {}) {
   const setActiveDeviceHandler = createSetActiveDeviceHandler({
     displayInventory: options.displayInventory,
@@ -917,18 +933,7 @@ export function registerUtilityTools(options: RegisterUtilityToolsOptions = {}) 
         : deviceState.setState(input);
 
     const capture = await captureBiometricEnrollment(device, args, deviceState);
-    const stateInput: SetDeviceStateInput = {
-      doNotDisturb: args.doNotDisturb,
-      biometrics: args.biometrics,
-      connectivity: args.connectivity,
-      networkCondition: args.networkCondition,
-      location: args.location,
-      clock: args.clock,
-      cameraPoster: args.cameraPoster,
-      screenLock: args.screenLock,
-      power: args.power,
-      keyboard: args.keyboard,
-    };
+    const stateInput = toSetDeviceStateInput(args);
     const applyLocationTracked = (input: SetDeviceStateInput): Promise<DeviceStateResult> =>
       input.location && !capture.sessionManager
         ? runSessionLocationMutation({

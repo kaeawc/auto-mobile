@@ -25,7 +25,9 @@ final class PrototypeLibraryImportTests: XCTestCase {
     private func store(
         _ files: PrototypeLibraryFakeFileSystem,
         supportedCapabilities: Set<String> = Set(AutoMobilePrototypeCapabilities.supported)
-    ) throws -> PrototypeLibraryStore {
+    )
+        throws -> PrototypeLibraryStore
+    {
         var sequence = 0
         return try PrototypeLibraryStore(
             root: root, storageRoot: storage, files: files, clock: PrototypeLibraryFakeClock(), libraryId: {

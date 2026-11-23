@@ -58,6 +58,16 @@ public final class PrototypeHapticsModule: PrototypePlatformModule {
     }
 }
 
+extension PrototypeHapticsModule: PrototypePlatformReportModeSource {
+    var platformReportMode: PrototypePlatformReport.Mode? {
+        (player as? any PrototypePlatformReportModeSource)?.platformReportMode
+    }
+
+    var platformReportReason: PrototypePlatformReport.Reason? {
+        (player as? any PrototypePlatformReportModeSource)?.platformReportReason
+    }
+}
+
 /// `sound.play`.
 @MainActor
 public final class PrototypeSoundModule: PrototypePlatformModule {

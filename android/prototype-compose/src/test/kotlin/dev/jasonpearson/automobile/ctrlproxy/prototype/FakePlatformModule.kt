@@ -1,12 +1,15 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import dev.jasonpearson.automobile.protocol.PrototypePlatformReport
 import dev.jasonpearson.automobile.prototype.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.JsonObject
 
-class FakePlatformModule(override val name: String = "test") : PrototypePlatformModule {
+class FakePlatformModule(override val name: String = "test") :
+  PrototypePlatformModule, PrototypePlatformModeSource {
   override val capability = "prototype_platform_${name}_v1"
+  override val platformMode = PrototypePlatformReport.Mode.FAKE
   var available: PlatformAvailability = PlatformAvailability.Ready
 
   override fun availability() = available

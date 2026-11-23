@@ -1,0 +1,25 @@
+[
+  {
+    "runtime": "disposableApp",
+    "appState": "active",
+    "modules": {
+      "notifications": { "availability": "ready", "mode": "real", "inFlight": 0 },
+      "cast": { "availability": "unavailable", "reason": "play_services_missing" },
+      "camera": { "availability": "unavailable", "reason": "permission_denied" }
+    },
+    "permissions": { "camera": "blocked" }
+  },
+  {
+    "runtime": "iosAgent",
+    "modules": {
+      "haptics": { "availability": "degraded", "mode": "simulated", "reason": "simulator" },
+      "biometric": { "availability": "unavailable", "reason": "hardware_unavailable" }
+    }
+  },
+  {
+    "runtime": "embedded",
+    "modules": {
+      "cast": { "availability": "degraded", "mode": "fake", "reason": "fake_mode" }
+    }
+  }
+]

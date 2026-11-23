@@ -1,3 +1,4 @@
+import type { PrototypeRuntimeKind } from "./prototypePlatformReport";
 import {
   PROTOTYPE_REMOTE_IMAGE_CAPABILITY,
   prototypeRemoteImageFields,
@@ -259,7 +260,11 @@ import {
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
   readonly fields: (spec: unknown, platform?: "android" | "ios") => string[];
-  readonly unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") => string;
+  readonly unsupportedMessage: (
+    fields: readonly string[],
+    platform: "android" | "ios",
+    runtime?: PrototypeRuntimeKind,
+  ) => string;
 }
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */

@@ -149,17 +149,22 @@ extension PrototypeNode {
         return true
     }
 
-    /// The `children` a container lays out, each with its position among all of them (a stable
-    /// identity across show and hide); those that do not draw in place are left out.
+    /// The visible children keep their composed repeat identity, or authored position for ordinary nodes.
     func drawnChildren(
         holds: (Condition) -> Bool, stacks: [String: PrototypeStackSnapshot] = [:]
     )
-        -> [(offset: Int, node: PrototypeNode)]
+        -> [(offset: Int, node: PrototypeNode, identity: String)]
     {
         let nodes = type == "stack" ? currentChildEntries(path: "root", pages: [:], stacks: stacks)
             .map(\.node) : children ?? []
         return Array(nodes.enumerated()).filter { $0.element.drawsInPlace(holds: holds) }
-            .map { (offset: $0.offset, node: $0.element) }
+            .map {
+                (
+                    offset: $0.offset,
+                    node: $0.element,
+                    identity: $0.element.repeatIdentity.map { "repeat:\($0)" } ?? "index:\($0.offset)"
+                )
+            }
     }
 
     /// What decides a container's size from its direct children: whether each one is shown and the

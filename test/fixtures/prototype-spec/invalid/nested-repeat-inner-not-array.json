@@ -1,0 +1,63 @@
+{
+  "spec": {
+    "id": "nested",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/orders"
+        },
+        "as": "order"
+      },
+      "children": [
+        {
+          "type": "column",
+          "repeat": {
+            "items": {
+              "field": "lines"
+            },
+            "as": "line"
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "{outerIndex}/{index} {order.id} {order.customer}: {line.sku} x{line.qty}"
+            }
+          ]
+        }
+      ]
+    },
+    "data": {
+      "orders": [
+        {
+          "id": "A",
+          "customer": "Ada",
+          "lines": "no"
+        },
+        {
+          "id": "B",
+          "customer": "Bo",
+          "lines": []
+        },
+        {
+          "id": "C",
+          "customer": "Cy",
+          "lines": [
+            {
+              "sku": "PAD",
+              "qty": 3,
+              "price": 4
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].repeat.items.field",
+  "expectedMessage": "Repeat field does not resolve to an array"
+}

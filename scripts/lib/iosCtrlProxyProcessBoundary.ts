@@ -23,6 +23,10 @@ export const EXCEPTIONS = new Map<string, string>([
     "Read-only ps snapshot for simulator fleet cost (#6696) and Android boot admission; never touches the iOS runner.",
   ],
   [
+    "src/utils/ios-cmdline-tools/launchdSimPid.ts",
+    "Read-only pgrep for a simulator's launchd_sim PID, which audio capture taps (#19046); never touches the iOS runner.",
+  ],
+  [
     "src/features/observe/android/CtrlProxyForwardClientProbe.ts",
     "Reads host TCP connections to an Android ADB forward; never touches the iOS runner.",
   ],

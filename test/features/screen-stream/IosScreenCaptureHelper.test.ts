@@ -115,6 +115,26 @@ describe("IosScreenCaptureHelper", () => {
     expect(spawnArgs.args).toEqual(["--simulator-window", "98765"]);
   });
 
+  test("passes --simulator-udid, fps and encode flags for framebuffer capture (#19015)", () => {
+    const { spawnArgs, helper } = withFakeSpawner({
+      kind: "simulatorFramebuffer",
+      udid: "4DA8AF35-C59B-43D3-A8FE-5640A7B0B8C1",
+      fps: 30,
+      encode: { codec: "h264", bitrate: { kind: "bitsPerPixel", bpp: 0.1 } },
+    });
+    helper.start();
+    expect(spawnArgs.args).toEqual([
+      "--simulator-udid",
+      "4DA8AF35-C59B-43D3-A8FE-5640A7B0B8C1",
+      "--simulator-fps",
+      "30",
+      "--encode",
+      "h264",
+      "--bits-per-pixel",
+      "0.1",
+    ]);
+  });
+
   test("accepts idle evidence only for its exact Simulator window", async () => {
     const { fake, helper } = withFakeSpawner({ kind: "simulator", windowID: 42 });
     const idle: number[] = [];

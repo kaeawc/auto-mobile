@@ -66,6 +66,8 @@ export class IosH264Source implements H264CaptureSource {
   private readonly resolver: IosCaptureResolver;
   private nativeFrameMetrics: IosH264FrameMetrics["native"] = null;
   private captureKind: CaptureTarget["kind"] | null = null;
+  /** Set once framebuffer capture fails to start; later attempts use the window path. */
+  private framebufferCaptureUnavailable = false;
   private lastForcedKeyFrameMs = Number.NEGATIVE_INFINITY;
   private readonly startup: IosCaptureStartup;
   getFrameMetrics(): IosH264FrameMetrics {
@@ -217,6 +219,9 @@ export class IosH264Source implements H264CaptureSource {
     if (generation !== this.helperGeneration) {
       return;
     }
+    if (await this.tryFramebufferCapture(helperPath, generation)) {
+      return;
+    }
     const target = await this.resolver.resolveCaptureTarget(helperPath);
     this.captureKind = target.kind;
     if (!this.isActive() || generation !== this.helperGeneration) {
@@ -226,6 +231,41 @@ export class IosH264Source implements H264CaptureSource {
       ...target,
       encode: resolveEncodeSettings(this.options, target.kind),
     });
+  }
+
+  /**
+   * Start headless capture from the Simulator's display framebuffer (#19015).
+   * Returns `true` when it is running (or the source stopped meanwhile), and
+   * `false` when the window path should run: not applicable, or the helper could
+   * not start it (an older helper, a missing CoreSimulator API). The failure is
+   * remembered so reconnects go straight to the window path.
+   */
+  private async tryFramebufferCapture(helperPath: string, generation: number): Promise<boolean> {
+    const target =
+      this.options.simulatorFramebufferCapture === true && !this.framebufferCaptureUnavailable
+        ? this.resolver.framebufferCaptureTarget()
+        : null;
+    if (target === null) {
+      return false;
+    }
+    this.captureKind = target.kind;
+    try {
+      await this.startCaptureAttempt(helperPath, {
+        ...target,
+        encode: resolveEncodeSettings(this.options, target.kind),
+      });
+      return true;
+    } catch (error) {
+      if (!this.isActive() || generation !== this.helperGeneration) {
+        return true;
+      }
+      this.framebufferCaptureUnavailable = true;
+      logger.warn(
+        `[IosH264Source] Simulator framebuffer capture did not start; using window capture: ${errorMessage(error)}`,
+      );
+      await this.stopCurrentHelper();
+      return false;
+    }
   }
 
   async stop(): Promise<void> {

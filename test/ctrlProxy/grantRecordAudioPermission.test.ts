@@ -55,7 +55,7 @@ describe("grantRecordAudioPermission", () => {
       adb.setCommandResponse("install ", createExecResult("Success", ""));
       await installer(adb, user).install("/fake/control-proxy.apk");
       expect(adb.getExecutedCommands()).toEqual([
-        'install "/fake/control-proxy.apk"',
+        'install -r "/fake/control-proxy.apk"',
         `shell pm grant${user === undefined ? "" : " --user 10"} ${CTRL_PROXY_PACKAGE} android.permission.RECORD_AUDIO`,
       ]);
     });

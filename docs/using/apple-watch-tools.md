@@ -5,10 +5,11 @@ with `platform: "watchos"`.
 
 ## `observe`
 
-`observe` returns a screenshot. With the automation runner connected, it also returns the target
-app's view hierarchy and on-screen system alerts, even when the app is not in the foreground. Those
-alerts include the notification permission prompt and the notification short look and long look
-with action buttons.
+`observe` returns a screenshot. With the runner connected, it also returns the app's view hierarchy
+and on-screen system alerts, such as notification looks, even with the app in the background.
+
+During a short look, `observe` and `tapOn` wait up to 2 seconds for the long look and its buttons.
+Tap a compact banner's title to open its long look.
 
 - If AutoMobile cannot read the hierarchy, the result carries `hierarchyUnavailable` and no
   hierarchy fields.
@@ -37,16 +38,17 @@ the watch screen fails with `tap is outside the watch screen`.
 
 Outside the Smart Stack, both results include `effect: {screenChanged, basis}`. AutoMobile checks
 the screen for about 1 second after the tap. `basis` is `viewHierarchy changed`,
-`viewHierarchy unchanged` or `insufficient observation data`. The tap is never retried for you. A
+`viewHierarchy unchanged`, `system alert dismissed` (the tap closed an alert) or
+`insufficient observation data`. AutoMobile never retries the tap. A
 changed screen does not prove the intended control responded, so `observe` when it matters.
 
-When a system or app alert, such as the notification permission prompt, covers the app, `tapOn`
-refuses a target outside the alert. The error names the alert title and its buttons. Tap one of
-those buttons first, for example `tapOn` with `text: "Allow"`, then retry the original tap.
+When an alert covers the app, `tapOn` refuses a target outside it. The error names the alert title
+and its buttons. Tap one, for example `text: "Allow"`, then retry.
 `tapAt` has no such guard: a point under an alert taps the alert.
 
-With the host app not in the foreground and no Smart Stack open, `tapAt` taps the watch face at the
-given point. Whether such a tap opens a complication is unverified, so `observe` afterwards. In that state `tapOn` still needs the host app in the foreground.
+With the host app in the background and no Smart Stack open, `tapAt` taps the watch face. Whether
+that opens a complication is unverified, so `observe` after. Outside a notification look or the
+Smart Stack, `tapOn` needs the host app foregrounded.
 
 ### Smart Stack widgets
 
@@ -55,18 +57,18 @@ When the Smart Stack is open and the host app is not in the foreground:
 - `tapOn` matches a widget's exact text or cell identifier on the watch face. Only cards wholly on
   screen match. AutoMobile refuses text that only an off-screen widget shows, with a hint to scroll
   the Smart Stack first.
-- `tapAt` taps widgets by point coordinates too.
+- `tapAt` taps widgets by point coordinates.
 - `observe` returns `hierarchyUnavailable` and no hierarchy fields.
 
 Tapping a widget opens its host app, where the normal tools work. A widget you just added
-shows its text about 2 seconds after the final Done tap; wait that long before you match it. See [Smart Stack](../how-it-works/plat/watchos/smart-stack.md) for how this works.
+shows its text about 2 seconds after the final Done tap, so wait before matching it. See [Smart Stack](../how-it-works/plat/watchos/smart-stack.md) for how this works.
 
 ## `swipeOn` and `pressButton`
 
 `swipeOn` swipes in a direction, including on the watch face after `pressButton` with `home`. With
 `lookFor`, it swipes until an exact `text` or `elementId` is on screen, up to `maxSwipes` (default
-10, maximum 100). Each `lookFor` step drags slowly by about one row, so reads overlap and
-skip no nearby targets. You cannot set coordinates or duration.
+10, maximum 100). Each `lookFor` step drags about one row, so reads overlap and miss nothing
+nearby. You cannot set coordinates or duration.
 
 `pressButton` supports `home` only.
 
@@ -93,16 +95,16 @@ on that control) may not register.
 ### How success is judged
 
 The focused control is the innermost focused element with an accessible value (for example SwiftUI
-`.accessibilityValue`), or the one valued element inside a focused view that does not scroll. When
-the app reports no focused element, as with SwiftUI `digitalCrownRotation`, it is the app's one
-valued control outside scrolling content.
+`.accessibilityValue`), or the one valued element in a focused, non-scrolling view. When the app
+reports no focused element, as with SwiftUI `digitalCrownRotation`, it is the app's one valued
+control outside scrolling content.
 
 - With a readable focused value before and after, that value must change for success.
-- Otherwise any hierarchy change counts as success. An unrelated update, such as a status label,
-  can satisfy it, so success does not confirm that the crown moved the control.
+- Otherwise any hierarchy change counts as success, even an unrelated one such as a status label,
+  so success does not confirm the crown moved the control.
 - Without a readable focused value, the tool first touches an interior point clear of elements to
-  wake crown routing. Content absent from the hierarchy, such as a canvas that handles taps, can
-  still receive that touch. To avoid it, tap the control that should respond first.
+  wake crown routing. Hidden content, such as a tap-handling canvas, can still receive that touch.
+  To avoid it, tap the control that should respond first.
 - If nothing changes, it may wake again and retry once. That needs a stable screen and an unchanged
   readable focused value. After an initial wake it never repeats the turn without a comparable value.
 - Without a stable hierarchy, it compares the last pre-rotation value with the post-rotation value,
@@ -111,9 +113,9 @@ valued control outside scrolling content.
 When a rotation changes nothing, the error says which case applies:
 
 - **The focused value stayed the same**: the error quotes it (`value stayed "10"`). The turn was too
-  small, or the control is at its limit. It is at its limit only when the value already sits at the
-  end the turn heads toward, such as `"10"` after a positive `delta` on a 0–10 control. Otherwise,
-  including `"0"` after a positive `delta`, retry with a larger `delta` in the same direction.
+  small, or the control is at its limit. That means the value already sits at the end the turn
+  heads toward, such as `"10"` after a positive `delta` on a 0–10 control. Otherwise, including
+  `"0"` after a positive `delta`, retry with a larger `delta` in the same direction.
 - **No focused control exposes a readable value**: no view may hold crown focus, or the scrolled
   content is at its limit. Tap the control first. For a `delta` between -1 and 1, the error also
   says the turn may be too small.
@@ -124,53 +126,53 @@ working turn can overshoot, and tap the control first.
 ## `sendKeys`
 
 `sendKeys` accepts non-empty text only and appends to the focused field. Focus a field with `tapOn`
-first, or pass a selector with an exact `elementId` or `text`. Selector `text` matches a field's
-label, value or placeholder, and prefers text fields over static text. Like `tapOn`, a selector
-refuses a field covered by an alert and names its buttons; tap one, then retry. A focused field opens the
-watch keyboard, and AutoMobile types through it. Input fails when no text field or keyboard is up.
+first, or pass a selector with an exact `elementId` or `text`. That `text` matches a field's label,
+value or placeholder, preferring text fields over static text. Like `tapOn`, a selector refuses a
+field covered by an alert and names its buttons; tap one, then retry. A focused field opens the
+watch keyboard, and AutoMobile types through it. Input fails with no text field or keyboard up.
 The watch refuses commands that clear, replace or press keys.
 
 ## `postNotification`
 
 `postNotification` sends a simulated push to the watch app named by `appId`. The simulator cannot
-pre-grant notification authorization, so the app must request permission. Find Allow with
-`observe` and tap it with `tapOn`, scrolling with `rotateCrown` or `swipeOn` first if needed. A "CtrlProxyWatch" permission prompt may appear first.
+pre-grant notification authorization, so the app must request it. Find Allow with `observe` and
+tap it with `tapOn`, scrolling with `rotateCrown` or `swipeOn` first if needed. A "CtrlProxyWatch"
+permission prompt may appear first.
 
 - If the watch dropped the push because the app's notifications are denied, `postNotification`
-  returns `success: false`. That happens after Don't Allow, or when Allow was never reached.
-- The watch does not ask a denied app again. Uninstall and reinstall it (`installApp` resets its
-  permissions), launch it, answer Allow, then post again.
+  returns `success: false`, after Don't Allow or when Allow was never reached.
+- The watch does not ask a denied app again. Uninstall and reinstall it (`installApp` resets
+  permissions), launch, answer Allow, then post again.
 - If the app is in the foreground and its notification delegate declines to present the alert,
-  the watch delivers the push without a banner. `postNotification` returns `success: true` with a
-  `warning` saying so (notifications are authorized, not denied). Background the app with
-  `pressButton` `home`, then post again if you need the banner.
+  the watch still delivers the push but shows no banner. In that case `postNotification` returns
+  `success: true` with a `warning` noting that notifications are authorized, not denied.
+  Background the app with `pressButton` `home`, then post again if you need the banner.
 - When no delivery verdict is available, success means the simulator accepted the push.
-- A banner disappears after a few seconds. Call `observe` right after the push to inspect its short
-  look; the long look exposes its action buttons.
+- A banner lasts a few seconds: `observe` right after the push. For a compact banner,
+  tap its title, then `observe` the long look ([`observe`](#observe)).
 
 ## App management
 
 - `installApp` takes a watch simulator `.app` bundle.
 - `uninstallApp` refuses `keepData: true`.
-- `launchApp` reports an app that is not installed without launching anything. It refuses
-  `prototype: true`. With `clearAppData`, it wipes the app's Documents, Library and tmp before
-  launch. It does not observe the launched app, so `verified` stays unset with
-  `verificationSkipped: "platform"`.
-- `terminateApp` succeeds with `wasRunning: false` when the app was not running.
+- `launchApp` reports a missing app without launching anything, and refuses `prototype: true`.
+  With `clearAppData`, it wipes the app's Documents, Library and tmp before launch. It does not
+  observe the launched app, so `verified` stays unset with `verificationSkipped: "platform"`.
+- `terminateApp` succeeds with `wasRunning: false` for a non-running app.
 - `crashApp` sends SIGABRT to the running watch app named by `appId`, as on an iOS simulator. It
-  checks the watch's unified log and the host crash reports for fresh crash evidence. The result has
-  `confirmed`, `evidence` and, when it finds the report, a `crashReport` summary. An app that is not
-  running fails with `wasRunning: false`, and AutoMobile signals nothing.
+  checks the watch's unified log and host crash reports for fresh evidence. The result has
+  `confirmed`, `evidence` and, when found, a `crashReport` summary. An app that is not running
+  fails with `wasRunning: false` and no further signal.
 
-To refresh a widget on demand, make the host app reload its widget timelines when it sees a launch
-argument you choose. Then call `terminateApp` and `launchApp` with that argument, for example
+To refresh a widget on demand, make the host app reload its widget timelines on a chosen launch
+argument. Then call `terminateApp` and `launchApp` with that argument, for example
 `launchArguments: ["-reload"]`. The widget shows the new content within about 2 seconds, with no
-tap in the host app.
+host app tap.
 
 ## `getLogs`
 
-`getLogs` reads the watch simulator's unified log as on an iOS simulator. Enable it with
-`setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
+`getLogs` reads the watch simulator's unified log, as on iOS. Enable it with `setToolEnabled`
+(see [Dynamic Tools](dynamic-tools.md)).
 
 | Parameter                          | Watch behavior                                                                                                                        |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -180,6 +182,6 @@ tap in the host app.
 
 ## `executePlan`
 
-`executePlan` replays a plan on a watch with `platform: "watchos"`, including a plan that
-`recordToolCalls` recorded on a watch. Each step runs as the same tool called directly. A step whose
-tool does not accept a watch fails with the standard refusal. Plans on a watch record no video.
+`executePlan` replays a plan on a watch with `platform: "watchos"`, including one `recordToolCalls`
+recorded on a watch. Each step runs as the same tool called directly. A step whose tool does not
+accept a watch fails with the standard refusal. Plans on a watch record no video.

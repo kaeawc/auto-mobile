@@ -10,6 +10,8 @@ const EXEMPT: Readonly<Record<string, string>> = {
     "Read-only app bundle lookup, never a data container.",
   "src/features/utility/DeepLinkManager.ts": "Read-only app bundle metadata lookup.",
   "src/features/observe/IosPackageSigningInspector.ts": "Read-only app bundle signing inspection.",
+  "src/features/performanceTrace/defaultPerformanceTraceManager.ts":
+    "Read-only app bundle path lookup for `xctrace record --launch`.",
   "src/daemon/sessionBroker/mutations/iosResetPort.ts":
     "Groups listing; deletion already requires the target device's own AppGroup directory.",
 };

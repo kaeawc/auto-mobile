@@ -3,12 +3,12 @@ import { logger } from "../utils/logger";
 import { FailureAnalyticsRepository } from "../db/failureAnalyticsRepository";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
-import type { DateRangePreset, TimeAggregation } from "../daemon/failuresStreamSocketTypes";
+import type { DateRangePreset, TimeAggregation } from "../daemon/streams/failuresStreamSocketTypes";
 import {
   getDateRangeDurationMs,
   normalizeAggregation,
   normalizeDateRange,
-} from "../daemon/streamQueryNormalizers";
+} from "../daemon/streams/streamQueryNormalizers";
 
 const FAILURES_RESOURCE_URIS = {
   BASE: "automobile:failures",

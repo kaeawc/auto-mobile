@@ -1,0 +1,35 @@
+Current lock settings service state:
+
+User State:
+  User 0
+    SP Handle: 0
+    Last changed: 1969-12-31 19:00:00 (0)
+    SID: 0
+    Quality: 0
+    CredentialType: None
+    SeparateChallenge: false
+    Metrics: known
+  
+Keys in namespace:
+  
+Storage:
+  User 0 [/data/system_de/0/spblob]:
+    [Not found]
+  
+StrongAuth:
+  PrimaryAuthFlags state:
+    userId=0, primaryAuthFlags=0
+    
+  NonStrongBiometricAllowed state:
+    
+  
+RebootEscrow:
+  mRebootEscrowWanted=false
+  mRebootEscrowReady=false
+  mRebootEscrowListener=com.android.server.recoverysystem.RecoverySystemService@9d94769
+  mPendingRebootEscrowKey is not set
+  RebootEscrowProvider type is null
+  Event log:
+    
+  
+PasswordHandleCount: 0

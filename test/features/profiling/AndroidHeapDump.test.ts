@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   AndroidHeapDump,
-  classifyHeapDumpEligibility,
   HeapDumpRefusedError,
 } from "../../../src/features/profiling/AndroidHeapDump";
 import { ProfilingRegistry } from "../../../src/features/profiling/ProfilingRegistry";
@@ -37,23 +36,6 @@ function setup() {
 }
 
 const REMOTE = "/data/local/tmp/automobile-heap-h1.hprof";
-
-describe("classifyHeapDumpEligibility", () => {
-  test("reads the captured debuggable Playground, release flags and the guessed profileable token", () => {
-    expect(classifyHeapDumpEligibility(dumpsysPackage("dumpsys-package-installed.txt"))).toBe(true);
-    expect(classifyHeapDumpEligibility(profiling("dumpsys-package-release-flags.txt"))).toBe(false);
-    expect(classifyHeapDumpEligibility(profiling("dumpsys-package-profileable-flags.txt"))).toBe(
-      true,
-    );
-  });
-
-  test("gives no verdict without a pkgFlags line", () => {
-    expect(classifyHeapDumpEligibility("")).toBeUndefined();
-    expect(
-      classifyHeapDumpEligibility(profiling("dumpsys-package-release-flags.txt").split("\n")[0]),
-    ).toBeUndefined();
-  });
-});
 
 describe("AndroidHeapDump (#14113)", () => {
   test("dumps, pulls, and deletes the device copy", async () => {
@@ -97,20 +79,30 @@ describe("AndroidHeapDump (#14113)", () => {
     expect(during).toEqual([REMOTE]);
   });
 
-  test("refuses an app that is neither debuggable nor profileable before touching the heap", async () => {
-    const { device, registry, dump } = setup();
-    device.packageDump = profiling("dumpsys-package-release-flags.txt");
+  test("a profileable app is dumped: dumpsys package prints no profileable flag, so am decides (#18747)", async () => {
+    const { device, dump } = setup();
+    device.packageDump = profiling("dumpsys-package-profileable-flags.txt");
 
-    const refusal = await dump.dump({ appId: "com.example.release", deviceId: DEVICE }).then(
+    const result = await dump.dump({ appId: "com.example.profileable", deviceId: DEVICE });
+
+    expect(result.attempts[0]).toMatchObject({ outcome: "dumped" });
+    expect(device.commands.some((c) => c.includes("dumpheap"))).toBe(true);
+  });
+
+  test("a native dump that is the captured placeholder fails and is cleaned up (#18747)", async () => {
+    const { device, store, dump } = setup();
+    device.heapBytes = 170;
+    device.deviceFileHead.set(REMOTE, profiling("native-heap-unavailable.txt"));
+
+    const failure = await dump.dump({ appId: APP, deviceId: DEVICE, native: true }).then(
       () => undefined,
       (error: unknown) => error,
     );
 
-    expect(refusal).toBeInstanceOf(HeapDumpRefusedError);
-    expect((refusal as HeapDumpRefusedError).code).toBe("heap_dump_not_debuggable");
-    expect((refusal as Error).message).toContain("heap_dump_not_debuggable: com.example.release");
-    expect(device.commands.some((c) => c.includes("dumpheap"))).toBe(false);
-    expect(registry.takeOwnedBy(DEVICE, "s-1")).toEqual({ deviceFiles: [] });
+    expect((failure as Error).message).toContain("native_heap_dump_unavailable");
+    expect(device.commands.some((c) => c.startsWith("pull"))).toBe(false);
+    expect(device.commands).toContain(`shell rm -f ${REMOTE}`);
+    expect(store.removed).toEqual(["/host/outputs/1-heapDump-h1.hprof"]);
   });
 
   test("maps am's own SecurityException to the same typed refusal and cleans up", async () => {

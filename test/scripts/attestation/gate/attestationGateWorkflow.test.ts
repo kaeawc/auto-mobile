@@ -2,7 +2,12 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { load } from "js-yaml";
-import { loadJobs, loadWorkflow, type WorkflowStep } from "../../../helpers/workflowSteps";
+import {
+  loadJobs,
+  loadWorkflow,
+  type WorkflowStep,
+  usesAction,
+} from "../../../helpers/workflowSteps";
 
 const id = "attestation-gate-shadow";
 const path = ".github/workflows/pull_request.yml";
@@ -33,7 +38,7 @@ test("shadow job is explicitly advisory and minimally privileged", () => {
   expect(job.if).toBe(
     "always() && !cancelled() && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'",
   );
-  expect(job.steps?.find((step) => step.uses === "actions/checkout@v6")?.with).toEqual({
+  expect(job.steps?.find((step) => usesAction(step.uses) === "actions/checkout")?.with).toEqual({
     lfs: false,
     "fetch-depth": 1,
     ref: "${{ github.event.pull_request.head.sha }}",
@@ -71,7 +76,7 @@ test("composite execution is tolerant and artifact is uniquely named", () => {
     ATTESTATION_COMMIT_SHA: "${{ inputs.commit-sha }}",
     AUTOMOBILE_LOG_SINK: "stderr",
   });
-  const upload = action.runs.steps.find((s) => s.uses === "actions/upload-artifact@v6");
+  const upload = action.runs.steps.find((s) => usesAction(s.uses) === "actions/upload-artifact");
   expect(upload?.if).toBe("always()");
   expect(upload?.with?.name).toBe(
     "attestation-shadow-${{ inputs.tier }}-${{ github.run_id }}-${{ github.run_attempt }}",

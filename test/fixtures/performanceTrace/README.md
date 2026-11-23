@@ -16,6 +16,11 @@
 - `xctrace-toc-empty-unfinalized-hitches-ios27.xml` (#15330): `xctrace export --toc` of the
   556K `hitches` trace the 0.0.88 smoke run stopped on an iOS 27.0 simulator (the stop returned
   success): zero duration, no processes, empty `<data/>`. Host name and UUID are scrubbed.
+- `xctrace-record-*.out.txt` (#18790): the verbatim stdout and stderr of `xctrace record` on an iPad
+  Pro 11-inch (M5) iOS 27.2 simulator, Xcode 27.2. `hitches-unsupported` is Animation Hitches
+  attached to Settings: it prints `[Error] Hitches is not supported on this platform.` and exits 0.
+  `launch-bundle-id-path-not-found` is App Launch given a bundle id: `Path not found` (the
+  `.app` path works).
 - `xctrace-export-*.stderr.txt` (#15330): the stderr of `xctrace export --toc` for a trace
   xctrace never finalized (`Trace is malformed - run data is missing.`, killed after SIGINT)
   and for a trace with no template document (`Document Missing Template Error`, the 52K traces).

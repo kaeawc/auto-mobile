@@ -219,6 +219,7 @@
 		9566E2D3B6A212840B945A1A /* StoreKitTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BCA6D75D490EC72A555985D6 /* StoreKitTest.framework */; };
 		96651EBBE6141F385B45B0EE /* ElementLocator+Finding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1409F4E8F31AFA65340EB16D /* ElementLocator+Finding.swift */; };
 		96F79B9872E588543C130932 /* FailureResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 520F6547A6F12A37027F556C /* FailureResponse.swift */; };
+		97154680B886F3EB5A536A72 /* ElementLocator+VisibleWindows.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEF156AE9BCFABB26DD2D4C1 /* ElementLocator+VisibleWindows.swift */; };
 		97680EFAC6E43D5F8ECE6E63 /* RequestAddHighlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F8DAF2C427F896348E37111 /* RequestAddHighlight.swift */; };
 		97F6378991206EAA06851712 /* HierarchyPair.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B059B0C297ADFB4ACC7B958 /* HierarchyPair.swift */; };
 		98DAEE393AE211A22F28C5AF /* ElementLocator+Snapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61419C30153676D5BC6CE0F7 /* ElementLocator+Snapshot.swift */; };
@@ -716,6 +717,7 @@
 		EE7FA458DAC40E12AE86DA3C /* CommandHandler+Accessibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CommandHandler+Accessibility.swift"; sourceTree = "<group>"; };
 		EE8AB11A7BF22041EE27F3B2 /* WebSocketResponding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketResponding.swift; sourceTree = "<group>"; };
 		EED23FD4D9FDA0854ABE22F1 /* GesturePerformer+CaretMemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GesturePerformer+CaretMemo.swift"; sourceTree = "<group>"; };
+		EEF156AE9BCFABB26DD2D4C1 /* ElementLocator+VisibleWindows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ElementLocator+VisibleWindows.swift"; sourceTree = "<group>"; };
 		EF16CFA1D19084DE48BB6024 /* DisplayCutoutInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayCutoutInfo.swift; sourceTree = "<group>"; };
 		EF6FB4F8EE013ACD7C305D32 /* DefaultHingeAngleSetter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultHingeAngleSetter.swift; sourceTree = "<group>"; };
 		F0845E1CBF4B29041A3BC745 /* SdkStorageDiagnostic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkStorageDiagnostic.swift; sourceTree = "<group>"; };
@@ -1119,6 +1121,7 @@
 				B35A7550278F8771BF4FDF33 /* ElementLocator+HostHelpers.swift */,
 				C2BC4B151CAC975C51065108 /* ElementLocator+Optimization.swift */,
 				61419C30153676D5BC6CE0F7 /* ElementLocator+Snapshot.swift */,
+				EEF156AE9BCFABB26DD2D4C1 /* ElementLocator+VisibleWindows.swift */,
 				3DDE9EA8FE4272AD9064DDA0 /* ErrorResponse.swift */,
 				520F6547A6F12A37027F556C /* FailureResponse.swift */,
 				8934AB12DE931554222D5789 /* ForegroundTracker.swift */,
@@ -1663,6 +1666,7 @@
 				DC6252A71F43A0D42BA833EA /* ElementLocator+HostHelpers.swift in Sources */,
 				4B8FA952A4FFA2668FB3F807 /* ElementLocator+Optimization.swift in Sources */,
 				98DAEE393AE211A22F28C5AF /* ElementLocator+Snapshot.swift in Sources */,
+				97154680B886F3EB5A536A72 /* ElementLocator+VisibleWindows.swift in Sources */,
 				1F968B5EDB744057F51321EF /* ElementLocator.swift in Sources */,
 				2D578CEB919E1A5DFE42330C /* ErrorResponse.swift in Sources */,
 				4F8A14D1F3410E54253DDA63 /* ExecuteSqlResponse.swift in Sources */,

@@ -20,9 +20,12 @@ class FakeRecorder implements PerformanceTraceRecorder {
   unsignalledFailures = 0;
   summaryGate?: Promise<void>;
   summarizeStarted?: () => void;
+  /** Hold `start` until released, to race a release against it. */
+  startGate?: Promise<void>;
 
   async start(request: StartPerformanceTraceRequest): Promise<RecordingPerformanceTrace> {
     this.started.push(request);
+    await this.startGate;
     let signalled = false;
     return {
       artifactPath: `${request.artifactDir}/${request.traceId}.perfetto-trace`,
@@ -243,16 +246,87 @@ describe("PerformanceTraceManager categories (#18688)", () => {
     expect(traces.activeTraceIds()).toEqual([]);
   });
 
-  test("release cleanup leaves an unsignalled trace registered, and a later release stops it", async () => {
+  test("release retries an unsignalled stop, so the device is free for its next owner (#18938)", async () => {
     const { manager: traces, recorder } = manager();
     recorder.unsignalledFailures = 1;
     await traces.start(pixel, { ...hitches, ownerSessionUuid: "s1" });
 
     await traces.stopSessionTracesOnDevice("s1", "emulator-5554");
+
+    expect(recorder.stops).toEqual(["trace-t-1", "trace-t-1"]);
+    expect(traces.activeTraceIds()).toEqual([]);
+    await expect(
+      traces.start(pixel, { ...hitches, ownerSessionUuid: "s2" }),
+    ).resolves.toMatchObject({ traceId: "trace-t-2" });
+  });
+
+  test("release gives up after bounded unsignalled stops, and a later release stops it", async () => {
+    const { manager: traces, recorder } = manager();
+    recorder.unsignalledFailures = 3;
+    await traces.start(pixel, { ...hitches, ownerSessionUuid: "s1" });
+
+    await traces.stopSessionTracesOnDevice("s1", "emulator-5554");
+    expect(recorder.stops).toHaveLength(3);
     expect(traces.activeTraceIds()).toEqual(["trace-t-1"]);
 
     await traces.stopSessionTracesOnDevice("s1", "emulator-5554");
     expect(traces.activeTraceIds()).toEqual([]);
+  });
+
+  test("a release during an in-flight start waits for it, then stops its recorder (#18938)", async () => {
+    const { manager: traces, recorder } = manager();
+    let releaseStart!: () => void;
+    recorder.startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const starting = traces.start(pixel, { ...hitches, ownerSessionUuid: "s1" });
+    expect(traces.hasSessionTraceOnDevice("s1", "emulator-5554")).toBe(true);
+    expect(traces.hasSessionTraceOnDevice("s2", "emulator-5554")).toBe(false);
+
+    let released = false;
+    const releasing = traces.stopTracesForSession("s1").then(() => {
+      released = true;
+    });
+    await Promise.resolve();
+    expect(released).toBe(false);
+
+    releaseStart();
+    await expect(starting).resolves.toMatchObject({ traceId: "trace-t-1" });
+    await releasing;
+    expect(recorder.stops).toEqual(["trace-t-1"]);
+    expect(traces.activeTraceIds()).toEqual([]);
+  });
+
+  test("a release leaves another session's in-flight start alone", async () => {
+    const { manager: traces, recorder } = manager();
+    let releaseStart!: () => void;
+    recorder.startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const starting = traces.start(pixel, { ...hitches, ownerSessionUuid: "s2" });
+
+    await traces.stopSessionTracesOnDevice("s1", "emulator-5554");
+    releaseStart();
+    await starting;
+
+    expect(recorder.stops).toEqual([]);
+    expect(traces.activeTraceIds()).toEqual(["trace-t-1"]);
+  });
+
+  test("a failed in-flight start releases cleanly", async () => {
+    const { manager: traces, recorder } = manager();
+    let failStart!: (error: Error) => void;
+    recorder.startGate = new Promise<void>((_resolve, reject) => {
+      failStart = reject;
+    });
+    const starting = traces.start(pixel, { ...hitches, ownerSessionUuid: "s1" });
+    const releasing = traces.stopTracesOnDevice("emulator-5554");
+
+    failStart(new Error("adb: perfetto missing"));
+    await expect(starting).rejects.toThrow("perfetto missing");
+    await releasing;
+    expect(recorder.stops).toEqual([]);
+    expect(traces.hasSessionTraceOnDevice("s1", "emulator-5554")).toBe(false);
   });
 
   test("a session's stop on one device leaves its traces elsewhere and other sessions' alone", async () => {

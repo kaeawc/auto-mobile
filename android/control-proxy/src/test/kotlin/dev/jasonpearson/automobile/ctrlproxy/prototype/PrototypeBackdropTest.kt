@@ -235,6 +235,60 @@ class PrototypeBackdropTest {
   }
 
   @Test
+  fun `a runtime change to the root radius reshapes the card window only when it changes`() =
+    runTest {
+      val harness = CardHarness()
+      harness.controller.show("a", reshapingSpec())
+      val runtime = checkNotNull(harness.controller.activeRuntime)
+      val first = harness.cards.windows.single()
+      assertEquals(36f, first.blur.cornerRadiusPx(200, 160), 0f)
+
+      harness.controller.interact(runtime, PrototypeInteraction.Toggle("other"))
+      assertEquals(1, harness.cards.windows.size)
+      assertFalse(first.removed)
+
+      harness.controller.interact(runtime, PrototypeInteraction.Toggle("flat"))
+      assertTrue(first.removed)
+      val flat = harness.cards.windows.last()
+      assertEquals(2, harness.cards.windows.size)
+      assertEquals(0f, flat.blur.cornerRadiusPx(200, 160), 0f)
+      assertFalse(flat.removed)
+
+      harness.controller.interact(runtime, PrototypeInteraction.Toggle("other"))
+      assertEquals(2, harness.cards.windows.size)
+      assertFalse(flat.removed)
+    }
+
+  @Test
+  fun `a card blur fallback is recorded and blur is retried only on a reshape`() = runTest {
+    val harness = Harness(sdk = 34, blurEnabled = true)
+    val host = harness.host
+    host.fallBackFromBlur = true
+    harness.controller.show("a", reshapingSpec())
+    assertEquals(listOf("fallback"), harness.noted)
+    val runtime = checkNotNull(harness.controller.activeRuntime)
+
+    harness.controller.interact(runtime, PrototypeInteraction.Toggle("other"))
+    assertEquals(1, host.requests.size)
+
+    // A detached window is restored with the backdrop the host drew, not the failed card blur.
+    host.isShowing = false
+    harness.controller.onDisplayTransition(0, removed = false)
+    assertEquals(PrototypeBackdropMode.FALLBACK, host.requests.last().backdrop?.mode)
+
+    // A reshape asks for the authored blur again.
+    host.fallBackFromBlur = false
+    harness.controller.interact(runtime, PrototypeInteraction.Toggle("flat"))
+    val reshaped = host.requests.last()
+    assertEquals(PrototypeBackdropMode.BLUR, reshaped.backdrop?.mode)
+    assertEquals(RoundedCornerShape(0.dp), reshaped.backdropShape)
+    val count = host.requests.size
+
+    harness.controller.interact(runtime, PrototypeInteraction.Toggle("other"))
+    assertEquals(count, host.requests.size)
+  }
+
+  @Test
   fun `sheet and fullscreen blur use the existing window manager`() = runTest {
     val harness = CardHarness()
     val plan = PrototypeBackdropPlan(PrototypeBackdropMode.BLUR, 16, null)
@@ -258,6 +312,29 @@ class PrototypeBackdropTest {
     assertEquals(0f, blur.cornerRadiusPx(200, 160), 0f)
     val unequal = request.copy(backdropShape = RoundedCornerShape(topStart = 18.dp))
     assertNull(unequal.floatingCardBlur(2f, 34))
+  }
+
+  /** A floating card whose root radius drops to 0 while `flat` is on; `other` changes nothing. */
+  private fun reshapingSpec(): PrototypeSpec {
+    val base = floatingSpec()
+    val root = base.root as PrototypeBoxNode
+    return base.copy(
+      state =
+        mapOf(
+          "flat" to PrototypeScalar.BooleanValue(false),
+          "other" to PrototypeScalar.BooleanValue(false),
+        ),
+      root =
+        root.copy(
+          styleWhen =
+            listOf(
+              PrototypeStyleWhen(
+                PrototypeCondition(key = "flat", equals = PrototypeScalar.BooleanValue(true)),
+                PrototypeStyle(cornerRadius = PrototypeCornerRadius.Dp(0.0)),
+              ),
+            ),
+        ),
+    )
   }
 
   private fun floatingSpec(cornerDp: Double = 18.0) =

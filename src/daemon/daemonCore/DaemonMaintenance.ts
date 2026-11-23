@@ -38,7 +38,7 @@ import { DefaultFileSystem } from "../../utils/filesystem/DefaultFileSystem";
 import { getDaemonSocketPathsByName } from "../socketPaths";
 import { AndroidCtrlProxyClient } from "../../features/observe/android";
 import { FeatureFlagService } from "../../features/featureFlags/FeatureFlagService";
-import { type ObservationStreamHealth } from "../ObservationStreamHealth";
+import { type ObservationStreamHealth } from "../streams/ObservationStreamHealth";
 import { type DatabaseHealthFailureRecovery } from "../daemonDependencies";
 import type { DaemonSessions } from "./DaemonSessions";
 import type { DaemonIdentity } from "./DaemonIdentity";

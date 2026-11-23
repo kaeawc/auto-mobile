@@ -17,9 +17,10 @@ import type { AccessibilityHierarchy } from "../../navigation/ScreenFingerprint"
 import {
   getDeviceDataStreamServer,
   type PerformanceStreamData,
-} from "../../../daemon/deviceDataStreamSocketServer";
+} from "../../../daemon/streams/deviceDataStreamSocketServer";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { appWindowsOnly } from "../hierarchyLayer";
+import { focusedAppWindowsOnly } from "./iosWindowLayer";
 import { logger } from "../../../utils/logger";
 interface HierarchyTelemetryHost {
   readonly timer: Timer;
@@ -143,8 +144,12 @@ export class CtrlProxyHierarchyTelemetry {
 
     const conversionStart = this.host.timer.now();
     // Screen identity follows the app's windows only (#9305): the prototype agent's UIWindow is
-    // removed, so showing, paging or dismissing a prototype records no navigation.
-    const convertedHierarchy = this.convertHierarchyForNavigation(appWindowsOnly(hierarchy));
+    // removed, so showing, paging or dismissing a prototype records no navigation. Other apps'
+    // iPad windows merged into the capture are removed too (#18830), so they never count as
+    // the focused app's screen.
+    const convertedHierarchy = this.convertHierarchyForNavigation(
+      appWindowsOnly(focusedAppWindowsOnly(hierarchy)),
+    );
     const conversionMs = this.host.timer.now() - conversionStart;
 
     const metrics: HierarchyNavigationUpdateMetrics = {

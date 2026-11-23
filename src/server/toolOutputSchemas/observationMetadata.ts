@@ -97,6 +97,7 @@ export const tapEffectSchema = z
       "viewHierarchy changed",
       "viewHierarchy unchanged",
       "insufficient observation data",
+      "system alert dismissed",
     ]),
   })
   .passthrough();

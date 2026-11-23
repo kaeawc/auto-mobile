@@ -27,7 +27,7 @@ WHEP=(
     [ -f ".github/actions/${action}/action.yml" ]
     [ "$(yq -r '.runs.using' ".github/actions/${action}/action.yml")" = "composite" ]
     for wf in "$PR_WF" "$MERGE_WF"; do
-      [ "$(yq -r ".jobs.\"${job}\".steps[0].uses" "$wf")" = "actions/checkout@v6" ]
+      [ "$(yq -r ".jobs.\"${job}\".steps[0].uses | sub(\"@.*\", \"\")" "$wf")" = "actions/checkout" ]
       [ "$(yq -r ".jobs.\"${job}\".steps[1].uses" "$wf")" = "./.github/actions/${action}" ]
       [ "$(yq -r ".jobs.\"${job}\".steps | length" "$wf")" = "2" ]
     done

@@ -104,6 +104,7 @@ export {
   networkConditionProfileSchema,
   NETWORK_CONDITION_PROFILES,
   MAX_NETWORK_CONDITION_TTL_SECONDS,
+  MAX_NETWORK_BANDWIDTH_KBPS,
   IOS_APP_NETWORK_CONDITION_LIMITATIONS,
   iosAppNetworkRuleOutcome,
   parseEmulatorNetworkStatus,

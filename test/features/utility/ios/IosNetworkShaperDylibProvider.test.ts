@@ -17,7 +17,8 @@ import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 const ROOT = resolve("/pkg");
 const SOURCE = join(ROOT, IOS_NETWORK_SHAPER_SOURCE);
 const STUB = join(ROOT, IOS_NETWORK_SHAPER_DNS_STUB);
-const ACTIVE_CLANG = "/Applications/Xcode-26.6.app/Contents/Developer/usr/bin/clang";
+const ACTIVE_DIR = "/Applications/Xcode-26.6.app/Contents/Developer";
+const ACTIVE_CLANG = `${ACTIVE_DIR}/usr/bin/clang`;
 const PINNED_DIR = "/Applications/Xcode-27.2.0.app/Contents/Developer";
 const PINNED_CLANG = `${PINNED_DIR}/usr/bin/clang`;
 function outputFor(identity: string): string {
@@ -36,6 +37,8 @@ function outputFor(identity: string): string {
 const OUTPUT = outputFor(`${ACTIVE_CLANG}\n24A100`);
 
 class BuildRunner extends FakeHostCommandExecutor {
+  /** What `xcode-select -p` answers: the operator can switch it while the daemon runs. */
+  activeDir = ACTIVE_DIR;
   constructor(private readonly fs: FakeFileSystem) {
     super();
   }
@@ -54,6 +57,9 @@ class BuildRunner extends FakeHostCommandExecutor {
     }
     if (command === "bash") {
       return { ...result, stdout: PINNED_DIR };
+    }
+    if (command === "xcode-select") {
+      return { ...result, stdout: `${this.activeDir}\n` };
     }
     const out = args.indexOf("-o");
     if (out >= 0) {
@@ -84,6 +90,7 @@ test("builds a universal simulator dylib linked against the resolver stub, signe
   expect(await h.provider.ensure()).toBe(OUTPUT);
   const partial = `${OUTPUT}.fake-1.tmp`;
   expect(h.runner.getExecutedCalls().map(({ command, args }) => ({ command, args }))).toEqual([
+    { command: "xcode-select", args: ["-p"] },
     { command: "xcrun", args: ["--sdk", "iphonesimulator", "--find", "clang"] },
     { command: "xcrun", args: ["--sdk", "iphonesimulator", "--show-sdk-build-version"] },
     {
@@ -138,12 +145,50 @@ test("a caller's DEVELOPER_DIR wins over the pin", async () => {
   expect(h.runner.wasCommandExecuted("bash")).toBe(false);
 });
 
+function builds(runner: FakeHostCommandExecutor): number {
+  return runner.getExecutedCalls().filter(({ command }) => command === "codesign").length;
+}
+
 test("a cached build is reused without invoking the compiler", async () => {
   const h = setup();
   await h.provider.ensure();
-  const calls = h.runner.getExecutedCalls().length;
   expect(await h.provider.ensure()).toBe(OUTPUT);
-  expect(h.runner.getExecutedCalls().length).toBe(calls);
+  expect(builds(h.runner)).toBe(1);
+});
+
+test("the active Xcode is re-resolved per ensure and pinned for its build, so a switch is a new build", async () => {
+  const h = setup(undefined, { PATH: "/opt/bin" });
+  expect(await h.provider.ensure()).toBe(OUTPUT);
+  h.runner.activeDir = PINNED_DIR;
+  expect(await h.provider.ensure()).toBe(outputFor(`${PINNED_CLANG}\n25B200`));
+  expect(builds(h.runner)).toBe(2);
+  // The injected environment reaches every lookup, compile and sign call on the active path.
+  const calls = h.runner.getExecutedCalls();
+  expect(calls.every(({ options }) => options?.env?.PATH === "/opt/bin")).toBe(true);
+  expect(
+    calls
+      .filter(({ command }) => command !== "xcode-select")
+      .map(({ options }) => options?.env?.DEVELOPER_DIR),
+  ).toEqual([
+    ACTIVE_DIR,
+    ACTIVE_DIR,
+    ACTIVE_DIR,
+    ACTIVE_DIR,
+    PINNED_DIR,
+    PINNED_DIR,
+    PINNED_DIR,
+    PINNED_DIR,
+  ]);
+});
+
+test("concurrent ensures share one toolchain probe and one build", async () => {
+  const h = setup();
+  const outputs = await Promise.all([h.provider.ensure(), h.provider.ensure()]);
+  expect(outputs).toEqual([OUTPUT, OUTPUT]);
+  expect(
+    h.runner.getExecutedCalls().filter(({ command }) => command === "xcode-select"),
+  ).toHaveLength(1);
+  expect(builds(h.runner)).toBe(1);
 });
 
 test("a missing source fails with an actionable error and runs nothing", async () => {

@@ -12,6 +12,7 @@ import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator
 import type { HostProcessRow } from "../../../models/HostProcessRow";
 import { readHostProcessTable } from "../../../devices/bootAdmission/readHostProcessTable";
 import { logger } from "../../../utils/logger";
+import { isMissingFileError } from "../../action/IosSimulatorMemoryWarning";
 import { isProcessRunning } from "../../../utils/processLiveness";
 import {
   ctrlProxyClientLifecycle,
@@ -51,7 +52,7 @@ export interface IosNetworkShaperReadResult {
 /**
  * Device-wide iOS Simulator network shaping with no network extension, root or
  * MDM (#19045). The simulator boots with the shaper dylib in launchd's
- * environment, so every process in the device loads it (WebKit's networking
+ * environment, so processes in the device load it (WebKit's networking
  * extension and system daemons included). Profiles change live: the shaper
  * re-reads its profile file within 250 ms.
  */
@@ -108,6 +109,8 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
   private readonly env: NodeJS.ProcessEnv;
   /** One injection check and reboot per simulator, however many applies race. */
   private readonly injections = new SingleFlight<string, boolean>();
+  /** Serializes this daemon's profile writes, rollbacks, clears and sweeps per simulator. */
+  private readonly profileLocks = new Map<string, Promise<void>>();
 
   constructor(private readonly deps: IosSimulatorNetworkShaperDependencies = {}) {
     this.runner = deps.runner ?? new DefaultHostCommandExecutor();
@@ -130,32 +133,141 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
   ): Promise<IosNetworkShaperApplyResult> {
     const dylib = await this.dylibProvider().ensure();
     const profilePath = this.profilePath(udid);
-    // The owner lands first, so a startup sweep never sees a profile without its owner and
-    // deletes live shaping; the profile lands before the boot so the first process sees it.
-    await this.writeAtomically(ownerPath(profilePath), `${this.deps.ownerPid ?? process.pid}\n`);
-    await this.writeProfile(profilePath, profile);
-    // A concurrent apply joins this flight instead of rebooting the simulator a second time.
-    const rebooted = await this.injections.run(udid.toUpperCase(), async () => {
-      if (await this.isInjected(udid, dylib, profilePath)) {
-        return false;
+    const content = formatShaperProfile(profile);
+    const previous = await this.withProfileLock(profilePath, async () => {
+      const snapshot = await this.snapshot(profilePath);
+      try {
+        // The owner lands first, so a startup sweep never sees a profile without its owner and
+        // deletes live shaping; the profile lands before the boot so the first process sees it.
+        await this.writeAtomically(ownerPath(profilePath), `${this.ownerPid()}\n`);
+        await this.writeAtomically(profilePath, content);
+      } catch (error) {
+        // Under the lock nothing else wrote here: put back exactly what was there.
+        await this.restoreSnapshot(profilePath, snapshot);
+        throw error;
       }
-      await this.rebootShaped(udid, dylib, profilePath);
-      return true;
+      return snapshot;
     });
-    return { rebooted };
+    try {
+      // A concurrent apply joins this flight instead of rebooting the simulator a second time.
+      const rebooted = await this.injections.run(udid.toUpperCase(), async () => {
+        if (await this.isInjected(udid, dylib, profilePath)) {
+          return false;
+        }
+        await this.rebootShaped(udid, dylib, profilePath);
+        return true;
+      });
+      return { rebooted };
+    } catch (error) {
+      // A failed apply leaves no new condition: the previous profile (or none) comes back.
+      await this.withProfileLock(profilePath, () => this.rollBack(profilePath, previous, content));
+      throw error;
+    }
   }
 
   async clear(udid: string): Promise<void> {
     const profilePath = this.profilePath(udid);
-    await this.removeProfile(profilePath);
+    await this.withProfileLock(profilePath, () => this.removeProfile(profilePath));
+  }
+
+  private ownerPid(): number {
+    return this.deps.ownerPid ?? process.pid;
+  }
+
+  private async withProfileLock<T>(profilePath: string, task: () => Promise<T>): Promise<T> {
+    const prior = this.profileLocks.get(profilePath) ?? Promise.resolve();
+    const run = prior.then(task);
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.profileLocks.set(profilePath, settled);
+    try {
+      return await run;
+    } finally {
+      if (this.profileLocks.get(profilePath) === settled) {
+        this.profileLocks.delete(profilePath);
+      }
+    }
+  }
+
+  private async snapshot(profilePath: string): Promise<ProfileSnapshot> {
+    return {
+      profile: await this.readIfPresent(profilePath),
+      owner: await this.readIfPresent(ownerPath(profilePath)),
+    };
+  }
+
+  /**
+   * Puts back what a failed apply replaced, unless a later apply already replaced
+   * this one's profile (then that apply owns the outcome).
+   */
+  private async rollBack(
+    profilePath: string,
+    previous: ProfileSnapshot,
+    written: string,
+  ): Promise<void> {
+    try {
+      const current = await this.readIfPresent(profilePath);
+      if (current !== undefined && current !== written) {
+        return;
+      }
+    } catch (error) {
+      logger.warn(`[NetworkShaper] could not read the profile at ${profilePath}`, error);
+      return;
+    }
+    await this.restoreSnapshot(profilePath, previous);
+  }
+
+  private async restoreSnapshot(profilePath: string, previous: ProfileSnapshot): Promise<void> {
+    try {
+      if (previous.profile === undefined) {
+        await this.removeProfile(profilePath);
+        return;
+      }
+      if (previous.owner !== undefined) {
+        await this.writeAtomically(ownerPath(profilePath), previous.owner);
+      }
+      await this.writeAtomically(profilePath, previous.profile);
+    } catch (error) {
+      logger.warn(`[NetworkShaper] could not roll back the profile at ${profilePath}`, error);
+    }
+  }
+
+  /** A file's text, or undefined when it does not exist (now or by the time it is read). */
+  private async readIfPresent(path: string): Promise<string | undefined> {
+    if (!this.fs.existsSync(path)) {
+      return undefined;
+    }
+    try {
+      return await this.fs.readFile(path);
+    } catch (error) {
+      if (isMissingFileError(error)) {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   private async removeProfile(profilePath: string): Promise<void> {
     // The shaper treats a missing profile file as unshaped.
     for (const path of [profilePath, ownerPath(profilePath)]) {
-      if (this.fs.existsSync(path)) {
-        await this.fs.unlink(path);
+      await this.unlinkIfPresent(path);
+    }
+  }
+
+  private async unlinkIfPresent(path: string): Promise<void> {
+    if (!this.fs.existsSync(path)) {
+      return;
+    }
+    try {
+      await this.fs.unlink(path);
+    } catch (error) {
+      if (!isMissingFileError(error)) {
+        throw error;
       }
+      // Another remover got there first; the file is gone either way.
+      logger.debug(`[NetworkShaper] ${path} was already removed`);
     }
   }
 
@@ -169,11 +281,9 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
     for (const name of names) {
       const profilePath = join(directory, name);
       try {
-        if (await this.ownerIsAlive(profilePath)) {
-          continue;
+        if (await this.withProfileLock(profilePath, () => this.clearIfOrphaned(profilePath))) {
+          cleared.push(name.slice(0, -".conf".length));
         }
-        await this.removeProfile(profilePath);
-        cleared.push(name.slice(0, -".conf".length));
       } catch (error) {
         logger.warn(`[NetworkShaper] could not clear orphaned profile ${name}`, error);
       }
@@ -181,13 +291,42 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
     return cleared;
   }
 
-  /** A profile with no readable owner pid is orphaned; a reused pid keeps it (the safe side). */
-  private async ownerIsAlive(profilePath: string): Promise<boolean> {
-    const owner = ownerPath(profilePath);
-    if (!this.fs.existsSync(owner)) {
+  /**
+   * Removes a profile whose owner is gone. Another daemon on the same data
+   * directory writes its owner before its profile, so the profile is first
+   * claimed by an atomic rename and the owner re-read: a changed owner means a
+   * live daemon took the simulator over, and its profile is put back.
+   */
+  private async clearIfOrphaned(profilePath: string): Promise<boolean> {
+    const owner = await this.readIfPresent(ownerPath(profilePath));
+    if (this.ownerIsAlive(owner)) {
       return false;
     }
-    const pid = Number.parseInt((await this.fs.readFile(owner)).trim(), 10);
+    const claimed = `${profilePath}.${(this.deps.idGenerator ?? defaultIdGenerator).next()}.sweep`;
+    try {
+      await this.fs.rename(profilePath, claimed);
+    } catch (error) {
+      if (isMissingFileError(error)) {
+        return false;
+      }
+      throw error;
+    }
+    if ((await this.readIfPresent(ownerPath(profilePath))) !== owner) {
+      if (!this.fs.existsSync(profilePath)) {
+        await this.fs.rename(claimed, profilePath);
+      } else {
+        await this.unlinkIfPresent(claimed);
+      }
+      return false;
+    }
+    await this.unlinkIfPresent(claimed);
+    await this.unlinkIfPresent(ownerPath(profilePath));
+    return true;
+  }
+
+  /** A profile with no readable owner pid is orphaned; a reused pid keeps it (the safe side). */
+  private ownerIsAlive(owner: string | undefined): boolean {
+    const pid = owner === undefined ? Number.NaN : Number.parseInt(owner.trim(), 10);
     if (!Number.isInteger(pid) || pid <= 0) {
       return false;
     }
@@ -205,15 +344,15 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
       env !== undefined &&
       env.includes(`${IOS_NETWORK_SHAPER_PROFILE_ENV}=${profilePath}`) &&
       env.includes("DYLD_INSERT_LIBRARIES=");
-    return { injected, profile: parseShaperProfile(await this.fs.readFile(profilePath)) };
+    // A concurrent clear can remove the profile while the process scan runs.
+    const text = await this.readIfPresent(profilePath);
+    return text === undefined
+      ? { injected: false }
+      : { injected, profile: parseShaperProfile(text) };
   }
 
   private dylibProvider(): IosNetworkShaperDylibProvider {
     return this.deps.dylibProvider ?? defaultIosNetworkShaperDylibProvider;
-  }
-
-  private async writeProfile(path: string, profile: IosNetworkShaperProfile): Promise<void> {
-    await this.writeAtomically(path, formatShaperProfile(profile));
   }
 
   private async writeAtomically(path: string, content: string): Promise<void> {
@@ -312,6 +451,11 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
       );
     }
   }
+}
+
+interface ProfileSnapshot {
+  profile?: string;
+  owner?: string;
 }
 
 /** The pid of the process that wrote a profile, beside it. */

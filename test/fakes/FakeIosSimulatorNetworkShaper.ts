@@ -15,6 +15,8 @@ export class FakeIosSimulatorNetworkShaper implements IosSimulatorNetworkShaper 
   readonly profiles = new Map<string, IosNetworkShaperProfile>();
   readonly injected = new Set<string>();
   applyError?: Error;
+  clearError?: Error;
+  readError?: Error;
 
   async apply(
     udid: string,
@@ -32,6 +34,9 @@ export class FakeIosSimulatorNetworkShaper implements IosSimulatorNetworkShaper 
 
   async clear(udid: string): Promise<void> {
     this.calls.push({ op: "clear", udid });
+    if (this.clearError) {
+      throw this.clearError;
+    }
     // Like the real shaper: the profile is removed, so reads fall through to per-app rules.
     this.profiles.delete(udid);
   }
@@ -46,6 +51,9 @@ export class FakeIosSimulatorNetworkShaper implements IosSimulatorNetworkShaper 
   }
 
   async read(udid: string): Promise<IosNetworkShaperReadResult> {
+    if (this.readError) {
+      throw this.readError;
+    }
     const profile = this.profiles.get(udid);
     return { injected: this.injected.has(udid), ...(profile ? { profile } : {}) };
   }

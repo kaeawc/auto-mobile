@@ -313,6 +313,41 @@ describe("DeviceState iOS Simulator networkCondition (#10590, #10264)", () => {
     expect(warn).toHaveBeenCalled();
   });
 
+  test("a failed device-wide reset is logged before the unverified error is returned", async () => {
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const shaper = new FakeIosSimulatorNetworkShaper();
+    shaper.clearError = new Error("unlink EACCES");
+    const result = await deviceState(
+      new FakeNetworkFilterBridge(),
+      undefined,
+      iosSimulator,
+      shaper,
+    ).setState({ networkCondition: { reset: true } });
+    expect(result.success).toBe(false);
+    expect(result.networkCondition).toMatchObject({ verified: false, backend: "socket-shaper" });
+    expect(result.networkCondition?.error).toContain("unlink EACCES");
+    expect(warn).toHaveBeenCalled();
+  });
+
+  test("a failed shaper read is a socket-shaper error, not a fall-through to the extension", async () => {
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const bridge = new FakeNetworkFilterBridge();
+    bridge.setState("ready");
+    const shaper = new FakeIosSimulatorNetworkShaper();
+    shaper.readError = new Error("profile read EIO");
+    const result = await deviceState(bridge, context(), iosSimulator, shaper).getState([
+      "networkCondition",
+    ]);
+    expect(result.networkCondition).toMatchObject({
+      supported: true,
+      backend: "socket-shaper",
+      scope: "device",
+      error: "profile read EIO",
+    });
+    expect(bridge.statusCalls).toBe(0);
+    expect(warn).toHaveBeenCalled();
+  });
+
   for (const input of [
     { profile: "3g" as const, named: "profile `3g`" },
     { profile: "none" as const, delayMs: 300, named: "`delayMs`" },

@@ -32,15 +32,17 @@ Send a profile, overrides, or both:
 | `packetLossPercent`          | Percent of new connections that time out and of UDP datagrams dropped  |
 | `profile: "none"` or `reset` | Normal network                                                         |
 
-The condition covers every process in the simulator: your app, `WKWebView` and Safari, and system
-services. Traffic to `localhost` is never shaped.
+The condition covers your app, `WKWebView` and Safari, and most system services. A few simulator
+processes do not load the shaper, so their traffic is not shaped. Traffic to `localhost` is never
+shaped.
 
-## The first call reboots the simulator
+## A degrading call can reboot the simulator
 
-The first degrading call on a simulator shuts it down and boots it again with the shaper. The
-result has `rebooted: true` and a `warning`; running apps were closed, so launch the app under
-test again. Later calls change the condition within a quarter second, with no reboot
-(`rebooted: false`).
+A degrading call reboots the simulator with the shaper whenever the current boot does not have
+it. That is the first call, and again after the simulator was booted some other way.
+The result has `rebooted: true` and a `warning`; running apps were closed, so launch the app under
+test again. Later calls on the same boot change the condition within a quarter second, with no
+reboot (`rebooted: false`).
 Two first calls at the same time share one reboot. AutoMobile reconnects to the simulator on the
 next call.
 

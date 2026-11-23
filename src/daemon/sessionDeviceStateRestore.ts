@@ -837,6 +837,7 @@ export class SessionDeviceStateRestore {
       incarnation: this.host.healthIncarnation(session.assignedDevice),
       restoreGeneration: this.host.restoreGeneration(session.assignedDevice),
       profile: state.initialProfile,
+      deviceWide: !ios || state.deviceWide === true,
       // Each capture allocates a fresh reset revision, newer than every apply
       // this session sent, so a late apply cannot outlive the restore.
       ...(ios
@@ -853,15 +854,36 @@ export class SessionDeviceStateRestore {
     };
   }
 
+  /**
+   * Restores every obligation the target carries: the per-app rule and the
+   * device-wide condition each run, even when the other fails (#19045).
+   */
   async restoreNetworkCondition(target: NetworkConditionRestoreTarget): Promise<void> {
-    if (target.iosAppRule) {
-      if (!this.host.restoreIncarnationIsCurrent(target)) {
-        return;
-      }
-      await this.iosAppNetworkRuleRestorer.reset(target.iosAppRule);
-      this.host.clearRestoreHealth(target, "network-condition");
+    if (!this.host.restoreIncarnationIsCurrent(target)) {
       return;
     }
+    const appRule = target.iosAppRule;
+    const restores: Array<() => Promise<void>> = [
+      ...(appRule ? [() => this.iosAppNetworkRuleRestorer.reset(appRule)] : []),
+      ...(target.deviceWide ? [() => this.restoreDeviceWideNetworkCondition(target)] : []),
+    ];
+    const failures: unknown[] = [];
+    for (const restore of restores) {
+      try {
+        await restore();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length > 0) {
+      throw failures[0];
+    }
+    this.host.clearRestoreHealth(target, "network-condition");
+  }
+
+  private async restoreDeviceWideNetworkCondition(
+    target: NetworkConditionRestoreTarget,
+  ): Promise<void> {
     // The device-wide slot is an Android emulator's or, for a simulator UDID, the
     // iOS Simulator socket shaper's (#19045).
     const device: BootedDevice = {
@@ -870,9 +892,6 @@ export class SessionDeviceStateRestore {
         resolveIosDeviceKind({ deviceId: target.deviceId }) === "simulator" ? "ios" : "android",
       deviceId: target.deviceId,
     };
-    if (!this.host.restoreIncarnationIsCurrent(target)) {
-      return;
-    }
     await this.host.dispatchDeviceRestore(
       target.deviceId,
       (_signal, _identitySignal, acknowledge) =>
@@ -880,7 +899,6 @@ export class SessionDeviceStateRestore {
       target.restoreGeneration,
       3,
     );
-    this.host.clearRestoreHealth(target, "network-condition");
   }
 
   /**

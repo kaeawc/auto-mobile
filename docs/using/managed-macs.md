@@ -97,7 +97,9 @@ After the profile is installed and `activate` has run:
    "/Applications/AutoMobile Network Identity Probe.app/Contents/MacOS/network-filter-controller" status
    ```
 
-3. `getDeviceState` reports the `networkCondition` backend as ready on that Mac.
+3. `getDeviceState` reports the `networkCondition` backend as ready on that Mac. While a
+   device-wide condition is active, it reports that condition instead, so reset it first or rely
+   on step 2.
 
 If the controller still reports `approval_required`, check that `profiles status -type
 enrollment` shows an MDM enrollment and that the profile appears in `profiles show`. A

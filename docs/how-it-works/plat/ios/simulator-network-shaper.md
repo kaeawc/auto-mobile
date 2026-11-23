@@ -13,16 +13,21 @@ auto-mobile-simulator `sim-netshape` crate. Background:
   `<data dir>/ios-network-shaper/<hash>-sim-universal/`. The hash covers both files, clang's path
   and the simulator SDK build.
 - The Xcode is the caller's `DEVELOPER_DIR`, else, in a repo checkout, the one
-  `select_pinned_xcode` in `scripts/ios/xcode_version.sh` picks, else the active Xcode.
-- `IosSimulatorNetworkShaper.apply` writes the profile to
-  `<data dir>/ios-network-shaper/profiles/<UDID>.conf` (temp file plus rename), then checks
+  `select_pinned_xcode` in `scripts/ios/xcode_version.sh` picks, else the active Xcode
+  (`xcode-select -p`). It is resolved on every `ensure` before the cache is consulted (concurrent
+  calls share one probe), and every lookup, compile and sign call gets the injected environment
+  with that `DEVELOPER_DIR`.
+- `IosSimulatorNetworkShaper.apply` writes the owner file, then the profile to
+  `<data dir>/ios-network-shaper/profiles/<UDID>.conf` (temp file plus rename), both before any
+  boot, so the first process sees the profile. A failed write or reboot puts back the previous
+  profile and owner, or removes them when there were none. Then it checks
   whether the simulator's `launchd_sim` carries the shaper. It reads that process's environment
   with `ps -E` and looks for `DYLD_INSERT_LIBRARIES=<this build>` and
   `SIM_RS_NETSHAPE=<this profile>`.
 - When it does not, it runs `simctl shutdown` and then `simctl boot` with
   `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES` and `SIMCTL_CHILD_SIM_RS_NETSHAPE`. It waits with
   `simctl bootstatus` and checks the environment again. simctl passes `SIMCTL_CHILD_*` into launchd's environment, so
-  every process in the device loads the shaper, including WebKit's networking extension. A boot
+  processes in the device load the shaper, including WebKit's networking extension. A boot
   that does not carry it fails the call.
 - A new shaper build has a new path, so the next apply reboots once more.
 - The injection check and reboot run in a per-UDID `SingleFlight`, so concurrent applies share one
@@ -55,6 +60,9 @@ percent of UDP datagrams.
 - A device-wide degrade in a session registers the same `none` restore slot as an Android
   emulator degrade (`shouldRegisterNetworkRestore`). Release, rebind and TTL expiry restore through
   `defaultNetworkConditionRestorer`, which picks the iOS path for a simulator UDID.
+- The slot can also hold the session's per-app rule (`iosAppRule`). A device-wide degrade then sets
+  `deviceWide` on it, and the restore resets the rule and restores the device, each even when the
+  other fails. Resetting only the app rule keeps the device-wide obligation.
 - `clear` deletes the profile and owner files and never reboots; the simulator keeps the inert shaper until
   its next plain boot.
 - Reads (`getDeviceState`) report the shaper only when a profile file exists and `launchd_sim`
@@ -63,9 +71,15 @@ percent of UDP datagrams.
 - `apply` writes the daemon's pid to `<UDID>.owner` beside the profile. The restore slot lives in
   session memory, so at startup, after rehydration, the daemon deletes every profile whose owner
   pid is not running (`sweepStaleNetworkShaperProfiles`). That unshapes simulators a crashed or
-  stopped daemon left shaped and keeps a live peer's on a shared data dir.
+  stopped daemon left shaped and keeps a live peer's on a shared data dir. The sweep claims a
+  profile by renaming it, then re-reads the owner; a changed owner means a live daemon took the
+  simulator over, and the profile goes back. Within one daemon, writes, rollbacks, clears and the
+  sweep take a per-profile lock.
 
 ## Limits
+
+- A few simulator processes do not load the shaper; their traffic is not shaped.
+- `localhost` names (RFC 6761) skip the resolver gate, so they resolve while offline.
 
 - TCP exposes no segment arrival times, so HTTP/2 and TLS setup latency is counted more than once.
 - Simulators that AutoMobile does not reboot keep running unshaped until the first degrade.

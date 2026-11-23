@@ -106,14 +106,20 @@ describe("runSessionNetworkMutation", () => {
           true,
           {
             mutation: async () => {
-              expect(manager.getNetworkCondition("net-throws")).toEqual({ initialProfile: "none" });
+              expect(manager.getNetworkCondition("net-throws")).toEqual({
+                initialProfile: "none",
+                deviceWide: true,
+              });
               throw new Error("mutation failed after partially shaping the device");
             },
           },
         ),
       ).rejects.toThrow("mutation failed after partially shaping the device");
 
-      expect(manager.getNetworkCondition("net-throws")).toEqual({ initialProfile: "none" });
+      expect(manager.getNetworkCondition("net-throws")).toEqual({
+        initialProfile: "none",
+        deviceWide: true,
+      });
       expect(restored).toEqual([]);
       await manager.releaseSession("net-throws");
       expect(restored).toEqual(["none"]);
@@ -146,7 +152,10 @@ describe("runSessionNetworkMutation", () => {
 
       // The slot is published before the mutation completes, so a release that
       // begins now already knows the device must be restored.
-      expect(manager.getNetworkCondition("net-1")).toEqual({ initialProfile: "none" });
+      expect(manager.getNetworkCondition("net-1")).toEqual({
+        initialProfile: "none",
+        deviceWide: true,
+      });
 
       const release = manager.releaseSession("net-1");
       // The tracked mutation is awaited by release, so no restore has run yet.
@@ -176,7 +185,10 @@ describe("runSessionNetworkMutation", () => {
         true,
         { mutation: async () => {} },
       );
-      expect(manager.getNetworkCondition("net-override")).toEqual({ initialProfile: "none" });
+      expect(manager.getNetworkCondition("net-override")).toEqual({
+        initialProfile: "none",
+        deviceWide: true,
+      });
     } finally {
       manager.stopCleanupTimer();
     }
@@ -268,7 +280,10 @@ describe("runSessionNetworkMutation", () => {
         failure,
       );
 
-      expect(manager.getNetworkCondition("net-fallback")).toEqual({ initialProfile: "none" });
+      expect(manager.getNetworkCondition("net-fallback")).toEqual({
+        initialProfile: "none",
+        deviceWide: true,
+      });
     } finally {
       manager.stopCleanupTimer();
     }
@@ -362,7 +377,10 @@ describe("runSessionNetworkMutation", () => {
       // the freshly-published slot is not cleared out from under the re-apply.
       timer.advanceTime(60_000);
       expect(restored).toEqual([]);
-      expect(manager.getNetworkCondition("net-reapply")).toEqual({ initialProfile: "none" });
+      expect(manager.getNetworkCondition("net-reapply")).toEqual({
+        initialProfile: "none",
+        deviceWide: true,
+      });
 
       finished.resolve();
       await reapply;

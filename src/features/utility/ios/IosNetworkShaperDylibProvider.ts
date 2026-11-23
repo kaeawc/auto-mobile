@@ -49,8 +49,8 @@ export interface IosNetworkShaperDylibDependencies {
 }
 
 interface ShaperToolchain {
-  /** The build environment with the selected DEVELOPER_DIR, or undefined for the active Xcode. */
-  env?: NodeJS.ProcessEnv;
+  /** The injected build environment, with DEVELOPER_DIR set to the selected Xcode when known. */
+  env: NodeJS.ProcessEnv;
   /** clang's path and the simulator SDK build, folded into the build cache key. */
   identity: string;
 }
@@ -61,7 +61,8 @@ export class DefaultIosNetworkShaperDylibProvider implements IosNetworkShaperDyl
   private readonly runner: HostCommandExecutor;
   private readonly env: NodeJS.ProcessEnv;
   private readonly flights = new SingleFlight<string, string>();
-  private toolchain?: Promise<ShaperToolchain>;
+  /** Concurrent ensures share one probe; each later ensure probes again, so an Xcode switch is seen. */
+  private readonly toolchainProbes = new SingleFlight<string, ShaperToolchain>();
 
   constructor(private readonly deps: IosNetworkShaperDylibDependencies = {}) {
     this.fs = deps.fileSystem ?? new DefaultFileSystem();
@@ -121,25 +122,26 @@ export class DefaultIosNetworkShaperDylibProvider implements IosNetworkShaperDyl
     );
   }
 
-  /** Memoized per provider; a failed resolution is retried by the next call. */
+  /**
+   * Resolved before the cache is consulted, never kept past the ensure that asked: the cache
+   * key and the compiler then always name the same Xcode.
+   */
   private resolveToolchain(source: string): Promise<ShaperToolchain> {
-    this.toolchain ??= this.readToolchain(source).catch((error: unknown) => {
-      this.toolchain = undefined;
-      throw error;
-    });
-    return this.toolchain;
+    return this.toolchainProbes.run(source, () => this.readToolchain(source));
   }
 
   /**
    * The Xcode the build uses: the caller's DEVELOPER_DIR, else the repository pin in a repo
-   * checkout (the same `select_pinned_xcode` local build scripts use), else the active Xcode.
+   * checkout (the same `select_pinned_xcode` local build scripts use), else the active Xcode,
+   * which is then pinned for this build so a switch mid-build cannot mix toolchains.
    */
   private async readToolchain(source: string): Promise<ShaperToolchain> {
     const developerDir =
       readEnvTrimmed(AMBIENT_ENV.DEVELOPER_DIR, this.env) ||
-      (await this.pinnedDeveloperDir(source));
-    const env = developerDir ? { ...this.env, DEVELOPER_DIR: developerDir } : undefined;
-    const options = env ? { env } : undefined;
+      (await this.pinnedDeveloperDir(source)) ||
+      (await this.activeDeveloperDir());
+    const env = developerDir ? { ...this.env, DEVELOPER_DIR: developerDir } : { ...this.env };
+    const options = { env };
     try {
       const clang = await this.runner.executeCommand(
         "xcrun",
@@ -157,6 +159,17 @@ export class DefaultIosNetworkShaperDylibProvider implements IosNetworkShaperDyl
         `iOS network shaper compiler unavailable. ${XCODE_HINT}. ${formatCommandError(error, { command: "xcrun" })}`,
         { cause: error },
       );
+    }
+  }
+
+  private async activeDeveloperDir(): Promise<string | undefined> {
+    try {
+      const result = await this.runner.executeCommand("xcode-select", ["-p"], { env: this.env });
+      return result.stdout.trim() || undefined;
+    } catch (error) {
+      // xcrun below resolves the selection itself; the cache key still records its clang.
+      logger.warn(`[NetworkShaper] xcode-select -p failed; xcrun picks the Xcode`, error);
+      return undefined;
     }
   }
 
@@ -237,11 +250,7 @@ export class DefaultIosNetworkShaperDylibProvider implements IosNetworkShaperDyl
     args: string[],
   ): Promise<void> {
     try {
-      await this.runner.executeCommand(
-        command,
-        args,
-        toolchain.env ? { env: toolchain.env } : undefined,
-      );
+      await this.runner.executeCommand(command, args, { env: toolchain.env });
     } catch (error) {
       throw new ActionableError(
         `iOS network shaper compile/sign failed. ${XCODE_HINT}. ${formatCommandError(error, { command, args })}`,

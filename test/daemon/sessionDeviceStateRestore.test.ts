@@ -433,6 +433,22 @@ describe("SessionDeviceStateRestore iOS app rule lease (#10264)", () => {
     expect(session.cacheData.networkCondition).toBeUndefined();
   });
 
+  test("an app rule joining a device-wide slot keeps the device-wide obligation (#19045)", () => {
+    session.cacheData.networkCondition = { initialProfile: "none", deviceWide: true };
+    const rule = begin();
+    expect(session.cacheData.networkCondition).toMatchObject({ deviceWide: true });
+    expect(session.cacheData.networkCondition?.iosAppRule?.bundleId).toBe(target.bundleId);
+    restore.finishIosAppNetworkReset(
+      session,
+      restore.prepareIosAppNetworkReset(session, target).rule,
+    );
+    expect(rule.revision).toBe(1);
+    expect(session.cacheData.networkCondition).toEqual({
+      initialProfile: "none",
+      deviceWide: true,
+    });
+  });
+
   test("confirm and finish are no-ops for an unpublished session or stale generation", () => {
     const rule = begin();
     restore.confirmIosAppNetworkRule(session, {
@@ -846,6 +862,37 @@ describe("network-condition family", () => {
     expect(h.calls()).toBe(0);
     expect(resets).toEqual([{ udid: "UDID-1", revision: 5 }]);
     expect(h.session.cacheData.networkCondition.iosAppRule?.lastRevision).toBe(5);
+  });
+
+  test("an app rule and a device-wide degrade in one slot are both restored (#19045)", async () => {
+    const resets: Array<{ udid: string; revision: number }> = [];
+    const h = await createNetwork(async () => {}, {
+      iosAppNetworkRuleRestorer: {
+        reset: async (rule) => {
+          resets.push({ udid: rule.udid, revision: rule.revision });
+          throw new Error("controller unreachable");
+        },
+        renew: async () => "renewed",
+      },
+    });
+    h.session.cacheData.networkCondition = {
+      initialProfile: "none",
+      deviceWide: true,
+      iosAppRule: { udid: "UDID-1", bundleId: "com.example", ownerGeneration: 1, lastRevision: 4 },
+    };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const target = h.restore.networkConditionRestoreTarget(h.session);
+      expect(target?.deviceWide).toBe(true);
+      // A failed rule reset does not skip the device-wide restore, and the failure is reported.
+      await expect(h.restore.restoreNetworkCondition(target!)).rejects.toThrow(
+        "controller unreachable",
+      );
+      expect(resets).toEqual([{ udid: "UDID-1", revision: 5 }]);
+      expect(h.calls()).toBe(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("expiry registers a capped quarantine only while the slot still holds a baseline", async () => {

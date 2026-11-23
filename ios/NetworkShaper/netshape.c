@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -103,6 +104,13 @@ static void sleep_s(double s) {
     while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {}
 }
 
+/// kbps to bytes per second with checked arithmetic: zero, negative or out-of-range is unlimited.
+static long kbps_to_bps(long kbps) {
+    long bps;
+    if (kbps <= 0 || __builtin_mul_overflow(kbps, 125L, &bps)) return 0;
+    return bps;
+}
+
 static void reload(void) {
     double t = now_s();
     pthread_mutex_lock(&g_lock);
@@ -143,8 +151,8 @@ static void reload(void) {
                     if (sscanf(tok, "%63[^=]=%ld", key, &value) != 2) continue;
                     if (!strcmp(key, "offline")) { r->set_offline = 1; r->offline = (int)value; }
                     else if (!strcmp(key, "latency_ms")) { r->set_latency = 1; r->latency_ms = (int)value; }
-                    else if (!strcmp(key, "down_kbps")) { r->set_down = 1; r->down_bps = value * 1000 / 8; }
-                    else if (!strcmp(key, "up_kbps")) { r->set_up = 1; r->up_bps = value * 1000 / 8; }
+                    else if (!strcmp(key, "down_kbps")) { r->set_down = 1; r->down_bps = kbps_to_bps(value); }
+                    else if (!strcmp(key, "up_kbps")) { r->set_up = 1; r->up_bps = kbps_to_bps(value); }
                     else if (!strcmp(key, "loss_pct")) { r->set_loss = 1; r->loss_pct = (int)value; }
                 }
                 nrules++;
@@ -153,8 +161,8 @@ static void reload(void) {
             if (sscanf(line, " %63[^= ] = %ld", key, &value) != 2) continue;
             if (!strcmp(key, "offline")) p.offline = (int)value;
             else if (!strcmp(key, "latency_ms")) p.latency_ms = (int)value;
-            else if (!strcmp(key, "down_kbps")) p.down_bps = value * 1000 / 8;
-            else if (!strcmp(key, "up_kbps")) p.up_bps = value * 1000 / 8;
+            else if (!strcmp(key, "down_kbps")) p.down_bps = kbps_to_bps(value);
+            else if (!strcmp(key, "up_kbps")) p.up_bps = kbps_to_bps(value);
             else if (!strcmp(key, "loss_pct")) p.loss_pct = (int)value;
             else if (!strcmp(key, "port_base")) p.port_base = (int)value;
             else if (!strcmp(key, "port_count")) p.port_count = (int)value;
@@ -491,6 +499,8 @@ static double cmsg_arrival(const struct msghdr *m) {
     return 0;
 }
 
+static void pace(int fd, ssize_t bytes, int sending);
+
 /// recv/recvfrom on a delayed UDP socket, through recvmsg so the arrival timestamp is visible.
 static ssize_t udp_recv(int fd, void *b, size_t n, int fl, struct sockaddr *from, socklen_t *fromlen, const profile_t *p) {
     struct iovec iov = {b, n};
@@ -507,7 +517,10 @@ static ssize_t udp_recv(int fd, void *b, size_t n, int fl, struct sockaddr *from
     g_depth--;
     if (r >= 0) {
         if (fromlen) *fromlen = m.msg_namelen;
-        if (!(fl & MSG_PEEK)) deliver_at(cmsg_arrival(&m), p);
+        if (!(fl & MSG_PEEK)) {
+            deliver_at(cmsg_arrival(&m), p);
+            pace(fd, r, 0); // the download cap applies once the datagram is due
+        }
     }
     return r;
 }
@@ -726,9 +739,20 @@ static int is_literal(const char *node) {
     return inet_pton(AF_INET, node, &a4) == 1 || inet_pton(AF_INET6, node, &a6) == 1;
 }
 
+/// `localhost`, `localhost.` and names under `.localhost` (RFC 6761) resolve to loopback, which
+/// is never shaped: they stay resolvable, with no added latency, while the profile is offline.
+static int is_localhost_name(const char *node) {
+    static const char *const suffix = "localhost";
+    size_t len = strlen(node);
+    if (len > 0 && node[len - 1] == '.') len--;
+    size_t slen = strlen(suffix);
+    if (len < slen || strncasecmp(node + len - slen, suffix, slen) != 0) return 0;
+    return len == slen || node[len - slen - 1] == '.';
+}
+
 /// A DNS lookup is one round trip on the shaped link, and fails while the host (or all) is offline.
 static int my_getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res) {
-    if (node && !is_literal(node)) {
+    if (node && !is_literal(node) && !is_localhost_name(node)) {
         profile_t p = effective(match_rule_name(node));
         if (p.offline) return EAI_NONAME;
         sleep_s(p.latency_ms / 1000.0);
@@ -761,6 +785,10 @@ static void dns_reply(DNSServiceRef ref, uint32_t flags, uint32_t ifi, int32_t e
 #define kDNSServiceErr_NoSuchName (-65538)
 /// Offline (for this name): the query fails up front, as with no network.
 static int dns_blocked(const char *host, double *delay) {
+    if (is_localhost_name(host)) {
+        *delay = 0;
+        return 0;
+    }
     profile_t p = effective(match_rule_name(host));
     *delay = p.latency_ms / 1000.0;
     return p.offline;
@@ -768,12 +796,15 @@ static int dns_blocked(const char *host, double *delay) {
 static int32_t my_DNSServiceGetAddrInfo(DNSServiceRef *ref, uint32_t flags, uint32_t ifi, uint32_t proto, const char *host, DNSServiceGetAddrInfoReply reply, void *ctx) {
     double delay = 0;
     if (host && dns_blocked(host, &delay)) return kDNSServiceErr_NoSuchName;
+    if (!reply) return DNSServiceGetAddrInfo(ref, flags, ifi, proto, host, reply, ctx);
     dns_ctx_t *c = malloc(sizeof *c); // lives as long as the query; small and rare
-    if (!c || !reply) return DNSServiceGetAddrInfo(ref, flags, ifi, proto, host, reply, ctx);
+    if (!c) return DNSServiceGetAddrInfo(ref, flags, ifi, proto, host, reply, ctx);
     c->reply = reply;
     c->context = ctx;
     c->delay = delay;
-    return DNSServiceGetAddrInfo(ref, flags, ifi, proto, host, dns_reply, c);
+    int32_t err = DNSServiceGetAddrInfo(ref, flags, ifi, proto, host, dns_reply, c);
+    if (err != 0) free(c); // a query that failed to start never calls back
+    return err;
 }
 DYLD_INTERPOSE(my_DNSServiceGetAddrInfo, DNSServiceGetAddrInfo)
 
@@ -782,12 +813,15 @@ extern int32_t DNSServiceGetAddrInfoEx(DNSServiceRef *, uint32_t, uint32_t, uint
 static int32_t my_DNSServiceGetAddrInfoEx(DNSServiceRef *ref, uint32_t flags, uint32_t ifi, uint32_t proto, const char *host, const void *attr, DNSServiceGetAddrInfoReply reply, void *ctx) {
     double delay = 0;
     if (host && dns_blocked(host, &delay)) return kDNSServiceErr_NoSuchName;
+    if (!reply) return DNSServiceGetAddrInfoEx(ref, flags, ifi, proto, host, attr, reply, ctx);
     dns_ctx_t *c = malloc(sizeof *c);
-    if (!c || !reply) return DNSServiceGetAddrInfoEx(ref, flags, ifi, proto, host, attr, reply, ctx);
+    if (!c) return DNSServiceGetAddrInfoEx(ref, flags, ifi, proto, host, attr, reply, ctx);
     c->reply = reply;
     c->context = ctx;
     c->delay = delay;
-    return DNSServiceGetAddrInfoEx(ref, flags, ifi, proto, host, attr, dns_reply, c);
+    int32_t err = DNSServiceGetAddrInfoEx(ref, flags, ifi, proto, host, attr, dns_reply, c);
+    if (err != 0) free(c); // a query that failed to start never calls back
+    return err;
 }
 DYLD_INTERPOSE(my_DNSServiceGetAddrInfoEx, DNSServiceGetAddrInfoEx)
 

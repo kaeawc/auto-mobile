@@ -2617,11 +2617,13 @@
         "downloadKbps": {
           "type": "number",
           "minimum": 0,
+          "maximum": 100000000,
           "description": "Override download cap in kbps (0 = unlimited)"
         },
         "uploadKbps": {
           "type": "number",
           "minimum": 0,
+          "maximum": 100000000,
           "description": "Override upload cap in kbps (0 = unlimited)"
         },
         "packetLossPercent": {

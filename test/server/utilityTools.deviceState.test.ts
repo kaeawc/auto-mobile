@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { compileAjv } from "../helpers/jsonSchemaCompile";
 import fs from "node:fs";
 import path from "node:path";
-import { registerUtilityTools } from "../../src/server/utilityTools";
+import { registerUtilityTools, setDeviceStateSchema } from "../../src/server/utilityTools";
 import { ActionableError } from "../../src/models/ActionableError";
 import { DeviceState } from "../../src/features/utility/DeviceState";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -868,5 +868,17 @@ describe("device state tools", () => {
     expect(devicePool.getDevice("sim-b")?.sessionId).toBe("session-b");
 
     sessionManager.stopCleanupTimer();
+  });
+});
+
+describe("setDeviceState networkCondition bandwidth bounds (#19108)", () => {
+  test("accepts caps up to 100 Gbit/s and rejects larger ones before any device is shaped", () => {
+    for (const field of ["downloadKbps", "uploadKbps"] as const) {
+      const parse = (value: number) =>
+        setDeviceStateSchema.safeParse({ networkCondition: { profile: "none", [field]: value } });
+      expect(parse(0).success).toBe(true);
+      expect(parse(100_000_000).success).toBe(true);
+      expect(parse(10_000_000_000_000_000).success).toBe(false);
+    }
   });
 });

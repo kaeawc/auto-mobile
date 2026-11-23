@@ -19,7 +19,7 @@ export const IOS_SHAPER_REBOOT_WARNING =
 
 /** What the device-wide socket shaper covers and does not (#19045). */
 export const IOS_SHAPER_LIMITATIONS: readonly string[] = Object.freeze([
-  "Shapes every process in the simulator, WebKit and system daemons included, for connections to non-loopback peers; loopback traffic (CtrlProxy) is never shaped.",
+  "Shapes the processes in the simulator that load the shaper (the app, WebKit and most system daemons; a few simulator processes do not load it), for connections to non-loopback peers; loopback traffic (CtrlProxy) is never shaped.",
   "packetLossPercent is the percent of new TCP connections that time out and of UDP datagrams dropped.",
   "Latency is added to the connection handshake and to each request/response turnaround; HTTP/2 and TLS setup can count it more than once.",
 ]);
@@ -62,6 +62,7 @@ export async function applyIosShaperNetworkCondition(
     try {
       await shaper.clear(udid);
     } catch (error) {
+      logger.warn(`[DeviceState] iOS network shaper reset failed: ${errorMessage(error)}`, error);
       return { ...base, verified: false, error: errorMessage(error) };
     }
     return {
@@ -91,7 +92,10 @@ export async function applyIosShaperNetworkCondition(
   }
 }
 
-/** The shaper's state for a read, or undefined when AutoMobile never shaped this simulator. */
+/**
+ * The shaper's state for a read, or undefined when AutoMobile never shaped this simulator.
+ * A failed read is a socket-shaper state with an error, not a fall-through to the extension.
+ */
 export async function readIosShaperNetworkCondition(
   shaper: IosSimulatorNetworkShaper,
   udid: string,
@@ -101,7 +105,13 @@ export async function readIosShaperNetworkCondition(
     state = await shaper.read(udid);
   } catch (error) {
     logger.warn(`[DeviceState] iOS network shaper read failed: ${errorMessage(error)}`, error);
-    return undefined;
+    return {
+      supported: true,
+      capability: "full",
+      backend: "socket-shaper",
+      scope: "device",
+      error: errorMessage(error),
+    };
   }
   if (!state.injected || !state.profile) {
     return undefined;

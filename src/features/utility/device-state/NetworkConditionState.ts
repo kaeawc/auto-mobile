@@ -152,6 +152,13 @@ export const NETWORK_CONDITION_PROFILES: Record<NetworkConditionProfile, Network
 export const MAX_NETWORK_CONDITION_TTL_SECONDS = Math.floor(2_147_483_647 / 1000);
 
 /**
+ * Upper bound for `downloadKbps`/`uploadKbps` (100 Gbit/s): far above any real
+ * cap, and small enough that the iOS shaper's bytes-per-second conversion never
+ * overflows (#19108).
+ */
+export const MAX_NETWORK_BANDWIDTH_KBPS = 100_000_000;
+
+/**
  * State of the iOS Simulator network-extension backend (#10590): whether the
  * controller is installed, approved and answering.
  */

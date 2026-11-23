@@ -250,3 +250,89 @@ test("apply publishes the owner file before the profile, so a sweep never sees a
   expect(renamed).toEqual([OWNER, PROFILE]);
   expect(await h.fs.readFile(OWNER)).toBe("4242\n");
 });
+
+test("a failed profile write leaves the previous profile and owner in place", async () => {
+  const h = setup();
+  h.fs.setFile(PROFILE, formatShaperProfile(THREE_G));
+  h.fs.setFile(OWNER, "999\n");
+  const rename = h.fs.rename.bind(h.fs);
+  h.fs.rename = async (from: string, to: string) => {
+    if (to === PROFILE) {
+      throw new Error("disk full");
+    }
+    await rename(from, to);
+  };
+  await expect(h.shaper.apply(UDID, { ...THREE_G, offline: true })).rejects.toThrow("disk full");
+  h.fs.rename = rename;
+  expect(parseShaperProfile(await h.fs.readFile(PROFILE))).toEqual(THREE_G);
+  expect(await h.fs.readFile(OWNER)).toBe("999\n");
+});
+
+test("a failed shaped reboot removes the new profile when there was none before", async () => {
+  const h = setup();
+  h.runner.setCommandError("simctl boot", new Error("Unable to boot device"));
+  await expect(h.shaper.apply(UDID, { ...THREE_G, offline: true })).rejects.toThrow("Rebooting");
+  expect(h.fs.existsSync(PROFILE)).toBe(false);
+  expect(h.fs.existsSync(OWNER)).toBe(false);
+});
+
+test("a failed shaped reboot restores the profile that was in effect before", async () => {
+  const h = setup();
+  h.runner.shaped = true;
+  await h.shaper.apply(UDID, THREE_G);
+  // The simulator was booted again without the shaper, and the shaped reboot now fails.
+  h.runner.shaped = false;
+  h.runner.bootInjects = false;
+  await expect(h.shaper.apply(UDID, { ...THREE_G, offline: true })).rejects.toThrow(
+    "does not carry the network shaper",
+  );
+  expect(parseShaperProfile(await h.fs.readFile(PROFILE))).toEqual(THREE_G);
+});
+
+test("the sweep keeps a profile a live daemon took over after the sweep read the dead owner", async () => {
+  const h = setup();
+  h.fs.setFile(PROFILE, "offline=1\n");
+  h.fs.setFile(OWNER, "999\n");
+  h.livePids.add(777);
+  const rename = h.fs.rename.bind(h.fs);
+  h.fs.rename = async (from: string, to: string) => {
+    if (from === PROFILE && to.endsWith(".sweep")) {
+      // Another daemon writes its owner, then its profile, between the sweep's read and claim.
+      h.fs.setFile(OWNER, "777\n");
+      h.fs.setFile(PROFILE, "offline=0\nlatency_ms=500\n");
+    }
+    await rename(from, to);
+  };
+  expect(await h.shaper.clearOrphaned()).toEqual([]);
+  expect(await h.fs.readFile(PROFILE)).toBe("offline=0\nlatency_ms=500\n");
+  expect(await h.fs.readFile(OWNER)).toBe("777\n");
+  const dir = join(resolve("/data/ios-network-shaper"), "profiles");
+  expect((await h.fs.readdir(dir)).filter((name) => name.endsWith(".sweep"))).toEqual([]);
+});
+
+test("the sweep waits for this daemon's in-flight apply on the same simulator", async () => {
+  const h = setup();
+  h.runner.shaped = true;
+  h.fs.setFile(PROFILE, "offline=1\n");
+  h.fs.setFile(OWNER, "999\n");
+  const applying = h.shaper.apply(UDID, THREE_G);
+  const swept = h.shaper.clearOrphaned();
+  expect(await applying).toEqual({ rebooted: false });
+  expect(await swept).toEqual([]);
+  expect(parseShaperProfile(await h.fs.readFile(PROFILE))).toEqual(THREE_G);
+  expect(await h.fs.readFile(OWNER)).toBe("4242\n");
+});
+
+test("a profile removed while read scans processes reads as unshaped", async () => {
+  const h = setup();
+  h.fs.setFile(PROFILE, formatShaperProfile(THREE_G));
+  h.runner.shaped = true;
+  const execute = h.runner.executeCommand.bind(h.runner);
+  h.runner.executeCommand = async (command, args = [], options) => {
+    if (command === "ps" && args[0] === "-E") {
+      await h.shaper.clear(UDID);
+    }
+    return execute(command, args, options);
+  };
+  expect(await h.shaper.read(UDID)).toEqual({ injected: false });
+});

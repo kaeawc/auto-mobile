@@ -60,6 +60,8 @@ export interface NetworkConditionRestoreTarget {
    * the target was captured — newer than any apply this session sent.
    */
   iosAppRule?: IosAppNetworkRule;
+  /** Also restore the device-wide condition to `profile` (always true without `iosAppRule`). */
+  deviceWide: boolean;
 }
 
 /** What SessionDeviceStateRestore needs from the session manager that owns it (#11795). */

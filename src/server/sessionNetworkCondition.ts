@@ -219,7 +219,10 @@ export async function runSessionNetworkMutation<T>(
               ? sessionManager.beginIosAppNetworkRule(session, iosPlan.target)
               : sessionManager.prepareIosAppNetworkReset(session, iosPlan.target);
         } else if (registerRestore) {
-          sessionManager.setNetworkCondition(sessionUuid, { initialProfile: "none" });
+          sessionManager.setNetworkCondition(sessionUuid, {
+            initialProfile: "none",
+            deviceWide: true,
+          });
         }
         result = await mutation(iosRule);
         completed = true;

@@ -167,7 +167,7 @@ final class PrototypeStateExpressivenessTests: XCTestCase {
                 "visibleWhen": .object(["key": .string("n"), "equals": .string("{row.n}")]),
             ])]),
         ]))
-        XCTAssertEqual(expanded, .object([
+        XCTAssertEqual(PrototypeRepeat.withoutRowKeys(expanded), .object([
             "type": .string("column"),
             "children": .array([.object([
                 "type": .string("text"),

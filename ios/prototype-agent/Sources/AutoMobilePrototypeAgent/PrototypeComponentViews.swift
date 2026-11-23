@@ -409,7 +409,7 @@
                 ? colors.surfaceHigh
                 : colors.surface
             VStack(alignment: .leading, spacing: style?.spacing ?? 0) {
-                ForEach(node.drawnChildren(holds: model.holds, stacks: model.stacks), id: \.offset) { entry in
+                ForEach(node.drawnChildren(holds: model.holds, stacks: model.stacks), id: \.identity) { entry in
                     NodeView(node: entry.node, model: model, inStackSlot: true)
                 }
             }
@@ -989,7 +989,7 @@
             case nil: !(DateFormatter.dateFormat(
                     fromTemplate: "j", options: 0, locale: PrototypeRecordingMode.current.locale
                 ) ?? "")
-                .contains("a")
+                    .contains("a")
             }
         }
     }

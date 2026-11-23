@@ -371,6 +371,67 @@ describe("xctrace recorder (#14102)", () => {
     expect((error as Error).message).toContain("Path not found 'com.apple.Preferences'");
   });
 
+  test("drains error lines after an xctrace that already exited, before close (#19022)", async () => {
+    const { host, recorder, timer } = xctrace();
+    const recording = await recorder.start({ ...iosRequest, template: "hitches" });
+    const child = host.spawned[0]!.child;
+    const signals: Array<string | number | undefined> = [];
+    child.kill = (signal) => (signals.push(signal), true);
+    child.exitCode = 0;
+    child.emit("exit", 0, null);
+    timer.setTimeout(() => {
+      child.stderr.emit(
+        "data",
+        fixture("xctrace-record-launch-bundle-id-path-not-found-ios27.out.txt"),
+      );
+      child.emit("close", 0, null);
+    }, 50);
+    host.executeCommand = async () => {
+      throw new Error(fixture("xctrace-export-malformed.stderr.txt"));
+    };
+    await recording.stop();
+
+    const error = await recording.summarize().catch((caught: unknown) => caught);
+
+    expect(signals).toEqual([]);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect((error as Error).message).toContain("Path not found 'com.apple.Preferences'");
+  });
+
+  test("stops waiting for an exited xctrace whose output never closes (#19022)", async () => {
+    const { host, recorder, timer } = xctrace();
+    const recording = await recorder.start(iosRequest);
+    const child = host.spawned[0]!.child;
+    child.exitCode = 0;
+    child.emit("exit", 0, null);
+    const started = timer.now();
+
+    await recording.stop();
+
+    expect(timer.now() - started).toBe(5000);
+    expect(child.stderr.listenerCount("data")).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("decodes a multibyte character split across output chunks (#19022)", async () => {
+    const { host, recorder } = xctrace();
+    const recording = await recorder.start({ ...iosRequest, template: "hitches" });
+    const child = host.spawned[0]!.child;
+    const line = Buffer.from("  * [Error] Path not found '/sim/Café.app'.\n");
+    const split = line.indexOf(Buffer.from("é")) + 1;
+    child.stderr.push(line.subarray(0, split));
+    child.stderr.push(line.subarray(split));
+    await new Promise((resolve) => setImmediate(resolve));
+    host.executeCommand = async () => {
+      throw new Error(fixture("xctrace-export-malformed.stderr.txt"));
+    };
+    await recording.stop();
+
+    const error = await recording.summarize().catch((caught: unknown) => caught);
+
+    expect((error as Error).message).toContain("Path not found '/sim/Café.app'");
+  });
+
   test("keeps recorder errors as warnings when the trace is readable", async () => {
     const { host, recorder } = xctrace();
     host.startOutput = fixture("xctrace-record-hitches-unsupported-ipad-ios27.out.txt");

@@ -60,17 +60,25 @@ function buildAlarm(
 ): AlarmInfo {
   const typeCode = Number(match[3]);
   const alarmType = TYPE_NAMES[typeCode] ?? match[1];
-  const detail = field(body, /\btype=\d+\b.*?\bwindow=(-?\d+)\b.*?\brepeatInterval=(\d+)/);
+  // Android 11 prints `window=0` on its own line and Android 14 prints a duration (`+22m30s0ms`).
+  const window = field(body, /\bwindow=(\S+)/)?.[1];
+  const repeat = field(body, /\brepeatInterval=(\d+)/)?.[1];
   const flags = field(body, /\bflags=0x([0-9a-f]+)/i)?.[1];
-  const operation = field(body, /^\s*(?:operation|listener)=(.+)$/)?.[1]?.trim();
+  // A listener alarm prints `operation=null` and then `listener=`, so skip the null operation.
+  const operation = body
+    .map((line) => /^\s*(?:operation|listener)=(.+)$/.exec(line)?.[1]?.trim())
+    .find((value) => value !== undefined && value !== "null");
   return {
     packageName: match[5],
     alarmType,
     wakeup: alarmType.endsWith("_WAKEUP"),
     ...optional("tag", field(body, /^\s*tag=(.+)$/)?.[1]?.trim()),
     ...optional("triggerInMs", triggerInMs(body, match[4], nowElapsed)),
-    ...optional("windowMs", numberOrUndefined(detail?.[1])),
-    ...optional("repeatIntervalMs", numberOrUndefined(detail?.[2])),
+    ...optional(
+      "windowMs",
+      /^-?\d+$/.test(window ?? "") ? Number(window) : parseDumpDurationMs(window),
+    ),
+    ...optional("repeatIntervalMs", numberOrUndefined(repeat)),
     ...optional("flags", flags === undefined ? undefined : Number.parseInt(flags, 16)),
     ...optional("operation", operation?.slice(0, OPERATION_MAX_LENGTH)),
   };

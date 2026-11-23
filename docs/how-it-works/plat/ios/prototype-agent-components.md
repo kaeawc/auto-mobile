@@ -146,7 +146,7 @@ transition as a real tap, including on part identifiers.
   Kind `link_opened` with payload `{url,entry}` precedes actions; kind `link_unmatched` with payload
   `{url}` runs none. Both have `name: null`, and URLs omit every declared secret query value.
   An absent optional binding refuses the complete action list after acceptance.
-  Injected agents intercept scene and application URL delegate callbacks, preserving host callbacks;
+- **Inbound link delivery.** Injected agents intercept scene and application URL delegate callbacks, preserving host callbacks;
   cold URLs wait for the first spec before rendering. ProtoViewer's `onOpenURL` callback delivers
   each prototype link the delegate hook did not (the SwiftUI app lifecycle on iOS 27.2 never reaches
   the hook), and it registers `amp-demo` for prototype links alongside its separate MCP scheme.

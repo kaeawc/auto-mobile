@@ -13,6 +13,7 @@ const FIXTURES = join(import.meta.dir, "../../fixtures/ios-render-overlays");
 const UDID = "E5D28852-ACC5-4769-91DA-7F497C8969B9";
 
 /** Captured from an iOS 27.2 Simulator (Xcode 27.2) turning on blended layers and off-screen. */
+const DEVELOPER_DIR = async () => "/Applications/Xcode.app/Contents/Developer";
 const SET_STDOUT = readFileSync(join(FIXTURES, "set-blended-offscreen.stdout"), "utf8");
 /** Captured osascript stderr for a UDID that is not in the default device set. */
 const MISSING_STDERR = readFileSync(join(FIXTURES, "missing-device.stderr"), "utf8");
@@ -55,7 +56,7 @@ describe("CoreSimulator render overlay bridge (#19016)", () => {
   test("passes the UDID and each write as option id / 0|1 pairs to osascript", async () => {
     const host = new RecordingHost({ stdout: SET_STDOUT });
 
-    const change = await new OsascriptSimulatorRenderOverlayControl(host).set(UDID, {
+    const change = await new OsascriptSimulatorRenderOverlayControl(host, DEVELOPER_DIR).set(UDID, {
       offscreenRendered: true,
       blendedLayers: true,
     });
@@ -66,16 +67,26 @@ describe("CoreSimulator render overlay bridge (#19016)", () => {
     expect(call?.file).toBe("/usr/bin/osascript");
     expect(call?.args.slice(0, 3)).toEqual(["-l", "JavaScript", "-e"]);
     expect(call?.args[3]).toContain("setCADebugOption:enabled:");
-    expect(call?.args.slice(4)).toEqual([UDID, "/var/db/xcode_select_link", "2", "1", "17", "1"]);
+    expect(call?.args.slice(4)).toEqual([
+      UDID,
+      "/Applications/Xcode.app/Contents/Developer",
+      "2",
+      "1",
+      "17",
+      "1",
+    ]);
   });
 
   test("a read writes nothing and returns the state", async () => {
     const host = new RecordingHost({ stdout: SET_STDOUT });
 
-    const state = await new OsascriptSimulatorRenderOverlayControl(host).read(UDID);
+    const state = await new OsascriptSimulatorRenderOverlayControl(host, DEVELOPER_DIR).read(UDID);
 
     expect(state.offscreenRendered).toBe(true);
-    expect(host.calls[0]?.args.slice(4)).toEqual([UDID, "/var/db/xcode_select_link"]);
+    expect(host.calls[0]?.args.slice(4)).toEqual([
+      UDID,
+      "/Applications/Xcode.app/Contents/Developer",
+    ]);
   });
 
   test("reports osascript's stderr, not the script, when CoreSimulator fails", async () => {
@@ -85,6 +96,7 @@ describe("CoreSimulator render overlay bridge (#19016)", () => {
     });
     const control = new OsascriptSimulatorRenderOverlayControl(
       new RecordingHost({ error: failure }),
+      DEVELOPER_DIR,
     );
 
     const error = await control.read(UDID).catch((caught: unknown) => caught);
@@ -96,25 +108,13 @@ describe("CoreSimulator render overlay bridge (#19016)", () => {
     expect(String((error as Error).message)).not.toContain("ObjC.import");
   });
 
-  test("an Xcode.app DEVELOPER_DIR resolves to its developer directory", async () => {
+  test("passes the resolved developer directory to the script", async () => {
     const host = new RecordingHost({ stdout: SET_STDOUT });
-    const env = { DEVELOPER_DIR: "/Applications/Xcode-27.2.0.app/" };
+    const resolved = async () => "/Applications/Xcode-27.2.0.app/Contents/Developer";
 
-    await new OsascriptSimulatorRenderOverlayControl(host, env).read(UDID);
+    await new OsascriptSimulatorRenderOverlayControl(host, resolved).read(UDID);
 
-    expect(host.calls[0]?.args.slice(4)).toEqual([
-      UDID,
-      "/Applications/Xcode-27.2.0.app/Contents/Developer",
-    ]);
-  });
-
-  test("a developer directory is passed through unchanged", async () => {
-    const host = new RecordingHost({ stdout: SET_STDOUT });
-    const env = { DEVELOPER_DIR: "/Applications/Xcode.app/Contents/Developer" };
-
-    await new OsascriptSimulatorRenderOverlayControl(host, env).read(UDID);
-
-    expect(host.calls[0]?.args[5]).toBe("/Applications/Xcode.app/Contents/Developer");
+    expect(host.calls[0]?.args[5]).toBe("/Applications/Xcode-27.2.0.app/Contents/Developer");
   });
 
   test("a write to a shut-down Simulator is a typed actionable error", async () => {
@@ -124,6 +124,7 @@ describe("CoreSimulator render overlay bridge (#19016)", () => {
     });
     const control = new OsascriptSimulatorRenderOverlayControl(
       new RecordingHost({ error: failure }),
+      DEVELOPER_DIR,
     );
 
     const error = await control
@@ -134,9 +135,9 @@ describe("CoreSimulator render overlay bridge (#19016)", () => {
     expect(String((error as Error).message)).toContain("is not booted");
   });
 
-  test("the script checks the booted state only when it writes", () => {
+  test("the script checks the booted state only when it writes", async () => {
     const host = new RecordingHost({ stdout: SET_STDOUT });
-    void new OsascriptSimulatorRenderOverlayControl(host).read(UDID);
+    await new OsascriptSimulatorRenderOverlayControl(host, DEVELOPER_DIR).read(UDID);
     const script = host.calls[0]?.args[3] ?? "";
     expect(script).toContain("argv.length > 2 && Number(device.state) !== 3");
   });

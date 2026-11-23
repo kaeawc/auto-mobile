@@ -2,7 +2,6 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod/v3";
 import { AMBIENT_ENV, readEnvTrimmed } from "../../config/env";
-import { developerDirectoryOf, XCODE_SELECT_LINK } from "./developerDirectory";
 import { defaultIdGenerator, type IdGenerator } from "../IdGenerator";
 import { resolveAutoMobileBaseDir } from "../tempDir";
 import { logger } from "../logger";
@@ -56,9 +55,11 @@ export class FileSimulatorProfileStore implements SimulatorProfileStore {
     // xcode-select maintains this symlink. DEVELOPER_DIR overrides it, including
     // the supported Xcode.app shorthand. Never spawn xcode-select or plutil.
     const selected = await fs.realpath(
-      readEnvTrimmed(AMBIENT_ENV.DEVELOPER_DIR, this.env) || XCODE_SELECT_LINK,
+      readEnvTrimmed(AMBIENT_ENV.DEVELOPER_DIR, this.env) || "/var/db/xcode_select_link",
     );
-    const developer = developerDirectoryOf(selected);
+    const developer = selected.endsWith(".app")
+      ? path.join(selected, "Contents/Developer")
+      : selected;
     const versionPath = path.resolve(developer, "../version.plist");
     const [directory, version] = await Promise.all([fs.stat(developer), fs.stat(versionPath)]);
     return JSON.stringify([

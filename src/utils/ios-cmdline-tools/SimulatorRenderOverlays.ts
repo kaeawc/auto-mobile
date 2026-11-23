@@ -2,9 +2,8 @@ import { z } from "zod/v4";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { commandFailureDetails } from "../CommandError";
 import { errorMessage } from "../describeUnknownError";
-import { AMBIENT_ENV, readEnvTrimmed } from "../../config/env";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../HostCommandExecutor";
-import { developerDirectoryOf, XCODE_SELECT_LINK } from "./developerDirectory";
+import { resolveDeveloperDirectory } from "./SimulatorBacklight";
 
 /**
  * Core Animation render overlays the Simulator's Debug menu offers (#19016), keyed by the
@@ -95,7 +94,7 @@ const OSASCRIPT_TIMEOUT_MS = 15_000;
 export class OsascriptSimulatorRenderOverlayControl implements SimulatorRenderOverlayControl {
   constructor(
     private readonly host: HostCommandExecutor = new DefaultHostCommandExecutor(),
-    private readonly env: NodeJS.ProcessEnv = process.env,
+    private readonly developerDirectory: () => Promise<string> = () => resolveDeveloperDirectory(),
   ) {}
 
   async read(udid: string, signal?: AbortSignal): Promise<Record<RenderOverlay, boolean>> {
@@ -110,12 +109,6 @@ export class OsascriptSimulatorRenderOverlayControl implements SimulatorRenderOv
     return this.run(udid, values, signal);
   }
 
-  private developerDirectory(): string {
-    return developerDirectoryOf(
-      readEnvTrimmed(AMBIENT_ENV.DEVELOPER_DIR, this.env) || XCODE_SELECT_LINK,
-    );
-  }
-
   private async run(
     udid: string,
     values: RenderOverlayValues,
@@ -128,7 +121,7 @@ export class OsascriptSimulatorRenderOverlayControl implements SimulatorRenderOv
     try {
       const result = await this.host.executeCommand(
         "/usr/bin/osascript",
-        ["-l", "JavaScript", "-e", JXA_SCRIPT, udid, this.developerDirectory(), ...writes],
+        ["-l", "JavaScript", "-e", JXA_SCRIPT, udid, await this.developerDirectory(), ...writes],
         { timeoutMs: OSASCRIPT_TIMEOUT_MS, ...(signal ? { signal } : {}) },
       );
       stdout = result.stdout;

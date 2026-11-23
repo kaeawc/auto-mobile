@@ -3,10 +3,14 @@
 // Report docs pages that exceed their section's readability budgets (#18145).
 //
 // Usage: bun scripts/docs/check-readability.ts [--config <file>] [--github] [--strict]
+//        [--files <path>...]
 //
 // Budgets live in scripts/docs/readability-budgets.json, one entry per docs
 // section (using, how-it-works, devlog). Every `.md` file under a section path
-// is checked; pages outside every section are skipped. Prints one
+// is checked, or only the listed pages with `--files` (every argument after it
+// is a repository-relative path; scripts/docs/check-readability-changed.sh
+// passes the docs pages a branch changed). Pages outside every section are
+// skipped. Prints one
 // `file:line: rule: message [section]` row per finding and a per-section
 // summary. `--github` also emits workflow annotations: errors for findings in
 // a section marked `"enforced": true` (already clean on main), warnings for the
@@ -14,7 +18,7 @@
 // with `--strict`; findings in other sections are advisory.
 // See scripts/docs/readability.ts for what each rule measures.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { dropGitIgnored } from "../lib/gitIgnored";
@@ -31,13 +35,28 @@ import {
 const ROOT = join(import.meta.dir, "..", "..");
 const DEFAULT_CONFIG = join(import.meta.dir, "readability-budgets.json");
 
-export function checkRepository(root: string, config: ReadabilityConfig): Finding[] {
-  const files = dropGitIgnored(
-    root,
+/** Normalizes a `--files` list to the unique, sorted Markdown pages under docs/ that exist. */
+export function selectDocsPages(
+  files: readonly string[],
+  exists: (file: string) => boolean,
+): string[] {
+  const pages = files
+    .map((file) => file.split("\\").join("/").replace(/^\.\//, ""))
+    .filter((file) => file.startsWith("docs/") && file.endsWith(".md") && exists(file));
+  return [...new Set(pages)].sort();
+}
+
+export function checkRepository(
+  root: string,
+  config: ReadabilityConfig,
+  only?: readonly string[],
+): Finding[] {
+  const candidates =
+    only ??
     Array.from(new Glob("docs/**/*.md").scanSync({ cwd: root })).map((file) =>
       file.split("\\").join("/"),
-    ),
-  ).sort();
+    );
+  const files = dropGitIgnored(root, [...candidates]).sort();
   return files.flatMap((file) => {
     const budget = sectionFor(config, file);
     return budget ? checkPage(file, readFileSync(join(root, file), "utf8"), budget) : [];
@@ -65,11 +84,24 @@ if (import.meta.main) {
   const configIndex = args.indexOf("--config");
   const configPath = configIndex >= 0 ? args[configIndex + 1] : DEFAULT_CONFIG;
   if (!configPath) {
-    console.error("usage: check-readability.ts [--config <file>] [--github] [--strict]");
+    console.error(
+      "usage: check-readability.ts [--config <file>] [--github] [--strict] [--files <path>...]",
+    );
     process.exit(2);
   }
   const config = parseConfig(JSON.parse(readFileSync(configPath, "utf8")));
-  const findings = checkRepository(ROOT, config);
+  const filesIndex = args.indexOf("--files");
+  const only =
+    filesIndex >= 0
+      ? selectDocsPages(args.slice(filesIndex + 1), (file) => existsSync(join(ROOT, file)))
+      : undefined;
+  if (only) {
+    console.log(`Checking ${only.length} docs page(s):`);
+    for (const file of only) {
+      console.log(`  ${file}`);
+    }
+  }
+  const findings = checkRepository(ROOT, config, only);
   const failing = new Set(failingFindings(config, findings, args.includes("--strict")));
   for (const finding of findings) {
     console.log(formatFinding(finding));

@@ -13,7 +13,12 @@ import { diffDeviceBaseline } from "../../../src/daemon/sessionBroker/mutations/
 import { planDeviceMutationRevert } from "../../../src/daemon/sessionBroker/mutations/revertPlanner";
 import { readFileSync } from "node:fs";
 import { shellQuote } from "../../../src/utils/shellQuote";
-import { androidBaselineRig, androidPackageDump } from "./fixtures/androidMutationBaseline";
+import {
+  NIGHT_MODE_UNSUPPORTED_RESULTS,
+  androidBaselineRig,
+  androidPackageDump,
+} from "./fixtures/androidMutationBaseline";
+import { createExecResult } from "../../../src/utils/execResult";
 
 function rig(users: readonly number[] = [0]) {
   const { adb, reply } = androidBaselineRig(users);
@@ -456,5 +461,22 @@ describe("Android mutation baseline capture", () => {
     const { port, context, reply } = rig();
     reply(command, stdout);
     await expect(port.capture(context)).rejects.toThrow();
+  });
+
+  test.each(NIGHT_MODE_UNSUPPORTED_RESULTS)(
+    "skips night mode on Android before 8 (%s)",
+    async (_shape, result) => {
+      const { port, context, adb } = rig();
+      adb.setCommandResponse("shell cmd uimode night", result);
+      const snapshot = await port.capture(context);
+      expect(observation(snapshot, "device-setting", "display:night-mode")).toBeUndefined();
+      expect(observation(snapshot, "device-setting", "display:density")).toBeDefined();
+    },
+  );
+
+  test("unrelated night-mode stderr still fails the baseline", async () => {
+    const { port, context, adb } = rig();
+    adb.setCommandResponse("shell cmd uimode night", createExecResult("", "Error: denied"));
+    await expect(port.capture(context)).rejects.toThrow("Android reset command failed");
   });
 });

@@ -193,6 +193,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
       "tapAt",
       "tapOn",
       "wakeAndUnlock",
+      "xrHeadsetInput",
     ],
     "Pointer, key and gesture input changes no persistent device state; the target app's own effects are app-owned and outside the journal's scope, and the baseline clean covers shared settings, packages and files.",
     "notJournaled",

@@ -96,9 +96,13 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
         // other key still takes the focus-guarded XCUITest path below.
         let simulatorGate = try XCTUnwrap(pressKey.range(of: "#if targetEnvironment(simulator)"))
         let chordMatch = try XCTUnwrap(pressKey.range(of: "GesturePerformer.letterChordUsages("))
-        let chordEnd = try XCTUnwrap(pressKey.range(of: "#endif", range: chordMatch.upperBound..<pressKey.endIndex))
-        let chordBlock = pressKey[simulatorGate.lowerBound..<chordEnd.upperBound]
+        let chordEnd = try XCTUnwrap(pressKey.range(of: "#endif", range: chordMatch.upperBound ..< pressKey.endIndex))
+        let chordBlock = pressKey[simulatorGate.lowerBound ..< chordEnd.upperBound]
         XCTAssertTrue(chordBlock.contains("try await pressKeyboardChordViaHID(usages: usages, key: key)"))
+        // Cmd+H must be verified by the home screen appearing, never trusted from the dispatch (#19062).
+        XCTAssertTrue(chordBlock.contains("GesturePerformer.isHomeChord(usages)"))
+        XCTAssertTrue(chordBlock.contains("SpringBoardHomeScreenDetector.isShowing(in: springboard)"))
+        XCTAssertTrue(chordBlock.contains("GesturePerformer.homeChordNotDeliveredMessage"))
         XCTAssertTrue(chordBlock.contains("return nil"))
         XCTAssertLessThan(chordEnd.upperBound, focusGuard.lowerBound)
 
@@ -107,7 +111,7 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
             "pressKey must not suspend before its first XCUITest dispatch"
         )
         XCTAssertFalse(
-            pressKey[chordEnd.upperBound..<synthesis.lowerBound].contains("await "),
+            pressKey[chordEnd.upperBound ..< synthesis.lowerBound].contains("await "),
             "pressKey must not suspend before its first XCUITest dispatch"
         )
         XCTAssertLessThan(focusGuard.lowerBound, keyPressFocus.lowerBound)

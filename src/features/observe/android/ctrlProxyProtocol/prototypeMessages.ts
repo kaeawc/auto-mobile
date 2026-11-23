@@ -208,6 +208,8 @@ export interface AdvancePrototypeClockMessage {
   advanceTimeMs: number;
 }
 export interface PrototypeResult {
+  /** The device runtime report, validated by the host before use. */
+  platformRuntime?: unknown;
   fired?: number;
   saved?: SavedPrototypeInfo;
   pin?: SavedPrototypePinInfo;
@@ -259,6 +261,7 @@ export interface PrototypeDegradedEffect {
 
 /** One prototype the device reported to `inspect_prototypes`. `id` is the prototype id (its spec id). */
 export interface PrototypeStatusEntry {
+  platformRuntime?: unknown;
   /** Aggregate remote image states, with no URLs or per-image failures. */
   images?: { loaded: number; failed: number; pending: number };
   /** Agent-owned read-only content of the shown spec; absent when it has none. */

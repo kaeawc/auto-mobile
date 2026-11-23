@@ -5,7 +5,7 @@ import dev.jasonpearson.automobile.protocol.PrototypePlatformCalls
 import dev.jasonpearson.automobile.prototype.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Runtime-owned subscriptions and calls; all mutations and callbacks execute under the host lock.
@@ -44,6 +44,11 @@ internal class PrototypePlatformDispatcher(
   private val subscriptions = mutableListOf<Job>()
   @Volatile private var closed = false
   private var subscribed = false
+
+  fun inFlightByModule(): Map<String, Int> =
+    synchronized(pending) {
+      pending.values.groupingBy { it.action.call.substringBefore('.') }.eachCount()
+    }
 
   fun subscribe() {
     if (subscribed || closed) return

@@ -1,0 +1,8 @@
+ACCESSIBILITY MANAGER (dumpsys accessibility)
+
+User state[attributes:{id=0, currentUser=true, touchExplorationEnabled=false, displayMagnificationEnabled=false, navBarMagnificationEnabled=false, autoclickEnabled=false}
+           services:{Service[label=AutoMobile CtrlProxy, feedbackType[FEEDBACK_GENERIC], capabilities=33, eventTypes=[TYPE_VIEW_CLICKED, TYPE_VIEW_LONG_CLICKED, TYPE_VIEW_SELECTED, TYPE_VIEW_FOCUSED, TYPE_VIEW_TEXT_CHANGED, TYPE_WINDOW_STATE_CHANGED, TYPE_WINDOW_CONTENT_CHANGED, TYPE_VIEW_SCROLLED, TYPE_VIEW_TEXT_SELECTION_CHANGED, TYPE_VIEW_ACCESSIBILITY_FOCUSED, TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED, TYPE_WINDOWS_CHANGED], notificationTimeout=100]}]
+
+Window[AccessibilityWindowInfo[title=nullid=3, type=TYPE_SYSTEM, layer=231000, bounds=Rect(0, 1794 - 1080, 1920), focused=false, active=false, pictureInPicture=false, hasParent=false, isAnchored=false, hasChildren=false]],
+Window[AccessibilityWindowInfo[title=nullid=5, type=TYPE_SYSTEM, layer=181000, bounds=Rect(0, 0 - 1080, 63), focused=false, active=false, pictureInPicture=false, hasParent=false, isAnchored=false, hasChildren=false]],
+Window[AccessibilityWindowInfo[title=Pixel Launcherid=1, type=TYPE_APPLICATION, layer=21000, bounds=Rect(0, 0 - 1080, 1920), focused=true, active=true, pictureInPicture=false, hasParent=false, isAnchored=false, hasChildren=false]]

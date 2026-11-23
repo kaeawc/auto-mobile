@@ -577,8 +577,64 @@ function repeatIdentityError(
   scope: Scope | undefined,
 ): RepeatError | undefined {
   const key = record(node.repeat)?.key;
-  return scope && typeof key === "string" && !scope.derivedFields.has(key)
-    ? repeatKeyError(scope.items, key, `${path}.repeat.key`)
+  if (!scope || typeof key !== "string") {
+    return undefined;
+  }
+  return scope.derivedFields.has(key)
+    ? derivedKeyError(node, scope, key, `${path}.repeat.key`)
+    : repeatKeyError(scope.items, key, `${path}.repeat.key`);
+}
+
+/**
+ * A derived key's string is formatted on the device, but one entry formats equal inputs to equal
+ * strings, so two rows that feed it the same input always share a key (#18665).
+ */
+function derivedKeyError(
+  node: Raw,
+  scope: Scope,
+  key: string,
+  path: string,
+): RepeatError | undefined {
+  const of = record(record(record(record(node.repeat)?.derive)?.[key])?.of);
+  if (!of || scope.items.length < 2) {
+    return undefined;
+  }
+  const constant = Object.hasOwn(of, "value");
+  const field = of.item;
+  if (!constant && (typeof field !== "string" || scope.derivedFields.has(field))) {
+    return undefined;
+  }
+  const seen = new Map<string, number>();
+  for (const [index, item] of scope.items.entries()) {
+    const input = derivedKeyInput(constant, item, String(field));
+    if (input === undefined) {
+      continue;
+    }
+    const first = seen.get(input);
+    if (first !== undefined) {
+      return fail(
+        path,
+        `Derived repeat key ${JSON.stringify(key)} has the same input for items ${first} and ${index}`,
+      );
+    }
+    seen.set(input, index);
+  }
+  return undefined;
+}
+
+/** The row's input to a derived key, or `undefined` when it is not a comparable scalar. */
+function derivedKeyInput(
+  constant: boolean,
+  item: Readonly<Raw>,
+  field: string,
+): string | undefined {
+  if (constant) {
+    return "constant";
+  }
+  const value = Object.hasOwn(item, field) ? item[field] : undefined;
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+    ? // `String(-0)` is "0", but a formatter renders -0 as "-0": keep the sign apart.
+      `${typeof value}:${Object.is(value, -0) ? "-0" : String(value)}`
     : undefined;
 }
 

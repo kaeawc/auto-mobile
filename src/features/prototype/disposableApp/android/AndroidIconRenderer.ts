@@ -3,11 +3,18 @@ import { ActionableError } from "../../../../models/ActionableError";
 import type { ImageBackend, RawImage } from "../../../../utils/image/backend/ImageBackend";
 import { JimpBackend } from "../../../../utils/image/backend/JimpBackend";
 import { loadJimp, type JimpConstructor } from "../../../../utils/image/loadJimp";
-import { detectImageMimeType } from "../../../../utils/screenshot/imageHeaderDimensions";
+import {
+  detectImageMimeType,
+  readImageHeaderDimensions,
+} from "../../../../utils/screenshot/imageHeaderDimensions";
 import { contrastRatio, type Rgba } from "../../prototypeContrast";
 
 const CANVAS_SIZE = 432;
-const SAFE_SIZE = 288;
+/** The 66dp adaptive-icon safe zone is a circle; launcher masks may clip anything outside it. */
+const SAFE_DIAMETER = 264;
+const GLYPH_SIZE = 288;
+/** Rejects artwork whose header declares more pixels than this before it is decoded. */
+export const MAX_ICON_ASSET_PIXELS = 4096 * 4096;
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 const BLACK = { r: 0, g: 0, b: 0, a: 1 };
 const WHITE = { r: 255, g: 255, b: 255, a: 1 };
@@ -49,10 +56,11 @@ export class DefaultAndroidIconRenderer implements AndroidIconRenderer {
         : await this.monogram(source.label, source.background);
     const Jimp = await this.jimpLoader();
 
-    const scale = SAFE_SIZE / Math.max(artwork.width, artwork.height);
+    // Fit the artwork's diagonal to the safe circle so its corners stay unmasked.
+    const scale = SAFE_DIAMETER / Math.hypot(artwork.width, artwork.height);
     artwork.resize({
-      w: Math.max(1, Math.round(artwork.width * scale)),
-      h: Math.max(1, Math.round(artwork.height * scale)),
+      w: Math.max(1, Math.floor(artwork.width * scale)),
+      h: Math.max(1, Math.floor(artwork.height * scale)),
     });
     const foreground = new Jimp({ width: CANVAS_SIZE, height: CANVAS_SIZE });
     const monochrome = new Jimp({ width: CANVAS_SIZE, height: CANVAS_SIZE });
@@ -78,8 +86,14 @@ export class DefaultAndroidIconRenderer implements AndroidIconRenderer {
     const mime = detectImageMimeType(input);
     const message =
       "Android icon.asset must be a decodable PNG or JPEG. Replace the asset and retry.";
-    if (mime !== "image/png" && mime !== "image/jpeg") {
+    const dimensions = readImageHeaderDimensions(input);
+    if ((mime !== "image/png" && mime !== "image/jpeg") || !dimensions) {
       throw new ActionableError(message);
+    }
+    if (dimensions.width * dimensions.height > MAX_ICON_ASSET_PIXELS) {
+      throw new ActionableError(
+        `Android icon.asset is ${dimensions.width}x${dimensions.height}; it must be at most ${MAX_ICON_ASSET_PIXELS} pixels (4096x4096). Downscale the image and retry.`,
+      );
     }
     let decoded: RawImage;
     try {
@@ -104,7 +118,7 @@ export class DefaultAndroidIconRenderer implements AndroidIconRenderer {
     // unsupported grapheme, even if it contains multiple Unicode code points.
     const text =
       initial && [...initial].every((character) => font.chars[character]) ? initial : "?";
-    const glyph = new Jimp({ width: SAFE_SIZE, height: SAFE_SIZE });
+    const glyph = new Jimp({ width: GLYPH_SIZE, height: GLYPH_SIZE });
     glyph.print({ font, x: 8, y: 8, text }).autocrop({ cropOnlyFrames: false });
     const ink = contrastRatio(background, BLACK) >= contrastRatio(background, WHITE) ? 0 : 255;
     glyph.scan((_, __, index) => {

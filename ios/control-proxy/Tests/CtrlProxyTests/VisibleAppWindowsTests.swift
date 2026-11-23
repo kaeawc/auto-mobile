@@ -252,3 +252,91 @@ final class VisibleAppWindowsTests: XCTestCase {
         XCTAssertEqual(windows[1].bounds?.right, 511)
     }
 }
+
+/// #19064: with Files tiled left and focused, Settings floats behind it. Frames were captured on
+/// the iPad Pro 13-inch (M5) simulator, iOS 27.2: Settings' snapshot frame is window-relative
+/// (0,0,524,782) while its window is drawn shrunk at (255.34,242) sized 521.32x778.
+final class BackgroundWindowPlacementTests: XCTestCase {
+    private let screenFrame = CGRect(x: 0, y: 0, width: 1032, height: 1376)
+    private let settingsSnapshot = CGRect(x: 0, y: 0, width: 524, height: 782)
+    private let settingsWindow = CGRect(x: 255.3401534526854, y: 242.0, width: 521.3196930946292, height: 778.0)
+    private let filesLeftTile = ElementBounds(left: 0, top: 0, right: 511, bottom: 1253)
+
+    private func ltrb(_ bounds: ElementBounds?) -> [Int] {
+        bounds.map { [$0.left, $0.top, $0.right, $0.bottom] } ?? []
+    }
+
+    private func settingsPlacement() throws -> WindowPlacement {
+        try XCTUnwrap(ElementLocator.backgroundWindowPlacement(
+            appFrame: settingsSnapshot, screenFrame: screenFrame, windowFrame: { self.settingsWindow }
+        ))
+    }
+
+    func testShrunkFloatingWindowMapsToItsScreenFrame() throws {
+        let placement = try settingsPlacement()
+        XCTAssertEqual(placement.scale, 778.0 / 782.0, accuracy: 1e-9)
+        XCTAssertEqual(ltrb(placement.screenBounds(ElementBounds(clamping: settingsSnapshot))), [255, 242, 776, 1020])
+    }
+
+    func testShrunkWindowBehindATileAtTheOriginIsVisible() throws {
+        let unplaced = ElementBounds(clamping: settingsSnapshot)
+        let placed = try settingsPlacement().screenBounds(unplaced)
+        let screen = ElementBounds(clamping: screenFrame)
+        XCTAssertTrue(ElementLocator.isVisibleBesideFocused(placed, focused: filesLeftTile, screen: screen))
+    }
+
+    func testPlacedTreeKeepsNodesBesideTheFocusedTile() throws {
+        // A right-hand row of Settings' window and a left-hand one that Files covers once placed.
+        let right = UIElementInfo(text: "Language & Region", bounds: ElementBounds(left: 16, top: 690, right: 508, bottom: 740))
+        let back = UIElementInfo(text: "Back", bounds: ElementBounds(left: 80, top: 12, right: 124, bottom: 56))
+        let root = UIElementInfo(
+            className: "XCUIApplication", bounds: ElementBounds(clamping: settingsSnapshot), node: [back, right]
+        )
+
+        let placed = ElementLocator.placedOnScreen(root, by: try settingsPlacement())
+        let visible = try XCTUnwrap(ElementLocator.removingOccluded(placed, by: filesLeftTile))
+
+        XCTAssertEqual(ltrb(visible.bounds), [255, 242, 776, 1020])
+        XCTAssertEqual(visible.node?.map(\.text), ["Language & Region"])
+        let row = try XCTUnwrap(visible.node?.first?.bounds)
+        XCTAssertEqual(row.left, 271)
+        XCTAssertEqual(row.top, 928)
+        XCTAssertEqual(row.right, 760)
+        XCTAssertEqual(row.bottom, 978)
+    }
+
+    func testUnscaledTileIsOffsetOnly() throws {
+        let placement = try XCTUnwrap(ElementLocator.backgroundWindowPlacement(
+            appFrame: CGRect(x: 0, y: 0, width: 511, height: 1253),
+            screenFrame: screenFrame,
+            windowFrame: { CGRect(x: 521, y: 0, width: 511, height: 1253) }
+        ))
+        XCTAssertEqual(placement, WindowPlacement(origin: CGPoint(x: 521, y: 0), scale: 1))
+    }
+
+    func testScreenSizedAppIsPlacedWithoutReadingItsWindow() throws {
+        let placement = try XCTUnwrap(ElementLocator.backgroundWindowPlacement(
+            appFrame: screenFrame, screenFrame: screenFrame, windowFrame: {
+                XCTFail("a screen-sized app needs no window frame")
+                return nil
+            }
+        ))
+        XCTAssertTrue(placement.isIdentity)
+    }
+
+    func testUnknownOrDistortedWindowIsLeftOut() {
+        XCTAssertNil(ElementLocator.backgroundWindowPlacement(
+            appFrame: settingsSnapshot, screenFrame: screenFrame, windowFrame: { nil }
+        ))
+        XCTAssertNil(ElementLocator.backgroundWindowPlacement(
+            appFrame: settingsSnapshot, screenFrame: screenFrame, windowFrame: {
+                CGRect(x: 255, y: 242, width: 400, height: 778)
+            }
+        ))
+        XCTAssertNil(ElementLocator.backgroundWindowPlacement(
+            appFrame: settingsSnapshot, screenFrame: screenFrame, windowFrame: {
+                CGRect(x: 255, y: 242, width: 131, height: 195.5)
+            }
+        ))
+    }
+}

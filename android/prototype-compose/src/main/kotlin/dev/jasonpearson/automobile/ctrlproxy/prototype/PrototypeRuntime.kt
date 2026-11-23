@@ -519,8 +519,14 @@ class PrototypeRuntime(
       monotonicMs,
     )
 
+  private val platformReporting =
+    PrototypePlatformReporting(platformRegistry, platformDispatcher::inFlightByModule)
+
   private var platformModulesStarted = false
   private var platformForeground = true
+
+  fun platformRuntimeReport(runtime: PrototypePlatformReport.Runtime): PrototypePlatformReport =
+    platformReporting.report(runtime, if (platformForeground) "active" else "background")
 
   private fun locationModules(): List<PrototypeLocationModule> {
     return platformRegistry.modules.filterIsInstance<PrototypeLocationModule>()
@@ -1674,6 +1680,16 @@ class PrototypeRuntime(
     }
   }
 
+  private fun platformOutcomePayload(
+    call: PrototypePlatformDispatcher.Pending,
+    error: PlatformError?,
+    durationMs: Long,
+  ): JsonObject =
+    JsonObject(
+      platformCallPayload(call, error, durationMs) +
+        platformReporting.outcomeMetadata(call.action.call),
+    )
+
   /** Writes a call's result and metadata under `into`; returns the error to report. */
   private suspend fun writePlatformResult(
     call: PrototypePlatformDispatcher.Pending,
@@ -1737,7 +1753,7 @@ class PrototypeRuntime(
           emit(
             PrototypeEventKind.EMIT,
             PrototypePlatform.CALL_EVENT_NAME,
-            platformCallPayload(call, closed, duration),
+            platformOutcomePayload(call, closed, duration),
           )
         }
         return
@@ -1753,7 +1769,7 @@ class PrototypeRuntime(
       emit(
         PrototypeEventKind.EMIT,
         PrototypePlatform.CALL_EVENT_NAME,
-        platformCallPayload(call, error, duration),
+        platformOutcomePayload(call, error, duration),
       )
       runPlatformFollowUp(call, error)
     } finally {

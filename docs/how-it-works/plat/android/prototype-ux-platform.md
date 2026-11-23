@@ -142,3 +142,12 @@ module in release; debug additionally registers the permission-free test module.
 
 The shared fixtures `test/fixtures/prototype-spec/valid/platform-*.json` and
 `invalid/platform-*.json` are replayed by the TypeScript, Kotlin and Swift validators.
+
+## Runtime observability
+
+| Feature                 | Android runtime                                                                                                                                    |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Platform runtime report | CtrlProxy and disposable apps return `platformRuntime` with registered module availability, known modes, and pending call counts.                  |
+| Host status mirror      | A successful show or inspect supplies the latest report for the scope. Platform call completions update mode and in-flight counts for that report. |
+
+The report lives alongside the spec's `/platform` state. See [Platform runtime report](../../../using/prototype-embedding.md#platform-runtime-report) for the tool fields and show notes.

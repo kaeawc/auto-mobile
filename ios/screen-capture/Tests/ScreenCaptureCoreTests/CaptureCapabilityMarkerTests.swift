@@ -20,6 +20,7 @@ final class CaptureCapabilityMarkerTests: XCTestCase {
         )
         XCTAssertTrue(CaptureCapabilityMarker.allLines().contains("capture-capability: encoded-video-h264"))
         XCTAssertTrue(CaptureCapabilityMarker.allLines().contains("capture-capability: simulator-idle-evidence"))
+        XCTAssertTrue(CaptureCapabilityMarker.allLines().contains("capture-capability: simulator-framebuffer"))
     }
 
     /// The TS supervisor (`IosH264Source`) treats an `error:`-prefixed helper line

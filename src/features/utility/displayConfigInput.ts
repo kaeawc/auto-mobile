@@ -8,10 +8,12 @@ import type {
   DisplayConfig,
   DisplayConfigResult,
   DisplayConfigSupport,
+  DisplayConfigValues,
   DisplayTheme,
   SetDisplayConfigInput,
 } from "./DisplayConfig";
 import { IOS_DEFAULT_CONTENT_SIZE } from "./IosSimulatorDisplayConfig";
+import { hasScreenControlField } from "./IosSimulatorScreenControls";
 
 /** Why a set request contradicts itself or asks for nothing, before any platform check. */
 export function setInputContradiction(input: SetDisplayConfigInput): string | undefined {
@@ -22,18 +24,19 @@ export function setInputContradiction(input: SetDisplayConfigInput): string | un
   const explicit =
     hasDisplayField(input) ||
     hasDisplayGeometryField(input) ||
+    hasScreenControlField(input) ||
     requestedAccessibilityFields(input).length > 0;
   if (input.reset === true && explicit) {
     return (
       "reset cannot be combined with an explicit fontScale, contentSize, density, theme, size, " +
-      "navigationMode, displayCutout, or accessibility display preference: reset restores the platform defaults and recorded " +
+      "navigationMode, displayCutout, dynamicIsland, backlight, or accessibility display preference: reset restores the platform defaults and recorded " +
       "baselines. Send reset on its own, or send only the explicit fields you want to change."
     );
   }
   if (input.reset !== true && !explicit) {
     return (
       "At least one of fontScale, contentSize, density, theme, size, navigationMode, displayCutout, " +
-      "an accessibility display preference, or reset must be provided to set display config."
+      "dynamicIsland, backlight, an accessibility display preference, or reset must be provided to set display config."
     );
   }
   if (input.fontScale !== undefined && input.contentSize !== undefined) {
@@ -86,10 +89,16 @@ function accessibilityResetMessage(restored: readonly AccessibilityDisplayField[
     : "No accessibility display preference changed by displayConfig needed restoring.";
 }
 
+/** A geometry or Simulator screen change merged into the display result. */
+export type DisplayFieldChange = Omit<DisplayGeometryChange, "previous" | "applied"> & {
+  previous: DisplayConfigValues;
+  applied?: DisplayConfigValues;
+};
+
 /** One result from the font/density/theme/accessibility part (if any) and the geometry change. */
 export function mergeGeometryChange(
   display: DisplayConfigResult | undefined,
-  change: DisplayGeometryChange,
+  change: DisplayFieldChange,
   identity: Pick<DisplayConfigResult, "deviceId" | "platform" | "supported">,
 ): DisplayConfigResult {
   const errors = [...(display?.error ? [display.error] : []), ...change.errors];

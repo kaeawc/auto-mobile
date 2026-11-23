@@ -506,6 +506,14 @@ for path in "${changed_files[@]}"; do
       ;;
   esac
 
+  # Readability runs on the changed docs pages only, so a change to the checker
+  # or its budgets selects it too and the run then reports any changed pages.
+  case "${path}" in
+    docs/*.md|scripts/docs/readability-budgets.json|scripts/docs/readability.ts|scripts/docs/check-readability.ts)
+      add_check "docs-readability"
+      ;;
+  esac
+
   # The browser docs assets are generated from docs-assets/src into
   # docs/assets/javascripts/*.js; either the source or a hand-edit of the
   # generated output must run the freshness gate. (A change to the generator
@@ -631,6 +639,7 @@ if [[ "${#selected_checks[@]}" -gt 0 ]]; then
   echo "Fast validation: ./scripts/all_fast_validate_checks.sh --only ${checks_csv}"
   set +e
   export STDLIB_FIRST_BASE_REF="${BASE}"
+  export DOCS_READABILITY_BASE_REF="${BASE}"
   ./scripts/all_fast_validate_checks.sh --only "${checks_csv}"
   fast_validation_status=$?
   set -e

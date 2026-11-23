@@ -71,6 +71,14 @@ path cannot silently fall back to Android. The stream reconnects after transient
 network failures; browser viewers may need to reconnect too.
 With `AUTOMOBILE_DAEMON_STREAM_AUTH=0`, lease ownership enforcement is advisory only and is not enforced.
 
+## iOS Simulator capture
+
+iOS Simulator streams read the Simulator's display directly, so a headless
+Simulator streams with no Simulator window open and no Screen Recording
+permission. Streams with audio capture the Simulator window instead, which must be
+visible, and the host needs Screen Recording permission. A helper that cannot read
+the display, such as an older release, also falls back to the window.
+
 ## Viewers and device ownership
 
 Watching never requires owning the device. A WebRTC or video-relay stream keeps

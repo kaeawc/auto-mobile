@@ -44,4 +44,10 @@ extension ElementLocating {
     var gestureCoordinateGeometry: GestureCoordinateGeometry? {
         (self as? ElementLocator)?.observedGestureGeometry
     }
+
+    /// The geometry a gesture's delivery route is decided on, with the iPad window placement
+    /// re-read when an earlier gesture may have moved the window (#19050).
+    func gestureRouteGeometry() -> GestureCoordinateGeometry? {
+        (self as? ElementLocator)?.routedGestureGeometry()
+    }
 }

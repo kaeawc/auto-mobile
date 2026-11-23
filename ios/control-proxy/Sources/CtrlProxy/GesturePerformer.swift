@@ -116,7 +116,7 @@ public final class GesturePerformer: GesturePerforming {
             -> Int?
         {
             let decision = GestureDeliveryRoute.decide(
-                target: target, forced: forced, geometry: elementLocator.gestureCoordinateGeometry
+                target: target, forced: forced, geometry: elementLocator.gestureRouteGeometry()
             )
             // One line per gesture: tells a stale tracker (keepPinned) from a missing observation.
             let pinned = pinnedApplication.bundleId ?? "none"

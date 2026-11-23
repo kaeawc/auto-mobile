@@ -12,7 +12,8 @@ the runner can observe and act on, and what it cannot.
   Provisioning accepts only readiness `none`.
 - `installApp`, `uninstallApp`, `launchApp`, `terminateApp` and `listApps` use `simctl`.
   Screenshots use `simctl`.
-- `observe`, `tapOn` and `sendKeys` prepare a separate window-app XCUITest runner on demand.
+- `observe`, `tapOn`, `sendKeys`, `tapAt`, `swipeOn`, `pressButton` (home only) and `homeScreen`
+  prepare a separate window-app XCUITest runner on demand.
   Its xrsimulator xctestrun comes from `AUTOMOBILE_VISIONOS_RUNNER_XCTESTRUN`, then local
   `AutoMobileVisionTest` products, then the release's pinned `visionos-runner-macos.zip` through
   `VisionosRunnerReleaseProvider` (the tvOS `SimulatorRunnerReleaseProvider` contract), then a
@@ -36,6 +37,16 @@ the runner can observe and act on, and what it cannot.
   when shared (disabled twins never count as sharers). Text is appended to a focused field. A
   missing or disabled target is an invalid `identifier` parameter; remaining ambiguity is
   `ambiguous_element`.
+- `tapAt` and `swipeOn` send window points, the space of observed element frames.
+  `request_tap_coordinates` and `request_swipe` add them to
+  `app.coordinate(withNormalizedOffset: .zero)` after subtracting the app frame's origin, read at
+  dispatch. A swipe is `press(forDuration: 0.05, thenDragTo:withVelocity:)` at the velocity that
+  covers the stroke in its 50–10000 ms duration. The daemon refuses an ornament `container`,
+  because ornament frames are scene-local.
+- `request_press_home` is `XCUIDevice.shared.press(.home)`, the Digital Crown press. Nothing
+  reads the Home View afterwards, so `pressButton home` and `homeScreen` report the press only.
+- A runner from an earlier release does not advertise these three commands; the client refuses
+  them before sending.
 - A runner automating its own host app is restarted (reinstalling that app) when the host app is
   gone. The tool `uninstallApp` marks it. The lifecycle detects a removal outside that tool when a
   runner command reports the host app not running or not installed (retried once). It also
@@ -64,6 +75,7 @@ volumetric window, and an empty immersive space. The verbatim capture is
 | Immersive space open         | Partial       | A button calls `openImmersiveSpace` and the tap completes without error. The immersive content is empty, so the capture cannot show whether content is visible or appears in the hierarchy.                       |
 | Volumetric window            | Not tested    | The volumetric window was declared but never opened.                                                                                                                                                              |
 | Window move or resize        | Not shown     | A press-and-drag on the window's bottom edge left the frame origin at `(0, 0)`. That is no evidence of movement. Resize was not tried.                                                                            |
+| Coordinate tap, swipe, home  | Not probed    | No probe capture (#19055). With `AM_VISIONOS_SMOKE=1` the router smoke test taps `B11` at its reported centre, swipes, and presses home.                                                                          |
 | Gaze, pinch, drag as input   | Not available | No XCUITest API for gaze or hand gestures was found. Only a standard drag was tried.                                                                                                                              |
 | Screenshot from `XCUIScreen` | No            | `XCUIScreen.main.screenshot()` returned a 1×1 PNG on this runtime.                                                                                                                                                |
 | Screenshot from `simctl`     | Yes           | `xcrun simctl io <udid> screenshot` writes a 3840 px wide PNG. The runner should use this path.                                                                                                                   |
@@ -78,8 +90,8 @@ The runner binds its socket only after it has activated the target app, and
 sends its `connected` handshake on each accepted connection. Startup treats that
 handshake as ready (5 s per connection attempt, retried within a 60 s startup
 limit). It does not request a hierarchy, because the first hierarchy for a built-in app such as
-Settings or Safari can take about 8 s (#17199). Hierarchy requests default to a 20 s budget; taps
-and text input keep 5 s.
+Settings or Safari can take about 8 s (#17199). Hierarchy requests default to a 20 s budget; taps,
+swipes, the home press and text input keep 5 s.
 
 A target app process launched before the runner can fail `snapshot()` with
 `Error getting main window kAXErrorAPIDisabled` even while Settings and other
@@ -100,15 +112,18 @@ apps may still work; use a screenshot from `simctl` to see the affected app.
 ## Unproven capabilities
 
 Commands are limited to hierarchy with focus, element taps in the window and ornaments, text
-input, and `simctl` screenshots (`XCUIScreen` returns a 1×1 image). Each of these needs its own
-probe before a command depends on it:
+input, window-point taps and swipes, the home press, and `simctl` screenshots (`XCUIScreen`
+returns a 1×1 image). Each of these needs its own probe before a command depends on it:
 
 - Immersive-space content visibility in the hierarchy (the probe must render visible content,
   then check the snapshot and a screenshot).
 - Volume window placement and interaction.
 - Window move and resize: no move command until a probe shows the frame actually changes.
-- Gaze and pinch: treated as not scriptable from XCUITest.
+- Gaze, pinch, head pose and immersive spaces: not scriptable from XCUITest. Simulator.app sends
+  them through Xcode's XROS.simdeviceui plugin, whose messages are undocumented.
+- Simulator HID touch (`IndigoHIDMessageForMouseNSEvent`) into a visionOS window: not probed.
 
 ## Background
 
 - [visionOS XCUITest runner scope](../../../devlog/2026-11-04-xcuitest-capabilities-visionos-runner-scope.md)
+- [visionOS coordinate input and home press](../../../devlog/2026-11-23-visionos-coordinate-input-home-press.md)

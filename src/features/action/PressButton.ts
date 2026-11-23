@@ -1,5 +1,4 @@
-import { tvosPress, unsupportedTvosAction } from "../tvos/TvosActions";
-import { watchPress, unsupportedWatchAction } from "../watch/WatchActions";
+import { pressOnAppleRunner } from "./appleRunnerPress";
 import { isIosAppSwitcherVisible } from "../observe/ios/AppSwitcherSnapshotClassifier";
 import { invalidateIosLockAfterPress } from "./iosLockAfterPress";
 import type { IosLockStateInvalidator } from "../observe/ios/CachedIosLockStateProbe";
@@ -247,17 +246,13 @@ export class PressButton extends BaseVisualChange {
         signal,
       },
     );
-    if (this.device.platform === "tvos") {
-      if (typeof progressOrCall === "object" && progressOrCall.steps !== undefined) {
-        unsupportedTvosAction("remote press with steps");
-      }
-      return tvosPress(this.device.deviceId, button, signal, durationMs);
-    }
-    if (this.device.platform === "watchos") {
-      if (typeof progressOrCall === "object" && progressOrCall.steps !== undefined) {
-        unsupportedWatchAction("home with steps");
-      }
-      return watchPress(this.device.deviceId, button, signal);
+    const appleRunnerPress = pressOnAppleRunner(this.device, button, {
+      steps: typeof progressOrCall === "object" ? progressOrCall.steps : undefined,
+      signal,
+      durationMs,
+    });
+    if (appleRunnerPress) {
+      return appleRunnerPress;
     }
     const rotary = isRotaryButton(button) ? this.rotaryInput() : undefined;
     // Refuse a bad rotary call before observing; `steps` means nothing on any other button.

@@ -38,6 +38,7 @@ import {
 import { CARPLAY_DISPLAY, carPlayTapAtHandler } from "./interactionTools/carPlayHandlers";
 import { HEAD_UNIT_DISPLAY } from "../features/androidAuto/HeadUnitInteraction";
 import { withTvosHomeScreen } from "./tvosHomeScreen";
+import { withVisionosHomeScreen } from "./visionosHomeScreen";
 import { withTvosOpenLink } from "./tvosOpenLink";
 import {
   pressButtonHandler,
@@ -515,7 +516,10 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
 
   recentAppsTool.register(ToolRegistry, createRecentAppsHandler(deps));
 
-  homeScreenTool.register(ToolRegistry, withTvosHomeScreen(homeScreenHandler));
+  homeScreenTool.register(
+    ToolRegistry,
+    withTvosHomeScreen(withVisionosHomeScreen(homeScreenHandler)),
+  );
 
   // Register the new rotate tool
   rotateTool.register(ToolRegistry, (device, args, progress, signal) =>

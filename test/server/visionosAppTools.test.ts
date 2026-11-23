@@ -20,6 +20,9 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SELECTS_ACTIVE_DEVICE } from "../../src/server/toolRegistryTypes";
 import { setActiveDeviceSchema } from "../../src/server/utilityTools";
 import { APPLE_PLATFORM_SUPPORTED_TOOLS } from "../../src/server/applePlatformToolSupport";
+import { registerInteractionTools } from "../../src/server/interactionTools";
+import { visionosRunners } from "../../src/features/visionos/VisionosRunnerRegistry";
+import { FakeVisionosRunnerClient } from "../fakes/FakeVisionosRunnerClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -166,6 +169,38 @@ describe("app tools on an Apple Vision Pro simulator", () => {
     "%s is allowlisted for visionOS",
     (name) => expect(APPLE_PLATFORM_SUPPORTED_TOOLS.visionos.has(name)).toBe(true),
   );
+
+  test("coordinate, swipe and home tools dispatch through the registry to the runner", async () => {
+    const { timer } = await arrange();
+    const runner = new FakeVisionosRunnerClient();
+    cleanups.push(visionosRunners.register(visionPro.deviceId, runner));
+    registerInteractionTools();
+    await bindVisionSession();
+    const session = { sessionUuid: VISION_SESSION };
+    expect(toolJson(await call("tapAt", { ...session, x: 640, y: 232 }))).toMatchObject({
+      success: true,
+      platform: "visionos",
+    });
+    expect(toolJson(await call("swipeOn", { ...session, direction: "up" }))).toMatchObject({
+      success: true,
+      targetType: "screen",
+    });
+    expect(toolJson(await call("pressButton", { ...session, button: "home" }))).toMatchObject({
+      success: true,
+    });
+    expect(toolJson(await call("homeScreen", session))).toMatchObject({
+      success: true,
+      navigationMethod: "hardware",
+    });
+    expect(runner.commands).toEqual([
+      { type: "request_tap_coordinates", x: 640, y: 232 },
+      { type: "request_hierarchy" },
+      { type: "request_swipe", x1: 640, y1: 540, x2: 640, y2: 180, duration: 300 },
+      { type: "request_press_home" },
+      { type: "request_press_home" },
+    ]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
 
   test("install, list and uninstall use simctl on a pooled visionOS session", async () => {
     const { visionSimctl, timer } = await arrange();

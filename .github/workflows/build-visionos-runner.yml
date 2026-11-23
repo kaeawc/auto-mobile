@@ -29,6 +29,9 @@ on:
       - "scripts/ios/build-simulator-runner-release.sh"
       - "ios/control-proxy/project.yml"
       - "ios/control-proxy/CtrlProxy.xcodeproj/xcshareddata/xcschemes/AutoMobileVisionTest.xcscheme"
+      # The runner's own sources compile only in this build.
+      - "ios/control-proxy/AutoMobileVisionTest/**"
+      - "ios/control-proxy/Tests/CtrlProxyVisionUITests/**"
   # Manual build check outside a release; it uploads nothing.
   workflow_dispatch:
 

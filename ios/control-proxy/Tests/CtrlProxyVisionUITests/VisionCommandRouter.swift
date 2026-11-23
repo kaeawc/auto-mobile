@@ -24,6 +24,35 @@ final class VisionCommandRouter {
         let frameContext: String?
     }
 
+    /// Points in the hierarchy's space, as observe reports element bounds.
+    private struct TapCoordinatesRequest: Decodable {
+        let x: Double
+        let y: Double
+        let frameContext: String?
+    }
+
+    private struct SwipeRequest: Decodable {
+        let x1: Double
+        let y1: Double
+        let x2: Double
+        let y2: Double
+        let duration: Int
+        let frameContext: String?
+    }
+
+    /// The offset from the target application's frame origin to a hierarchy point, `nil` for an
+    /// invalid point. The origin is read at dispatch so a moved window keeps hierarchy points aligned.
+    private func offset(x: Double, y: Double) -> VisionCommandPolicy.Offset? {
+        let origin = application.frame.origin
+        return VisionCommandPolicy.coordinateOffset(
+            x: x, y: y, appOriginX: Double(origin.x), appOriginY: Double(origin.y)
+        )
+    }
+
+    private func coordinate(_ offset: VisionCommandPolicy.Offset) -> XCUICoordinate {
+        application.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: offset.dx, dy: offset.dy))
+    }
+
     func handle(_ data: Data) -> Data {
         var requestId: String?
         do {
@@ -188,6 +217,48 @@ final class VisionCommandRouter {
                 target.typeText(request.text)
                 return try JSONEncoder().encode(WebSocketResponse.success(
                     type: "append_text_result", requestId: requestId, totalTimeMs: 0
+                ))
+            case "request_tap_coordinates":
+                let request = try decoder.decode(TapCoordinatesRequest.self, from: data)
+                guard request.frameContext == nil, let point = offset(x: request.x, y: request.y) else {
+                    throw CommandError.invalidParameter(
+                        "x", "supply finite non-negative x/y in window points without frameContext"
+                    )
+                }
+                coordinate(point).tap()
+                return try JSONEncoder().encode(WebSocketResponse.success(
+                    type: "tap_coordinates_result", requestId: requestId, totalTimeMs: 0
+                ))
+            case "request_swipe":
+                let request = try decoder.decode(SwipeRequest.self, from: data)
+                guard request.frameContext == nil,
+                      let start = offset(x: request.x1, y: request.y1),
+                      let end = offset(x: request.x2, y: request.y2),
+                      let velocity = VisionCommandPolicy.swipeVelocity(
+                          from: start, to: end, durationMs: request.duration
+                      )
+                else {
+                    throw CommandError.invalidParameter(
+                        "x1",
+                        "supply finite non-negative window points at least one point apart and a duration of "
+                            + "\(VisionCommandPolicy.swipeDurationRangeMs.lowerBound)-"
+                            + "\(VisionCommandPolicy.swipeDurationRangeMs.upperBound) ms without frameContext"
+                    )
+                }
+                coordinate(start).press(
+                    forDuration: 0.05,
+                    thenDragTo: coordinate(end),
+                    withVelocity: XCUIGestureVelocity(CGFloat(velocity)),
+                    thenHoldForDuration: 0
+                )
+                return try JSONEncoder().encode(WebSocketResponse.success(
+                    type: "swipe_result", requestId: requestId, totalTimeMs: 0
+                ))
+            case "request_press_home":
+                // The Digital Crown press: visionOS shows the Home View over the shared space.
+                XCUIDevice.shared.press(.home)
+                return try JSONEncoder().encode(WebSocketResponse.success(
+                    type: "press_home_result", requestId: requestId, totalTimeMs: 0
                 ))
             default:
                 throw CommandError.unknownCommand(envelope.type)

@@ -3,6 +3,7 @@ import { isVisibleAutoScrollTarget } from "./SwipeOnAutoTargeting";
 import { observedAndroidXr, withXrPoseWarning, xrScreenSwipeBounds } from "../../xr/xrPanelSpace";
 import { rejectTvosTouch } from "../../tvos/TvosActions";
 import { watchSwipeOn } from "../../watch/WatchActions";
+import { visionosSwipeOn } from "../../visionos/VisionosGestures";
 import { iosWebScrollIntoView } from "./IosSdkWebScrollIntoView";
 import { androidCtrlProxyClientForPlatform } from "../../observe/android/androidCtrlProxyClientFor";
 import { SwipeOnAutoTargeting } from "./SwipeOnAutoTargeting";
@@ -355,6 +356,9 @@ export class SwipeOn extends BaseVisualChange {
     rejectTvosTouch(this.device.platform, "swipeOn");
     if (this.device.platform === "watchos") {
       return watchSwipeOn(this.device.deviceId, options, signal);
+    }
+    if (this.device.platform === "visionos") {
+      return visionosSwipeOn(this.device.deviceId, options, signal);
     }
     const result = await withSwipeObservationReadScope(() =>
       this.executeWithReadScope(options, progress, signal),

@@ -30,8 +30,14 @@ public enum PrototypeLibraryNetwork {
     )
         -> PrototypeNetworkConfiguration
     {
-        PrototypeNetworkConfiguration(device: PrototypeLibraryGatedClient(
+        var configuration = PrototypeNetworkConfiguration(device: PrototypeLibraryGatedClient(
             gate: gate, factory: { epoch in pinned(allowsCleartext, epoch) }, onLocalNetworkDenied: onLocalNetworkDenied
         ))
+        configuration.remoteImages = PrototypeRemoteImageLoader(
+            client: configuration.device,
+            development: PrototypeRemoteImages.developmentLoopback && allowsCleartext,
+            gate: gate, onLocalNetworkDenied: onLocalNetworkDenied
+        )
+        return configuration
     }
 }

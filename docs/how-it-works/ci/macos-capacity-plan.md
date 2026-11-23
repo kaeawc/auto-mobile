@@ -18,13 +18,13 @@ fork PRs and, per run, for a self-hosted pool with no online runner.
 
 ## CircleCI (#11010)
 
-CircleCI runs one macOS job at a time for this organization, so it carries one PR
+CircleCI runs one macOS job at a time for this organization: one PR
 job plus the work off the PR critical path.
 
 ### Pull requests
 
 `ios-playground-tests` is the only CircleCI job on the PR path (gated on
-`run-ios`, which path filtering sets from the same paths as `filter-ios` in
+`run-ios`, set the same way as `filter-ios` in
 `pull_request.yml`). It is advisory and must stay off the required-check list.
 Swift Packages, Build Xcode Projects and Build Root SPM Package run on GitHub
 only; their CircleCI mirrors are gone.
@@ -110,7 +110,7 @@ required check, so the routing job checks the pools when every run starts.
 repository's self-hosted runners via the REST API and outputs `small`
 (`automobile-mac`) and `heavy` (`automobile-mac-heavy`), each `self-hosted` or
 `hosted`. A pool is `hosted` when no runner carrying exactly that label is
-`online`; a busy online runner still counts, since the job waits for it. It
+`online`; a busy online runner still counts. It
 routes only the current run and never changes the repository variable. Every Mac pool job `needs` it and leaves its pool only on an
 explicit `hosted`, and runs under `always()` so a cancelled or failed routing
 job does not skip it.
@@ -129,8 +129,7 @@ job does not skip it.
 - Runner status is read once, at run start; a pool that goes offline later
   still queues its jobs.
 - Fallback cost: an iOS run on hosted macOS uses about 18-20 macOS minutes, and
-  hosted jobs count toward the 40-concurrent-job cap. The job summary repeats
-  this on every fallback.
+  hosted jobs count toward the 40-concurrent-job cap.
 
 | Pool                   | Jobs                                                                                                                                                  |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -155,7 +154,7 @@ job does not skip it.
   Hosted runners keep their two cache paths; DerivedData is unchanged.
 - `Mac Runner Queue` is an advisory Linux watchdog, with a 15 minute queue-age
   threshold and 30 second polls. It waits for Fast Validation before observing
-  Mac jobs on GitHub-hosted `ubuntu-latest`, which provides gh, jq, and timeout.
+  Mac jobs on GitHub-hosted `ubuntu-latest`.
   It watches the self-hosted jobs present while it runs and exits once none is
   queued. Later Prototype Simulator (`needs: ios-xcode-build`) is
   unwatched so Linux is not held for the whole Mac phase; that job is advisory
@@ -190,7 +189,7 @@ job does not skip it.
   that Xcode lacks its Metal Toolchain. Local scripts call `select_pinned_xcode`.
   `test/bats/xcode-version-pin.bats` fails when a workflow job selects another
   version. The CircleCI nightly sweeps and the 26.6 entry of the Build Root SPM
-  Package matrix keep Xcode 26.6, the Swift 6.3 floor, verified; both pin
+  Package matrix keep Xcode 26.6, the Swift 6.3 floor, verified. Both pin
   `DEVELOPER_DIR` to that Xcode so `select_pinned_xcode` cannot move them to 27.2.
   A roll-up job keeps the required check name.
 - Swift Packages builds unsigned on the Mac: its signing flags are false

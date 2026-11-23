@@ -1,4 +1,6 @@
-import { FakeWatchRunnerClient } from "../fakes/FakeWatchRunnerClient";
+import { FakeSequencedWatchRunner, FakeWatchRunnerClient } from "../fakes/FakeWatchRunnerClient";
+import shortLook27 from "../fixtures/watchos-xcuitest/notification-short-look-watchos27.json";
+import longLook27 from "../fixtures/watchos-xcuitest/notification-long-look-watchos27.json";
 import { FakeTvosRunnerClient } from "../fakes/FakeTvosRunnerClient";
 import { tvosRunners } from "../../src/features/tvos/TvosRunnerRegistry";
 import { WatchRunnerError } from "../../src/features/watch/WatchRunnerError";
@@ -272,6 +274,24 @@ test("connected watch hierarchy keeps the screenshot and uses XCTest point dimen
   expect(result).not.toHaveProperty("hierarchyBundleId");
   expect(runner.commands).toEqual([{ type: "hierarchy" }]);
   expect(screenshots.captures).toHaveLength(1);
+});
+
+test("observe during a notification short look returns the long look's action buttons (#18655)", async () => {
+  const runner = new FakeSequencedWatchRunner([
+    shortLook27.data,
+    shortLook27.data,
+    longLook27.data,
+  ]);
+  const { observe, timer } = arrange(undefined, runner);
+  timer.enableAutoAdvance();
+  const result = getStructuredPayload<import("../../src/models").ObserveResult>(await observe())!;
+  const tappable = (result.elements?.clickable ?? []).map((element) => element.text);
+  expect(tappable).toEqual(expect.arrayContaining(["Accept", "Decline"]));
+  expect(runner.commands).toEqual([
+    { type: "hierarchy" },
+    { type: "hierarchy" },
+    { type: "hierarchy" },
+  ]);
 });
 
 test("a connected runner failure surfaces instead of becoming a screenshot-only success", async () => {

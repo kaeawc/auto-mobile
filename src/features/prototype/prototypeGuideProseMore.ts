@@ -126,6 +126,12 @@ entries and request body values (including form and multipart values). The actio
 current raw value. Use \`{key:"confirm",equalsKey:"password"}\` to compare two set state keys.
 Collections, derived repeat items, derived conditions, derived bindings and equalsKey require
 \`prototype_derive_v1\`.
+For two-level repeats, put \`repeat:{items:{field:"lines"},as:"line"}\` on an inner container.
+Each outer item must hold a lines array of at most 100 object rows; empty arrays draw no inner rows.
+The inner alias must differ from the outer alias and route. Inner templates can read both
+\`{line.sku}\` and \`{order.id}\`; \`{index}\` is inner and \`{outerIndex}\` is outer.
+\`{outerIndex}\` is invalid elsewhere. State keys must bind valid declared keys for every pair.
+A third level is invalid. Nested repeats require \`prototype_nested_repeat_v1\`.
 Scalar and formatted collection entries and repeat derive maps require \`prototype_format_v1\`; use literal strings with older renderers.
 \`dateTime\`, \`duration\`, \`plural\`, and \`fileSize\` are unsupported follow-ups.
 `;

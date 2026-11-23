@@ -12,9 +12,9 @@ after focusing a field with `selector`.
 `{ "action": "key", "key": "<name>", "modifiers": [...] }` presses one key.
 
 - `key` is a raw key (`enter`, `tab`, `escape`, `backspace`, `delete`,
-  `arrow_up`, `arrow_down`, `arrow_left`, `arrow_right`), a lowercase letter `a`
-  to `z`, or a semantic IME key (`next`, `previous`, `done`, `search`, `send`,
-  `go`).
+  `arrow_up`, `arrow_down`, `arrow_left`, `arrow_right`) or a lowercase letter `a`
+  to `z`. It can also be a semantic IME key (`next`, `previous`, `done`, `search`,
+  `send`, `go`).
 - `modifiers` holds `shift`, `ctrl`, `alt` and `meta` (Command on iOS). Semantic
   IME keys ignore them.
 
@@ -30,7 +30,10 @@ A letter with modifiers is a keyboard shortcut:
 
 - **iOS simulator:** the chord is sent as the simulator's hardware keyboard, so
   system shortcuts reach SpringBoard and no text field needs focus. The result
-  does not confirm what the shortcut did; observe the screen afterwards.
+  does not confirm what the shortcut did; observe the screen afterwards. The
+  exception is `meta+h`: it succeeds only once the home screen shows, and fails
+  with "was not delivered" on a simulator that ignores it (iPhone Duo). Use
+  `homeScreen` or `pressButton home` there.
 - **iOS physical device:** a key command needs a focused text field. Without
   one, the command fails; tap a field first or pass `selector`.
 - **Android:** a letter without modifiers is a key event. A chord needs Android

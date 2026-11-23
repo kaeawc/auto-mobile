@@ -75,3 +75,39 @@ export function prototypeDeriveUnsupportedMessage(
 ): string {
   return `The connected ${platform === "ios" ? "iOS prototype agent" : "CtrlProxy"} does not advertise prototype_derive_v1 required by ${fields[0]}. Nothing was shown. Update the connected renderer or use literal rows.`;
 }
+
+/** Field sources and collection-valued literal fields need the nested-repeat contract. */
+export function prototypeNestedRepeatFields(spec: unknown): string[] {
+  const fields: string[] = [];
+  const pending = prototypeSpecNodeRoots(spec);
+  while (pending.length) {
+    const { node, path } = pending.pop()!;
+    const value = record(node);
+    if (!value) {
+      continue;
+    }
+    if (Object.hasOwn(record(record(value.repeat)?.items) ?? {}, "field")) {
+      fields.push(`${path}.repeat.items.field`);
+    }
+    const items = record(value.repeat)?.items;
+    if (
+      Array.isArray(items) &&
+      items.some((row) => Object.values(record(row) ?? {}).some(Array.isArray))
+    ) {
+      fields.push(`${path}.repeat.items`);
+    }
+    pending.push(
+      ...prototypeNodeChildren(value).map((child) => ({
+        node: child.value,
+        path: `${path}${child.suffix}`,
+      })),
+    );
+  }
+  return fields;
+}
+export function prototypeNestedRepeatUnsupportedMessage(
+  fields: readonly string[],
+  platform: "android" | "ios",
+): string {
+  return `The connected ${platform} renderer does not advertise prototype_nested_repeat_v1 required by ${fields[0]}. Nothing was shown. Update the renderer or remove the inner repeat.`;
+}

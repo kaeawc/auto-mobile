@@ -14,7 +14,7 @@ import {
 } from "./AdbDeviceTransportUnavailableError";
 
 const PROCESS_RECORD_PATTERN =
-  /(?:^|\s)(\d+):([A-Za-z0-9_.:]+)\/(u(\d+)(?:a\d+(?:i\d+)?|i\d+)|\d+)(?=[\s}]|$)/gm;
+  /(?:^|\s)(\d+):([A-Za-z0-9_.:]+)\/(u(\d+)(?:[as]\d+(?:i\d+)?|i\d+)|\d+)(?=[\s}]|$)/gm;
 
 export interface AndroidPackageProcess {
   pid: number;

@@ -18,6 +18,7 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { ExecResult, BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
+import { FakeWearOsDetector } from "../../fakes/FakeWearOsDetector";
 import { WINDOW_MANAGER_ROTATION_TIMEOUT_MS } from "../../../src/utils/android-cmdline-tools/readWindowManagerRotation";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -103,7 +104,10 @@ describe("Rotate", () => {
     rotate = new Rotate(mockDevice, {
       adb: fakeAdb,
       timer: fakeTimer,
-      options: { xrDetector: new FakeAndroidXrDetector() },
+      options: {
+        xrDetector: new FakeAndroidXrDetector(),
+        wearOsDetector: new FakeWearOsDetector(),
+      },
       collaborators: {
         awaitIdle: fakeAwaitIdle,
         observeScreen: fakeObserveScreen,
@@ -706,7 +710,12 @@ describe("Rotate", () => {
           "shell dumpsys window displays",
           createExecResult(`mRotation=${live}`),
         );
-        fakeAdb.setCommandResponse(`shell settings get system ${key}`, createExecResult("null"));
+        if (key === "user_rotation") {
+          // An unset key prints `null` (#19063); only a failed read is unreadable.
+          fakeAdb.setCommandError(`shell settings get system ${key}`, new Error("adb failed"));
+        } else {
+          fakeAdb.setCommandResponse(`shell settings get system ${key}`, createExecResult("null"));
+        }
         await expect(rotate.execute("landscape", { lockOrientation: true })).rejects.toBeInstanceOf(
           ActionableError,
         );
@@ -720,24 +729,30 @@ describe("Rotate", () => {
       },
     );
 
-    test.each(["accelerometer_rotation", "user_rotation"])(
-      "session retries unreadable %s once and records the real original",
-      async (key) => {
-        const original = useSession();
-        settingsSequence(["1", "0"]);
-        fakeAdb.setCommandResponseSequence(`shell settings get system ${key}`, [
-          createExecResult("null"),
-          createExecResult(key === "user_rotation" ? "2" : "1"),
-          createExecResult("0"),
-        ]);
-        const result = await rotate.execute("landscape", { lockOrientation: true });
-        expect(result.success).toBe(true);
-        expect(original()).toEqual({
-          accelerometerRotation: 1,
-          userRotation: key === "user_rotation" ? 2 : 0,
-        });
-      },
-    );
+    test("session retries unreadable accelerometer_rotation once and records the real original", async () => {
+      const original = useSession();
+      settingsSequence(["1", "0"]);
+      fakeAdb.setCommandResponseSequence("shell settings get system accelerometer_rotation", [
+        createExecResult("null"),
+        createExecResult("1"),
+        createExecResult("0"),
+      ]);
+      const result = await rotate.execute("landscape", { lockOrientation: true });
+      expect(result.success).toBe(true);
+      expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
+    });
+
+    test("session records an unset user_rotation (settings get prints null) as the default 0 (#19063)", async () => {
+      const original = useSession();
+      settingsSequence(["1", "0"]);
+      fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
+        createExecResult("null"),
+        createExecResult("1"),
+      ]);
+      const result = await rotate.execute("landscape", { lockOrientation: true });
+      expect(result.success).toBe(true);
+      expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
+    });
 
     test.each(["match", "mismatch", "unreadable"])(
       "waitForRotation exception confirms live outcome %s before deciding rollback",

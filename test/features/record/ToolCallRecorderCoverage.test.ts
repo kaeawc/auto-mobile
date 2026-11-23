@@ -151,6 +151,7 @@ const FORMER_PLAN_RELEVANT_TOOLS = [
   "recentApps",
   "rotaryScroll",
   "glassesInput",
+  "xrHeadsetInput",
   "ambient",
   "wearSurface",
   "resetAppLogs",

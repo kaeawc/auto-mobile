@@ -373,6 +373,7 @@ nav:
           - "Form factors: TV fixtures": how-it-works/plat/android/form-factors-tv-fixtures.md
           - "Form factors: Wear OS, Auto and Automotive": how-it-works/plat/android/form-factors-wear-auto.md
           - "Android XR headset baseline": how-it-works/plat/android/xr-headset.md
+          - "Android XR headset host input": how-it-works/plat/android/xr-host-input.md
           - "Car App Library template snapshots": how-it-works/plat/android/car-app-templates.md
           - "Android Auto projection provisioning": how-it-works/plat/android/android-auto-projection-provisioning.md
           - "Automotive prototypes": how-it-works/plat/android/automotive-prototypes.md
@@ -509,7 +510,9 @@ nav:
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-23: XR headset hand and eye input over emulator gRPC": devlog/2026-11-23-xr-headset-hand-and-eye-input.md
       - "2026-11-21: iOS Simulator audio routing open questions": devlog/2026-11-21-ios-simulator-audio-routing-open-questions.md
+      - "2026-11-21: Prototype media runtime placement spike": devlog/2026-11-21-prototype-media-runtime-placement-spike.md
       - "2026-11-20: Fixture capture mode": devlog/2026-11-20-fixture-capture-mode.md
       - "2026-11-19: iOS Simulator audio isolation": devlog/2026-11-19-ios-simulator-audio-isolation.md
       - "2026-11-19: Committed page bundle and one export budget": devlog/2026-11-19-prototype-web-page-bundle.md

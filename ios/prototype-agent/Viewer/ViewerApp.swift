@@ -24,6 +24,7 @@ struct PrototypeViewerApp: App {
         let locations = Bundle.main.path(forResource: "prototype", ofType: "json").map { [$0] } ?? []
         let model = PrototypeModel(
             mode: .standalone,
+            runtime: .iosViewer,
             storage: PrototypeStorageCoordinator.fileBacked(secure: registry.secureStorage),
             registry: registry
         )

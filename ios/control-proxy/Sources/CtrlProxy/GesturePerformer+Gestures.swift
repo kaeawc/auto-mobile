@@ -41,6 +41,16 @@ extension GesturePerformer {
         return usages + [0x04 + letter.value - letterA]
     }
 
+    /// Cmd+H: the one letter chord whose effect (the home screen) the runner can verify.
+    nonisolated static func isHomeChord(_ usages: [UInt32]) -> Bool {
+        usages == [0xE3, 0x0B]
+    }
+
+    nonisolated static let homeChordNotDeliveredMessage =
+        "Key 'h' with meta was not delivered: the home screen did not appear after Cmd+H. "
+            + "This simulator accepts the chord without acting on it (seen on iPhone Duo); "
+            + "use pressButton home or homeScreen instead"
+
     nonisolated static func swipeVelocity(distance: Double, duration: TimeInterval) -> Double? {
         guard distance.isFinite, duration.isFinite, distance > 0, duration > 0 else { return nil }
         return min(max(distance / duration, 100), 10000)

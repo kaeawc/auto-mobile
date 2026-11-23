@@ -190,6 +190,7 @@ enum PrototypeMenus {
             let common: Set<String> = [
                 "type", "id", "testTag", "contentDescription", "onTap", "style", "styleWhen",
                 "visibleWhen", "transition", "anchor", "safeAreaPadding",
+                PrototypeRepeat.rowKeyField, PrototypeRepeat.identityField,
             ]
             try strict(
                 fields,

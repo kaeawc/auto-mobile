@@ -173,6 +173,16 @@ function xcuiElementType(className: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+/** Whether a node is a control that activates on tap (see {@link TAP_ELEMENT_TYPES}). */
+export function isWatchTapElement(node: WatchHierarchyNode): boolean {
+  return hasElementType(node, TAP_ELEMENT_TYPES);
+}
+
+/** Visible children only: the converter drops hidden, occluded and transparent subtrees. */
+export function visibleWatchChildren(node: WatchHierarchyNode): WatchHierarchyNode[] {
+  return (node.children ?? []).filter(isVisible);
+}
+
 function hasElementType(node: WatchHierarchyNode, types: ReadonlySet<number>): boolean {
   const type = xcuiElementType(node.className);
   return type !== undefined && types.has(type);

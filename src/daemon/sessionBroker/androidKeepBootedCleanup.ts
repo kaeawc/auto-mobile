@@ -19,7 +19,7 @@ import {
   parseAndroidAccountDigests,
   parseAndroidBaselinePackages,
   parseDisplayOverride,
-  parseNightMode,
+  readAndroidNightMode,
   type AndroidBaselineCommand,
 } from "./androidMutationBaseline";
 import type { DeviceMutationResetContext } from "./mutations/reset";
@@ -538,14 +538,17 @@ class AndroidBaselineCleaner {
   private async readDisplay(): Promise<ReadonlyMap<string, MutationValue>> {
     const density = parseDisplayOverride(await this.command("shell wm density"), "density");
     const size = parseDisplayOverride(await this.command("shell wm size"), "size");
-    const night = parseNightMode(await this.command("shell cmd uimode night"));
+    const night = await readAndroidNightMode(this.command);
     return new Map<string, MutationValue>([
       [
         "display:density",
         density === null ? { state: "absent" } : { state: "present", value: density },
       ],
       ["display:size", size === null ? { state: "absent" } : { state: "present", value: size }],
-      ["display:night-mode", { state: "present", value: night }],
+      // Android before 8 has no night mode to read or restore.
+      ...(night === null
+        ? []
+        : [["display:night-mode", { state: "present", value: night }] as const]),
     ]);
   }
 

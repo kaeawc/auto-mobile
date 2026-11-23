@@ -268,6 +268,16 @@ export const tapOnResultSchema = z
     selectedElements: z.array(selectedElementSchema).optional(),
     skipped: z.literal("already-checked").optional(),
     error: z.string().optional(),
+    retryable: z
+      .boolean()
+      .optional()
+      .describe("True when the failure is transient and the same call can be retried"),
+    hierarchyUnavailableReason: z
+      .string()
+      .optional()
+      .describe(
+        "Set when no view hierarchy read during the search was usable (e.g. service_recovering), so the element could not be looked up",
+      ),
     pinnedDisplay: pinnedDisplaySchema.optional(),
     displayInventory: displayInventoryUnavailableSchema.optional(),
     staleDisplay: staleDisplaySchema.optional(),

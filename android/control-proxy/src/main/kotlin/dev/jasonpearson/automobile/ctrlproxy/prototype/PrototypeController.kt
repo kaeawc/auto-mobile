@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypePlatformCalls
+import dev.jasonpearson.automobile.protocol.PrototypePlatformReport
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
@@ -115,10 +116,10 @@ fun interface PrototypeResultSink : PrototypeReplySink {
   ) = sendShown(requestId, missingAssets, appearance, hiddenReason)
 
   /**
-   * A successful show that also reports [degradedEffects] (`prototype_effects_v1`). The default
-   * drops them, so sinks that predate the field keep answering as before.
+   * A successful show with effect fallbacks and the platform runtime snapshot. The default forwards
+   * the navigation context for sinks that only consume it.
    */
-  @Suppress("LongParameterList") // Mirrors sendShownNavigation plus the one new field.
+  @Suppress("LongParameterList") // The complete successful show response.
   suspend fun sendShownDegraded(
     requestId: String?,
     missingAssets: List<String>,
@@ -127,6 +128,7 @@ fun interface PrototypeResultSink : PrototypeReplySink {
     stacks: Map<String, PrototypeStackSnapshot>,
     hiddenReason: PrototypeHiddenReason?,
     degradedEffects: List<PrototypeDegradedEffect>,
+    platformRuntime: PrototypePlatformReport? = null,
   ) = sendShownNavigation(requestId, missingAssets, appearance, pages, stacks, hiddenReason)
 
   /** The reply to `clear_prototype_storage`. Sinks that predate it answer a bare success. */
@@ -321,9 +323,14 @@ class PrototypeController(
   /** One cap on requests in flight for every surface this controller shows. */
   private val requestLimiter = PrototypeRequestLimiter()
 
+  /**
+   * [request] records what the host applied, so its backdrop is the tonal fallback after a failed
+   * card blur attach; [authoredBackdrop] is the spec's own plan, requested again on a reshape.
+   */
   private class Surface(
     val runtime: PrototypeRuntime,
     @Volatile var request: PrototypeRequest,
+    val authoredBackdrop: PrototypeBackdropPlan?,
     val theme: MutableStateFlow<PrototypeShownTheme>,
     val appearanceOverride: PrototypeAppearanceOverride?,
     val localeOverride: String?,
@@ -443,6 +450,8 @@ class PrototypeController(
           stacks = shown.runtime.current.stacks,
           backdrop = shown.host.appliedBackdrop?.wire,
           displayId = shown.request.displayId,
+          platformRuntime =
+            shown.runtime.platformRuntimeReport(PrototypePlatformReport.Runtime.CTRL_PROXY),
           degradedEffects =
             prototypeEffectReport(
               shown.runtime.renderModel(shown.runtime.current).root,
@@ -513,6 +522,7 @@ class PrototypeController(
     val backdrop: String? = null,
     val displayId: Int = Display.DEFAULT_DISPLAY,
     val degradedEffects: List<PrototypeDegradedEffect> = emptyList(),
+    val platformRuntime: PrototypePlatformReport? = null,
   )
 
   private fun validate(spec: JsonObject): PrototypeSpec =
@@ -764,11 +774,13 @@ class PrototypeController(
     reused?.runtime?.close()
     idle.cancel()
     val retainedRequest =
-      if (interactive.bringToFront) interactive.copy(bringToFront = false) else interactive
+      (if (interactive.bringToFront) interactive.copy(bringToFront = false) else interactive)
+        .withAppliedBackdrop(surfaceHost)
     val surface =
       Surface(
         runtime,
         retainedRequest,
+        interactive.backdrop,
         theme,
         appearance,
         locale,
@@ -977,7 +989,44 @@ class PrototypeController(
     PrototypeTrace.asyncSection(PrototypeTrace.SYNC_APPEARANCE) {
       syncAppearance(runtime, model)
       syncTextFieldFocus(runtime, model)
+      syncBackdropShape(runtime, model)
     }
+  }
+
+  /**
+   * A runtime change can reshape a floating root (an 18dp radius patched to 0), so its card blur
+   * window or tonal fallback must clip to the new shape. The window is replaced only when the shape
+   * changed, requesting the authored backdrop again so a card blur that fell back is retried once
+   * per reshape; the stored request then records the backdrop the host applied. A failed replace
+   * keeps the old request and is retried on the next change.
+   */
+  private suspend fun syncBackdropShape(runtime: PrototypeRuntime, model: PrototypeRenderModel) {
+    val surface = surfaceOf(runtime) ?: return
+    val request = surface.request
+    if (request.backdrop == null || request.placement !is PrototypePlacement.Floating) return
+    val shape = prototypeRootBackdropShape(model)
+    if (shape == request.backdropShape) return
+    val updated = request.copy(backdrop = surface.authoredBackdrop, backdropShape = shape)
+    val host = surface.host
+    val applied =
+      !host.isShowing ||
+        try {
+          host.replace(updated.copy(animateEnter = false))
+        } catch (error: CancellationException) {
+          throw error
+        } catch (error: Exception) {
+          Log.w("PrototypeController", "Prototype host failed to reshape its backdrop", error)
+          false
+        }
+    if (applied) surface.request = updated.withAppliedBackdrop(host)
+    else Log.w("PrototypeController", "Prototype host failed to reshape its backdrop")
+  }
+
+  /** A card blur attach can fall back to the tonal backdrop; record the mode the host drew. */
+  private fun PrototypeRequest.withAppliedBackdrop(host: PrototypeHost): PrototypeRequest {
+    val plan = backdrop ?: return this
+    val mode = host.appliedBackdrop?.takeIf { host.isShowing } ?: return this
+    return if (plan.mode == mode) this else copy(backdrop = plan.copy(mode = mode))
   }
 
   /**
@@ -1046,26 +1095,16 @@ class PrototypeController(
     missing: List<String>,
     appearance: PrototypeAppearance,
   ) {
-    if (outcome.degradedEffects.isNotEmpty()) {
-      sink.sendShownDegraded(
-        requestId,
-        missing,
-        appearance,
-        outcome.pages.orEmpty(),
-        outcome.stacks.orEmpty(),
-        outcome.hiddenReason,
-        outcome.degradedEffects,
-      )
-    } else {
-      sink.sendShownNavigation(
-        requestId,
-        missing,
-        appearance,
-        outcome.pages.orEmpty(),
-        outcome.stacks.orEmpty(),
-        outcome.hiddenReason,
-      )
-    }
+    sink.sendShownDegraded(
+      requestId,
+      missing,
+      appearance,
+      outcome.pages.orEmpty(),
+      outcome.stacks.orEmpty(),
+      outcome.hiddenReason,
+      outcome.degradedEffects,
+      outcome.platformRuntime,
+    )
   }
 
   private fun armIdle(
@@ -1237,6 +1276,7 @@ class PrototypeController(
       degradedEffects =
         prototypeEffectReport(runtime.renderModel(runtime.current).root, runtime.effectHealth),
       feedbackLog = runtime.feedbackLog.snapshot(),
+      platformRuntime = runtime.platformRuntimeReport(PrototypePlatformReport.Runtime.CTRL_PROXY),
       orientation = surface.request.windowControls.orientation,
       statusBar = surface.request.windowControls.statusBarSupport,
     )

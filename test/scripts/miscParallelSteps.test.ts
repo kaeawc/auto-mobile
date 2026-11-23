@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { indexOfNamed, indexOfWaitOn, loadJobSteps, stepNamed } from "../helpers/workflowSteps";
+import {
+  indexOfNamed,
+  indexOfWaitOn,
+  loadJobSteps,
+  stepNamed,
+  usesAction,
+} from "../helpers/workflowSteps";
 
 // Guards issue #4130: the remaining parallel-steps wins.
 //
@@ -38,7 +44,9 @@ describe("#4130 cache fan-out (mcp-build-and-test)", () => {
   test("the Bun package store is restore-only; main primes it", () => {
     // A PR-side save wrote a ~100 MB PR-scoped entry no other PR could read
     // and churned the repo cache; prime-bun-cache.yml saves it on main.
-    expect(stepNamed(steps, "Cache Bun dependencies")?.uses).toBe("actions/cache/restore@v5");
+    expect(usesAction(stepNamed(steps, "Cache Bun dependencies")?.uses)).toBe(
+      "actions/cache/restore",
+    );
   });
 
   test("one barrier covers both and precedes Setup Auto Mobile", () => {

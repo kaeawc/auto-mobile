@@ -102,6 +102,7 @@ enum PrototypeBundleCapabilities {
             if let repeated = node["repeat"]?.objectFields,
                repeated["items"]?.objectFields != nil || repeated["key"] != nil { need("data_model") }
             if node["repeat"]?.objectFields?["items"]?.objectFields?["derived"] != nil { need("derive") }
+            if PrototypeRepeat.requiresNestedCapability(node["repeat"]) { need("nested_repeat") }
             if node["repeat"]?.objectFields?["derive"] != nil { need("format") }
             if node["span"] != nil { need("flow_grid") }
             if node["onLongPress"] != nil || node["onDoubleTap"] != nil { need("gestures") }
@@ -154,8 +155,8 @@ enum PrototypeBundleCapabilities {
             }
             scanSlots(.object(node), names: &names)
             if case let .array(children) = node["children"] { pending += children }
-            for key in ["child", "header", "footer"] {
-                if let child = node[key] { pending.append(child) }
+            for name in ["child", "header", "footer"] {
+                if let child = node[name] { pending.append(child) }
             }
             if type == "adaptive" { pending += PrototypeAdaptive.slots.compactMap { node[$0] } }
             pending += Array(node["screens"]?.objectFields?.values ?? [:].values)

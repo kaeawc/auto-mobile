@@ -32,6 +32,7 @@ import {
 } from "../features/watch/WatchRunnerRecovery";
 import { normalizeWatchHierarchy, type WatchHierarchy } from "../features/watch/WatchHierarchy";
 import { getWatchRunnerLifecycle } from "../features/watch/WatchRunnerLifecycle";
+import { readSettledWatchHierarchy } from "../features/watch/WatchNotificationLook";
 import {
   LaunchctlWatchTargetAppProbe,
   type WatchTargetAppProbe,
@@ -429,7 +430,12 @@ async function appleRunnerHierarchy(
     return {};
   }
   try {
-    const hierarchy = await read();
+    // A notification short look has no action buttons yet; return its long look (#18655).
+    const hierarchy = await readSettledWatchHierarchy(
+      read,
+      dependencies.timer ?? defaultTimer,
+      signal,
+    );
     return { hierarchy: normalizeWatchHierarchy(hierarchy) };
   } catch (error) {
     if (error instanceof WatchRunnerError && error.errorCode === "app_not_foreground") {

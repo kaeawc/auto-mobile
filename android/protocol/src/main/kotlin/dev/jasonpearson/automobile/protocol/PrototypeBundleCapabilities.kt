@@ -137,7 +137,7 @@ internal object PrototypeBundleCapabilities {
       )
     )
       caps.add("prototype_loading_states_v1")
-    repeatFields(node["repeat"] as? JsonObject, caps)
+    repeatCapabilities(node["repeat"] as? JsonObject, caps)
     PrototypeBindableFields.first<Unit>(node, "") { value, _, kind ->
       if (kind.requiresDerive()) caps.add("prototype_derive_v1")
       val bound =
@@ -156,7 +156,8 @@ internal object PrototypeBundleCapabilities {
       caps.add("prototype_data_model_v1")
   }
 
-  private fun repeatFields(repeat: JsonObject?, caps: MutableSet<String>) {
+  private fun repeatCapabilities(repeat: JsonObject?, caps: MutableSet<String>) {
+    if (PrototypeNestedRepeat.requiresCapability(repeat)) caps.add("prototype_nested_repeat_v1")
     if (repeat?.containsKey("derive") == true) caps.add("prototype_format_v1")
     if ((repeat?.get("items") as? JsonObject)?.containsKey("derived") == true)
       caps.add("prototype_derive_v1")

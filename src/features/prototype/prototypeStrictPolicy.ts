@@ -1,4 +1,5 @@
 import { prototypeDeclaredCapabilities } from "./prototypeDeclaredCapabilities";
+import { prototypeDerivedInputs } from "./prototypeDerive";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeMapMarkerAssetsError } from "./prototypeMap";
 import {
@@ -197,9 +198,11 @@ export function prototypeSensitiveSinkScan(spec: unknown): {
     }
     const boundTexts = texts.get(field.path) ?? [field.text];
     // A key field reads the named state entry; text interpolates `{key}` state placeholders.
-    const readsTaintedState = field.key
-      ? boundTexts.some((key) => stateIndex.key(key))
-      : !field.pointerSource && boundTexts.some((text) => stateIndex.text(text));
+    const readsTaintedState = field.derivedKeys
+      ? field.derivedKeys.some((key) => stateIndex.key(key))
+      : field.key
+        ? boundTexts.some((key) => stateIndex.key(key))
+        : !field.pointerSource && boundTexts.some((text) => stateIndex.text(text));
     if (field.key) {
       return readsTaintedState ? [sinkError(field.path)] : [];
     }
@@ -620,6 +623,7 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
     (field) =>
       // mapBinding visits only the state key of request/data/emit/platform value bindings.
       (field.key && field.path.endsWith(".state")) ||
+      field.derivedKeys?.length ||
       inRequest(field.path) ||
       sharePaths.has(field.path),
   );
@@ -637,7 +641,12 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
   );
   for (const { value, located: field } of instances) {
     const text = String(value.stateKey);
-    if (field.key ? secure.has(text) : [...secure].some((key) => text.includes(`{${key}}`))) {
+    const readsSecure = field.derivedKeys
+      ? field.derivedKeys.some((key) => secure.has(key))
+      : field.key
+        ? secure.has(text)
+        : [...secure].some((key) => text.includes(`{${key}}`));
+    if (readsSecure) {
       return {
         path: field.path,
         message: inRequest(field.path)
@@ -677,6 +686,7 @@ interface LibraryField {
   key: boolean;
   pointerSource?: "data" | "platform";
   itemBinding?: boolean;
+  derivedKeys?: readonly string[];
 }
 export interface DataWrite {
   /** The `/data` pointer written, or the state key when `intoState` is set. */
@@ -702,7 +712,10 @@ class DataCopies {
   private readonly stateReads = new Map<string, CopyRead[]>();
   private readonly repeats: { path: string; from: string; alias: string }[];
 
-  constructor(nodes: readonly Located[]) {
+  constructor(
+    nodes: readonly Located[],
+    private readonly derive: unknown,
+  ) {
     this.repeats = nodes.flatMap(({ value, path }) => {
       const repeat = object(value.repeat);
       const from = object(repeat?.items)?.path;
@@ -753,6 +766,14 @@ class DataCopies {
         this.reads.set(at.slice(0, -".value".length), [{ source, from }]);
       }
     }
+    if (typeof binding?.derived === "string") {
+      const { pointer, keys } = prototypeDerivedInputs(this.derive, binding.derived);
+      const reads = keys.map((from): CopyRead => ({ source: "state", from }));
+      if (pointer !== undefined) {
+        reads.push({ source: "data", from: pointer });
+      }
+      this.reads.set(at.slice(0, -".value".length), reads);
+    }
     if (typeof binding?.item === "string") {
       const scopes = this.scopes(at);
       if (scopes.length > 0) {
@@ -800,6 +821,25 @@ class DataCopies {
   }
 }
 
+function libraryValueBindingFields(
+  binding: Record<string, unknown> | undefined,
+  path: string,
+): LibraryField[] {
+  if (!binding || Object.hasOwn(binding, "state")) {
+    return [];
+  }
+  const fields: LibraryField[] = [];
+  for (const source of ["data", "platform"] as const) {
+    if (typeof binding[source] === "string") {
+      fields.push({ text: binding[source], path, key: false, pointerSource: source });
+    }
+  }
+  if (typeof binding.item === "string") {
+    fields.push({ text: "", path, key: false, itemBinding: true });
+  }
+  return fields;
+}
+
 function libraryFields(
   spec: unknown,
   nodes: readonly Located[],
@@ -807,7 +847,8 @@ function libraryFields(
 ): { requests: string[]; fields: LibraryField[]; dataWrites: DataWrite[] } {
   const requests: string[] = [];
   const fields: LibraryField[] = [];
-  const copies = new DataCopies(nodes);
+  const derive = object(spec)?.derive;
+  const copies = new DataCopies(nodes, derive);
   const collect: FieldVisitor = (raw, at, kind) => {
     copies.visit(raw, at, kind);
     if (kind === "request") {
@@ -816,16 +857,19 @@ function libraryFields(
     if (typeof raw === "string" && (kind === "text" || kind === "key")) {
       fields.push({ text: raw, path: at, key: kind === "key" });
     }
-    const binding = kind === "emitBinding" ? object(raw) : undefined;
-    if (includeDataBindings && binding && !Object.hasOwn(binding, "state")) {
-      for (const source of ["data", "platform"] as const) {
-        if (typeof binding[source] === "string") {
-          fields.push({ text: binding[source], path: at, key: false, pointerSource: source });
-        }
-      }
-      if (typeof binding.item === "string") {
-        fields.push({ text: "", path: at, key: false, itemBinding: true });
-      }
+    if (kind === "derivedBinding" && typeof raw === "string") {
+      const { keys, pointer } = prototypeDerivedInputs(derive, raw);
+      const dataPointer = includeDataBindings ? pointer : undefined;
+      fields.push({
+        text: dataPointer ?? "",
+        path: at,
+        key: false,
+        derivedKeys: keys,
+        pointerSource: dataPointer === undefined ? undefined : "data",
+      });
+    }
+    if (includeDataBindings && kind === "emitBinding") {
+      fields.push(...libraryValueBindingFields(object(raw), at));
     }
     return raw;
   };

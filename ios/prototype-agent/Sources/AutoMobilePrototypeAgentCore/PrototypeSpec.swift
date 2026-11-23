@@ -146,8 +146,8 @@ struct PrototypeSpec: Decodable {
         }
         try PrototypeLazyList.validateLimits(root: container.decode(JSONValue.self, forKey: .root), data: data)
         if let data { try PrototypeLimits.guardData(data) }
-        derive = container.contains(.derive)
-            ? try PrototypeDerivedCollections.entries(container.decode(JSONValue.self, forKey: .derive)) : nil
+        let rawDerive = container.contains(.derive) ? try container.decode(JSONValue.self, forKey: .derive) : nil
+        derive = try rawDerive.map { try PrototypeDerivedCollections.entries($0) }
         channels = try container.decodeIfPresent(JSONValue.self, forKey: .channels)
         media = try container.decodeIfPresent(JSONValue.self, forKey: .media)
         locationBlock = try container.decodeIfPresent(JSONValue.self, forKey: .location)
@@ -193,6 +193,7 @@ struct PrototypeSpec: Decodable {
             sensors: container.decodeIfPresent(JSONValue.self, forKey: .sensors),
             notifications: notificationsBlock,
             media: media,
+            derive: rawDerive,
             root: raw,
             state: menuState ?? [:]
         )
@@ -767,6 +768,7 @@ struct PrototypeRoute: Decodable, Sendable {
 /// object, recursive through `all`/`any`/`not`. Mirrors Android's `PrototypeCondition.holds`.
 indirect enum Condition: Decodable, Equatable {
     case equals(key: String, value: JSONValue)
+    case equalsKey(key: String, other: String)
     case notEquals(key: String, value: JSONValue)
     case contains(key: String, value: JSONValue)
     case startsWith(key: String, value: JSONValue)
@@ -780,7 +782,7 @@ indirect enum Condition: Decodable, Equatable {
     case valid([String], PrototypeValidityContext)
 
     private enum CodingKeys: String, CodingKey {
-        case key, equals, notEquals, contains, startsWith, lengthGt, lengthLt, all, any, not, valid
+        case key, equals, equalsKey, notEquals, contains, startsWith, lengthGt, lengthLt, all, any, not, valid
         case derived = "_derivedValue"
         case greaterThan = "gt"
         case lessThan = "lt"
@@ -808,6 +810,8 @@ indirect enum Condition: Decodable, Equatable {
             let key = isDerived ? "" : try container.decode(String.self, forKey: .key)
             if let value = try container.decodeIfPresent(JSONValue.self, forKey: .equals) {
                 self = .equals(key: key, value: value)
+            } else if let other = try container.decodeIfPresent(String.self, forKey: .equalsKey) {
+                self = .equalsKey(key: key, other: other)
             } else if let value = try container.decodeIfPresent(JSONValue.self, forKey: .notEquals) {
                 self = .notEquals(key: key, value: value)
             } else if let value = try container.decodeIfPresent(JSONValue.self, forKey: .contains) {
@@ -826,7 +830,7 @@ indirect enum Condition: Decodable, Equatable {
                 throw DecodingError.dataCorruptedError(
                     forKey: .key,
                     in: container,
-                    debugDescription: "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt is required"
+                    debugDescription: "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt, equalsKey is required"
                 )
             }
             if let derived {
@@ -847,6 +851,7 @@ indirect enum Condition: Decodable, Equatable {
     func holds(_ state: [String: JSONValue]) -> Bool {
         switch self {
         case let .equals(key, value): state[key] == value
+        case let .equalsKey(key, other): state[key] != nil && PrototypeSession.scalarIdentical(state[key], state[other])
         case let .notEquals(key, value): state[key] != value
         case let .contains(key, value): state[key]?.stringValue.map { text in
                 guard let value = value.stringValue else { return false }

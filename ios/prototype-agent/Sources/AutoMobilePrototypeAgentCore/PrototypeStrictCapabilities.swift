@@ -101,7 +101,7 @@ enum PrototypeStrictCapabilities {
             if PrototypeM3Expressive.required(fields) { result.insert(PrototypeM3Expressive.capability) }
             let type = fields["type"]?.stringValue ?? ""
             if type.isEmpty, let pointer = fields["platform"]?.stringValue { platformRead(pointer) }
-            if !PrototypeDerivedValidator.conditionReferences(fields, path: "").isEmpty { need("derive") }
+            if PrototypeDerivedValidator.requiresCapability(fields) { need("derive") }
             if PrototypeStringConditions.uses(fields) { need("string_conditions") }
             let types = [
                 "startTimer": "timers",

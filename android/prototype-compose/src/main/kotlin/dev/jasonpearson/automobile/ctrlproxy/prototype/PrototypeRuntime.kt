@@ -1458,6 +1458,8 @@ class PrototypeRuntime(
     )
   }
 
+  private val actionDerivedValues = PrototypeDerivedValuesCache()
+
   /** Bindings read the committed values at the action, after the writes before it in the list. */
   private fun bindingInputs() =
     object : EmitContextInputs {
@@ -1471,6 +1473,12 @@ class PrototypeRuntime(
 
       override fun data(pointer: String): JsonElement? =
         PrototypeDataPointer.resolve(current.spec.data, pointer)
+
+      override fun derived(name: String): JsonElement? =
+        actionDerivedValues.evaluate(current.spec)[name]?.takeUnless { value ->
+          value == JsonNull ||
+            (value is JsonPrimitive && !value.isString && value.doubleOrNull?.isFinite() == false)
+        }
 
       override fun platform(pointer: String): JsonElement? =
         PrototypeDataPointer.resolve(current.platformState, pointer)
@@ -1597,8 +1605,14 @@ class PrototypeRuntime(
   }
 
   private fun isSecureStateBinding(binding: JsonObject?): Boolean {
-    val key = (binding?.get("state") as? JsonPrimitive)?.content ?: return false
-    return "state:$key" in current.spec.storage?.secure.orEmpty()
+    val secure = current.spec.storage?.secure.orEmpty()
+    if (binding == null || secure.isEmpty()) return false
+    (binding["state"] as? JsonPrimitive)?.content?.let {
+      return "state:$it" in secure
+    }
+    val derivedName = (binding["derived"] as? JsonPrimitive)?.content ?: return false
+    val entry = current.spec.derive?.get(derivedName) ?: return false
+    return PrototypeDerive.stateInputs(entry).any { "state:$it" in secure }
   }
 
   private fun dataWrite(action: PrototypeAction): PrototypeDataWrite? {

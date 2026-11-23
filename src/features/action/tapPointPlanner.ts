@@ -14,6 +14,7 @@ import { applicationWindowSafeTapPoint } from "../observe/HierarchyHitTest";
 import type { SafeTapPointResult } from "../observe/ApplicationWindowCover";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import { SearchableHierarchy } from "../utility/SearchableNode";
+import { clearOfFocusedIosWindow } from "./iosBackgroundWindowTap";
 import {
   ActionableError,
   BootedDevice,
@@ -401,13 +402,20 @@ export class TapPointPlanner {
     const targetNode = findTapTargetNode(nodes, target);
     const barSafeBounds = this.barSafeIosVisibleBounds(hierarchy, targetNode, visibleBounds, point);
     const barClipped = barSafeBounds !== visibleBounds;
+    const tapBounds = clearOfFocusedIosWindow({
+      hierarchy,
+      nodes,
+      targetNode,
+      target,
+      bounds: barSafeBounds,
+    });
     const exposedImePoint = ime
       ? tapPointOutsideIme(
-          [barSafeBounds.left, barSafeBounds.top, barSafeBounds.right, barSafeBounds.bottom],
+          [tapBounds.left, tapBounds.top, tapBounds.right, tapBounds.bottom],
           ime.bounds,
         )
       : null;
-    const exposedCenter = this.deps.geometry().getElementCenter({ bounds: barSafeBounds });
+    const exposedCenter = this.deps.geometry().getElementCenter({ bounds: tapBounds });
     const chromeElements = context.chromeElements ?? [target];
     const navClipped = this.navigationTapBounds(
       target.bounds,
@@ -435,14 +443,14 @@ export class TapPointPlanner {
         return node ? [node] : [];
       }),
       screen: context.screenSize,
-      visibleBounds: barSafeBounds,
+      visibleBounds: tapBounds,
       candidates,
       imeBounds,
       isValid: (candidate): candidate is { x: number; y: number } =>
         candidate !== null &&
         Number.isInteger(candidate.x) &&
         Number.isInteger(candidate.y) &&
-        pointInTapBounds(candidate, barSafeBounds) &&
+        pointInTapBounds(candidate, tapBounds) &&
         pointInTapBounds(candidate, target.bounds) &&
         (!imeBounds || !pointInTapBounds(candidate, imeBounds)) &&
         (!isUsableScreenSize(context.screenSize) ||

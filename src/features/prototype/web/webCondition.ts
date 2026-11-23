@@ -108,8 +108,8 @@ function decideLeaf(raw: Raw, scope: ConditionScope): Decision {
       true,
     );
   }
-  if (typeof raw.key === "string" && Object.hasOwn(scope.state, raw.key)) {
-    return compare(scope.state[raw.key], raw);
+  if (typeof raw.key === "string") {
+    return compareState(raw, raw.key, scope.state);
   }
   // A platform pointer the frame decides compares like state; `data` pointers stay undecidable.
   const platformState = scope.platformState ?? {};
@@ -117,6 +117,17 @@ function decideLeaf(raw: Raw, scope: ConditionScope): Decision {
     return compare(platformState[raw.platform], raw);
   }
   return undefined;
+}
+
+function compareState(condition: Raw, key: string, state: Raw): Decision {
+  if (typeof condition.equalsKey === "string") {
+    return (
+      Object.hasOwn(state, key) &&
+      Object.hasOwn(state, condition.equalsKey) &&
+      state[key] === state[condition.equalsKey]
+    );
+  }
+  return Object.hasOwn(state, key) ? compare(state[key], condition) : undefined;
 }
 
 /**

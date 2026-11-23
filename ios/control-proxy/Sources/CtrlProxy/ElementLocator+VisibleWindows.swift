@@ -244,14 +244,29 @@ extension ElementLocator {
     }
 
     /// The background app whose window a screen point lands in, or nil when the point is in the
-    /// focused window or outside every observed window. iPadOS focuses the window a tap lands in.
+    /// focused window, within `focusedWindowTouchMargin` of it, or outside every observed window.
+    /// iPadOS focuses the window a tap lands in, but gives a touch near the focused window's edge
+    /// to the focused window (#19091), so such a tap must not switch the tracked app.
     nonisolated static func backgroundWindowOwner(x: Double, y: Double, in frames: ObservedWindowFrames) -> String? {
         guard x.isFinite, y.isFinite else { return nil }
         let px = ElementBounds.clampedInt(x)
         let py = ElementBounds.clampedInt(y)
-        guard !contains(frames.focused, x: px, y: py) else { return nil }
+        let margin = focusedWindowTouchMargin
+        let focusedTouchArea = ElementBounds(
+            left: frames.focused.left - margin,
+            top: frames.focused.top - margin,
+            right: frames.focused.right + margin,
+            bottom: frames.focused.bottom + margin
+        )
+        guard !contains(focusedTouchArea, x: px, y: py) else { return nil }
         return frames.background.first { contains($0.frame, x: px, y: py) }?.bundleId
     }
+
+    /// Points around the focused iPad window where iPadOS still gives a touch to it: about 5 pt
+    /// on iPadOS 27.2 for both a tiled and a floating window (#19091). tapOn keeps its point in a
+    /// background window farther out (`IOS_FOCUSED_WINDOW_TOUCH_MARGIN` in
+    /// src/features/action/iosBackgroundWindowTap.ts).
+    nonisolated static let focusedWindowTouchMargin = 8
 
     nonisolated static func withChildren(_ element: UIElementInfo, _ children: [UIElementInfo]?) -> UIElementInfo {
         UIElementInfo(

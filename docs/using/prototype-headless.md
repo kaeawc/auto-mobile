@@ -67,7 +67,7 @@ on a device.
 - The result lists `events` (`sequence`, `kind`, `name`) and `virtualDevice`. `handled: false`
   means the tap reached nothing that handles it, or the control is disabled.
 
-These actions run on a tap: `emit` (context from `state`, `page`, `data` or `value`),
+These actions run on a tap: `emit` (context from `state`, `page`, `data`, `derived` or `value`),
 `setState`, `toggle`, `increment`, `decrement`, `setPage`, `push`, `pop`, `popToRoot`, `replace`,
 `dismiss` and `hideKeyboard`. An emit context over 4096 bytes is cut and flagged
 `contextTruncated`, as on a device. A tap whose actions include anything else fails with "cannot run",

@@ -93,6 +93,12 @@ internal object PrototypeBundleCapabilities {
 
   private fun actions(action: JsonObject, caps: MutableSet<String>) {
     val type = text(action["type"])
+    if (
+      PrototypeBindableFields.firstAction(action, "") { _, _, kind ->
+        true.takeIf { kind.requiresDerive() }
+      } != null
+    )
+      caps.add("prototype_derive_v1")
     dataActions(action, caps)
     if (PrototypeChannels.needsRealtimeCapability(action))
       caps.add("prototype_platform_realtime_v1")
@@ -133,7 +139,7 @@ internal object PrototypeBundleCapabilities {
       caps.add("prototype_loading_states_v1")
     repeatCapabilities(node["repeat"] as? JsonObject, caps)
     PrototypeBindableFields.first<Unit>(node, "") { value, _, kind ->
-      if (kind == PrototypeBindableKind.DERIVED_CONDITION) caps.add("prototype_derive_v1")
+      if (kind.requiresDerive()) caps.add("prototype_derive_v1")
       val bound =
         when (kind) {
           PrototypeBindableKind.TEXT -> text(value)?.let(PrototypeDataText::hasBinding) == true

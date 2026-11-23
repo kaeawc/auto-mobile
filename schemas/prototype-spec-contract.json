@@ -405,9 +405,11 @@
           "contains",
           "startsWith",
           "lengthGt",
-          "lengthLt"
+          "lengthLt",
+          "equalsKey"
         ],
-        "key|derived": ["contains", "startsWith", "lengthGt", "lengthLt"]
+        "key|derived": ["contains", "startsWith", "lengthGt", "lengthLt"],
+        "key": ["equalsKey"]
       },
       "fields": {
         "key": {
@@ -546,6 +548,12 @@
         },
         "derived": {
           "rule": { "kind": "key" },
+          "optional": true
+        },
+        "equalsKey": {
+          "rule": {
+            "kind": "boundKey"
+          },
           "optional": true
         }
       }
@@ -1688,6 +1696,17 @@
                           "optional": false
                         }
                       }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "derived": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
                     }
                   ]
                 }
@@ -2221,6 +2240,17 @@
                   {
                     "kind": "object",
                     "fields": {
+                      "derived": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
                       "generate": {
                         "rule": {
                           "kind": "enum",
@@ -2403,6 +2433,17 @@
                     "kind": "object",
                     "fields": {
                       "link": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "derived": {
                         "rule": {
                           "kind": "key"
                         },
@@ -2716,6 +2757,17 @@
                     {
                       "kind": "object",
                       "fields": {
+                        "derived": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
                         "generate": {
                           "rule": {
                             "kind": "enum",
@@ -2933,6 +2985,17 @@
                               {
                                 "kind": "object",
                                 "fields": {
+                                  "derived": {
+                                    "rule": {
+                                      "kind": "key"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
                                   "generate": {
                                     "rule": {
                                       "kind": "enum",
@@ -2978,6 +3041,17 @@
                     "kind": "object",
                     "fields": {
                       "link": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "derived": {
                         "rule": {
                           "kind": "key"
                         },
@@ -3572,6 +3646,17 @@
                   {
                     "kind": "object",
                     "fields": {
+                      "derived": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
                       "generate": {
                         "rule": {
                           "kind": "enum",
@@ -3736,6 +3821,17 @@
                     "kind": "object",
                     "fields": {
                       "link": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "derived": {
                         "rule": {
                           "kind": "key"
                         },
@@ -22543,6 +22639,17 @@
         {
           "kind": "object",
           "fields": {
+            "derived": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
             "generate": {
               "rule": {
                 "kind": "enum",
@@ -23504,6 +23611,17 @@
                     "rule": {
                       "kind": "json",
                       "maxDepth": 24
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "derived": {
+                    "rule": {
+                      "kind": "key"
                     },
                     "optional": false
                   }

@@ -1092,6 +1092,7 @@ private fun PrototypeCondition.bound(instance: RepeatInstance): PrototypeConditi
   copy(
     valid = valid?.let { PrototypeValidityKeys.Multiple(it.keys().map(instance::interpolate)) },
     key = key?.let(instance::interpolate),
+    equalsKey = equalsKey?.let(instance::interpolate),
     equals = equals?.let(instance::interpolateScalar),
     notEquals = notEquals?.let(instance::interpolateScalar),
     contains = contains?.let(instance::interpolateText),

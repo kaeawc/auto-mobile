@@ -190,8 +190,11 @@ window with `isFocused: false`; with more than one window every entry carries
 
 Every app in a tiled or floating layout stays `.runningForeground`, so the focused app is
 the tracked one: launching an app, or a tap delivered inside another observed window,
-makes it the focused app. iPadOS consumes that first tap to focus the window, so the
-control under it does not react and a second tap activates it. The runner does not
+makes it the focused app. iPadOS gives a touch within about 5 pt of the focused window
+to that window, so a tap within 8 pt of it does not switch the tracked app, and `tapOn`
+places its point in a background window at least 24 pt clear of the focused window,
+refusing a target with no such point. iPadOS consumes that first tap to focus the window,
+so the control under it does not react and a second tap activates it. The runner does not
 repeat the tap itself. Any foreground switch drops the observed window frames. An app
 opened outside the runner that is not a common system app is not found.
 

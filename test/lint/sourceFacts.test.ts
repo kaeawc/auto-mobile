@@ -4,7 +4,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import {
+  createGuardDirectoryLister,
   createGuardSourceReader,
+  GUARD_RACY_WINDOW_NS,
   guardDirectoryEntries,
   parseGuardSource,
   readGuardFile,
@@ -43,6 +45,59 @@ describe("collectSourceFacts (mutations the guards rely on)", () => {
       expect(reads).toBe(platform === "win32" ? 4 : 2);
     },
   );
+
+  test("guard source reader re-reads a same-tick rewrite with an unchanged identity", () => {
+    let source = 'import "s1";';
+    let reads = 0;
+    let now = 10n;
+    const stat = { dev: 1n, ino: 2n, mtimeNs: 10n, ctimeNs: 10n, size: 12n };
+    const read = createGuardSourceReader({
+      platform: "linux",
+      stat: () => stat,
+      readFile: () => {
+        reads++;
+        return source;
+      },
+      nowNs: () => now,
+    });
+    expect(read("fixture.ts")).toBe(source);
+    source = 'import "s2";';
+    expect(read("fixture.ts")).toBe(source);
+    expect(reads).toBe(2);
+    now = stat.ctimeNs + GUARD_RACY_WINDOW_NS;
+    expect(read("fixture.ts")).toBe(source);
+    expect(read("fixture.ts")).toBe(source);
+    expect(reads).toBe(3);
+  });
+
+  test("guard directory lister sees a create within one timestamp tick (#18986)", () => {
+    const entry = (name: string) => ({ name, isDirectory: () => false, isFile: () => true });
+    let names: string[] = [];
+    let listings = 0;
+    let now = 10n;
+    const stat = { dev: 1n, ino: 2n, mtimeNs: 10n, ctimeNs: 10n, size: 4096n };
+    const list = createGuardDirectoryLister({
+      platform: "linux",
+      stat: () => stat,
+      readdir: () => {
+        listings++;
+        return names.map(entry);
+      },
+      nowNs: () => now,
+    });
+    const empty = list("nested");
+    expect(empty).toEqual([]);
+    names = ["source.ts"];
+    const created = list("nested");
+    expect(created.map((e) => e.name)).toEqual(["source.ts"]);
+    // An unchanged racy re-list keeps the cached array so inventories stay reusable.
+    expect(list("nested")).toBe(created);
+    expect(listings).toBe(3);
+    now = stat.ctimeNs + GUARD_RACY_WINDOW_NS;
+    expect(list("nested")).toBe(created);
+    expect(list("nested")).toBe(created);
+    expect(listings).toBe(4);
+  });
 
   test("module specifiers cover static, dynamic, re-export and require forms", () => {
     expect(

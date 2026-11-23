@@ -201,6 +201,25 @@ final class PrototypeMenusTests: XCTestCase {
         XCTAssertEqual(select.options?.first?.label, "One")
     }
 
+    func testKeyedMenuAndSelectTemplateChildrenKeepInternalIdentities() throws {
+        for template in [
+            #"{"type":"menu","openWhen":{"key":"open","equals":true},"items":[{"label":"One"}]}"#,
+            #"{"type":"select","stateKey":"choice","options":[{"value":"a","label":"A"},{"value":"b","label":"B"}]}"#,
+        ] {
+            let spec = try decode("""
+            {"id":"r","window":{"placement":{"type":"fullscreen"}},"state":{"open":false,"choice":"a"},
+             "root":{"type":"column","repeat":{"as":"item","items":[{"id":1}],"key":"id"},
+              "children":[\(template),\(template)]}}
+            """)
+            let children = try XCTUnwrap(spec.root.children)
+            XCTAssertEqual(children.count, 2)
+            XCTAssertEqual(children.first?.repeatKey, "1")
+            XCTAssertNil(children.last?.repeatKey)
+            XCTAssertEqual(children.first?.repeatIdentity, "1/children[0]")
+            XCTAssertEqual(children.last?.repeatIdentity, "1/children[1]")
+        }
+    }
+
     func testRuntimeSelectValidationRejectsDuplicateValues() throws {
         let node = try JSONDecoder().decode(PrototypeNode.self, from: Data(
             #"{"type":"select","stateKey":"choice","options":[{"value":"a","label":"A"},{"value":"a","label":"Again"}]}"#

@@ -158,13 +158,16 @@ omit the module. Other canonical names return `unavailable`. A missing usage key
 The first status read establishes `/platform/permissions/<name>` asynchronously without prompting.
 Foreground refresh re-reads each authority. Requests and foreground reads publish only changed
 states. A request prompts only while authorization is `notDetermined` and returns the resulting
-status. Notifications request alert, sound and badge options, and `options.provisional: true` adds
+status.
+
+Notifications request alert, sound and badge options, and `options.provisional: true` adds
 provisional authorization without showing a prompt. Photos use read/write access,
 `photosAdd` uses add-only access, calendar requests full access and location requests when-in-use
 access. One request may be in flight per module. A second returns `too_many_in_flight`. Permission
 requests have no platform-call deadline, including an explicit `timeoutMs`; `statusKey` stays `loading`
 until a result or cancellation. Cancellation drops the late result while foreground observation
 stays active. The registry stops observation when its final observer releases it.
+
 The notifications state is also published at `/platform/notifications/authorization`, including the
 baseline and foreground re-reads, and cleared on stop. An authorization-only binding declares
 `notifications` in `requires.platform` and `requires.permissions` and uses the permissions capability
@@ -206,8 +209,7 @@ launch delivers a denial, and cleared on reset, teardown, or whenever a grant is
 | API 33+, denial recorded and rationale available                        | `denied`        |
 | API 33+, denial recorded and no rationale (including user-fixed denial) | `blocked`       |
 
-`POST_NOTIFICATIONS` is a runtime permission starting at API 33. Earlier versions never prompt;
-Settings alone controls it. Granted and blocked requests return their
+Below API 33, `POST_NOTIFICATIONS` never prompts; Settings alone controls it. Granted and blocked requests return their
 state without a prompt. This runtime does not publish `/platform/notifications/authorization` or
 advertise the notifications module.
 
@@ -228,7 +230,7 @@ calls:
   (non-blank, at most 128). Its optional arguments are `body` (at most 1024), `largeImage` (an asset id),
   `style`, `group`, `badge` (whole number 0-9999), `data`, `actions`, `progress`, `silent` and `ongoing`.
   The `data` argument is JSON, at most 1 KiB, echoed in every event for the notification.
-- `notifications.cancel` takes `id`, `group` or `all: true`.
+- `notifications.cancel` takes exactly one of `id`, `group` or `all: true`.
 - `notifications.setBadge` takes `count` (0-9999).
 
 The `style` argument is discriminated by `type`: `bigText`,
@@ -242,25 +244,22 @@ carries typed text) and `.dismissed`.
 
 State is `/platform/notifications/{badge, active, pending, authorization}` plus
 `/platform/notifications/channels/<id>/blocked` (a boolean, readable only for a declared channel). The
-`active` key is at most 24 per prototype, and `authorization` uses the permission vocabulary (`granted`,
-`denied`, `blocked`, `notDetermined`, `limited`, `restricted`, `unavailable`). Android hosts do not
-advertise this module. The `permissions` module above supplies notification authorization; iOS also
-publishes its authorization key without advertising notification delivery calls.
+`active` key is at most 24 per prototype, and `authorization` uses the permission states above. Android hosts do not
+advertise this module. The `permissions` module above supplies notification authorization.
 
 Channels come from a root `notifications` block,
 `{channels: [{id, name, importance, description?, showBadge?}]}`. It holds 1-8 channels with unique
 key-shaped ids, a non-blank `name` (at most 64), `importance` one of `min`, `low`, `default` or `high`,
 and an optional `description` (at most 256). The block needs `notifications` in `requires.platform`. A
 literal `channel` on `notifications.post` must name a declared channel, and a literal `actions` list
-needs unique ids. The `notifications.cancel` call takes exactly one of `id`, `group` or `all`; the
-runtime checks bound values. On iOS, `min` and `low` map to the passive interruption level and
+needs unique ids; the runtime checks bound values. On iOS, `min` and `low` map to the passive interruption level and
 `default` and `high` to active.
 
 The bounds are named contract limits (`MAX_PROTOTYPE_NOTIFICATION_*`,
 `MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE`) that the call, state and channel rules repeat. Spec validation
 checks literal values only. The limits that apply after placeholders resolve belong to the device
-runtime that posts the notification. The per-prototype iOS Viewer is the only runtime that posts
-notifications; no other host posts one, so these limits are not enforced elsewhere.
+runtime that posts the notification. Only the per-prototype iOS Viewer posts notifications, so no
+other host enforces these limits.
 
 | Resolved limit | Value                                                          |
 | -------------- | -------------------------------------------------------------- |

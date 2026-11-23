@@ -1,0 +1,9 @@
+  *APP* UID 1001000 ProcessRecord{19ea5ba 5112:com.android.car.settings/u10s1000}
+    user #10 uid=1001000 gids={1065, 3002, 3003, 3001, 3007, 1007, 1000, 1009997, 1077}
+    mRequiredAbi=arm64-v8a instructionSet=arm64
+    class=com.android.car.settings.CarSettingsApplication
+    dir=/system/priv-app/CarSettings/CarSettings.apk publicDir=/system/priv-app/CarSettings/CarSettings.apk data=/data/user/10/com.android.car.settings
+    packageList={com.android.car.settings}
+    compat={160dpi always-compat}
+    thread=android.app.IApplicationThread$Stub$Proxy@d6fa931
+    pid=5112

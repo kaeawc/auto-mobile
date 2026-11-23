@@ -1029,7 +1029,7 @@ export const GUIDE_ERRORS = `## Common validation errors
 | \`Data depth limit exceeded\` / \`Data array limit exceeded\` / \`Data byte limit exceeded\` | Reduce data to the generated limits. |
 | \`Invalid pointer value\` | Use a nonempty RFC 6901 pointer within the pointer limit. |
 | \`Repeat path does not resolve to an array\` / \`Repeat path resolves to more than 128 items\` / \`Repeat path item <i> is not an object\` | Point to an array of objects within the repeat item limit. |
-| \`Duplicate repeat key "x" (items <i> and <j>)\` | Give every item a unique rendered identity. |
+| \`Duplicate repeat key "x" (items <i> and <j>)\` / \`Derived repeat key "x" has the same input for items <i> and <j>\` | Give every item a unique rendered identity; derive a key from a field that differs per row, not a constant or a shared value. |
 | \`Bound state key "x" is invalid (repeat item <i>)\` | A path-bound key must form a valid state key; error is at repeat.items.path. |
 | \`Requires key or data or platform or derived\` | Supply one condition source with exactly one comparison. |
 | \`Repeat path cell limit exceeded\` | Reduce path-bound repeats or the scalar members projected per item; see \`MAX_PROTOTYPE_REPEAT_PATH_CELLS\`. |

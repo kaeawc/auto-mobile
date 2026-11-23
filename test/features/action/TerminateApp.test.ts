@@ -122,6 +122,34 @@ describe("TerminateApp (Android install listing)", () => {
     expect(usersSpy).toHaveBeenCalledTimes(1);
   });
 
+  test("an Automotive device force-stops the app for the foreground driver user, not user 0 (#19061)", async () => {
+    const automotive: BootedDevice = { ...device, formFactor: "automotive" };
+    // Both users are "Driver" and running; user 0 is the headless system user.
+    adb.setUsers([
+      { userId: 0, name: "Driver", flags: 0x813, running: true },
+      { userId: 10, name: "Driver", flags: 0x402, running: true },
+    ]);
+    adb.setCommandResult("shell am get-current-user", "10\n");
+    adb.setCommandResult("shell pm list packages --user 10", "package:com.android.car.settings");
+    adb.setCommandResult(
+      "shell dumpsys activity processes",
+      "  *APP* UID 1001000 ProcessRecord{19ea5ba 5112:com.android.car.settings/u10s1000}",
+    );
+    ctrlProxySpy.mockRestore();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const terminate = new TerminateApp(automotive, adb, { timer, cacheInvalidator });
+    ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+      throw new Error("CtrlProxy unavailable");
+    });
+    const result = await terminate.execute("com.android.car.settings", { skipObservation: true });
+    expect(result).toMatchObject({ wasInstalled: true, wasRunning: true, userId: 10 });
+    expect(adb.wasCommandExecuted("shell am force-stop --user 10 'com.android.car.settings'")).toBe(
+      true,
+    );
+    expect(adb.wasCommandExecuted("force-stop --user 0")).toBe(false);
+  });
+
   test("retires the app's process state after a force-stop and for an already-dead process", async () => {
     adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
     adb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");

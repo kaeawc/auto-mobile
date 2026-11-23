@@ -6,10 +6,14 @@ import {
   screenLockRestoreResult,
   startScreenLockRestore,
 } from "../../src/daemon/screenLockSessionCleanup";
-import { AdbLockSettingsClient } from "../../src/features/utility/screenLock/AndroidLockSettings";
+import {
+  AdbLockSettingsClient,
+  defaultLockSettingsClientFactory,
+} from "../../src/features/utility/screenLock/AndroidLockSettings";
 import { ScreenLockRegistry } from "../../src/features/utility/screenLock/ScreenLockRegistry";
 import { createExecResult } from "../../src/utils/execResult";
 import { logger } from "../../src/utils/logger";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeLockSettingsClient } from "../fakes/FakeLockSettingsClient";
 import { FakeSessionCleanupManager } from "../fakes/FakeSessionCleanupManager";
@@ -39,6 +43,51 @@ function setup(options: { adb?: FakeAdbExecutor; client?: FakeLockSettingsClient
   registry.record({ deviceId: DEVICE, sessionId: "s-1", type: "pin", credential: PIN });
   return { manager, registry, timer, forgotten };
 }
+
+describe("release clears the user the lock was set on (#19095)", () => {
+  async function releaseAfterUserSwitch(formFactor: "automotive" | "phone") {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "locksettings",
+      stdout("Lock credential cleared\nAUTOMOBILE_LOCKSETTINGS_EXIT=0\n"),
+    );
+    adb.setCommandResponse("get-current-user", stdout("11\n"));
+    const manager = new FakeSessionCleanupManager();
+    const registry = new ScreenLockRegistry();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    registerScreenLockSessionCleanup(manager, {
+      registry,
+      timer,
+      clientFactory: defaultLockSettingsClientFactory(new FakeAdbClientFactory(adb)),
+      forgetRememberedUnlock: async () => {},
+    });
+    // The set resolved user 10 (automotive) or 0 (phone); the foreground then moved to 11.
+    registry.record({
+      deviceId: DEVICE,
+      sessionId: "s-1",
+      type: "pin",
+      credential: PIN,
+      formFactor,
+      userId: formFactor === "automotive" ? 10 : 0,
+    });
+    manager.release("s-1", DEVICE);
+    await screenLockRestoreResult("s-1", { registry, timer });
+    return adb
+      .getExecutedArgv()
+      .find((argv) => argv.includes("locksettings") && argv.includes("clear"));
+  }
+
+  test("an Automotive release after a foreground switch clears the recorded user 10", async () => {
+    const clear = await releaseAfterUserSwitch("automotive");
+    expect(clear?.slice(2, 5)).toEqual(["clear", "--user", "10"]);
+  });
+
+  test("a phone release still clears user 0", async () => {
+    const clear = await releaseAfterUserSwitch("phone");
+    expect(clear?.slice(2, 5)).toEqual(["clear", "--user", "0"]);
+  });
+});
 
 describe("registerScreenLockSessionCleanup on Automotive (#19092)", () => {
   test("release builds the restore client with the form factor recorded at set time", async () => {

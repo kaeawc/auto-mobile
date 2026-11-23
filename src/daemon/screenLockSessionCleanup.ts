@@ -52,7 +52,10 @@ export function startScreenLockRestore(
   const restore = runOutsideRequestContext(async () =>
     restoreSessionScreenLock(
       lock,
-      (options.clientFactory ?? defaultLockSettingsClientFactory())(device),
+      (options.clientFactory ?? defaultLockSettingsClientFactory())(
+        device,
+        lock.userId === undefined ? undefined : { userId: lock.userId },
+      ),
       {
         timer: options.timer ?? defaultTimer,
         forgetRememberedUnlock: options.forgetRememberedUnlock ?? defaultForgetRememberedUnlock,

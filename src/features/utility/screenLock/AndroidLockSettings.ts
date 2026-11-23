@@ -59,9 +59,19 @@ export interface LockSettingsClient {
     oldCredential?: string,
   ): Promise<LockSettingsCommandResult>;
   clearCredential(oldCredential: string): Promise<LockSettingsCommandResult>;
+  /** The Android user this client targets: resolved once, so a set can record it for release. */
+  targetUserId(): Promise<number>;
 }
 
-export type LockSettingsClientFactory = (device: BootedDevice) => LockSettingsClient;
+/** `userId` pins the client to the user a lock was set on instead of resolving the foreground. */
+export interface LockSettingsClientOptions {
+  userId?: number;
+}
+
+export type LockSettingsClientFactory = (
+  device: BootedDevice,
+  options?: LockSettingsClientOptions,
+) => LockSettingsClient;
 
 /**
  * Replace every secret, and its device-shell-quoted form, in `text`. Longest first, so a secret
@@ -184,6 +194,10 @@ export class AdbLockSettingsClient implements LockSettingsClient {
     return this.resolvedUser;
   }
 
+  targetUserId(): Promise<number> {
+    return this.resolveUser();
+  }
+
   async read(): Promise<LockSettingsReading> {
     const userId = await this.resolveUser();
     try {
@@ -267,8 +281,12 @@ export class AdbLockSettingsClient implements LockSettingsClient {
 export const defaultLockSettingsClientFactory = (
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
 ): LockSettingsClientFactory => {
-  return (device) => {
+  return (device, options) => {
     const adb = adbFactory.create(device);
-    return new AdbLockSettingsClient(adb, createLockUserResolver(adb, device));
+    const { userId } = options ?? {};
+    return new AdbLockSettingsClient(
+      adb,
+      userId === undefined ? createLockUserResolver(adb, device) : async () => userId,
+    );
   };
 };

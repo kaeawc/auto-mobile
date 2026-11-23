@@ -157,11 +157,13 @@ export class ScreenLockOperations {
       return commandFailure(result.outcome, result.detail, `set-${requested.type}`);
     }
     if (owner !== undefined) {
+      const userId = await client.targetUserId();
       this.dependencies.registry().record({
         deviceId,
         sessionId: owner,
         ...requested,
         ...(formFactor === undefined ? {} : { formFactor }),
+        userId,
       });
     }
     await this.dependencies.forgetRememberedUnlock()(deviceId);

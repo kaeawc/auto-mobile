@@ -45,6 +45,15 @@ describe("setDeviceState screenLock", () => {
     expect(registry.get("emulator-5554")?.formFactor).toBe("automotive");
   });
 
+  test("records the user the set resolved so release can clear exactly that user (#19095)", async () => {
+    const { client, registry, state } = harness({ owner: "s-1" });
+    client.userId = 10;
+
+    await state.setState({ screenLock: { type: "pin", credential: PIN } });
+
+    expect(registry.get("emulator-5554")?.userId).toBe(10);
+  });
+
   test("a session sets a PIN, records it for release, and returns no credential", async () => {
     const { client, registry, forgotten, state } = harness({ owner: "s-1" });
 
@@ -66,6 +75,7 @@ describe("setDeviceState screenLock", () => {
       sessionId: "s-1",
       type: "pin",
       credential: PIN,
+      userId: 0,
     });
     expect(forgotten).toEqual(["emulator-5554"]);
     expect(JSON.stringify(result)).not.toContain(PIN);

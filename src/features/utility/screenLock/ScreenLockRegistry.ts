@@ -9,6 +9,12 @@ export interface SessionScreenLock {
   credential: string;
   /** The device's form factor when set: release builds its restore client without the device. */
   formFactor?: FormFactor;
+  /**
+   * The Android user the credential was set on: release clears exactly that user, even after the
+   * foreground user changed. Absent for a record that predates it; release then resolves by
+   * `formFactor`.
+   */
+  userId?: number;
 }
 
 /** Release reports kept for late `releaseSession` replies, as for keep-awake reports. */

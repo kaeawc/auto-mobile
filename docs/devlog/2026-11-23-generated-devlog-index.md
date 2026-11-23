@@ -25,7 +25,8 @@ Authors add only the entry file and run the script.
 
 ## Consequences
 
-Two pull requests that each add an entry still touch the same generated lines, but the conflict is
-resolved by running the script, not by hand. Entries from one day are listed by file name, not by the
-order they were added. Nav labels drop backticks, which MkDocs shows literally. An entry with a bad
-file name, kind or date fails the check.
+Two pull requests that each add an entry still touch the same generated lines, but running the script
+resolves the conflict, not a hand edit. The script writes the index table without padding and oxfmt
+skips the file, so a long title does not rewrite every row. The script lists entries from one day by
+file name, not by the order they arrived. Nav labels drop backticks, which MkDocs shows literally. An
+entry with a bad file name, kind or date fails the check.

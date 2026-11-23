@@ -81,21 +81,20 @@ export function sortEntries(entries: readonly DevlogEntry[]): DevlogEntry[] {
   return entries.toSorted((a, b) => (a.file < b.file ? 1 : a.file > b.file ? -1 : 0));
 }
 
-function padCell(text: string, width: number): string {
-  return text + " ".repeat(Math.max(0, width - Bun.stringWidth(text)));
-}
-
-/** The index table, padded the way oxfmt formats a Markdown table. */
+/**
+ * The index table, unpadded: a padded table re-pads every row when one wider
+ * entry lands, so each such PR would conflict with every other devlog PR. The
+ * file is in .oxfmtrc.json ignorePatterns so oxfmt does not re-pad it.
+ */
 export function renderIndexTable(entries: readonly DevlogEntry[]): string {
-  const header = ["Date", "Kind", "Entry"];
-  const rows = entries.map((entry) => [entry.date, entry.kind, `[${entry.title}](${entry.file})`]);
-  const widths = header.map((cell, column) =>
-    Math.max(3, Bun.stringWidth(cell), ...rows.map((row) => Bun.stringWidth(row[column] ?? ""))),
-  );
-  const line = (cells: readonly string[]) =>
-    `| ${cells.map((cell, i) => padCell(cell, widths[i] ?? 0)).join(" | ")} |`;
-  const divider = `| ${widths.map((width) => "-".repeat(width)).join(" | ")} |`;
-  return [line(header), divider, ...rows.map(line)].join("\n");
+  const row = (cells: readonly string[]) => `| ${cells.join(" | ")} |`;
+  return [
+    row(["Date", "Kind", "Entry"]),
+    row(["---", "---", "---"]),
+    ...entries.map((entry) =>
+      row([entry.date, entry.kind, `[${entry.title.replaceAll("|", "\\|")}](${entry.file})`]),
+    ),
+  ].join("\n");
 }
 
 function yamlDoubleQuoted(text: string): string {

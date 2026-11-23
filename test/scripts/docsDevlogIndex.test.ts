@@ -88,17 +88,17 @@ describe("generate-devlog-index", () => {
     ]);
   });
 
-  test("renderIndexTable pads columns to the widest cell", () => {
+  test("renderIndexTable writes unpadded rows and escapes pipes in titles", () => {
     const entries: DevlogEntry[] = [
       { file: "2026-11-01-a.md", title: "A", kind: "idea", date: "2026-11-01" },
-      { file: "2026-11-02-b.md", title: "Longer", kind: "decision", date: "2026-11-02" },
+      { file: "2026-11-02-b.md", title: "Longer | piped", kind: "decision", date: "2026-11-02" },
     ];
     expect(renderIndexTable(entries)).toBe(
       [
-        "| Date       | Kind     | Entry                     |",
-        "| ---------- | -------- | ------------------------- |",
-        "| 2026-11-01 | idea     | [A](2026-11-01-a.md)      |",
-        "| 2026-11-02 | decision | [Longer](2026-11-02-b.md) |",
+        "| Date | Kind | Entry |",
+        "| --- | --- | --- |",
+        "| 2026-11-01 | idea | [A](2026-11-01-a.md) |",
+        "| 2026-11-02 | decision | [Longer \\| piped](2026-11-02-b.md) |",
       ].join("\n"),
     );
   });
@@ -122,7 +122,7 @@ describe("generate-devlog-index", () => {
   test("generate rewrites both regions and is idempotent", () => {
     const first = generate({ entries: ENTRIES, index: INDEX, mkdocs: MKDOCS });
     expect(first.index).toContain(
-      '| 2026-11-23 | idea     | [Use `observe` quotes "here"](2026-11-23-zeta.md) |',
+      '| 2026-11-23 | idea | [Use `observe` quotes "here"](2026-11-23-zeta.md) |',
     );
     expect(first.index).not.toContain("stale");
     expect(first.index.startsWith("# Devlog\n\nIntro.\n")).toBe(true);

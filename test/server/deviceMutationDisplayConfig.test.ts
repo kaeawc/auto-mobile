@@ -8,6 +8,7 @@ import { deviceToolMutations } from "../../src/server/deviceMutationAdapters";
 import { displayConfigSchema } from "../../src/server/displayConfigTool";
 import { ACCESSIBILITY_DISPLAY_FIELDS } from "../../src/features/utility/AccessibilityDisplayPreferences";
 import { DEVICE_SETTING_KEYS } from "../../src/models/DeviceSettingDefaults";
+import { RENDER_OVERLAYS } from "../../src/utils/ios-cmdline-tools/SimulatorRenderOverlays";
 
 /** A sample argument and the journal key it must record, per platform (null: not journaled there). */
 const SETTING_FIELDS: Readonly<
@@ -29,6 +30,12 @@ const SETTING_FIELDS: Readonly<
   magnification: { arg: true, android: "magnification", ios: "magnification" },
   magnificationScale: { arg: 3, android: "magnificationScale", ios: "magnificationScale" },
   extraDim: { arg: true, android: "extraDim", ios: "extraDim" },
+  // Simulator render overlays (#19016): one row per named overlay; Android refuses them.
+  renderOverlays: {
+    arg: { blendedLayers: true },
+    android: null,
+    ios: "renderOverlay:blendedLayers",
+  },
 };
 
 /** Schema fields that select a device or modify the call rather than a display setting. */
@@ -95,7 +102,20 @@ describe("displayConfig mutation journaling covers every field (#14790)", () => 
       "density",
       "nightMode",
     ]);
-    expect(keysFor({ reset: true }, "ios")).toEqual(["contentSize", "nightMode"]);
+    expect(keysFor({ reset: true }, "ios")).toEqual([
+      "contentSize",
+      "nightMode",
+      ...RENDER_OVERLAYS.map((overlay) => `renderOverlay:${overlay}`),
+    ]);
+  });
+
+  test("render overlays record one row per overlay named, on or off (#19016)", () => {
+    expect(
+      keysFor({ renderOverlays: { offscreenRendered: false, blendedLayers: true } }, "ios"),
+    ).toEqual(["renderOverlay:blendedLayers", "renderOverlay:offscreenRendered"]);
+    expect(keysFor({ reset: "factory" }, "ios")).toEqual(
+      expect.arrayContaining(RENDER_OVERLAYS.map((overlay) => `renderOverlay:${overlay}`)),
+    );
   });
 
   test("several geometry fields record the opaque intent once", () => {

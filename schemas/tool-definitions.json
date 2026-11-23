@@ -3411,7 +3411,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Read or set the visual display configuration — font/text scale, effective display density, light/dark (night mode) theme, and on Android the runtime screen size, navigation mode (gesture / 3-button / 2-button) and display-cutout emulation — for adaptive-layout, edge-to-edge and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, size, navigationMode, displayCutout, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). Android size, navigationMode and displayCutout use `wm size` and the system image's overlays; values the image does not ship are refused and `available` lists the ones it has; size, overlay and density changes invalidate cached observations and coordinates. On Android, reset restores font scale, density and screen size to device defaults, navigation mode and display cutout to the values recorded before they were first changed, and night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Releasing or rebinding the session that changed size, navigationMode or displayCutout restores them through the same record as displayProfile; sessionless changes persist until reset. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed. reset: \"factory\" additionally forces platform defaults (light theme, iOS content size large, accessibility display preferences off) regardless of recorded baselines, including after a daemon restart.",
+    "description": "Read or set the visual display configuration — font/text scale, effective display density, light/dark (night mode) theme, and on Android the runtime screen size, navigation mode (gesture / 3-button / 2-button) and display-cutout emulation — for adaptive-layout, edge-to-edge and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, size, navigationMode, displayCutout, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). Android size, navigationMode and displayCutout use `wm size` and the system image's overlays; values the image does not ship are refused and `available` lists the ones it has; size, overlay and density changes invalidate cached observations and coordinates. On Android, reset restores font scale, density and screen size to device defaults, navigation mode and display cutout to the values recorded before they were first changed, and night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Releasing or rebinding the session that changed size, navigationMode or displayCutout restores them through the same record as displayProfile; sessionless changes persist until reset. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed. reset: \"factory\" additionally forces platform defaults (light theme, iOS content size large, accessibility display preferences off) regardless of recorded baselines, including after a daemon restart. On the iOS Simulator, renderOverlays turns Core Animation render overlays (blendedLayers, offscreenRendered, misalignedImages, copiedImages, cacheHits, flashUpdatedRegions) on or off; reads report every overlay, reset turns them all off, and a session's keep-booted reset restores the state it found.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -3542,6 +3542,37 @@
           "description": "Android API 31+: Extra dim (secure reduce_bright_colors_activated).",
           "type": "boolean"
         },
+        "renderOverlays": {
+          "description": "iOS Simulator only: Core Animation render overlays, the Simulator Debug menu's color tints for rendering cost, on (true) or off (false). They tint every app on screen until turned off; screenshots show them. reset turns all of them off. Omit to leave unchanged.",
+          "type": "object",
+          "properties": {
+            "blendedLayers": {
+              "description": "Color blended layers: green opaque, red blended.",
+              "type": "boolean"
+            },
+            "offscreenRendered": {
+              "description": "Color off-screen rendered layers yellow.",
+              "type": "boolean"
+            },
+            "misalignedImages": {
+              "description": "Color misaligned images magenta, scaled images yellow.",
+              "type": "boolean"
+            },
+            "copiedImages": {
+              "description": "Color images Core Animation had to copy cyan.",
+              "type": "boolean"
+            },
+            "cacheHits": {
+              "description": "Color rasterized layer cache hits green, misses red.",
+              "type": "boolean"
+            },
+            "flashUpdatedRegions": {
+              "description": "Flash regions as they redraw (yellow).",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
         "reset": {
           "description": "Pass \"factory\" to restore platform defaults no matter which baselines were recorded, including after a daemon restart or for changes made outside a session: light theme, iOS content size large, accessibility display preferences off, font scale 1.0, density and size defaults. Pass true for the baseline-only reset described next. On Android, restore font scale, density and screen size to device defaults, and navigation mode and display cutout to the values recorded before they were first changed. Restore night mode only to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. Android reset never forces light mode. On the iOS Simulator, reset restores light appearance and the content size category displayConfig replaced earlier in this process. On both, restore each accessibility display preference that displayConfig changed earlier in this process.",
           "anyOf": [
@@ -3641,6 +3672,9 @@
             },
             "extraDim": {
               "$ref": "#/$defs/__schema0"
+            },
+            "renderOverlays": {
+              "type": "boolean"
             }
           },
           "required": ["fontScale", "density", "theme"],
@@ -3806,6 +3840,15 @@
             },
             "extraDim": {
               "type": "boolean"
+            },
+            "renderOverlays": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "boolean"
+              }
             }
           },
           "additionalProperties": {}
@@ -3831,7 +3874,8 @@
             "colorCorrection",
             "magnification",
             "magnificationScale",
-            "extraDim"
+            "extraDim",
+            "renderOverlays"
           ]
         }
       ],

@@ -23,6 +23,15 @@ import { type AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlPr
 import { FamilyMutationPriorReader } from "./deviceMutationFamilyPriorReader";
 import { DeviceStateMutationPriorReader } from "./deviceMutationDeviceStatePriorReader";
 import { NotificationChannelMutationPriorReader } from "./deviceMutationNotificationChannelPriorReader";
+import {
+  OsascriptSimulatorRenderOverlayControl,
+  type RenderOverlay,
+  type SimulatorRenderOverlayControl,
+} from "../utils/ios-cmdline-tools/SimulatorRenderOverlays";
+import { renderOverlayFromKey } from "../daemon/sessionBroker/mutations/renderOverlayMutation";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 
 function stateField(entry: ToolMutation): DeviceStateField | undefined {
   const settingFields: Readonly<Record<string, DeviceStateField>> = {
@@ -132,6 +141,8 @@ export interface DefaultMutationPriorReaderDependencies {
   biometricsFor?: (device: BootedDevice) => Pick<DeviceState, "getBiometricEnrollmentState">;
   stateFor?: (device: BootedDevice) => Pick<DeviceState, "getState">;
   rotationFor?: (device: BootedDevice) => Pick<Rotate, "getRestoreState">;
+  /** Simulator render overlay state (#19016). */
+  renderOverlays?: Pick<SimulatorRenderOverlayControl, "read">;
   observationReaders?: Partial<MutationObservationReaders>;
 }
 
@@ -147,6 +158,7 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
   ) => Pick<DeviceState, "getBiometricEnrollmentState">;
   private readonly stateFor: (device: BootedDevice) => Pick<DeviceState, "getState">;
   private readonly rotationFor: (device: BootedDevice) => Pick<Rotate, "getRestoreState">;
+  private renderOverlays?: Pick<SimulatorRenderOverlayControl, "read">;
 
   constructor({
     settingsAccess = new DefaultDeviceSettingsAccess(),
@@ -154,8 +166,10 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
     biometricsFor = (device) => new DeviceState(device),
     stateFor = (device) => new DeviceState(device),
     rotationFor = (device) => new Rotate(device),
+    renderOverlays,
     observationReaders = {},
   }: DefaultMutationPriorReaderDependencies = {}) {
+    this.renderOverlays = renderOverlays;
     this.settingsAccess = settingsAccess;
     this.clipboardFor = clipboardFor;
     this.biometricsFor = biometricsFor;
@@ -213,11 +227,13 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
         )
       : undefined;
     const keyboardProfile = await this.readKeyboardProfile(device, mutations, signal);
+    const overlayPriors = await this.readRenderOverlayPriors(device, mutations, signal);
     const dataPriors = await this.dataReader.read(device, mutations, signal);
     const familyPriors = mergePriors(
       mergePriors(dataPriors, await this.deviceStateReader.read(device, mutations, signal)),
       await this.notificationChannelReader.read(device, mutations, signal),
     );
+    const fallbackPriors = mergePriors(familyPriors, overlayPriors);
     signal?.throwIfAborted();
     const priorsByKey: Readonly<Record<string, Readonly<Record<string, MutationValue>>>> = {
       device: {
@@ -245,9 +261,49 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
         return statePrior(entry, state);
       }
       return (
-        priorsByKey[entry.key]?.[entry.kind] ?? familyPriors[index] ?? { state: "unobservable" }
+        priorsByKey[entry.key]?.[entry.kind] ?? fallbackPriors[index] ?? { state: "unobservable" }
       );
     });
+  }
+
+  /** Per entry, the prior of a Simulator render overlay row (#19016); others are unobservable. */
+  private async readRenderOverlayPriors(
+    device: BootedDevice,
+    mutations: readonly ToolMutation[],
+    signal?: AbortSignal,
+  ): Promise<readonly MutationValue[]> {
+    const overlays = await this.readRenderOverlays(device, mutations, signal);
+    return mutations.map((entry): MutationValue => {
+      const overlay = entry.kind === "device-setting" ? renderOverlayFromKey(entry.key) : undefined;
+      return overlay && overlays ? present(overlays[overlay]) : { state: "unobservable" };
+    });
+  }
+
+  /** One overlay read for every overlay row; unreadable state leaves the rows unobservable. */
+  private async readRenderOverlays(
+    device: BootedDevice,
+    mutations: readonly ToolMutation[],
+    signal?: AbortSignal,
+  ): Promise<Record<RenderOverlay, boolean> | undefined> {
+    if (
+      device.platform !== "ios" ||
+      resolveIosDeviceKind({ deviceId: device.deviceId }) !== "simulator" ||
+      !mutations.some(
+        (entry) => entry.kind === "device-setting" && renderOverlayFromKey(entry.key) !== undefined,
+      )
+    ) {
+      return undefined;
+    }
+    try {
+      this.renderOverlays ??= new OsascriptSimulatorRenderOverlayControl();
+      return await this.renderOverlays.read(device.deviceId, signal);
+    } catch (error) {
+      logger.warn(
+        `Render overlay prior read failed on ${device.deviceId}: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   private async readKeyboardProfile(

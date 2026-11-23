@@ -1,6 +1,8 @@
 import {
   requestedAccessibilityFields,
+  type AccessibilityDisplayChange,
   type AccessibilityDisplayField,
+  type AccessibilityDisplayNotes,
   type AccessibilityDisplayValues,
 } from "./AccessibilityDisplayPreferences";
 import { hasDisplayGeometryField, type DisplayGeometryChange } from "./AndroidDisplayGeometry";
@@ -12,6 +14,7 @@ import type {
   SetDisplayConfigInput,
 } from "./DisplayConfig";
 import { IOS_DEFAULT_CONTENT_SIZE } from "./IosSimulatorDisplayConfig";
+import { hasRenderOverlayField } from "./displayRenderOverlays";
 
 /** Why a set request contradicts itself or asks for nothing, before any platform check. */
 export function setInputContradiction(input: SetDisplayConfigInput): string | undefined {
@@ -22,18 +25,19 @@ export function setInputContradiction(input: SetDisplayConfigInput): string | un
   const explicit =
     hasDisplayField(input) ||
     hasDisplayGeometryField(input) ||
+    hasRenderOverlayField(input) ||
     requestedAccessibilityFields(input).length > 0;
   if (input.reset === true && explicit) {
     return (
       "reset cannot be combined with an explicit fontScale, contentSize, density, theme, size, " +
-      "navigationMode, displayCutout, or accessibility display preference: reset restores the platform defaults and recorded " +
+      "navigationMode, displayCutout, renderOverlays, or accessibility display preference: reset restores the platform defaults and recorded " +
       "baselines. Send reset on its own, or send only the explicit fields you want to change."
     );
   }
   if (input.reset !== true && !explicit) {
     return (
       "At least one of fontScale, contentSize, density, theme, size, navigationMode, displayCutout, " +
-      "an accessibility display preference, or reset must be provided to set display config."
+      "renderOverlays, an accessibility display preference, or reset must be provided to set display config."
     );
   }
   if (input.fontScale !== undefined && input.contentSize !== undefined) {
@@ -84,6 +88,35 @@ function accessibilityResetMessage(restored: readonly AccessibilityDisplayField[
   return restored.length > 0
     ? `Restored ${restored.join(", ")} to the value displayConfig replaced.`
     : "No accessibility display preference changed by displayConfig needed restoring.";
+}
+
+export function supportNotes(notes: AccessibilityDisplayNotes): {
+  supportNotes?: AccessibilityDisplayNotes;
+} {
+  return Object.keys(notes).length > 0 ? { supportNotes: notes } : {};
+}
+
+/** One result from the font/density/theme part (if any) and the accessibility change. */
+export function mergeAccessibilityChange(
+  display: DisplayConfigResult | undefined,
+  change: AccessibilityDisplayChange,
+  reset: boolean,
+  identity: Pick<DisplayConfigResult, "deviceId" | "platform" | "supported">,
+): DisplayConfigResult {
+  const errors = [...(display?.error ? [display.error] : []), ...change.errors];
+  const error = errors.length > 0 ? errors.join("; ") : undefined;
+  const message = mergedMessage(error, display?.message, reset, change.restored);
+  return {
+    success: error === undefined,
+    deviceId: identity.deviceId,
+    platform: identity.platform,
+    supported: { ...(display?.supported ?? identity.supported), ...change.supported },
+    ...supportNotes(change.notes),
+    applied: { ...display?.applied, ...change.applied },
+    previous: { ...display?.previous, ...change.previous },
+    ...(error ? { error } : {}),
+    ...(message ? { message } : {}),
+  };
 }
 
 /** One result from the font/density/theme/accessibility part (if any) and the geometry change. */

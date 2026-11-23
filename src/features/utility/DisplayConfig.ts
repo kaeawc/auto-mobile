@@ -52,7 +52,8 @@ import {
   displayFieldsOf,
   mergeGeometryChange,
   hasDisplayField,
-  mergedMessage,
+  mergeAccessibilityChange,
+  supportNotes,
   setInputContradiction,
 } from "./displayConfigInput";
 import {
@@ -60,7 +61,6 @@ import {
   requestedAccessibilityFields,
   unsupportedAccessibilityDisplay,
   type AccessibilityBaselineStore,
-  type AccessibilityDisplayChange,
   type AccessibilityDisplayField,
   type AccessibilityDisplayNotes,
   type AccessibilityDisplayRead,
@@ -69,6 +69,8 @@ import {
 } from "./AccessibilityDisplayPreferences";
 import type { CtrlProxyAppearanceResult } from "../observe/ios/types";
 import { iosCtrlProxyClientFor } from "../observe/ios/iosCtrlProxyClientFor";
+import * as overlays from "./displayRenderOverlays";
+import * as simulatorOverlays from "../../utils/ios-cmdline-tools/SimulatorRenderOverlays";
 
 /**
  * The argv-shaped slice of the simctl client this feature needs. Routing
@@ -111,7 +113,8 @@ export {
   type DensityInput,
 } from "./androidDensityCommand";
 
-export interface DisplayConfigValues extends AccessibilityDisplayValues, DisplayGeometryValues {
+export interface DisplayConfigValues
+  extends AccessibilityDisplayValues, DisplayGeometryValues, overlays.RenderOverlayDisplayValues {
   /** System text scale, or `"default"` when Android has no explicit override. */
   fontScale?: FontScaleInput;
   /**
@@ -140,6 +143,7 @@ export interface DisplayConfigSupport
   fontScale: boolean;
   density: boolean | "partial";
   theme: boolean;
+  renderOverlays?: boolean;
 }
 
 export interface DisplayConfigResult {
@@ -160,7 +164,8 @@ export interface DisplayConfigResult {
   error?: string;
 }
 
-export interface SetDisplayConfigInput extends AccessibilityDisplayValues, DisplayGeometryInput {
+export interface SetDisplayConfigInput
+  extends AccessibilityDisplayValues, DisplayGeometryInput, overlays.RenderOverlayDisplayInput {
   fontScale?: FontScaleInput;
   density?: DensityInput;
   theme?: DisplayTheme;
@@ -205,6 +210,7 @@ export interface DisplayConfigDependencies {
   /** Process-lifetime baselines for the Simulator text size category this tool replaced. */
   contentSizeBaselines?: ContentSizeBaselineStore;
   geometry?: DisplayGeometryOptions;
+  renderOverlays?: simulatorOverlays.SimulatorRenderOverlayControl;
 }
 
 /** The runner's `request_appearance` (`XCUIDevice.appearance`); physical iOS has no simctl. */
@@ -251,6 +257,8 @@ export class DisplayConfig {
 
   private geometryOptions: DisplayGeometryOptions;
 
+  private overlayControl?: simulatorOverlays.SimulatorRenderOverlayControl;
+
   constructor(device: BootedDevice, dependencies: DisplayConfigDependencies = {}) {
     this.device = device;
     this.themeBaselines = dependencies.themeBaselines ?? defaultThemeBaselines;
@@ -260,6 +268,15 @@ export class DisplayConfig {
     this.iosRunnerAppearance = dependencies.iosRunnerAppearance;
     this.contentSizeBaselines = dependencies.contentSizeBaselines;
     this.geometryOptions = dependencies.geometry ?? {};
+    this.overlayControl = dependencies.renderOverlays;
+  }
+
+  /** The iOS Simulator's Core Animation render overlays (#19016). */
+  private renderOverlays(): overlays.RenderOverlayDisplay {
+    const supported = this.support();
+    const target = { deviceId: this.device.deviceId, platform: this.platform, supported };
+    const simulator = this.platform === "ios" && this.isIosSimulator();
+    return new overlays.RenderOverlayDisplay(target, simulator, this.overlayControl);
   }
 
   /** The accessibility display preferences (#14088) on this device, sharing this tool's seams. */
@@ -313,6 +330,7 @@ export class DisplayConfig {
         fontScale: simulator,
         density: false,
         theme: true,
+        renderOverlays: simulator,
         ...(simulator ? {} : unsupportedAccessibilityDisplay().supported),
       };
     }
@@ -373,7 +391,8 @@ export class DisplayConfig {
       const current = this.isIosSimulator()
         ? await this.iosSimulator().read()
         : await this.readIosThemeSnapshot();
-      return this.withAccessibilityRead(current, await this.accessibility().read());
+      const values = { ...current, ...(await this.renderOverlays().read()) };
+      return this.withAccessibilityRead(values, await this.accessibility().read());
     } catch (error) {
       logger.warn(`[DisplayConfig] getConfig failed (iOS): ${errorMessage(error)}`, error);
       return this.failure(errorMessage(error));
@@ -654,10 +673,11 @@ export class DisplayConfig {
     if (refusal) {
       return refusal;
     }
-    if (this.platform === "android" && (input.reset === true || hasDisplayGeometryField(input))) {
-      return this.setWithGeometry(input);
-    }
-    return this.setNonGeometry(input);
+    return this.renderOverlays().set(input, (rest) =>
+      this.platform === "android" && (rest.reset === true || hasDisplayGeometryField(rest))
+        ? this.setWithGeometry(rest)
+        : this.setNonGeometry(rest),
+    );
   }
 
   /** Forget every recorded baseline: theme, accessibility preferences and Simulator text size. */
@@ -710,7 +730,11 @@ export class DisplayConfig {
     const change = reset
       ? await accessibility.reset()
       : await accessibility.set(accessibilityValuesOf(input));
-    return this.mergeAccessibilityChange(display, change, reset);
+    return mergeAccessibilityChange(display, change, reset, {
+      deviceId: this.device.deviceId,
+      platform: this.platform,
+      supported: this.support(),
+    });
   }
 
   /** Requests refused before any device command: contradictory, empty, or unsupported target. */
@@ -735,27 +759,6 @@ export class DisplayConfig {
     return this.isIosSimulator()
       ? this.setIosSimulatorConfig(input)
       : this.setIosDeviceConfig(input);
-  }
-
-  private mergeAccessibilityChange(
-    display: DisplayConfigResult | undefined,
-    change: AccessibilityDisplayChange,
-    reset: boolean,
-  ): DisplayConfigResult {
-    const errors = [...(display?.error ? [display.error] : []), ...change.errors];
-    const error = errors.length > 0 ? errors.join("; ") : undefined;
-    const message = mergedMessage(error, display?.message, reset, change.restored);
-    return {
-      success: error === undefined,
-      deviceId: this.device.deviceId,
-      platform: this.platform,
-      supported: { ...(display?.supported ?? this.support()), ...change.supported },
-      ...supportNotes(change.notes),
-      applied: { ...display?.applied, ...change.applied },
-      previous: { ...display?.previous, ...change.previous },
-      ...(error ? { error } : {}),
-      ...(message ? { message } : {}),
-    };
   }
 
   private async setAndroidConfig(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
@@ -1068,10 +1071,4 @@ export class DisplayConfig {
       return [`${setting}: '${command}' failed: ${errorMessage(error)}`];
     }
   }
-}
-
-function supportNotes(notes: AccessibilityDisplayNotes): {
-  supportNotes?: AccessibilityDisplayNotes;
-} {
-  return Object.keys(notes).length > 0 ? { supportNotes: notes } : {};
 }

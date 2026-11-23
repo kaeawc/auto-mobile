@@ -75,6 +75,29 @@ frames from app launch or earlier screens. When the app rendered no frames durin
 frame-time check, so it does not fail the call. For raw captures use `performanceTrace` (its `categories` option records a custom Perfetto trace),
 [`measureStartup`](#measurestartup) or [`heapDump`](#heapdump).
 
+## Render overlays (iOS Simulator)
+
+To see rendering cost in screenshots, turn on the Simulator's Core Animation overlays with
+`displayConfig` `renderOverlays`, take a screenshot, then turn them off:
+
+```json
+{ "renderOverlays": { "blendedLayers": true, "offscreenRendered": true } }
+```
+
+| Overlay               | What the screenshot shows                       |
+| --------------------- | ----------------------------------------------- |
+| `blendedLayers`       | Opaque layers green, blended layers red         |
+| `offscreenRendered`   | Off-screen rendered layers yellow               |
+| `misalignedImages`    | Misaligned images magenta, scaled images yellow |
+| `copiedImages`        | Images Core Animation copied cyan               |
+| `cacheHits`           | Rasterized layer cache hits green, misses red   |
+| `flashUpdatedRegions` | Regions flash yellow as they redraw             |
+
+The result's `applied.renderOverlays` and `previous.renderOverlays` report every overlay, and a
+read reports them under `current.renderOverlays`. The overlays tint every app on screen until you
+turn them off, send `reset: true`, or shut the Simulator down. A session's keep-booted reset puts
+them back the way it found them. Android and physical iOS devices refuse `renderOverlays`.
+
 ## `measureStartup`
 
 Set `appId` to the package name or bundle ID and choose a startup `mode`. The tool is off by

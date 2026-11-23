@@ -16,6 +16,8 @@ import {
 import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/types";
 import { storeKitMutation } from "../daemon/sessionBroker/mutations/storeKitSession";
 import { isRecord } from "./pipeline/isRecord";
+import { RENDER_OVERLAYS } from "../utils/ios-cmdline-tools/SimulatorRenderOverlays";
+import { renderOverlayKey } from "../daemon/sessionBroker/mutations/renderOverlayMutation";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
 import { dataToolMutations, isCoreDataRead } from "./deviceMutationDataAdapters";
 import { appearanceToolMutations } from "./deviceMutationAppearanceAdapters";
@@ -67,9 +69,26 @@ function settingMutations(args: Record<string, unknown>, platform?: Platform): T
           .filter((key) => key !== "density")
           .map((key) => (key === "fontScale" ? "contentSize" : key))
       : keys;
-  return [...new Set(journaled), ...geometryKeys(args, platform)].map((key) =>
-    mutation("device-setting", key),
-  );
+  return [
+    ...new Set(journaled),
+    ...geometryKeys(args, platform),
+    ...renderOverlayKeys(args, platform),
+  ].map((key) => mutation("device-setting", key));
+}
+
+/**
+ * Simulator render overlays (#19016), one row per overlay a call names; reset turns every
+ * overlay off, so it records them all. Other targets refuse overlays and change nothing.
+ */
+function renderOverlayKeys(args: Record<string, unknown>, platform?: Platform): string[] {
+  if (platform !== "ios") {
+    return [];
+  }
+  const requested = isRecord(args.renderOverlays) ? args.renderOverlays : {};
+  return RENDER_OVERLAYS.filter(
+    (overlay) =>
+      args.reset === true || args.reset === "factory" || requested[overlay] !== undefined,
+  ).map(renderOverlayKey);
 }
 
 /**

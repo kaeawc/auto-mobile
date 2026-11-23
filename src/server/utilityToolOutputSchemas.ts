@@ -56,6 +56,8 @@ const displayConfigValuesOutputSchema = z
     magnification: z.boolean().optional(),
     magnificationScale: z.number().optional(),
     extraDim: z.boolean().optional(),
+    // iOS Simulator Core Animation render overlays (#19016): every overlay's on/off state.
+    renderOverlays: z.record(z.string(), z.boolean()).optional(),
   })
   .passthrough();
 
@@ -84,6 +86,7 @@ export const displayConfigResultSchema = z
         magnification: accessibilityDisplaySupportOutputSchema.optional(),
         magnificationScale: accessibilityDisplaySupportOutputSchema.optional(),
         extraDim: accessibilityDisplaySupportOutputSchema.optional(),
+        renderOverlays: z.boolean().optional(),
       })
       .passthrough(),
     supportNotes: z

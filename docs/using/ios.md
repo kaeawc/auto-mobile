@@ -20,6 +20,8 @@ Most tools work the same on Android and iOS. These guides cover iOS:
 
 - [Device condition fixtures](device-condition.md) set the status bar, privacy
   decisions or location on a simulator.
+- [Network condition](ios-network-condition.md) slows down or cuts a simulator's
+  network.
 - [Storage capabilities](storage-capabilities.md)
 - [App lifecycle](app-lifecycle.md) sends a simulated memory warning to the
   foreground app on a simulator.

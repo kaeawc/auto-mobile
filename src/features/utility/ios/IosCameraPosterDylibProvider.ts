@@ -233,12 +233,12 @@ export const iosCameraPosterGateProvider: IosCameraPosterDylibProvider =
  */
 export function sourcePathsFromModule(
   moduleDirectory: string,
-  source: string = IOS_CAMERA_POSTER_SOURCE,
+  relativePath: string = IOS_CAMERA_POSTER_SOURCE,
 ): string[] {
   const paths: string[] = [];
   let directory = moduleDirectory;
   while (true) {
-    paths.push(join(directory, source));
+    paths.push(join(directory, relativePath));
     const parent = dirname(directory);
     if (parent === directory) {
       return paths;

@@ -210,7 +210,9 @@ const deviceStateOutputFields = {
       observedValues: networkConditionValuesOutputSchema.partial().optional(),
       expiresInSeconds: z.number().optional(),
       rawStatus: z.string().optional(),
-      backend: z.literal("network-extension").optional(),
+      backend: z.enum(["network-extension", "socket-shaper"]).optional(),
+      rebooted: z.boolean().optional(),
+      offline: z.boolean().optional(),
       controller: z
         .object({
           state: z.string(),

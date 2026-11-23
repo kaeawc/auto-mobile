@@ -30,6 +30,7 @@ import {
 } from "../../../src/features/utility/DeviceState";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
+import { FakeIosSimulatorNetworkShaper } from "../../fakes/FakeIosSimulatorNetworkShaper";
 import { FakeNetworkFilterBridge } from "../../fakes/FakeNetworkFilterBridge";
 
 const androidDevice: BootedDevice = {
@@ -695,32 +696,25 @@ describe("DeviceState", () => {
     expect(client.getAllCommands()).toEqual([]);
   });
 
-  test("reports network conditioning unsupported on an iOS simulator", async () => {
+  test("shapes a whole iOS simulator through the socket shaper, never through simctl", async () => {
     const simctl = new FakeSimctl();
+    const shaper = new FakeIosSimulatorNetworkShaper();
     const deviceState = new DeviceState(iosSimulator, {
       simctl,
       networkFilterBridge: new FakeNetworkFilterBridge(),
+      iosNetworkShaper: shaper,
     });
 
     const set = await deviceState.setState({ networkCondition: { profile: "3g" } });
     const get = await deviceState.getState(["networkCondition"]);
 
-    expect(set.success).toBe(false);
+    expect(set.success).toBe(true);
     expect(set.networkCondition).toMatchObject({
-      supported: false,
-      capability: "unsupported",
-      requestedProfile: "3g",
-      verified: false,
+      supported: true,
+      backend: "socket-shaper",
+      appliedProfile: "3g",
     });
-    expect(get.networkCondition).toMatchObject({
-      supported: false,
-      capability: "unsupported",
-      backend: "network-extension",
-      controller: { state: "not_installed" },
-    });
-    expect(set.networkCondition?.error).toContain("iOS Simulator");
-    expect(set.networkCondition?.error).not.toContain("host-side proxy");
-    // No simctl command is issued for an unsupported concern.
+    expect(get.networkCondition).toMatchObject({ supported: true, backend: "socket-shaper" });
     expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
   });
 

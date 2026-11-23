@@ -271,6 +271,7 @@ nav:
           - "Keystore state": using/keystore-test-state.md
           - "Keystore metadata": using/keystore-metadata.md
           - "Device condition fixtures": using/device-condition.md
+          - "iOS Simulator network condition": using/ios-network-condition.md
           - "App lifecycle": using/app-lifecycle.md
           - "Kill profiles": using/kill-profiles.md
           - "Manufacturer profiles": using/oem-personas.md
@@ -406,6 +407,7 @@ nav:
           - "iOS Simulator audio loopback": how-it-works/plat/ios/simulator-audio-loopback.md
           - "iOS Simulator audio isolation": how-it-works/plat/ios/simulator-audio-isolation.md
           - "iOS Simulator camera poster": how-it-works/plat/ios/simulator-camera-poster.md
+          - "iOS Simulator network shaper": how-it-works/plat/ios/simulator-network-shaper.md
           - "iOS Simulator keyboard": how-it-works/plat/ios/simulator-keyboard.md
           - "iOS Simulator render overlays": how-it-works/plat/ios/simulator-render-overlays.md
           - "iOS Simulator Dynamic Island and backlight": how-it-works/plat/ios/simulator-island-and-backlight.md
@@ -517,6 +519,7 @@ nav:
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-23: iOS Simulator network shaping through a boot-injected socket shaper": devlog/2026-11-23-ios-simulator-boot-injected-network-shaper.md
       - "2026-11-23: Keyboard control through CoreSimulator": devlog/2026-11-23-simulator-keyboard-coresimulator.md
       - "2026-11-23: Reach Simulator render overlays through osascript": devlog/2026-11-23-simulator-render-overlays-osascript.md
       - "2026-11-23: Read Simulator network activity with host tools": devlog/2026-11-23-simulator-network-activity-host-tools.md

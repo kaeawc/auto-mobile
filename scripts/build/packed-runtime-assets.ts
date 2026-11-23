@@ -13,6 +13,11 @@ export const REQUIRED_PACKED_RUNTIME_ASSETS: readonly string[] = [
   // The iOS Simulator camera poster dylib and its device-wide gate are compiled on demand.
   "ios/CameraPosterInjection/Injection/CameraPosterInjection.m",
   "ios/CameraPosterInjection/Injection/CameraPosterGate.c",
+  // The iOS Simulator network shaper dylib is compiled on demand from these (#19045).
+  "ios/NetworkShaper/netshape.c",
+  "ios/NetworkShaper/libdns_services.tbd",
+  // The vendored shaper source's MIT notice ships with it.
+  "ios/NetworkShaper/LICENSE",
 ];
 
 /**

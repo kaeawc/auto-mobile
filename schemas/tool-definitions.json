@@ -34097,22 +34097,89 @@
           "required": ["lastAction", "success", "timestamp"],
           "additionalProperties": false
         },
+        "platformRuntime": {
+          "description": "inspect: the runtime and its registered modules; status: the host mirror from the last show or inspect, updated by platform call events. Unknown details are omitted",
+          "type": "object",
+          "properties": {
+            "runtime": {
+              "type": "string",
+              "enum": [
+                "ctrlproxy",
+                "iosAgent",
+                "iosViewer",
+                "disposableApp",
+                "protoviewer",
+                "embedded"
+              ]
+            },
+            "appState": {
+              "type": "string"
+            },
+            "modules": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "availability": {
+                    "type": "string",
+                    "enum": ["ready", "degraded", "unavailable"]
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": ["real", "fake", "simulated"]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "permission_denied",
+                      "hardware_unavailable",
+                      "play_services_missing",
+                      "simulator",
+                      "fake_mode"
+                    ]
+                  },
+                  "inFlight": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": ["availability"],
+                "additionalProperties": false
+              }
+            },
+            "permissions": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["runtime", "modules"],
+          "additionalProperties": false
+        },
         "platformStatus": {
           "description": "status and inspect: the last battery, power and audio values the device delivered through <module>.changed, and the accuracy of the last location.updated; a module is absent until its first event",
           "type": "object",
           "properties": {
             "battery": {
-              "$ref": "#/$defs/__schema99"
+              "$ref": "#/$defs/__schema100"
             },
             "power": {
-              "$ref": "#/$defs/__schema99"
+              "$ref": "#/$defs/__schema100"
             },
             "audio": {
-              "$ref": "#/$defs/__schema99"
+              "$ref": "#/$defs/__schema100"
             },
             "location": {
               "description": "The last location.updated as {accuracyM, approximate} only: a fix is present and how accurate it is, never its coordinates",
-              "$ref": "#/$defs/__schema99"
+              "$ref": "#/$defs/__schema100"
             }
           },
           "additionalProperties": false
@@ -34127,7 +34194,7 @@
           "const": "automotive"
         },
         "platformNotes": {
-          "description": "Successful show on either platform (legacy renderer differences apply to iOS only): strings.fallback applies to all platforms, lists locale and up to 20 referenced keys falling through to default (values), with paths strings.default.<key>; other notes describe platform differences: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
+          "description": "Successful show on either platform (legacy renderer differences apply to iOS only): strings.fallback applies to all platforms, lists locale and up to 20 referenced keys falling through to default (values), with paths strings.default.<key>; other notes describe platform differences: platform and construct identify the difference; effect says ignored, substituted or simulated; platform.<module> notes describe reported availability reasons and carry empty paths; other paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
           "type": "array",
           "items": {
             "type": "object",
@@ -34137,35 +34204,43 @@
                 "enum": ["android", "ios", "all"]
               },
               "construct": {
-                "type": "string",
-                "enum": [
-                  "stack",
-                  "stack.zoom",
-                  "carousel",
-                  "node.id",
-                  "bottomSheet.dismissOnSwipe",
-                  "bottomSheet.detents",
-                  "icon.effect",
-                  "icon.name",
-                  "icon.variant",
-                  "textField.variant",
-                  "textField.label",
-                  "node.gestures",
-                  "searchBar",
-                  "searchBar.icons",
-                  "rich-text-links",
-                  "strings.fallback",
-                  "design.fallback",
-                  "platformNamespace",
-                  "scroll.edgeEffect",
-                  "adaptive",
-                  "menu",
-                  "select"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^platform\\.[\\s\\S]{1,}$"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "stack",
+                      "stack.zoom",
+                      "carousel",
+                      "node.id",
+                      "bottomSheet.dismissOnSwipe",
+                      "bottomSheet.detents",
+                      "icon.effect",
+                      "icon.name",
+                      "icon.variant",
+                      "textField.variant",
+                      "textField.label",
+                      "node.gestures",
+                      "searchBar",
+                      "searchBar.icons",
+                      "rich-text-links",
+                      "strings.fallback",
+                      "design.fallback",
+                      "platformNamespace",
+                      "scroll.edgeEffect",
+                      "adaptive",
+                      "menu",
+                      "select"
+                    ]
+                  }
                 ]
               },
               "effect": {
                 "type": "string",
-                "enum": ["ignored", "substituted"]
+                "enum": ["ignored", "substituted", "simulated"]
               },
               "paths": {
                 "maxItems": 20,
@@ -34302,7 +34377,7 @@
               ]
             },
             "payload": {
-              "$ref": "#/$defs/__schema110"
+              "$ref": "#/$defs/__schema111"
             },
             "context": {
               "$ref": "#/$defs/__schema92"
@@ -35222,7 +35297,7 @@
           "type": "boolean",
           "const": true
         },
-        "__schema99": {
+        "__schema100": {
           "type": "object",
           "properties": {
             "values": {
@@ -35259,7 +35334,7 @@
           "required": ["values", "timestamp", "receivedAt"],
           "additionalProperties": false
         },
-        "__schema110": {
+        "__schema111": {
           "anyOf": [
             {
               "type": "string"
@@ -35276,7 +35351,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema110"
+                "$ref": "#/$defs/__schema111"
               }
             },
             {
@@ -35285,7 +35360,7 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema110"
+                "$ref": "#/$defs/__schema111"
               }
             }
           ]

@@ -12,6 +12,26 @@ struct VisibleAppWindow {
     let hierarchy: UIElementInfo
 }
 
+/// Screen placement of a window-relative snapshot: screen = origin + point * scale (#19064).
+struct WindowPlacement: Equatable {
+    let origin: CGPoint
+    let scale: Double
+
+    var isIdentity: Bool { origin == .zero && scale == 1 }
+
+    func screenBounds(_ bounds: ElementBounds) -> ElementBounds {
+        func map(_ value: Int, _ offset: CGFloat) -> CGFloat { offset + CGFloat(Double(value) * scale) }
+        let left = map(bounds.left, origin.x)
+        let top = map(bounds.top, origin.y)
+        return ElementBounds(clamping: CGRect(
+            x: left,
+            y: top,
+            width: map(bounds.right, origin.x) - left,
+            height: map(bounds.bottom, origin.y) - top
+        ))
+    }
+}
+
 /// Window frames from the last observation, for moving focus to a tapped background window.
 struct ObservedWindowFrames {
     let focused: ElementBounds
@@ -55,6 +75,50 @@ extension ElementLocator {
     /// stable window order; never the focused app or SpringBoard.
     nonisolated static func otherWindowCandidates(observed: Set<String>, focusedBundleId: String) -> [String] {
         observed.subtracting([focusedBundleId, "com.apple.springboard"]).sorted()
+    }
+
+    /// Where a background app's window-relative snapshot sits on screen, or nil when its window
+    /// frame is unknown or not a uniformly scaled copy of the snapshot frame: such a window cannot
+    /// be reported in screen space, so it is left out. iPadOS draws a floating window that is not
+    /// focused about 0.5% smaller than its snapshot frame (#19064), so a size match alone misses
+    /// it. `windowFrame` is a live query and only runs for an inset window.
+    nonisolated static func backgroundWindowPlacement(
+        appFrame: CGRect,
+        screenFrame: CGRect,
+        windowFrame: () -> CGRect?
+    )
+        -> WindowPlacement?
+    {
+        let appSize = GestureSize(width: Double(appFrame.width), height: Double(appFrame.height))
+        let screenSize = GestureSize(width: Double(screenFrame.width), height: Double(screenFrame.height))
+        guard appSize.isValid, appFrame.origin.x.isFinite, appFrame.origin.y.isFinite else { return nil }
+        guard hasMultiPanelMismatch(app: appSize, screen: screenSize) else {
+            return WindowPlacement(origin: appFrame.origin, scale: 1)
+        }
+        guard let window = windowFrame(), !hasZeroArea(window) else { return nil }
+        let tolerance: CGFloat = 1
+        if abs(window.width - appFrame.width) <= tolerance, abs(window.height - appFrame.height) <= tolerance {
+            return WindowPlacement(
+                origin: CGPoint(x: window.minX - appFrame.minX, y: window.minY - appFrame.minY),
+                scale: 1
+            )
+        }
+        let scale = window.height / appFrame.height
+        guard scale >= minBackgroundWindowScale, scale < 1,
+              abs(window.width - appFrame.width * scale) <= tolerance else { return nil }
+        return WindowPlacement(
+            origin: CGPoint(x: window.minX - appFrame.minX * scale, y: window.minY - appFrame.minY * scale),
+            scale: Double(scale)
+        )
+    }
+
+    /// Smallest scale accepted for a background window; anything smaller is not the focus shrink.
+    nonisolated static let minBackgroundWindowScale: CGFloat = 0.5
+
+    /// Move a background window's window-relative tree onto the screen.
+    nonisolated static func placedOnScreen(_ element: UIElementInfo, by placement: WindowPlacement) -> UIElementInfo {
+        guard !placement.isIdentity else { return element }
+        return mappingBounds(element, rootBounds: nil) { placement.screenBounds($0) }
     }
 
     /// Whether a window is on screen and not wholly behind the focused window, which is in front.
@@ -233,16 +297,16 @@ extension ElementLocator {
                 }, fallback: nil)
                 guard let snapshot else { continue }
                 tracker.trackObserved(bundleId)
-                let translation = Self.windowScreenTranslation(
+                // A floating background window is drawn slightly shrunk, so its snapshot maps to
+                // the screen by a scale as well as an offset (#19064).
+                guard let placement = Self.backgroundWindowPlacement(
                     appFrame: snapshot.frame,
                     screenFrame: screenFrame,
                     windowFrame: {
                         catchingObjCExceptionNonThrowing({ app.windows.firstMatch.frame }, fallback: nil)
                     }
-                )
-                let frame = ElementBounds(clamping: translation.map {
-                    snapshot.frame.offsetBy(dx: $0.x, dy: $0.y)
-                } ?? snapshot.frame)
+                ) else { continue }
+                let frame = placement.screenBounds(ElementBounds(clamping: snapshot.frame))
                 guard Self.isVisibleBesideFocused(frame, focused: focusedFrame, screen: screen) else { continue }
                 let built = buildElementInfoFromSnapshot(
                     snapshot,
@@ -252,7 +316,7 @@ extension ElementLocator {
                     parentPath: bundleId,
                     disableAllFiltering: disableAllFiltering
                 )
-                let inScreen = translation.map { Self.translatedToScreen(built, by: $0) } ?? built
+                let inScreen = Self.placedOnScreen(built, by: placement)
                 let optimized = disableAllFiltering
                     ? inScreen
                     : optimizeHierarchy(inScreen, isRoot: true).first ?? inScreen

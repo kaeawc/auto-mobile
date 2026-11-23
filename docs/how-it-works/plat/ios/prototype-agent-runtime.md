@@ -96,6 +96,10 @@ AutoMobile does not launch these, so edit the scheme (Run > Arguments > Environm
 
 ## Inspect
 
+Status from the agent or Viewer carries `platformRuntime` alongside the spec's `/platform` state.
+The registry supplies module availability, and call completions update the host's mirrored mode and
+in-flight counts. See [Platform runtime report](../../../using/prototype-embedding.md#platform-runtime-report).
+
 `inspect` (#10494) adopts the device's prototypes into host `status`/`awaitEvent` state after a session
 release or daemon restart. On iOS the host sends `get_prototype_status` and adopts the reply: `id`,
 `state`, `pages`, `lastSequence` (the agent's event ledger, so the host resumes past it) and

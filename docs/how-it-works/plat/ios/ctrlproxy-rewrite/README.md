@@ -174,7 +174,10 @@ Candidates are the apps the runner has launched or observed, plus the common sys
 at most once every 10 s; SpringBoard's tree names no app windows. Each candidate in
 `.runningForeground` whose window is on screen and not wholly behind the focused window
 is snapshotted, moved into screen space, and its nodes whose centre the focused window
-covers are dropped.
+covers are dropped. iPadOS draws a floating window that is not focused slightly smaller
+than its snapshot frame, so the move scales the snapshot onto the window's screen frame
+as well as offsetting it. A window whose frame cannot be read, or is not a uniformly
+scaled copy of the snapshot frame, is left out rather than reported in window space.
 
 Those window roots go first under the root, before the focused app's children. Each
 carries its owner (`automobile:iosWindowPackage`) and an `automobile:iosWindowLayer`

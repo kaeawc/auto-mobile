@@ -2,7 +2,9 @@ import { z } from "zod/v4";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { commandFailureDetails } from "../CommandError";
 import { errorMessage } from "../describeUnknownError";
+import { AMBIENT_ENV, readEnvTrimmed } from "../../config/env";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../HostCommandExecutor";
+import { developerDirectoryOf, XCODE_SELECT_LINK } from "./developerDirectory";
 
 /**
  * Core Animation render overlays the Simulator's Debug menu offers (#19016), keyed by the
@@ -44,9 +46,14 @@ export function isRenderOverlay(value: string): value is RenderOverlay {
   return Object.hasOwn(RENDER_OVERLAY_OPTION_IDS, value);
 }
 
+/** `SimDeviceState.booted`. */
+const SIM_DEVICE_STATE_BOOTED = 3;
+const NOT_BOOTED_MARKER = "AUTOMOBILE_SIMULATOR_NOT_BOOTED";
+
 /**
  * Loads CoreSimulator into an `osascript` JavaScript process, so a private-API crash or Xcode
- * mismatch takes down only that process. argv: udid, then option id / 0|1 pairs to write.
+ * mismatch takes down only that process. argv: udid, the developer directory, then option id / 0|1
+ * pairs to write; a write to a Simulator that is not booted fails with {@link NOT_BOOTED_MARKER}.
  * Prints every mapped option's state before and after the writes as JSON.
  */
 const JXA_SCRIPT = `
@@ -56,8 +63,7 @@ function run(argv) {
   ObjC.unwrap($.NSBundle.bundleWithPath('/Library/Developer/PrivateFrameworks/CoreSimulator.framework').load);
   const contextClass = $.NSClassFromString('SimServiceContext');
   if (contextClass.isNil()) throw new Error('CoreSimulator SimServiceContext is unavailable');
-  const env = $.NSProcessInfo.processInfo.environment.objectForKey('DEVELOPER_DIR');
-  const dir = env.isNil() ? '/var/db/xcode_select_link' : ObjC.unwrap(env);
+  const dir = argv[1];
   const context = contextClass.sharedServiceContextForDeveloperDirError($(dir), null);
   if (context.isNil()) throw new Error('CoreSimulator service context is unavailable for ' + dir);
   const set = context.defaultDeviceSetWithError(null);
@@ -68,9 +74,12 @@ function run(argv) {
   if (!device.respondsToSelector('setCADebugOption:enabled:') || !device.respondsToSelector('getCADebugOption:')) {
     throw new Error('SimDevice CA debug options are unavailable in this CoreSimulator');
   }
+  if (argv.length > 2 && Number(device.state) !== ${SIM_DEVICE_STATE_BOOTED}) {
+    throw new Error('${NOT_BOOTED_MARKER}');
+  }
   const read = () => Object.fromEntries(ids.map((id) => [String(id), !!device.getCADebugOption(id)]));
   const previous = read();
-  for (let i = 1; i + 1 < argv.length; i += 2) {
+  for (let i = 2; i + 1 < argv.length; i += 2) {
     device.setCADebugOptionEnabled(Number(argv[i]), argv[i + 1] === '1');
   }
   return JSON.stringify({ previous: previous, applied: read() });
@@ -84,7 +93,10 @@ const OSASCRIPT_TIMEOUT_MS = 15_000;
 
 /** {@link SimulatorRenderOverlayControl} through CoreSimulator's SimDevice in `osascript`. */
 export class OsascriptSimulatorRenderOverlayControl implements SimulatorRenderOverlayControl {
-  constructor(private readonly host: HostCommandExecutor = new DefaultHostCommandExecutor()) {}
+  constructor(
+    private readonly host: HostCommandExecutor = new DefaultHostCommandExecutor(),
+    private readonly env: NodeJS.ProcessEnv = process.env,
+  ) {}
 
   async read(udid: string, signal?: AbortSignal): Promise<Record<RenderOverlay, boolean>> {
     return (await this.run(udid, {}, signal)).applied;
@@ -96,6 +108,12 @@ export class OsascriptSimulatorRenderOverlayControl implements SimulatorRenderOv
     signal?: AbortSignal,
   ): Promise<RenderOverlayChange> {
     return this.run(udid, values, signal);
+  }
+
+  private developerDirectory(): string {
+    return developerDirectoryOf(
+      readEnvTrimmed(AMBIENT_ENV.DEVELOPER_DIR, this.env) || XCODE_SELECT_LINK,
+    );
   }
 
   private async run(
@@ -110,13 +128,20 @@ export class OsascriptSimulatorRenderOverlayControl implements SimulatorRenderOv
     try {
       const result = await this.host.executeCommand(
         "/usr/bin/osascript",
-        ["-l", "JavaScript", "-e", JXA_SCRIPT, udid, ...writes],
+        ["-l", "JavaScript", "-e", JXA_SCRIPT, udid, this.developerDirectory(), ...writes],
         { timeoutMs: OSASCRIPT_TIMEOUT_MS, ...(signal ? { signal } : {}) },
       );
       stdout = result.stdout;
     } catch (error) {
       // The failure message would quote the whole script; osascript's stderr names the cause.
       const stderr = commandFailureDetails(error).stderr.trim();
+      if (stderr.includes(NOT_BOOTED_MARKER)) {
+        throw new ActionableError(
+          `Simulator ${udid} is not booted, so its render overlays cannot be changed. Boot it ` +
+            "first; overlays are off after every boot.",
+          { cause: error },
+        );
+      }
       throw new ActionableError(
         `Could not reach the Core Animation render overlays of Simulator ${udid} through ` +
           `CoreSimulator: ${stderr || errorMessage(error)}`,

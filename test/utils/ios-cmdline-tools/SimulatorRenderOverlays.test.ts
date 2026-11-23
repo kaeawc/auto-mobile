@@ -5,6 +5,7 @@ import {
   OsascriptSimulatorRenderOverlayControl,
   parseRenderOverlayOutput,
 } from "../../../src/utils/ios-cmdline-tools/SimulatorRenderOverlays";
+import { ActionableError } from "../../../src/models/ActionableError";
 import type { HostCommandExecutor } from "../../../src/utils/HostCommandExecutor";
 import { createExecResult } from "../../../src/utils/execResult";
 
@@ -65,7 +66,7 @@ describe("CoreSimulator render overlay bridge (#19016)", () => {
     expect(call?.file).toBe("/usr/bin/osascript");
     expect(call?.args.slice(0, 3)).toEqual(["-l", "JavaScript", "-e"]);
     expect(call?.args[3]).toContain("setCADebugOption:enabled:");
-    expect(call?.args.slice(4)).toEqual([UDID, "2", "1", "17", "1"]);
+    expect(call?.args.slice(4)).toEqual([UDID, "/var/db/xcode_select_link", "2", "1", "17", "1"]);
   });
 
   test("a read writes nothing and returns the state", async () => {
@@ -74,7 +75,7 @@ describe("CoreSimulator render overlay bridge (#19016)", () => {
     const state = await new OsascriptSimulatorRenderOverlayControl(host).read(UDID);
 
     expect(state.offscreenRendered).toBe(true);
-    expect(host.calls[0]?.args.slice(4)).toEqual([UDID]);
+    expect(host.calls[0]?.args.slice(4)).toEqual([UDID, "/var/db/xcode_select_link"]);
   });
 
   test("reports osascript's stderr, not the script, when CoreSimulator fails", async () => {
@@ -93,6 +94,51 @@ describe("CoreSimulator render overlay bridge (#19016)", () => {
       "was not found in the default device set (-2700)",
     );
     expect(String((error as Error).message)).not.toContain("ObjC.import");
+  });
+
+  test("an Xcode.app DEVELOPER_DIR resolves to its developer directory", async () => {
+    const host = new RecordingHost({ stdout: SET_STDOUT });
+    const env = { DEVELOPER_DIR: "/Applications/Xcode-27.2.0.app/" };
+
+    await new OsascriptSimulatorRenderOverlayControl(host, env).read(UDID);
+
+    expect(host.calls[0]?.args.slice(4)).toEqual([
+      UDID,
+      "/Applications/Xcode-27.2.0.app/Contents/Developer",
+    ]);
+  });
+
+  test("a developer directory is passed through unchanged", async () => {
+    const host = new RecordingHost({ stdout: SET_STDOUT });
+    const env = { DEVELOPER_DIR: "/Applications/Xcode.app/Contents/Developer" };
+
+    await new OsascriptSimulatorRenderOverlayControl(host, env).read(UDID);
+
+    expect(host.calls[0]?.args[5]).toBe("/Applications/Xcode.app/Contents/Developer");
+  });
+
+  test("a write to a shut-down Simulator is a typed actionable error", async () => {
+    const failure = Object.assign(new Error("Command failed: /usr/bin/osascript ..."), {
+      stderr: "execution error: Error: AUTOMOBILE_SIMULATOR_NOT_BOOTED (-2700)",
+      code: 1,
+    });
+    const control = new OsascriptSimulatorRenderOverlayControl(
+      new RecordingHost({ error: failure }),
+    );
+
+    const error = await control
+      .set(UDID, { blendedLayers: true })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(String((error as Error).message)).toContain("is not booted");
+  });
+
+  test("the script checks the booted state only when it writes", () => {
+    const host = new RecordingHost({ stdout: SET_STDOUT });
+    void new OsascriptSimulatorRenderOverlayControl(host).read(UDID);
+    const script = host.calls[0]?.args[3] ?? "";
+    expect(script).toContain("argv.length > 2 && Number(device.state) !== 3");
   });
 
   test("output missing an option is refused", () => {

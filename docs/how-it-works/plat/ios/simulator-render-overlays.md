@@ -11,14 +11,16 @@ private `SimDevice` API. The decision is in the
 runs one `osascript -l JavaScript` process per read or write. The script:
 
 1. loads `/Library/Developer/PrivateFrameworks/CoreSimulator.framework`;
-2. gets `+[SimServiceContext sharedServiceContextForDeveloperDir:error:]` for `DEVELOPER_DIR`, or
+2. gets `+[SimServiceContext sharedServiceContextForDeveloperDir:error:]` for `DEVELOPER_DIR`
+   (an `Xcode.app` value resolves to `Xcode.app/Contents/Developer`), or
    `/var/db/xcode_select_link` when it is unset, then `defaultDeviceSetWithError:` and
    `devicesByUDID`;
 3. reads every mapped option with `-[SimDevice getCADebugOption:]`, applies the requested
    `-[SimDevice setCADebugOption:enabled:]` writes, and reads every option again;
 4. prints `{ previous, applied }` keyed by option id.
 
-A missing class, device or selector throws inside the script, and the TypeScript side wraps the
+A write to a Simulator that is not booted fails with an `ActionableError` (a read works on any
+state). A missing class, device or selector throws inside the script, and the TypeScript side wraps the
 non-zero exit in an `ActionableError`. A CoreSimulator crash ends only that `osascript` process.
 
 | Overlay               | Option id | Effect seen on Settings (iOS 27.2)                          |
@@ -39,7 +41,8 @@ per boot: a Simulator shutdown turns them all off.
   read fails with the bridge error.
 - A write sends only the named overlays and reports `previous` and `applied` for every overlay. An
   overlay that does not read back as requested makes the call fail with the read-back state.
-- `reset` (and `reset: "factory"`) writes every overlay off after the other fields reset.
+- `reset` (and `reset: "factory"`) reads the overlays after the other fields reset and writes them
+  all off only when one is on. A bridge failure during a reset is logged and does not fail it.
 - Android and physical iOS refuse `renderOverlays` before any command.
 
 ## Session cleanup
@@ -49,9 +52,9 @@ not force overlays off. An overlay that was already on when the session started 
 release, the same restore-prior contract as every other `displayConfig` setting.
 
 On a Simulator, each named overlay journals a `device-setting` row keyed `renderOverlay:<name>`,
-and reset journals all six. Android and physical iOS journal no overlay row. The prior is the
+and reset journals all six only when one of them is on. Android and physical iOS journal no overlay row. The prior is the
 boolean the bridge read before the call. The iOS keep-booted reset writes that prior back through
-the same bridge and fails the revert when the overlay does not read back restored. An unreadable
+the same bridge, all rows of the device in one call, and fails the revert when the overlay does not read back restored. An unreadable
 prior leaves the row unobservable, so the reset falls back to erase (see
 [journal cleaning](../../session-broker-device-mutation-journal-cleaning.md)); the reboot leaves
 every overlay off.

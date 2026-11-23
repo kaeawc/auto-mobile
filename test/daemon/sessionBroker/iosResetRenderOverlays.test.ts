@@ -143,3 +143,36 @@ describe("render overlay priors (#19016)", () => {
     expect(overlays.reads).toEqual([]);
   });
 });
+
+describe("iOS release restores all overlay rows of a device in one call (#19016)", () => {
+  test("revertRenderOverlays writes every row through one CoreSimulator set", async () => {
+    const rig = harness();
+    rig.overlays.states.set(UDID, {
+      ...rig.overlays.state(UDID),
+      blendedLayers: true,
+      cacheHits: true,
+    });
+    const rows: DeviceMutationInput[] = [
+      { ...overlayRow({ state: "present", value: false }), key: "renderOverlay:cacheHits" },
+      overlayRow({ state: "present", value: false }),
+    ];
+
+    await rig.port.revertRenderOverlays(rows, rig.context);
+
+    expect(rig.overlays.writes).toEqual([
+      { udid: UDID, values: { cacheHits: false, blendedLayers: false } },
+    ]);
+    expect(rig.overlays.state(UDID).cacheHits).toBe(false);
+    expect(rig.phases).toEqual(["coresimulator:ca-debug"]);
+  });
+
+  test("a row that did not read back as restored fails the batch", async () => {
+    const rig = harness();
+    rig.overlays.states.set(UDID, { ...rig.overlays.state(UDID), blendedLayers: true });
+    rig.overlays.stuck.add("blendedLayers");
+
+    await expect(
+      rig.port.revertRenderOverlays([overlayRow({ state: "present", value: false })], rig.context),
+    ).rejects.toThrow("did not read back as restored");
+  });
+});

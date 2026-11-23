@@ -98,8 +98,35 @@ export class RenderOverlayDisplay {
     if (display && !display.success && display.previous === undefined) {
       return display;
     }
-    const target = input.reset === true ? ALL_RENDER_OVERLAYS_OFF : (requested ?? {});
-    return this.merge(display, await this.apply(target));
+    return this.merge(
+      display,
+      named ? await this.apply(requested ?? {}) : await this.resetOverlays(),
+    );
+  }
+
+  /**
+   * Reset turns on overlays off, and writes nothing when none is on. It never asked about
+   * overlays, so a bridge failure is logged and the rest of the reset stands.
+   */
+  private async resetOverlays(): Promise<RenderOverlayChange> {
+    const udid = this.identity.deviceId;
+    try {
+      const current = await this.control.read(udid);
+      if (!RENDER_OVERLAYS.some((overlay) => current[overlay])) {
+        return { previous: current, applied: current, errors: [] };
+      }
+    } catch (error) {
+      logger.warn(
+        `[DisplayConfig] render overlay read failed during reset on ${udid}: ${errorMessage(error)}`,
+        error,
+      );
+      return { errors: [] };
+    }
+    const change = await this.apply(ALL_RENDER_OVERLAYS_OFF);
+    if (change.errors.length > 0) {
+      logger.warn(`[DisplayConfig] render overlay reset on ${udid}: ${change.errors.join("; ")}`);
+    }
+    return { ...change, errors: [] };
   }
 
   /** Write `target` and verify each named overlay against the read-back. */

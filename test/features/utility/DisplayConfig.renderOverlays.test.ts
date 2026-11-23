@@ -96,6 +96,38 @@ describe("displayConfig render overlays on the iOS Simulator (#19016)", () => {
     ]);
   });
 
+  test("reset with every overlay off makes no overlay write", async () => {
+    const { overlays, config } = setup();
+
+    const result = await config.setConfig({ reset: true });
+
+    expect(result.success).toBe(true);
+    expect(result.applied?.renderOverlays).toEqual(ALL_RENDER_OVERLAYS_OFF);
+    expect(overlays.writes).toEqual([]);
+  });
+
+  test("a bridge failure during reset does not fail the rest of the reset", async () => {
+    const { overlays, config } = setup();
+    overlays.failure = new Error("CoreSimulator unavailable");
+
+    const result = await config.setConfig({ reset: true });
+
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.applied?.theme).toBe("light");
+  });
+
+  test("a failed overlay write during reset does not fail the reset", async () => {
+    const { overlays, config } = setup();
+    overlays.states.set(simulator.deviceId, { ...ALL_RENDER_OVERLAYS_OFF, blendedLayers: true });
+    overlays.stuck.add("blendedLayers");
+
+    const result = await config.setConfig({ reset: true });
+
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+  });
+
   test("applies a theme and overlays in one call", async () => {
     const { overlays, simctl, config } = setup();
     simctl.setCommandArgsResultSequence(

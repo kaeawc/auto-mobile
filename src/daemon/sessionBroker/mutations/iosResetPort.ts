@@ -23,7 +23,11 @@ import type { BaselineChange } from "./baseline";
 import { parseNotifyutilState } from "../../../utils/ios-cmdline-tools/notifyutil";
 import { iosBiometricEnrollmentTarget, iosBiometricRevertArgs } from "./iosBiometricRevert";
 import { STOREKIT_MUTATION_KIND, type IosStoreKitSessionReset } from "./storeKitSession";
-import type { SimulatorRenderOverlayControl } from "../../../utils/ios-cmdline-tools/SimulatorRenderOverlays";
+import {
+  RENDER_OVERLAYS,
+  type RenderOverlay,
+  type SimulatorRenderOverlayControl,
+} from "../../../utils/ios-cmdline-tools/SimulatorRenderOverlays";
 import { renderOverlayFromKey } from "./renderOverlayMutation";
 import {
   IOS_ACCESSIBILITY_RESIDUE_DOMAIN,
@@ -433,7 +437,7 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
       case "device-setting":
         await (renderOverlayFromKey(mutation.key) === undefined
           ? this.revertByCommand(mutation, context)
-          : this.revertRenderOverlay(mutation, context));
+          : this.revertRenderOverlays([mutation], context));
         break;
       default:
         await this.revertByCommand(mutation, context);
@@ -458,26 +462,33 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
     }
   }
 
-  private async revertRenderOverlay(
-    mutation: DeviceMutationInput,
+  /** Restore every given overlay row of one device through a single CoreSimulator call. */
+  async revertRenderOverlays(
+    mutations: readonly DeviceMutationInput[],
     context: DeviceMutationResetContext,
   ): Promise<void> {
-    const overlay = renderOverlayFromKey(mutation.key);
-    const prior = mutation.priorValue.state === "present" ? mutation.priorValue.value : undefined;
     const control = this.dependencies.renderOverlays;
-    if (overlay === undefined || typeof prior !== "boolean" || control === undefined) {
-      throw new ActionableError(`iOS cannot restore render overlay ${mutation.key}`);
+    const values: Partial<Record<RenderOverlay, boolean>> = {};
+    for (const mutation of mutations) {
+      const overlay = renderOverlayFromKey(mutation.key);
+      const prior = mutation.priorValue.state === "present" ? mutation.priorValue.value : undefined;
+      if (overlay === undefined || typeof prior !== "boolean" || control === undefined) {
+        throw new ActionableError(`iOS cannot restore render overlay ${mutation.key}`);
+      }
+      // Rows arrive newest first, so the oldest prior of an overlay wins.
+      values[overlay] = prior;
+    }
+    if (control === undefined || Object.keys(values).length === 0) {
+      return;
     }
     await context.assertOwned();
     const started = this.timer.now();
     try {
-      const change = await control.set(
-        context.scope.deviceId,
-        { [overlay]: prior },
-        context.signal,
-      );
-      if (change.applied[overlay] !== prior) {
-        throw new ActionableError(`iOS render overlay ${overlay} did not read back as restored`);
+      const change = await control.set(context.scope.deviceId, values, context.signal);
+      for (const overlay of RENDER_OVERLAYS) {
+        if (values[overlay] !== undefined && change.applied[overlay] !== values[overlay]) {
+          throw new ActionableError(`iOS render overlay ${overlay} did not read back as restored`);
+        }
       }
     } finally {
       context.recordPhase?.("coresimulator:ca-debug", this.timer.now() - started);

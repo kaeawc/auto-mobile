@@ -2,6 +2,7 @@ import { ActionableError } from "../../models/ActionableError";
 import { createHash } from "node:crypto";
 import { shellQuote } from "../../utils/shellQuote";
 import { parseAndroidRuntimePermissions } from "../../features/action/parseAndroidRuntimePermissions";
+import { isNightModeUnsupported } from "../../features/utility/displayConfigParsers";
 import { parsePmListUsers } from "../../utils/android-cmdline-tools/parseAndroidUsers";
 import {
   DEVICE_MUTATION_KINDS,
@@ -9,7 +10,18 @@ import {
   type DeviceStateObservation,
 } from "./mutations/types";
 
-export type AndroidBaselineCommand = (command: string, timeoutMs?: number) => Promise<string>;
+export interface AndroidBaselineCommandOptions {
+  /** When this matches a result, return both streams instead of failing on its stderr. */
+  unsupported?: (stdout: string, stderr: string) => boolean;
+}
+
+export type AndroidBaselineCommand = (
+  command: string,
+  timeoutMs?: number,
+  options?: AndroidBaselineCommandOptions,
+) => Promise<string>;
+
+export const ANDROID_NIGHT_MODE_READ = "shell cmd uimode night";
 type AndroidObservationSink = (kind: string, key: string, value: string | boolean | null) => void;
 
 export const ANDROID_CERTIFIABLE_KINDS = ["device-setting", "account"] as const;
@@ -187,11 +199,10 @@ async function captureDisplay(
     "display:size",
     parseDisplayOverride(await command("shell wm size"), "size"),
   );
-  observe(
-    "device-setting",
-    "display:night-mode",
-    parseNightMode(await command("shell cmd uimode night")),
-  );
+  const night = await readAndroidNightMode(command);
+  if (night !== null) {
+    observe("device-setting", "display:night-mode", night);
+  }
 }
 
 async function captureFiles(
@@ -379,6 +390,19 @@ export function parseDisplayOverride(output: string, type: "density" | "size"): 
     throw new ActionableError(`Android baseline display ${type} is unreadable`);
   }
   return match[1];
+}
+
+/**
+ * Reads `cmd uimode night`, or null when the device has no shell implementation for it
+ * (Android before 8 / API 26), so callers skip night mode instead of failing.
+ */
+export async function readAndroidNightMode(
+  command: AndroidBaselineCommand,
+): Promise<string | null> {
+  const output = await command(ANDROID_NIGHT_MODE_READ, undefined, {
+    unsupported: isNightModeUnsupported,
+  });
+  return isNightModeUnsupported(output) ? null : parseNightMode(output);
 }
 
 export function parseNightMode(output: string): string {

@@ -227,8 +227,9 @@ function fieldError(
   if (resolved === undefined) {
     return dataTextError(path, state);
   }
+  const segments = resolved === value ? authored : templateSegments(resolved, scope.binding);
   const repeated = repeatTextError(
-    { text: resolved, segments: authored, dataRecognized },
+    { text: resolved, segments, dataRecognized },
     path,
     scope,
     state,

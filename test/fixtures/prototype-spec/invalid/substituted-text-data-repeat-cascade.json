@@ -19,12 +19,12 @@
       "children": [
         {
           "type": "text",
-          "text": "{data:/t}{i.b}{i.b}"
+          "text": "{data:/t}"
         }
       ]
     },
     "data": {
-      "t": "literal"
+      "t": "{i.b}{i.b}"
     }
   },
   "expectedPath": "root.children[0].text",

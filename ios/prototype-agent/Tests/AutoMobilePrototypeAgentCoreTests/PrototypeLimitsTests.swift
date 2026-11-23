@@ -304,7 +304,7 @@ final class PrototypeLimitsTests: XCTestCase {
     func testSharedSubstitutionAndNonObjectLimits() throws {
         for name in [
             "substituted-text-data-limit", "substituted-text-repeat-limit",
-            "substituted-text-repeat-emit-limit", "substituted-text-data-repeat-limit",
+            "substituted-text-repeat-emit-limit", "substituted-text-data-repeat-cascade",
             "substituted-text-repeat-path-limit", "repeat-non-object-children",
         ] {
             let wrapper = try JSONDecoder().decode(JSONValue.self, from: data("invalid/\(name).json"))

@@ -269,12 +269,15 @@ test("data values containing {row.x} stay inert during fieldError validation", (
     window: { placement: { type: "fullscreen" } },
     data: {
       literal: "{row.x}",
-      rows: [{ x: "x".repeat(contract.limits.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH), qty: 2 }],
+      rows: [{ x: "x", qty: 2 }],
     },
     root: { type: "column", repeat: { items: { path: "/rows" }, as: "row" }, children: [child] },
   };
   expect(validatePrototypeSpec(spec)).toMatchObject({ success: true });
   expect(toHtml(renderPrototypeStill(spec).element)).toContain("{row.x} 2");
+  record((spec.data.rows as Raw[])[0])!.x = "x".repeat(
+    contract.limits.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH,
+  );
   child.text = "{row.x}{row.qty}";
   expect(repeatErrors(spec)?.message).toBe("Substituted text length limit exceeded");
 });

@@ -2481,7 +2481,7 @@
     "style-when-unknown-style-key.json",
     "style-when-width-over-max.json",
     "substituted-text-data-limit.json",
-    "substituted-text-data-repeat-limit.json",
+    "substituted-text-data-repeat-cascade.json",
     "substituted-text-repeat-emit-limit.json",
     "substituted-text-repeat-limit.json",
     "substituted-text-repeat-path-limit.json",

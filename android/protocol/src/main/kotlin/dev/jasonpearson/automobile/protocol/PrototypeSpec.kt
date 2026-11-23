@@ -36,8 +36,6 @@ data class PrototypeRepeat(
   val sourceItems: List<JsonObject>? = null,
   /** Runtime-only enclosing alias; outer values live in the projected rows. */
   val outerAlias: String? = null,
-  /** Show-time platform snapshot, used only after lazy row tokens have bound. */
-  val platformSnapshot: JsonObject? = null,
 )
 
 @Serializable
@@ -47,7 +45,6 @@ private data class PrototypeRepeatWire(
   val key: String? = null,
   val derive: Map<String, PrototypeDerivedEntry>? = null,
   val stagger: Int? = null,
-  @SerialName("_platform") val platformSnapshot: JsonObject? = null,
 )
 
 /** Keeps path, derived and inner field sources alongside literal object rows. */
@@ -87,7 +84,6 @@ object PrototypeRepeatSerializer :
       derived?.content,
       field?.content,
       raw.takeIf { rows -> rows.any { row -> row.values.any { it !is JsonPrimitive } } },
-      platformSnapshot = wire.platformSnapshot,
     )
   }
 
@@ -100,14 +96,7 @@ object PrototypeRepeatSerializer :
         ?: value.sourceItems?.let(::JsonArray)
         ?: json.encodeToJsonElement(value.items)
     return json.encodeToJsonElement(
-      PrototypeRepeatWire(
-        items,
-        value.`as`,
-        value.key,
-        value.derive,
-        value.stagger,
-        value.platformSnapshot,
-      ),
+      PrototypeRepeatWire(items, value.`as`, value.key, value.derive, value.stagger),
     )
   }
 }

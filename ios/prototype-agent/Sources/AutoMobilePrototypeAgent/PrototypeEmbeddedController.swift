@@ -46,6 +46,7 @@
             // Invalid/unsupported specs never initialize persistence, start requests, or show a partial tree.
             let model = PrototypeModel(
                 mode: .standalone,
+                runtime: .embedded,
                 storage: loaded == nil ? nil : storage.coordinator(secure: registry.secureStorage),
                 registry: registry
             )

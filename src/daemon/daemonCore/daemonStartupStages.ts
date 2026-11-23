@@ -41,6 +41,8 @@ export const DAEMON_STARTUP_STAGES = {
   "binding registry": "incumbent window",
   "daemon collaborators": "incumbent window",
   "http token prepare": "incumbent window",
+  // Unshape simulators a dead daemon left shaped before any apply can arrive (#19045).
+  "network shaper sweep": "incumbent window",
   "http ingress": "incumbent window",
   // Initialize the device pool BEFORE the socket server so connecting clients see it.
   "device discovery": "incumbent window",

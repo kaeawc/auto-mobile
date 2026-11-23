@@ -709,6 +709,20 @@ steps:
       expect(validator.validateYaml(yaml).valid).toBe(true);
     });
 
+    it("should reject a networkCondition bandwidth above the supported maximum (#19108)", () => {
+      // Mirrors MAX_NETWORK_BANDWIDTH_KBPS (src/features/utility/DeviceState.ts).
+      const at = `
+name: net-bandwidth-max
+steps:
+  - tool: setDeviceState
+    networkCondition:
+      profile: none
+      downloadKbps: 100000000
+`;
+      expect(validator.validateYaml(at).valid).toBe(true);
+      expect(validator.validateYaml(at.replace("100000000", "100000001")).valid).toBe(false);
+    });
+
     it("should accept an inline networkCondition that params.networkCondition overrides (#6090 review)", () => {
       // PlanNormalizer gives params precedence, so at execution this step receives
       // ONLY the valid params reset — the inline `{delayMs:0}` is discarded. Schema

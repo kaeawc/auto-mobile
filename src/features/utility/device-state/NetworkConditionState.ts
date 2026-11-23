@@ -152,6 +152,13 @@ export const NETWORK_CONDITION_PROFILES: Record<NetworkConditionProfile, Network
 export const MAX_NETWORK_CONDITION_TTL_SECONDS = Math.floor(2_147_483_647 / 1000);
 
 /**
+ * Upper bound for `downloadKbps`/`uploadKbps` (100 Gbit/s): far above any real
+ * cap, and small enough that the iOS shaper's bytes-per-second conversion never
+ * overflows (#19108).
+ */
+export const MAX_NETWORK_BANDWIDTH_KBPS = 100_000_000;
+
+/**
  * State of the iOS Simulator network-extension backend (#10590): whether the
  * controller is installed, approved and answering.
  */
@@ -183,13 +190,21 @@ export interface NetworkConditionState {
   supported: boolean;
   capability?: NetworkConditionCapability;
   method?: "android_emulator_console";
-  /** iOS Simulator only: the host backend that will shape traffic. */
-  backend?: "network-extension";
+  /**
+   * iOS Simulator only: the backend that shapes traffic. `socket-shaper` is the
+   * device-wide shaper the simulator boots with (#19045); `network-extension`
+   * takes one app offline (#10264).
+   */
+  backend?: "network-extension" | "socket-shaper";
+  /** `socket-shaper` writes: applying first rebooted the simulator with the shaper. */
+  rebooted?: boolean;
+  /** `socket-shaper` reads: the shaper refuses every new remote connection. */
+  offline?: boolean;
   /** iOS Simulator only: the backend's install/approval state and next step. */
   controller?: NetworkConditionBackendState;
   /**
-   * What the condition applies to. iOS Simulator is always `app` (one app on
-   * one simulator); a request without `appId` is `device` and refused there.
+   * What the condition applies to: `device` (every process; Android emulator and
+   * the iOS Simulator socket shaper) or `app` (one iOS Simulator app, `appId`).
    */
   scope?: "device" | "app";
   /** iOS Simulator writes: the targeted app's bundle id. */
@@ -246,8 +261,9 @@ export interface NetworkConditionResultBase {
 export interface SetNetworkConditionInput {
   profile?: NetworkConditionProfile;
   /**
-   * iOS Simulator only, and required there: the bundle id of the one app to take
-   * offline (`profile: "offline"`) or restore (`profile: "none"`/reset) (#10264).
+   * iOS Simulator only: the bundle id of the one app to take offline
+   * (`profile: "offline"`) or restore (`profile: "none"`/reset) (#10264). Without
+   * it, the condition shapes the whole simulator (#19045).
    */
   appId?: string;
   /** Reset to normal connectivity (equivalent to `profile: "none"`). */
@@ -289,12 +305,6 @@ export function iosSimulatorNetworkConditionError(state: NetworkFilterState): st
   return `${prefix} ${networkFilterNextStep(state)}`;
 }
 
-/** A simulator shares the Mac's network stack, so only one app at a time is selectable (#10264). */
-export const IOS_SIMULATOR_NETWORK_CONDITION_APP_REQUIRED_ERROR =
-  "On iOS Simulator, networkCondition applies to one app, never the whole simulator: pass " +
-  "networkCondition.appId (the app's bundle id) with profile `offline`, or `none` to restore it. " +
-  "The simulator shares the Mac's network stack, so a device-wide condition is not supported.";
-
 export const IOS_SIMULATOR_NETWORK_CONDITION_SESSION_REQUIRED_ERROR =
   "Taking an iOS Simulator app offline needs a daemon session: the session renews the network " +
   "filter's lease and removes the rule on release, rebind or expiry. Run this call within a session.";
@@ -305,7 +315,7 @@ export const IOS_APP_NETWORK_CONDITION_LIMITATIONS: readonly string[] = Object.f
   "Flows the filter cannot attribute to this app on this simulator are allowed, so coverage is partial.",
   "The provider acknowledged the rule; AutoMobile does not verify traffic behaviour.",
   `The rule ends on its own unless the session renews it within ${IOS_APP_NETWORK_RULE_LEASE_MS / 1000}s.`,
-  "Latency, bandwidth and packet-loss profiles are not supported on iOS Simulator (#10265).",
+  "Latency, bandwidth and packet-loss profiles are not supported for one app (#10265); omit appId to shape the whole simulator.",
 ]);
 
 export function iosUnsupportedNetworkConditionError(input: SetNetworkConditionInput): string {
@@ -319,7 +329,8 @@ export function iosUnsupportedNetworkConditionError(input: SetNetworkConditionIn
   ];
   return (
     `iOS Simulator supports only profile \`offline\` and \`none\` for one app; ` +
-    `${named.join(", ") || "this request"} cannot be applied (latency and bandwidth shaping is #10265).`
+    `${named.join(", ") || "this request"} cannot be applied (latency and bandwidth shaping is #10265). ` +
+    "Omit appId to shape the whole simulator."
   );
 }
 

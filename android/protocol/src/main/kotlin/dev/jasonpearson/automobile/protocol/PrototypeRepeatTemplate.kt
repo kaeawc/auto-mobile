@@ -194,6 +194,8 @@ internal enum class PrototypeBindableKind {
   OPERAND,
   DATA_OPERAND,
   DERIVED_CONDITION,
+  DERIVED_BINDING,
+  EQUALS_KEY,
   EMIT_NAME,
   EMIT_BINDING,
   KEY,
@@ -217,6 +219,11 @@ internal enum class PrototypeBindableKind {
 
   /** The kinds holding a `/data/...` path with `{index}` segments. */
   fun isDataPath(): Boolean = this == DATA_PATH || this == REQUEST_INTO
+
+  fun isStateKey(): Boolean = this == KEY || this == EQUALS_KEY
+
+  fun requiresDerive(): Boolean =
+    this == DERIVED_CONDITION || this == DERIVED_BINDING || this == EQUALS_KEY
 }
 
 /**
@@ -381,6 +388,9 @@ internal object PrototypeBindableFields {
       field(condition, "key", path, PrototypeBindableKind.KEY)?.let {
         return it
       }
+      field(condition, "equalsKey", path, PrototypeBindableKind.EQUALS_KEY)?.let {
+        return it
+      }
       keyList(condition, "valid", path)?.let {
         return it
       }
@@ -498,6 +508,7 @@ internal object PrototypeBindableFields {
       return (value as? JsonObject)?.let {
         field(it, "state", at, PrototypeBindableKind.KEY)
           ?: field(it, "data", at, PrototypeBindableKind.ROUTE_POINTER)
+          ?: field(it, "derived", at, PrototypeBindableKind.DERIVED_BINDING)
       }
     }
 

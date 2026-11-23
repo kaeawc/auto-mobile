@@ -300,36 +300,35 @@ object PrototypeDataWriter {
     }
   }
 
-  /**
-   * `{state}` and `{data}` read the committed values at the action; a missing source is an error.
-   */
+  /** Bindings read the committed values at the action; a missing source is an error. */
   fun resolveValue(binding: EmitContextBinding, inputs: EmitContextInputs): PrototypeDataValue {
     PrototypeGeneratedValues.resolveBinding(binding, inputs.actionContext)?.let {
       return it
     }
-    fun fail(code: PrototypeDataWriteErrorCode, message: String) =
-      PrototypeDataValue.Failure(PrototypeDataWriteError(code, message))
     return when {
       "value" in binding -> PrototypeDataValue.Resolved(binding.getValue("value"))
       "state" in binding -> {
         val key = binding.getValue("state").jsonPrimitive.content
         inputs.state(key)?.let(PrototypeDataValue::Resolved)
-          ?: fail(PrototypeDataWriteErrorCode.INVALID_VALUE, "State key $key is not set")
+          ?: PrototypeDataBindings.failure(
+            PrototypeDataWriteErrorCode.INVALID_VALUE,
+            "State key $key is not set",
+          )
       }
-      "data" in binding -> {
-        val pointer = binding.getValue("data").jsonPrimitive.content
-        inputs.data(pointer)?.let(PrototypeDataValue::Resolved)
-          ?: fail(PrototypeDataWriteErrorCode.NOT_FOUND, "Data pointer $pointer does not exist")
-      }
+      "data" in binding || "derived" in binding ->
+        PrototypeDataBindings.resolveDataOrDerived(binding, inputs)
       "platform" in binding || "event" in binding -> {
         val source = if ("platform" in binding) "platform" else "event"
         val pointer = binding.getValue(source).jsonPrimitive.content
         val value = if (source == "platform") inputs.platform(pointer) else inputs.event(pointer)
         value?.let(PrototypeDataValue::Resolved)
-          ?: fail(PrototypeDataWriteErrorCode.NOT_FOUND, "Data pointer $pointer does not exist")
+          ?: PrototypeDataBindings.failure(
+            PrototypeDataWriteErrorCode.NOT_FOUND,
+            "Data pointer $pointer does not exist",
+          )
       }
       else ->
-        fail(
+        PrototypeDataBindings.failure(
           PrototypeDataWriteErrorCode.INVALID_VALUE,
           "A data write value must be bound to a literal, state or data before it runs",
         )
@@ -392,4 +391,23 @@ internal object PrototypeDataArrayWindow {
       is PrototypeDataWrite.Prepend -> write.maxItems?.toDouble()
       else -> null
     }
+}
+
+internal object PrototypeDataBindings {
+  fun resolveDataOrDerived(
+    binding: EmitContextBinding,
+    inputs: EmitContextInputs,
+  ): PrototypeDataValue {
+    if ("derived" in binding) {
+      val name = binding.getValue("derived").jsonPrimitive.content
+      return inputs.derived(name)?.let(PrototypeDataValue::Resolved)
+        ?: failure(PrototypeDataWriteErrorCode.NOT_FOUND, "Derived value $name is not set")
+    }
+    val pointer = binding.getValue("data").jsonPrimitive.content
+    return inputs.data(pointer)?.let(PrototypeDataValue::Resolved)
+      ?: failure(PrototypeDataWriteErrorCode.NOT_FOUND, "Data pointer $pointer does not exist")
+  }
+
+  fun failure(code: PrototypeDataWriteErrorCode, message: String) =
+    PrototypeDataValue.Failure(PrototypeDataWriteError(code, message))
 }

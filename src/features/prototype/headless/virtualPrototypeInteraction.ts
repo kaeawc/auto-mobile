@@ -117,7 +117,7 @@ const RUNNABLE_ACTIONS = new Set([
   "replace",
 ]);
 const STACK_ACTIONS = new Set(["push", "pop", "popToRoot", "replace"]);
-const CONTEXT_BINDINGS = new Set(["state", "page", "data", "value"]);
+const CONTEXT_BINDINGS = new Set(["state", "page", "data", "derived", "value"]);
 /** Fields the device interpolates `{key}` state tokens into before it renders them. */
 const INTERPOLATED_FIELDS = new Set(["text", "title"]);
 const STATE_TOKEN = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
@@ -637,11 +637,11 @@ function runEmit(action: Raw, draft: Draft): void {
   const bindings = record(action.context);
   draft.event("emit", String(action.name), (action.payload ?? null) as PrototypeJson);
   if (bindings) {
-    // `unsupportedContext` admits only state, page, data and value bindings.
     const resolved = resolveEmitContext(bindings as EmitBindings, {
       state: draft.state,
       pages: draft.pages,
       data: draft.spec.data as PrototypeJson | undefined,
+      derived: virtualDerivedValues(draft),
     });
     Object.assign(draft.steps.at(-1)!, resolved);
   }

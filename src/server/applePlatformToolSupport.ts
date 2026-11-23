@@ -34,6 +34,9 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "observe",
     // simctl spawn <udid> log show, as on an iOS simulator (#17547).
     "getLogs",
+    // simctl io recordVideo / screenshot capture, as on an Apple TV simulator (#19056).
+    "videoRecording",
+    "compareScreenshot",
   ]),
   tvos: new Set<string>([
     "getLogs",

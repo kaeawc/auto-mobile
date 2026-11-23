@@ -12,6 +12,7 @@ To add one, copy the [template](template.md).
 
 | Date       | Kind     | Entry                                                                                                                              |
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-11-23 | decision | [Apple Watch evidence tools, and no side button yet](2026-11-23-watchos-evidence-tools-and-side-button.md)                         |
 | 2026-11-21 | concept  | [iOS Simulator audio routing open questions](2026-11-21-ios-simulator-audio-routing-open-questions.md)                             |
 | 2026-11-21 | decision | [Prototype media runtime placement spike](2026-11-21-prototype-media-runtime-placement-spike.md)                                   |
 | 2026-11-20 | decision | [Fixture capture mode](2026-11-20-fixture-capture-mode.md)                                                                         |

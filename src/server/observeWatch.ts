@@ -20,6 +20,7 @@ import {
   type TvosRunnerLifecycle,
 } from "../features/tvos/TvosRunnerLifecycle";
 import { captureTvosRunnerScreenshot } from "../features/tvos/TvosScreenshot";
+import { watchScreenshotDisplay } from "../features/watch/WatchScreenshot";
 import { ObserveElementsBuilder } from "../features/observe/ObserveElementsBuilder";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../models";
 import type { WatchRunnerClient } from "../features/watch/WatchRunnerClient";
@@ -126,8 +127,6 @@ const defaultWatchTargetAppProbe: WatchTargetAppProbe = new LaunchctlWatchTarget
   simctl: (device) => new SimCtlClient(device),
 });
 
-/** The simctl display key the iOS simulator observer uses for a single-screen simulator. */
-const SIMCTL_DEFAULT_DISPLAY = "main";
 /** The stable single-panel display key observations report without a panel inventory. */
 const SINGLE_PANEL_DISPLAY_KEY = "0";
 
@@ -175,9 +174,7 @@ function watchDisplay(device: BootedDevice): { ref: DisplayRef; captureKey: stri
       generation: 0,
     },
     captureKey:
-      screenshotOnlyPlatform(device) === "watchos"
-        ? (panel?.key ?? SIMCTL_DEFAULT_DISPLAY)
-        : undefined,
+      screenshotOnlyPlatform(device) === "watchos" ? watchScreenshotDisplay(device) : undefined,
   };
 }
 

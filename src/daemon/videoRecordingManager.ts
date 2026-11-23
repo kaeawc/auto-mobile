@@ -1389,14 +1389,14 @@ async function persistStartedVideoRecording(
 }
 
 /**
- * Fail closed before any capture state exists: no recorder drives a watch (#14899), and an Apple
- * TV recording has no audio source (#16725).
+ * Fail closed before any capture state exists: no recorder drives a Vision Pro, and Apple TV and
+ * Apple Watch recordings have no audio source (#16725, #19056).
  */
 function assertRecordableDevice(request: StartVideoRecordingRequest): void {
-  requireVideoRecordingPlatform(request.device.platform, "Video recording");
-  if (request.audio && request.device.platform === "tvos") {
+  const platform = requireVideoRecordingPlatform(request.device.platform, "Video recording");
+  if (request.audio && (platform === "tvos" || platform === "watchos")) {
     throw new ActionableError(
-      "audio is not supported for Apple TV recordings; record without audio.",
+      `audio is not supported for ${platform === "tvos" ? "Apple TV" : "Apple Watch"} recordings; record without audio.`,
     );
   }
 }

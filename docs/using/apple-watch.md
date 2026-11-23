@@ -132,6 +132,8 @@ Besides the device management above, these tools accept a watch:
 - `terminateApp`
 - `crashApp`
 - `getLogs`
+- `videoRecording`
+- `compareScreenshot`
 - `executePlan`
 
 <!-- watchos-supported-tools:end -->
@@ -160,5 +162,7 @@ watch, including `rotateCrown`, notifications and Smart Stack widgets.
   reason; call `startDevice` to restart the runner. A disconnected runner AutoMobile did not start
   is not restarted: restart it yourself before trying again.
 - No pinch, multi-touch or drag.
+- No side button: `pressButton` supports `home` only (see
+  [Apple Watch tool behavior](apple-watch-tools.md#swipeon-and-pressbutton)).
 - Prototypes do not run on a watch. To mock up a watch screen, use a watch-sized prototype spec on a
   phone instead (see [Watch-sized mockups](../tools.md#watch-sized-mockups)).

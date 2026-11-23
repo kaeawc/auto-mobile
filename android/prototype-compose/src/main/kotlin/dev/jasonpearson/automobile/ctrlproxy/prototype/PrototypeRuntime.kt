@@ -193,6 +193,12 @@ class PrototypeRuntime(
   private val uploadAssets: PrototypeAssetSource? = null,
   private val idGenerator: PrototypeIdGenerator = SystemPrototypeIdGenerator,
   private val generatedClock: PrototypeClock = PrototypeClock(clock),
+  /**
+   * The limits state and data writes are checked against (#18804): the overlay keeps the base
+   * budget, an activity-hosted runtime advertising `prototype_large_budget_v1` passes the large
+   * one.
+   */
+  private val budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
 ) {
   private var actionContext = PrototypeActionContext(idGenerator, generatedClock)
 
@@ -210,7 +216,7 @@ class PrototypeRuntime(
 
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
-    PrototypeSpecValidator.prepareStateWrites(it, runtimeJson)
+    PrototypeSpecValidator.prepareStateWrites(it, runtimeJson, budget)
   }
 
   // A runtime is owned by one show; list disposal during navigation never clears its signatures.
@@ -234,6 +240,7 @@ class PrototypeRuntime(
 
   /** Called only after the host accepts the show. A preserving replacement seeds without firing. */
   suspend fun shown(preservingState: Boolean = false) {
+    platformDispatcher.outcomes.clear()
     // Posted first, so a realtime call this show makes queues behind its declarations.
     realtimeModule?.let {
       it.update(channelDeclarations(current.spec))
@@ -322,6 +329,19 @@ class PrototypeRuntime(
   fun timerReports(): List<PrototypeTimerReport> = timerEngine.reports()
 
   suspend fun advanceClock(ms: Int): Int = timerEngine.advance(ms)
+
+  /** Host-only outcome queue, scoped to this shown runtime. */
+  fun queueCallOutcome(call: String, outcome: JsonObject) {
+    check(current.active) { "Prototype is inactive" }
+    val owner =
+      requireNotNull(PrototypePlatformCalls.callOwner(call)) {
+        "Unknown platform call: $call"
+      }
+    require(owner in current.spec.requires?.platform.orEmpty()) {
+      "Declare $owner in requires.platform before simulation"
+    }
+    platformDispatcher.queueCallOutcome(call, outcome)
+  }
 
   /** Host-only injection, deliberately absent from the spec action vocabulary. */
   suspend fun simulatePlatformEvent(name: String, data: JsonObject): Boolean {
@@ -1506,11 +1526,11 @@ class PrototypeRuntime(
     write: PrototypeDataWrite,
   ): StagedWrite {
     val data =
-      when (val result = PrototypeDataWriter.apply(from.data, write)) {
+      when (val result = PrototypeDataWriter.apply(from.data, write, budget)) {
         is PrototypeDataWriteResult.Success -> result.data
         is PrototypeDataWriteResult.Failure -> return StagedWrite.Refused(result.error)
       }
-    prototypeListDataWriteError(from, data, write.path)?.let {
+    prototypeListDataWriteError(from, data, write.path, budget)?.let {
       return StagedWrite.Refused(
         PrototypeDataWriteError(PrototypeDataWriteErrorCode.INVALID_VALUE, it.message),
       )

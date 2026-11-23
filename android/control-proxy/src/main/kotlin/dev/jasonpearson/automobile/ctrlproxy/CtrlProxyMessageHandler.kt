@@ -30,6 +30,7 @@ import dev.jasonpearson.automobile.protocol.PinSavedPrototype
 import dev.jasonpearson.automobile.protocol.PinchResult
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PutPrototypeAsset
+import dev.jasonpearson.automobile.protocol.QueuePrototypeCallOutcome
 import dev.jasonpearson.automobile.protocol.RemoveCaCert
 import dev.jasonpearson.automobile.protocol.RemovePreference
 import dev.jasonpearson.automobile.protocol.RemovePrototypeAsset
@@ -291,6 +292,7 @@ class CtrlProxyMessageHandler(
       is PinSavedPrototype -> actions.pinSavedPrototype(request.requestId, request.id, request.icon)
       is ListSavedPrototypes -> actions.listSavedPrototypes(request.requestId)
       is DeleteSavedPrototype -> actions.deleteSavedPrototype(request.requestId, request.id)
+      is QueuePrototypeCallOutcome,
       is SimulatePrototypePlatform,
       is AdvancePrototypeClock -> handlePrototypeSimulation(request)
       is ClearPrototypeStorage -> actions.clearPrototypeStorage(request.requestId, request.id)
@@ -311,6 +313,13 @@ class CtrlProxyMessageHandler(
 
   private suspend fun handlePrototypeSimulation(request: WebSocketRequest) {
     when (request) {
+      is QueuePrototypeCallOutcome ->
+        actions.queuePrototypeCallOutcome(
+          request.requestId,
+          request.id,
+          request.call,
+          request.outcome,
+        )
       is SimulatePrototypePlatform ->
         actions.simulatePrototypePlatform(
           request.requestId,
@@ -808,6 +817,7 @@ private class RequestRoute(request: WebSocketRequest) {
       is PinSavedPrototype,
       is ListSavedPrototypes,
       is DeleteSavedPrototype,
+      is QueuePrototypeCallOutcome,
       is SimulatePrototypePlatform,
       is AdvancePrototypeClock,
       is ClearPrototypeStorage,

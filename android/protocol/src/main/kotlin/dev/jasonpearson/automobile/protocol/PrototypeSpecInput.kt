@@ -15,7 +15,6 @@ import dev.jasonpearson.automobile.protocol.PrototypeRequestRules.requestActionE
 import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.definitions
 import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.json
 import dev.jasonpearson.automobile.protocol.PrototypeSpecContract.numberTokenPattern
-import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.MAX_PROTOTYPE_SPEC_BYTES
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator.validate
 import dev.jasonpearson.automobile.protocol.PrototypeStateChecks.Context
 import dev.jasonpearson.automobile.protocol.PrototypeStateChecks.stateTypeErrors
@@ -40,7 +39,7 @@ import kotlinx.serialization.json.jsonPrimitive
 
 internal object PrototypeSpecInput {
   fun validateInput(input: String, context: Context): PrototypeSpecValidation {
-    if (input.toByteArray(Charsets.UTF_8).size > MAX_PROTOTYPE_SPEC_BYTES) {
+    if (input.toByteArray(Charsets.UTF_8).size > context.budget.maxSpecBytes) {
       return PrototypeSpecValidation.Failure(fail("", "Spec byte limit exceeded"))
     }
     if (hasUnescapedControl(input)) return PrototypeSpecValidation.Failure(fail("", "Invalid JSON"))
@@ -128,7 +127,7 @@ internal object PrototypeSpecInput {
 
   fun validateElement(value: JsonElement, context: Context): PrototypeSpecValidation {
     context.root = value
-    val repeats = PrototypeRepeatData.fromSpec(value)
+    val repeats = PrototypeRepeatData.fromSpec(value, context.budget.maxListItems)
     val error =
       structuralError(value, context)
         ?: PrototypeKeyframesRules.validate(context)
@@ -146,10 +145,7 @@ internal object PrototypeSpecInput {
       PrototypeSpecValidation.Success(
         json.decodeFromJsonElement<PrototypeSpec>(
           stripPlatformNamespaces(
-            normalizeIntegers(
-              value,
-              definitions.getValue("spec").jsonObject,
-            ),
+            normalizeIntegers(value, definitions.getValue("spec").jsonObject, context.budget),
           ),
         ),
       )
@@ -165,7 +161,7 @@ internal object PrototypeSpecInput {
       ?: requestActionErrors(context)
 
   private fun structuralError(value: JsonElement, context: Context): PrototypeSpecError? =
-    PrototypeLazyListRules.limitError(value)
+    PrototypeLazyListRules.limitError(value, context.budget.maxListItems)
       ?: walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
       ?: PrototypeRemoteImages.error(value.jsonObject, context.nodes)
       ?: excludeAccessoryReferences(context)
@@ -195,10 +191,20 @@ internal object PrototypeSpecInput {
 
   // JSON integers include exponent/decimal spellings (1e2, 100.0). Kotlin's Int decoder
   // accepts only integer lexical tokens, so normalize validated integer fields structurally.
-  fun normalizeIntegers(value: JsonElement, rule: JsonObject): JsonElement =
+  // A choice probe uses the validated spec's budget, so an option valid only under a larger
+  // runtime budget (#18804) is still the one chosen.
+  fun normalizeIntegers(
+    value: JsonElement,
+    rule: JsonObject,
+    budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
+  ): JsonElement =
     when (rule.text("kind")) {
       "ref" ->
-        normalizeIntegers(value, definitions.getValue(checkNotNull(rule.text("name"))).jsonObject)
+        normalizeIntegers(
+          value,
+          definitions.getValue(checkNotNull(rule.text("name"))).jsonObject,
+          budget,
+        )
       "tagged" ->
         normalizeIntegers(
           value,
@@ -207,12 +213,17 @@ internal object PrototypeSpecInput {
             .jsonObject
             .getValue(checkNotNull((value as JsonObject).text("type")))
             .jsonObject,
+          budget,
         )
       "object" -> {
         val fields = rule.getValue("fields").jsonObject
         JsonObject(
           (value as JsonObject).mapValues { (key, child) ->
-            normalizeIntegers(child, fields.getValue(key).jsonObject.getValue("rule").jsonObject)
+            normalizeIntegers(
+              child,
+              fields.getValue(key).jsonObject.getValue("rule").jsonObject,
+              budget,
+            )
           },
         )
       }
@@ -221,19 +232,21 @@ internal object PrototypeSpecInput {
       "screenMap" ->
         JsonObject(
           (value as JsonObject).mapValues { (_, child) ->
-            normalizeIntegers(child, rule.getValue("item").jsonObject)
+            normalizeIntegers(child, rule.getValue("item").jsonObject, budget)
           },
         )
       "array" ->
         JsonArray(
-          (value as JsonArray).map { normalizeIntegers(it, rule.getValue("item").jsonObject) },
+          (value as JsonArray).map {
+            normalizeIntegers(it, rule.getValue("item").jsonObject, budget)
+          },
         )
       "choice" -> {
         val option =
           rule.getValue("options").jsonArray.first {
-            walk(value, it.jsonObject, "", Context(), 0) == null
+            walk(value, it.jsonObject, "", Context(budget), 0) == null
           }
-        normalizeIntegers(value, option.jsonObject)
+        normalizeIntegers(value, option.jsonObject, budget)
       }
       "number" ->
         if (rule.flag("integer")) JsonPrimitive(value.jsonPrimitive.double.toInt()) else value

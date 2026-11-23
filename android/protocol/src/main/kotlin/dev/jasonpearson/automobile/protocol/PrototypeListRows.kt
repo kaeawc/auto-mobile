@@ -6,13 +6,16 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /** Lazy renderers resolve row data without expanding the template or copying the node tree. */
 object PrototypeListRows {
+  /**
+   * The spec was validated against its runtime's budget, so rows draw up to the largest (#18804).
+   */
   fun items(list: PrototypeListNode, data: JsonObject?): List<JsonObject> =
     list.repeat.itemsPath
       ?.let { pointer ->
         (PrototypeDataPointer.resolve(data, pointer) as? JsonArray)
           .orEmpty()
           .filterIsInstance<JsonObject>()
-          .take(PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS)
+          .take(PrototypeRuntimeBudget.LARGE.maxListItems)
           .map { PrototypeDataValues.project(it, includeArrays = true) }
       }
       .orEmpty()

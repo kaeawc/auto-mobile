@@ -189,7 +189,10 @@ internal object PrototypeStateChecks {
     return null
   }
 
-  class Context {
+  class Context(
+    /** The target runtime's budget (#18804): spec, data and list limits a capability can raise. */
+    val budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
+  ) {
     var root: JsonElement? = null
     var stateBindings: Context? = null
     val nodes = mutableListOf<Located>()

@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.PrototypeAssetContract
+import dev.jasonpearson.automobile.protocol.PrototypeRuntimeBudget
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import java.io.File
@@ -28,7 +29,9 @@ import kotlinx.serialization.json.intOrNull
  * delete rename. Files are synced before commit, with the manifest synced last on a best-effort
  * basis. Directories are not synced because this is not portable across supported Android SDKs.
  * Factory callers share an instance per canonical root; direct instances are for isolated owners
- * and tests and must not operate concurrently on the same root.
+ * and tests and must not operate concurrently on the same root. [budget] is the runtime budget
+ * specs are validated against on save and reload (#18804): the base budget unless the owning
+ * runtime advertises a larger one.
  */
 class SavedPrototypeDirectoryStore(
   private val root: File,
@@ -40,6 +43,7 @@ class SavedPrototypeDirectoryStore(
     Logger.getLogger("SavedPrototypeStore").log(Level.WARNING, message, error)
   },
   private val files: SavedPrototypeFileOperations = DiskFiles,
+  private val budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
 ) : SavedPrototypeStore {
   private val lock = Any()
   private val json = Json {
@@ -207,7 +211,7 @@ class SavedPrototypeDirectoryStore(
       return refusal(SavedPrototypeRejection.INVALID_LABEL)
     if (request.specJson.toByteArray(Charsets.UTF_8).size > limits.maxSpecBytes)
       return refusal(SavedPrototypeRejection.SPEC_TOO_LARGE)
-    val validated = PrototypeSpecValidator.validate(request.specJson)
+    val validated = PrototypeSpecValidator.validate(request.specJson, budget = budget)
     if (validated !is PrototypeSpecValidation.Success)
       return refusal(SavedPrototypeRejection.INVALID_SPEC)
     if (request.assets.size > limits.assets.maxCount)
@@ -251,7 +255,7 @@ class SavedPrototypeDirectoryStore(
       val specFile = File(entry, manifest.specFile)
       if (specFile.length() > limits.maxSpecBytes) throw IOException("Spec exceeds byte cap")
       val specJson = specFile.readText(Charsets.UTF_8)
-      val validated = PrototypeSpecValidator.validate(specJson)
+      val validated = PrototypeSpecValidator.validate(specJson, budget = budget)
       if (validated !is PrototypeSpecValidation.Success) throw IOException("Invalid stored spec")
       val records = manifest.assets + manifest.fonts
       if (

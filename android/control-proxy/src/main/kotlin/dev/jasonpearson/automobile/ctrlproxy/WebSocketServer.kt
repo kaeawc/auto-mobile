@@ -133,6 +133,7 @@ class WebSocketServer(
         "clear_prototype_storage",
         "advance_prototype_clock",
         "simulate_prototype_platform",
+        "queue_prototype_call_outcome",
       ) + prototypeAssetRequestTypes
 
     /** Requests whose payload is typed user input, which may be a password. */
@@ -473,6 +474,7 @@ class WebSocketServer(
     add("prototype_pager_state_key_v1")
     add("prototype_timers_v1")
     add("prototype_platform_simulation_v1")
+    add("prototype_platform_outcomes_v1")
   }
 
   /** Prototype window, patch, anchor and screenshot flags. */

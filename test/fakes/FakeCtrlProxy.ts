@@ -1,4 +1,7 @@
-import type { PrototypePlatformSimulationRequest } from "../../src/features/observe/android/ctrlProxyProtocol";
+import type {
+  PrototypePlatformOutcomeRequest,
+  PrototypePlatformSimulationRequest,
+} from "../../src/features/observe/android/ctrlProxyProtocol";
 import type { PinchRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import type {
   LatestHierarchyOptions,
@@ -225,6 +228,20 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     this.simulatePlatformRequests.push(simulation);
     this.checkFailure("requestSimulatePrototypePlatform");
     return this.simulatePlatformResult;
+  }
+  readonly queueCallOutcomeRequests: PrototypePlatformOutcomeRequest[] = [];
+  private queueCallOutcomeResult: PrototypeResult = { success: true };
+  setQueueCallOutcomeResult(result: PrototypeResult): void {
+    this.queueCallOutcomeResult = result;
+  }
+  async requestQueuePrototypeCallOutcome(
+    request: PrototypePlatformOutcomeRequest,
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    this.queueCallOutcomeRequests.push(request);
+    this.checkFailure("requestQueuePrototypeCallOutcome");
+    return this.queueCallOutcomeResult;
   }
   readonly advanceClockRequests: { id: string; advanceTimeMs: number }[] = [];
   private advanceClockResult: PrototypeResult = { success: true, fired: 0 };

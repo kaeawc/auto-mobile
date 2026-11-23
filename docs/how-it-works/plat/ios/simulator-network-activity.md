@@ -14,17 +14,17 @@ no privileges. Source: `src/features/utility/networkActivity/`.
 2. In parallel:
    - `lsof -nP -a -i -p <tree pids> -F pcPnT`: per process, each internet socket's protocol,
      `local->remote` name and TCP state. lsof exits 1 when a listed pid has exited or none holds a
-     socket, and still prints what it found; exit 1 is parsed, not a failure unless stderr has text.
+     socket. It still prints what it found. The reader parses exit 1 and fails only when stderr has text.
    - `nettop -P -L 1 -x -J bytes_in,bytes_out`: one host-wide sample of `<name>.<pid>,<in>,<out>`
      rows, joined to the tree by pid.
    - `simctl listapps`: each app's bundle path.
 3. A process gets an `appId` when its `ps` executable starts with an app's bundle path. The
    longest path wins, so an extension inside an app maps to that app. `ps` shows runtime-root apps
-   under `/var/run/...` and `simctl listapps` under `/private/var/run/...`. Both drop `/private` before
-   comparing.
-4. Processes with no socket and no bytes are left out. The rest are sorted by bytes, then socket
-   count, and capped at 50; `activeProcessCount` and `truncated` report the cut. The name is lsof's, then nettop's (truncated
-   to 15 characters), then the executable basename.
+   under `/var/run/...` and `simctl listapps` under `/private/var/run/...`. The matcher drops
+   `/private` from both before comparing.
+4. The reader leaves out processes with no socket and no bytes. It sorts the rest by bytes, then
+   socket count, and caps them at 50; `activeProcessCount` and `truncated` report the cut. The name
+   is lsof's, then nettop's (truncated to 15 characters), then the executable basename.
 
 ## Byte counts
 

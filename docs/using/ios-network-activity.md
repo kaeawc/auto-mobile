@@ -22,11 +22,12 @@ traffic:
 | `bytesIn`  | Bytes received on the sockets open at read time.                                                                                       |
 | `bytesOut` | Bytes sent on the sockets open at read time.                                                                                           |
 
-`networkActivity.processCount` is the number of processes the simulator runs, active or not.
-`processes` lists at most 50 of them, busiest first (most bytes, then most sockets).
-`activeProcessCount` is how many had sockets or traffic; `truncated` is `true` when the quietest
-were dropped. `warnings` names any host tool that failed: without `nettop` the byte counts are 0,
-without `lsof` the sockets are empty, and without `simctl listapps` the `appId` is omitted.
+The `networkActivity.processCount` field is the number of processes the simulator runs, active or not.
+The `processes` list holds at most 50 of them, busiest first (most bytes, then most sockets).
+The `activeProcessCount` field is how many had sockets or traffic.
+The `truncated` field is `true` when the quietest were dropped.
+The `warnings` field names any host tool that failed. Without `nettop` the byte counts are 0.
+Without `lsof` the sockets are empty. Without `simctl listapps` the `appId` is omitted.
 
 ```json
 {

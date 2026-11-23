@@ -50,12 +50,12 @@ export class PsSimulatorBootEnvironment implements SimulatorBootEnvironment {
     if (!pid) {
       return "";
     }
-    const environment = await this.host.executeCommand(
+    const launchdSim = await this.host.executeCommand(
       "ps",
       ["-E", "-ww", "-o", "command=", "-p", pid],
       { ...PS_OPTIONS, signal },
     );
-    return parseDyldInsertLibraries(environment.stdout);
+    return parseDyldInsertLibraries(launchdSim.stdout);
   }
 }
 

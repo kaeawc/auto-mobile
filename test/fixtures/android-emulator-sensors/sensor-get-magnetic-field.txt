@@ -1,2 +1,0 @@
-magnetic-field = 0:5.9:-48.4
-OK

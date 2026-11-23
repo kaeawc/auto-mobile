@@ -65,14 +65,15 @@ describe("formatEmulatorSensorValue", () => {
   });
 });
 
-describe("parseEmulatorSensorReadback (hand-reconstructed console fixtures)", () => {
+describe("parseEmulatorSensorReadback (captured console fixtures)", () => {
   test.each([
-    ["sensor-get-acceleration.txt", "acceleration", [0, 9.77622, 0]],
-    ["sensor-get-magnetic-field.txt", "magnetic-field", [0, 5.9, -48.4]],
-    ["sensor-get-orientation.txt", "orientation", [0, 0, 0]],
-    ["sensor-get-light.txt", "light", [0]],
-    ["sensor-get-proximity.txt", "proximity", [1]],
-    ["sensor-get-pressure.txt", "pressure", [1013.25]],
+    ["sensor-get-acceleration-phone-api34.txt", "acceleration", [1, 9.77631, 0.812349]],
+    ["sensor-get-magnetic-field-phone-api34.txt", "magnetic-field", [0, 9.88766, -47.7452]],
+    ["sensor-get-orientation-phone-api34.txt", "orientation", [-0.0829031, 0, 0]],
+    ["sensor-get-light-phone-api34.txt", "light", [0]],
+    ["sensor-get-proximity-phone-api34.txt", "proximity", [1]],
+    ["sensor-get-pressure-phone-api34.txt", "pressure", [1013.25]],
+    ["sensor-get-humidity-phone-api34.txt", "humidity", [0]],
   ] as const)("%s", (file, sensor, value) => {
     expect(parseEmulatorSensorReadback(fixture(file), sensor)).toEqual([...value]);
   });
@@ -91,32 +92,32 @@ describe("AdbEmulatorSensorConsole", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(
       "emu sensor get light",
-      createExecResult(fixture("sensor-get-light.txt"), ""),
+      createExecResult(fixture("sensor-get-light-phone-api34.txt"), ""),
     );
     adb.setCommandResponse(
-      "emu sensor get humidity",
-      createExecResult(fixture("sensor-get-humidity-disabled.txt"), ""),
+      "emu sensor get acceleration",
+      createExecResult(fixture("sensor-get-acceleration-disabled-tv-api36.txt"), ""),
     );
     adb.setCommandResponse(
       "emu sensor set light",
-      createExecResult(fixture("sensor-set-ok.txt"), ""),
+      createExecResult(fixture("sensor-set-ok-phone-api34.txt"), ""),
     );
     adb.setCommandResponse(
       "emu sensor set acceleration",
-      createExecResult(fixture("sensor-set-usage-ko.txt"), ""),
+      createExecResult(fixture("sensor-set-usage-ko-phone-api34.txt"), ""),
     );
     const sensorConsole = new AdbEmulatorSensorConsole(adb);
 
     expect(await sensorConsole.read("light")).toEqual({ ok: true, value: [0] });
-    expect(await sensorConsole.read("humidity")).toEqual({
+    expect(await sensorConsole.read("acceleration")).toEqual({
       ok: false,
-      reason: "KO: 'humidity' is disabled.",
+      reason: "KO: 'acceleration' sensor is disabled.",
     });
     expect(await sensorConsole.write("light", [500])).toEqual({ ok: true });
     expect((await sensorConsole.write("acceleration", [1, 2, 3])).ok).toBe(false);
     expect(adb.getExecutedCommands()).toEqual([
       "emu sensor get light",
-      "emu sensor get humidity",
+      "emu sensor get acceleration",
       "emu sensor set light 500",
       "emu sensor set acceleration 1:2:3",
     ]);

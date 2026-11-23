@@ -39,4 +39,9 @@ public enum PrototypePlatformPermissions {
     }()
 
     public static func mapping(for name: String) -> PrototypePermissionMapping? { mapping[name] }
+
+    static func hasRequiredUsageKey(for name: String, contains: (String) -> Bool) -> Bool {
+        guard let ios = mapping(for: name)?.ios else { return false }
+        return ios.usageKey.map(contains) ?? true
+    }
 }

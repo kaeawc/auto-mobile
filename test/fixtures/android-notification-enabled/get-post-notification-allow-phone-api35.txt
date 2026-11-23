@@ -1,0 +1,2 @@
+No operations.
+Default mode: allow

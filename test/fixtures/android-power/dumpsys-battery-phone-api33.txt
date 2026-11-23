@@ -1,0 +1,15 @@
+Current Battery Service state:
+  AC powered: true
+  USB powered: false
+  Wireless powered: false
+  Max charging current: 5000000
+  Max charging voltage: 5000000
+  Charge counter: 10000
+  status: 2
+  health: 2
+  present: true
+  level: 100
+  scale: 100
+  voltage: 5000
+  temperature: 250
+  technology: Li-ion

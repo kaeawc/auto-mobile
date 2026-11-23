@@ -50,6 +50,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeMenuNode
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePagerNode
 import dev.jasonpearson.automobile.protocol.PrototypePasteButtonNode
+import dev.jasonpearson.automobile.protocol.PrototypePlatformAction
 import dev.jasonpearson.automobile.protocol.PrototypePrependDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
 import dev.jasonpearson.automobile.protocol.PrototypePushAction
@@ -979,6 +980,20 @@ private fun PrototypeRequestAction.boundRequest(instance: RepeatInstance): Proto
   )
 }
 
+/**
+ * Mirrors the protocol binder's `platform` (#14294): argument bindings, `into`, `statusKey` and the
+ * follow-ups bind to the row; literal arguments pass through.
+ */
+private fun PrototypePlatformAction.boundPlatform(instance: RepeatInstance) =
+  copy(
+    args =
+      args?.mapValues { (_, value) -> (value as? JsonObject)?.let(instance::dataValue) ?: value },
+    into = into?.let(instance::dataPath),
+    statusKey = statusKey?.let(instance::interpolate),
+    onSuccess = onSuccess?.map { it.bound(instance) },
+    onError = onError?.map { it.bound(instance) },
+  )
+
 private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
   when (this) {
     is PrototypeSetStateAction ->
@@ -1001,6 +1016,7 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
     is PrototypeStartTimerAction -> copy(actions = actions.map { it.bound(instance) })
     is PrototypeCancelTimerAction -> this
     is PrototypeRequestAction -> boundRequest(instance)
+    is PrototypePlatformAction -> boundPlatform(instance)
     is PrototypeToggleAction -> copy(key = instance.interpolate(key))
     is PrototypeIncrementAction -> copy(key = instance.interpolate(key))
     is PrototypeDecrementAction -> copy(key = instance.interpolate(key))

@@ -557,7 +557,7 @@ describe("CtrlProxyManager", function () {
       adb.setCommandResponseSequence(installedCommand, [
         createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}`, ""),
       ]);
-      adb.setCommandResponse('install "/tmp/ctrlproxy.apk"', createExecResult("Success", ""));
+      adb.setCommandResponse('install -r "/tmp/ctrlproxy.apk"', createExecResult("Success", ""));
       await manager.install("/tmp/ctrlproxy.apk");
 
       await expect(manager.isInstalled()).resolves.toBe(true);
@@ -578,7 +578,7 @@ describe("CtrlProxyManager", function () {
         grantResponse?: ExecResult,
       ): Promise<FakeAdbExecutor> {
         const adb = new FakeAdbExecutor();
-        adb.setCommandResponse('install "/tmp/ctrlproxy.apk"', createExecResult("Success", ""));
+        adb.setCommandResponse('install -r "/tmp/ctrlproxy.apk"', createExecResult("Success", ""));
         adb.setCommandResponse("shell getprop ro.build.version.sdk", createExecResult(sdk, ""));
         if (grantResponse) {
           adb.setCommandResponse(grantCommand, grantResponse);
@@ -603,7 +603,7 @@ describe("CtrlProxyManager", function () {
         const grant = `shell pm grant ${AndroidCtrlProxyManager.PACKAGE} android.permission.RECORD_AUDIO`;
         expect(commands.filter((command) => command === grant)).toHaveLength(1);
         expect(commands.indexOf(grant)).toBeGreaterThan(
-          commands.indexOf('install "/tmp/ctrlproxy.apk"'),
+          commands.indexOf('install -r "/tmp/ctrlproxy.apk"'),
         );
       });
 
@@ -638,7 +638,7 @@ describe("CtrlProxyManager", function () {
             const commands = adb.getExecutedCommands();
             const installCommand =
               mode === "reinstall"
-                ? 'install "/tmp/ctrlproxy.apk"'
+                ? 'install -r "/tmp/ctrlproxy.apk"'
                 : 'install -r -d "/tmp/ctrlproxy.apk"';
             for (const grant of [recordGrant, grantCommand]) {
               expect(commands.filter((command) => command === grant)).toHaveLength(1);
@@ -1454,7 +1454,7 @@ describe("CtrlProxyManager", function () {
     test("waits through six seconds of binding and observes a healthy rebound", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
         createExecResult(accessibilityFixture("unbound"), ""),
-        ...Array.from({ length: 30 }, () => createExecResult(accessibilityFixture("binding"), "")),
+        ...Array.from({ length: 6 }, () => createExecResult(accessibilityFixture("binding"), "")),
         createExecResult(accessibilityFixture("bound-label"), ""),
       ]);
 
@@ -1479,7 +1479,7 @@ describe("CtrlProxyManager", function () {
 
     test("waits for an existing bind without starting a rebind", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
-        ...Array.from({ length: 32 }, () => createExecResult(accessibilityFixture("binding"), "")),
+        ...Array.from({ length: 8 }, () => createExecResult(accessibilityFixture("binding"), "")),
         createExecResult(accessibilityFixture("bound-label"), ""),
       ]);
 
@@ -1487,7 +1487,7 @@ describe("CtrlProxyManager", function () {
       expect(await accessibilityServiceClient.waitForAccessibilityServiceBinding()).toBe(
         "recovered",
       );
-      expect(timer.now()).toBe(6_000);
+      expect(timer.now()).toBe(7_000);
       expect(
         fakeAdb.wasCommandExecuted(`shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`),
       ).toBe(false);
@@ -1532,6 +1532,29 @@ describe("CtrlProxyManager", function () {
       expect(timer.getSleepHistory()).toEqual([100]);
     });
 
+    test("a slow cold start of 25 seconds is waited out without a second force-stop (#18981)", async () => {
+      fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
+        createExecResult(accessibilityFixture("crashed"), ""),
+        ...Array.from({ length: 20 }, () => createExecResult(accessibilityFixture("binding"), "")),
+        createExecResult(accessibilityFixture("bound-label"), ""),
+      ]);
+
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
+      expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(true);
+      expect(timer.now()).toBeGreaterThanOrEqual(25_000 - 2_000);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter(
+            (command) => command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
+          ),
+      ).toHaveLength(1);
+      // Each poll waits longer than the last, capped at 2 s.
+      const polls = timer.getSleepHistory().slice(1);
+      expect(polls.slice(0, 5)).toEqual([200, 400, 800, 1600, 2000]);
+      expect(Math.max(...polls)).toBe(2000);
+    });
+
     test("stops waiting at the bind budget when binding never finishes", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
         createExecResult(accessibilityFixture("unbound"), ""),
@@ -1549,7 +1572,7 @@ describe("CtrlProxyManager", function () {
     test("a second recovery during a long bind shares the first force-stop", async () => {
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
         createExecResult(accessibilityFixture("unbound"), ""),
-        ...Array.from({ length: 35 }, () => createExecResult(accessibilityFixture("binding"), "")),
+        ...Array.from({ length: 6 }, () => createExecResult(accessibilityFixture("binding"), "")),
         createExecResult(accessibilityFixture("bound-label"), ""),
       ]);
       let rearmed: Promise<boolean> | undefined;
@@ -2425,7 +2448,7 @@ describe("CtrlProxyManager", function () {
         `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
         createExecResult("Success", ""),
       );
-      localFakeAdb.setCommandError('install "', new Error("INSTALL_FAILED_ABORTED"));
+      localFakeAdb.setCommandError('install -r "', new Error("INSTALL_FAILED_ABORTED"));
 
       const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
         timer: new FakeTimer(),
@@ -2499,7 +2522,7 @@ describe("CtrlProxyManager", function () {
           `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
           createExecResult("Success", ""),
         );
-        localFakeAdb.setCommandError('install "', new Error("INSTALL_FAILED_ABORTED"));
+        localFakeAdb.setCommandError('install -r "', new Error("INSTALL_FAILED_ABORTED"));
 
         const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
           timer: new FakeTimer(),
@@ -2551,7 +2574,7 @@ describe("CtrlProxyManager", function () {
           `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
           createExecResult("Success", ""),
         );
-        localFakeAdb.setCommandError('install "', new Error("INSTALL_FAILED_ABORTED"));
+        localFakeAdb.setCommandError('install -r "', new Error("INSTALL_FAILED_ABORTED"));
 
         const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
           timer: new FakeTimer(),
@@ -2846,7 +2869,7 @@ describe("CtrlProxyManager", function () {
         `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
         createExecResult("Success", ""),
       );
-      localFakeAdb.setCommandError('install "', new Error("Failure [INSTALL_FAILED_ABORTED]"));
+      localFakeAdb.setCommandError('install -r "', new Error("Failure [INSTALL_FAILED_ABORTED]"));
       const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
         timer: new FakeTimer(),
         fileDownloader: { download: async () => undefined },

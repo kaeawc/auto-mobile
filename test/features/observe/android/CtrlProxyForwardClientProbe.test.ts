@@ -4,6 +4,7 @@ import {
   HostForwardClientConnectionProbe,
   parseLsofForwardClientPids,
   parseNetstatForwardClientPids,
+  parseSsForwardClientPids,
 } from "../../../../src/features/observe/android/CtrlProxyForwardClientProbe";
 import type { ExecResult } from "../../../../src/models";
 import type {
@@ -83,6 +84,43 @@ describe("parseLsofForwardClientPids", () => {
   });
 });
 
+// `ss -Htnp state established` rows (iproute2): with a single-state filter the
+// State column is omitted. PID 4242 is the client; adb (PID 501) holds the
+// accepted end whose peer is the client's ephemeral port.
+const SS_ADB_AND_CLIENT =
+  '0      0          127.0.0.1:8765      127.0.0.1:49573 users:(("adb",pid=501,fd=12))\n' +
+  '0      0          127.0.0.1:49573     127.0.0.1:8765  users:(("node",pid=4242,fd=21),("node",pid=4243,fd=21))\n';
+
+describe("parseSsForwardClientPids", () => {
+  test("counts only the client end of a loopback connection", () => {
+    expect(parseSsForwardClientPids(SS_ADB_AND_CLIENT, 8765)).toEqual([4242, 4243]);
+    expect(parseSsForwardClientPids(SS_ADB_AND_CLIENT, 9000)).toEqual([]);
+    expect(parseSsForwardClientPids("", 8765)).toEqual([]);
+  });
+
+  test("accepts a leading State column and IPv6 or v4-mapped loopback peers", () => {
+    expect(
+      parseSsForwardClientPids(
+        'ESTAB 0 0 [::1]:50000 [::1]:8765 users:(("node",pid=42,fd=7))\n' +
+          '0 0 [::ffff:127.0.0.1]:50001 [::ffff:127.0.0.1]:8765 users:(("node",pid=43,fd=8))\n',
+        8765,
+      ),
+    ).toEqual([42, 43]);
+  });
+
+  test("ignores a non-loopback peer on the same port", () => {
+    expect(
+      parseSsForwardClientPids('0 0 10.0.0.2:50000 10.0.0.9:8765 users:(("x",pid=9,fd=3))', 8765),
+    ).toEqual([]);
+  });
+
+  test("throws when a client connection's process is not visible", () => {
+    expect(() => parseSsForwardClientPids("0 0 127.0.0.1:50000 127.0.0.1:8765\n", 8765)).toThrow(
+      "not visible",
+    );
+  });
+});
+
 describe("parseNetstatForwardClientPids", () => {
   test("keeps the CRLF line endings of the real capture", () => {
     expect(NETSTAT_TCP).toContain("\r\n");
@@ -120,15 +158,7 @@ describe("HostForwardClientConnectionProbe", () => {
     expect(await probe.findClientPids(8765)).toEqual([]);
   });
 
-  test("propagates a missing or failing lsof so callers stay conservative", async () => {
-    const missing = new HostForwardClientConnectionProbe(
-      new ScriptedHost(async () => {
-        throw execFailure("ENOENT");
-      }),
-      "linux",
-    );
-    await expect(missing.findClientPids(8765)).rejects.toThrow("Command failed");
-
+  test("propagates a failing lsof so callers stay conservative", async () => {
     const failing = new HostForwardClientConnectionProbe(
       new ScriptedHost(async () => {
         throw execFailure(1, "", "lsof: WARNING: can't stat()");
@@ -136,6 +166,40 @@ describe("HostForwardClientConnectionProbe", () => {
       "darwin",
     );
     await expect(failing.findClientPids(8765)).rejects.toThrow("Command failed");
+  });
+
+  test("falls back to ss on Linux when lsof is not installed (#18985)", async () => {
+    const host = new ScriptedHost(async (command) => {
+      if (command.startsWith("lsof")) {
+        throw execFailure("ENOENT");
+      }
+      return execResult(SS_ADB_AND_CLIENT);
+    });
+    const probe = new HostForwardClientConnectionProbe(host, "linux");
+    expect(await probe.findClientPids(8765)).toEqual([4242, 4243]);
+    expect(host.commands).toEqual([
+      "lsof -nP -iTCP:8765 -sTCP:ESTABLISHED -Fpn",
+      "ss -Htnp state established dport = :8765",
+    ]);
+  });
+
+  test("names both tools when neither lsof nor ss is installed", async () => {
+    const probe = new HostForwardClientConnectionProbe(
+      new ScriptedHost(async () => {
+        throw execFailure("ENOENT");
+      }),
+      "linux",
+    );
+    await expect(probe.findClientPids(8765)).rejects.toThrow("neither lsof nor ss is installed");
+  });
+
+  test("does not fall back to ss on macOS", async () => {
+    const host = new ScriptedHost(async () => {
+      throw execFailure("ENOENT");
+    });
+    const probe = new HostForwardClientConnectionProbe(host, "darwin");
+    await expect(probe.findClientPids(8765)).rejects.toThrow("Command failed");
+    expect(host.commands).toEqual(["lsof -nP -iTCP:8765 -sTCP:ESTABLISHED -Fpn"]);
   });
 
   test("reads IPv4 and IPv6 netstat tables on Windows", async () => {

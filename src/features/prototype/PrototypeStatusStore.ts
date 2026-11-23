@@ -3,13 +3,12 @@ import { shownBackdrop, type PrototypeBackdropOutcome } from "./prototypeBackdro
 import { prototypeDegradedEffectsField, type DegradedEffect } from "./prototypeDegradedEffects";
 import type { PrototypeTimerReport } from "./prototypeTimerSchema";
 import type { PrototypeHiddenReason } from "./prototypeHidden";
-import { PrototypeShownSpecs } from "./PrototypeShownSpecs";
+import { applyDeviceDataWrite, PrototypeShownSpecs } from "./PrototypeShownSpecs";
 import {
   PrototypeSpecRevisions,
   type PrototypeSpecRevisionRecorder,
 } from "./prototypeSpecRevisions";
 import type { PrototypeData } from "./prototypeSpec";
-import { applyPrototypeDataWrite } from "./prototypeDataWrite";
 import { prototypeDataWriteOf } from "./prototypeDataWriteEvent";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
@@ -581,24 +580,15 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     if (!write) {
       return;
     }
+    // Read before mirroring: a write the mirror cannot apply forgets the entry and its budget.
+    const budget = this.shownSpecs.budgetOf(deviceId, event.id);
     this.shownSpecs.recordDeviceDataWrite(deviceId, event.id, write);
     for (const stored of this.scopes.values()) {
       const entry = stored.deviceId === deviceId ? stored.shown.get(event.id) : undefined;
       if (!entry) {
         continue;
       }
-      const applied =
-        write.op === "remove"
-          ? applyPrototypeDataWrite(entry.data, {
-              op: "remove",
-              path: write.path,
-              where: write.where,
-            })
-          : write.value === undefined
-            ? undefined
-            : write.op === "extend" || write.op === "prepend"
-              ? applyPrototypeDataWrite(entry.data, { ...write, value: write.value })
-              : applyPrototypeDataWrite(entry.data, { ...write, value: write.value });
+      const applied = applyDeviceDataWrite(entry.data, write, budget);
       const written = { ...entry, ...newerRevision(entry, write.revision) };
       if (applied?.success) {
         written.data = applied.data;

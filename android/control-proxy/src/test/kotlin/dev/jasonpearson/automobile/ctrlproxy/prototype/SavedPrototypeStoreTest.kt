@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import dev.jasonpearson.automobile.protocol.PrototypeRuntimeBudget
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
@@ -50,6 +51,25 @@ class SavedPrototypeStoreTest {
         .walkTopDown()
         .filter { it.isFile }
         .associate { it.relativeTo(root).path to it.readBytes().toList() }
+
+  @Test
+  fun `save and reload validate against the store's runtime budget`() {
+    val items = (0 until 2001).joinToString(",") { """{"id":$it}""" }
+    val rows =
+      """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Rows"},"data":{"rows":[$items]}}"""
+    val base = store().save(request().copy(specJson = rows))
+    assertEquals(
+      SavedPrototypeRejection.INVALID_SPEC,
+      (base as SavedPrototypeSaveResult.Rejected).reason,
+    )
+    val large = SavedPrototypeDirectoryStore(root, budget = PrototypeRuntimeBudget.LARGE)
+    saved(large, request().copy(specJson = rows))
+    assertEquals(
+      rows,
+      loaded(SavedPrototypeDirectoryStore(root, budget = PrototypeRuntimeBudget.LARGE)).specJson,
+    )
+    assertTrue(store().load("panel") is SavedPrototypeLoadResult.Corrupt)
+  }
 
   @Test
   fun `image and font round trip includes version bytes and paths`() {

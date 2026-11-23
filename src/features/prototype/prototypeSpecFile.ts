@@ -2,7 +2,7 @@ import { isAbsolute } from "node:path";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { PrototypeAssetFileReader } from "./prototypeAssetUploader";
-import { MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
+import { PROTOTYPE_LARGE_BUDGET } from "./prototypeRuntimeBudget";
 
 export type PrototypeSpecFileRead = { json: unknown } | { error: string };
 
@@ -21,7 +21,10 @@ export interface PrototypeJsonFileOptions {
 export async function readPrototypeSpecFile(
   path: string,
   reader: PrototypeAssetFileReader,
-  { label = "specPath", maxBytes = MAX_PROTOTYPE_SPEC_BYTES }: PrototypeJsonFileOptions = {},
+  {
+    label = "specPath",
+    maxBytes = PROTOTYPE_LARGE_BUDGET.MAX_PROTOTYPE_SPEC_BYTES,
+  }: PrototypeJsonFileOptions = {},
 ): Promise<PrototypeSpecFileRead> {
   const fail = (reason: string): PrototypeSpecFileRead => ({
     error: `${label} ${path}: ${reason}`,

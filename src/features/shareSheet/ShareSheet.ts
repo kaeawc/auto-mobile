@@ -100,7 +100,9 @@ function uniqueRowsByKey(sheet: AndroidSheet): Map<string, AndroidShareRow> {
 /**
  * True when `match` on the page after a scroll is the previous page's match carried along
  * by the scroll (viewport overlap) or pinned in place, rather than another row with the
- * same label. The scroll distance comes from the other rows visible on both pages.
+ * same label. A list row's own collection position settles it when both pages report one, so
+ * a row that is the only one visible on both pages stays one target (#19099). Without
+ * positions, the scroll distance comes from the other rows visible on both pages.
  */
 function isSameRowAfterScroll(
   previous: { sheet: AndroidSheet; match?: AndroidShareRow },
@@ -116,6 +118,10 @@ function isSameRowAfterScroll(
     Math.abs(old.left - match.element.bounds.left) > SCROLL_TOLERANCE_PX
   ) {
     return false;
+  }
+  const [was, now] = [previous.match.listPosition, match.listPosition];
+  if (was !== undefined && now !== undefined) {
+    return was === now;
   }
   const moved = old.top - match.element.bounds.top;
   // Copy and other actions can sit outside the scrolling list.

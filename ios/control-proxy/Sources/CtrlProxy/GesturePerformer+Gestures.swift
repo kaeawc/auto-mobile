@@ -48,8 +48,8 @@ extension GesturePerformer {
 
     nonisolated static let homeChordNotDeliveredMessage =
         "Key 'h' with meta was not delivered: the home screen did not appear after Cmd+H. "
-        + "This simulator accepts the chord without acting on it (seen on iPhone Duo); "
-        + "use pressButton home or homeScreen instead"
+            + "This simulator accepts the chord without acting on it (seen on iPhone Duo); "
+            + "use pressButton home or homeScreen instead"
 
     nonisolated static func swipeVelocity(distance: Double, duration: TimeInterval) -> Double? {
         guard distance.isFinite, duration.isFinite, distance > 0, duration > 0 else { return nil }

@@ -37,7 +37,9 @@ import os
                         // accept Cmd+H without acting on it (#19062): only report success once
                         // the home screen is showing.
                         let home = try await KeyboardWait.destructivePostCondition(clock: keyboardClock) {
-                            SpringBoardHomeScreenDetector.isShowing(in: springboard)
+                            catchingObjCExceptionNonThrowing({
+                                SpringBoardHomeScreenDetector.isShowing(in: springboard)
+                            }, fallback: false)
                         }
                         guard home else {
                             throw GestureError.gestureFailed(GesturePerformer.homeChordNotDeliveredMessage)

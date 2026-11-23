@@ -31,7 +31,7 @@ jobs:
     continue-on-error: true
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -58,7 +58,7 @@ jobs:
       - name: "Upload Heap Dumps"
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-runner-api37-heap-dumps-emulator
           path: heap-dump
@@ -66,14 +66,14 @@ jobs:
 
       - name: "Upload JUnit Runner Test Results"
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-runner-api37-emulator-test-results
           path: android/junit-runner/build/reports/tests/test/
 
       - name: "Upload Playground Test Results"
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playground-api37-emulator-test-results
           path: android/playground/app/build/reports/tests/test/

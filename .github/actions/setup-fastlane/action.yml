@@ -8,7 +8,7 @@ runs:
   using: "composite"
   steps:
     # SHA-pinned: this runs in jobs that hold the Play service-account key.
-    - uses: ruby/setup-ruby@824c0e29fdfc7d689c191c27acc969d2d04b7dd8 # v1.331.0
+    - uses: ruby/setup-ruby@f9c4492e86def3e644ab32a0ef185eda5b0c20d0 # v1.342.0
       with:
         ruby-version: "3.3"
         bundler: "Gemfile.lock"

@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -66,7 +66,7 @@ jobs:
       CLAUDE_CODE_VERSION: "2.1.311"
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
           persist-credentials: false
@@ -106,7 +106,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
           fetch-depth: 0
@@ -148,7 +148,7 @@ jobs:
     needs: [build-control-proxy-apk, build-ctrl-proxy-ios-ipa, build-video-server-jar]
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
           # Full history so the direct push to main isn't rejected as a shallow
@@ -162,19 +162,19 @@ jobs:
           bun-version: 1.4.4
 
       - name: "Download APK artifact"
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: control-proxy-apk
           path: /tmp
 
       - name: "Download IPA artifact"
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ctrl-proxy-ios-ipa
           path: /tmp
 
       - name: "Download video-server jar artifact"
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: video-server-jar
           path: /tmp
@@ -383,7 +383,7 @@ jobs:
       AUTOMOBILE_ALLOW_SHARED_DAEMON_NAMESPACE: "1"
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -396,7 +396,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: "Download CtrlProxy APK"
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: control-proxy-apk
           path: android/control-proxy/build/outputs/apk/debug
@@ -447,7 +447,7 @@ jobs:
 
       - name: "Upload foldable diagnostics, screenshots and recordings"
         if: failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: foldable-posture-${{ matrix.profile }}
           path: |
@@ -467,14 +467,14 @@ jobs:
     needs: build-control-proxy-apk
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Download CtrlProxy APK"
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: control-proxy-apk
           path: android/control-proxy/build/outputs/apk/debug
@@ -492,7 +492,7 @@ jobs:
 
       - name: "Upload Test Results"
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-runner-emulator-test-results
           path: android/junit-runner/build/reports/tests/test/
@@ -511,14 +511,14 @@ jobs:
     needs: build-control-proxy-apk
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Download CtrlProxy APK"
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: control-proxy-apk
           path: android/control-proxy/build/outputs/apk/debug
@@ -536,7 +536,7 @@ jobs:
 
       - name: "Upload Test Results"
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playground-automobile-emulator-test-results
           path: android/playground/app/build/reports/tests/test/
@@ -564,14 +564,14 @@ jobs:
     needs: build-video-server-jar
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Download video-server jar"
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: video-server-jar
           path: artifacts

@@ -142,7 +142,10 @@ is missing.
   members whose names match `^[A-Za-z_][A-Za-z0-9_]{0,63}$`; nested members stay in data and are invisible to
   templates. Optional `repeat.key` names a projected field present in every item; rendered identities use
   scalar text rendering and must be unique (7 and "7" collide), for literal lists too. Per-item field,
-  state-key, action and expanded node/image checks still run. Templates cannot nest repeats or pagers.
+  state-key, action and expanded node/image checks still run. Templates may nest one container repeat with a `{field}` source and `prototype_nested_repeat_v1`;
+  the source resolves against each outer item, with at most 100 object rows per item. Inner bindings
+  include both aliases, `{index}` (inner) and `{outerIndex}` (outer). Expanded budgets charge every pair.
+  A third level and pagers are invalid.
 - `MAX_PROTOTYPE_REPEAT_PATH_CELLS` bounds the sum across path-bound repeats in pre-order after component
   expansion (empty templates included): each instantiated object item costs its projected scalar members, or
   one if none; literal repeats are free. After the three path-source checks, exceeding it fails at
@@ -212,7 +215,7 @@ depth precedes array length, then children; the byte check runs last.
 | Authored bindable field, e.g. `root.children[0].text` or `root.children[0].onTap[0].name` | `Substituted text length limit exceeded` (after unknown repeat fields, before bound key/empty emit checks)                                                                        |
 | Referencing template string                                                               | `Unknown repeat field "x"` (non-scalar members count as absent)                                                                                                                   |
 | `<node>.repeat.items.path`                                                                | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix                                                            |
-| `<node>.repeat.key`                                                                       | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair                                                                         |
+| `<node>.repeat.key`                                                                       | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair; `Derived repeat key "<key>" has the same input for items <i> and <j>`  |
 | Condition `.key`                                                                          | `Exactly one of key, data, platform, all, any, not, valid, derived is required`                                                                                                   |
 | Condition comparison field                                                                | `Requires key or data or platform or derived`; `Requires key or derived`; `Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt is required` |
 | Condition `.equals` / `.notEquals` in bindable visiting order                             | `Repeat placeholder in a data condition operand is not supported`                                                                                                                 |

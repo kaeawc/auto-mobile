@@ -78,6 +78,8 @@ class RotationAdb extends FakeAdbExecutor {
   /** Accept the lock write without changing the map (a write that does not stick). */
   ignoreLockWrite = false;
   blockRead?: () => Promise<void>;
+  /** `settings get system user_rotation` fails (as opposed to printing `null` for an unset key). */
+  failUserRead = false;
   /**
    * `secure device_state_rotation_lock`; null models a device without the setting. When set,
    * it mirrors the am-resizable window manager (mt-0083 D1): turning auto-rotate off records
@@ -113,6 +115,9 @@ class RotationAdb extends FakeAdbExecutor {
     if (command.startsWith("shell settings get system")) {
       if (this.blockRead) {
         await this.blockRead();
+      }
+      if (key === "user_rotation" && this.failUserRead) {
+        throw new Error("settings get refused");
       }
       return output(String(key === "user_rotation" ? this.user : this.auto));
     }
@@ -999,7 +1004,7 @@ describe("session rotation restoration", () => {
   test("unknown user original fails without writes or a restoration slot", async () => {
     const h = harness();
     h.adb.auto = null;
-    h.adb.user = null;
+    h.adb.failUserRead = true;
     try {
       await h.manager.createSession("rotation-session", device.deviceId, "android");
       await expect(h.rotate.execute("landscape")).rejects.toThrow(
@@ -1009,6 +1014,24 @@ describe("session rotation restoration", () => {
       expect(h.adb.writes()).toEqual([]);
       await h.manager.releaseSession("rotation-session");
       expect(h.restored).toEqual([]);
+    } finally {
+      h.manager.stopCleanupTimer();
+    }
+  });
+
+  test("unset user_rotation prints null and is the default 0, not unreadable (#19063)", async () => {
+    const h = harness();
+    h.adb.user = null;
+    try {
+      await h.manager.createSession("rotation-session", device.deviceId, "android");
+      await h.rotate.execute("landscape");
+      expect(h.manager.getRotation("rotation-session")).toEqual({
+        accelerometerRotation: 1,
+        userRotation: 0,
+      });
+      expect(h.adb.user as number | null).toBe(1);
+      await h.manager.releaseSession("rotation-session");
+      expect(h.adb.user as number | null).toBe(0);
     } finally {
       h.manager.stopCleanupTimer();
     }

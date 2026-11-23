@@ -404,6 +404,36 @@ class PrototypeRepeatTest {
   }
 
   @Test
+  fun `platform actions bind statusKey into args and follow ups per row`() {
+    val copy =
+      PrototypePlatformAction(
+        call = "clipboard.copy",
+        args =
+          mapOf(
+            "text" to buildJsonObject { put("item", "label") },
+            "mode" to kotlinx.serialization.json.JsonPrimitive("plain"),
+          ),
+        into = "/data/copied/{index}",
+        statusKey = "copy_{index}",
+        onSuccess = listOf(PrototypeEmitAction("copied_{item.id}")),
+        onError =
+          listOf(PrototypeSetStateAction("failed_{item.id}", PrototypeScalar.BooleanValue(true))),
+      )
+    val rows =
+      mapPrototypeSpec(spec(list(PrototypeButtonNode(label = "Copy", onTap = listOf(copy)))))
+        .root
+        .children
+    val second = rows[1].source?.onTap?.single() as PrototypePlatformAction
+    assertEquals("copy_1", second.statusKey)
+    assertEquals("/data/copied/1", second.into)
+    assertEquals(buildJsonObject { put("value", "Beta") }, second.args?.get("text"))
+    assertEquals(kotlinx.serialization.json.JsonPrimitive("plain"), second.args?.get("mode"))
+    assertEquals(listOf(PrototypeEmitAction("copied_7")), second.onSuccess)
+    assertEquals("failed_7", (second.onError?.single() as PrototypeSetStateAction).key)
+    assertEquals("copy_0", (rows[0].source?.onTap?.single() as PrototypePlatformAction).statusKey)
+  }
+
+  @Test
   fun `component labels and button actions bind per item`() {
     val open = PrototypeSheetCondition("open", true)
     fun button(label: String, name: String) =

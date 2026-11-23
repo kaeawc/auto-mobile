@@ -237,6 +237,7 @@ internal class PrototypeNodeMapping(
   private val derive: Map<String, PrototypeDerivedEntry> = emptyMap(),
   private val formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
   private val fillWindowRoot: Boolean = false,
+  private val resolveRowData: Boolean = false,
   private val derivedValues: Map<String, kotlinx.serialization.json.JsonElement?> =
     PrototypeDerive.evaluate(
       derive,
@@ -279,6 +280,7 @@ internal class PrototypeNodeMapping(
     pagerState: Map<String, PrototypeScalar>? = null,
     staggerDelayMs: Int = 0,
   ): PrototypeRenderNode {
+    val node = if (resolveRowData) resolvePrototypeListNodeText(node, data, shield = true) else node
     if (!repeatItemsHaveBrace && prototypeRepeatItemsHaveBrace(node)) repeatItemsHaveBrace = true
     val localState =
       derivedState +
@@ -463,6 +465,7 @@ internal class PrototypeNodeMapping(
                   derive = derive,
                   derivedValues = derivedValues,
                   formatter = formatter,
+                  resolveRowData = true,
                   shieldedInputs = mayShield,
                 )
                 .map(

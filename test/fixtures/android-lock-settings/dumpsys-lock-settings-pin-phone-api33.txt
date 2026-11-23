@@ -1,0 +1,42 @@
+Current lock settings service state:
+
+User State:
+  User 0
+    SP Handle: f386434bcea4f271
+    Last changed: 2026-11-22 00:21:41 (6e82c4e57d660911)
+    SID: 2e85391f63cabd92
+    Quality: 0
+    CredentialType: Pin
+    SeparateChallenge: true
+    Metrics: known
+  
+Keys in namespace:
+  synthetic_password_f386434bcea4f271
+  
+Storage:
+  User 0 [/data/system_de/0/spblob]:
+        60 2026-11-22 00:21:21 0000000000000000.e0
+        58 2026-11-22 00:21:41 0000000000000000.handle
+        32 2026-11-22 00:21:22 0000000000000000.p1
+        72 2026-11-22 00:21:40 f386434bcea4f271.metrics
+        89 2026-11-22 00:21:40 f386434bcea4f271.pwd
+     16384 2026-11-22 00:21:40 f386434bcea4f271.secdis
+       186 2026-11-22 00:21:40 f386434bcea4f271.spblob
+  
+StrongAuth:
+  PrimaryAuthFlags state:
+    userId=0, primaryAuthFlags=0
+    
+  NonStrongBiometricAllowed state:
+    
+  
+RebootEscrow:
+  mRebootEscrowWanted=false
+  mRebootEscrowReady=false
+  mRebootEscrowListener=com.android.server.recoverysystem.RecoverySystemService@9d94769
+  mPendingRebootEscrowKey is not set
+  RebootEscrowProvider type is null
+  Event log:
+    
+  
+PasswordHandleCount: 0

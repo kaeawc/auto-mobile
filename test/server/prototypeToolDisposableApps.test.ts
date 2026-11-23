@@ -142,6 +142,21 @@ describe("prototype disposable app actions (#14184)", () => {
     expect(stamper.stamped[0]?.assets?.[0]).toMatchObject({ id: "logo", bytes: iconBytes });
   });
 
+  test("installApp refuses a space or Unicode asset id on Android before reading or stamping", async () => {
+    for (const id of ["brand logo", "logó"]) {
+      const output = await call({
+        action: "installApp",
+        spec,
+        app,
+        assets: [{ id, path: "/specs/missing.png" }],
+      });
+      expect(output.success).toBe(false);
+      expect(output.error).toContain(`asset id '${id}' must be letters, digits`);
+    }
+    expect(stamper.stamped).toHaveLength(0);
+    expect(installer.installs).toHaveLength(0);
+  });
+
   test("installApp reads specPath, and a re-install of the slug is an in-place update", async () => {
     await call({ action: "installApp", specPath: "/specs/app.json", app });
     const again = await call({ action: "installApp", specPath: "/specs/app.json", app });

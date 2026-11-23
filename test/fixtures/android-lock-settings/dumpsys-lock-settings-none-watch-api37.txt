@@ -1,0 +1,45 @@
+Current lock settings service state:
+
+User State:
+  User 0
+    LSKF-based SP protector ID: b7206a14b723454f
+    LSKF last changed: 2026-11-22 00:24:15 (previous protector: 0000000000000000)
+    SID: 0000000000000000
+    Quality: 0
+    CredentialType: NONE
+    IsLockScreenDisabled: false
+    IsUseOneLockSettingEnabled: true
+    Metrics: known
+  
+Keys in namespace:
+  synthetic_password_b7206a14b723454f
+  
+Storage:
+  User 0 [/data/system_de/0/spblob]:
+        60 2026-11-22 00:24:14 0000000000000000.e0
+        32 2026-11-22 00:24:14 0000000000000000.p1
+     16384 2026-11-22 00:24:14 b7206a14b723454f.secdis
+       186 2026-11-22 00:24:14 b7206a14b723454f.spblob
+  
+StrongAuth:
+  PrimaryAuthFlags state:
+    userId=0, primaryAuthFlags=0
+    
+  NonStrongBiometricAllowed state:
+    
+  
+RebootEscrow:
+  mRebootEscrowWanted=false
+  mRebootEscrowReady=false
+  mRebootEscrowListener=com.android.server.recoverysystem.RecoverySystemService@78e7b34
+  mLoadEscrowDataErrorCode=0
+  mPendingRebootEscrowKey is not set
+  RebootEscrowProvider type is null
+  Event log:
+    
+  
+SoftwareRateLimiter:
+  Enforcing: true
+  
+PasswordHandleCount: 0
+ThirdPartyAppsStarted: true

@@ -39,6 +39,7 @@ object AutoMobilePrototype {
       "prototype_flow_grid_v1",
       "prototype_format_v1",
       "prototype_derive_v1",
+      "prototype_nested_repeat_v1",
       "prototype_gestures_v1",
       "prototype_glass_v1",
       "prototype_keyframes_v1",

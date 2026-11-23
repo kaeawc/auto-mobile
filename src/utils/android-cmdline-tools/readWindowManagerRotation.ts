@@ -2,14 +2,17 @@ import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
 import type { AdbCommandRunner } from "./interfaces/AdbExecutor";
 import {
   parseAppliedDisplayRotation,
+  parseInputSurfaceOrientation,
   parseWindowManagerRotation,
 } from "./parseWindowManagerRotation";
 import { throwIfAborted } from "../toolUtils";
 import { logger } from "../logger";
 
 export const WINDOW_MANAGER_ROTATION_COMMAND = "shell dumpsys window displays";
+// API 24-27 dumps carry no `mRotation=`; their input dispatcher still reports the applied
+// rotation as `SurfaceOrientation:` (#19063), so the same single command falls through to it.
 export const WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND =
-  'shell dumpsys window | grep -i "mRotation="';
+  'shell dumpsys window | grep -i "mRotation=" || dumpsys input | grep "SurfaceOrientation:"';
 export const WINDOW_MANAGER_ROTATION_TIMEOUT_MS = 5_000;
 // Preserve the exported rotation limit as an alias of the shared dumpsys cap.
 export const WINDOW_MANAGER_ROTATION_MAX_BUFFER = DUMPSYS_MAX_BUFFER;
@@ -19,6 +22,10 @@ function parseLiveDisplayRotation(stdout: string, options: { displayId?: number 
   return (
     parseAppliedDisplayRotation(stdout, options) ?? parseWindowManagerRotation(stdout, options)
   );
+}
+
+function parseFallbackRotation(stdout: string): number | null {
+  return parseWindowManagerRotation(stdout) ?? parseInputSurfaceOrientation(stdout);
 }
 
 export async function readWindowManagerRotation(
@@ -61,5 +68,5 @@ export async function readWindowManagerRotation(
     maxBuffer: WINDOW_MANAGER_ROTATION_MAX_BUFFER,
     signal: options.signal,
   });
-  return parseWindowManagerRotation(stdout);
+  return parseFallbackRotation(stdout);
 }

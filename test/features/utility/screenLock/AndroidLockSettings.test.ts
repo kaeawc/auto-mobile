@@ -5,15 +5,18 @@ import type { DeviceLockState, ExecResult } from "../../../../src/models";
 import type { AdbExecuteOptions } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   AdbLockSettingsClient,
+  createLockUserResolver,
   LOCK_SETTINGS_LOG_LABEL,
   parseLockSettingsCredentialType,
   scrubLockCredentials,
 } from "../../../../src/features/utility/screenLock/AndroidLockSettings";
+import { ActionableError } from "../../../../src/models/ActionableError";
 import { createExecResult } from "../../../../src/utils/execResult";
 import { logger } from "../../../../src/utils/logger";
 import { runExecSeam } from "../../../../src/utils/ExecSeam";
 import type { ToolCallCapture } from "../../../../src/utils/fixtureCapture/fixtureCaptureFormat";
 import { runWithFixtureCapture } from "../../../../src/utils/fixtureCapture/fixtureCaptureScope";
+import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const fixture = (name: string): string =>
@@ -46,31 +49,44 @@ class FakeLockSettingsAdb {
 }
 
 describe("parseLockSettingsCredentialType", () => {
-  test("reads user 0's credential type from an Android 14 dump", () => {
-    expect(
-      parseLockSettingsCredentialType(fixture("dumpsys-lock-settings-api34-none.txt")),
-    ).toEqual({ type: "none", secure: false });
-    expect(parseLockSettingsCredentialType(fixture("dumpsys-lock-settings-api34-pin.txt"))).toEqual(
-      {
-        type: "pin",
-        secure: true,
-      },
-    );
+  // API 30 prints `None`/`Pin`; API 34 and later print `NONE`/`PIN`; the parser folds case.
+  test.each(["phone-api30", "phone-api34", "phone-api37", "watch-api37", "automotive-api34"])(
+    "reads user 0's credential type on %s",
+    (device) => {
+      expect(
+        parseLockSettingsCredentialType(fixture(`dumpsys-lock-settings-none-${device}.txt`)),
+      ).toEqual({ type: "none", secure: false });
+    },
+  );
+
+  test.each(["phone-api30", "phone-api34", "phone-api37", "watch-api37"])(
+    "reads a PIN on %s",
+    (device) => {
+      expect(
+        parseLockSettingsCredentialType(fixture(`dumpsys-lock-settings-pin-${device}.txt`)),
+      ).toEqual({ type: "pin", secure: true });
+    },
+  );
+
+  test("only user 0 counts: an Automotive image's driver user 10 has its own PIN", () => {
+    const dump = fixture("dumpsys-lock-settings-pin-automotive-api34.txt");
+    expect(dump).toMatch(/User 10[\s\S]*CredentialType: PIN/);
+    expect(parseLockSettingsCredentialType(dump)).toEqual({ type: "none", secure: false });
   });
 
-  test("ignores a work profile's own credential", () => {
-    expect(
-      parseLockSettingsCredentialType(fixture("dumpsys-lock-settings-api34-work-profile.txt")),
-    ).toEqual({ type: "none", secure: false });
+  test("reads the foreground driver user 10 when asked, on the same Automotive dump (#19060)", () => {
+    const dump = fixture("dumpsys-lock-settings-pin-automotive-api34.txt");
+    expect(parseLockSettingsCredentialType(dump, 10)).toEqual({ type: "pin", secure: true });
   });
 
+  // Not reproducible on the AVDs available: an Android 10 dump and a dump with no type line.
   test("an Android 10 integer 2 is secure but of unknown type; a missing line is unknown", () => {
     expect(
-      parseLockSettingsCredentialType(fixture("dumpsys-lock-settings-api29-legacy-int.txt")),
+      parseLockSettingsCredentialType("User State:\n  User 0\n    CredentialType: 2\n"),
     ).toEqual({ type: "unknown", secure: true });
-    expect(
-      parseLockSettingsCredentialType(fixture("dumpsys-lock-settings-no-credential-type.txt")),
-    ).toEqual({ type: "unknown" });
+    expect(parseLockSettingsCredentialType("User State:\n  User 0\n    Quality: 0\n")).toEqual({
+      type: "unknown",
+    });
   });
 });
 
@@ -88,21 +104,21 @@ describe("scrubLockCredentials", () => {
 describe("AdbLockSettingsClient", () => {
   test("reads the type with dumpsys lock_settings", async () => {
     const adb = new FakeLockSettingsAdb();
-    adb.responses.push(execResult(fixture("dumpsys-lock-settings-api34-pin.txt")));
+    adb.responses.push(execResult(fixture("dumpsys-lock-settings-pin-phone-api34.txt")));
     expect(await new AdbLockSettingsClient(adb).read()).toEqual({ type: "pin", secure: true });
     expect(adb.calls[0].args).toEqual(["shell", "dumpsys", "lock_settings"]);
   });
 
   test("falls back to the keyguard's secure flag when the dump names no type", async () => {
     const adb = new FakeLockSettingsAdb();
-    adb.responses.push(execResult(fixture("dumpsys-lock-settings-no-credential-type.txt")));
+    adb.responses.push(execResult("User State:\n  User 0\n    Quality: 0\n"));
     adb.deviceLock = { locked: true, keyguardShowing: true, secure: false };
     expect(await new AdbLockSettingsClient(adb).read()).toEqual({ type: "none", secure: false });
   });
 
   test("sets a PIN with --old, under a log label, without retries", async () => {
     const adb = new FakeLockSettingsAdb();
-    adb.responses.push(execResult(fixture("locksettings-set-pin-ok.txt") + EXIT(0)));
+    adb.responses.push(execResult(fixture("locksettings-set-pin-ok-phone-api34.txt") + EXIT(0)));
 
     const result = await new AdbLockSettingsClient(adb).setCredential("pin", "1357", "2468");
 
@@ -111,6 +127,8 @@ describe("AdbLockSettingsClient", () => {
       "shell",
       "locksettings",
       "set-pin",
+      "--user",
+      "0",
       "--old",
       "2468",
       "1357",
@@ -128,12 +146,14 @@ describe("AdbLockSettingsClient", () => {
     const adb = new FakeLockSettingsAdb();
     adb.responses.push(execResult(EXIT(0)));
     await new AdbLockSettingsClient(adb).setCredential("password", "a b$c");
-    expect(adb.calls[0].args.slice(2, 4)).toEqual(["set-password", "'a b$c'"]);
+    expect(adb.calls[0].args.slice(2, 6)).toEqual(["set-password", "--user", "0", "'a b$c'"]);
   });
 
   test("classifies a refused old credential and scrubs the echoed value", async () => {
     const adb = new FakeLockSettingsAdb();
-    adb.responses.push(execResult(fixture("locksettings-old-mismatch.txt") + EXIT(255)));
+    adb.responses.push(
+      execResult(fixture("locksettings-old-mismatch-phone-api34.txt") + EXIT(255)),
+    );
 
     const result = await new AdbLockSettingsClient(adb).setCredential("pin", "1357", "2468");
 
@@ -144,16 +164,23 @@ describe("AdbLockSettingsClient", () => {
   test("classifies clear outcomes", async () => {
     const adb = new FakeLockSettingsAdb();
     adb.responses.push(
-      execResult(fixture("locksettings-clear-ok.txt") + EXIT(0)),
-      execResult(fixture("locksettings-old-without-credential.txt") + EXIT(255)),
-      execResult(fixture("locksettings-no-secure-lock-screen.txt") + EXIT(255)),
+      execResult(fixture("locksettings-clear-ok-phone-api34.txt") + EXIT(0)),
+      execResult(fixture("locksettings-old-without-credential-phone-api34.txt") + EXIT(255)),
+      execResult(fixture("locksettings-set-pin-no-secure-lock-screen-tv-api36.txt") + EXIT(255)),
     );
     const client = new AdbLockSettingsClient(adb);
 
     expect((await client.clearCredential("1357")).outcome).toBe("ok");
     expect((await client.clearCredential("1357")).outcome).toBe("no_existing_credential");
     expect((await client.clearCredential("1357")).outcome).toBe("unsupported");
-    expect(adb.calls[0].args.slice(1, 5)).toEqual(["locksettings", "clear", "--old", "1357"]);
+    expect(adb.calls[0].args.slice(1, 7)).toEqual([
+      "locksettings",
+      "clear",
+      "--user",
+      "0",
+      "--old",
+      "1357",
+    ]);
   });
 
   test("a transport failure is scrubbed before it is logged or returned", async () => {
@@ -190,7 +217,7 @@ describe("AdbLockSettingsClient fixture capture", () => {
     adb.execute = (args) =>
       runExecSeam(
         async () => ({
-          stdout: `${fixture("locksettings-old-mismatch.txt")}${EXIT(1)}`,
+          stdout: `${fixture("locksettings-old-mismatch-phone-api34.txt")}${EXIT(1)}`,
           stderr: "",
         }),
         {},
@@ -211,5 +238,110 @@ describe("AdbLockSettingsClient fixture capture", () => {
     expect(command?.stdout).toContain("Old password '<redacted>' didn't match");
     expect(command?.redacted).toBe(true);
     expect(JSON.stringify(captures)).not.toContain("2468");
+  });
+});
+
+describe("AdbLockSettingsClient on an Automotive foreground user (#19060)", () => {
+  test("sets, clears and reads back the resolved user instead of user 0", async () => {
+    const adb = new FakeLockSettingsAdb();
+    const client = new AdbLockSettingsClient(adb, async () => 10);
+    adb.responses.push(execResult("Pin set to '2468'\n" + EXIT(0)));
+    await client.setCredential("pin", "2468");
+    adb.responses.push(execResult("Lock credential cleared\n" + EXIT(0)));
+    await client.clearCredential("2468");
+    adb.responses.push(execResult(fixture("dumpsys-lock-settings-pin-automotive-api34.txt")));
+    const reading = await client.read();
+    expect(adb.calls[0].args.slice(0, 5)).toEqual([
+      "shell",
+      "locksettings",
+      "set-pin",
+      "--user",
+      "10",
+    ]);
+    expect(adb.calls[1].args.slice(0, 5)).toEqual([
+      "shell",
+      "locksettings",
+      "clear",
+      "--user",
+      "10",
+    ]);
+    expect(reading).toEqual({ type: "pin", secure: true });
+  });
+
+  test("a non-automotive device never asks for the foreground user and targets user 0", async () => {
+    const adb = new FakeLockSettingsAdb();
+    const phone = new FakeAdbClient();
+    const resolve = createLockUserResolver(phone, { formFactor: "phone" });
+    expect(await resolve()).toBe(0);
+    expect(phone.wasCommandExecuted("get-current-user")).toBe(false);
+    await new AdbLockSettingsClient(adb, resolve).setCredential("pin", "2468");
+    expect(adb.calls[0].args.slice(3, 5)).toEqual(["--user", "0"]);
+  });
+
+  test("throws instead of falling back to user 0 when the foreground user cannot be read (#19070)", async () => {
+    const offline = new FakeAdbClient();
+    offline.setCommandError("shell am get-current-user", new Error("offline"));
+    const resolve = createLockUserResolver(offline, { formFactor: "automotive" });
+    const failure = await resolve().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect(String(failure)).toContain("foreground user");
+    expect(String(failure)).toContain("offline");
+  });
+
+  test("an unreadable foreground user fails the set and the read without running locksettings", async () => {
+    const adb = new FakeLockSettingsAdb();
+    const offline = new FakeAdbClient();
+    offline.setCommandError("shell am get-current-user", new Error("offline"));
+    const resolve = createLockUserResolver(offline, { formFactor: "automotive" });
+    const client = new AdbLockSettingsClient(adb, resolve);
+    await expect(client.setCredential("pin", "2468")).rejects.toBeInstanceOf(ActionableError);
+    await expect(client.read()).rejects.toBeInstanceOf(ActionableError);
+    expect(adb.calls).toEqual([]);
+  });
+});
+
+describe("AdbLockSettingsClient resolves the user once per operation (#19070)", () => {
+  test("the set and the read-back share the first resolved user", async () => {
+    const adb = new FakeLockSettingsAdb();
+    const answers = [10, 0];
+    let lookups = 0;
+    const client = new AdbLockSettingsClient(adb, async () => answers[lookups++] ?? 0);
+    adb.responses.push(execResult("Pin set to '2468'\n" + EXIT(0)));
+    await client.setCredential("pin", "2468");
+    adb.responses.push(execResult(fixture("dumpsys-lock-settings-pin-automotive-api34.txt")));
+    const reading = await client.read();
+    expect(lookups).toBe(1);
+    expect(adb.calls[0].args.slice(3, 5)).toEqual(["--user", "10"]);
+    expect(reading).toEqual({ type: "pin", secure: true });
+  });
+
+  test("a failed lookup is not retried into a different user within the operation", async () => {
+    const adb = new FakeLockSettingsAdb();
+    let lookups = 0;
+    const client = new AdbLockSettingsClient(adb, async () => {
+      lookups += 1;
+      if (lookups === 1) {
+        throw new ActionableError("foreground user unreadable");
+      }
+      return 10;
+    });
+    await expect(client.read()).rejects.toThrow("foreground user unreadable");
+    await expect(client.setCredential("pin", "2468")).rejects.toThrow("foreground user unreadable");
+    expect(lookups).toBe(1);
+    expect(adb.calls).toEqual([]);
+  });
+
+  test("each client resolves its own user", async () => {
+    let lookups = 0;
+    const resolve = async () => {
+      lookups += 1;
+      return 10;
+    };
+    await new AdbLockSettingsClient(new FakeLockSettingsAdb(), resolve).setCredential("pin", "1");
+    await new AdbLockSettingsClient(new FakeLockSettingsAdb(), resolve).setCredential("pin", "1");
+    expect(lookups).toBe(2);
   });
 });

@@ -13,6 +13,8 @@ import {
 } from "../../../src/features/prototype/prototypeCapabilityGates";
 import {
   PROTOTYPE_REQUEST_EVENT_NAME,
+  prototypeNetworkDeviceUnsupportedMessage,
+  prototypeNetworkUnsupportedMessage,
   prototypeRequestMetaPath,
   resolvePrototypeRequest,
 } from "../../../src/features/prototype/prototypeRequest";
@@ -327,6 +329,26 @@ describe("request limits", () => {
 });
 
 describe("request capability gates", () => {
+  test("requests keep the legacy advice when the runtime kind is unknown", () => {
+    expect(prototypeNetworkUnsupportedMessage(["root.onTap[0]"], "android")).toBe(
+      "The connected CtrlProxy does not advertise prototype_network_v1, so it cannot run the request action at root.onTap[0]. Nothing was shown. Update the connected CtrlProxy, or load data with a /data patch instead.",
+    );
+    expect(prototypeNetworkDeviceUnsupportedMessage(["root.onTap[0]"], "ios")).toBe(
+      'The connected iOS prototype agent does not advertise prototype_network_device_v1, so it cannot run a request with via "device" at root.onTap[0]. Nothing was shown. Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version, or use via "host", which the host executes.',
+    );
+  });
+
+  test("network refusals use network-capable runtime guidance for the Android disposable shell", () => {
+    expect(prototypeNetworkUnsupportedMessage(["root"], "android", "disposableApp")).toContain(
+      "Show the spec in CtrlProxy to use network requests",
+    );
+    expect(
+      prototypeNetworkDeviceUnsupportedMessage(["root"], "android", "disposableApp"),
+    ).toEndWith("or load data with a /data patch instead.");
+    expect(prototypeNetworkDeviceUnsupportedMessage(["root"], "ios", "embedded")).toContain(
+      "Check the host app's prototype SDK and module configuration",
+    );
+  });
   const networkGates = new Set([PROTOTYPE_NETWORK_CAPABILITY, PROTOTYPE_NETWORK_DEVICE_CAPABILITY]);
   const gatesOf = (candidate: unknown) =>
     prototypeRequiredCapabilities(candidate).filter((gate) => networkGates.has(gate.capability));

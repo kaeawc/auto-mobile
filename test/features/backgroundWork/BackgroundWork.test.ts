@@ -5,19 +5,19 @@ import type { ExecResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-const APP = "dev.example.playground";
+const APP = "com.google.android.apps.wellbeing";
 const SYNC_ID = "0a1b2c3d-1111-4222-8333-444455556666";
 const jobsDump = readFileSync(
   new URL(
-    "../../fixtures/android-jobscheduler/dumpsys-jobscheduler-api29-periodic.txt",
+    "../../fixtures/android-jobscheduler/dumpsys-jobscheduler-wellbeing-phone-api34.txt",
     import.meta.url,
   ),
   "utf8",
 );
 const diagnosticsLog = [
   "I/WM-DiagnosticsWrkr( 4242):  Id \t Class Name\t Job Id\t State\t Unique Name\t Tags\t",
-  `I/WM-DiagnosticsWrkr( 4242): ${SYNC_ID}\t dev.example.playground.work.SyncWorker\t 7\t ENQUEUED\t periodic-sync\t dev.example.playground.work.SyncWorker\t`,
-  "I/WM-DiagnosticsWrkr( 4242): 1b2c3d4e-2222-4333-8444-555566667777\t dev.example.playground.work.CleanupWorker\t null\t SUCCEEDED\t null\t dev.example.playground.work.CleanupWorker\t",
+  `I/WM-DiagnosticsWrkr( 4242): ${SYNC_ID}\t ${APP}.work.SyncWorker\t 0\t ENQUEUED\t periodic-sync\t ${APP}.work.SyncWorker\t`,
+  `I/WM-DiagnosticsWrkr( 4242): 1b2c3d4e-2222-4333-8444-555566667777\t ${APP}.work.CleanupWorker\t null\t SUCCEEDED\t null\t ${APP}.work.CleanupWorker\t`,
 ].join("\n");
 
 const result = (stdout: string, stderr = ""): ExecResult => ({
@@ -43,7 +43,7 @@ describe("BackgroundWork.listJobs", () => {
     const { adb, work } = harness();
     adb.setCommandResponse("dumpsys jobscheduler", result(jobsDump));
     const listed = await work.listJobs(APP);
-    expect(listed.ok && listed.jobs.map((job) => job.jobId)).toEqual([7, 12]);
+    expect(listed.ok && listed.jobs.map((job) => job.jobId)).toEqual([0, 1, 2, 6, 9, 12]);
     expect(adb.getExecutedCommands()).toContain(`shell dumpsys jobscheduler '${APP}'`);
   });
 
@@ -53,8 +53,8 @@ describe("BackgroundWork.listJobs", () => {
     adb.setCommandResponse("logcat", result(diagnosticsLog));
     const listed = await work.listJobs(APP);
     expect(listed.ok && listed.jobs[0]).toMatchObject({
-      jobId: 7,
-      workerClass: "dev.example.playground.work.SyncWorker",
+      jobId: 0,
+      workerClass: `${APP}.work.SyncWorker`,
       workerClassSource: "diagnostics-log",
     });
     expect(listed.ok && listed.jobs[1].workerClass).toBeUndefined();
@@ -82,13 +82,13 @@ describe("BackgroundWork.listAlarms", () => {
       "dumpsys alarm",
       result(
         readFileSync(
-          new URL("../../fixtures/android-alarm/dumpsys-alarm-api29.txt", import.meta.url),
+          new URL("../../fixtures/android-alarm/dumpsys-alarm-phone-api30.txt", import.meta.url),
           "utf8",
         ),
       ),
     );
-    const listed = await work.listAlarms(APP);
-    expect(listed.ok && listed.alarms).toHaveLength(2);
+    const listed = await work.listAlarms("com.google.android.networkstack");
+    expect(listed.ok && listed.alarms).toHaveLength(3);
     expect(adb.getExecutedCommands()).toContain("shell dumpsys alarm");
   });
 });
@@ -100,7 +100,7 @@ describe("BackgroundWork.workManagerDiagnostics", () => {
     const diagnostics = await work.workManagerDiagnostics(APP);
 
     expect(diagnostics.ok && diagnostics.workers.map((worker) => worker.systemJobId)).toEqual([
-      7,
+      0,
       undefined,
     ]);
     const commands = adb.getExecutedCommands();
@@ -159,15 +159,15 @@ describe("BackgroundWork.runJob", () => {
     const run = await work.runJob(APP, { target: { worker: "SyncWorker" }, force: true });
     expect(run).toMatchObject({
       ok: true,
-      jobId: 7,
-      worker: { workerClassName: "dev.example.playground.work.SyncWorker" },
+      jobId: 0,
+      worker: { workerClassName: `${APP}.work.SyncWorker` },
     });
-    expect(adb.getExecutedCommands().at(-1)).toBe(`shell cmd jobscheduler run -f '${APP}' 7`);
+    expect(adb.getExecutedCommands().at(-1)).toBe(`shell cmd jobscheduler run -f '${APP}' 0`);
   });
 
   test.each([
     ["NoSuchWorker", "worker_not_found"],
-    ["dev.example.playground.work.CleanupWorker", "worker_not_scheduled"],
+    [`${APP}.work.CleanupWorker`, "worker_not_scheduled"],
   ])("worker %s is %s and runs nothing", async (worker, errorCode) => {
     const { adb, work } = harness();
     adb.setCommandResponse("logcat", result(diagnosticsLog));
@@ -186,7 +186,7 @@ describe("BackgroundWork.runJob", () => {
       "logcat",
       result(
         [
-          `${SYNC_ID}\t a.SyncWorker\t 7\t ENQUEUED\t null\t a.SyncWorker\t`,
+          `${SYNC_ID}\t a.SyncWorker\t 0\t ENQUEUED\t null\t a.SyncWorker\t`,
           `1b2c3d4e-2222-4333-8444-555566667777\t b.SyncWorker\t 8\t ENQUEUED\t null\t b.SyncWorker\t`,
         ].join("\n"),
       ),

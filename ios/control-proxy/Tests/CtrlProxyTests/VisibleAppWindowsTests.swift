@@ -252,3 +252,152 @@ final class VisibleAppWindowsTests: XCTestCase {
         XCTAssertEqual(windows[1].bounds?.right, 511)
     }
 }
+
+/// #19064: with Files tiled left and focused, Settings floats behind it. Frames were captured on
+/// the iPad Pro 13-inch (M5) simulator, iOS 27.2: Settings' snapshot frame is window-relative
+/// (0,0,524,782) while its window is drawn shrunk at (255.34,242) sized 521.32x778.
+final class BackgroundWindowPlacementTests: XCTestCase {
+    private let screenFrame = CGRect(x: 0, y: 0, width: 1032, height: 1376)
+    private let settingsSnapshot = CGRect(x: 0, y: 0, width: 524, height: 782)
+    private let settingsWindow = CGRect(x: 255.3401534526854, y: 242.0, width: 521.3196930946292, height: 778.0)
+    private let filesLeftTile = ElementBounds(left: 0, top: 0, right: 511, bottom: 1253)
+
+    private func ltrb(_ bounds: ElementBounds?) -> [Int] {
+        bounds.map { [$0.left, $0.top, $0.right, $0.bottom] } ?? []
+    }
+
+    private func settingsPlacement() throws -> WindowPlacement {
+        try XCTUnwrap(ElementLocator.backgroundWindowPlacement(
+            appFrame: settingsSnapshot, screenFrame: screenFrame, windowFrame: { self.settingsWindow }
+        ))
+    }
+
+    func testShrunkFloatingWindowMapsToItsScreenFrame() throws {
+        let placement = try settingsPlacement()
+        XCTAssertEqual(placement.scale, 778.0 / 782.0, accuracy: 1e-9)
+        XCTAssertEqual(ltrb(placement.screenBounds(ElementBounds(clamping: settingsSnapshot))), [255, 242, 776, 1020])
+    }
+
+    func testShrunkWindowBehindATileAtTheOriginIsVisible() throws {
+        let unplaced = ElementBounds(clamping: settingsSnapshot)
+        let placed = try settingsPlacement().screenBounds(unplaced)
+        let screen = ElementBounds(clamping: screenFrame)
+        XCTAssertTrue(ElementLocator.isVisibleBesideFocused(placed, focused: filesLeftTile, screen: screen))
+    }
+
+    func testPlacedTreeKeepsNodesBesideTheFocusedTile() throws {
+        // A right-hand row of Settings' window and a left-hand one that Files covers once placed.
+        let right = UIElementInfo(
+            text: "Language & Region",
+            bounds: ElementBounds(left: 16, top: 690, right: 508, bottom: 740)
+        )
+        let back = UIElementInfo(text: "Back", bounds: ElementBounds(left: 80, top: 12, right: 124, bottom: 56))
+        let root = UIElementInfo(
+            className: "XCUIApplication", bounds: ElementBounds(clamping: settingsSnapshot), node: [back, right]
+        )
+
+        let placed = try ElementLocator.placedOnScreen(root, by: settingsPlacement())
+        let visible = try XCTUnwrap(ElementLocator.removingOccluded(placed, by: filesLeftTile))
+
+        XCTAssertEqual(ltrb(visible.bounds), [255, 242, 776, 1020])
+        XCTAssertEqual(visible.node?.map(\.text), ["Language & Region"])
+        let row = try XCTUnwrap(visible.node?.first?.bounds)
+        XCTAssertEqual(row.left, 271)
+        XCTAssertEqual(row.top, 928)
+        XCTAssertEqual(row.right, 760)
+        XCTAssertEqual(row.bottom, 978)
+    }
+
+    func testUnscaledTileIsOffsetOnly() throws {
+        let placement = try XCTUnwrap(ElementLocator.backgroundWindowPlacement(
+            appFrame: CGRect(x: 0, y: 0, width: 511, height: 1253),
+            screenFrame: screenFrame,
+            windowFrame: { CGRect(x: 521, y: 0, width: 511, height: 1253) }
+        ))
+        XCTAssertEqual(placement, WindowPlacement(origin: CGPoint(x: 521, y: 0), scale: 1))
+    }
+
+    func testScreenSizedAppIsPlacedWithoutReadingItsWindow() throws {
+        let placement = try XCTUnwrap(ElementLocator.backgroundWindowPlacement(
+            appFrame: screenFrame, screenFrame: screenFrame, windowFrame: {
+                XCTFail("a screen-sized app needs no window frame")
+                return nil
+            }
+        ))
+        XCTAssertTrue(placement.isIdentity)
+    }
+
+    func testScreenSizedAppWithAnOriginIsNotOffsetTwice() throws {
+        // Its snapshot is already in screen space, so a non-zero app origin must not move it again.
+        let shifted = CGRect(x: 0, y: 24, width: 1032, height: 1376)
+        let placement = try XCTUnwrap(ElementLocator.backgroundWindowPlacement(
+            appFrame: shifted, screenFrame: screenFrame, windowFrame: { nil }
+        ))
+        XCTAssertTrue(placement.isIdentity)
+        XCTAssertEqual(ltrb(placement.screenBounds(ElementBounds(clamping: shifted))), [0, 24, 1032, 1400])
+    }
+
+    func testUnplacedWindowIsReportedAsATruncationReason() {
+        var reasons: Set<String> = []
+        XCTAssertNil(ElementLocator.backgroundWindowPlacement(
+            appFrame: settingsSnapshot, screenFrame: screenFrame, truncationReasons: &reasons, windowFrame: { nil }
+        ))
+        XCTAssertEqual(reasons, ["background_window_unplaced"])
+    }
+
+    func testPlacedWindowAddsNoTruncationReason() {
+        var reasons: Set<String> = []
+        XCTAssertNotNil(ElementLocator.backgroundWindowPlacement(
+            appFrame: settingsSnapshot, screenFrame: screenFrame, truncationReasons: &reasons,
+            windowFrame: { self.settingsWindow }
+        ))
+        XCTAssertTrue(reasons.isEmpty)
+    }
+
+    func testPlacedTreeKeepsKeyboardSubtreesInScreenSpace() throws {
+        let appBounds = ElementBounds(clamping: settingsSnapshot)
+        let key = UIElementInfo(
+            className: "UIKeyboardKey",
+            bounds: ElementBounds(left: 10, top: 1100, right: 90, bottom: 1160)
+        )
+        let keyboard = UIElementInfo(
+            className: "UIKeyboard", bounds: ElementBounds(left: 0, top: 1028, right: 1032, bottom: 1376), node: [key]
+        )
+        let field = UIElementInfo(
+            className: "UITextField",
+            bounds: ElementBounds(left: 16, top: 100, right: 508, bottom: 140)
+        )
+        let root = UIElementInfo(
+            className: "XCUIApplication", bounds: appBounds,
+            node: [
+                UIElementInfo(className: "UIWindow", bounds: appBounds, node: [field]),
+                UIElementInfo(className: "UIWindow", bounds: ElementBounds(clamping: screenFrame), node: [keyboard]),
+            ]
+        )
+
+        let placed = try ElementLocator.placedOnScreen(root, by: settingsPlacement())
+
+        XCTAssertEqual(ltrb(placed.bounds), [255, 242, 776, 1020])
+        XCTAssertEqual(ltrb(placed.node?[0].node?[0].bounds), [271, 341, 760, 381])
+        // The keyboard's window, the keyboard and its keys are already screen space.
+        XCTAssertEqual(ltrb(placed.node?[1].bounds), [0, 0, 1032, 1376])
+        XCTAssertEqual(ltrb(placed.node?[1].node?[0].bounds), [0, 1028, 1032, 1376])
+        XCTAssertEqual(ltrb(placed.node?[1].node?[0].node?[0].bounds), [10, 1100, 90, 1160])
+    }
+
+    func testUnknownOrDistortedWindowIsLeftOut() {
+        XCTAssertNil(ElementLocator.backgroundWindowPlacement(
+            appFrame: settingsSnapshot, screenFrame: screenFrame, windowFrame: { nil }
+        ))
+        XCTAssertNil(ElementLocator.backgroundWindowPlacement(
+            appFrame: settingsSnapshot, screenFrame: screenFrame, windowFrame: {
+                CGRect(x: 255, y: 242, width: 400, height: 778)
+            }
+        ))
+        XCTAssertNil(ElementLocator.backgroundWindowPlacement(
+            appFrame: settingsSnapshot, screenFrame: screenFrame, windowFrame: {
+                CGRect(x: 255, y: 242, width: 131, height: 195.5)
+            }
+        ))
+    }
+}

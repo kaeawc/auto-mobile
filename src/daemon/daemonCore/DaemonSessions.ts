@@ -1,3 +1,4 @@
+import { defaultIosCameraPosterDaemonHooks } from "../iosCameraPosterSessionCleanup";
 import { lazyDeviceClaims, StoreDeviceClaimMirror, type DeviceClaimMirror } from "../deviceClaims";
 import { localClaimRegistryExpectation } from "../deviceClaimRegistryExpectation";
 import type { DeviceClaimMirrorHub } from "../deviceClaimMirrorHub";
@@ -320,6 +321,7 @@ export class DaemonSessions {
         this.latestSessionExecutionDeadlineMs(sessionId, options),
       cancelExecutionsForExpiryRelease: (sessionId, cancellation, query, releasedDeviceId) =>
         this.cancelExecutionsForExpiryRelease(sessionId, cancellation, query, releasedDeviceId),
+      iosCameraPosterDaemonHooks: defaultIosCameraPosterDaemonHooks,
     });
   }
 

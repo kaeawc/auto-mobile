@@ -1,22 +1,38 @@
-import UIKit
 @preconcurrency import AVFoundation
 import CoreImage
 import CryptoKit
 import ImageIO
+import UIKit
 import VisionKit
 
 @main
 @MainActor
 final class AppDelegate: UIResponder, UIApplicationDelegate {
+    func application(
+        _: UIApplication,
+        didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?
+    )
+        -> Bool
+    {
+        true
+    }
+}
+
+/// iOS 27 stops apps that do not adopt the scene lifecycle at their first scene.
+@MainActor
+final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
 
-    func application(_ application: UIApplication,
-                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        let window = UIWindow(frame: UIScreen.main.bounds)
+    func scene(
+        _ scene: UIScene,
+        willConnectTo _: UISceneSession,
+        options _: UIScene.ConnectionOptions
+    ) {
+        guard let windowScene = scene as? UIWindowScene else { return }
+        let window = UIWindow(windowScene: windowScene)
         window.rootViewController = CameraViewController()
         window.makeKeyAndVisible()
         self.window = window
-        return true
     }
 }
 
@@ -85,7 +101,9 @@ struct CameraReport: Encodable {
 }
 
 @MainActor
-final class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, AVCaptureMetadataOutputObjectsDelegate {
+final class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegate,
+    AVCaptureMetadataOutputObjectsDelegate
+{
     private let session = AVCaptureSession()
     private let photoOutput = AVCapturePhotoOutput()
     private let metadataOutput = AVCaptureMetadataOutput()
@@ -133,8 +151,12 @@ final class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegat
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         preview.frame = view.bounds
-        status.frame = CGRect(x: 12, y: view.safeAreaInsets.top + 12,
-                              width: view.bounds.width - 24, height: 110)
+        status.frame = CGRect(
+            x: 12,
+            y: view.safeAreaInsets.top + 12,
+            width: view.bounds.width - 24,
+            height: 110
+        )
     }
 
     private func configureCamera() {
@@ -189,7 +211,8 @@ final class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegat
     private func recordDiscovery() {
         let discovery = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.builtInWideAngleCamera, .builtInUltraWideCamera, .builtInTelephotoCamera],
-            mediaType: .video, position: .unspecified)
+            mediaType: .video, position: .unspecified
+        )
         let authorization = AVCaptureDevice.authorizationStatus(for: .video)
         let authorizationName: String
         switch authorization {
@@ -215,7 +238,8 @@ final class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegat
             sessionCanAddMetadataOutput: canAddMetadata,
             imagePickerCameraAvailable: UIImagePickerController.isSourceTypeAvailable(.camera),
             dataScannerSupported: scannerSupported,
-            dataScannerAvailable: scannerAvailable)
+            dataScannerAvailable: scannerAvailable
+        )
     }
 
     private func writeReport() {
@@ -229,7 +253,8 @@ final class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegat
             photo: photoReport,
             photoDecodedQr: decodedQR,
             metadataQrStrings: metadataStrings,
-            timestamp: ISO8601DateFormatter().string(from: Date()))
+            timestamp: ISO8601DateFormatter().string(from: Date())
+        )
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -243,8 +268,11 @@ final class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegat
         }
     }
 
-    nonisolated func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto,
-                                error: Error?) {
+    nonisolated func photoOutput(
+        _: AVCapturePhotoOutput,
+        didFinishProcessingPhoto photo: AVCapturePhoto,
+        error: Error?
+    ) {
         let data = photo.fileDataRepresentation()
         let message = error?.localizedDescription
         DispatchQueue.main.async { [weak self] in
@@ -255,11 +283,15 @@ final class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegat
                 self.photoReport.byteCount = data.count
                 self.photoReport.sha256 = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
                 if let source = CGImageSourceCreateWithData(data as CFData, nil),
-                   let image = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                   let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+                {
                     self.photoReport.width = image.width
                     self.photoReport.height = image.height
-                    let detector = CIDetector(ofType: CIDetectorTypeQRCode, context: nil,
-                                              options: [CIDetectorAccuracy: CIDetectorAccuracyHigh])
+                    let detector = CIDetector(
+                        ofType: CIDetectorTypeQRCode,
+                        context: nil,
+                        options: [CIDetectorAccuracy: CIDetectorAccuracyHigh]
+                    )
                     self.decodedQR = (detector?.features(in: CIImage(cgImage: image)) ?? [])
                         .compactMap { ($0 as? CIQRCodeFeature)?.messageString }
                 }
@@ -273,8 +305,11 @@ final class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegat
         }
     }
 
-    nonisolated func photoOutput(_ output: AVCapturePhotoOutput,
-                                didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
+    nonisolated func photoOutput(
+        _: AVCapturePhotoOutput,
+        didFinishCaptureFor _: AVCaptureResolvedPhotoSettings,
+        error: Error?
+    ) {
         guard let message = error?.localizedDescription else { return }
         DispatchQueue.main.async { [weak self] in
             self?.photoReport.error = message
@@ -282,8 +317,11 @@ final class CameraViewController: UIViewController, AVCapturePhotoCaptureDelegat
         }
     }
 
-    nonisolated func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject],
-                                   from connection: AVCaptureConnection) {
+    nonisolated func metadataOutput(
+        _: AVCaptureMetadataOutput,
+        didOutput metadataObjects: [AVMetadataObject],
+        from _: AVCaptureConnection
+    ) {
         let strings = metadataObjects.compactMap { ($0 as? AVMetadataMachineReadableCodeObject)?.stringValue }
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.complete else { return }

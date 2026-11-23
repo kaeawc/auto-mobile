@@ -14,6 +14,7 @@ export function deviceStateMessage(result: DeviceStateResult): string {
     sensorsMessage(result),
     screenLockMessage(result),
     powerMessage(result),
+    networkActivityMessage(result),
   ].filter((section): section is string => section !== undefined);
   return sections.length > 0 ? sections.join("; ") : "Read device state";
 }
@@ -77,4 +78,15 @@ function powerMessage(result: DeviceStateResult): string | undefined {
     power.thermal?.override ? `thermal ${power.thermal.status} (override)` : undefined,
   ].filter((part): part is string => part !== undefined);
   return parts.length > 0 ? `Power: ${parts.join(", ")}` : "Power read";
+}
+
+function networkActivityMessage(result: DeviceStateResult): string | undefined {
+  const processes = result.networkActivity?.supported
+    ? result.networkActivity.processes
+    : undefined;
+  if (!processes) {
+    return undefined;
+  }
+  const sockets = processes.reduce((total, process) => total + process.sockets.length, 0);
+  return `Network activity: ${processes.length} processes, ${sockets} sockets`;
 }

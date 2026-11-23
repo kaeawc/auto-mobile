@@ -17,6 +17,8 @@ import {
 import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/types";
 import { storeKitMutation } from "../daemon/sessionBroker/mutations/storeKitSession";
 import { isRecord } from "./pipeline/isRecord";
+import { RENDER_OVERLAYS } from "../utils/ios-cmdline-tools/SimulatorRenderOverlays";
+import { renderOverlayKey } from "../daemon/sessionBroker/mutations/renderOverlayMutation";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
 import { dataToolMutations, isCoreDataRead } from "./deviceMutationDataAdapters";
 import { appearanceToolMutations } from "./deviceMutationAppearanceAdapters";
@@ -39,6 +41,12 @@ import {
 
 export type ToolMutation = Pick<DeviceMutationInput, "kind" | "key">;
 
+/** What the adapters know about the target beyond its platform. */
+export interface MutationTarget {
+  /** True only for an iOS Simulator, the one target with render overlays (#19016). */
+  iosSimulator?: boolean;
+}
+
 function mutation(kind: string, key = "device"): ToolMutation {
   return { kind, key };
 }
@@ -54,7 +62,11 @@ function displayArgument(key: DeviceSettingKey): string {
  * scale is the Dynamic Type category, so the scale is journaled as `contentSize`, the setting
  * that is actually restored.
  */
-function settingMutations(args: Record<string, unknown>, platform?: Platform): ToolMutation[] {
+function settingMutations(
+  args: Record<string, unknown>,
+  platform?: Platform,
+  target: MutationTarget = {},
+): ToolMutation[] {
   const reset = args.reset === true;
   const keys: DeviceSettingKey[] = [...DISPLAY_KEYS, ...ACCESSIBILITY_DISPLAY_FIELDS].filter(
     (key) =>
@@ -72,6 +84,7 @@ function settingMutations(args: Record<string, unknown>, platform?: Platform): T
     ...new Set(journaled),
     ...geometryKeys(args, platform),
     ...screenControlKeys(args, platform),
+    ...renderOverlayKeys(args, platform, target),
   ].map((key) => mutation("device-setting", key));
 }
 
@@ -85,6 +98,26 @@ function screenControlKeys(args: Record<string, unknown>, platform?: Platform): 
         (field) => args.reset === true || args.reset === "factory" || args[field] !== undefined,
       )
     : [];
+}
+
+/**
+ * Simulator render overlays (#19016), one row per overlay a call names; reset turns every
+ * overlay off, so it records them all. Android and physical iOS refuse named overlays, and their
+ * reset writes none, so they journal no overlay row (an unobservable one would block the revert).
+ */
+function renderOverlayKeys(
+  args: Record<string, unknown>,
+  platform: Platform | undefined,
+  target: MutationTarget,
+): string[] {
+  if (platform !== "ios" || target.iosSimulator !== true) {
+    return [];
+  }
+  const requested = isRecord(args.renderOverlays) ? args.renderOverlays : {};
+  return RENDER_OVERLAYS.filter(
+    (overlay) =>
+      args.reset === true || args.reset === "factory" || requested[overlay] !== undefined,
+  ).map(renderOverlayKey);
 }
 
 /**
@@ -236,6 +269,7 @@ function mutationCallIsRead(
   name: string,
   args: Record<string, unknown>,
   platform?: Platform,
+  target: MutationTarget = {},
 ): boolean {
   switch (name) {
     case "accessibility":
@@ -249,7 +283,7 @@ function mutationCallIsRead(
         isCoreDataRead(args) || (typeof args.query === "string" && isReadOnlySqlQuery(args.query))
       );
     case "displayConfig":
-      return settingMutations(args, platform).length === 0;
+      return settingMutations(args, platform, target).length === 0;
     case "network":
       return Object.keys(args).every((key) =>
         ["platform", "device", "deviceId", "sessionUuid"].includes(key),
@@ -371,10 +405,11 @@ export function deviceToolMutations(
   name: string,
   args: Record<string, unknown>,
   platform?: Platform,
+  target: MutationTarget = {},
 ): ToolMutation[] {
   if (
     DEVICE_MUTATION_TOOL_COVERAGE[name]?.status === "notJournaled" ||
-    mutationCallIsRead(name, args, platform) ||
+    mutationCallIsRead(name, args, platform, target) ||
     mutationCallNotJournaled(name, args)
   ) {
     // A notJournaled tool changes no device state a later session could observe (#14359).
@@ -393,7 +428,7 @@ export function deviceToolMutations(
     // An adapter that answered [] decided this call changes nothing.
     return direct;
   }
-  const mutations = stateToolMutations(name, args, platform);
+  const mutations = stateToolMutations(name, args, platform, target);
   return mutations.length > 0 || DEVICE_MUTATION_TOOL_COVERAGE[name]?.status !== "journaled"
     ? mutations
     : [mutation("opaque", `tool:${name}`)];
@@ -441,10 +476,11 @@ function stateToolMutations(
   name: string,
   args: Record<string, unknown>,
   platform?: Platform,
+  target: MutationTarget = {},
 ): ToolMutation[] {
   switch (name) {
     case "displayConfig":
-      return settingMutations(args, platform);
+      return settingMutations(args, platform, target);
     case "changeLocalization":
       return ["locale", "timeZone", "textDirection", "timeFormat", "calendarSystem"]
         .filter((key) => args[key] !== undefined)

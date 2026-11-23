@@ -159,8 +159,20 @@ describe("ps parsing and attribution", () => {
 
   test("a process claimed by two simulators is attributed to the shared process", () => {
     const rows = [
-      { pid: 1, ppid: 0, rssBytes: 10, cpuPercent: 1, command: "/a/CoreSimulator/Devices/A/x" },
-      { pid: 2, ppid: 1, rssBytes: 10, cpuPercent: 1, command: "/CoreSimulator/Devices/B/x" },
+      {
+        pid: 1,
+        ppid: 0,
+        rssBytes: 10,
+        cpuPercent: 1,
+        command: "launchd_sim /a/CoreSimulator/Devices/A/x",
+      },
+      {
+        pid: 2,
+        ppid: 1,
+        rssBytes: 10,
+        cpuPercent: 1,
+        command: "launchd_sim /CoreSimulator/Devices/B/x",
+      },
     ];
     const cost = attributeSimulatorProcesses(rows, ["A", "B"]);
     expect(cost.get("A")?.processCount).toBe(1);

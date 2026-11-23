@@ -180,6 +180,10 @@ writes into apps absent from a complete baseline installed-app inventory
 by uninstalling those apps and removing their private data. Other shared-file
 rows still force erase.
 
+Simulator render overlay rows (`renderOverlay:<name>`) revert through CoreSimulator to their
+boolean prior; an unreadable prior forces erase. See
+[iOS Simulator render overlays](plat/ios/simulator-render-overlays.md).
+
 The `opened-url` (`openLink`) row also forces erase: it names no app,
 and simctl listapps provides no URL-scheme handler ownership proof. So do the
 frequent `rotate`, VoiceOver (`accessibility`), `postNotification`, keep-awake and

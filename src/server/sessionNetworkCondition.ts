@@ -69,6 +69,30 @@ function isTypedFailureResult(value: unknown): boolean {
   return "success" in record && record.success === false;
 }
 
+type NetworkTtlBackend = "deviceWide" | "app";
+
+/**
+ * Which backend armed a session's pending TTL. The session keeps one expiry timer, so a mutation
+ * on the other backend must carry the deadline over instead of cancelling it (#19045).
+ */
+const ttlBackends = new WeakMap<object, NetworkTtlBackend>();
+
+function hasPositiveTtl(seconds: number | undefined): seconds is number {
+  return seconds !== undefined && seconds > 0;
+}
+
+function backendOf(iosPlan: IosAppNetworkRulePlan | undefined): NetworkTtlBackend {
+  return iosPlan ? "app" : "deviceWide";
+}
+
+function isOtherBackend(
+  priorExpiry: unknown,
+  priorBackend: NetworkTtlBackend | undefined,
+  backend: NetworkTtlBackend,
+): boolean {
+  return priorExpiry !== undefined && priorBackend !== undefined && priorBackend !== backend;
+}
+
 /** The session whose lifecycle owns a network-condition mutation, and the device it shapes. */
 export interface SessionNetworkTarget {
   sessionUuid: string | undefined;
@@ -176,7 +200,10 @@ export async function runSessionNetworkMutation<T>(
     // its outcome, so the re-armed timer must match what
     // `currentNetworkConditionGeneration` will return, or its eventual successful
     // fire would see a generation mismatch and skip clearing the restore slot.
+    const backend = backendOf(iosPlan);
     const priorExpiry = sessionManager.peekNetworkConditionExpiry(sessionUuid);
+    const priorBackend = ttlBackends.get(session);
+    const carriesOver = () => isOtherBackend(priorExpiry, priorBackend, backend);
     sessionManager.cancelNetworkConditionExpiry(sessionUuid);
     const rearmPriorExpiry = () => {
       if (priorExpiry) {
@@ -261,8 +288,12 @@ export async function runSessionNetworkMutation<T>(
     // on it). A reset, or a degrade with no TTL, arms nothing; the pre-mutation
     // cancel above already cleared any prior timer.
     const registersRestore = iosPlan ? iosPlan.action === "apply" : registerRestore;
-    if (registersRestore && expiresInSeconds !== undefined && expiresInSeconds > 0) {
+    if (registersRestore && hasPositiveTtl(expiresInSeconds)) {
       sessionManager.scheduleNetworkConditionExpiry(session, expiresInSeconds, generation);
+      ttlBackends.set(session, backend);
+    } else if (carriesOver()) {
+      // The other backend's timed condition is still in force: keep its deadline.
+      rearmPriorExpiry();
     }
     return result;
   });

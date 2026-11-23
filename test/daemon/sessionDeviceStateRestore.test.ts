@@ -895,6 +895,32 @@ describe("network-condition family", () => {
     }
   });
 
+  test("when both restores fail every failure is logged and the first is thrown (#19045)", async () => {
+    const h = await createNetwork(() => Promise.reject(new Error("device restore failed")), {
+      iosAppNetworkRuleRestorer: {
+        reset: async () => {
+          throw new Error("rule reset failed");
+        },
+        renew: async () => "renewed",
+      },
+    });
+    h.session.cacheData.networkCondition = {
+      initialProfile: "none",
+      deviceWide: true,
+      iosAppRule: { udid: "UDID-1", bundleId: "com.example", ownerGeneration: 1, lastRevision: 4 },
+    };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const target = h.restore.networkConditionRestoreTarget(h.session)!;
+      await expect(h.restore.restoreNetworkCondition(target)).rejects.toThrow("rule reset failed");
+      expect(
+        warn.mock.calls.some((call) => String(call[1]).includes("device restore failed")),
+      ).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("expiry registers a capped quarantine only while the slot still holds a baseline", async () => {
     const h = await createNetwork(async () => {});
     h.restore.restoreNetworkConditionOnExpiryFor(h.session, () => {});

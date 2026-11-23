@@ -876,6 +876,9 @@ export class SessionDeviceStateRestore {
       }
     }
     if (failures.length > 0) {
+      for (const failure of failures.slice(1)) {
+        logger.warn("[SessionRestore] a further network condition restore failed", failure);
+      }
       throw failures[0];
     }
     this.host.clearRestoreHealth(target, "network-condition");

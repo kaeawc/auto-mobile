@@ -74,6 +74,7 @@ function setup(roots = [resolve("/missing"), ROOT], env: NodeJS.ProcessEnv = {})
   fs.setFile(SOURCE, "shaper c");
   fs.setFile(STUB, "dns stub");
   const runner = new BuildRunner(fs);
+  const clock = { now: 0 };
   const provider = new DefaultIosNetworkShaperDylibProvider({
     fileSystem: fs,
     runner,
@@ -81,8 +82,10 @@ function setup(roots = [resolve("/missing"), ROOT], env: NodeJS.ProcessEnv = {})
     rootCandidates: roots,
     env,
     directory: () => resolve("/data/ios-network-shaper"),
+    now: () => clock.now,
+    toolchainTtlMs: 30_000,
   });
-  return { fs, runner, provider };
+  return { fs, runner, provider, clock };
 }
 
 test("builds a universal simulator dylib linked against the resolver stub, signed, under both files' hash", async () => {
@@ -156,10 +159,33 @@ test("a cached build is reused without invoking the compiler", async () => {
   expect(builds(h.runner)).toBe(1);
 });
 
-test("the active Xcode is re-resolved per ensure and pinned for its build, so a switch is a new build", async () => {
+test("the toolchain is probed once per TTL, so live applies stay fast", async () => {
+  const h = setup();
+  await h.provider.ensure();
+  h.clock.now = 29_999;
+  await h.provider.ensure();
+  expect(
+    h.runner.getExecutedCalls().filter(({ command }) => command === "xcode-select"),
+  ).toHaveLength(1);
+  h.clock.now = 30_000;
+  await h.provider.ensure();
+  expect(
+    h.runner.getExecutedCalls().filter(({ command }) => command === "xcode-select"),
+  ).toHaveLength(2);
+});
+
+test("an unreadable active Xcode fails instead of building unpinned", async () => {
+  const h = setup();
+  h.runner.setCommandError("xcode-select", new Error("no developer directory"));
+  await expect(h.provider.ensure()).rejects.toThrow("cannot determine the active Xcode");
+  expect(builds(h.runner)).toBe(0);
+});
+
+test("the active Xcode is re-resolved after the TTL and pinned for its build, so a switch is a new build", async () => {
   const h = setup(undefined, { PATH: "/opt/bin" });
   expect(await h.provider.ensure()).toBe(OUTPUT);
   h.runner.activeDir = PINNED_DIR;
+  h.clock.now = 30_000;
   expect(await h.provider.ensure()).toBe(outputFor(`${PINNED_CLANG}\n25B200`));
   expect(builds(h.runner)).toBe(2);
   // The injected environment reaches every lookup, compile and sign call on the active path.

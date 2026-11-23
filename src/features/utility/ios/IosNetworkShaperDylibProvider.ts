@@ -46,7 +46,13 @@ export interface IosNetworkShaperDylibDependencies {
   directory?: () => string;
   /** Candidate directories holding `ios/NetworkShaper/`; defaults to the module's ancestors. */
   rootCandidates?: string[];
+  /** Milliseconds a resolved toolchain is reused; an Xcode switch is seen after this. */
+  toolchainTtlMs?: number;
+  now?: () => number;
 }
+
+/** Short enough that an Xcode switch is noticed, long enough that live applies stay fast. */
+export const IOS_NETWORK_SHAPER_TOOLCHAIN_TTL_MS = 30_000;
 
 interface ShaperToolchain {
   /** The injected build environment, with DEVELOPER_DIR set to the selected Xcode when known. */
@@ -61,8 +67,9 @@ export class DefaultIosNetworkShaperDylibProvider implements IosNetworkShaperDyl
   private readonly runner: HostCommandExecutor;
   private readonly env: NodeJS.ProcessEnv;
   private readonly flights = new SingleFlight<string, string>();
-  /** Concurrent ensures share one probe; each later ensure probes again, so an Xcode switch is seen. */
+  /** Concurrent ensures share one probe; the result is reused for a short TTL. */
   private readonly toolchainProbes = new SingleFlight<string, ShaperToolchain>();
+  private cachedToolchain?: { key: string; expiresAt: number; value: ShaperToolchain };
 
   constructor(private readonly deps: IosNetworkShaperDylibDependencies = {}) {
     this.fs = deps.fileSystem ?? new DefaultFileSystem();
@@ -123,11 +130,23 @@ export class DefaultIosNetworkShaperDylibProvider implements IosNetworkShaperDyl
   }
 
   /**
-   * Resolved before the cache is consulted, never kept past the ensure that asked: the cache
-   * key and the compiler then always name the same Xcode.
+   * Resolved before the build cache is consulted and reused for a short TTL: the cache key and
+   * the compiler then always name the same Xcode.
    */
-  private resolveToolchain(source: string): Promise<ShaperToolchain> {
-    return this.toolchainProbes.run(source, () => this.readToolchain(source));
+  private async resolveToolchain(source: string): Promise<ShaperToolchain> {
+    const now = (this.deps.now ?? Date.now)();
+    const key = `${source}\n${readEnvTrimmed(AMBIENT_ENV.DEVELOPER_DIR, this.env) ?? ""}`;
+    const cached = this.cachedToolchain;
+    if (cached && cached.key === key && now < cached.expiresAt) {
+      return cached.value;
+    }
+    const value = await this.toolchainProbes.run(source, () => this.readToolchain(source));
+    this.cachedToolchain = {
+      key,
+      value,
+      expiresAt: now + (this.deps.toolchainTtlMs ?? IOS_NETWORK_SHAPER_TOOLCHAIN_TTL_MS),
+    };
+    return value;
   }
 
   /**
@@ -162,14 +181,20 @@ export class DefaultIosNetworkShaperDylibProvider implements IosNetworkShaperDyl
     }
   }
 
-  private async activeDeveloperDir(): Promise<string | undefined> {
+  private async activeDeveloperDir(): Promise<string> {
     try {
       const result = await this.runner.executeCommand("xcode-select", ["-p"], { env: this.env });
-      return result.stdout.trim() || undefined;
+      const path = result.stdout.trim();
+      if (!path) {
+        throw new Error("xcode-select -p printed no path");
+      }
+      return path;
     } catch (error) {
-      // xcrun below resolves the selection itself; the cache key still records its clang.
-      logger.warn(`[NetworkShaper] xcode-select -p failed; xcrun picks the Xcode`, error);
-      return undefined;
+      // Unpinned, a switch between the probe and the compile would key the build to the wrong Xcode.
+      throw new ActionableError(
+        `iOS network shaper cannot determine the active Xcode. ${XCODE_HINT}. ${formatCommandError(error, { command: "xcode-select" })}`,
+        { cause: error },
+      );
     }
   }
 

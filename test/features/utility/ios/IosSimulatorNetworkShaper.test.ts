@@ -336,3 +336,66 @@ test("a profile removed while read scans processes reads as unshaped", async () 
   };
   expect(await h.shaper.read(UDID)).toEqual({ injected: false });
 });
+
+test("applies sharing one failed shaped reboot restore the profile from before any of them", async () => {
+  const h = setup();
+  h.runner.shaped = true;
+  await h.shaper.apply(UDID, THREE_G);
+  h.runner.shaped = false;
+  h.runner.bootInjects = false;
+  const results = await Promise.allSettled([
+    h.shaper.apply(UDID, { ...THREE_G, offline: true }),
+    h.shaper.apply(UDID, { ...THREE_G, delayMs: 900 }),
+  ]);
+  expect(results.map(({ status }) => status)).toEqual(["rejected", "rejected"]);
+  expect(parseShaperProfile(await h.fs.readFile(PROFILE))).toEqual(THREE_G);
+});
+
+test("a clear that lands during a failing shaped reboot is not undone by the rollback", async () => {
+  const h = setup();
+  const execute = h.runner.executeCommand.bind(h.runner);
+  h.runner.bootInjects = false;
+  h.runner.executeCommand = async (command, args = [], options) => {
+    if (args[1] === "boot") {
+      await h.shaper.clear(UDID);
+    }
+    return execute(command, args, options);
+  };
+  await expect(h.shaper.apply(UDID, THREE_G)).rejects.toThrow();
+  expect(h.fs.existsSync(PROFILE)).toBe(false);
+});
+
+test("a rollback leaves a profile another daemon wrote while the reboot failed", async () => {
+  const h = setup();
+  const execute = h.runner.executeCommand.bind(h.runner);
+  h.runner.bootInjects = false;
+  h.runner.executeCommand = async (command, args = [], options) => {
+    if (args[1] === "boot") {
+      h.fs.setFile(PROFILE, "offline=0\nlatency_ms=500\n");
+    }
+    return execute(command, args, options);
+  };
+  await expect(h.shaper.apply(UDID, THREE_G)).rejects.toThrow();
+  expect(await h.fs.readFile(PROFILE)).toBe("offline=0\nlatency_ms=500\n");
+});
+
+test("the sweep keeps an owner a live daemon wrote between the sweep's claim and its owner removal", async () => {
+  const h = setup();
+  h.fs.setFile(PROFILE, "offline=1\n");
+  h.fs.setFile(OWNER, "999\n");
+  h.livePids.add(777);
+  const rename = h.fs.rename.bind(h.fs);
+  h.fs.rename = async (from: string, to: string) => {
+    await rename(from, to);
+    if (from === PROFILE && to.endsWith(".sweep")) {
+      // The takeover lands after the profile claim and the sweep's owner read.
+      h.fs.setFile(OWNER, "777\n");
+      h.fs.setFile(PROFILE, "offline=0\nlatency_ms=500\n");
+    }
+  };
+  expect(await h.shaper.clearOrphaned()).toEqual([]);
+  expect(await h.fs.readFile(PROFILE)).toBe("offline=0\nlatency_ms=500\n");
+  expect(await h.fs.readFile(OWNER)).toBe("777\n");
+  const dir = join(resolve("/data/ios-network-shaper"), "profiles");
+  expect((await h.fs.readdir(dir)).filter((name) => name.includes(".sweep"))).toEqual([]);
+});

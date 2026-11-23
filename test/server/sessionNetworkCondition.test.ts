@@ -1045,6 +1045,23 @@ describe("launch-time app network watch", () => {
       },
     );
 
+  test("an app-scoped rule without a TTL keeps a device-wide TTL's deadline (#19045)", async () => {
+    const { bridge, manager } = arrange();
+    try {
+      await manager.createSession(target.sessionUuid, deviceId, "ios");
+      await runSessionNetworkMutation(manager, target, true, {
+        mutation: async () => {},
+        expiresInSeconds: 30,
+      });
+      const deadline = manager.peekNetworkConditionExpiry(target.sessionUuid)?.deadlineMs;
+      expect(deadline).toBeDefined();
+      await applyOfflineFor(manager, bridge, "other.app");
+      expect(manager.peekNetworkConditionExpiry(target.sessionUuid)?.deadlineMs).toBe(deadline);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
   test("an explicit offline rule for another app replaces the passive launch watch", async () => {
     const { bridge, manager } = arrange();
     try {

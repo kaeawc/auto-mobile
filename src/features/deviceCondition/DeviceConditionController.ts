@@ -12,6 +12,7 @@ import {
   type DeviceConditionKey,
   type DeviceConditionResult,
   type DeviceConditionSignalResult,
+  type DeviceConditionVehiclePropertyResult,
   type DeviceConditionRestoreFailure,
   type DeviceConditionRestoreReport,
 } from "./DeviceConditionTypes";
@@ -45,6 +46,7 @@ export interface DeviceConditionApplyOutcome {
   /** How the request resolved, mirrored into the per-change result. */
   status: "applied" | "unchanged";
   signals?: DeviceConditionSignalResult[];
+  vehicleProperty?: DeviceConditionVehiclePropertyResult;
   detail?: string;
   /** Run on restore; absent when nothing changed. Idempotent. */
   reset?: (signal?: AbortSignal) => Promise<void>;
@@ -154,6 +156,7 @@ export class DeviceConditionController {
         key: change.key,
         status: outcome.status,
         ...(outcome.signals ? { signals: outcome.signals } : {}),
+        ...(outcome.vehicleProperty ? { vehicleProperty: outcome.vehicleProperty } : {}),
         ...(outcome.detail ? { detail: outcome.detail } : {}),
       };
     } catch (error) {

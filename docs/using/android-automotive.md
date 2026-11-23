@@ -155,10 +155,11 @@ emulators and a phone projecting to a Desktop Head Unit (see
 { "deviceCondition": { "vehicle": { "motion": "driving", "nightMode": "on" } } }
 ```
 
-| Field               | Values                                                                     | Image                                                                                                                                     |
-| ------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `vehicle.motion`    | `parked`, `driving` (sets gear, speed and parking brake together), `unset` | Non-user build (userdebug or eng, such as `android-automotive` API 34 ext9); `unsupported` on a `user` build such as the Play Store image |
-| `vehicle.nightMode` | `on`, `off`, `unset`                                                       | Both                                                                                                                                      |
+| Field               | Values                                                                                               | Image                                                                                                                                     |
+| ------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `vehicle.motion`    | `parked`, `driving` (sets gear, speed and parking brake together), `unset`                           | Non-user build (userdebug or eng, such as `android-automotive` API 34 ext9); `unsupported` on a `user` build such as the Play Store image |
+| `vehicle.nightMode` | `on`, `off`, `unset`                                                                                 | Both                                                                                                                                      |
+| `vehicle.property`  | `{ id, areaId?, value }`, `unset`; see [Setting any vehicle property](#setting-any-vehicle-property) | Non-user build                                                                                                                            |
 
 A test plan step takes the same object: `tool: setDeviceState` with `params.deviceCondition.vehicle`.
 
@@ -179,6 +180,27 @@ Reset happens when you `unset`, call `reset`, release the session, or the lease 
 - Night mode returns to automatic sensor control and does not restore a prior manual override.
 
 Phones, physical head units and iOS return `unsupported`.
+
+### Setting any vehicle property
+
+`vehicle.property` sends one vehicle HAL property event and then reads the property back:
+
+```json
+{ "deviceCondition": { "vehicle": { "property": { "id": "FUEL_LEVEL", "value": 12500 } } } }
+```
+
+| Field    | Value                                                                                                                                                                                                                                                               |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`     | A `VehicleProperty` name: `GEAR_SELECTION`, `PERF_VEHICLE_SPEED`, `PARKING_BRAKE_ON`, `IGNITION_STATE`, `FUEL_LEVEL`, `EV_BATTERY_LEVEL`, `HVAC_TEMPERATURE_SET`, `TURN_SIGNAL_STATE` or `NIGHT_MODE`. Or any id as a number, a decimal string or a `0x` hex string |
+| `areaId` | Required for a zoned property, such as `1` for the first row's left seat on `HVAC_TEMPERATURE_SET`. Omit it, or pass `0`, for a global property                                                                                                                     |
+| `value`  | `true` or `false` for a boolean property, a number, or an array of numbers for a vector property. String, bytes and mixed properties are refused                                                                                                                    |
+
+The result's change carries `vehicleProperty`: `id`, `name`, `areaId`, `type`, the injected `value`,
+`readBack` and `matches`. The event reaches car service and apps but is not written to the vehicle HAL
+that `get-property-value` reads, so on a stock emulator `readBack` can show the earlier value.
+
+Set one property per call. Reset re-sends each property's value from before its first change. It needs
+the same non-user build as `vehicle.motion`.
 
 ### Checking support
 

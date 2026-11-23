@@ -160,6 +160,66 @@ final class GestureDeliveryRouteTests: XCTestCase {
         XCTAssertEqual(pinned.target(trackedBundleId: settings), .rebind(bundleId: settings))
     }
 
+    // MARK: - Inset iPadOS windows (#18960)
+
+    private let iPad = GestureSize(width: 1032, height: 1376)
+    private let floatingWindow = GestureSize(width: 640, height: 720)
+
+    private func floating(translation: GesturePoint? = GesturePoint(x: 196, y: 320)) -> GestureCoordinateGeometry {
+        GestureCoordinateGeometry(
+            app: floatingWindow, screen: iPad, observation: iPad, rotation: 0, windowTranslation: translation
+        )
+    }
+
+    func testPinnedAppInFloatingWindowSynthesizes() {
+        XCTAssertEqual(
+            GestureDeliveryRoute.decide(target: .keepPinned, forced: nil, geometry: floating()),
+            .init(route: .synthesizedEventRecord(interfaceOrientation: 1), fallback: nil)
+        )
+    }
+
+    func testUnpinnedAppInFloatingWindowSynthesizes() {
+        XCTAssertEqual(
+            GestureDeliveryRoute.decide(target: unpinned, forced: nil, geometry: floating()),
+            .init(route: .synthesizedEventRecord(interfaceOrientation: 1), fallback: nil)
+        )
+    }
+
+    func testPinnedFullScreenAppKeepsCoordinateRoute() {
+        let fullScreen = GestureCoordinateGeometry(app: iPad, screen: iPad, observation: iPad, rotation: 0)
+        XCTAssertEqual(
+            GestureDeliveryRoute.decide(target: .keepPinned, forced: nil, geometry: fullScreen),
+            .init(route: .xcuiCoordinate, fallback: .pinnedApp)
+        )
+    }
+
+    func testMultiPanelWithoutWindowTranslationKeepsCoordinateRoute() {
+        let multiPanel = floating(translation: nil)
+        XCTAssertEqual(
+            GestureDeliveryRoute.decide(target: unpinned, forced: nil, geometry: multiPanel),
+            .init(route: .xcuiCoordinate, fallback: .multiPanel)
+        )
+        XCTAssertEqual(
+            GestureDeliveryRoute.decide(target: .keepPinned, forced: nil, geometry: multiPanel),
+            .init(route: .xcuiCoordinate, fallback: .pinnedApp)
+        )
+    }
+
+    func testFloatingWindowStillHonoursForcedStrategyAndRotation() {
+        XCTAssertEqual(
+            GestureDeliveryRoute.decide(target: .keepPinned, forced: .legacy, geometry: floating()).fallback,
+            .forcedStrategy
+        )
+        let noRotation = GestureCoordinateGeometry(
+            app: floatingWindow, screen: iPad, observation: iPad, rotation: nil,
+            windowTranslation: GesturePoint(x: 196, y: 320)
+        )
+        XCTAssertEqual(
+            GestureDeliveryRoute.decide(target: .keepPinned, forced: nil, geometry: noRotation).fallback,
+            .unknownRotation
+        )
+    }
+
     func testFallbackNamesWhyTheSynthesizedRouteWasSkipped() {
         let cases: [(GestureCoordinateGeometry?, TapCoordinateStrategy?, GestureDeliveryRoute.Fallback)] = [
             (nil, nil, .noObservation),

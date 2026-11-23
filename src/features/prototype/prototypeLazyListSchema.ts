@@ -27,7 +27,8 @@ function shape<A extends z.ZodTypeAny, R extends z.ZodTypeAny>(action: A, refres
       .finite()
       .int()
       .min(1)
-      .max(contract.limits.MAX_PROTOTYPE_LIST_ITEMS)
+      // The largest runtime budget (#18804); the validator applies the target's own limit.
+      .max(contract.runtimeBudgets.prototype_large_budget_v1.MAX_PROTOTYPE_LIST_ITEMS)
       .optional(),
   };
 }

@@ -48,6 +48,7 @@ import {
   MAX_DISPOSABLE_APP_SLUG_LENGTH,
 } from "../../features/prototype/disposableApp/disposableAppId";
 import { getRemovedToolActionHint } from "../../utils/removedTools";
+import { PROTOTYPE_LARGE_BUDGET } from "../../features/prototype/prototypeRuntimeBudget";
 import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "../../utils/schemaHelpers";
 import { validatePrototypeSavedInput } from "../prototypeSavedActions";
 import { validatePrototypeStorageInput } from "../prototypeStorageAction";
@@ -64,9 +65,13 @@ export const PROTOTYPE_TOOL_NAME = "prototype";
 const specDetailsSchema = specZ.object({ spec: prototypeSpecSchema });
 const stateDetailsSchema = prototypeSpecSchema.pick({ state: true });
 
-/** The first problem with an authored spec as `{path, text}`; `text` includes Zod's allowed values. */
+/**
+ * The first problem with an authored spec as `{path, text}`; `text` includes Zod's allowed values.
+ * The target is not known yet, so this admits the largest runtime budget (#18804); the show
+ * preflight refuses a spec over the base budget on a runtime without `prototype_large_budget_v1`.
+ */
 export function specProblem(spec: unknown): { path: string; text: string } | undefined {
-  const validated = validatePrototypeSpec(spec);
+  const validated = validatePrototypeSpec(spec, { budget: PROTOTYPE_LARGE_BUDGET });
   if (validated.success) {
     return undefined;
   }

@@ -19,6 +19,7 @@ import type { PrototypeResult } from "../../features/observe/android/ctrlProxyPr
 import {
   PROTOTYPE_PATCH_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
+  PROTOTYPE_LARGE_BUDGET_CAPABILITY,
 } from "../../features/observe/android/ctrlProxyProtocol";
 import { PrototypeCommitGenerations } from "../../features/prototype/PrototypeCommitGenerations";
 import type { PrototypeEventSource } from "../../features/prototype/PrototypeEventCoordinator";
@@ -52,6 +53,10 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { performPrototypePatch, type PrototypePatchQueue } from "../prototypePatchAction";
 import { shownSpecOutcome } from "../prototypeShownOutcome";
+import {
+  prototypeRuntimeBudget,
+  type PrototypeRuntimeBudget,
+} from "../../features/prototype/prototypeRuntimeBudget";
 import { sendPrototype, stageAssets } from "./assets";
 import { appLayerGrant, preflightMutation, specCapabilityRefusal } from "./preflight";
 import { prototypeSchema } from "./schemas";
@@ -272,26 +277,23 @@ async function performMutation(
         env: dependencies.env,
         superseded: () => isSuperseded(commits, scope, target, generation),
         beforeSend: async () => {
+          // Only a show that is sent looks up the budget its device writes are mirrored with.
+          ordering.budget = await targetBudget(prototypeTarget, args);
           // Last abort check before the grant, the event epoch and the device send.
           signal?.throwIfAborted();
           await appLayerGrant(prototypeTarget, device, args, { dependencies, signal })?.();
+          // The budget lookup and the grant suspend: a newer same-id show may have dispatched first,
+          // and this older spec must not follow it onto the device.
+          if (isSuperseded(commits, scope, target, generation)) {
+            return "superseded";
+          }
           // Last step before dispatch: a refusal, a failed upload, a lost race or a failed grant
           // must leave the event epoch of a prototype still on screen alone (#11394).
           startFreshShowEvents(events, scope, source, { target, args, inPlace });
           ordering.startedFreshEvents = args.action === "show" && !inPlace;
-          if (args.action === "show" && target.id) {
-            dependencies.store.beginShowDispatch(scope.deviceId, target.id);
-          }
           // From here the show is issued to the device: it may be on screen, so it is never withdrawn.
-          ordering.sent = true;
-          if (args.action === "show") {
-            ordering.specTicket = store.shownSpecs.beginShow(
-              scope.deviceId,
-              target.id,
-              args.replaceOthers,
-              device.platform === "android" ? "android" : "ios",
-            );
-          }
+          markShowIssued(ordering, { store, dependencies, args, device });
+          return undefined;
         },
       }),
     ).then(renderShowOutcome);
@@ -530,6 +532,19 @@ async function legacyInPlaceWarning(
   return `the connected CtrlProxy does not advertise ${PROTOTYPE_SHOW_IN_PLACE_CAPABILITY}, so prototype ${prototype.id} was re-shown fresh on its display: pager pages restarted. Update the connected CtrlProxy to keep pages.`;
 }
 
+/** The show target's runtime budget, which the host mirrors its device data writes with (#18804). */
+async function targetBudget(
+  target: PrototypeTarget,
+  args: { action: string },
+): Promise<PrototypeRuntimeBudget> {
+  const large =
+    args.action === "show" &&
+    (target.android
+      ? await target.android.supportsCommand(PROTOTYPE_LARGE_BUDGET_CAPABILITY)
+      : target.ios?.supportsCapability(PROTOTYPE_LARGE_BUDGET_CAPABILITY) === true);
+  return prototypeRuntimeBudget(large ? [PROTOTYPE_LARGE_BUDGET_CAPABILITY] : []);
+}
+
 /**
  * A show or dismiss that landed changed the screen, so the observation cached before it is stale:
  * without this, the "Verify with observe" call right after returns the pre-mutation capture.
@@ -557,6 +572,8 @@ interface ShowOrdering {
   specTicket?: number;
   /** The MCP connection issuing the show, recorded on its spec revision (#17358). */
   mcpSessionId?: string;
+  /** The target runtime's budget, looked up once the show is sent (#18804). */
+  budget?: PrototypeRuntimeBudget;
 }
 
 function withdrawGeneration(ordering: ShowOrdering): void {
@@ -573,8 +590,12 @@ function endShownSpec(
 ): void {
   if (ordering.specTicket !== undefined) {
     const { shown, refusal } = outcome ? shownSpecOutcome(outcome) : {};
-    const { mcpSessionId } = ordering;
-    const attributed = shown && mcpSessionId !== undefined ? { ...shown, mcpSessionId } : shown;
+    const { mcpSessionId, budget } = ordering;
+    const attributed = shown && {
+      ...shown,
+      ...(mcpSessionId === undefined ? {} : { mcpSessionId }),
+      ...(budget === undefined ? {} : { budget }),
+    };
     store.shownSpecs.endShow(ordering.scope.deviceId, ordering.specTicket, attributed, refusal);
   }
 }
@@ -707,6 +728,31 @@ function commitMutation(
  * A newer show of the same id on this device started after this one, so it owns host status and
  * event buffers; this call reports only its own outcome and commits nothing.
  */
+function markShowIssued(
+  ordering: ShowOrdering,
+  issued: {
+    store: PrototypeStatusStore;
+    dependencies: PrototypeHandlerDependencies;
+    args: { action: PrototypeMutation; replaceOthers?: boolean };
+    device: BootedDevice;
+  },
+): void {
+  const { store, dependencies, args, device } = issued;
+  const { scope, target } = ordering;
+  if (args.action === "show" && target.id) {
+    dependencies.store.beginShowDispatch(scope.deviceId, target.id);
+  }
+  ordering.sent = true;
+  if (args.action === "show") {
+    ordering.specTicket = store.shownSpecs.beginShow(
+      scope.deviceId,
+      target.id,
+      args.replaceOthers,
+      device.platform === "android" ? "android" : "ios",
+    );
+  }
+}
+
 function supersededResult(
   dependencies: PrototypeHandlerDependencies,
   outcome: CommitOutcome,

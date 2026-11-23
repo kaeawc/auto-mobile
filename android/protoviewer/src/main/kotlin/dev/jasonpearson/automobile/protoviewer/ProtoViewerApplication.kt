@@ -18,7 +18,6 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRemoteImageTrans
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureValueStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
-import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeDirectoryStore
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.protocol.PrototypeBundleDirectoryFileSystem
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
@@ -48,7 +47,7 @@ class ProtoViewerApplication : Application() {
       SharedPreferencesContentBlocklist(app.getSharedPreferences("blocklist", MODE_PRIVATE))
     val repository =
       DirectoryLibraryRepository(
-        SavedPrototypeDirectoryStore(File(root, "prototypes"), limits = libraryLimits),
+        librarySavedStore(File(root, "prototypes")),
         DirectoryLibraryFiles(File(root, "metadata")),
         storage,
         ids,

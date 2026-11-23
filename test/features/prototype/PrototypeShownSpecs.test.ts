@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { PrototypeShownSpecs } from "../../../src/features/prototype/PrototypeShownSpecs";
+import {
+  PrototypeShownSpecs,
+  type DeviceDataWriteOutcome,
+} from "../../../src/features/prototype/PrototypeShownSpecs";
+import {
+  PROTOTYPE_BASE_BUDGET,
+  PROTOTYPE_LARGE_BUDGET,
+  type PrototypeRuntimeBudget,
+} from "../../../src/features/prototype/prototypeRuntimeBudget";
 
 const spec = { data: { count: 1 } };
 function shown(store: PrototypeShownSpecs, device = "d", id = "panel") {
@@ -218,4 +226,41 @@ test("remembers the platform a show was sent to and which devices show an id (#1
   expect(specs.devicesShowing("a")).toEqual(["emu", "sim"]);
   specs.forget("emu", "a");
   expect(specs.devicesShowing("a")).toEqual(["sim"]);
+});
+
+const budgetCases: [PrototypeRuntimeBudget, DeviceDataWriteOutcome["kind"]][] = [
+  [PROTOTYPE_LARGE_BUDGET, "mirrored"],
+  [PROTOTYPE_BASE_BUDGET, "dropped"],
+];
+test.each(budgetCases)(
+  "device writes are mirrored with the runtime budget the spec was shown under (#18804)",
+  (budget, kind) => {
+    const specs = new PrototypeShownSpecs();
+    const rows = { data: { rows: Array.from({ length: 2001 }, (_, id) => ({ id })), flag: false } };
+    const ticket = specs.beginShow("d", "feed", true, "android");
+    specs.endShow("d", ticket, { id: "feed", spec: rows, budget });
+    expect(specs.budgetOf("d", "feed")).toBe(budget);
+    const write = { op: "set" as const, path: "/data/flag", value: true, revision: 1 };
+    expect(specs.recordDeviceDataWrite("d", "feed", write).kind).toBe(kind);
+    expect(specs.read("d", "feed").kind).toBe(kind === "mirrored" ? "known" : "unknown");
+  },
+);
+
+test("a replacing show forgets the budgets of the prototypes it removed (#18804)", () => {
+  const specs = new PrototypeShownSpecs();
+  const first = specs.beginShow("d", "feed", true, "android");
+  specs.endShow("d", first, { id: "feed", spec: { data: {} }, budget: PROTOTYPE_LARGE_BUDGET });
+  expect(specs.budgetOf("d", "feed")).toBe(PROTOTYPE_LARGE_BUDGET);
+  const second = specs.beginShow("d", "other", true, "android");
+  specs.endShow("d", second, { id: "other", spec: { data: {} } });
+  expect(specs.budgetOf("d", "feed")).toBe(PROTOTYPE_BASE_BUDGET);
+});
+
+test("abandoning tracking keeps the accepted show's budget for later writes (#18804)", () => {
+  const specs = new PrototypeShownSpecs();
+  const ticket = specs.beginShow("d", "feed", true, "android");
+  specs.endShow("d", ticket, { id: "feed", spec: { data: {} }, budget: PROTOTYPE_LARGE_BUDGET });
+  specs.abandon("d");
+  expect(specs.read("d", "feed").kind).toBe("unknown");
+  expect(specs.budgetOf("d", "feed")).toBe(PROTOTYPE_LARGE_BUDGET);
 });

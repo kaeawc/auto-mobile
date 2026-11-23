@@ -19,19 +19,26 @@ function fixture(name: string): string {
 
 // Load outside individual tests so fixture I/O does not affect their timing budget.
 const modes = ["allow", "deny", "ignore", "default", "foreground"] as const;
-const fixtures = [33, 37].flatMap((api) =>
+const fixtures = ["phone-api30", "phone-api33", "phone-api34", "automotive-api34"].flatMap((api) =>
   modes.map((mode) => ({
     api,
     mode,
-    output: fixture(`get-post-notification-api${api}-${mode}`),
+    output: fixture(`get-post-notification-${mode}-${api}`),
   })),
 );
 const oldFailure = fixture("set-enabled-api37-stdout");
 const oldExitCode = fixture("set-enabled-api37-exit-code");
 
 describe("parseNotificationAppOpMode", () => {
-  test.each(fixtures)("API $api $mode", ({ mode, output }) => {
+  test.each(fixtures)("$api $mode", ({ mode, output }) => {
     expect(parseNotificationAppOpMode(output)).toBe(mode);
+  });
+  // On API 35 the emulator records no op for the package whatever the mode set, so the read-back
+  // names no mode and verification reports that instead of guessing.
+  test.each(modes)("API 35 prints no operations after set %s", (mode) => {
+    const output = fixture(`get-post-notification-${mode}-phone-api35`);
+    expect(output).toBe("No operations.\nDefault mode: allow\n");
+    expect(parseNotificationAppOpMode(output)).toBeUndefined();
   });
   test("accepts explicit default and CRLF indentation", () => {
     expect(parseNotificationAppOpMode("  POST_NOTIFICATION: default; time=+1s ago\r\n")).toBe(

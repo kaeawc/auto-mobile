@@ -12,27 +12,29 @@ import {
   parseStandbyBucket,
   parseThermal,
 } from "../../../../src/features/utility/power/PowerParsers";
+import { AdbPowerClient } from "../../../../src/features/utility/power/AndroidPowerClient";
+import { createExecResult } from "../../../../src/utils/execResult";
 
 const fixture = (name: string): string =>
   readFileSync(join(import.meta.dir, "../../../fixtures/android-power", name), "utf8");
 
-describe("power parsers (hand-reconstructed fixtures)", () => {
-  test("a real battery reports the charger and is not faked", () => {
-    expect(parseBattery(fixture("dumpsys-battery-real.txt"))).toEqual({
-      level: 100,
-      charging: "ac",
-      status: "charging",
-      faked: false,
-    });
+describe("power parsers (captured fixtures)", () => {
+  test.each([
+    ["phone-api30", { level: 100, charging: "ac", status: "charging", faked: false }],
+    ["phone-api34", { level: 100, charging: "ac", status: "charging", faked: false }],
+    ["phone-api37", { level: 100, charging: "ac", status: "charging", faked: false }],
+    ["watch-api37", { level: 100, charging: "ac", status: "charging", faked: false }],
+    ["automotive-api34", { level: 100, charging: "ac", status: "charging", faked: false }],
+    // The TV image has no battery: present false, status unknown (1), level 0.
+    ["tv-api36", { level: 0, charging: "ac", status: "unknown", faked: false }],
+  ] as const)("a real battery on %s reports the charger and is not faked", (device, expected) => {
+    expect(parseBattery(fixture(`dumpsys-battery-${device}.txt`))).toEqual(expected);
   });
 
   test("a faked battery is marked by UPDATES STOPPED", () => {
-    expect(parseBattery(fixture("dumpsys-battery-faked-unplugged-level-15.txt"))).toEqual({
-      level: 15,
-      charging: "none",
-      status: "discharging",
-      faked: true,
-    });
+    expect(
+      parseBattery(fixture("dumpsys-battery-faked-unplugged-level-15-phone-api34.txt")),
+    ).toEqual({ level: 15, charging: "none", status: "discharging", faked: true });
   });
 
   test("a battery dump without a level is rejected", () => {
@@ -40,23 +42,25 @@ describe("power parsers (hand-reconstructed fixtures)", () => {
   });
 
   test("thermal status and override", () => {
-    expect(parseThermal(fixture("dumpsys-thermalservice-normal.txt"))).toEqual({
-      status: 0,
-      override: false,
-    });
-    expect(parseThermal(fixture("dumpsys-thermalservice-override-3.txt"))).toEqual({
+    for (const device of ["phone-api30", "phone-api34", "watch-api37", "tv-api36"]) {
+      expect(parseThermal(fixture(`dumpsys-thermalservice-${device}.txt`))).toEqual({
+        status: 0,
+        override: false,
+      });
+    }
+    expect(parseThermal(fixture("dumpsys-thermalservice-override-3-phone-api34.txt"))).toEqual({
       status: 3,
       override: true,
     });
   });
 
   test("restrict background", () => {
-    expect(parseRestrictBackground(fixture("netpolicy-restrict-background-enabled.txt"))).toBe(
-      true,
-    );
-    expect(parseRestrictBackground(fixture("netpolicy-restrict-background-disabled.txt"))).toBe(
-      false,
-    );
+    expect(
+      parseRestrictBackground(fixture("netpolicy-restrict-background-enabled-phone-api34.txt")),
+    ).toBe(true);
+    expect(
+      parseRestrictBackground(fixture("netpolicy-restrict-background-disabled-phone-api34.txt")),
+    ).toBe(false);
     expect(() => parseRestrictBackground("")).toThrow();
   });
 
@@ -84,5 +88,23 @@ describe("power parsers (hand-reconstructed fixtures)", () => {
     expect(parseStandbyBucket("garbage")).toBe("unknown");
     expect(parseInactive("Idle=true\n")).toBe(true);
     expect(parseInactive("Idle=false")).toBe(false);
+  });
+});
+
+describe("deviceidle force-idle (captured fixtures)", () => {
+  const clientAnswering = (stdout: string) =>
+    new AdbPowerClient({
+      execute: async () => createExecResult(stdout, ""),
+      isScreenOn: async () => true,
+    });
+
+  test("deep idle is accepted on a phone", async () => {
+    await clientAnswering(fixture("deviceidle-force-idle-deep-phone-api34.txt")).forceDoze("deep");
+  });
+
+  test("an Automotive image refuses deep idle and the refusal is reported", async () => {
+    const refusal = fixture("deviceidle-force-idle-not-enabled-automotive-api34.txt");
+    expect(refusal.trim()).toBe("Unable to go deep idle; not enabled");
+    await expect(clientAnswering(refusal).forceDoze("deep")).rejects.toThrow("not enabled");
   });
 });

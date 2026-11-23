@@ -56,3 +56,44 @@ export class FakeScreenChangingAfterTapWatchRunner
     return { ...tree, root: { ...tree.root, accessibilityLabel: `after ${this.taps} taps` } };
   }
 }
+
+/**
+ * Replays captured hierarchies in order, repeating the last, and after a tap answers every
+ * hierarchy read with `afterTap` (a tree, or an error such as `app_not_foreground`).
+ */
+export class FakeSequencedWatchRunner extends FakeWatchRunnerClient implements WatchRunnerClient {
+  private reads = 0;
+  private tapped = false;
+  private readonly trees: WatchHierarchy[];
+  constructor(
+    trees: readonly unknown[],
+    private readonly afterTap?: unknown,
+  ) {
+    super(trees[0]);
+    this.trees = trees.map((tree) => {
+      if (!isWatchHierarchy(tree)) {
+        throw new Error("Invalid captured watch fixture");
+      }
+      return tree;
+    });
+  }
+  override async request(...args: Parameters<FakeWatchRunnerClient["request"]>): Promise<unknown> {
+    if (args[0].type === "tap") {
+      this.tapped = true;
+    }
+    return super.request(...args);
+  }
+  override async hierarchy(signal?: AbortSignal): Promise<WatchHierarchy> {
+    await super.hierarchy(signal);
+    if (this.tapped && this.afterTap !== undefined) {
+      if (this.afterTap instanceof Error) {
+        throw this.afterTap;
+      }
+      if (!isWatchHierarchy(this.afterTap)) {
+        throw new Error("Invalid captured watch fixture");
+      }
+      return this.afterTap;
+    }
+    return this.trees[Math.min(this.reads++, this.trees.length - 1)]!;
+  }
+}

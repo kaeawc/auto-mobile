@@ -32,6 +32,26 @@ Most tools work the same on Android and iOS. These guides cover iOS:
 The **Platforms** column in [Tools](../tools.md) shows which devices each tool
 drives.
 
+## Dynamic Island and display backlight
+
+On a simulator, `displayConfig` hides the Dynamic Island for layout checks and
+turns the display off and on without a lock gesture:
+
+- `dynamicIsland: "hidden"` hides the island; `"visible"` shows it again.
+  Screen recordings and the Simulator window show the change; screenshots never
+  include the island.
+- Only models with a Dynamic Island support it: iPhone 14 Pro and later, except
+  the 16e and 17e. On other models `supported.dynamicIsland` is `false` and a
+  `dynamicIsland` request fails without changing anything. Use a model with an
+  island.
+- `backlight: false` turns the display off: the device locks and shows the dimmed
+  Lock Screen. `backlight: true` lights the Lock Screen; unlock it with
+  `wakeAndUnlock`.
+- A read reports both under `current`. `reset: true` shows a hidden island and
+  turns an off display back on.
+
+Android and physical iOS devices refuse both fields.
+
 ## Limits
 
 - `dragPath` and `dragAndDrop` cannot move home screen or dock icons. Synthesized

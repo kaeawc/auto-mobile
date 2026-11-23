@@ -130,9 +130,10 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
   ): Promise<IosNetworkShaperApplyResult> {
     const dylib = await this.dylibProvider().ensure();
     const profilePath = this.profilePath(udid);
-    // Written first so the condition holds from the first process of a shaped boot.
+    // The owner lands first, so a startup sweep never sees a profile without its owner and
+    // deletes live shaping; the profile lands before the boot so the first process sees it.
+    await this.writeAtomically(ownerPath(profilePath), `${this.deps.ownerPid ?? process.pid}\n`);
     await this.writeProfile(profilePath, profile);
-    await this.fs.writeFile(ownerPath(profilePath), `${this.deps.ownerPid ?? process.pid}\n`);
     // A concurrent apply joins this flight instead of rebooting the simulator a second time.
     const rebooted = await this.injections.run(udid.toUpperCase(), async () => {
       if (await this.isInjected(udid, dylib, profilePath)) {
@@ -212,10 +213,14 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
   }
 
   private async writeProfile(path: string, profile: IosNetworkShaperProfile): Promise<void> {
+    await this.writeAtomically(path, formatShaperProfile(profile));
+  }
+
+  private async writeAtomically(path: string, content: string): Promise<void> {
     await this.fs.ensureDir(join(path, ".."));
     const partial = `${path}.${(this.deps.idGenerator ?? defaultIdGenerator).next()}.tmp`;
-    await this.fs.writeFile(partial, formatShaperProfile(profile));
-    // A rename changes the file's mtime atomically, so the shaper never reads half a profile.
+    await this.fs.writeFile(partial, content);
+    // A rename changes the file's mtime atomically, so a reader never sees half a file.
     await this.fs.rename(partial, path);
   }
 

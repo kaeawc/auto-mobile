@@ -477,6 +477,9 @@ export class DaemonStartup {
       startupStage("http token prepare", () => {
         startHost().prepareHttpToken();
       }),
+      // Before ingress so no apply can race the sweep; its own stage so a rehydration failure
+      // cannot skip it.
+      startupStage("network shaper sweep", () => this.sweepNetworkShaperProfiles()),
       startupStage("http ingress", () => startHost().startHttpIngress()),
       startupStage("device discovery", async () => {
         // Wait up to 5 seconds - emulators should already be running
@@ -544,9 +547,19 @@ export class DaemonStartup {
       );
       await this.host.reownRehydratedManagedExecutions(rehydration.rehydrated);
       await this.host.startHost().sweepStaleAppearanceConfigs(rehydration);
-      await this.host.startHost().sweepStaleNetworkShaperProfiles();
     } catch (error) {
       logger.warn(`[Daemon] Session rehydration failed; continuing startup: ${error}`);
+    }
+  }
+
+  private async sweepNetworkShaperProfiles(): Promise<void> {
+    try {
+      await this.host.startHost().sweepStaleNetworkShaperProfiles();
+    } catch (error) {
+      logger.warn(
+        `[Daemon] Network shaper sweep failed; continuing startup: ${errorMessage(error)}`,
+        error,
+      );
     }
   }
 

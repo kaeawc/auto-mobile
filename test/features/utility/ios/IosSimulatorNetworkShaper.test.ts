@@ -237,3 +237,16 @@ test("finds only this simulator's launchd_sim", () => {
   expect(findLaunchdSimPid(rows, `/${UDID}/data/var/run/launchd_bootstrap.plist`)).toBe(18299);
   expect(findLaunchdSimPid(rows, "/MISSING/data/var/run/launchd_bootstrap.plist")).toBeUndefined();
 });
+
+test("apply publishes the owner file before the profile, so a sweep never sees an unowned profile", async () => {
+  const h = setup();
+  const renamed: string[] = [];
+  const rename = h.fs.rename.bind(h.fs);
+  h.fs.rename = async (from: string, to: string) => {
+    renamed.push(to);
+    await rename(from, to);
+  };
+  await h.shaper.apply(UDID, THREE_G);
+  expect(renamed).toEqual([OWNER, PROFILE]);
+  expect(await h.fs.readFile(OWNER)).toBe("4242\n");
+});

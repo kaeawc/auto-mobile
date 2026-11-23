@@ -33,7 +33,7 @@ internal object PrototypeRepeatLiteralChecks {
     if (text != null && "{outerIndex}" in text)
       fail(fieldPath, "{outerIndex} outside an inner repeat template")
     else if (
-      kind == PrototypeBindableKind.KEY &&
+      kind.isStateKey() &&
         text != null &&
         !stateKeyPattern.matches(
           PrototypeRepeatTemplate.segments(text, "route").joinToString("") {

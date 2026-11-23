@@ -38,6 +38,20 @@ final class VisibleAppWindowsTests: XCTestCase {
         XCTAssertNil(ElementLocator.backgroundWindowOwner(x: .nan, y: 10, in: frames))
     }
 
+    /// #19091: Files tiled left and focused, Settings floating behind it. A tap 4 pt right of the
+    /// Files tile still went to Files, so it must not switch the tracked app to Settings.
+    func testTapNearTheFocusedWindowEdgeDoesNotNameTheBackgroundApp() {
+        let settings = ElementBounds(left: 258, top: 246, right: 773, bottom: 1015)
+        let frames = ObservedWindowFrames(
+            focused: leftTile, background: [(bundleId: "com.apple.Preferences", frame: settings)]
+        )
+        XCTAssertNil(ElementLocator.backgroundWindowOwner(x: 515, y: 513, in: frames))
+        let clear = Double(leftTile.right + ElementLocator.focusedWindowTouchMargin)
+        XCTAssertNil(ElementLocator.backgroundWindowOwner(x: clear - 1, y: 513, in: frames))
+        XCTAssertEqual(ElementLocator.backgroundWindowOwner(x: clear, y: 513, in: frames), "com.apple.Preferences")
+        XCTAssertEqual(ElementLocator.backgroundWindowOwner(x: 640, y: 1000, in: frames), "com.apple.Preferences")
+    }
+
     func testTiledWindowBesideTheFocusedOneIsVisible() {
         XCTAssertTrue(ElementLocator.isVisibleBesideFocused(leftTile, focused: rightTile, screen: screen))
     }

@@ -21,6 +21,7 @@ struct PrototypeScreen: View {
     @State private var waitingForStop = false
     @State private var loadReport = PrototypeLoadReport()
     @State private var pending: Action?
+    @State private var finishingRelaunch = false
     @State private var content: PrototypeLibraryContent?
     /// R6 (#15636): sensitive modules the loaded spec uses, named in the app-owned provenance region.
     @State private var sensitiveModules: [String] = []
@@ -35,10 +36,11 @@ struct PrototypeScreen: View {
     private let copyText: @MainActor (String) -> Void
 
     private let network: PrototypeNetworkConfiguration
+    private let webDataWiper: any PrototypeWebDataWiper
 
     init(
         store: PrototypeLibraryStore, entry: PrototypeLibraryEntry, networkSwitch: PrototypeLibraryNetworkSwitch,
-        registry: PrototypePlatformRegistry = .system,
+        registry: PrototypePlatformRegistry = .viewer, webDataWiper: any PrototypeWebDataWiper = ViewerWebDataWiper(),
         appVersion: String = Bundle.main
             .object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
         osVersion: String = UIDevice.current.systemVersion,
@@ -52,6 +54,7 @@ struct PrototypeScreen: View {
         ))
         self.copyText = copyText
         self.onClose = onClose
+        self.webDataWiper = webDataWiper
         if let secureStorage = registry.secureStorage {
             _registry = State(
                 initialValue: registry.withSecureStorage(store.scopedSecureStorage(secureStorage, for: entry.libraryId))
@@ -107,6 +110,7 @@ struct PrototypeScreen: View {
             }
             prototypeContent
                 .environment(\.prototypeMapNetworkAllowed, networkSwitch.enabled)
+                .environment(\.prototypeWebDataStoreIdentifier, UUID(uuidString: entry.libraryId))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
                 .ignoresSafeArea(
@@ -139,7 +143,9 @@ struct PrototypeScreen: View {
         ) {
             Button("Reset and relaunch", role: .destructive) { relaunch(.reset) }
         }
-        .onAppear(perform: load)
+        .onAppear {
+            if pending == nil { load() }
+        }
         .onDisappear { watchdog.cancel() }
         .onChange(of: importRefusal) { _, refusal in
             if refusal != nil { watchdog.cancel() }
@@ -222,20 +228,30 @@ struct PrototypeScreen: View {
     }
 
     private func finishRelaunch() {
-        guard let action = pending else { return }
-        pending = nil
+        guard let action = pending, !finishingRelaunch else { return }
+        finishingRelaunch = true
         loadReport.begin()
-        do {
-            if action == .reset {
-                try store.resetStorage(entry.libraryId, secureStorage: registry.secureStorage)
+        Task { @MainActor in
+            defer {
+                pending = nil
+                finishingRelaunch = false
             }
-            revision += 1
-            error = nil
-            load()
-        } catch {
-            diagnostics.record(.libraryStorage)
-            self.error = error
-            reportLoad(.failed)
+            do {
+                if action == .reset {
+                    try await store.resetStorage(
+                        entry.libraryId,
+                        secureStorage: registry.secureStorage,
+                        webDataWiper: webDataWiper
+                    )
+                }
+                revision += 1
+                error = nil
+                load()
+            } catch {
+                diagnostics.record(.libraryStorage)
+                self.error = error
+                reportLoad(.failed)
+            }
         }
     }
 

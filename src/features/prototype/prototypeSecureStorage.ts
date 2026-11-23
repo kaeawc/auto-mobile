@@ -1,3 +1,4 @@
+import { prototypeDerivedInputs } from "./prototypeDerive";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { record, type Raw } from "./prototypeTemplate";
 import type { PrototypePlatformError } from "./prototypePlatform";
@@ -73,8 +74,7 @@ export function prototypeSecureStorageEmitError(
   const context = action.type === "emit" ? record(action.context) : undefined;
   const secure = strings(record(root.storage)?.secure);
   for (const [name, binding] of Object.entries(context ?? {})) {
-    const key = record(binding)?.state;
-    const leaked = typeof key === "string" ? secureKeyFor(key, secure) : undefined;
+    const leaked = bindingKey(binding, secure, root.derive);
     if (leaked) {
       return {
         path: memberPath(`${path}.context`, name),
@@ -195,7 +195,9 @@ export function prototypeSecureStorageRequestError(
   }
   const leak = (value: unknown, at: string): PrototypePlatformError | undefined => {
     const key =
-      typeof value === "string" ? placeholderKey(value, secure) : bindingKey(value, secure);
+      typeof value === "string"
+        ? placeholderKey(value, secure)
+        : bindingKey(value, secure, root.derive);
     return key
       ? {
           path: at,
@@ -229,9 +231,20 @@ export function prototypeSecureStorageRequestError(
 }
 
 /** The secure key a `{state}` value binding reads, a repeat template matching any row. */
-function bindingKey(value: unknown, secure: string[]): string | undefined {
-  const key = record(value)?.state;
-  return typeof key === "string" ? secureKeyFor(key, secure) : undefined;
+function bindingKey(value: unknown, secure: string[], derive?: unknown): string | undefined {
+  const binding = record(value);
+  if (typeof binding?.state === "string") {
+    return secureKeyFor(binding.state, secure);
+  }
+  if (typeof binding?.derived === "string" && secure.length > 0) {
+    for (const stateKey of prototypeDerivedInputs(derive, binding.derived).keys) {
+      const key = secureKeyFor(stateKey, secure);
+      if (key) {
+        return key;
+      }
+    }
+  }
+  return undefined;
 }
 
 /**

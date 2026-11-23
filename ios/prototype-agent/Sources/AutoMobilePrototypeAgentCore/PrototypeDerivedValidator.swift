@@ -2,6 +2,8 @@ import Foundation
 
 /// Semantic backstop shared by strict imports and the decoder; formatting remains a runtime concern.
 enum PrototypeDerivedValidator {
+    typealias Reference = (name: String, path: String)
+
     static func validate(
         derive: JSONValue?,
         root: JSONValue,
@@ -42,12 +44,7 @@ enum PrototypeDerivedValidator {
         throws
     {
         guard let fields = root.objectFields else { return }
-        for reference in conditionReferences(fields, path: path) where entries[reference.name] == nil {
-            throw PrototypeContractValidator.invalid(
-                reference.path,
-                "Unknown derived value \(PrototypeContractValidator.quoted(reference.name))"
-            )
-        }
+        try validateReferences(conditionReads(fields, path: path).derived, entries: entries)
         // Reuse the text-field mapper, so payloads, action operands and child nodes remain opaque.
         var textFields = fields
         PrototypeRepeat.bindTextFields(&textFields) { _ in "" }
@@ -107,16 +104,18 @@ enum PrototypeDerivedValidator {
         }
     }
 
-    static func conditionReferences(
+    static func conditionReads(
         _ node: [String: JSONValue],
         path: String
     )
-        -> [(name: String, path: String)]
+        -> (derived: [Reference], comparesStateKeys: Bool)
     {
-        var references: [(name: String, path: String)] = []
+        var references: [Reference] = []
+        var comparesStateKeys = false
         func visit(_ condition: JSONValue?, at: String) {
             guard let fields = condition?.objectFields else { return }
             if let name = fields["derived"]?.stringValue { references.append((name, "\(at).derived")) }
+            if fields["equalsKey"] != nil { comparesStateKeys = true }
             visit(fields["not"], at: "\(at).not")
             for group in ["all", "any"] {
                 for (index, child) in PrototypeStrictBindings.array(fields[group]).enumerated() {
@@ -130,7 +129,70 @@ enum PrototypeDerivedValidator {
         for (index, style) in PrototypeStrictBindings.array(node["styleWhen"]).enumerated() {
             visit(style.objectFields?["when"], at: "\(path).styleWhen[\(index)].when")
         }
-        return references
+        return (references, comparesStateKeys)
+    }
+
+    static func requiresCapability(_ fields: [String: JSONValue]) -> Bool {
+        let conditions = conditionReads(fields, path: "")
+        return conditions.comparesStateKeys || !conditions.derived.isEmpty
+            || !bindingReferences(fields, path: "").isEmpty
+    }
+
+    static func validateReferences(_ references: [Reference], entries: [String: JSONValue]) throws {
+        for reference in references where entries[reference.name] == nil {
+            throw PrototypeContractValidator.invalid(
+                reference.path,
+                "Unknown derived value \(PrototypeContractValidator.quoted(reference.name))"
+            )
+        }
+    }
+
+    static func bindingReferences(_ action: [String: JSONValue], path: String) -> [Reference] {
+        var result: [Reference] = []
+        func binding(_ raw: JSONValue?, _ at: String) {
+            if let name = raw?.objectFields?["derived"]?.stringValue {
+                result.append((name, "\(at).derived"))
+            }
+        }
+        func entries(_ raw: JSONValue?, _ at: String) {
+            let fields = raw?.objectFields ?? [:]
+            for key in PrototypeContractValidator.sorted(fields.keys) {
+                binding(fields[key], PrototypeContractValidator.keyPath(at, key))
+            }
+        }
+        switch action["type"]?.stringValue {
+        case "emit":
+            entries(action["context"], "\(path).context")
+        case "request":
+            let body = action["body"]?.objectFields
+            entries(action["query"], "\(path).query")
+            binding(action["body"], "\(path).body")
+            entries(body?["form"], "\(path).body.form")
+            for (index, part) in PrototypeStrictBindings.array(body?["multipart"]).enumerated() {
+                binding(part.objectFields?["value"], "\(path).body.multipart[\(index)].value")
+            }
+        case let type? where PrototypeDataWrite.actionTypes.contains(type):
+            binding(action["where"]?.objectFields?["equals"], "\(path).where.equals")
+            binding(action["value"], "\(path).value")
+        default:
+            break
+        }
+        return result
+    }
+
+    /// Source bindings that can affect a derived value, for the secure and sensitive sink checks.
+    static func sources(
+        _ binding: [String: JSONValue], entries: [String: JSONValue]
+    )
+        -> [[String: JSONValue]]
+    {
+        guard let name = binding["derived"]?.stringValue else { return [binding] }
+        guard let entry = entries[name]?.objectFields else { return [] }
+        if let collection = entry["collection"]?.objectFields {
+            return [collection["of"]?.objectFields].compactMap { $0 }
+                + PrototypeCollection.clauses(collection).compactMap { $0["value"]?.objectFields }
+        }
+        return [entry["of"]?.objectFields].compactMap { $0 }
     }
 
     /// Request URLs are render-time text too; opaque action values and payloads are not.

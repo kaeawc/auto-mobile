@@ -121,7 +121,11 @@ Reduced scalars support the existing format, locale and timeZone options.
 Use a derived condition such as \`visibleWhen:{derived:"cartCount",gt:0}\`. These conditions compare
 raw values and follow their inputs. They accept equals, notEquals, gt, lt, empty, contains, startsWith,
 lengthGt and lengthLt.
-Collections, derived repeat items and derived conditions require \`prototype_derive_v1\`.
+Use \`{derived:"cartCount"}\` in data action values and selectors, emit context, request query
+entries and request body values (including form and multipart values). The action reads the
+current raw value. Use \`{key:"confirm",equalsKey:"password"}\` to compare two set state keys.
+Collections, derived repeat items, derived conditions, derived bindings and equalsKey require
+\`prototype_derive_v1\`.
 For two-level repeats, put \`repeat:{items:{field:"lines"},as:"line"}\` on an inner container.
 Each outer item must hold a lines array of at most 100 object rows; empty arrays draw no inner rows.
 The inner alias must differ from the outer alias and route. Inner templates can read both

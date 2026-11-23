@@ -157,6 +157,8 @@ export type FieldKind =
   | "operand"
   | "substring"
   | "derivedCondition"
+  | "derivedBinding"
+  | "equalsKey"
   | "emitName"
   | "key"
   | "emitBinding"
@@ -238,6 +240,10 @@ function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
   mapField(condition, "derived", path, { kind: "derivedCondition", visit });
   mapField(condition, "data", path, { kind: "routePointer", visit });
   mapField(condition, "key", path, { kind: "key", visit });
+  if (condition.equalsKey !== undefined) {
+    visit(condition.equalsKey, `${path}.equalsKey`, "equalsKey");
+  }
+  mapField(condition, "equalsKey", path, { kind: "key", visit });
   mapKeyList(condition, "valid", path, visit);
   const operandVisit: FieldVisitor = (value, fieldPath, kind) =>
     visit(value, fieldPath, kind, "data" in condition);
@@ -253,10 +259,18 @@ function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
 }
 
 /** A `{state}` binding names a (possibly repeat-bound) key; every other form is an emit binding. */
-function mapBinding(value: unknown, at: string, visit: FieldVisitor): unknown {
+function mapBinding(
+  value: unknown,
+  at: string,
+  visit: FieldVisitor,
+  allowDerived = false,
+): unknown {
   const binding = record(value);
   if (binding && typeof binding.data === "string") {
     visit(binding.data, `${at}.data`, "routePointer");
+  }
+  if (allowDerived && typeof binding?.derived === "string") {
+    visit(binding.derived, `${at}.derived`, "derivedBinding");
   }
   return binding && Object.hasOwn(binding, "state")
     ? { ...binding, state: visit(binding.state, `${at}.state`, "key") }
@@ -272,7 +286,7 @@ function mapEmitAction(action: Raw, path: string, visit: FieldVisitor): void {
         const at = prototypeContractPatterns.pathKey.test(name)
           ? `${path}.context.${name}`
           : `${path}.context[${JSON.stringify(name)}]`;
-        return [name, mapBinding(value, at, visit)];
+        return [name, mapBinding(value, at, visit, true)];
       }),
     );
   }
@@ -285,11 +299,14 @@ function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
   }
   const where = record(action.where);
   if (where) {
-    action.where = { ...where, equals: mapBinding(where.equals, `${path}.where.equals`, visit) };
+    action.where = {
+      ...where,
+      equals: mapBinding(where.equals, `${path}.where.equals`, visit, true),
+    };
   }
   mapField(action, "path", path, { kind: "dataPath", visit });
   if (action.type !== "removeData" && action.value !== undefined) {
-    action.value = mapBinding(action.value, `${path}.value`, visit);
+    action.value = mapBinding(action.value, `${path}.value`, visit, true);
   }
 }
 
@@ -407,7 +424,9 @@ function mapRequestEntries(action: Raw, field: string, path: string, visit: Fiel
         const at = memberPath(`${path}.${field}`, name);
         return [
           name,
-          typeof value === "string" ? visit(value, at, "text") : mapBinding(value, at, visit),
+          typeof value === "string"
+            ? visit(value, at, "text")
+            : mapBinding(value, at, visit, field === "query"),
         ];
       }),
     );
@@ -459,7 +478,7 @@ function mapRequestBody(value: unknown, path: string, visit: FieldVisitor): unkn
           ? part
           : {
               ...fields,
-              value: mapBinding(fields.value, `${path}.multipart[${index}].value`, visit),
+              value: mapBinding(fields.value, `${path}.multipart[${index}].value`, visit, true),
             };
       }),
     };
@@ -471,12 +490,12 @@ function mapRequestBody(value: unknown, path: string, visit: FieldVisitor): unkn
       form: Object.fromEntries(
         Object.entries(form).map(([name, binding]) => [
           name,
-          mapBinding(binding, memberPath(`${path}.form`, name), visit),
+          mapBinding(binding, memberPath(`${path}.form`, name), visit, true),
         ]),
       ),
     };
   }
-  return body?.file === undefined ? mapBinding(value, path, visit) : value;
+  return body?.file === undefined ? mapBinding(value, path, visit, true) : value;
 }
 
 /** A `platform` call (#14294): each argument is a value binding, `into` the request grammar. */

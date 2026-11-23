@@ -80,6 +80,42 @@ class PrototypeSecureStorageRulesTest {
     )
   }
 
+  @Test
+  fun derivedBindingsPreserveSecureStorageRestrictions() {
+    val derive =
+      Json.parseToJsonElement("""{"secret":{"of":{"state":"token"},"format":{"number":{}}}}""")
+    fun result(action: String): PrototypeSpecValidation {
+      val spec = Json.parseToJsonElement(spec(action)).jsonObject
+      return PrototypeSpecValidator.validate(JsonObject(spec + ("derive" to derive)).toString())
+    }
+    val base = "root.screens[\"home\"].onTap[0]"
+    val emit = """{"type":"emit","name":"token","context":{"token":{"derived":"secret"}}}"""
+    assertEquals(
+      PrototypeSpecValidation.Failure(
+        PrototypeSpecError(
+          "$base.context.token",
+          "Secure storage key state:token cannot be sent in an emit context",
+        ),
+      ),
+      result(emit),
+    )
+    val request =
+      """{"type":"request","url":"https://example.com","query":{"token":{"derived":"secret"}}}"""
+    assertEquals(
+      PrototypeSpecValidation.Failure(
+        PrototypeSpecError(
+          "$base.query.token",
+          "Secure storage key state:token cannot be sent in a request without allowSecureInRequest",
+        ),
+      ),
+      result(request),
+    )
+    assertTrue(
+      result(request.dropLast(1) + ""","allowSecureInRequest":true}""")
+        is PrototypeSpecValidation.Success,
+    )
+  }
+
   @TestFactory
   fun ordinaryPlatformArgs(): List<DynamicTest> =
     listOf("""{"state":"public"}""", """{"value":"{token}"}""").map { binding ->

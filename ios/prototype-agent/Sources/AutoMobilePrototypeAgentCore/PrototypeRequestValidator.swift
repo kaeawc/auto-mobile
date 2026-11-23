@@ -132,7 +132,7 @@ enum PrototypeRequestValidator {
                 throw fail("\(path).body", "A GET or HEAD request cannot have a body")
             }
             if body.objectFields?.keys.contains(where: { ["multipart", "form", "file"].contains($0) }) != true {
-                try binding(body, path: "\(path).body")
+                try binding(body, path: "\(path).body", allowDerived: true)
             } else {
                 try PrototypeContractValidator.validateRequestBody(body, path: "\(path).body")
             }
@@ -245,7 +245,7 @@ enum PrototypeRequestValidator {
                     throw fail(entryPath, "Entry is longer than \(PrototypeLimits.maxRequestEntryLength) characters")
                 }
             case let .object(form)?:
-                try binding(.object(form), path: entryPath)
+                try binding(.object(form), path: entryPath, allowDerived: !isHeader)
                 if let literal = form["value"], !literal.isScalar {
                     throw fail("\(entryPath).value", "A header or query literal must be a string, number or boolean")
                 }
@@ -256,8 +256,10 @@ enum PrototypeRequestValidator {
     }
 
     /// One structured value binding, including platform state and handler-scoped event data.
-    private static func binding(_ raw: JSONValue, path: String) throws {
+    private static func binding(_ raw: JSONValue, path: String, allowDerived: Bool) throws {
         if PrototypeGeneratedValues.form(raw) != nil { return }
+        if allowDerived, raw.objectFields?.count == 1,
+           let name = raw.objectFields?["derived"]?.stringValue, PrototypeRepeat.isFieldName(name) { return }
         guard case let .object(form) = raw, form.count == 1, let key = form.keys.first,
               bindingKeys.contains(key), key != "index" || form[key] == .bool(true)
         else { throw fail(path, "Expected one value binding: state, data, value, item, index, platform or event")

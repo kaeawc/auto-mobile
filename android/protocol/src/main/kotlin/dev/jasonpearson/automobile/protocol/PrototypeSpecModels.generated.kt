@@ -2640,6 +2640,7 @@ data class PrototypeCondition(
   val lengthGt: Int? = null,
   val lengthLt: Int? = null,
   val derived: String? = null,
+  val equalsKey: String? = null,
 )
 
 @Serializable

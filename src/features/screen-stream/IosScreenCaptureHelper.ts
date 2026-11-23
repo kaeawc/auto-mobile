@@ -32,6 +32,8 @@ export const CAPTURE_CAPABILITY_PREFIX = "capture-capability:";
 /** Capability token advertising in-helper H.264 encoded output (issue #4787). */
 export const ENCODED_VIDEO_CAPABILITY = "encoded-video-h264";
 export const SIMULATOR_IDLE_EVIDENCE_CAPABILITY = "simulator-idle-evidence";
+/** Capability token advertising `--simulator-udid` headless framebuffer capture (#19015). */
+export const SIMULATOR_FRAMEBUFFER_CAPABILITY = "simulator-framebuffer";
 /**
  * Prefix of a stable macOS privacy-permission marker emitted by the helper.
  * The companion error line is human-readable, while this token is the
@@ -95,12 +97,14 @@ export type EncodeBitratePolicy =
   | { kind: "videoToolboxDefault" };
 
 /**
- * What the helper should capture. Either a USB-connected iOS device (via
- * AVFoundation) or a macOS iOS Simulator window (via ScreenCaptureKit).
+ * What the helper should capture: a USB-connected iOS device (via AVFoundation),
+ * a macOS iOS Simulator window (via ScreenCaptureKit), or a booted Simulator's
+ * display framebuffer read headlessly through CoreSimulator (#19015).
  */
 export type CaptureTarget =
   | { kind: "device"; deviceId?: string; encode?: EncodeSettings }
-  | { kind: "simulator"; windowID: number; fps?: number; audio?: boolean; encode?: EncodeSettings };
+  | { kind: "simulator"; windowID: number; fps?: number; audio?: boolean; encode?: EncodeSettings }
+  | { kind: "simulatorFramebuffer"; udid: string; fps?: number; encode?: EncodeSettings };
 
 /** Valid range for the simulator capture frame rate, mirrors the Swift CLI. */
 export const SIMULATOR_FPS_MIN = 5;
@@ -617,25 +621,32 @@ function buildArgs(target: CaptureTarget): string[] {
     }
     case "simulator": {
       const args = ["--simulator-window", String(target.windowID)];
-      if (target.fps !== undefined) {
-        if (
-          !Number.isInteger(target.fps) ||
-          target.fps < SIMULATOR_FPS_MIN ||
-          target.fps > SIMULATOR_FPS_MAX
-        ) {
-          throw new RangeError(
-            `simulator fps must be an integer in [${SIMULATOR_FPS_MIN}, ${SIMULATOR_FPS_MAX}]; got ${target.fps}`,
-          );
-        }
-        args.push("--simulator-fps", String(target.fps));
-      }
+      appendSimulatorFpsArgs(args, target.fps);
       if (target.audio === true) {
         args.push("--audio");
       }
       appendEncodeArgs(args, target.encode);
       return args;
     }
+    case "simulatorFramebuffer": {
+      const args = ["--simulator-udid", target.udid];
+      appendSimulatorFpsArgs(args, target.fps);
+      appendEncodeArgs(args, target.encode);
+      return args;
+    }
   }
+}
+
+function appendSimulatorFpsArgs(args: string[], fps: number | undefined): void {
+  if (fps === undefined) {
+    return;
+  }
+  if (!Number.isInteger(fps) || fps < SIMULATOR_FPS_MIN || fps > SIMULATOR_FPS_MAX) {
+    throw new RangeError(
+      `simulator fps must be an integer in [${SIMULATOR_FPS_MIN}, ${SIMULATOR_FPS_MAX}]; got ${fps}`,
+    );
+  }
+  args.push("--simulator-fps", String(fps));
 }
 
 /**

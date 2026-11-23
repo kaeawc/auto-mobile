@@ -393,6 +393,19 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     }),
     with: ["prototype_data_actions_v1"],
   },
+  prototype_data_actions_v3: {
+    ...fixture({
+      ...label,
+      onTap: [
+        {
+          type: "appendData",
+          path: "/data/rows",
+          value: { object: { title: { state: "name" }, done: { value: false } } },
+        },
+      ],
+    }),
+    with: ["prototype_data_actions_v1"],
+  },
   prototype_data_actions_v1: fixture({
     ...label,
     onTap: [{ type: "setData", path: "/data/count", value: { value: 1 } }],

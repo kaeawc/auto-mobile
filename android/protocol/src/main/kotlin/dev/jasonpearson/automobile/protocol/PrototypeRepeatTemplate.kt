@@ -318,10 +318,18 @@ internal object PrototypeBindableFields {
     field(action, "path", path, PrototypeBindableKind.DATA_PATH)?.let {
       return it
     }
-    if (hasValue)
-      binding(action["value"], "$path.value")?.let {
+    if (hasValue) {
+      // An `{object}` value (#18826) binds each member like a value.
+      val value = action["value"]
+      val members = (value as? JsonObject)?.get("object") as? JsonObject
+      val bound =
+        members?.entries?.firstNotNullOfOrNull { (name, member) ->
+          binding(member, memberPath("$path.value.object", name))
+        } ?: if (members == null) binding(value, "$path.value") else null
+      bound?.let {
         return it
       }
+    }
     return binding((action["where"] as? JsonObject)?.get("equals"), "$path.where.equals")
   }
 

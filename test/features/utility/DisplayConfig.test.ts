@@ -73,12 +73,12 @@ const NIGHT_GET = "shell cmd uimode night";
 /** Seed the three read commands so getConfig/readValues resolve deterministically. */
 function seedReads(
   factory: FakeAdbClientFactory,
-  opts: { fontScale?: string; density?: string; night?: string } = {},
+  opts: { fontScale?: string; density?: string; night?: string; nightStderr?: string } = {},
 ): void {
   const client = factory.getFakeClient();
   client.setCommandResult(FONT_GET, opts.fontScale ?? "1.0\n");
   client.setCommandResult(DENSITY_GET, opts.density ?? "Physical density: 440\n");
-  client.setCommandResult(NIGHT_GET, opts.night ?? "Night mode: no\n");
+  client.setCommandResult(NIGHT_GET, opts.night ?? "Night mode: no\n", opts.nightStderr ?? "");
 }
 
 describe("DisplayConfig parsers", () => {
@@ -415,6 +415,81 @@ describe("DisplayConfig setConfig", () => {
       .map((c) => c.command);
     expect(commands).toContain("shell wm density 506");
     expect(commands).not.toContain("shell wm density 582");
+  });
+
+  describe.each([
+    {
+      shape: "API 24: message on stderr, empty stdout",
+      reads: { night: "", nightStderr: captured("night-mode-unsupported-api24.stderr") },
+    },
+    {
+      shape: "API 25: message on stdout",
+      reads: { night: captured("night-mode-unsupported-api25") },
+    },
+  ])(
+    "Android before 8: cmd uimode night has no shell implementation (#18984), $shape",
+    ({ reads }) => {
+      test("getConfig reads font scale and density and omits theme", async () => {
+        const adbFactory = new FakeAdbClientFactory();
+        seedReads(adbFactory, reads);
+
+        const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
+
+        expect(result.success).toBe(true);
+        expect(result.current).toMatchObject({ fontScale: 1.0, density: 440 });
+        expect(result.current?.theme).toBeUndefined();
+      });
+
+      test("setting theme is refused with an actionable error and writes nothing", async () => {
+        const adbFactory = new FakeAdbClientFactory();
+        seedReads(adbFactory, reads);
+
+        const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
+          theme: "dark",
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Android before 8");
+        const commands = adbFactory
+          .getFakeClient()
+          .getCommandCalls()
+          .map((c) => c.command);
+        expect(commands.some((c) => c.startsWith("shell cmd uimode night "))).toBe(false);
+      });
+
+      test("font scale still applies", async () => {
+        const adbFactory = new FakeAdbClientFactory();
+        seedReads(adbFactory, reads);
+
+        const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
+          fontScale: 1.0,
+        });
+
+        expect(result.error).toBeUndefined();
+        expect(result.success).toBe(true);
+      });
+    },
+  );
+
+  describe("night mode stays unreadable without the unsupported message (#18984)", () => {
+    test("a garbled night-mode line on a supporting device", async () => {
+      const adbFactory = new FakeAdbClientFactory();
+      seedReads(adbFactory, { night: "garbage\n" });
+
+      const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
+
+      expect(result.success).toBe(false);
+    });
+
+    test("empty stdout with unrelated stderr", async () => {
+      const adbFactory = new FakeAdbClientFactory();
+      seedReads(adbFactory, { night: "", nightStderr: "cmd: Can't find service: uimode\n" });
+
+      const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("night mode");
+    });
   });
 
   test("sets dark theme via cmd uimode night", async () => {

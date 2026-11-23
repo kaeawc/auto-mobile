@@ -133,6 +133,13 @@ export function classifyLockSettingsOutput(
 
 type LockSettingsAdb = Pick<AdbExecutor, "execute" | "getDeviceLock">;
 
+/**
+ * `locksettings` acts on the current user unless told otherwise, while the reader checks user 0.
+ * They differ on a multi-user image: an Automotive AVD runs as user 10, so an unqualified
+ * `set-pin` locked user 10 and the read-back still reported user 0 as unlocked.
+ */
+const LOCK_USER_ARGS = ["--user", "0"];
+
 /** {@link LockSettingsClient} over adb: `locksettings` writes, `dumpsys lock_settings` reads. */
 export class AdbLockSettingsClient implements LockSettingsClient {
   constructor(private readonly adb: LockSettingsAdb) {}
@@ -163,11 +170,14 @@ export class AdbLockSettingsClient implements LockSettingsClient {
     oldCredential?: string,
   ): Promise<LockSettingsCommandResult> {
     const old = oldCredential === undefined ? [] : ["--old", oldCredential];
-    return this.run([`set-${type}`, ...old, credential], [credential, oldCredential ?? ""]);
+    return this.run(
+      [`set-${type}`, ...LOCK_USER_ARGS, ...old, credential],
+      [credential, oldCredential ?? ""],
+    );
   }
 
   clearCredential(oldCredential: string): Promise<LockSettingsCommandResult> {
-    return this.run(["clear", "--old", oldCredential], [oldCredential]);
+    return this.run(["clear", ...LOCK_USER_ARGS, "--old", oldCredential], [oldCredential]);
   }
 
   /** `secure` from `dumpsys window policy` when this release's lock_settings dump has no type. */

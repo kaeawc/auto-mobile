@@ -92,11 +92,14 @@ extension GesturePerformer {
             GesturePhaseDiagnostics.current?.begin("targetResolution")
             let target = gestureApplicationTarget()
             let point = GesturePoint(x: x, y: y)
+            // Route once per command: a double tap's second contact reuses the first's decision
+            // and reads nothing from the app between the two touches (#19050).
             if try UnpinnedGestureSynthesis.tap(
                 doubleTap: doubleTap,
-                deliver: {
-                    try self.deliverToUnpinnedForegroundApp(
-                        target: target, forced: forced, start: point, end: point, duration: duration
+                route: { self.unpinnedSynthesisOrientation(kind: .tap, target: target, forced: forced) },
+                deliver: { orientation in
+                    try self.synthesizeOneFinger(
+                        orientation: orientation, start: point, end: point, duration: duration
                     )
                 },
                 wait: { gap in RunLoop.current.run(until: Date(timeIntervalSinceNow: gap)) }

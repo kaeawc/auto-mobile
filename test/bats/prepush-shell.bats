@@ -14,6 +14,7 @@ setup() {
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${PREPUSH_FAST_LOG}"
 printf 'STDLIB_FIRST_BASE_REF=%s\n' "${STDLIB_FIRST_BASE_REF:-<unset>}" >> "${PREPUSH_FAST_LOG}"
+printf 'DOCS_READABILITY_BASE_REF=%s\n' "${DOCS_READABILITY_BASE_REF:-<unset>}" >> "${PREPUSH_FAST_LOG}"
 EOF
   chmod +x "${TEST_ROOT}/scripts/all_fast_validate_checks.sh"
 
@@ -224,6 +225,7 @@ if [[ "${1:-}" == "--list-checks" ]]; then
 fi
 printf '%s\n' "$*" >> "${PREPUSH_FAST_LOG}"
 printf 'STDLIB_FIRST_BASE_REF=%s\n' "${STDLIB_FIRST_BASE_REF:-<unset>}" >> "${PREPUSH_FAST_LOG}"
+printf 'DOCS_READABILITY_BASE_REF=%s\n' "${DOCS_READABILITY_BASE_REF:-<unset>}" >> "${PREPUSH_FAST_LOG}"
 EOF
   chmod +x "${TEST_ROOT}/scripts/all_fast_validate_checks.sh"
 }
@@ -571,7 +573,31 @@ EOF
   run bash scripts/prepush-shell.sh --base base
 
   [ "${status}" -eq 0 ]
-  grep -Fqx -- '--only mkdocs-nav,docs-github-markdown,docs-banned-phrases' "${FAST_LOG}"
+  grep -Fqx -- '--only mkdocs-nav,docs-github-markdown,docs-banned-phrases,docs-readability' "${FAST_LOG}"
+}
+
+@test "changed docs Markdown passes the merge-base ref to docs-readability" {
+  commit_change "docs/using/page.md" "# Page"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- 'DOCS_READABILITY_BASE_REF=base' "${FAST_LOG}"
+}
+
+@test "changed readability checker or budgets select docs-readability" {
+  local path
+  for path in scripts/docs/readability-budgets.json scripts/docs/readability.ts scripts/docs/check-readability.ts; do
+    git checkout -q base
+    git checkout -qB feature
+    : > "${FAST_LOG}"
+    commit_change "${path}" "// fixture"
+
+    run bash scripts/prepush-shell.sh --base base
+
+    [ "${status}" -eq 0 ]
+    grep -Eq -- '^--only (.*,)?docs-readability(,|$)' "${FAST_LOG}"
+  done
 }
 
 @test "changed banned-phrase list or allowlist selects docs-banned-phrases" {

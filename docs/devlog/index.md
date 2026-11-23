@@ -14,6 +14,7 @@ To add one, copy the [template](template.md).
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-11-23 | decision | [Capture Simulator video from the device framebuffer](2026-11-23-simulator-framebuffer-capture.md)                                 |
 | 2026-11-23 | decision | [Driverless simulator audio capture](2026-11-23-driverless-simulator-audio-capture.md)                                             |
+| 2026-11-23 | decision | [No consumer keep rule for prototype icons](2026-11-23-prototype-icon-keep-rule.md)                                                |
 | 2026-11-23 | decision | [XR headset hand and eye input over emulator gRPC](2026-11-23-xr-headset-hand-and-eye-input.md)                                    |
 | 2026-11-21 | concept  | [iOS Simulator audio routing open questions](2026-11-21-ios-simulator-audio-routing-open-questions.md)                             |
 | 2026-11-21 | decision | [Prototype media runtime placement spike](2026-11-21-prototype-media-runtime-placement-spike.md)                                   |

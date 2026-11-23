@@ -21,14 +21,19 @@ import type { DeviceMutationResetContext, DeviceMutationResetPort } from "./rese
 import { DEVICE_MUTATION_KINDS, type DeviceBaseline, type DeviceMutationInput } from "./types";
 import type { BaselineChange } from "./baseline";
 import { parseNotifyutilState } from "../../../utils/ios-cmdline-tools/notifyutil";
+import {
+  OsascriptSimulatorBacklight,
+  type SimulatorBacklight,
+} from "../../../utils/ios-cmdline-tools/SimulatorBacklight";
+import {
+  DYNAMIC_ISLAND_DEFAULTS_DOMAIN,
+  DYNAMIC_ISLAND_SUPPRESSED_KEY,
+  hiddenDynamicIslands,
+} from "../../../utils/ios-cmdline-tools/SimulatorDynamicIsland";
 import { iosBiometricEnrollmentTarget, iosBiometricRevertArgs } from "./iosBiometricRevert";
 import { STOREKIT_MUTATION_KIND, type IosStoreKitSessionReset } from "./storeKitSession";
-import {
-  RENDER_OVERLAYS,
-  type RenderOverlay,
-  type SimulatorRenderOverlayControl,
-} from "../../../utils/ios-cmdline-tools/SimulatorRenderOverlays";
-import { renderOverlayFromKey } from "./renderOverlayMutation";
+import type { SimulatorRenderOverlayControl } from "../../../utils/ios-cmdline-tools/SimulatorRenderOverlays";
+import { renderOverlayFromKey, restoreRenderOverlays } from "./renderOverlayMutation";
 import {
   IOS_ACCESSIBILITY_RESIDUE_DOMAIN,
   IOS_KEYBOARD_DEFAULTS_DOMAIN,
@@ -141,6 +146,29 @@ function accessibilityDefaultCommand(udid: string, key: string, prior: unknown):
   ];
 }
 
+/**
+ * The settings stored as one boolean default: the accessibility preferences, and the Simulator's
+ * Dynamic Island default in SpringBoard's domain (#19018).
+ */
+function boolDefaultCommand(udid: string, key: string, prior: unknown): string[] | undefined {
+  const accessibilityKey = iosAccessibilityDefaultKey(key);
+  if (accessibilityKey) {
+    return accessibilityDefaultCommand(udid, accessibilityKey, prior);
+  }
+  if (key !== "dynamicIsland") {
+    return undefined;
+  }
+  return [
+    "spawn",
+    udid,
+    "defaults",
+    prior === undefined ? "delete" : "write",
+    DYNAMIC_ISLAND_DEFAULTS_DOMAIN,
+    DYNAMIC_ISLAND_SUPPRESSED_KEY,
+    ...(prior === undefined ? [] : ["-bool", prior === true ? "YES" : "NO"]),
+  ];
+}
+
 function iosGlobalSettingKey(key: string): string | undefined {
   return Object.entries(IOS_GLOBAL_SETTING_KEYS).find(([setting]) => setting === key)?.[1];
 }
@@ -161,10 +189,21 @@ async function iosGlobalSettingObservations(xml: string): Promise<DeviceBaseline
   });
 }
 
+/** The Simulator-only rows (overlays #19016, island and backlight #19018), or undefined. */
+function canRestoreSimulatorRow(mutation: DeviceMutationInput): boolean | undefined {
+  const prior = mutation.priorValue;
+  const boolean = prior.state === "present" && typeof prior.value === "boolean";
+  if (renderOverlayFromKey(mutation.key) !== undefined || mutation.key === "backlight") {
+    return boolean;
+  }
+  return mutation.key === "dynamicIsland" ? prior.state === "absent" || boolean : undefined;
+}
+
 function canRestoreIosSetting(mutation: DeviceMutationInput): boolean {
   const prior = mutation.priorValue;
-  if (renderOverlayFromKey(mutation.key) !== undefined) {
-    return prior.state === "present" && typeof prior.value === "boolean";
+  const simulatorRow = canRestoreSimulatorRow(mutation);
+  if (simulatorRow !== undefined) {
+    return simulatorRow;
   }
   if (prior.state !== "present") {
     // An absent Simulator accessibility default is off, and a restore deletes it again.
@@ -207,6 +246,8 @@ export interface IosMutationResetDependencies {
   storeKit: IosStoreKitSessionReset;
   /** Simulator render overlays (#19016); without it a journaled overlay row cannot revert. */
   renderOverlays?: Pick<SimulatorRenderOverlayControl, "set">;
+  /** Relights a Simulator whose session turned the display off (#19018). */
+  backlight?: SimulatorBacklight;
 }
 
 interface IosAppGroupCleanup {
@@ -434,14 +475,40 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         await this.dependencies.storeKit.clear(udid, mutation.key, context.signal);
         await context.assertOwned();
         break;
-      case "device-setting":
-        await (renderOverlayFromKey(mutation.key) === undefined
-          ? this.revertByCommand(mutation, context)
-          : this.revertRenderOverlays([mutation], context));
-        break;
       default:
-        await this.revertByCommand(mutation, context);
+        await this.revertOther(mutation, prior, context);
     }
+  }
+
+  private async revertOther(
+    mutation: DeviceMutationInput,
+    prior: unknown,
+    context: DeviceMutationResetContext,
+  ): Promise<void> {
+    if (mutation.kind === "device-setting" && renderOverlayFromKey(mutation.key) !== undefined) {
+      await this.revertRenderOverlays([mutation], context);
+      return;
+    }
+    if (mutation.kind !== "device-setting" || mutation.key !== "backlight") {
+      await this.revertByCommand(mutation, context);
+    } else {
+      await this.revertBacklight(prior === true, context);
+    }
+    if (mutation.kind === "device-setting" && mutation.key === "dynamicIsland") {
+      // A later simctl screenshot re-hides only an island that is still meant to be hidden.
+      hiddenDynamicIslands.set(context.scope.deviceId, prior === true);
+    }
+  }
+
+  /** simctl cannot set the backlight; CoreSimulator can (#19018). */
+  private async revertBacklight(active: boolean, context: DeviceMutationResetContext) {
+    await context.assertOwned();
+    await (this.dependencies.backlight ?? new OsascriptSimulatorBacklight()).setActive(
+      context.scope.deviceId,
+      active,
+      context.signal,
+    );
+    await context.assertOwned();
   }
 
   private async revertByCommand(
@@ -462,38 +529,12 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
     }
   }
 
-  /** Restore every given overlay row of one device through a single CoreSimulator call. */
+  /** Restore the overlay rows of one device in a single CoreSimulator call. */
   async revertRenderOverlays(
     mutations: readonly DeviceMutationInput[],
     context: DeviceMutationResetContext,
   ): Promise<void> {
-    const control = this.dependencies.renderOverlays;
-    const values: Partial<Record<RenderOverlay, boolean>> = {};
-    for (const mutation of mutations) {
-      const overlay = renderOverlayFromKey(mutation.key);
-      const prior = mutation.priorValue.state === "present" ? mutation.priorValue.value : undefined;
-      if (overlay === undefined || typeof prior !== "boolean" || control === undefined) {
-        throw new ActionableError(`iOS cannot restore render overlay ${mutation.key}`);
-      }
-      // Rows arrive newest first, so the oldest prior of an overlay wins.
-      values[overlay] = prior;
-    }
-    if (control === undefined || Object.keys(values).length === 0) {
-      return;
-    }
-    await context.assertOwned();
-    const started = this.timer.now();
-    try {
-      const change = await control.set(context.scope.deviceId, values, context.signal);
-      for (const overlay of RENDER_OVERLAYS) {
-        if (values[overlay] !== undefined && change.applied[overlay] !== values[overlay]) {
-          throw new ActionableError(`iOS render overlay ${overlay} did not read back as restored`);
-        }
-      }
-    } finally {
-      context.recordPhase?.("coresimulator:ca-debug", this.timer.now() - started);
-    }
-    await context.assertOwned();
+    await restoreRenderOverlays(this.dependencies.renderOverlays, this.timer, mutations, context);
   }
 
   private async revertBiometricEnrollment(
@@ -553,9 +594,9 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         String(prior),
       ];
     }
-    const accessibilityKey = iosAccessibilityDefaultKey(mutation.key);
-    if (accessibilityKey) {
-      return accessibilityDefaultCommand(udid, accessibilityKey, prior);
+    const defaultsCommand = boolDefaultCommand(udid, mutation.key, prior);
+    if (defaultsCommand) {
+      return defaultsCommand;
     }
     const preference = iosGlobalSettingKey(mutation.key);
     if (!preference) {

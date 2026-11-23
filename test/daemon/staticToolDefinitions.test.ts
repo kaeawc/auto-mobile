@@ -197,6 +197,8 @@ describe("getStaticToolDefinitions", () => {
             "magnificationScale",
             "extraDim",
             "renderOverlays",
+            "dynamicIsland",
+            "backlight",
           ],
         },
       ],

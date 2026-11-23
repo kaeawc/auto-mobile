@@ -30,6 +30,7 @@ function setup(device: BootedDevice = simulator) {
   const config = new DisplayConfig(device, {
     simctl,
     renderOverlays: overlays,
+    screenControls: { islandSupport: { supportsDynamicIsland: async () => false } },
     adbFactory: new FakeAdbClientFactory(),
     themeBaselines: new Map(),
     accessibilityBaselines: new Map(),

@@ -9,6 +9,7 @@ import {
 } from "../../utils/ios-cmdline-tools/SimulatorRenderOverlays";
 import { hasDisplayGeometryField } from "./AndroidDisplayGeometry";
 import { requestedAccessibilityFields } from "./AccessibilityDisplayPreferences";
+import { hasScreenControlField } from "./IosSimulatorScreenControls";
 import type { DisplayConfigResult, SetDisplayConfigInput } from "./DisplayConfig";
 
 export const RENDER_OVERLAYS_SIMULATOR_ONLY_ERROR =
@@ -44,6 +45,7 @@ function hasNonOverlayField(input: SetDisplayConfigInput): boolean {
     input.theme !== undefined ||
     input.contentSize !== undefined ||
     hasDisplayGeometryField(input) ||
+    hasScreenControlField(input) ||
     requestedAccessibilityFields(input).length > 0
   );
 }

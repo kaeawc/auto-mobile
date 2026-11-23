@@ -32,6 +32,7 @@ import { renderOverlayFromKey } from "../daemon/sessionBroker/mutations/renderOv
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
+import { ScreenControlMutationPriorReader } from "./deviceMutationScreenControlPriorReader";
 
 function stateField(entry: ToolMutation): DeviceStateField | undefined {
   const settingFields: Readonly<Record<string, DeviceStateField>> = {
@@ -132,6 +133,8 @@ export interface MutationObservationReaders {
   deviceStateReader?: MutationPriorReader;
   /** Priors for the notification-channel rows of an Android postNotification (#16510). */
   notificationChannelReader?: MutationPriorReader;
+  /** Priors for the iOS Simulator Dynamic Island and backlight rows of displayConfig (#19018). */
+  screenControlReader?: MutationPriorReader;
 }
 
 /** The device readers a {@link DefaultMutationPriorReader} reads priors through; each defaults to the real one. */
@@ -146,11 +149,16 @@ export interface DefaultMutationPriorReaderDependencies {
   observationReaders?: Partial<MutationObservationReaders>;
 }
 
+function screenControlReaderOf(readers: Partial<MutationObservationReaders>): MutationPriorReader {
+  return readers.screenControlReader ?? new ScreenControlMutationPriorReader();
+}
+
 export class DefaultMutationPriorReader implements MutationPriorReader {
   private readonly observationReaders: MutationObservationReaders;
   private readonly dataReader: MutationPriorReader;
   private readonly deviceStateReader: MutationPriorReader;
   private readonly notificationChannelReader: MutationPriorReader;
+  private readonly screenControlReader: MutationPriorReader;
   private readonly settingsAccess: Pick<DeviceSettingsAccess, "read">;
   private readonly clipboardFor: (device: BootedDevice) => Pick<Clipboard, "execute">;
   private readonly biometricsFor: (
@@ -180,6 +188,7 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
       observationReaders.deviceStateReader ?? new DeviceStateMutationPriorReader();
     this.notificationChannelReader =
       observationReaders.notificationChannelReader ?? new NotificationChannelMutationPriorReader();
+    this.screenControlReader = screenControlReaderOf(observationReaders);
     this.observationReaders = {
       screenReaderFor:
         observationReaders.screenReaderFor ??
@@ -230,8 +239,11 @@ export class DefaultMutationPriorReader implements MutationPriorReader {
     const overlayPriors = await this.readRenderOverlayPriors(device, mutations, signal);
     const dataPriors = await this.dataReader.read(device, mutations, signal);
     const familyPriors = mergePriors(
-      mergePriors(dataPriors, await this.deviceStateReader.read(device, mutations, signal)),
-      await this.notificationChannelReader.read(device, mutations, signal),
+      mergePriors(
+        mergePriors(dataPriors, await this.deviceStateReader.read(device, mutations, signal)),
+        await this.notificationChannelReader.read(device, mutations, signal),
+      ),
+      await this.screenControlReader.read(device, mutations, signal),
     );
     const fallbackPriors = mergePriors(familyPriors, overlayPriors);
     signal?.throwIfAborted();

@@ -406,6 +406,7 @@ nav:
           - "iOS Simulator audio isolation": how-it-works/plat/ios/simulator-audio-isolation.md
           - "iOS Simulator camera poster": how-it-works/plat/ios/simulator-camera-poster.md
           - "iOS Simulator render overlays": how-it-works/plat/ios/simulator-render-overlays.md
+          - "iOS Simulator Dynamic Island and backlight": how-it-works/plat/ios/simulator-island-and-backlight.md
           - "iOS Simulator framebuffer capture": how-it-works/plat/ios/simulator-framebuffer-capture.md
           - "iOS keep-booted reset": how-it-works/ios-keep-booted-reset.md
           - "iOS CarPlay template snapshots": how-it-works/plat/ios/carplay-template-snapshot.md
@@ -514,6 +515,7 @@ nav:
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
       - "2026-11-23: Reach Simulator render overlays through osascript": devlog/2026-11-23-simulator-render-overlays-osascript.md
+      - "2026-11-23: Simulator Dynamic Island and backlight through defaults and JXA": devlog/2026-11-23-simulator-island-and-backlight.md
       - "2026-11-23: Capture Simulator video from the device framebuffer": devlog/2026-11-23-simulator-framebuffer-capture.md
       - "2026-11-23: No consumer keep rule for prototype icons": devlog/2026-11-23-prototype-icon-keep-rule.md
       - "2026-11-23: XR headset hand and eye input over emulator gRPC": devlog/2026-11-23-xr-headset-hand-and-eye-input.md

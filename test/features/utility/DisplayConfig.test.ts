@@ -58,6 +58,7 @@ function createDisplayConfig(device: BootedDevice, dependencies: DisplayConfigDe
     themeBaselines: new Map(),
     renderOverlays: new FakeSimulatorRenderOverlayControl(),
     geometry: { registry: new DisplayProfileRestoreRegistry(), invalidate: () => {} },
+    screenControls: { islandSupport: { supportsDynamicIsland: async () => true } },
     ...dependencies,
   });
 }
@@ -761,6 +762,8 @@ describe("DisplayConfig physical iOS theme through the runner (#14092)", () => {
       density: false,
       theme: true,
       renderOverlays: false,
+      dynamicIsland: false,
+      backlight: false,
       increaseContrast: false,
       reduceMotion: false,
       boldText: false,
@@ -840,6 +843,8 @@ describe("DisplayConfig iOS Simulator theme support", () => {
       density: false,
       theme: true,
       renderOverlays: true,
+      dynamicIsland: true,
+      backlight: true,
     });
   });
 
@@ -850,7 +855,12 @@ describe("DisplayConfig iOS Simulator theme support", () => {
     const result = await createDisplayConfig(iosSimulator, { simctl }).getConfig();
 
     expect(result.success).toBe(true);
-    expect(result.current).toEqual({ theme: "dark", renderOverlays: ALL_RENDER_OVERLAYS_OFF });
+    // The fake answers the island default read with no output, the unset (visible) state.
+    expect(result.current).toEqual({
+      theme: "dark",
+      dynamicIsland: "visible",
+      renderOverlays: ALL_RENDER_OVERLAYS_OFF,
+    });
     // The read is issued as an argv array via the seam, not a raw simctl spawn.
     expect(simctlArgvCalls(simctl)).toContainEqual(["ui", iosSimulator.deviceId, "appearance"]);
   });

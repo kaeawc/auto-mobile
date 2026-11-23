@@ -36,6 +36,9 @@ const SETTING_FIELDS: Readonly<
     android: null,
     ios: "renderOverlay:blendedLayers",
   },
+  // iOS Simulator only (#19018); Android refuses them before any device call.
+  dynamicIsland: { arg: "hidden", android: null, ios: "dynamicIsland" },
+  backlight: { arg: false, android: null, ios: "backlight" },
 };
 
 /** Schema fields that select a device or modify the call rather than a display setting. */
@@ -107,9 +110,17 @@ describe("displayConfig mutation journaling covers every field (#14790)", () => 
       "density",
       "nightMode",
     ]);
+    // An iOS reset can also show the island, relight the display (#19018) and turn overlays off.
     expect(keysFor({ reset: true }, "ios")).toEqual([
       "contentSize",
       "nightMode",
+      "dynamicIsland",
+      "backlight",
+      ...RENDER_OVERLAYS.map((overlay) => `renderOverlay:${overlay}`),
+    ]);
+    expect(keysFor({ reset: "factory" }, "ios")).toEqual([
+      "dynamicIsland",
+      "backlight",
       ...RENDER_OVERLAYS.map((overlay) => `renderOverlay:${overlay}`),
     ]);
   });

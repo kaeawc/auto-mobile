@@ -1,5 +1,18 @@
 import Foundation
 
+extension PrototypeRepeat {
+    static func requiresNestedCapability(_ repeated: JSONValue?) -> Bool {
+        let items = repeated?.objectFields?["items"]
+        if items?.objectFields?["field"] != nil { return true }
+        return PrototypeStrictBindings.array(items).contains { row in
+            (row.objectFields ?? [:]).values.contains { value in
+                if case .array = value { return true }
+                return false
+            }
+        }
+    }
+}
+
 extension PrototypeStrictRepeats {
     /// Each outer row owns an independent inner index and identity namespace, including empty rows.
     mutating func nestedTemplates(
@@ -11,9 +24,7 @@ extension PrototypeStrictRepeats {
         let alias = repeated["as"]?.stringValue ?? "item"
         let derived = Set(repeated["derive"]?.objectFields?.keys ?? [:].keys)
         let outerDerived = Set(outer.derived.map { "outer.\($0)" })
-        let sources = outer.sourceField == "derived"
-            ? outer.sourceItems.map { PrototypeDataValues.project($0).objectFields ?? [:] }
-            : outer.sourceItems
+        let sources = outer.sourceItems
         if sources.isEmpty {
             let empty = Scope(
                 path: path, alias: alias, items: [], pathBound: true, sourceField: "field",
@@ -50,7 +61,7 @@ extension PrototypeStrictRepeats {
             }
             let outerItem = outer.items[index]
             let items = rows.compactMap(\.objectFields).map { row in
-                var item = row
+                var item = PrototypeDataValues.project(row).objectFields ?? [:]
                 for name in derived {
                     item[name] = .string("")
                 }

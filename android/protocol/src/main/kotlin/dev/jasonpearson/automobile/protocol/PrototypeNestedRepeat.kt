@@ -10,6 +10,13 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /** Per-outer-row scopes shared by template, state-key and expanded-budget validation. */
 internal object PrototypeNestedRepeat {
+  fun requiresCapability(repeat: JsonObject?): Boolean {
+    val items = repeat?.get("items")
+    return (items is JsonObject && "field" in items) ||
+      (items is JsonArray &&
+        items.filterIsInstance<JsonObject>().any { row -> row.values.any { it is JsonArray } })
+  }
+
   fun innerScope(node: JsonObject, path: String, outer: Scope, index: Int): Scope {
     val repeat = node.getValue("repeat") as JsonObject
     val field = checkNotNull((repeat.getValue("items") as JsonObject).text("field"))

@@ -1,0 +1,30 @@
+{
+  "id": "literal-arrays",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "items": [
+        {
+          "id": "a",
+          "unused": [
+            {
+              "label": "x"
+            }
+          ]
+        }
+      ],
+      "as": "row"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "{row.id}"
+      }
+    ]
+  }
+}

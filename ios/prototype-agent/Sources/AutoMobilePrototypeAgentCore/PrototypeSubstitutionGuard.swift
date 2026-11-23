@@ -90,7 +90,7 @@ private struct PrototypeSubstitutionGuard {
         if case let .object(pointer)? = spec["items"], let path = pointer["path"]?.stringValue {
             source = PrototypeDataPointer.resolve(data, pointer: path)
         } else {
-            source = spec["_sourceItems"] ?? spec["items"]
+            source = spec["_sourceItems"] ?? spec["items"]?.objectFields?["_rows"] ?? spec["items"]
         }
         guard case let .array(items)? = source else { return Scope(alias: alias, items: []) }
         let derive = (

@@ -78,6 +78,10 @@ struct GestureCoordinateGeometry: Equatable, Sendable {
     /// The observed frame cannot be re-read live (a two-panel SpringBoard's inner panel, whose
     /// live application frame is the cover's), so the cached geometry is used as observed.
     var pinnedToObservation = false
+    /// An inset iPadOS window observe confirmed against the screen, including one tiled at the
+    /// screen origin, whose `windowTranslation` is nil (#19050). Its observed points are screen
+    /// points either way.
+    var insetWindow = false
 
     /// A letterboxed app at the main-screen origin is not evidence of another panel (#16259).
     nonisolated func isAppOnMainScreen(applicationDisplayId: UInt64?) -> Bool {
@@ -98,7 +102,7 @@ struct GestureCoordinateGeometry: Equatable, Sendable {
         Self(
             app: app, screen: screen, observation: observation, rotation: rotation,
             appOrigin: appOrigin, screenOrigin: screenOrigin, windowTranslation: windowTranslation,
-            applicationDisplayId: applicationDisplayId
+            applicationDisplayId: applicationDisplayId, insetWindow: insetWindow
         )
     }
 

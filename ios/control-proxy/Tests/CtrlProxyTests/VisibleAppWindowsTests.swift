@@ -287,13 +287,16 @@ final class BackgroundWindowPlacementTests: XCTestCase {
 
     func testPlacedTreeKeepsNodesBesideTheFocusedTile() throws {
         // A right-hand row of Settings' window and a left-hand one that Files covers once placed.
-        let right = UIElementInfo(text: "Language & Region", bounds: ElementBounds(left: 16, top: 690, right: 508, bottom: 740))
+        let right = UIElementInfo(
+            text: "Language & Region",
+            bounds: ElementBounds(left: 16, top: 690, right: 508, bottom: 740)
+        )
         let back = UIElementInfo(text: "Back", bounds: ElementBounds(left: 80, top: 12, right: 124, bottom: 56))
         let root = UIElementInfo(
             className: "XCUIApplication", bounds: ElementBounds(clamping: settingsSnapshot), node: [back, right]
         )
 
-        let placed = ElementLocator.placedOnScreen(root, by: try settingsPlacement())
+        let placed = try ElementLocator.placedOnScreen(root, by: settingsPlacement())
         let visible = try XCTUnwrap(ElementLocator.removingOccluded(placed, by: filesLeftTile))
 
         XCTAssertEqual(ltrb(visible.bounds), [255, 242, 776, 1020])
@@ -322,6 +325,64 @@ final class BackgroundWindowPlacementTests: XCTestCase {
             }
         ))
         XCTAssertTrue(placement.isIdentity)
+    }
+
+    func testScreenSizedAppWithAnOriginIsNotOffsetTwice() throws {
+        // Its snapshot is already in screen space, so a non-zero app origin must not move it again.
+        let shifted = CGRect(x: 0, y: 24, width: 1032, height: 1376)
+        let placement = try XCTUnwrap(ElementLocator.backgroundWindowPlacement(
+            appFrame: shifted, screenFrame: screenFrame, windowFrame: { nil }
+        ))
+        XCTAssertTrue(placement.isIdentity)
+        XCTAssertEqual(ltrb(placement.screenBounds(ElementBounds(clamping: shifted))), [0, 24, 1032, 1400])
+    }
+
+    func testUnplacedWindowIsReportedAsATruncationReason() {
+        var reasons: Set<String> = []
+        XCTAssertNil(ElementLocator.backgroundWindowPlacement(
+            appFrame: settingsSnapshot, screenFrame: screenFrame, truncationReasons: &reasons, windowFrame: { nil }
+        ))
+        XCTAssertEqual(reasons, ["background_window_unplaced"])
+    }
+
+    func testPlacedWindowAddsNoTruncationReason() {
+        var reasons: Set<String> = []
+        XCTAssertNotNil(ElementLocator.backgroundWindowPlacement(
+            appFrame: settingsSnapshot, screenFrame: screenFrame, truncationReasons: &reasons,
+            windowFrame: { self.settingsWindow }
+        ))
+        XCTAssertTrue(reasons.isEmpty)
+    }
+
+    func testPlacedTreeKeepsKeyboardSubtreesInScreenSpace() throws {
+        let appBounds = ElementBounds(clamping: settingsSnapshot)
+        let key = UIElementInfo(
+            className: "UIKeyboardKey",
+            bounds: ElementBounds(left: 10, top: 1100, right: 90, bottom: 1160)
+        )
+        let keyboard = UIElementInfo(
+            className: "UIKeyboard", bounds: ElementBounds(left: 0, top: 1028, right: 1032, bottom: 1376), node: [key]
+        )
+        let field = UIElementInfo(
+            className: "UITextField",
+            bounds: ElementBounds(left: 16, top: 100, right: 508, bottom: 140)
+        )
+        let root = UIElementInfo(
+            className: "XCUIApplication", bounds: appBounds,
+            node: [
+                UIElementInfo(className: "UIWindow", bounds: appBounds, node: [field]),
+                UIElementInfo(className: "UIWindow", bounds: ElementBounds(clamping: screenFrame), node: [keyboard]),
+            ]
+        )
+
+        let placed = try ElementLocator.placedOnScreen(root, by: settingsPlacement())
+
+        XCTAssertEqual(ltrb(placed.bounds), [255, 242, 776, 1020])
+        XCTAssertEqual(ltrb(placed.node?[0].node?[0].bounds), [271, 341, 760, 381])
+        // The keyboard's window, the keyboard and its keys are already screen space.
+        XCTAssertEqual(ltrb(placed.node?[1].bounds), [0, 0, 1032, 1376])
+        XCTAssertEqual(ltrb(placed.node?[1].node?[0].bounds), [0, 1028, 1032, 1376])
+        XCTAssertEqual(ltrb(placed.node?[1].node?[0].node?[0].bounds), [10, 1100, 90, 1160])
     }
 
     func testUnknownOrDistortedWindowIsLeftOut() {

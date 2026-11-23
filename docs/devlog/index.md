@@ -18,6 +18,7 @@ regenerates the table below.
 | 2026-11-23 | decision | [XR headset hand and eye input over emulator gRPC](2026-11-23-xr-headset-hand-and-eye-input.md)                                    |
 | 2026-11-23 | decision | [Reach Simulator render overlays through osascript](2026-11-23-simulator-render-overlays-osascript.md)                             |
 | 2026-11-23 | decision | [Read Simulator network activity with host tools](2026-11-23-simulator-network-activity-host-tools.md)                             |
+| 2026-11-23 | decision | [Keyboard control through CoreSimulator](2026-11-23-simulator-keyboard-coresimulator.md)                                           |
 | 2026-11-23 | decision | [Simulator Dynamic Island and backlight through defaults and JXA](2026-11-23-simulator-island-and-backlight.md)                    |
 | 2026-11-23 | decision | [Capture Simulator video from the device framebuffer](2026-11-23-simulator-framebuffer-capture.md)                                 |
 | 2026-11-23 | decision | [No consumer keep rule for prototype icons](2026-11-23-prototype-icon-keep-rule.md)                                                |

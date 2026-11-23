@@ -8,6 +8,7 @@ import type {
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIosResidueInspector } from "../../fakes/FakeIosResidueInspector";
+import { FakeSimulatorKeyboardBridge } from "../../fakes/FakeSimulatorKeyboardBridge";
 import { hiddenDynamicIslands } from "../../../src/utils/ios-cmdline-tools/SimulatorDynamicIsland";
 
 function harness(commandError?: (args: string[]) => Error | undefined) {
@@ -32,6 +33,7 @@ function harness(commandError?: (args: string[]) => Error | undefined) {
       trustStore: { readUserTrustedCertificates: async () => [] },
       files: { realpath: async (path) => path, remove: async () => {} },
       pasteboard: { assertSettled: () => {}, write: async () => {} },
+      keyboard: new FakeSimulatorKeyboardBridge(),
       backlight: {
         setActive: async (udid, active) => {
           backlight.push({ udid, active });

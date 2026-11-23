@@ -5,6 +5,7 @@ import type { DeviceMutationResetContext } from "../../../src/daemon/sessionBrok
 import type { MutationValue } from "../../../src/daemon/sessionBroker/mutations/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIosResidueInspector } from "../../fakes/FakeIosResidueInspector";
+import { FakeSimulatorKeyboardBridge } from "../../fakes/FakeSimulatorKeyboardBridge";
 
 function harness(
   globals = '<plist version="1.0"><dict/></plist>',
@@ -41,6 +42,7 @@ function harness(
       residue: new FakeIosResidueInspector(),
 
       storeKit: { clear: async () => {} },
+      keyboard: new FakeSimulatorKeyboardBridge(),
       trustStore: { readUserTrustedCertificates: async () => [] },
       files: { realpath: async (path) => path, remove: async () => {} },
       pasteboard: { assertSettled: () => {}, write: async () => {} },
@@ -158,6 +160,7 @@ describe("iOS baseline setting contracts", () => {
         residue: new FakeIosResidueInspector(),
 
         storeKit: { clear: async () => {} },
+        keyboard: new FakeSimulatorKeyboardBridge(),
         trustStore: { readUserTrustedCertificates: async () => [] },
         files: { realpath: async (path) => path, remove: async () => {} },
         pasteboard: { assertSettled: () => {}, write: async () => {} },

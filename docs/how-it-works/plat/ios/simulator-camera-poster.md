@@ -16,6 +16,39 @@ canvas with a quiet zone, whereas a host PNG is aspect-filled and loses its edge
 to cropping. The `ios/CameraPosterInjection/build.sh` script also builds a fixture app for direct
 validation.
 
+## Device-wide activation
+
+Setting a poster also turns it on for apps that `launchApp` does not start: the home screen,
+XCUITest and system relaunches. `IosCameraPosterDeviceWide` runs `simctl spawn <udid> launchctl
+setenv` for three variables in the simulator's launchd environment, which every process launchd
+starts afterwards inherits:
+
+- `AM_CAMERA_POSTER_DYLIB`: the poster library.
+- `AM_CAMERA_POSTER_CONFIG`: `<AutoMobile data dir>/ios-camera-poster/devices/<udid>.json`.
+- `DYLD_INSERT_LIBRARIES`: the gate library, `libAMCameraPosterGate.dylib`, merged into any value
+  already set. It is set last, so no process loads the gate before it can find the poster library.
+
+The gate (`CameraPosterGate.c`) links only libSystem because every new process loads it. It loads
+the poster library only into a process whose executable path contains `.app/` (apps and app
+extensions), that has AVFoundation loaded, and that has a poster source: the per-launch
+variables, or a readable config file. Other processes are unchanged.
+
+The config file holds `{"path": …}` for an image or `{"qr": …}` for a QR. The poster library
+reads it when the process starts if neither per-launch variable is set. The registry mirrors
+each record into this file (`DeviceConfigMirroringIosCameraPosterRegistry`): a set writes it
+atomically, and every clear removes it. A new poster, or a clear, therefore reaches the next
+launch of each app without another launchd change. The launchd variables last until the
+simulator shuts down; with no config file the gate does nothing. Daemon startup removes the
+whole `devices` directory, because the previous daemon's posters died with its registry.
+
+`setDeviceState` and `startDevice` report `deviceWide: true` when activation succeeded. A
+failure is logged, the poster stays recorded for `launchApp`, and the result carries
+`deviceWide: false` with a warning that only `launchApp` applies it. Activation never runs on
+clear. A caller that injects its own dylib provider (a test fake) gets activation only by also
+injecting an activator.
+
+## Injected camera
+
 The library swizzles the public AVFoundation surface:
 
 - `AVCaptureDevice` and `AVCaptureDeviceDiscoverySession` list one back wide-angle video device;
@@ -58,7 +91,7 @@ A record lasts until one of these happens:
 A session that reuses the simulator therefore never inherits an earlier session's poster.
 
 `setDeviceState` returns `supported: true`, `method: "ios_simulator_dyld_injection"`, the path
-when set, and `relaunchRequired: true`. It never relaunches an app automatically. A running app
+and `deviceWide` when set, and `relaunchRequired: true`. It never relaunches an app automatically. A running app
 takes a new process environment only on relaunch. With a registered poster, `launchApp`
 forces a cold launch and returns `cameraPosterApplied: true`; after clearing, use
 `launchApp coldBoot: true` to remove injection from a running app. Existing DYLD entries and
@@ -80,11 +113,16 @@ missing path fails instead of falling back. Otherwise it locates the committed O
 relative to the module's package/repository root or daemon launch directory, or uses
 `AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE`. Relative overrides resolve against the daemon launch
 directory. The npm package ships `ios/CameraPosterInjection/Injection/CameraPosterInjection.m`
+and `CameraPosterGate.c` beside it
 (package.json `files`, required by `scripts/build/packed-runtime-assets.ts`), so an installed
 package finds it from `<package>/dist/src/` by walking ancestors, with no override.
 
 The source (about 30 KB) is built on demand rather than shipped as a prebuilt release asset;
 `AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB` serves users who supply their own build.
+
+The same provider class builds the gate from `CameraPosterGate.c` (`iosCameraPosterGateProvider`,
+`-dynamiclib` only, into `libAMCameraPosterGate.dylib`); the two `AUTOMOBILE_IOS_CAMERA_POSTER_*`
+overrides apply only to the poster library.
 
 The source bytes' SHA-256 determines
 `<AutoMobile data dir>/ios-camera-poster/<hash12>-sim-universal/libAMCameraPoster.dylib`; the
@@ -107,6 +145,10 @@ state failures and leave the prior record intact.
 
 - The built library targets arm64 and x86_64 iOS Simulator 17.0 and later.
 - Takes effect only at launch; hardened or system apps that strip `DYLD_INSERT_LIBRARIES` are out.
+- Device-wide activation reaches processes launchd starts after `launchctl setenv`. Research
+  (#19047) reports that ExtensionKit processes do not inherit `launchctl setenv`; only a boot
+  environment reaches them. An app that loads AVFoundation with `dlopen` after launch is not gated
+  in.
 - Process-wide swizzles; apps that subclass capture classes or use private camera paths may bypass it.
 - Not implemented: `UIImagePickerController` presentation and capture, `AVCaptureStillImageOutput`,
   device formats, capture connection topology, camera controls, depth. Metadata geometry is synthetic.
@@ -122,3 +164,4 @@ not cover live preview, `AVCapturePhotoOutput` or QR scanning.
 ## Background
 
 - [Build the camera poster dylib on demand](../../../devlog/2026-11-11-simulator-camera-poster-on-demand-build.md)
+- [Device-wide camera poster through the launchd environment](../../../devlog/2026-11-23-simulator-camera-poster-device-wide.md)

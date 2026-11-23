@@ -11346,6 +11346,9 @@
             "relaunchRequired": {
               "type": "boolean"
             },
+            "deviceWide": {
+              "type": "boolean"
+            },
             "surface": {
               "type": "string",
               "enum": ["wall", "table"]
@@ -48676,6 +48679,9 @@
               "enum": ["image", "qr", "clear"]
             },
             "relaunchRequired": {
+              "type": "boolean"
+            },
+            "deviceWide": {
               "type": "boolean"
             },
             "surface": {

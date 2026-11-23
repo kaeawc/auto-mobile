@@ -34,7 +34,8 @@
     "!dist/**/*.map",
     "schemas",
     "mcp-skills",
-    "ios/CameraPosterInjection/Injection/CameraPosterInjection.m"
+    "ios/CameraPosterInjection/Injection/CameraPosterInjection.m",
+    "ios/CameraPosterInjection/Injection/CameraPosterGate.c"
   ],
   "main": "dist/src/index.js",
   "publishConfig": {

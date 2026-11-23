@@ -9,11 +9,16 @@ const simB = "66666666-7777-8888-9999-000000000000";
 function setup() {
   const manager = new FakeSessionCleanupManager();
   const registry = new InMemoryIosCameraPosterRegistry();
-  registerIosCameraPosterSessionCleanup(manager, registry);
+  const deviceConfig = { removals: 0, removeAll: () => void deviceConfig.removals++ };
+  registerIosCameraPosterSessionCleanup(manager, registry, deviceConfig);
   registry.set(simA, { kind: "image", path: "/a.png" });
   registry.set(simB, { kind: "qr", text: "b", path: "/b.png" });
-  return { manager, registry };
+  return { manager, registry, deviceConfig };
 }
+
+test("registration removes device-wide poster files a previous daemon left", () => {
+  expect(setup().deviceConfig.removals).toBe(1);
+});
 
 test("a session release forgets only its simulator's poster", () => {
   const h = setup();

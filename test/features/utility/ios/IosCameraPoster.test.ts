@@ -2,6 +2,11 @@ import { expect, test } from "bun:test";
 import { resolve } from "node:path";
 import { DeviceState } from "../../../../src/features/utility/DeviceState";
 import {
+  IOS_CAMERA_POSTER_LAUNCH_ONLY_WARNING,
+  IOS_CAMERA_POSTER_RELAUNCH_WARNING,
+  writeIosCameraPoster,
+} from "../../../../src/features/utility/ios/IosCameraPoster";
+import {
   FakeIosCameraPosterDylibProvider,
   FakeIosCameraPosterRegistry,
 } from "../../../fakes/FakeIosCameraPoster";
@@ -109,4 +114,46 @@ test("dylib preflight failure is reported at set time and keeps the previous pos
   expect(result.cameraPoster?.error).toContain("Camera poster not recorded");
   expect(result.cameraPoster?.error).toContain("source not found");
   expect(h.registry.get(simulator.deviceId)).toEqual({ kind: "qr", text: "old", path: qr });
+});
+
+function deviceWideSetup(failure?: Error) {
+  const registry = new FakeIosCameraPosterRegistry();
+  const activated: string[] = [];
+  const deps = {
+    registry,
+    dylibProvider: new FakeIosCameraPosterDylibProvider(),
+    fileExists: (path: string) => path === image,
+    deviceWide: {
+      activate: async (udid: string) => {
+        activated.push(udid);
+        if (failure) {
+          throw failure;
+        }
+      },
+    },
+  };
+  return { registry, activated, deps };
+}
+
+test("a set poster is turned on device-wide for apps launched any way", async () => {
+  const h = deviceWideSetup();
+  const result = await writeIosCameraPoster(simulator, { mode: "image", path: image }, h.deps);
+  expect(h.activated).toEqual([simulator.deviceId]);
+  expect(result).toMatchObject({ supported: true, deviceWide: true, path: image });
+  expect(result.warning).toBe(IOS_CAMERA_POSTER_RELAUNCH_WARNING);
+});
+
+test("a device-wide failure keeps the poster for launchApp and says so", async () => {
+  const h = deviceWideSetup(new Error("launchctl refused"));
+  const result = await writeIosCameraPoster(simulator, { mode: "image", path: image }, h.deps);
+  expect(result).toMatchObject({ supported: true, deviceWide: false, path: image });
+  expect(result.error).toBeUndefined();
+  expect(result.warning).toBe(IOS_CAMERA_POSTER_LAUNCH_ONLY_WARNING);
+  expect(h.registry.get(simulator.deviceId)).toEqual({ kind: "image", path: image });
+});
+
+test("clear never touches the device-wide environment", async () => {
+  const h = deviceWideSetup();
+  await writeIosCameraPoster(simulator, { mode: "clear" }, h.deps);
+  expect(h.activated).toEqual([]);
 });

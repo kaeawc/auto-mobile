@@ -444,6 +444,18 @@ __attribute__((constructor)) static void AMActivate(void) {
     @autoreleasepool {
         NSDictionary *env = NSProcessInfo.processInfo.environment;
         NSString *path = env[@"AM_CAMERA_POSTER_PATH"], *qr = env[@"AM_CAMERA_POSTER_QR"];
+        NSString *config = env[@"AM_CAMERA_POSTER_CONFIG"];
+        if (!path.length && !qr.length && config.length) {
+            // Device-wide poster (#19047): the boot environment names a JSON file the host
+            // rewrites, so a new poster reaches the next launch of any app without a reboot.
+            NSData *data = [NSData dataWithContentsOfFile:config];
+            id json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+            if ([json isKindOfClass:NSDictionary.class]) {
+                id p = json[@"path"], q = json[@"qr"];
+                path = [p isKindOfClass:NSString.class] ? p : nil;
+                qr = [q isKindOfClass:NSString.class] ? q : nil;
+            }
+        }
         if (!path.length && !qr.length) return;
         if (!AMLoadPoster(path, qr)) return; // Invalid path wins too: no QR fallback.
         AMInstallObjects(); AMInstallDiscovery(); AMInstallSession(); AMInstallPreviewAndOutputs();

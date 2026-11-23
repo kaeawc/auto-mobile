@@ -129,11 +129,13 @@ Android devices, and Apple platforms other than iOS, do not support camera poste
 
 - Android emulators update the virtual-scene poster live (`surface: "wall"` or
   `"table"`).
-- On iOS Simulator, the call records the poster for each app's next `launchApp`.
-  It returns `method: "ios_simulator_dyld_injection"`, `path` when set, and
-  `relaunchRequired: true`. Relaunch running apps; iOS ignores `surface`. After
-  clearing, use `launchApp` with `coldBoot: true` to remove the poster from a
-  running app.
+- On iOS Simulator, the call sets the poster for the next launch of every app,
+  whether `launchApp`, the home screen or an XCUITest run starts it. It returns
+  `method: "ios_simulator_dyld_injection"`, `path` when set, `deviceWide: true`
+  and `relaunchRequired: true`. Relaunch running apps; iOS ignores `surface`.
+  After clearing, relaunch running apps (`launchApp` with `coldBoot: true`) to
+  remove the poster. `deviceWide: false` means only `launchApp` applies the
+  poster; the `warning` says so.
 
 `startDevice` accepts mutually exclusive `cameraPosterPath` or
 `cameraPosterQr: { text }`. Android requires a stopped emulator; iOS Simulator also

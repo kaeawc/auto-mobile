@@ -1,3 +1,6 @@
+import { DeviceConfigMirroringIosCameraPosterRegistry } from "./DeviceConfigMirroringIosCameraPosterRegistry";
+import { iosCameraPosterDeviceConfig } from "./IosCameraPosterDeviceConfig";
+
 /** A QR record injects its payload (the library renders the code); `path` is the host PNG preview. */
 export type IosCameraPoster =
   | { kind: "image"; path: string }
@@ -27,4 +30,7 @@ export class InMemoryIosCameraPosterRegistry implements IosCameraPosterRegistry 
 }
 
 export const iosCameraPosterRegistry: IosCameraPosterRegistry =
-  new InMemoryIosCameraPosterRegistry();
+  new DeviceConfigMirroringIosCameraPosterRegistry(
+    new InMemoryIosCameraPosterRegistry(),
+    iosCameraPosterDeviceConfig,
+  );

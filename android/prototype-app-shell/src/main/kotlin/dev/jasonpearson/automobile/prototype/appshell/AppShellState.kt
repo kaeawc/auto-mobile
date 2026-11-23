@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.prototype.appshell
 
+import dev.jasonpearson.automobile.protocol.PrototypeRuntimeBudget
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.prototype.PrototypeStorage
@@ -22,7 +23,7 @@ sealed interface AppShellState {
 class AppShellLoader(private val source: AppSpecSource, val storage: PrototypeStorage) {
   fun load(): AppShellState {
     val spec = source.readSpec() ?: return AppShellState.MissingSpec
-    return when (PrototypeSpecValidator.validate(spec)) {
+    return when (PrototypeSpecValidator.validate(spec, budget = PrototypeRuntimeBudget.LARGE)) {
       is PrototypeSpecValidation.Success -> AppShellState.Ready(spec)
       is PrototypeSpecValidation.Failure -> AppShellState.CorruptSpec
     }

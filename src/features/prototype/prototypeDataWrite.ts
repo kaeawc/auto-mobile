@@ -11,6 +11,7 @@ import { prototypeDataPathPointer, resolvePrototypeDataPointer } from "./prototy
 import { applyPrototypePatch, type PrototypePatchOp } from "./prototypePatch";
 import { record } from "./prototypeTemplate";
 import { prototypeDataError } from "./prototypeValidation";
+import { PROTOTYPE_BASE_BUDGET, type PrototypeRuntimeBudget } from "./prototypeRuntimeBudget";
 
 /**
  * The pure semantics of a `setData` / `appendData` / `prependData` / `removeData` action (#12519). Device runtimes
@@ -119,7 +120,10 @@ function setTargetRefusal(
     : undefined;
 }
 
-function valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult | undefined {
+function valueRefusal(
+  write: PrototypeDataWrite,
+  budget: PrototypeRuntimeBudget,
+): PrototypeDataWriteResult | undefined {
   if (write.op === "remove") {
     return undefined;
   }
@@ -137,12 +141,13 @@ function valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult | und
   if (["extend", "prepend"].includes(write.op) && !Array.isArray(write.value)) {
     return refused("invalid_value", `${name} needs an array value`);
   }
-  return maximumRefusal(write, name);
+  return maximumRefusal(write, name, budget);
 }
 
 function maximumRefusal(
   write: PrototypeDataWrite,
   name: string,
+  budget: PrototypeRuntimeBudget,
 ): PrototypeDataWriteResult | undefined {
   if (
     "maxItems" in write &&
@@ -150,7 +155,7 @@ function maximumRefusal(
     (!Number.isSafeInteger(write.maxItems) ||
       write.maxItems < 1 ||
       ((write.op === "upsert" || write.op === "append") &&
-        write.maxItems > contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS))
+        write.maxItems > budget.MAX_PROTOTYPE_DATA_ARRAY_ITEMS))
   ) {
     return refused("invalid_value", `${name} maxItems must be a positive safe integer`);
   }
@@ -239,6 +244,7 @@ function keyedWrite(
   data: PrototypeData,
   pointer: string,
   write: Extract<PrototypeDataWrite, { op: "set" | "remove" }>,
+  budget: PrototypeRuntimeBudget,
 ): PrototypeDataWriteResult {
   const { where } = write;
   const member = write.op === "set" ? write.member : undefined;
@@ -283,7 +289,7 @@ function keyedWrite(
   } else {
     changed[index] = { ...record(target[index]), [member]: write.value };
   }
-  return applyPrototypeDataWrite(data, { op: "set", path: write.path, value: changed });
+  return applyPrototypeDataWrite(data, { op: "set", path: write.path, value: changed }, budget);
 }
 
 /**
@@ -293,23 +299,25 @@ function keyedWrite(
  * start when maxItems is present. `prepend` inserts an ordered page at the start and trims
  * from the end, keeping the first maxItems rows; `remove` deletes an existing member or element
  * (later array elements shift down). The result must still satisfy the data limits, including
- * `MAX_PROTOTYPE_DATA_WRITE_BYTES`, or nothing is written.
+ * `MAX_PROTOTYPE_DATA_WRITE_BYTES`, or nothing is written. `budget` is the limits of the runtime
+ * the data lives in (#18804): the base budget unless it advertises a larger one.
  */
 export function applyPrototypeDataWrite(
   data: unknown,
   write: PrototypeDataWrite,
+  budget: PrototypeRuntimeBudget = PROTOTYPE_BASE_BUDGET,
 ): PrototypeDataWriteResult {
   const pointer = prototypeDataPathPointer(write.path);
   if (pointer === undefined) {
     return refused("invalid_path", `${write.path} is not a /data/<pointer> path`);
   }
-  const invalidValue = valueRefusal(write);
+  const invalidValue = valueRefusal(write, budget);
   if (invalidValue) {
     return invalidValue;
   }
   const current = (record(data) ?? {}) as PrototypeData;
   if (isKeyedWrite(write)) {
-    return keyedWrite(current, pointer, write);
+    return keyedWrite(current, pointer, write, budget);
   }
   const target = targetRefusal(current, pointer, write);
   if (target) {
@@ -321,8 +329,20 @@ export function applyPrototypeDataWrite(
   if (!applied.success) {
     return refused("not_found", `${write.path}: ${applied.error.message}`);
   }
-  const next = record(applied.spec.data);
-  const invalid = prototypeDataError(next, contract.limits.MAX_PROTOTYPE_DATA_WRITE_BYTES);
+  return writtenData(record(applied.spec.data), trimmed, budget);
+}
+
+/** The written data, unless it breaks the data limits of `budget`. */
+function writtenData(
+  next: Record<string, unknown> | undefined,
+  trimmed: number,
+  budget: PrototypeRuntimeBudget,
+): PrototypeDataWriteResult {
+  const invalid = prototypeDataError(
+    next,
+    budget.MAX_PROTOTYPE_DATA_WRITE_BYTES,
+    budget.MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
+  );
   if (!next || invalid) {
     const message = invalid?.message ?? "Data must stay an object";
     return refused(message.includes("limit") ? "limit_exceeded" : "invalid_value", message);

@@ -93,7 +93,7 @@ internal object PrototypeRepeatTree {
       else pointer?.let(state.data::source))
         ?: return fail(at, "Repeat path does not resolve to an array")
     val maximum =
-      if (node.text("type") == "list") PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS
+      if (node.text("type") == "list") state.data.listItems
       else PrototypeSpecValidator.maxRepeatItems
     if (items.size > maximum) return fail(at, "Repeat path resolves to more than $maximum items")
     val maxItems = (node["maxItems"] as? JsonPrimitive)?.doubleOrNull
@@ -102,7 +102,8 @@ internal object PrototypeRepeatTree {
     val invalid = items.indexOfFirst { it !is JsonObject }
     if (invalid >= 0) return fail(at, "Repeat path item $invalid is not an object")
     state.cells +=
-      if (derived != null) PrototypeRepeatData(JsonObject(mapOf("rows" to items))).cells("/rows")
+      if (derived != null)
+        PrototypeRepeatData(JsonObject(mapOf("rows" to items)), state.data.listItems).cells("/rows")
       else state.data.cells(checkNotNull(pointer))
     return if (state.cells > PrototypeSpecValidator.MAX_PROTOTYPE_REPEAT_PATH_CELLS)
       fail(at, "Repeat path cell limit exceeded")

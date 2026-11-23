@@ -183,6 +183,7 @@ const CLASSIFICATION: Classification = {
     "recentApps",
     "rotaryScroll",
     "glassesInput",
+    "xrHeadsetInput",
     "ambient",
     "rotateCrown",
     "reconcileDeviceResources",

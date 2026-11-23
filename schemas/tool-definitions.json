@@ -10272,7 +10272,8 @@
               "videoRecording",
               "wakeAndUnlock",
               "wearSurface",
-              "windowMode"
+              "windowMode",
+              "xrHeadsetInput"
             ]
           }
         }
@@ -10446,7 +10447,8 @@
               "videoRecording",
               "wakeAndUnlock",
               "wearSurface",
-              "windowMode"
+              "windowMode",
+              "xrHeadsetInput"
             ]
           }
         }
@@ -36170,7 +36172,8 @@
               "videoRecording",
               "wakeAndUnlock",
               "wearSurface",
-              "windowMode"
+              "windowMode",
+              "xrHeadsetInput"
             ]
           }
         },
@@ -49832,7 +49835,8 @@
             "videoRecording",
             "wakeAndUnlock",
             "wearSurface",
-            "windowMode"
+            "windowMode",
+            "xrHeadsetInput"
           ]
         },
         "toolNames": {
@@ -49965,7 +49969,8 @@
               "videoRecording",
               "wakeAndUnlock",
               "wearSurface",
-              "windowMode"
+              "windowMode",
+              "xrHeadsetInput"
             ]
           }
         },
@@ -66622,6 +66627,134 @@
           "$ref": "#/$defs/__schema1"
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
+    }
+  },
+  {
+    "name": "xrHeadsetInput",
+    "title": "XR Headset Hand and Eye Input",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Android XR headset emulator hand and eye input. pointer hand aims the right-hand ray at a display point and pinches; pointer eye moves the gaze point and clicks. action select aims, presses and releases; point only aims (hover); drag pinch-drags from x,y to toX,toY (hand only). Coordinates are display pixels. Sent over the emulator's gRPC streamInputEvent (emulator 35.4+); the emulator returns no acknowledgement, so observe afterwards. Refused on devices that are not XR headset emulators.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "pointer": {
+          "type": "string",
+          "enum": ["hand", "eye"],
+          "description": "hand: right-hand ray and pinch; eye: gaze point and click"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["select", "point", "drag"],
+          "description": "select: aim, press, release; point: aim only; drag: pinch-drag (hand only)"
+        },
+        "x": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16384,
+          "description": "Display x in pixels, as in observe screenSize"
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16384,
+          "description": "Display y in pixels"
+        },
+        "toX": {
+          "description": "drag: release x",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16384
+        },
+        "toY": {
+          "description": "drag: release y",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16384
+        },
+        "holdMs": {
+          "description": "select: press length in ms, default 100",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "durationMs": {
+          "description": "drag: duration in ms, default 300",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos", "visionos"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["pointer", "action", "x", "y"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "pointer": {
+          "type": "string",
+          "enum": ["hand", "eye"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["select", "point", "drag"]
+        },
+        "rpc": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string",
+          "enum": ["xr_hand_event", "xr_eye_event"]
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "buttons": {
+                "type": "number"
+              }
+            },
+            "required": ["x", "y", "buttons"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["success", "message", "pointer", "action", "rpc", "field", "events"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/requires": ["platform:android", "platform:ios"]

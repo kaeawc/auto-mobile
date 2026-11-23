@@ -103,6 +103,7 @@ export const TOOL_EMOJI: Readonly<Record<string, ToolEmojiEntry>> = Object.freez
   windowMode: tool("🪟"),
   rotaryScroll: tool("🎛️"),
   glassesInput: tool("🥽"),
+  xrHeadsetInput: tool("👀"),
   ambient: tool("🌙"),
   wearSurface: tool("⌚"),
   rotateCrown: tool("👑"),

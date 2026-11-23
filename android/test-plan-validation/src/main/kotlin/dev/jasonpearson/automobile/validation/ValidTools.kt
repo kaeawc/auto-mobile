@@ -73,6 +73,7 @@ object ValidTools {
         "wearSurface",
         "rotaryScroll",
         "glassesInput",
+        "xrHeadsetInput",
         "rotateCrown",
         "recordDeviceGestures",
         "recordToolCalls",

@@ -33,6 +33,7 @@ import { registerAmbientTools } from "./ambientTool";
 import { registerSessionRequirementCapabilityTool } from "./sessionRequirementCapabilityTool";
 import { registerWearSurfaceTools } from "./wearSurfaceTool";
 import { registerGlassesInputTools } from "./glassesInputTool";
+import { registerXrHeadsetInputTools } from "./xrHeadsetInputTool";
 import { registerRotaryScrollTools } from "./rotaryScrollTool";
 import { registerRotateCrownTools } from "./rotateCrownTool";
 import { registerWindowModeTools } from "./windowModeTools";
@@ -140,6 +141,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerWindowModeTools();
   registerRotaryScrollTools();
   registerGlassesInputTools();
+  registerXrHeadsetInputTools();
   registerAmbientTools();
   registerWearSurfaceTools();
   registerRotateCrownTools();

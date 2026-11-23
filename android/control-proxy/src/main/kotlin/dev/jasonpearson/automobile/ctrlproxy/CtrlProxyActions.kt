@@ -194,6 +194,13 @@ interface CtrlProxyActions {
 
   suspend fun deleteSavedPrototype(requestId: String?, id: String)
 
+  suspend fun queuePrototypeCallOutcome(
+    requestId: String?,
+    id: String,
+    call: String,
+    outcome: JsonObject,
+  )
+
   suspend fun simulatePrototypePlatform(
     requestId: String?,
     id: String,

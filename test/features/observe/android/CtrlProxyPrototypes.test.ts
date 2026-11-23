@@ -2125,3 +2125,57 @@ describe("CtrlProxy simulate_prototype_platform", () => {
     }
   });
 });
+
+describe("CtrlProxy queue_prototype_call_outcome", () => {
+  const request = { id: "panel", call: "test.echo", outcome: { result: null } };
+
+  test("refuses legacy peers before writing", async () => {
+    for (const commands of [null, [], ["full_command_set_v1", "queue_prototype_call_outcome"]]) {
+      const { client, socket } = await harness(commands);
+      const send = spyOn(socket, "send");
+      try {
+        await expect(client.requestQueuePrototypeCallOutcome(request)).rejects.toThrow(
+          "prototype_platform_outcomes_v1",
+        );
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        send.mockRestore();
+      }
+    }
+  });
+
+  test("sends a correlated request and returns a device refusal", async () => {
+    const { client, socket, receive } = await harness([
+      "full_command_set_v1",
+      "request_id_echo_v1",
+      "queue_prototype_call_outcome",
+      "prototype_platform_outcomes_v1",
+    ]);
+    const frames: Record<string, unknown>[] = [];
+    const send = spyOn(socket, "send").mockImplementation((data) => {
+      const frame = JSON.parse(String(data));
+      frames.push(frame);
+      void receive({
+        type: "prototype_result",
+        requestId: frame.requestId,
+        success: false,
+        error: "queue full",
+      });
+    });
+    try {
+      expect(await client.requestQueuePrototypeCallOutcome(request)).toMatchObject({
+        success: false,
+        error: "queue full",
+      });
+      expect(frames).toEqual([
+        { type: "queue_prototype_call_outcome", requestId: expect.any(String), ...request },
+      ]);
+      await expect(
+        client.requestQueuePrototypeCallOutcome({ ...request, call: "test.unknown" }),
+      ).rejects.toThrow("Unknown platform call");
+      expect(frames).toHaveLength(1);
+    } finally {
+      send.mockRestore();
+    }
+  });
+});

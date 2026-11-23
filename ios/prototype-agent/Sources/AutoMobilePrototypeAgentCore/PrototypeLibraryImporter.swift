@@ -30,7 +30,7 @@ struct PrototypeLibraryImporter {
     static let maxTotalImagePixels = 64_000_000
     let store: PrototypeLibraryStore
     var imageProbe: any ImageHeaderProbe = PrototypeLibraryImageIOProbe()
-    var supportedCapabilities = Set(AutoMobilePrototypeCapabilities.supported)
+    var supportedCapabilities: Set<String>?
 
     /// Bytes alone choose the format; provenance is chosen by the app's receiving route.
     @discardableResult

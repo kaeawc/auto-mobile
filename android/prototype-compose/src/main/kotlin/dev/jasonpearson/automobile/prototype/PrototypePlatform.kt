@@ -56,6 +56,10 @@ interface PrototypePlatformModule {
    */
   suspend fun simulate(event: PlatformEvent): Boolean = false
 
+  /** Opts this module into host-only simulation of call outcomes. */
+  val supportsSimulation: Boolean
+    get() = false
+
   val events: Flow<PlatformEvent>
   val state: StateFlow<JsonObject>
 

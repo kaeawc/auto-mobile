@@ -480,3 +480,39 @@ describe("IosPrototypeTransport.simulatePlatformEvent", () => {
     expect(requests).toHaveLength(1);
   });
 });
+
+describe("IosPrototypeTransport.queueCallOutcome", () => {
+  const input = { id: "p", call: "test.echo", outcome: { result: null } };
+
+  test("requires both capability and request support", async () => {
+    for (const capabilities of [
+      [],
+      ["prototype_platform_outcomes_v1"],
+      ["queue_prototype_call_outcome"],
+    ]) {
+      const calls: string[] = [];
+      const transport = new IosPrototypeTransport(fakeAgent(capabilities, calls));
+      await expect(transport.queueCallOutcome(input)).rejects.toThrow(
+        "prototype_platform_outcomes_v1",
+      );
+      expect(calls).toEqual([]);
+    }
+  });
+
+  test("validates before dispatch and forwards the request and timeout", async () => {
+    const requests: Parameters<PrototypeAgentClient["request"]>[] = [];
+    const transport = new IosPrototypeTransport(
+      fakeAgent(
+        ["prototype_platform_outcomes_v1", "queue_prototype_call_outcome"],
+        [],
+        undefined,
+        requests,
+      ),
+    );
+    expect(await transport.queueCallOutcome(input, 200)).toMatchObject({ success: true });
+    await expect(transport.queueCallOutcome({ ...input, call: "test.missing" })).rejects.toThrow(
+      "Unknown platform call",
+    );
+    expect(requests).toEqual([["queue_prototype_call_outcome", input, { timeoutMs: 200 }]]);
+  });
+});

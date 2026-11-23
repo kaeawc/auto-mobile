@@ -33,6 +33,8 @@ class PrototypeCapabilityAdvertisementTest {
     assertTrue("prototype_remote_image_v1" in commands)
     assertTrue("simulate_prototype_platform" in commands)
     assertTrue("prototype_platform_simulation_v1" in commands)
+    assertTrue("prototype_platform_outcomes_v1" in commands)
+    assertTrue("queue_prototype_call_outcome" in commands)
   }
 
   @Test

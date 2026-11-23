@@ -1,4 +1,7 @@
-import type { PrototypePlatformSimulationRequest } from "./ctrlProxyProtocol";
+import {
+  queuePrototypeCallOutcomeMessage,
+  requirePrototypePlatformOutcomesSupport,
+} from "../../prototype/prototypePlatformOutcomes";
 import {
   requirePrototypePlatformSimulationSupport,
   simulatePrototypePlatformMessage,
@@ -76,25 +79,18 @@ import { PROTOTYPE_RESPONSE_MESSAGE_TYPE } from "../../prototype/prototypeReques
 import {
   ctrlProxyRequests,
   PROTOTYPE_SAVED_CAPABILITY,
+  type PrototypeRequestMessage,
+  type PrototypePlatformOutcomeRequest,
+  type PrototypePlatformSimulationRequest,
   isSavedPrototypeErrorCode,
-  type SavePrototypeMessage,
-  type PinSavedPrototypeMessage,
-  type ListSavedPrototypesMessage,
-  type ClearPrototypeStorageMessage,
-  type AdvancePrototypeClockMessage,
-  type SimulatePrototypePlatformMessage,
-  type DeleteSavedPrototypeMessage,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_MULTI_SURFACE_CAPABILITY,
   PROTOTYPE_PATCH_CAPABILITY,
-  type PatchPrototypeMessage,
   PROTOTYPE_EVENT_KINDS,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   UNKNOWN_PROTOTYPE_EVENT_KIND,
-  type InspectPrototypesMessage,
   type ShowPrototypeMessage,
-  type DismissPrototypeMessage,
   type PrototypeAssetResult,
   type PrototypeDismiss,
   type PrototypeEvent,
@@ -434,6 +430,13 @@ export class CtrlProxyPrototypes {
       perf,
     );
     return withHostOnlySavedPrototypes(reply, this.context.savedPrototypeMirror);
+  }
+  async requestQueuePrototypeCallOutcome(
+    request: PrototypePlatformOutcomeRequest,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    return this.request(queuePrototypeCallOutcomeMessage(request), timeoutMs, perf);
   }
   async requestSimulatePrototypePlatform(
     simulation: PrototypePlatformSimulationRequest,
@@ -846,18 +849,7 @@ export class CtrlProxyPrototypes {
   }
 
   private async request(
-    message:
-      | ShowPrototypeMessage
-      | DismissPrototypeMessage
-      | InspectPrototypesMessage
-      | PatchPrototypeMessage
-      | PinSavedPrototypeMessage
-      | SavePrototypeMessage
-      | ListSavedPrototypesMessage
-      | DeleteSavedPrototypeMessage
-      | ClearPrototypeStorageMessage
-      | AdvancePrototypeClockMessage
-      | SimulatePrototypePlatformMessage,
+    message: PrototypeRequestMessage,
     timeoutMs: number,
     perf?: PerformanceTracker,
     deliveryOptions: Pick<SendCommandOptions<PrototypeResult>, "onDispatch" | "timeoutError"> = {},
@@ -885,20 +877,7 @@ export class CtrlProxyPrototypes {
     });
   }
 
-  private requirePrototypeSupport(
-    message:
-      | ShowPrototypeMessage
-      | DismissPrototypeMessage
-      | InspectPrototypesMessage
-      | PatchPrototypeMessage
-      | PinSavedPrototypeMessage
-      | SavePrototypeMessage
-      | ListSavedPrototypesMessage
-      | DeleteSavedPrototypeMessage
-      | ClearPrototypeStorageMessage
-      | AdvancePrototypeClockMessage
-      | SimulatePrototypePlatformMessage,
-  ): void {
+  private requirePrototypeSupport(message: PrototypeRequestMessage): void {
     const supports = (command: string) => this.context.isCommandSupported?.(command);
     this.requireShaderSpecSupport(message, supports);
     if (message.type === "patch_prototype" && supports(PROTOTYPE_PATCH_CAPABILITY) !== true) {
@@ -915,6 +894,7 @@ export class CtrlProxyPrototypes {
     requirePrototypeStorageSupport(message.type, supports);
     requirePrototypeTimersSupport(message.type, supports);
     requirePrototypePlatformSimulationSupport(message.type, supports);
+    requirePrototypePlatformOutcomesSupport(message.type, supports);
     const type = message.type;
     if (
       [

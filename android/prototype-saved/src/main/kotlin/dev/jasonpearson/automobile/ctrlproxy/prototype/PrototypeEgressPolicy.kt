@@ -29,6 +29,7 @@ class PrototypeEgressPolicy(
   private val daemonPorts: Set<Int> = DEFAULT_DAEMON_PORTS,
   private val allowLoopback: Boolean = false,
   private val blockPrivateNetworks: Boolean = false,
+  private val blockPrivateAddresses: Boolean = false,
 ) : PrototypeDestinationPolicy {
   /** Retains the host's protected ports while enabling the image contract's stricter ranges. */
   internal fun forRemoteImages(allowLoopback: Boolean): PrototypeEgressPolicy =
@@ -60,11 +61,20 @@ class PrototypeEgressPolicy(
     ) {
       return PrototypeEgressDecision.Blocked("Blocked destination address")
     }
-    if (port in daemonPorts && addresses.any { privateAddress(it) }) {
-      return PrototypeEgressDecision.Blocked("Blocked destination port on a non-public address")
-    }
-    return PrototypeEgressDecision.Allow
+    return privateAddressDecision(port, addresses)
   }
+
+  private fun privateAddressDecision(
+    port: Int,
+    addresses: List<ByteArray>,
+  ): PrototypeEgressDecision =
+    when {
+      !(blockPrivateAddresses || port in daemonPorts) || addresses.none(::privateAddress) ->
+        PrototypeEgressDecision.Allow
+      blockPrivateAddresses ->
+        PrototypeEgressDecision.Blocked("Blocked private destination address")
+      else -> PrototypeEgressDecision.Blocked("Blocked destination port on a non-public address")
+    }
 
   private fun isLoopbackDestination(name: String, resolvedAddresses: List<InetAddress>): Boolean =
     name in setOf("localhost", "127.0.0.1", "::1") && resolvedAddresses.all { it.isLoopbackAddress }

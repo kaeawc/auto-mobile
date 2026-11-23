@@ -196,6 +196,7 @@ describe("getStaticToolDefinitions", () => {
             "magnification",
             "magnificationScale",
             "extraDim",
+            "renderOverlays",
           ],
         },
       ],

@@ -15,6 +15,8 @@ import {
 import { DisplayProfileRestoreRegistry } from "../../../src/features/utility/DisplayProfileRestore";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
+import { FakeSimulatorRenderOverlayControl } from "../../fakes/FakeSimulatorRenderOverlayControl";
+import { ALL_RENDER_OVERLAYS_OFF } from "../../../src/features/utility/displayRenderOverlays";
 import type {
   CtrlProxyAppearance,
   CtrlProxyAppearanceResult,
@@ -54,6 +56,7 @@ const iosPhysical: BootedDevice = {
 function createDisplayConfig(device: BootedDevice, dependencies: DisplayConfigDependencies) {
   return new DisplayConfig(device, {
     themeBaselines: new Map(),
+    renderOverlays: new FakeSimulatorRenderOverlayControl(),
     geometry: { registry: new DisplayProfileRestoreRegistry(), invalidate: () => {} },
     screenControls: { islandSupport: { supportsDynamicIsland: async () => true } },
     ...dependencies,
@@ -740,6 +743,7 @@ describe("DisplayConfig physical iOS theme through the runner (#14092)", () => {
     const config = new DisplayConfig(iosPhysical, {
       simctl,
       themeBaselines,
+      renderOverlays: new FakeSimulatorRenderOverlayControl(),
       iosRunnerAppearance: runner,
     });
     return { simctl, config };
@@ -757,6 +761,7 @@ describe("DisplayConfig physical iOS theme through the runner (#14092)", () => {
       fontScale: false,
       density: false,
       theme: true,
+      renderOverlays: false,
       dynamicIsland: false,
       backlight: false,
       increaseContrast: false,
@@ -837,6 +842,7 @@ describe("DisplayConfig iOS Simulator theme support", () => {
       fontScale: true,
       density: false,
       theme: true,
+      renderOverlays: true,
       dynamicIsland: true,
       backlight: true,
     });
@@ -850,7 +856,11 @@ describe("DisplayConfig iOS Simulator theme support", () => {
 
     expect(result.success).toBe(true);
     // The fake answers the island default read with no output, the unset (visible) state.
-    expect(result.current).toEqual({ theme: "dark", dynamicIsland: "visible" });
+    expect(result.current).toEqual({
+      theme: "dark",
+      dynamicIsland: "visible",
+      renderOverlays: ALL_RENDER_OVERLAYS_OFF,
+    });
     // The read is issued as an argv array via the seam, not a raw simctl spawn.
     expect(simctlArgvCalls(simctl)).toContainEqual(["ui", iosSimulator.deviceId, "appearance"]);
   });

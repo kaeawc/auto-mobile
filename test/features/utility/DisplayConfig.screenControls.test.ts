@@ -5,6 +5,7 @@ import { DYNAMIC_ISLAND_UNSUPPORTED_ERROR } from "../../../src/features/utility/
 import type { SimCtl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeSimulatorRenderOverlayControl } from "../../fakes/FakeSimulatorRenderOverlayControl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const simulator: BootedDevice = {
@@ -49,6 +50,7 @@ function config(device: BootedDevice, simctl: FakeSimulator, island = true) {
   timer.enableAutoAdvance();
   return new DisplayConfig(device, {
     simctl,
+    renderOverlays: new FakeSimulatorRenderOverlayControl(),
     adbFactory: new FakeAdbClientFactory(),
     contentSizeBaselines: new Map(),
     accessibilityBaselines: new Map(),

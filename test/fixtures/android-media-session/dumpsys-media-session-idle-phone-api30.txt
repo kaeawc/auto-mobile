@@ -1,0 +1,59 @@
+MEDIA SESSION SERVICE (dumpsys media_session)
+
+3 sessions listeners.
+Global priority session is com.android.server.telecom/HeadsetMediaButton (userId=0)
+  HeadsetMediaButton com.android.server.telecom/HeadsetMediaButton (userId=0)
+    ownerPid=516, ownerUid=1000, userId=0
+    package=com.android.server.telecom
+    launchIntent=null
+    mediaButtonReceiver=null
+    active=false
+    flags=65537
+    rating type=0
+    controllers: 0
+    state=null
+    audioAttrs=AudioAttributes: usage=USAGE_VOICE_COMMUNICATION content=CONTENT_TYPE_SPEECH flags=0x800 tags= bundle=null
+    volumeType=1, controlType=2, max=0, current=0
+    metadata: null
+    queueTitle=null, size=0
+User Records:
+Record for full_user=0
+  Volume key long-press listener: null
+  Volume key long-press listener package: 
+  Media key listener: null
+  Media key listener package: 
+  OnMediaKeyEventDispatchedListener: added 0 listener(s)
+  OnMediaKeyEventSessionChangedListener: added 1 listener(s)
+    from com.android.bluetooth
+  Last MediaButtonReceiver: null
+  Media button session is null
+  Sessions Stack - have 2 sessions:
+    YouTube playerlib com.google.android.apps.youtube.music/YouTube playerlib (userId=0)
+      ownerPid=2223, ownerUid=10137, userId=0
+      package=com.google.android.apps.youtube.music
+      launchIntent=null
+      mediaButtonReceiver=MBR {pi=PendingIntent{342b8bb: PendingIntentRecord{353d1d8 com.google.android.apps.youtube.music broadcastIntent}}, type=1}
+      active=false
+      flags=3
+      rating type=2
+      controllers: 0
+      state=PlaybackState {state=0, position=0, buffered position=0, speed=1.0, updated=149905, actions=11264, custom actions=[], active item id=-1, error=null}
+      audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_UNKNOWN flags=0x800 tags= bundle=null
+      volumeType=1, controlType=2, max=0, current=0
+      metadata: null
+      queueTitle=null, size=0
+    YouTube playerlib com.google.android.youtube/YouTube playerlib (userId=0)
+      ownerPid=2299, ownerUid=10142, userId=0
+      package=com.google.android.youtube
+      launchIntent=null
+      mediaButtonReceiver=MBR {pi=PendingIntent{9b05931: PendingIntentRecord{8291816 com.google.android.youtube broadcastIntent}}, type=1}
+      active=false
+      flags=3
+      rating type=2
+      controllers: 0
+      state=PlaybackState {state=0, position=0, buffered position=0, speed=1.0, updated=150556, actions=8192, custom actions=[], active item id=-1, error=null}
+      audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_UNKNOWN flags=0x800 tags= bundle=null
+      volumeType=1, controlType=2, max=0, current=0
+      metadata: null
+      queueTitle=null, size=0
+Audio playback (lastly played comes first)

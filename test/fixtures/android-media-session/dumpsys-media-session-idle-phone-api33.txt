@@ -1,0 +1,120 @@
+MEDIA SESSION SERVICE (dumpsys media_session)
+
+6 sessions listeners.
+Global priority session is com.android.server.telecom/HeadsetMediaButton (userId=0)
+  HeadsetMediaButton com.android.server.telecom/HeadsetMediaButton (userId=0)
+    ownerPid=503, ownerUid=1000, userId=0
+    package=com.android.server.telecom
+    launchIntent=null
+    mediaButtonReceiver=null
+    active=false
+    flags=65537
+    rating type=0
+    controllers: 0
+    state=null
+    audioAttrs=AudioAttributes: usage=USAGE_VOICE_COMMUNICATION content=CONTENT_TYPE_SPEECH flags=0x800 tags= bundle=null
+    volumeType=1, controlType=2, max=0, current=0
+    metadata: null
+    queueTitle=null, size=0
+User Records:
+Record for full_user=0
+  Volume key long-press listener: null
+  Volume key long-press listener package: 
+  Media key listener: null
+  Media key listener package: 
+  OnMediaKeyEventDispatchedListener: added 0 listener(s)
+  OnMediaKeyEventSessionChangedListener: added 2 listener(s)
+    from com.google.android.bluetooth
+    from com.google.android.bluetooth
+  Last MediaButtonReceiver: null
+  Media button session is null
+  Sessions Stack - have 6 sessions:
+    BluetoothMediaBrowserService com.google.android.bluetooth/BluetoothMediaBrowserService (userId=0)
+      ownerPid=1018, ownerUid=1002, userId=0
+      package=com.google.android.bluetooth
+      launchIntent=null
+      mediaButtonReceiver=null
+      active=false
+      flags=3
+      rating type=0
+      controllers: 0
+      state=PlaybackState {state=7, position=0, buffered position=0, speed=0.0, updated=44903, actions=0, custom actions=[], active item id=-1, error=Bluetooth audio disconnected}
+      audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_UNKNOWN flags=0x800 tags= bundle=null
+      volumeType=1, controlType=2, max=0, current=0
+      metadata: null
+      queueTitle=Now Playing, size=0
+    BluetoothMediaBrowserService com.google.android.bluetooth/BluetoothMediaBrowserService (userId=0)
+      ownerPid=1018, ownerUid=1002, userId=0
+      package=com.google.android.bluetooth
+      launchIntent=null
+      mediaButtonReceiver=null
+      active=false
+      flags=3
+      rating type=0
+      controllers: 0
+      state=PlaybackState {state=7, position=0, buffered position=0, speed=0.0, updated=45243, actions=0, custom actions=[], active item id=-1, error=Bluetooth audio disconnected}
+      audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_UNKNOWN flags=0x800 tags= bundle=null
+      volumeType=1, controlType=2, max=0, current=0
+      metadata: null
+      queueTitle=Now Playing, size=0
+    BluetoothMediaBrowserService com.google.android.bluetooth/BluetoothMediaBrowserService (userId=0)
+      ownerPid=1018, ownerUid=1002, userId=0
+      package=com.google.android.bluetooth
+      launchIntent=null
+      mediaButtonReceiver=null
+      active=false
+      flags=3
+      rating type=0
+      controllers: 0
+      state=PlaybackState {state=7, position=0, buffered position=0, speed=0.0, updated=61359, actions=0, custom actions=[], active item id=-1, error=Bluetooth audio disconnected}
+      audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_UNKNOWN flags=0x800 tags= bundle=null
+      volumeType=1, controlType=2, max=0, current=0
+      metadata: null
+      queueTitle=Now Playing, size=0
+    BluetoothMediaBrowserService com.google.android.bluetooth/BluetoothMediaBrowserService (userId=0)
+      ownerPid=1018, ownerUid=1002, userId=0
+      package=com.google.android.bluetooth
+      launchIntent=null
+      mediaButtonReceiver=null
+      active=false
+      flags=3
+      rating type=0
+      controllers: 0
+      state=PlaybackState {state=7, position=0, buffered position=0, speed=0.0, updated=61595, actions=0, custom actions=[], active item id=-1, error=Bluetooth audio disconnected}
+      audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_UNKNOWN flags=0x800 tags= bundle=null
+      volumeType=1, controlType=2, max=0, current=0
+      metadata: null
+      queueTitle=Now Playing, size=0
+    YouTube playerlib com.google.android.youtube/YouTube playerlib (userId=0)
+      ownerPid=2009, ownerUid=10144, userId=0
+      package=com.google.android.youtube
+      launchIntent=null
+      mediaButtonReceiver=MBR {pi=PendingIntent{dd508d: PendingIntentRecord{6d47242 com.google.android.youtube broadcastIntent}}, type=1}
+      active=false
+      flags=3
+      rating type=2
+      controllers: 0
+      state=PlaybackState {state=0, position=0, buffered position=0, speed=1.0, updated=64397, actions=8192, custom actions=[], active item id=-1, error=null}
+      audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_UNKNOWN flags=0x800 tags= bundle=null
+      volumeType=1, controlType=2, max=0, current=0
+      metadata: null
+      queueTitle=null, size=0
+    YouTube playerlib com.google.android.apps.youtube.music/YouTube playerlib (userId=0)
+      ownerPid=1993, ownerUid=10128, userId=0
+      package=com.google.android.apps.youtube.music
+      launchIntent=null
+      mediaButtonReceiver=MBR {pi=PendingIntent{450f253: PendingIntentRecord{f7ea790 com.google.android.apps.youtube.music broadcastIntent}}, type=1}
+      active=false
+      flags=3
+      rating type=2
+      controllers: 0
+      state=PlaybackState {state=0, position=0, buffered position=0, speed=1.0, updated=84765, actions=11828, custom actions=[], active item id=-1, error=null}
+      audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_UNKNOWN flags=0x800 tags= bundle=null
+      volumeType=1, controlType=2, max=0, current=0
+      metadata: null
+      queueTitle=Up next, size=0
+Audio playback (lastly played comes first)
+Media session config:
+  media_button_receiver_fgs_allowlist_duration_ms: [cur: 10000, def: 10000]
+  media_session_calback_fgs_allowlist_duration_ms: [cur: 10000, def: 10000]
+  media_session_callback_fgs_while_in_use_temp_allow_duration_ms: [cur: 10000, def: 10000]

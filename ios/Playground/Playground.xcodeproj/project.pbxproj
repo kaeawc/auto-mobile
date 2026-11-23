@@ -103,6 +103,7 @@
 		39AA033BD73C67F66C6EABEA /* PrototypeTestPlatformModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CC5CABBF9DC546A2DDE1E4E /* PrototypeTestPlatformModule.swift */; };
 		3A2A9A65828D3CD103C00BE1 /* StatusSheetDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA12565BE3936B47614D8005 /* StatusSheetDemo.swift */; };
 		3D8D8CC43D6338FD4D61F842 /* PrototypeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21C2E27DE1CEF36FEF2C6AE4 /* PrototypeSession.swift */; };
+		3E4C9DEF70111CD15624404C /* PrototypePermissionAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05DBBA2B96C9C95B2C93D62C /* PrototypePermissionAuthorization.swift */; };
 		3ECEDE0267DF08815044CFE5 /* PrototypeRealtimeModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8F266FB669C94B188E02E76 /* PrototypeRealtimeModule.swift */; };
 		3F0DA35E0E0DAC4607B1106B /* PrototypeRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E9134250AEFE1B860518C4D /* PrototypeRoutes.swift */; };
 		3FBA048AE724A3174AFB11C8 /* PrototypeChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C49166A583575982B51BCE /* PrototypeChart.swift */; };
@@ -239,6 +240,7 @@
 		9CCD400F276F71C1E5A91F38 /* PrototypeRecordingMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF88C9549715E4B0A280F41F /* PrototypeRecordingMode.swift */; };
 		9EF6CE1F7EAC1C61318889E2 /* PrototypeContentTransition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A62DD03C222CBAE87FD4DAC /* PrototypeContentTransition.swift */; };
 		A03793F43CE3F28402017D11 /* SdkContractRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6832B4473F28F2540F82E439 /* SdkContractRunner.swift */; };
+		A0A24D9A0B4E3811A6F8F68E /* FrameworkPrototypePermissionAuthorities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29CF7DD4B689320195D22F8E /* FrameworkPrototypePermissionAuthorities.swift */; };
 		A1C75CB690D850EDDB178E7A /* PrototypePlatformPermissionsData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76EA67B71B75273AB6F35432 /* PrototypePlatformPermissionsData.swift */; };
 		A49D08856839C5C3A9219595 /* PrototypeStateValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62EE8EE972813ED0ADC3489E /* PrototypeStateValidator.swift */; };
 		A4D71C3E781698007BCA8909 /* SystemDeviceStatusSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = D76F5839DB5F59D2FF8063A6 /* SystemDeviceStatusSources.swift */; };
@@ -444,6 +446,7 @@
 		03EAAC828326DC3589A67541 /* PrototypeStylePolishV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeStylePolishV2.swift; sourceTree = "<group>"; };
 		041CEC3D64E43F535025A583 /* PrototypeMcpRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeMcpRequest.swift; sourceTree = "<group>"; };
 		04D60C9B89D7C90C092DDD0B /* PrototypeChatScroll.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeChatScroll.swift; sourceTree = "<group>"; };
+		05DBBA2B96C9C95B2C93D62C /* PrototypePermissionAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypePermissionAuthorization.swift; sourceTree = "<group>"; };
 		06C02BE035F32E984F52B8D0 /* FilesPickerProbeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesPickerProbeUITests.swift; sourceTree = "<group>"; };
 		07A049ACBE32C8463A2B9997 /* PrototypeMediaQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeMediaQueue.swift; sourceTree = "<group>"; };
 		07A4515FA878D140F0562D3C /* PrototypeRequestValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeRequestValidator.swift; sourceTree = "<group>"; };
@@ -489,6 +492,7 @@
 		28C0541E5EF5F0C370043AA6 /* PrototypeCarousel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeCarousel.swift; sourceTree = "<group>"; };
 		29773E91840B2EB5662D794C /* PrototypeSessionStackActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeSessionStackActions.swift; sourceTree = "<group>"; };
 		29B6F60ED56A189273FF3F94 /* PrototypeOverlayFocus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeOverlayFocus.swift; sourceTree = "<group>"; };
+		29CF7DD4B689320195D22F8E /* FrameworkPrototypePermissionAuthorities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameworkPrototypePermissionAuthorities.swift; sourceTree = "<group>"; };
 		2A0E49C79AD532DDF1FF940E /* ShareSinkSummaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSinkSummaryTests.swift; sourceTree = "<group>"; };
 		2A8BC8E5B6EA4CEE87E3D905 /* PhotosAuthorizationProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosAuthorizationProbeTests.swift; sourceTree = "<group>"; };
 		2B46870C2DDF4A2F73A5778B /* Colors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Colors.swift; sourceTree = "<group>"; };
@@ -845,6 +849,7 @@
 				56C335E6F57D72AE140FAFF2 /* AVFoundationMediaCaptureProbe.swift */,
 				4EB20E85087D10F1E1B5CDAB /* CLLocationManagerPrototypeLocationSource.swift */,
 				BA5D44A565808C7FE556DDEA /* CoreMotionPrototypeSensorSource.swift */,
+				29CF7DD4B689320195D22F8E /* FrameworkPrototypePermissionAuthorities.swift */,
 				23086D58D4945F1603F4B8EF /* LAContextPrototypeBiometricSource.swift */,
 				5818E1C04BB2B5B68F3E4D68 /* PrototypeAdaptiveView.swift */,
 				2F4FA3A4265DD8FEA7AE35D3 /* PrototypeAnchorViews.swift */,
@@ -1188,6 +1193,7 @@
 				ACD15506636DE7EE09249F1B /* PrototypeOrientationLock.swift */,
 				0885276692D8CCE01BD2F127 /* PrototypePagerOptions.swift */,
 				ED5AA5056D70CB85AC31BA03 /* PrototypePatch.swift */,
+				05DBBA2B96C9C95B2C93D62C /* PrototypePermissionAuthorization.swift */,
 				0C68CFE4F51FCCF8478FF0B8 /* PrototypePermissions.swift */,
 				3BD9D53119B6E9E9FE54D06E /* PrototypePinnedCall.swift */,
 				72A152ABD47FA51591E22423 /* PrototypePinnedHttpClient.swift */,
@@ -1561,6 +1567,7 @@
 				831EC73F5E08A1B69A515B7F /* AutoMobilePrototypeView.swift in Sources */,
 				E9313268346F690E192BAF2E /* CLLocationManagerPrototypeLocationSource.swift in Sources */,
 				A7D5DC570615EAFB4C92BFF4 /* CoreMotionPrototypeSensorSource.swift in Sources */,
+				A0A24D9A0B4E3811A6F8F68E /* FrameworkPrototypePermissionAuthorities.swift in Sources */,
 				A97E3ED717D3FAE78E8766C4 /* KeychainPrototypeSecureValueStore.swift in Sources */,
 				57EBA5DF55F26B67FE37F122 /* LAContextPrototypeBiometricSource.swift in Sources */,
 				AA71A3F4939558B77A6F6F03 /* NWPathConnectivitySource.swift in Sources */,
@@ -1752,6 +1759,7 @@
 				1251F657AF0B4EFDD3AAEAE1 /* PrototypeOverlayFocus.swift in Sources */,
 				249F380844E8B7ACDC92DF16 /* PrototypePagerOptions.swift in Sources */,
 				306830BA83B2323A216F1906 /* PrototypePatch.swift in Sources */,
+				3E4C9DEF70111CD15624404C /* PrototypePermissionAuthorization.swift in Sources */,
 				53B9F01A45FB8E1FCD68C662 /* PrototypePermissions.swift in Sources */,
 				0DFCBEDD880846EEBD1DB90D /* PrototypePinnedCall.swift in Sources */,
 				B475F51305875D43CB191E15 /* PrototypePinnedHttpClient.swift in Sources */,

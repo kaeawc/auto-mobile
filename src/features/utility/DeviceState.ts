@@ -20,6 +20,10 @@ import type {
   SetNetworkConditionInput,
 } from "./device-state/NetworkConditionState";
 import { NetworkConditionOperations } from "./device-state/NetworkConditionOperations";
+import {
+  defaultIosSimulatorNetworkShaper,
+  type IosSimulatorNetworkShaper,
+} from "./ios/IosSimulatorNetworkShaper";
 import { DoNotDisturbOperations } from "./device-state/DoNotDisturbOperations";
 import type { DoNotDisturbState } from "./device-state/DoNotDisturbState";
 import { BiometricOperations } from "./device-state/BiometricOperations";
@@ -141,6 +145,7 @@ export class DeviceState {
   private readonly cameraPosterFileExists?: (path: string) => boolean;
   private injectedNetworkFilterBridge?: NetworkFilterBridge;
   private readonly iosAppNetworkRule?: () => IosAppNetworkRuleCommandContext | undefined;
+  private readonly iosNetworkShaper: IosSimulatorNetworkShaper;
 
   private readonly networkCondition = new NetworkConditionOperations({
     device: () => this.device,
@@ -148,6 +153,7 @@ export class DeviceState {
     timer: () => this.timer,
     networkFilterBridge: () => this.networkFilterBridge,
     iosAppNetworkRule: () => this.iosAppNetworkRule?.(),
+    iosNetworkShaper: () => this.iosNetworkShaper,
   });
 
   private readonly location = new LocationOperations({
@@ -228,6 +234,7 @@ export class DeviceState {
     this.iosRunnerLocation = dependencies.iosRunnerLocation;
     this.injectedNetworkFilterBridge = dependencies.networkFilterBridge;
     this.iosAppNetworkRule = dependencies.iosAppNetworkRule;
+    this.iosNetworkShaper = dependencies.iosNetworkShaper ?? defaultIosSimulatorNetworkShaper;
   }
 
   /** Created on first iOS Simulator network read so other paths never touch it. */

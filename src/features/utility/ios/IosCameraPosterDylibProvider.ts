@@ -188,11 +188,14 @@ export const iosCameraPosterDylibProvider: IosCameraPosterDylibProvider =
  * Walk ancestors so source modules and bundled dist/src chunks find the same file: the package
  * root of an installed package (`<root>/dist/src/...`) or a repo checkout.
  */
-export function sourcePathsFromModule(moduleDirectory: string): string[] {
+export function sourcePathsFromModule(
+  moduleDirectory: string,
+  relativePath: string = IOS_CAMERA_POSTER_SOURCE,
+): string[] {
   const paths: string[] = [];
   let directory = moduleDirectory;
   while (true) {
-    paths.push(join(directory, IOS_CAMERA_POSTER_SOURCE));
+    paths.push(join(directory, relativePath));
     const parent = dirname(directory);
     if (parent === directory) {
       return paths;

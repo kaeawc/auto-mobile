@@ -34,7 +34,9 @@
     "!dist/**/*.map",
     "schemas",
     "mcp-skills",
-    "ios/CameraPosterInjection/Injection/CameraPosterInjection.m"
+    "ios/CameraPosterInjection/Injection/CameraPosterInjection.m",
+    "ios/NetworkShaper/netshape.c",
+    "ios/NetworkShaper/libdns_services.tbd"
   ],
   "main": "dist/src/index.js",
   "publishConfig": {

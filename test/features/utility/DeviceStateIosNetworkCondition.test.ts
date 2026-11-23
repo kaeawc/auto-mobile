@@ -19,6 +19,7 @@ import {
 import { logger } from "../../../src/utils/logger";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeNetworkFilterBridge } from "../../fakes/FakeNetworkFilterBridge";
+import { FakeIosSimulatorNetworkShaper } from "../../fakes/FakeIosSimulatorNetworkShaper";
 
 afterEach(() => {
   mock.restore();
@@ -70,11 +71,13 @@ function deviceState(
   bridge: NetworkFilterBridge,
   rule?: IosAppNetworkRuleCommandContext,
   device: BootedDevice = iosSimulator,
+  shaper: FakeIosSimulatorNetworkShaper = new FakeIosSimulatorNetworkShaper(),
 ): DeviceState {
   return new DeviceState(device, {
     networkFilterBridge: bridge,
     iosAppNetworkRule: () => rule,
     adbFactory: new FakeAdbClientFactory(),
+    iosNetworkShaper: shaper,
   });
 }
 
@@ -175,24 +178,121 @@ describe("DeviceState iOS Simulator networkCondition (#10590, #10264)", () => {
     expect(getDeviceStateResultSchema.safeParse({ message: "ok", ...result }).success).toBe(true);
   });
 
-  test("a device-wide request is refused without contacting the controller", async () => {
+  test("a device-wide degrade shapes the whole simulator, rebooting it only the first time (#19045)", async () => {
     const bridge = new FakeNetworkFilterBridge();
-    bridge.setState("ready");
+    const shaper = new FakeIosSimulatorNetworkShaper();
 
-    const result = await deviceState(bridge, context()).setState({
-      networkCondition: { profile: "offline" },
+    const first = await deviceState(bridge, undefined, iosSimulator, shaper).setState({
+      networkCondition: { profile: "3g" },
+    });
+    const second = await deviceState(bridge, undefined, iosSimulator, shaper).setState({
+      networkCondition: { profile: "none", delayMs: 300, downloadKbps: 1000, uploadKbps: 1000 },
     });
 
-    expect(result.success).toBe(false);
-    expect(result.networkCondition).toMatchObject({
-      supported: false,
+    expect(first.success).toBe(true);
+    expect(first.networkCondition).toMatchObject({
+      supported: true,
+      capability: "full",
+      backend: "socket-shaper",
       scope: "device",
-      requestedProfile: "offline",
-      verified: false,
+      appliedProfile: "3g",
+      values: { delayMs: 200, downloadKbps: 1920, uploadKbps: 128, packetLossPercent: 2 },
+      rebooted: true,
     });
-    expect(result.networkCondition?.error).toContain("networkCondition.appId");
-    expect(bridge.ruleCalls).toEqual([]);
+    expect(first.networkCondition?.warning).toContain("relaunch the app under test");
+    expect(second.networkCondition).toMatchObject({ rebooted: false, appliedProfile: "none" });
+    expect(second.networkCondition?.warning).toBeUndefined();
+    expect(shaper.calls.map(({ op, profile }) => ({ op, profile }))).toEqual([
+      {
+        op: "apply",
+        profile: {
+          offline: false,
+          delayMs: 200,
+          downloadKbps: 1920,
+          uploadKbps: 128,
+          packetLossPercent: 2,
+        },
+      },
+      {
+        op: "apply",
+        profile: {
+          offline: false,
+          delayMs: 300,
+          downloadKbps: 1000,
+          uploadKbps: 1000,
+          packetLossPercent: 0,
+        },
+      },
+    ]);
+    // Neither write consults the network extension.
     expect(bridge.statusCalls).toBe(0);
+    expect(bridge.ruleCalls).toEqual([]);
+    expect(setDeviceStateResultSchema.safeParse({ message: "ok", ...first }).success).toBe(true);
+  });
+
+  test("device-wide offline is read back from the shaper, and a reset clears it live", async () => {
+    const bridge = new FakeNetworkFilterBridge();
+    const shaper = new FakeIosSimulatorNetworkShaper();
+    const state = () => deviceState(bridge, undefined, iosSimulator, shaper);
+
+    await state().setState({ networkCondition: { profile: "offline" } });
+    const read = await state().getState(["networkCondition"]);
+    const reset = await state().setState({ networkCondition: { reset: true } });
+
+    expect(read.networkCondition).toMatchObject({
+      supported: true,
+      backend: "socket-shaper",
+      scope: "device",
+      offline: true,
+    });
+    expect(read.unsupported).toBeUndefined();
+    expect(getDeviceStateResultSchema.safeParse({ message: "ok", ...read }).success).toBe(true);
+    expect(reset.success).toBe(true);
+    expect(reset.networkCondition).toMatchObject({ appliedProfile: "none", verified: true });
+    expect(shaper.calls.map(({ op }) => op)).toEqual(["apply", "clear"]);
+    expect(shaper.profiles.get(iosSimulator.deviceId)?.offline).toBe(false);
+    expect(bridge.statusCalls).toBe(0);
+  });
+
+  test("device-wide packet loss alone is applied: the shaper enforces it", async () => {
+    const shaper = new FakeIosSimulatorNetworkShaper();
+    const result = await deviceState(
+      new FakeNetworkFilterBridge(),
+      undefined,
+      iosSimulator,
+      shaper,
+    ).setState({ networkCondition: { packetLossPercent: 10 } });
+    expect(result.success).toBe(true);
+    expect(shaper.calls[0]?.profile?.packetLossPercent).toBe(10);
+  });
+
+  test("offline with a shaping override is refused without touching the shaper", async () => {
+    const shaper = new FakeIosSimulatorNetworkShaper();
+    const result = await deviceState(
+      new FakeNetworkFilterBridge(),
+      undefined,
+      iosSimulator,
+      shaper,
+    ).setState({ networkCondition: { profile: "offline", delayMs: 100 } });
+    expect(result.success).toBe(false);
+    expect(result.networkCondition).toMatchObject({ supported: false, verified: false });
+    expect(shaper.calls).toEqual([]);
+  });
+
+  test("a failed shaped reboot is reported as an unverified error and logged", async () => {
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const shaper = new FakeIosSimulatorNetworkShaper();
+    shaper.applyError = new Error("simctl boot failed");
+    const result = await deviceState(
+      new FakeNetworkFilterBridge(),
+      undefined,
+      iosSimulator,
+      shaper,
+    ).setState({ networkCondition: { profile: "2g" } });
+    expect(result.success).toBe(false);
+    expect(result.networkCondition).toMatchObject({ verified: false, backend: "socket-shaper" });
+    expect(result.networkCondition?.error).toContain("simctl boot failed");
+    expect(warn).toHaveBeenCalled();
   });
 
   for (const input of [

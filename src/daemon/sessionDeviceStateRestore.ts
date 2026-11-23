@@ -3,6 +3,7 @@ import type {
   IosAppNetworkRuleCommandContext,
 } from "../features/networkFilter/IosAppNetworkRuleClient";
 import type { BootedDevice } from "../models";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import type { BackoffPolicy } from "../utils/Backoff";
 import type { KeepAwakeRestoreReport } from "../utils/KeepScreenAwakeManager";
 import { logger } from "../utils/logger";
@@ -822,7 +823,8 @@ export class SessionDeviceStateRestore {
   networkConditionRestoreTarget(session: Session): NetworkConditionRestoreTarget | null {
     const state = session.cacheData.networkCondition;
     // Keyed on the cache alone: the slot is only written by the Android emulator
-    // network path or the iOS Simulator per-app path (`iosAppRule`), so its
+    // network path, the iOS Simulator socket shaper (#19045) or the iOS Simulator
+    // per-app path (`iosAppRule`), so its
     // presence is the authoritative evidence a device needs restoring —
     // independent of whatever platform the caller declared.
     if (!state) {
@@ -860,9 +862,12 @@ export class SessionDeviceStateRestore {
       this.host.clearRestoreHealth(target, "network-condition");
       return;
     }
+    // The device-wide slot is an Android emulator's or, for a simulator UDID, the
+    // iOS Simulator socket shaper's (#19045).
     const device: BootedDevice = {
       name: target.deviceId,
-      platform: "android",
+      platform:
+        resolveIosDeviceKind({ deviceId: target.deviceId }) === "simulator" ? "ios" : "android",
       deviceId: target.deviceId,
     };
     if (!this.host.restoreIncarnationIsCurrent(target)) {

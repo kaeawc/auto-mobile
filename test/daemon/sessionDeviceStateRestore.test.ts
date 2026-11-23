@@ -5,6 +5,7 @@ import {
   type SessionDeviceStateRestoreOptions,
 } from "../../src/daemon/sessionDeviceStateRestore";
 import type { IosAppNetworkRuleRestorer } from "../../src/daemon/iosAppNetworkLease";
+import type { BootedDevice } from "../../src/models";
 import {
   SESSION_RELEASE_TEARDOWN_CAP_MS,
   SessionManager,
@@ -751,15 +752,21 @@ describe("network-condition family", () => {
   async function createNetwork(
     result: (call: number) => Promise<void>,
     overrides: Partial<SessionDeviceStateRestoreOptions> = {},
+    target: { deviceId: string; platform: "android" | "ios" } = {
+      deviceId: "emulator-5560",
+      platform: "android",
+    },
   ) {
     const timer = new FakeTimer();
     const host = new FakeHost(timer);
     host.publishAll = true;
     let calls = 0;
+    const devices: BootedDevice[] = [];
     const restore = makeRestore(host, undefined, undefined, undefined, undefined, undefined, {
-      networkCondition: () => ({
+      networkCondition: (device) => ({
         restore: () => {
           calls++;
+          devices.push(device);
           return result(calls);
         },
       }),
@@ -769,10 +776,24 @@ describe("network-condition family", () => {
       barrier: () => new FakeDbWriteBarrier(),
     });
     factory.stopCleanupTimer();
-    const session = await factory.createSession("s5", "emulator-5560", "android");
+    const session = await factory.createSession("s5", target.deviceId, target.platform);
     factory.setNetworkCondition("s5", { initialProfile: "none" });
-    return { timer, host, restore, session, calls: () => calls };
+    return { timer, host, restore, session, calls: () => calls, devices };
   }
+
+  test("a device-wide slot restores through the platform its device id names (#19045)", async () => {
+    const simulator = "79F93511-21AB-4E2F-9E1D-CE8BF15800B1";
+    const ios = await createNetwork(async () => {}, {}, { deviceId: simulator, platform: "ios" });
+    expect((await ios.restore.restoreNetworkConditionBestEffort(ios.session)).pending).toBeNull();
+    expect(ios.devices.map(({ platform, deviceId }) => ({ platform, deviceId }))).toEqual([
+      { platform: "ios", deviceId: simulator },
+    ]);
+    const android = await createNetwork(async () => {});
+    expect(
+      (await android.restore.restoreNetworkConditionBestEffort(android.session)).pending,
+    ).toBeNull();
+    expect(android.devices.map(({ platform }) => platform)).toEqual(["android"]);
+  });
 
   test("no baseline means no target", async () => {
     const h = await createNetwork(async () => {});

@@ -1,6 +1,8 @@
 # Managed Macs and CI runners
 
-On iOS simulators, `networkCondition` relies on a macOS network-filter system extension.
+On iOS simulators, `networkCondition` with `appId` relies on a macOS network-filter system
+extension. Device-wide `networkCondition` (no `appId`) needs none of this; see
+[iOS Simulator network condition](ios-network-condition.md).
 Out of the box, macOS asks a person to approve it twice: once for the system extension
 and once for the content filter. On Macs that nobody watches, such as CI runners, EC2 Mac
 hosts, or a team's managed machines, one MDM configuration profile removes both prompts.

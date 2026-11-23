@@ -171,15 +171,17 @@ gesture on the mismatch path to keep the app off the main-screen rule.
 On an iPad, any inset app window (tiled at the screen origin too) reports the screen
 as the root's bounds, and observe also captures the other visible app windows (#18830).
 Candidates are the apps the runner has launched or observed, plus the common system apps
-at most once every 10 s; SpringBoard's tree names no app windows. Each candidate in
-`.runningForeground` whose window is on screen and not wholly behind the focused window
-is snapshotted, moved into screen space, and its nodes whose centre the focused window
-covers are dropped. iPadOS draws a floating window that is not focused slightly smaller
-than its snapshot frame, so the move scales the snapshot onto the window's screen frame
-as well as offsetting it. A keyboard, and a window hosting one, is already in screen
-space and keeps its bounds. A window whose frame cannot be read, or is not a uniformly
-scaled copy of the snapshot frame, is left out rather than reported in window space,
-and the observation carries the `background_window_unplaced` truncation reason.
+at most once every 10 s; SpringBoard's tree names no app windows. Observe snapshots each
+candidate in `.runningForeground` whose window is on screen and not wholly behind the
+focused window. It moves that snapshot into screen space and drops its nodes whose centre
+the focused window covers.
+
+The system draws a floating window that is not focused slightly smaller than its snapshot
+frame, so the move scales the snapshot onto the window's screen frame as well as offsetting
+it. A keyboard, and a window hosting one, is already in screen space and keeps its bounds.
+Observe leaves out a window whose frame it cannot read, or whose frame is not a uniformly
+scaled copy of the snapshot frame, rather than reporting it in window space. The
+observation then carries the `background_window_unplaced` truncation reason.
 
 Those window roots go first under the root, before the focused app's children. Each
 carries its owner (`automobile:iosWindowPackage`) and an `automobile:iosWindowLayer`
@@ -190,10 +192,10 @@ window with `isFocused: false`; with more than one window every entry carries
 
 Every app in a tiled or floating layout stays `.runningForeground`, so the focused app is
 the tracked one: launching an app, or a tap delivered inside another observed window,
-makes it the focused app. iPadOS gives a touch within about 5 pt of the focused window
-to that window, so a tap within 8 pt of it does not switch the tracked app, and `tapOn`
-places its point in a background window at least 24 pt clear of the focused window,
-refusing a target with no such point. iPadOS consumes that first tap to focus the window,
+makes it the focused app. The system gives a touch within about 5 pt of the focused window
+to that window, so a tap within 8 pt of it does not switch the tracked app. For a target in
+a background window, `tapOn` places its point at least 24 pt clear of the focused window and
+refuses a target with no such point. The system consumes that first tap to focus the window,
 so the control under it does not react and a second tap activates it. The runner does not
 repeat the tap itself. Any foreground switch drops the observed window frames. An app
 opened outside the runner that is not a common system app is not found.

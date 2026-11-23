@@ -515,6 +515,7 @@ nav:
       - "Entry template": devlog/template.md
       - "2026-11-23: Keyboard control through CoreSimulator": devlog/2026-11-23-simulator-keyboard-coresimulator.md
       - "2026-11-23: Capture Simulator video from the device framebuffer": devlog/2026-11-23-simulator-framebuffer-capture.md
+      - "2026-11-23: No consumer keep rule for prototype icons": devlog/2026-11-23-prototype-icon-keep-rule.md
       - "2026-11-23: XR headset hand and eye input over emulator gRPC": devlog/2026-11-23-xr-headset-hand-and-eye-input.md
       - "2026-11-21: iOS Simulator audio routing open questions": devlog/2026-11-21-ios-simulator-audio-routing-open-questions.md
       - "2026-11-21: Prototype media runtime placement spike": devlog/2026-11-21-prototype-media-runtime-placement-spike.md

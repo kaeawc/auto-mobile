@@ -168,6 +168,29 @@ point-offset tap, swipe, or drag is a screen point delivered unchanged
 (`appFrameOriginPlusPointOffset`). The gesture path still reads the window once per
 gesture on the mismatch path to keep the app off the main-screen rule.
 
+On an iPad, any inset app window (tiled at the screen origin too) reports the screen
+as the root's bounds, and observe also captures the other visible app windows (#18830).
+Candidates are the apps the runner has launched or observed, plus the common system apps
+at most once every 10 s; SpringBoard's tree names no app windows. Each candidate in
+`.runningForeground` whose window is on screen and not wholly behind the focused window
+is snapshotted, moved into screen space, and its nodes whose centre the focused window
+covers are dropped. iPadOS draws a floating window that is not focused slightly smaller
+than its snapshot frame, so the move scales the snapshot onto the window's screen frame
+as well as offsetting it. A window whose frame cannot be read, or is not a uniformly
+scaled copy of the snapshot frame, is left out rather than reported in window space.
+
+Those window roots go first under the root, before the focused app's children. Each
+carries its owner (`automobile:iosWindowPackage`) and an `automobile:iosWindowLayer`
+behind every focused window, so it never ranks above the focused app. Navigation
+identity drops these roots. `windows` lists the focused window first, then each other
+window with `isFocused: false`; with more than one window every entry carries
+`packageName`.
+
+Every app in a tiled or floating layout stays `.runningForeground`, so the focused app is
+the tracked one: launching an app, or a tap delivered inside another observed window,
+makes it the focused app. Any foreground switch drops the observed window frames. An app
+opened outside the runner that is not a common system app is not found.
+
 Full-screen apps and iPhones have no mismatch and perform no extra read.
 
 The points are XCUITest's resolved coordinates immediately before the gesture,

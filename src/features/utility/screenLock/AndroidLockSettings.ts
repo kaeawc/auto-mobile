@@ -1,9 +1,11 @@
 import type { BootedDevice } from "../../../models";
+import { toActionableError } from "../../../models/ActionableError";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
 } from "../../../utils/android-cmdline-tools/AdbClientFactory";
+import { AndroidUserTargetResolver } from "../../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { withFixtureCaptureScrub } from "../../../utils/fixtureCapture/fixtureCaptureScope";
@@ -48,7 +50,7 @@ export interface LockSettingsCommandResult {
   detail?: string;
 }
 
-/** The `locksettings` surface the screen-lock feature drives (one device, user 0). */
+/** The `locksettings` surface the screen-lock feature drives (one device, one Android user). */
 export interface LockSettingsClient {
   read(): Promise<LockSettingsReading>;
   setCredential(
@@ -86,13 +88,13 @@ const CREDENTIAL_TYPE_NAMES: Readonly<Record<string, ObservedScreenLockType>> = 
 };
 
 /**
- * The user-0 `CredentialType:` from `dumpsys lock_settings` (#14107). Android 11+ prints a name
+ * The `CredentialType:` of one user (default 0) from `dumpsys lock_settings` (#14107). Android 11+ prints a name
  * (`None`, `Pin`, `Password`, `Pattern`); older releases print the constant, where `2` is a PIN
  * or a password and so only says the lock is secure. Anything else is `unknown`.
  */
-export function parseLockSettingsCredentialType(dump: string): LockSettingsReading {
+export function parseLockSettingsCredentialType(dump: string, userId = 0): LockSettingsReading {
   const lines = dump.split(/\r?\n/);
-  const userStart = lines.findIndex((line) => /^\s*User 0\s*$/.test(line));
+  const userStart = lines.findIndex((line) => new RegExp(`^\\s*User ${userId}\\s*$`).test(line));
   const nextUser = lines.findIndex(
     (line, index) => index > userStart && /^\s*User \d+\s*$/.test(line),
   );
@@ -133,18 +135,64 @@ export function classifyLockSettingsOutput(
 
 type LockSettingsAdb = Pick<AdbExecutor, "execute" | "getDeviceLock">;
 
-/** {@link LockSettingsClient} over adb: `locksettings` writes, `dumpsys lock_settings` reads. */
+/** Resolves the Android user `locksettings` is aimed at and the reader inspects. */
+export type LockUserResolver = () => Promise<number>;
+
+const SYSTEM_USER: LockUserResolver = async () => 0;
+
+/**
+ * User 0 everywhere except Android Automotive, where the system user is headless and the driver
+ * (often user 10) is the foreground user: a lock set on user 0 never reaches the driver (#19060).
+ * Throws an `ActionableError` when the foreground user cannot be read: falling back to user 0
+ * would put the lock on the headless system user and read it back from there, reporting a
+ * success the driver never sees (#19070).
+ */
+export function createLockUserResolver(
+  adb: AdbExecutor,
+  device: Pick<BootedDevice, "formFactor">,
+): LockUserResolver {
+  if (device.formFactor !== "automotive") {
+    return SYSTEM_USER;
+  }
+  return async () => {
+    try {
+      return (await new AndroidUserTargetResolver(adb).resolve({ currentUser: true })).userId;
+    } catch (error) {
+      throw toActionableError(
+        error,
+        "Could not read the Android Automotive foreground user for the screen lock",
+      );
+    }
+  };
+}
+
+/**
+ * {@link LockSettingsClient} over adb: `locksettings` writes, `dumpsys lock_settings` reads.
+ * One client serves one operation: the user is resolved once, on first use, and every set,
+ * clear and read-back of that client targets it, so they cannot disagree (#19014, #19070).
+ */
 export class AdbLockSettingsClient implements LockSettingsClient {
-  constructor(private readonly adb: LockSettingsAdb) {}
+  private resolvedUser: Promise<number> | undefined;
+
+  constructor(
+    private readonly adb: LockSettingsAdb,
+    private readonly resolveUserOnce: LockUserResolver = SYSTEM_USER,
+  ) {}
+
+  private resolveUser(): Promise<number> {
+    this.resolvedUser ??= this.resolveUserOnce();
+    return this.resolvedUser;
+  }
 
   async read(): Promise<LockSettingsReading> {
+    const userId = await this.resolveUser();
     try {
       const result = await this.adb.execute(["shell", "dumpsys", "lock_settings"], {
         noRetry: true,
         timeoutMs: LOCK_SETTINGS_READ_TIMEOUT_MS,
         maxBuffer: DUMPSYS_MAX_BUFFER,
       });
-      const reading = parseLockSettingsCredentialType(result.stdout);
+      const reading = parseLockSettingsCredentialType(result.stdout, userId);
       return reading.type === "unknown" && reading.secure === undefined
         ? await this.readKeyguardSecure()
         : reading;
@@ -157,17 +205,21 @@ export class AdbLockSettingsClient implements LockSettingsClient {
     }
   }
 
-  setCredential(
+  async setCredential(
     type: ScreenLockCredentialType,
     credential: string,
     oldCredential?: string,
   ): Promise<LockSettingsCommandResult> {
     const old = oldCredential === undefined ? [] : ["--old", oldCredential];
-    return this.run([`set-${type}`, ...old, credential], [credential, oldCredential ?? ""]);
+    return this.run(
+      [`set-${type}`, "--user", String(await this.resolveUser()), ...old, credential],
+      [credential, oldCredential ?? ""],
+    );
   }
 
-  clearCredential(oldCredential: string): Promise<LockSettingsCommandResult> {
-    return this.run(["clear", "--old", oldCredential], [oldCredential]);
+  async clearCredential(oldCredential: string): Promise<LockSettingsCommandResult> {
+    const user = String(await this.resolveUser());
+    return this.run(["clear", "--user", user, "--old", oldCredential], [oldCredential]);
   }
 
   /** `secure` from `dumpsys window policy` when this release's lock_settings dump has no type. */
@@ -215,5 +267,8 @@ export class AdbLockSettingsClient implements LockSettingsClient {
 export const defaultLockSettingsClientFactory = (
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
 ): LockSettingsClientFactory => {
-  return (device) => new AdbLockSettingsClient(adbFactory.create(device));
+  return (device) => {
+    const adb = adbFactory.create(device);
+    return new AdbLockSettingsClient(adb, createLockUserResolver(adb, device));
+  };
 };

@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.prototype
 
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePlatformModeSource
+import dev.jasonpearson.automobile.protocol.PrototypePlatformReport
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -9,9 +11,10 @@ import kotlinx.serialization.json.*
 
 /** Contract test module, absent from release artifacts. Tick is an event, echo is a call. */
 class TestPlatformModule(private val wait: suspend (Long) -> Unit = { delay(it) }) :
-  PrototypePlatformModule {
+  PrototypePlatformModule, PrototypePlatformModeSource {
   override val name = "test"
   override val capability = "prototype_platform_test_v1"
+  override val platformMode = PrototypePlatformReport.Mode.FAKE
 
   override fun availability() = PlatformAvailability.Ready
 

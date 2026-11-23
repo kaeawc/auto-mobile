@@ -1,0 +1,21 @@
+IsStatusOverride: false
+ThermalEventListeners:
+	callbacks: 3
+	killed: false
+	broadcasts count: -1
+ThermalStatusListeners:
+	callbacks: 2
+	killed: false
+	broadcasts count: -1
+Thermal Status: 0
+Cached temperatures:
+	Temperature{mValue=30.8, mType=3, mName=test temperature sensor, mStatus=0}
+HAL Ready: true
+HAL connection:
+	ThermalHAL 2.0 connected: yes
+Current temperatures from HAL:
+	Temperature{mValue=30.8, mType=3, mName=test temperature sensor, mStatus=0}
+Current cooling devices from HAL:
+	CoolingDevice{mValue=100, mType=0, mName=test cooling device}
+Temperature static thresholds from HAL:
+	TemperatureThreshold{mType=3, mName=test temperature sensor, mHotThrottlingThresholds=[NaN, NaN, NaN, 48.0, NaN, NaN, 60.0], mColdThrottlingThresholds=[NaN, NaN, NaN, NaN, NaN, NaN, NaN]}

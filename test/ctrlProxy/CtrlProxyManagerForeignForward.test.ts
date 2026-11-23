@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
-import type { ForeignCtrlProxyForwardVerdict } from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
+import {
+  describeForeignCtrlProxyForwards,
+  type ForeignCtrlProxyForwardVerdict,
+} from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import type { BootedDevice, ExecResult } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 
@@ -69,7 +72,14 @@ describe("CtrlProxy manager foreign-forward mutation backstop #12220", () => {
   }
 
   test("#12220 known foreign forward identifies the owner and ports", async () => {
-    evidence({ kind: "foreign", ports: [9008, 9009], clientPids: [44122], message: "held" });
+    evidence({
+      kind: "foreign",
+      ports: [9008, 9009],
+      clientPids: [44122],
+      message: describeForeignCtrlProxyForwards(device.deviceId, [9008, 9009], undefined, {
+        clientPids: [44122],
+      }),
+    });
     try {
       await manager.assertNotDrivenByOtherDaemon();
       throw new Error("expected ownership refusal");
@@ -79,11 +89,20 @@ describe("CtrlProxy manager foreign-forward mutation backstop #12220", () => {
       expect((error as Error).message).toContain("9008");
       expect((error as Error).message).toContain("another device");
       expect((error as Error).message).not.toContain("forward --remove");
+      expect((error as Error).message.split("or use another device").length).toBe(2);
     }
   });
 
   test("#12220 unknown forward owner refuses without an invented PID", async () => {
-    evidence({ kind: "unknown", ports: [9008], reason: "owner unverified", message: "unknown" });
+    const reason = "Command failed: lsof\nerror code: ENOENT";
+    evidence({
+      kind: "unknown",
+      ports: [9008],
+      reason,
+      message: describeForeignCtrlProxyForwards(device.deviceId, [9008], undefined, {
+        probeFailure: reason,
+      }),
+    });
     try {
       await manager.assertNotDrivenByOtherDaemon();
       throw new Error("expected ownership refusal");
@@ -91,7 +110,11 @@ describe("CtrlProxy manager foreign-forward mutation backstop #12220", () => {
       expect(error).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
       expect((error as DeviceOwnedByOtherDaemonError).ownerPid).toBeUndefined();
       expect((error as Error).message).toContain("9008");
-      expect((error as Error).message).toContain("adb -s emulator-12220 forward --remove tcp:9008");
+      const message = (error as Error).message;
+      expect(message).toContain("adb -s emulator-12220 forward --remove tcp:9008");
+      // #18985: the remedy and the probe failure each appear exactly once.
+      expect(message.split("forward --remove tcp:9008").length).toBe(2);
+      expect(message.split("error code: ENOENT").length).toBe(2);
     }
   });
 

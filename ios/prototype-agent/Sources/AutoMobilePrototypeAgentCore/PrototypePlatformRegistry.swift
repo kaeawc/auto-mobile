@@ -19,6 +19,8 @@ public struct PlatformCall: Equatable, Sendable {
     public let callId: String
     public let call: String
     public let args: [String: JSONValue]
+
+    var moduleName: String { String(call.prefix(while: { $0 != "." })) }
 }
 
 public enum PlatformCallResult: Equatable, Sendable {
@@ -227,6 +229,7 @@ public final class PrototypePlatformRegistry {
         location: (any PrototypeLocationSource)? = nil,
         sensors: (any PrototypeSensorSource)? = nil,
         permissions: (any PrototypeNotificationAuthorizationSource)? = nil,
+        permissionAuthorities: [String: any PrototypePermissionAuthority] = [:],
         biometric: (any PrototypeBiometricSource)? = nil,
         secureStorage: (any PrototypeSecureValueStore)? = nil
     )
@@ -243,7 +246,13 @@ public final class PrototypePlatformRegistry {
         if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
         if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
         if let secureStorage { modules.append(PrototypeSecureStorageModule(store: secureStorage)) }
-        if let permissions { modules.append(PrototypePermissionsModule(source: permissions)) }
+        if let permissions {
+            modules.append(PrototypePermissionsModule(
+                source: permissions,
+                authorities: permissionAuthorities,
+                bundle: bundle
+            ))
+        }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 
@@ -257,6 +266,7 @@ public final class PrototypePlatformRegistry {
         location: (any PrototypeLocationSource)? = nil,
         sensors: (any PrototypeSensorSource)? = nil,
         permissions: (any PrototypeNotificationAuthorizationSource)? = nil,
+        permissionAuthorities: [String: any PrototypePermissionAuthority] = [:],
         biometric: (any PrototypeBiometricSource)? = nil,
         secureStorage: (any PrototypeSecureValueStore)? = nil,
         notifications: (any NotificationCenterClient)? = nil
@@ -273,7 +283,13 @@ public final class PrototypePlatformRegistry {
         if let biometric { modules.append(PrototypeBiometricModule(source: biometric, bundle: bundle)) }
         if let sensors { modules.append(PrototypeSensorsModule(source: sensors, bundle: bundle)) }
         if let secureStorage { modules.append(PrototypeSecureStorageModule(store: secureStorage)) }
-        if let permissions { modules.append(PrototypePermissionsModule(source: permissions)) }
+        if let permissions {
+            modules.append(PrototypePermissionsModule(
+                source: permissions,
+                authorities: permissionAuthorities,
+                bundle: bundle
+            ))
+        }
         if let notifications { modules.append(PrototypeNotificationsModule(client: notifications)) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }

@@ -4,6 +4,7 @@ import {
 } from "../../features/prototype/prototypeDegradedEffects";
 import { performPrototypeSimulate, type PrototypeSimulateTarget } from "../prototypeSimulateAction";
 import { PROTOTYPE_TIMERS_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
+import { parsePrototypePlatformReport } from "../../features/prototype/prototypePlatformReport";
 import { parsePrototypeFeedbackLog } from "../../features/prototype/prototypeFeedbackLog";
 import { parsePrototypeTimerReports } from "../../features/prototype/prototypeTimerSchema";
 import { z } from "zod/v4";
@@ -63,6 +64,7 @@ const devicePrototypeEntrySchema = z.object({
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
   timers: z.unknown().optional(),
   feedbackLog: z.unknown().optional().transform(parsePrototypeFeedbackLog),
+  platformRuntime: z.unknown().optional().transform(parsePrototypePlatformReport),
   images: z
     .object({
       loaded: z.number().int().nonnegative(),
@@ -173,6 +175,7 @@ function adoptReportedPrototypes(
     reconciliationId,
     reconciliationSource,
   });
+  store.clearPlatformRuntime(scope);
   for (const entry of reported) {
     if (!history.has(entry.id)) {
       events.adopt(scope, entry.id, source, { replayed: [], lastSequence: entry.lastSequence });
@@ -305,6 +308,7 @@ const iosAgentStatusSchema = z.object({
   storage: z.unknown().optional().transform(parsePrototypeStorageReport),
   timers: z.unknown().optional(),
   feedbackLog: z.unknown().optional().transform(parsePrototypeFeedbackLog),
+  platformRuntime: z.unknown().optional().transform(parsePrototypePlatformReport),
   degradedEffects: z.unknown().optional().transform(parsePrototypeDegradedEffects),
 });
 
@@ -360,6 +364,7 @@ async function inspectIosAgent(
     storage,
     timers,
     feedbackLog,
+    platformRuntime,
     degradedEffects,
   } = status.data;
   const reported =
@@ -377,6 +382,7 @@ async function inspectIosAgent(
             storage,
             timers,
             feedbackLog,
+            platformRuntime,
             degradedEffects,
           },
         ]
@@ -403,7 +409,7 @@ export function statusOutput(
   events: PrototypeEventCoordinator,
   scope: PrototypeScope,
   options: { deviceDark: "fresh" | "cached" },
-): Pick<PrototypeOutput, "prototypes" | "lastResult" | "platformStatus"> {
+): Pick<PrototypeOutput, "prototypes" | "lastResult" | "platformStatus" | "platformRuntime"> {
   const status = store.status(scope);
   return {
     ...status,

@@ -141,6 +141,50 @@ class PrototypePlatformRuntimeTest {
   }
 
   @Test
+  fun `platform runtime report and call outcomes reflect the registered fake and pending calls`() =
+    runTest {
+      val release = CompletableDeferred<Unit>()
+      val module = FakePlatformModule()
+      module.execute = {
+        release.await()
+        PlatformCallResult.Success(JsonNull)
+      }
+      val events = mutableListOf<PrototypeEvent>()
+      val subject = runtime(module, events)
+      val report = { subject.platformRuntimeReport(PrototypePlatformReport.Runtime.CTRL_PROXY) }
+
+      subject.tap(action(into = null))
+      runCurrent()
+      assertEquals(
+        PrototypePlatformReport.Module(
+          PrototypePlatformReport.Availability.READY,
+          mode = PrototypePlatformReport.Mode.FAKE,
+          reason = PrototypePlatformReport.Reason.FAKE_MODE,
+          inFlight = 1,
+        ),
+        report().modules["test"],
+      )
+
+      release.complete(Unit)
+      runCurrent()
+      val outcome = outcomes(events).single().payload?.jsonObject
+      assertEquals(JsonPrimitive(0), outcome?.get("inFlight"))
+      assertEquals(JsonPrimitive("fake"), outcome?.get("mode"))
+
+      module.available = PlatformAvailability.NeedsPermission(setOf("camera"))
+      assertEquals(
+        PrototypePlatformReport.Module(
+          PrototypePlatformReport.Availability.UNAVAILABLE,
+          mode = PrototypePlatformReport.Mode.FAKE,
+          reason = PrototypePlatformReport.Reason.PERMISSION_DENIED,
+          inFlight = 0,
+        ),
+        report().modules["test"],
+      )
+      subject.close()
+    }
+
+  @Test
   fun `location failures preserve into and normalize metadata codes and reasons`() = runTest {
     val module = FakePlatformModule("location")
     val subject =

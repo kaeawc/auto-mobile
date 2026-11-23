@@ -241,3 +241,15 @@ Events survive rotation and reconnects within the app process. If attachment fai
 overlay showing that id without ending other apps' waits. Otherwise relaunch; reinstall with
 `prototype installApp` for a stale saved token. Installed apps need distinct spec ids; ambiguous
 ids return conflicting app slugs. Other actions use the overlay.
+
+### Platform runtime report
+
+`prototype inspect` reads `platformRuntime` from the device. Host-local `status` returns the last
+report from `show` or `inspect`, with call mode and in-flight counts updated as events arrive.
+Run `inspect` to refresh availability, app state and permissions. The report names the runtime and
+lists registered modules with `ready`, `degraded` or `unavailable` availability. A module can also report
+its mode (`real`, `fake` or `simulated`), reason and in-flight count. Unknown fields are omitted.
+
+A successful `show` reports one `platformNotes` entry for each reported module reason. Look for
+`platform.<module>` and an effect of `ignored` or `simulated`, for example `platform.haptics` for
+simulated haptics on iOS.

@@ -45,11 +45,11 @@ describe("registerScreenLockSessionCleanup", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(
       "locksettings clear",
-      stdout(`${fixture("locksettings-clear-ok.txt")}AUTOMOBILE_LOCKSETTINGS_EXIT=0\n`),
+      stdout(`${fixture("locksettings-clear-ok-phone-api34.txt")}AUTOMOBILE_LOCKSETTINGS_EXIT=0\n`),
     );
     adb.setCommandResponse(
       "dumpsys lock_settings",
-      stdout(fixture("dumpsys-lock-settings-api34-none.txt")),
+      stdout(fixture("dumpsys-lock-settings-none-phone-api34.txt")),
     );
     const { manager, registry, timer, forgotten } = setup({ adb });
 
@@ -60,6 +60,8 @@ describe("registerScreenLockSessionCleanup", () => {
       "shell",
       "locksettings",
       "clear",
+      "--user",
+      "0",
       "--old",
       PIN,
       ";",

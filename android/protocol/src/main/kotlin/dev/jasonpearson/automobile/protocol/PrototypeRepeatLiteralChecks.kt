@@ -30,7 +30,9 @@ internal object PrototypeRepeatLiteralChecks {
     text: String?,
     fieldPath: String,
   ): PrototypeSpecError? =
-    if (
+    if (text != null && "{outerIndex}" in text)
+      fail(fieldPath, "{outerIndex} outside an inner repeat template")
+    else if (
       kind == PrototypeBindableKind.KEY &&
         text != null &&
         !stateKeyPattern.matches(

@@ -6,7 +6,19 @@
     /// generators run, so the call still succeeds and is logged. "System Haptics" off is not
     /// detectable, so nothing is reported suppressed.
     @MainActor
-    final class UIKitHapticsPlayer: PrototypeHapticsPlayer {
+    final class UIKitHapticsPlayer: PrototypeHapticsPlayer, PrototypePlatformReportModeSource {
+        var platformReportMode: PrototypePlatformReport.Mode? {
+            #if targetEnvironment(simulator)
+                .simulated
+            #else
+                .real
+            #endif
+        }
+
+        var platformReportReason: PrototypePlatformReport.Reason? {
+            platformReportMode == .simulated ? .simulator : nil
+        }
+
         func perform(_ effect: PrototypeHapticEffect) -> PrototypeFeedbackOutcome {
             run(PrototypeHapticPlan.plan(for: effect))
             return .played
@@ -83,6 +95,8 @@
                 location: CLLocationManagerPrototypeLocationSource(),
                 sensors: CoreMotionPrototypeSensorSource(),
                 permissions: includePermissions ? UNUserNotificationCenterPrototypePermissionsSource() : nil,
+                permissionAuthorities: includePermissions ? FrameworkPrototypePermissionAuthority
+                    .hostAuthorities() : [:],
                 biometric: LAContextPrototypeBiometricSource(),
                 secureStorage: secureStorage
             )

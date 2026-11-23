@@ -27,7 +27,8 @@ Decode order:
 5. Check substituted text against the per-field
    limit and the 4,194,304 UTF-16 rebuilt-text total per show. Inside a repeat, the decoder charges a data-resolved field
    once per item even without repeat placeholders. It does not charge literal fields and state placeholders.
-6. Refuse nested repeats.
+6. Refuse nested repeats unless the renderer advertises `prototype_nested_repeat_v1`; see the
+   [repeat contract](../android/prototype-ux-envelope.md#data-model-11673).
 7. Resolve with projected items cached per pointer.
 8. Guard the resolved tree.
 9. Expand repeats.

@@ -15,6 +15,10 @@ export const EXCEPTIONS = new Map<string, string>([
     "Read-only ps RSS read of one simulator app pid for performanceAudit memory; never touches the iOS runner.",
   ],
   [
+    "src/features/utility/ios/SimulatorBootEnvironment.ts",
+    "Read-only ps read of one simulator's launchd_sim environment for the camera poster (#19047); never touches the iOS runner.",
+  ],
+  [
     "src/features/performance/PerformanceMonitor.ts",
     "Collects app metrics, not CtrlProxy lifecycle state.",
   ],

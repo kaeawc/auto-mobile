@@ -5,6 +5,7 @@ import {
   type SessionDeviceStateRestoreOptions,
 } from "../../src/daemon/sessionDeviceStateRestore";
 import type { IosAppNetworkRuleRestorer } from "../../src/daemon/iosAppNetworkLease";
+import type { BootedDevice } from "../../src/models";
 import {
   SESSION_RELEASE_TEARDOWN_CAP_MS,
   SessionManager,
@@ -432,6 +433,22 @@ describe("SessionDeviceStateRestore iOS app rule lease (#10264)", () => {
     expect(session.cacheData.networkCondition).toBeUndefined();
   });
 
+  test("an app rule joining a device-wide slot keeps the device-wide obligation (#19045)", () => {
+    session.cacheData.networkCondition = { initialProfile: "none", deviceWide: true };
+    const rule = begin();
+    expect(session.cacheData.networkCondition).toMatchObject({ deviceWide: true });
+    expect(session.cacheData.networkCondition?.iosAppRule?.bundleId).toBe(target.bundleId);
+    restore.finishIosAppNetworkReset(
+      session,
+      restore.prepareIosAppNetworkReset(session, target).rule,
+    );
+    expect(rule.revision).toBe(1);
+    expect(session.cacheData.networkCondition).toEqual({
+      initialProfile: "none",
+      deviceWide: true,
+    });
+  });
+
   test("confirm and finish are no-ops for an unpublished session or stale generation", () => {
     const rule = begin();
     restore.confirmIosAppNetworkRule(session, {
@@ -751,15 +768,21 @@ describe("network-condition family", () => {
   async function createNetwork(
     result: (call: number) => Promise<void>,
     overrides: Partial<SessionDeviceStateRestoreOptions> = {},
+    target: { deviceId: string; platform: "android" | "ios" } = {
+      deviceId: "emulator-5560",
+      platform: "android",
+    },
   ) {
     const timer = new FakeTimer();
     const host = new FakeHost(timer);
     host.publishAll = true;
     let calls = 0;
+    const devices: BootedDevice[] = [];
     const restore = makeRestore(host, undefined, undefined, undefined, undefined, undefined, {
-      networkCondition: () => ({
+      networkCondition: (device) => ({
         restore: () => {
           calls++;
+          devices.push(device);
           return result(calls);
         },
       }),
@@ -769,10 +792,24 @@ describe("network-condition family", () => {
       barrier: () => new FakeDbWriteBarrier(),
     });
     factory.stopCleanupTimer();
-    const session = await factory.createSession("s5", "emulator-5560", "android");
+    const session = await factory.createSession("s5", target.deviceId, target.platform);
     factory.setNetworkCondition("s5", { initialProfile: "none" });
-    return { timer, host, restore, session, calls: () => calls };
+    return { timer, host, restore, session, calls: () => calls, devices };
   }
+
+  test("a device-wide slot restores through the platform its device id names (#19045)", async () => {
+    const simulator = "79F93511-21AB-4E2F-9E1D-CE8BF15800B1";
+    const ios = await createNetwork(async () => {}, {}, { deviceId: simulator, platform: "ios" });
+    expect((await ios.restore.restoreNetworkConditionBestEffort(ios.session)).pending).toBeNull();
+    expect(ios.devices.map(({ platform, deviceId }) => ({ platform, deviceId }))).toEqual([
+      { platform: "ios", deviceId: simulator },
+    ]);
+    const android = await createNetwork(async () => {});
+    expect(
+      (await android.restore.restoreNetworkConditionBestEffort(android.session)).pending,
+    ).toBeNull();
+    expect(android.devices.map(({ platform }) => platform)).toEqual(["android"]);
+  });
 
   test("no baseline means no target", async () => {
     const h = await createNetwork(async () => {});
@@ -825,6 +862,63 @@ describe("network-condition family", () => {
     expect(h.calls()).toBe(0);
     expect(resets).toEqual([{ udid: "UDID-1", revision: 5 }]);
     expect(h.session.cacheData.networkCondition.iosAppRule?.lastRevision).toBe(5);
+  });
+
+  test("an app rule and a device-wide degrade in one slot are both restored (#19045)", async () => {
+    const resets: Array<{ udid: string; revision: number }> = [];
+    const h = await createNetwork(async () => {}, {
+      iosAppNetworkRuleRestorer: {
+        reset: async (rule) => {
+          resets.push({ udid: rule.udid, revision: rule.revision });
+          throw new Error("controller unreachable");
+        },
+        renew: async () => "renewed",
+      },
+    });
+    h.session.cacheData.networkCondition = {
+      initialProfile: "none",
+      deviceWide: true,
+      iosAppRule: { udid: "UDID-1", bundleId: "com.example", ownerGeneration: 1, lastRevision: 4 },
+    };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const target = h.restore.networkConditionRestoreTarget(h.session);
+      expect(target?.deviceWide).toBe(true);
+      // A failed rule reset does not skip the device-wide restore, and the failure is reported.
+      await expect(h.restore.restoreNetworkCondition(target!)).rejects.toThrow(
+        "controller unreachable",
+      );
+      expect(resets).toEqual([{ udid: "UDID-1", revision: 5 }]);
+      expect(h.calls()).toBe(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("when both restores fail every failure is logged and the first is thrown (#19045)", async () => {
+    const h = await createNetwork(() => Promise.reject(new Error("device restore failed")), {
+      iosAppNetworkRuleRestorer: {
+        reset: async () => {
+          throw new Error("rule reset failed");
+        },
+        renew: async () => "renewed",
+      },
+    });
+    h.session.cacheData.networkCondition = {
+      initialProfile: "none",
+      deviceWide: true,
+      iosAppRule: { udid: "UDID-1", bundleId: "com.example", ownerGeneration: 1, lastRevision: 4 },
+    };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const target = h.restore.networkConditionRestoreTarget(h.session)!;
+      await expect(h.restore.restoreNetworkCondition(target)).rejects.toThrow("rule reset failed");
+      expect(
+        warn.mock.calls.some((call) => String(call[1]).includes("device restore failed")),
+      ).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("expiry registers a capped quarantine only while the slot still holds a baseline", async () => {

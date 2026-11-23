@@ -22,6 +22,7 @@ regenerates the table below.
 | 2026-11-23 | decision | [Simulator Dynamic Island and backlight through defaults and JXA](2026-11-23-simulator-island-and-backlight.md) |
 | 2026-11-23 | decision | [Capture Simulator video from the device framebuffer](2026-11-23-simulator-framebuffer-capture.md) |
 | 2026-11-23 | decision | [No consumer keep rule for prototype icons](2026-11-23-prototype-icon-keep-rule.md) |
+| 2026-11-23 | decision | [iOS Simulator network shaping through a boot-injected socket shaper](2026-11-23-ios-simulator-boot-injected-network-shaper.md) |
 | 2026-11-23 | decision | [Generate the devlog index and nav from the entries](2026-11-23-generated-devlog-index.md) |
 | 2026-11-23 | decision | [Docs readability in the pre-push shell lane](2026-11-23-docs-readability-prepush.md) |
 | 2026-11-21 | decision | [Prototype media runtime placement spike](2026-11-21-prototype-media-runtime-placement-spike.md) |

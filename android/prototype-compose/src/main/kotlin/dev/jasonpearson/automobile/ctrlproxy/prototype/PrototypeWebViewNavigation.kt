@@ -75,7 +75,7 @@ internal class PrototypeWebViewNavigation(
           node.navigationStateKey?.let { put(it, PrototypeScalar.Text(status)) }
           // Only a committed page has a title; a previous page's title must not leak into an error.
           node.titleKey?.let {
-            put(it, PrototypeScalar.Text(if (status == "loaded") page.title else ""))
+            put(it, PrototypeScalar.Text(if (status == "loaded") boundedTitle(page.title) else ""))
           }
           node.canGoBackKey?.let { put(it, PrototypeScalar.BooleanValue(page.canGoBack)) }
         },
@@ -83,6 +83,18 @@ internal class PrototypeWebViewNavigation(
       ),
     )
   }
+}
+
+/**
+ * A page controls its title, and an oversized one would push the state write past the spec size
+ * limit, so the write is refused and the navigation outcome lost. Bound it before it is written.
+ */
+internal const val MAX_WEB_VIEW_TITLE_LENGTH = 256
+
+internal fun boundedTitle(title: String): String {
+  if (title.length <= MAX_WEB_VIEW_TITLE_LENGTH) return title
+  val cut = title.take(MAX_WEB_VIEW_TITLE_LENGTH)
+  return if (cut.last().isHighSurrogate()) cut.dropLast(1) else cut
 }
 
 private fun bindWebViewUrl(action: PrototypeAction, url: String): PrototypeAction {

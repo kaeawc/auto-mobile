@@ -82,7 +82,7 @@ final class PrototypeWebViewNavigation {
     private func update(_ status: String, url: String = "", handlers: [JSONValue] = []) {
         let writes: [(String, JSONValue)] = [
             node.navigationStateKey.map { ($0, .string(status)) },
-            node.titleKey.map { ($0, .string(status == "loaded" ? page?.title ?? "" : "")) },
+            node.titleKey.map { ($0, .string(status == "loaded" ? Self.boundedTitle(page?.title ?? "") : "")) },
             node.canGoBackKey.map { ($0, .bool(page?.canGoBack ?? false)) },
         ].compactMap { $0 }
         let actions: [PrototypeAction]
@@ -93,6 +93,14 @@ final class PrototypeWebViewNavigation {
             actions = (try? JSONDecoder().decode([PrototypeAction].self, from: JSONEncoder().encode(bound))) ?? []
         }
         publish(.init(writes: writes, actions: actions))
+    }
+
+    /// A page controls its title; an oversized one would push the state write past the spec size
+    /// limit and lose the navigation outcome, so it is bounded before it is written.
+    static let maxTitleLength = 256
+
+    static func boundedTitle(_ title: String) -> String {
+        String(title.prefix(maxTitleLength))
     }
 
     private static func bindURL(_ value: JSONValue, url: String) -> JSONValue {

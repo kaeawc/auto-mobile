@@ -36,6 +36,18 @@ final class PrototypeWebViewNavigationTests: XCTestCase {
     }
 
     @MainActor
+    func testOversizedPageTitleIsBoundedBeforeItIsWritten() async throws {
+        let page = FakeWebPage()
+        let probe = try NavigationProbe(page: page)
+        await probe.navigation.prepare { _ in }
+        probe.navigation.load("https://example.com/")
+        page.title = String(repeating: "t", count: 256_000)
+        probe.navigation.finished("https://example.com/article")
+        let title = probe.updates.last?.writes.first(where: { $0.0 == "title" })?.1
+        XCTAssertEqual(title, .string(String(repeating: "t", count: 256)))
+    }
+
+    @MainActor
     func testAllowedFinishPublishesStateAndAction() async throws {
         let page = FakeWebPage()
         let probe = try NavigationProbe(page: page)

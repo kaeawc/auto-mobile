@@ -70,6 +70,15 @@ class PrototypeWebViewNavigationTest {
   }
 
   @Test
+  fun boundsAnOversizedPageTitleBeforeItIsWritten() {
+    navigation.load(allowed)
+    view.title = "t".repeat(MAX_WEB_VIEW_TITLE_LENGTH * 1000)
+    navigation.finished(allowed)
+    val title = updates.last().writes["title"] as PrototypeScalar.Text
+    assertEquals(MAX_WEB_VIEW_TITLE_LENGTH, title.value.length)
+  }
+
+  @Test
   fun backAndReloadRouteOnlyToAttachedNode() = runTest {
     val fetcher = PrototypeWebFetcher { _, _, _ -> error("no fetch expected") }
     val module =

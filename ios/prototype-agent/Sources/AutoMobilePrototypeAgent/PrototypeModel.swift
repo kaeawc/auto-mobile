@@ -404,10 +404,12 @@
         @ObservationIgnored private var timerLifecycle: PrototypeTimerLifecycle?
 
         let mode: PrototypeLifecycleMode
+        private let runtime: PrototypePlatformReport.Runtime
 
         init(
             clock: PrototypeClock = SystemPrototypeClock(),
             mode: PrototypeLifecycleMode = .session,
+            runtime: PrototypePlatformReport.Runtime = .iosAgent,
             storage: PrototypeStorageCoordinator? = nil,
             registry: PrototypePlatformRegistry = .system,
             realtime: PrototypeRealtimeConfig? = nil
@@ -416,6 +418,7 @@
             platformRegistry = registry.forPresentation()
             self.clock = clock
             self.mode = mode
+            self.runtime = runtime
             self.storage = storage
             timerLifecycle = PrototypeTimerLifecycle(model: self)
         }
@@ -527,10 +530,8 @@
             realtimeModule?.update(session.resolvedChannels)
             realtimeModule?.show()
             let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-            for var event in lifecycleEvents {
-                event.wireTimestamp = timestamp
-                onEmbeddedEvent?(event)
-                onEvent?(event.wireObject(timestamp: timestamp))
+            for event in lifecycleEvents {
+                publish(event, timestamp: timestamp)
             }
             platformDriver.perform(platformCommands)
             // A fresh stream cannot deliver the previous session's buffered shake/location events.
@@ -826,10 +827,8 @@
             }
             syncSnackbarTimeouts()
             let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-            for var event in events {
-                event.wireTimestamp = timestamp
-                onEmbeddedEvent?(event)
-                onEvent?(event.wireObject(timestamp: timestamp))
+            for event in events {
+                publish(event, timestamp: timestamp)
             }
             if wasShown, !session.isShown {
                 realtimeModule?.close()
@@ -844,6 +843,21 @@
             timers.perform(timerCommands)
             platformDriver.perform(platformCommands)
             requestDriver?.perform(requestCommands)
+        }
+
+        private func publish(_ event: PrototypeEvent, timestamp: Int) {
+            var event = event
+            event.wireTimestamp = timestamp
+            if event.name == "prototype_platform",
+               var fields = event.payload.objectFields,
+               let call = fields["call"]?.stringValue,
+               let mode = platformRegistry.reportMode(for: String(call.prefix(while: { $0 != "." })))
+            {
+                fields["mode"] = .string(mode.rawValue)
+                event.payload = .object(fields)
+            }
+            onEmbeddedEvent?(event)
+            onEvent?(event.wireObject(timestamp: timestamp))
         }
 
         /// Upload progress follows ordinary state transitions without counting as user activity.
@@ -866,6 +880,19 @@
             )
         }
 
+        var platformRuntime: JSONValue? {
+            guard session.isShown else { return nil }
+            let appState: String? = switch UIApplication.shared.applicationState {
+            case .active: "active"
+            case .inactive: "inactive"
+            case .background: "background"
+            @unknown default: nil
+            }
+            return platformRegistry.report(
+                runtime: runtime, inFlight: session.platformInFlight, appState: appState
+            ).wireObject
+        }
+
         func status() -> [String: Any] {
             var status: [String: Any] = [
                 "shown": session.isShown,
@@ -884,6 +911,7 @@
             if !assetProblems.isEmpty { status["assetProblems"] = assetProblems.map(\.wireObject) }
             if let platform = session.spec?
                 .platformState { status["platform"] = JSONValue.object(platform).foundationObject }
+            if let platformRuntime { status["platformRuntime"] = platformRuntime.foundationObject }
             if let data = session.data { status["data"] = JSONValue.object(data).foundationObject }
             let degraded = degradedEffects()
             if !degraded.isEmpty { status["degradedEffects"] = degraded }

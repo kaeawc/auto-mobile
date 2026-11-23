@@ -38,7 +38,7 @@ public struct PrototypeEvent: Equatable, Sendable {
     let wireKind: String
     /// The authored event name, state key, or data path.
     public let name: String?
-    let payload: JSONValue
+    var payload: JSONValue
     let state: [String: JSONValue]
     let pages: [String: Int]
     let stacks: [String: PrototypeStackSnapshot]
@@ -1448,6 +1448,12 @@ enum PrototypeTestHooks {
 // MARK: Requests (#12529)
 
 extension PrototypeSession {
+    var platformInFlight: [String: UInt] {
+        platformCalls.values.reduce(into: [:]) { counts, pending in
+            counts[pending.job.call.moduleName, default: 0] += 1
+        }
+    }
+
     /// The commands for the request driver since the last call. A transition calls this on its new
     /// value before it is stored, so the driver sees exactly what that transition started or ended.
     mutating func takeRequestCommands() -> [PrototypeRequestCommand] {
@@ -1972,6 +1978,7 @@ extension PrototypeSession {
         fields["callId"] = .string(pending.job.call.callId)
         fields["call"] = .string(pending.job.call.call)
         fields["outcome"] = .string(fields["error"] == nil ? "success" : "error")
+        fields["inFlight"] = .number(Double(platformInFlight[pending.job.call.moduleName, default: 0]))
         return emit(kind: "emit", name: "prototype_platform", payload: .object(fields))
     }
 

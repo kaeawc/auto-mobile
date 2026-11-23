@@ -112,7 +112,7 @@ extension ElementLocator {
 
         /// Common system apps to check when detecting foreground app
         /// These are apps that might be launched by the user during testing
-        private static let commonSystemApps: [String] = [
+        static let commonSystemApps: [String] = [
             "com.apple.Preferences", // Settings
             "com.apple.mobilesafari", // Safari
             "com.apple.MobileAddressBook", // Contacts

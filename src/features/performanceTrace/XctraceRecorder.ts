@@ -1,5 +1,8 @@
+import { createReadStream } from "node:fs";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { ActionableError, type BootedDevice } from "../../models";
+import { toActionableError } from "../../models/ActionableError";
 import type {
   HostChildProcess,
   HostCommandExecutor,
@@ -7,6 +10,7 @@ import type {
 } from "../../utils/HostCommandExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
 import type {
   PerformanceTraceRecorder,
@@ -32,8 +36,23 @@ import {
   XCTRACE_SUMMARY_SCHEMAS,
   type XctraceToc,
 } from "./xctraceExport";
+import {
+  summarizeTimeProfileStream,
+  type TimeProfileStreamSummary,
+} from "./xctraceTimeProfileStream";
 import { waitForChildExit, waitForChildOutput } from "./childProcessWaits";
 import { traceArtifactBytes, waitForXctraceFinalization } from "./xctraceFinalization";
+
+/** File access for table exports too large to hold in memory (the `time-profile` table, #18791). */
+export interface XctraceExportFiles {
+  open(path: string): AsyncIterable<string | Uint8Array>;
+  remove(path: string): Promise<void>;
+}
+
+const defaultExportFiles: XctraceExportFiles = {
+  open: (path) => createReadStream(path, { encoding: "utf8" }),
+  remove: (path) => rm(path, { force: true }),
+};
 
 export interface XctraceHost extends HostCommandExecutor {
   spawn(file: string, args: string[], options?: HostSpawnOptions): HostChildProcess;
@@ -46,9 +65,20 @@ export type IosAppPidResolver = (
   signal?: AbortSignal,
 ) => Promise<number | undefined>;
 
+/**
+ * Resolves what `xctrace record --launch` should start for `appId`: the `.app` path on a simulator,
+ * where xctrace rejects a bundle id as "Path not found" (#18790). `undefined` keeps the bundle id.
+ */
+export type IosLaunchTargetResolver = (
+  device: BootedDevice,
+  appId: string,
+  signal?: AbortSignal,
+) => Promise<string | undefined>;
+
 export interface XctraceRecorderDependencies {
   host: XctraceHost;
   resolvePid: IosAppPidResolver;
+  resolveLaunchTarget?: IosLaunchTargetResolver;
   timer: Timer;
   /** Host Xcode and simulator versions, checked against known-broken pairs; omitted skips the check. */
   environment?: XctraceEnvironment;
@@ -67,11 +97,15 @@ const DEFAULT_STOP_TIMEOUT_MS = 60_000;
 const DEFAULT_STOP_MAX_MS = 180_000;
 const EXPORT_TIMEOUT_MS = 120_000;
 const LIST_TEMPLATES_TIMEOUT_MS = 30_000;
+const RECORD_OUTPUT_MAX_CHARS = 8_000;
+/** How long `stop()` waits for stdio to close after xctrace already exited on its own. */
+const EXITED_DRAIN_TIMEOUT_MS = 5_000;
 const EXPORT_MAX_BUFFER = 64 * 1024 * 1024;
 /** `xctrace record` prints this once the recorder is capturing. */
 const RECORDING_STARTED = /Ctrl-C to stop the recording|Starting recording/i;
 
 interface RecordTarget {
+  /** A bundle id, or a simulator `.app` path when the app resolves to one. */
   launchBundleId?: string;
   attachPid?: number;
 }
@@ -114,6 +148,7 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
       stdio: ["ignore", "pipe", "pipe"],
     });
     const exited = waitForChildExit(child);
+    const output = captureChildOutput(child);
     try {
       await waitForChildOutput(child, RECORDING_STARTED, {
         timer: this.deps.timer,
@@ -128,7 +163,11 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
         { cause: error },
       );
     }
-    return this.recording(child, exited, artifactPath, { template: request.template, warnings });
+    return this.recording(child, exited, artifactPath, {
+      template: request.template,
+      warnings,
+      output,
+    });
   }
 
   /** Refuse up front on an Xcode and simulator pair where xctrace cannot finalise (#16999). */
@@ -208,7 +247,7 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
       return {};
     }
     if (template === "appLaunch") {
-      return { launchBundleId: appId };
+      return { launchBundleId: (await this.launchTarget(device, appId, request.signal)) ?? appId };
     }
     const pid = await this.deps.resolvePid(device, appId, request.signal);
     if (pid !== undefined) {
@@ -223,15 +262,53 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
     return {};
   }
 
+  private async launchTarget(
+    device: BootedDevice,
+    appId: string,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    try {
+      return await this.deps.resolveLaunchTarget?.(device, appId, signal);
+    } catch (error) {
+      signal?.throwIfAborted();
+      throw toActionableError(
+        error,
+        `Cannot find ${appId} on ${device.deviceId} to launch it under xctrace; is it installed?`,
+      );
+    }
+  }
+
   private recording(
     child: HostChildProcess,
     exited: Promise<void>,
     artifactPath: string,
-    { template, warnings }: { template: PerformanceTraceTemplate; warnings: string[] },
+    {
+      template,
+      warnings,
+      output,
+    }: { template: PerformanceTraceTemplate; warnings: string[]; output: ChildOutputCapture },
   ): RecordingPerformanceTrace {
     const { timer, host } = this.deps;
     const stopTimeoutMs = this.deps.stopTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS;
     let signalled = false;
+    const stopChild = async () => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        // Already ended (e.g. at its time limit): no signal, but let trailing stderr drain.
+        signalled = true;
+        await waitForDrain(exited, timer, EXITED_DRAIN_TIMEOUT_MS);
+        return;
+      }
+      const finalized = waitForXctraceFinalization(child, exited, {
+        timer,
+        artifactPath,
+        artifactBytes: this.deps.artifactBytes ?? traceArtifactBytes,
+        stopTimeoutMs,
+        stopMaxMs: this.deps.stopMaxMs ?? DEFAULT_STOP_MAX_MS,
+      });
+      child.kill("SIGINT");
+      signalled = true;
+      await finalized;
+    };
     return {
       artifactPath,
       warnings,
@@ -239,24 +316,101 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
         return signalled;
       },
       stop: async () => {
-        if (child.exitCode !== null || child.signalCode !== null) {
-          signalled = true;
-          return;
+        try {
+          await stopChild();
+        } finally {
+          output.detach();
         }
-        const finalized = waitForXctraceFinalization(child, exited, {
-          timer,
-          artifactPath,
-          artifactBytes: this.deps.artifactBytes ?? traceArtifactBytes,
-          stopTimeoutMs,
-          stopMaxMs: this.deps.stopMaxMs ?? DEFAULT_STOP_MAX_MS,
-        });
-        child.kill("SIGINT");
-        signalled = true;
-        await finalized;
       },
-      summarize: (signal) => summarizeXctrace(host, artifactPath, template, signal),
+      summarize: async (signal) => {
+        const summarized = await summarizeXctrace(host, artifactPath, template, { signal });
+        return withRecordErrors(
+          summarized,
+          xctraceRecordErrors(output.read()),
+          artifactPath,
+          template,
+        );
+      },
     };
   }
+}
+
+/**
+ * Waits for `exited` (close-backed) so trailing output drains, bounded by `timeoutMs`; a missed
+ * deadline only logs, since the recording itself already ended.
+ */
+async function waitForDrain(exited: Promise<void>, timer: Timer, timeoutMs: number): Promise<void> {
+  try {
+    await raceWithDeadline(exited, { timer, timeoutMs, label: "xctrace output drain" });
+  } catch (error) {
+    logger.warn(
+      `[performanceTrace] xctrace exited but its output did not close: ${errorMessage(error)}; recorder errors may be incomplete`,
+      error,
+    );
+  }
+}
+
+interface ChildOutputCapture {
+  read(): string;
+  /** Stop listening; the captured text stays readable. */
+  detach(): void;
+}
+
+/**
+ * Keeps the tail of what `xctrace record` prints, for the errors it reports after it starts.
+ * Decodes UTF-8 on the streams so a multibyte character split across chunks stays intact.
+ */
+function captureChildOutput(child: HostChildProcess): ChildOutputCapture {
+  let captured = "";
+  child.stdout?.setEncoding("utf8");
+  child.stderr?.setEncoding("utf8");
+  const onData = (chunk: Buffer | string) => {
+    captured = (captured + String(chunk)).slice(-RECORD_OUTPUT_MAX_CHARS);
+  };
+  child.stdout?.on("data", onData);
+  child.stderr?.on("data", onData);
+  return {
+    read: () => captured,
+    detach: () => {
+      child.stdout?.off("data", onData);
+      child.stderr?.off("data", onData);
+    },
+  };
+}
+
+/**
+ * The `* [Error] ...` lines of `xctrace record`'s "Run issues were detected" block. Its exit code
+ * is not reliable: an unsupported Animation Hitches recording attached to an app exits 0 (#18790).
+ */
+export function xctraceRecordErrors(output: string): string[] {
+  const errors = [...output.matchAll(/^\s*\*\s*\[Error\]\s*(.+?)\s*$/gm)].map((match) => match[1]!);
+  return [...new Set(errors)];
+}
+
+/**
+ * An unreadable or empty trace with recorder errors failed to record, so it throws instead of
+ * returning a successful empty summary; recorder errors on a readable trace stay warnings.
+ */
+function withRecordErrors(
+  summarized: { summary: PerformanceTraceSummary; warnings: string[] },
+  errors: string[],
+  artifactPath: string,
+  template: PerformanceTraceTemplate,
+): { summary: PerformanceTraceSummary; warnings: string[] } {
+  if (errors.length === 0) {
+    return summarized;
+  }
+  const recorded = Object.keys(summarized.summary).length > 0;
+  if (recorded) {
+    return {
+      summary: summarized.summary,
+      warnings: [...summarized.warnings, ...errors.map((error) => `xctrace reported: ${error}`)],
+    };
+  }
+  throw new ActionableError(
+    `xctrace could not record the ${template} trace: ${errors.join("; ").replace(/\.$/, "")}. ` +
+      `The artifact at ${artifactPath} has no run data.`,
+  );
 }
 
 async function exportXml(
@@ -271,6 +425,40 @@ async function exportXml(
       signal,
     })
   ).stdout;
+}
+
+interface ExportSource {
+  host: HostCommandExecutor;
+  files: XctraceExportFiles;
+  artifactPath: string;
+  signal?: AbortSignal;
+}
+
+/**
+ * `time-profile` is the one table that outgrows a stdout buffer (110 MB for a 10 s all-processes
+ * run), so export it to a file beside the trace and stream it, removing the file afterwards.
+ */
+async function summarizeTimeProfileExport(
+  source: ExportSource,
+  xpath: string,
+): Promise<TimeProfileStreamSummary> {
+  const { host, files, artifactPath, signal } = source;
+  const outputPath = `${artifactPath}.time-profile.xml`;
+  try {
+    await exportXml(
+      host,
+      ["--input", artifactPath, "--xpath", xpath, "--output", outputPath],
+      signal,
+    );
+    return await summarizeTimeProfileStream(files.open(outputPath), signal);
+  } finally {
+    await files.remove(outputPath).catch((error: unknown) => {
+      logger.warn(
+        `[performanceTrace] could not remove ${outputPath}: ${errorMessage(error)}`,
+        error,
+      );
+    });
+  }
 }
 
 function isEmptyRun(toc: XctraceToc): boolean {
@@ -290,13 +478,21 @@ function timeProfilerSummaryWarnings(
   return [];
 }
 
+function tocFailureWarning(error: unknown): string {
+  const unreadable = /malformed|missing/i.test(errorMessage(error))
+    ? " The trace is unreadable (xctrace did not finalize it); do not rely on the artifact."
+    : "";
+  return `xctrace export --toc failed: ${errorMessage(error)}.${unreadable}`;
+}
+
 /** Summarise a finished `.trace` through `xctrace export`: the TOC, then the template's table. */
 export async function summarizeXctrace(
   host: HostCommandExecutor,
   artifactPath: string,
   template: PerformanceTraceTemplate,
-  signal?: AbortSignal,
+  options: { signal?: AbortSignal; files?: XctraceExportFiles } = {},
 ): Promise<{ summary: PerformanceTraceSummary; warnings: string[] }> {
+  const { signal, files = defaultExportFiles } = options;
   const warnings: string[] = [];
   let toc;
   try {
@@ -304,13 +500,7 @@ export async function summarizeXctrace(
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn(`[performanceTrace] xctrace export --toc failed: ${errorMessage(error)}`, error);
-    const unreadable = /malformed|missing/i.test(errorMessage(error))
-      ? " The trace is unreadable (xctrace did not finalize it); do not rely on the artifact."
-      : "";
-    return {
-      summary: {},
-      warnings: [`xctrace export --toc failed: ${errorMessage(error)}.${unreadable}`],
-    };
+    return { summary: {}, warnings: [tocFailureWarning(error)] };
   }
   if (isEmptyRun(toc)) {
     return {
@@ -336,12 +526,9 @@ export async function summarizeXctrace(
     return { summary, warnings };
   }
   try {
-    const xpath = `/trace-toc/run[@number="1"]/data/table[@schema="${schema}"]`;
-    const rows = await parseXctraceTable(
-      await exportXml(host, ["--input", artifactPath, "--xpath", xpath], signal),
-    );
-    Object.assign(summary, summarizeXctraceTable(template, rows));
-    warnings.push(...timeProfilerSummaryWarnings(template, rows.length, summary));
+    const table = await summarizeTable({ host, files, artifactPath, signal }, template, schema);
+    Object.assign(summary, table.summary);
+    warnings.push(...table.warnings);
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn(
@@ -351,4 +538,25 @@ export async function summarizeXctrace(
     warnings.push(`xctrace export of "${schema}" failed: ${errorMessage(error)}`);
   }
   return { summary, warnings };
+}
+
+async function summarizeTable(
+  source: ExportSource,
+  template: PerformanceTraceTemplate,
+  schema: string,
+): Promise<{ summary: Partial<PerformanceTraceSummary>; warnings: string[] }> {
+  const xpath = `/trace-toc/run[@number="1"]/data/table[@schema="${schema}"]`;
+  if (template === "timeProfiler") {
+    const streamed = await summarizeTimeProfileExport(source, xpath);
+    const summary = { topFunctions: streamed.topFunctions };
+    return {
+      summary,
+      warnings: timeProfilerSummaryWarnings(template, streamed.sampleCount, summary),
+    };
+  }
+  const { host, artifactPath, signal } = source;
+  const rows = await parseXctraceTable(
+    await exportXml(host, ["--input", artifactPath, "--xpath", xpath], signal),
+  );
+  return { summary: summarizeXctraceTable(template, rows), warnings: [] };
 }

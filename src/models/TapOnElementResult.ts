@@ -14,7 +14,9 @@ export type TapEffectBasis =
   | "activeWindow unchanged"
   | "viewHierarchy changed"
   | "viewHierarchy unchanged"
-  | "insufficient observation data";
+  | "insufficient observation data"
+  /** watchOS: the tap closed the system alert (notification look or permission prompt) it was over. */
+  | "system alert dismissed";
 
 export interface TapEffect {
   screenChanged: boolean;
@@ -52,6 +54,10 @@ export interface TapOnElementResult extends BaseActionResult {
   element: Element;
   /** Which container level failed to resolve (not found or ambiguous), as dragAndDrop reports. */
   containerFailure?: ContainerFailure;
+  /** True when the failure is transient and the same call can be retried (#18983). */
+  retryable?: boolean;
+  /** Why no hierarchy read in the search was usable, e.g. `service_recovering` (#18983). */
+  hierarchyUnavailableReason?: string;
   skipped?: "already-checked";
   effect?: TapEffect;
   /** iOS coordinate tap route reported by the runner; omitted when unreported. */

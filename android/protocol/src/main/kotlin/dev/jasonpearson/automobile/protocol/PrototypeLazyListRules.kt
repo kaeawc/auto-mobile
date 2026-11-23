@@ -54,19 +54,18 @@ internal object PrototypeLazyListRules {
       else -> null
     }
 
-  fun limitError(spec: JsonElement): PrototypeSpecError? {
+  fun limitError(
+    spec: JsonElement,
+    listItems: Int = PrototypeRuntimeBudget.BASE.maxListItems,
+  ): PrototypeSpecError? {
     val data = (spec as? JsonObject)?.get("data") as? JsonObject
     return nodes(spec).firstNotNullOfOrNull { (node, path) ->
       val pointer = ((node["repeat"] as? JsonObject)?.get("items") as? JsonObject)?.text("path")
       val source = pointer?.let { PrototypeDataPointer.resolve(data, it) } as? JsonArray
-      if (
-        node.text("type") == "list" &&
-          source != null &&
-          source.size > PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS
-      )
+      if (node.text("type") == "list" && source != null && source.size > listItems)
         PrototypeSpecError(
           "$path.repeat.items.path",
-          "Repeat path resolves to more than ${PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS} items",
+          "Repeat path resolves to more than $listItems items",
         )
       else null
     }
@@ -105,8 +104,9 @@ fun prototypeListDataWriteError(
   spec: PrototypeSpec,
   data: JsonObject?,
   writePath: String,
+  budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
 ): PrototypeSpecError? {
-  val repeats = PrototypeRepeatData(data)
+  val repeats = PrototypeRepeatData(data, budget.maxListItems)
   val state = PrototypeRepeatTextChecks.RepeatState(repeats)
   for ((node, path) in
     PrototypeLazyListRules.nodes(PrototypeSpecValidator.json.encodeToJsonElement(spec))) {

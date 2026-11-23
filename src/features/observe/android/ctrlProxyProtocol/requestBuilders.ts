@@ -1,5 +1,6 @@
 import type {
   AdvancePrototypeClockMessage,
+  QueuePrototypeCallOutcomeMessage,
   SimulatePrototypePlatformMessage,
 } from "./prototypeMessages";
 /** Typed request builders and millisecond normalization for byte-identical wire frames. */
@@ -401,6 +402,9 @@ export const ctrlProxyRequests = {
   deleteSavedPrototype(args: { requestId: string; id: string }): DeleteSavedPrototypeMessage {
     return { type: "delete_saved_prototype", requestId: args.requestId, id: args.id };
   },
+  queuePrototypeCallOutcome: (
+    args: Omit<QueuePrototypeCallOutcomeMessage, "type">,
+  ): QueuePrototypeCallOutcomeMessage => ({ type: "queue_prototype_call_outcome", ...args }),
   simulatePrototypePlatform: (args: {
     requestId: string;
     id: string;

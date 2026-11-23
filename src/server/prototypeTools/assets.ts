@@ -244,7 +244,8 @@ export async function sendPrototype(
     signal: AbortSignal | undefined;
     displayId: number | undefined;
     superseded?: () => boolean;
-    beforeSend?: () => Promise<void>;
+    /** Resolves `"superseded"` when a newer show took over while it awaited: nothing is sent. */
+    beforeSend?: () => Promise<"superseded" | undefined>;
     env?: NodeJS.ProcessEnv;
   },
 ): Promise<MutationOutcome> {
@@ -256,7 +257,9 @@ export async function sendPrototype(
   if (superseded()) {
     return { result: supersededBeforeSend(args) };
   }
-  await beforeSend?.();
+  if ((await beforeSend?.()) === "superseded") {
+    return { result: supersededBeforeSend(args) };
+  }
   const first = await runMutation(target, args, displayId);
   if (!needsAssetResend(first, superseded)) {
     return { result: first };

@@ -27,6 +27,7 @@ object PrototypeObjectDataValue {
     value: JsonObject,
     members: JsonObject,
     path: String,
+    budget: PrototypeRuntimeBudget,
   ): PrototypeSpecError? {
     if (value.text("type") == "upsertData" && !keyNamesMember(value.text("key").orEmpty(), members))
       return fail(
@@ -35,7 +36,7 @@ object PrototypeObjectDataValue {
       )
     for (name in members.keys.sorted()) {
       val literal = (members[name] as? JsonObject)?.get("value") ?: continue
-      if (PrototypeDataRules.dataError(JsonObject(mapOf("value" to literal))) != null)
+      if (PrototypeDataRules.dataError(JsonObject(mapOf("value" to literal)), budget) != null)
         return fail(
           "$path.value.object.$name.value",
           "A data write value must be a string, boolean, finite number, array or object",

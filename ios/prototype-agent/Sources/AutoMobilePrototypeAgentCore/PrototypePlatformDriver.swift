@@ -12,6 +12,7 @@ final class PrototypePlatformDriver {
     private var started: [String: Int] = [:]
     private var subscriptions: [String: Task<Void, Never>] = [:]
     private var observing = false
+    private var outcomes = PrototypePlatformOutcomes()
     var onComplete: ((String, PlatformCallResult, Int) -> Void)?
     var onEvent: ((PlatformEvent) -> Void)?
     var onState: (([String: JSONValue]) -> Void)?
@@ -26,6 +27,22 @@ final class PrototypePlatformDriver {
             onState?(registry.snapshot)
             onEvent?($0)
         }
+    }
+
+    func queueCallOutcome(id: String, call: String, outcome: JSONValue, session: PrototypeSession) -> String? {
+        if let refusal = PrototypePlatformSimulation.callRefusal(
+            id: id,
+            call: call,
+            session: session,
+            registry: registry
+        ) {
+            return refusal
+        }
+        return outcomes.enqueue(call: call, outcome: outcome)
+    }
+
+    func clearOutcomes() {
+        outcomes.clear()
     }
 
     func subscribe() {
@@ -121,13 +138,17 @@ final class PrototypePlatformDriver {
             }
         }
         let registry = registry
+        let scriptedResult = outcomes.hasQueued(call: job.call.call)
+            ? Self.invalidArguments(job.call) ?? outcomes.consume(call: job.call.call)
+            : nil
         let realtime = realtime
         calls[id] = Task { [weak self] in
             guard !Task.isCancelled else { return }
             let result: PlatformCallResult
             let name = job.call.moduleName
             let resolved: (any PrototypePlatformModule)? = name == "realtime" ? realtime : registry.modules[name]
-            if let module = resolved {
+            if let scriptedResult { result = scriptedResult }
+            else if let module = resolved {
                 switch module.availability() {
                 case .ready:
                     if let invalid = Self.invalidArguments(job.call) { result = invalid }

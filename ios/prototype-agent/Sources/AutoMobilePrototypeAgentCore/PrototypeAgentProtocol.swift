@@ -270,6 +270,8 @@ enum PrototypeAgentProtocol {
     /// iOS 26+), a tonal fill where blur is unavailable, and `backdrop: blur|fallback` in the show reply.
     static let backdropCapability = "prototype_backdrop_v1"
     static let timersCapability = "prototype_timers_v1"
+    static let queueCallOutcomeRequest = "queue_prototype_call_outcome"
+    static let platformOutcomesCapability = "prototype_platform_outcomes_v1"
     static let simulatePlatformRequest = "simulate_prototype_platform"
     static let platformSimulationCapability = "prototype_platform_simulation_v1"
     static let advanceClockRequest = "advance_prototype_clock"

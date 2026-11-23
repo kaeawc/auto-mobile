@@ -124,7 +124,8 @@ export const appendDataActionSchema = z
       .number()
       .int()
       .min(1)
-      .max(contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS)
+      // The largest runtime budget (#18804); the validator applies the target's own limit.
+      .max(contract.runtimeBudgets.prototype_large_budget_v1.MAX_PROTOTYPE_DATA_ARRAY_ITEMS)
       .optional(),
   })
   .strict();
@@ -137,7 +138,8 @@ export const upsertDataActionSchema = z
       .number()
       .int()
       .min(1)
-      .max(contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS)
+      // The largest runtime budget (#18804); the validator applies the target's own limit.
+      .max(contract.runtimeBudgets.prototype_large_budget_v1.MAX_PROTOTYPE_DATA_ARRAY_ITEMS)
       .optional(),
   })
   .strict();

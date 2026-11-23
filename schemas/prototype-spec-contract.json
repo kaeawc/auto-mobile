@@ -117,6 +117,15 @@
     "MAX_PROTOTYPE_REMOTE_IMAGE_DISK_BYTES": 134217728,
     "MAX_PROTOTYPE_REMOTE_IMAGE_LOADS": 6
   },
+  "runtimeBudgets": {
+    "prototype_large_budget_v1": {
+      "MAX_PROTOTYPE_SPEC_BYTES": 4194304,
+      "MAX_PROTOTYPE_DATA_BYTES": 3145728,
+      "MAX_PROTOTYPE_DATA_WRITE_BYTES": 3145728,
+      "MAX_PROTOTYPE_DATA_ARRAY_ITEMS": 10000,
+      "MAX_PROTOTYPE_LIST_ITEMS": 10000
+    }
+  },
   "definitions": {
     "authAccount": {
       "kind": "object",
@@ -2626,7 +2635,8 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1,
-                "max": 2000
+                "max": 2000,
+                "maxLimit": "MAX_PROTOTYPE_DATA_ARRAY_ITEMS"
               },
               "optional": true
             }
@@ -4105,7 +4115,8 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1,
-                "max": 2000
+                "max": 2000,
+                "maxLimit": "MAX_PROTOTYPE_DATA_ARRAY_ITEMS"
               },
               "optional": true
             },
@@ -15945,7 +15956,8 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1,
-                "max": 2000
+                "max": 2000,
+                "maxLimit": "MAX_PROTOTYPE_LIST_ITEMS"
               },
               "optional": true
             },

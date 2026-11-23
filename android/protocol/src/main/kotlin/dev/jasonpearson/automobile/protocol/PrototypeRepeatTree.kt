@@ -113,7 +113,7 @@ internal object PrototypeRepeatTree {
     if (scope.items.any { !it.containsKey(key) }) {
       return fail(at, "Unknown repeat field ${JsonPrimitive(key)}")
     }
-    if (key in scope.derivedNames) return null
+    if (key in scope.derivedNames) return PrototypeDerivedRepeatKeys.error(node, scope, key, at)
     val seen = mutableMapOf<String, Int>()
     val numbers = mutableMapOf<Double, Int>()
     for ((index, item) in scope.items.withIndex()) {

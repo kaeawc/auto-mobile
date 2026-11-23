@@ -494,7 +494,6 @@ extension PrototypeRepeat {
                         for (name, value) in scope.items[index].objectFields ?? [:] {
                             values["outer.\(name)"] = value
                         }
-                        values["$outerIndex"] = .number(Double(index))
                         return .object(values)
                     }
                 })

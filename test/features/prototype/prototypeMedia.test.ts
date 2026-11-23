@@ -6,7 +6,7 @@ import {
   prototypeMediaReadValid,
 } from "../../../src/features/prototype/prototypeMedia";
 import { chargeVideoNode } from "../../../src/features/prototype/prototypeMediaSchema";
-import { nodeImageUses } from "../../../src/features/prototype/prototypeImageUses";
+import { nodeImageUses } from "../../../src/features/prototype/prototypeRepeat";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 const players = { main: { kind: "video", source: { sample: "colorBars" } } };

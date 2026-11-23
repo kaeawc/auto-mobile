@@ -8,7 +8,7 @@ import {
   prototypeMediaItemFields,
   prototypeMediaItemsUnsupportedMessage,
 } from "../../../src/features/prototype/prototypeMediaItems";
-import { imageSlotUses } from "../../../src/features/prototype/prototypeImageUses";
+import { imageSlotUses } from "../../../src/features/prototype/prototypeRepeat";
 import { prototypeThemeModeFields } from "../../../src/features/prototype/prototypeThemeModes";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 

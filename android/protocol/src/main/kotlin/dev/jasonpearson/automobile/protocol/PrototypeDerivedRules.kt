@@ -180,13 +180,12 @@ object PrototypeDerivedRows {
               )
             },
         )
-    val state = PrototypeRepeatTextChecks.RepeatState(data)
     for (child in PrototypeRepeatTree.childrenOf(materialized, "root")) {
       PrototypeRepeatTree.templateErrors(
           child.node,
           child.path,
           scope,
-          state,
+          PrototypeRepeatTextChecks.RepeatState(data),
         )
         ?.let {
           return it

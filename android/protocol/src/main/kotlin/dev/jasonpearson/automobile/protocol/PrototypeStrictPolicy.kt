@@ -519,7 +519,8 @@ internal object PrototypeStrictPolicy {
 
     private fun repeatFeatures(child: JsonElement) {
       val repeatSpec = child as? JsonObject
-      if (PrototypeNestedRepeat.requiresCapability(repeatSpec)) need("nested_repeat")
+      if ((repeatSpec?.get("items") as? JsonObject)?.containsKey("field") == true)
+        need("nested_repeat")
       if (repeatSpec?.containsKey("derive") == true) need("format")
       if ((repeatSpec?.get("items") as? JsonObject)?.containsKey("derived") == true) need("derive")
       if (repeatSpec?.get("stagger") != null) need("window_motion")

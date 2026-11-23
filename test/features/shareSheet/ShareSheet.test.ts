@@ -105,6 +105,22 @@ function scrolled(capture: ViewHierarchyResult, dy: number): ViewHierarchyResult
   return copy;
 }
 
+/**
+ * A copy of the capture whose chooser list items report collection row indices `by` higher,
+ * as a later page of distinct rows that happen to sit at the same coordinates does.
+ */
+function reindexed(capture: ViewHierarchyResult, by: number): ViewHierarchyResult {
+  const copy = { ...capture, hierarchy: structuredClone(capture.hierarchy) };
+  const list = findNode(copy, (node) => node["resource-id"] === "android:id/resolver_list");
+  parser.traverseNode(list, (node: ViewHierarchyNode) => {
+    const row = node["collection-row-index"];
+    if (row !== undefined) {
+      node["collection-row-index"] = Number(row) + by;
+    }
+  });
+  return copy;
+}
+
 function renamed(capture: ViewHierarchyResult, from: string, to: string): ViewHierarchyResult {
   const copy = { ...capture, hierarchy: structuredClone(capture.hierarchy) };
   findNode(copy, (node) => node.text === from).text = to;
@@ -127,6 +143,23 @@ function findNode(hierarchy: ViewHierarchyResult, predicate: (node: ViewHierarch
 }
 
 describe("Android share sheet", () => {
+  test("records each list row's collection position, from the row or its indexed line", () => {
+    const positions = (capture: ViewHierarchyResult) =>
+      extractAndroidShareSheet(capture, parser)?.rows.map(({ target, listPosition }) => [
+        target.label,
+        listPosition,
+      ]);
+    // Android 14 indexes the whole grid line; API 37 indexes each full-list cell.
+    expect(positions(android14)?.slice(0, 3)).toEqual([
+      ["Copy", undefined],
+      ["Nearby Share", "2:0"],
+      ["AutoMobile Share Sink", "2:0"],
+    ]);
+    expect(positions(android37Expanded)).toContainEqual(["Messages", "3:2"]);
+    // The legacy Android 11 capture reports no collection indices.
+    expect(positions(android11)?.every(([, position]) => position === undefined)).toBe(true);
+  });
+
   test("lists the exact visible Android 11 targets from the capture", async () => {
     const { tool, inputs } = makeShareSheet([android11]);
     expect(await tool.execute({ action: "list" })).toEqual({
@@ -284,7 +317,40 @@ describe("Android share sheet", () => {
       ["Chrome", "Photos"],
       ["Copy to clipboard", "Keep"],
       ["Drive", "Maps"],
-    ].reduce((page, [from, to]) => renamed(page, from, to), android14);
+    ].reduce((page, [from, to]) => renamed(page, from, to), reindexed(android14, 3));
+    const { tool, inputs } = makeShareSheet([android14, laterPage]);
+    await expect(
+      tool.execute({ action: "select", label: "AutoMobile Share Sink" }),
+    ).rejects.toThrow(/Ambiguous share target "AutoMobile Share Sink"/);
+    expect(inputs.some(({ args }) => args[0] === "tap")).toBe(false);
+  });
+
+  /** The page after a swipe where the target row is the only row still visible from page 1. */
+  function onlyTargetOverlaps(page: ViewHierarchyResult): ViewHierarchyResult {
+    return [
+      ["Nearby Share", "Files"],
+      ["Chrome", "Photos"],
+      ["Copy to clipboard", "Keep"],
+      ["Drive", "Maps"],
+      ["Drive", "Docs"],
+    ].reduce((next, [from, to]) => renamed(next, from, to), scrolled(page, 250));
+  }
+
+  test("selects a target that is the only row visible on both pages across a swipe", async () => {
+    const { tool, inputs } = makeShareSheet([android14, onlyTargetOverlaps(android14)]);
+    expect(await tool.execute({ action: "select", label: "AutoMobile Share Sink" })).toMatchObject({
+      selected: { label: "AutoMobile Share Sink", kind: "app" },
+    });
+    expect(inputs).toEqual([
+      EXPAND_14,
+      SWIPE_UP,
+      SWIPE_UP,
+      { args: ["tap", "324", "1935"], displayId: 0 },
+    ]);
+  });
+
+  test("refuses two distinct same-label rows that are the only rows shared across a swipe", async () => {
+    const laterPage = onlyTargetOverlaps(reindexed(android14, 1));
     const { tool, inputs } = makeShareSheet([android14, laterPage]);
     await expect(
       tool.execute({ action: "select", label: "AutoMobile Share Sink" }),

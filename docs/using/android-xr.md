@@ -119,7 +119,8 @@ xrHeadsetInput { pointer: "hand", action: "drag", x: 1280, y: 1200, toX: 1280, t
 
 The result has `success`, `message`, `pointer`, `action`, `rpc`, `field` and `events`, the
 (`x`, `y`, `buttons`) sequence that was sent. The emulator sends no acknowledgement, so call
-`observe` afterwards to check the effect.
+`observe` afterwards to check the effect. When the guest log shows the system image rejected the
+events, `success` is `false` and `guestRejected` counts them; use `tapOn` on that image.
 
 - Needs an Android XR headset emulator, version 35.4 or newer, running on the same host with gRPC
   enabled (the default). Older emulators ignore the events.

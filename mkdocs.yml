@@ -329,6 +329,7 @@ nav:
       - "observe": using/observe.md
       - "tapAt": using/tap-at.md
       - "swipeOn": using/swipe-on.md
+      - "shareSheet": using/share-sheet.md
       - "sendKeys": using/send-keys.md
       - "Environment variables": using/environment-variables.md
       - "Usage data": metrics/usage-data.md

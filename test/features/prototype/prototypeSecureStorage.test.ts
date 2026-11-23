@@ -318,3 +318,98 @@ describe("secure key template matching", () => {
     expect(leak(`${"{row.id}".repeat(8)}z`, [`state:${"a".repeat(63)}b`])).toBeUndefined();
   });
 });
+
+describe("secure keys reached through derived bindings (#19013)", () => {
+  const derive = {
+    secret: { of: { state: "token" }, format: { number: {} } },
+    matching: {
+      collection: {
+        of: { data: "/rows" },
+        where: [{ field: "t", op: "eq", value: { state: "token" } }],
+      },
+      reduce: { op: "count" },
+    },
+    open: { of: { state: "remember" }, format: { number: {} } },
+  };
+  const root = spec({ derive });
+  const error = (action: Record<string, unknown>) =>
+    prototypePlatformError(root, [{ value: action, path: "root.onTap[0]" }], () => undefined);
+
+  for (const name of ["secret", "matching"]) {
+    const binding = { derived: name };
+    test(`route params and platform args refuse derived ${name}`, () => {
+      expect(error({ type: "push", params: { t: binding } })).toEqual({
+        path: "root.onTap[0].params.t",
+        message: "Secure storage key state:token cannot be sent in route params",
+      });
+      expect(
+        error({ type: "setStack", path: [{ screen: "detail", params: { t: binding } }] }),
+      ).toEqual({
+        path: "root.onTap[0].path[0].params.t",
+        message: "Secure storage key state:token cannot be sent in route params",
+      });
+      expect(error({ type: "platform", args: { text: binding } })).toEqual({
+        path: "root.onTap[0].args.text",
+        message: "Secure storage key state:token cannot be sent in platform args",
+      });
+    });
+
+    test(`emit, request and data writes refuse derived ${name}`, () => {
+      expect(error({ type: "emit", name: "x", context: { t: binding } })?.message).toBe(
+        "Secure storage key state:token cannot be sent in an emit context",
+      );
+      expect(error({ type: "request", url: "https://a.test", query: { t: binding } })).toEqual({
+        path: "root.onTap[0].query.t",
+        message:
+          "Secure storage key state:token cannot be sent in a request without allowSecureInRequest",
+      });
+      expect(error({ type: "setData", path: "/data/copy", value: binding })).toEqual({
+        path: "root.onTap[0].value",
+        message: "Secure storage key state:token cannot be written to data",
+      });
+      expect(
+        error({ type: "removeData", path: "/data/rows", where: { field: "t", equals: binding } }),
+      ).toEqual({
+        path: "root.onTap[0].where.equals",
+        message: "Secure storage key state:token cannot be sent in data actions",
+      });
+    });
+  }
+
+  test("a derived binding over public state passes every check", () => {
+    const binding = { derived: "open" };
+    for (const action of [
+      { type: "push", params: { t: binding } },
+      { type: "platform", args: { text: binding } },
+      { type: "emit", name: "x", context: { t: binding } },
+      { type: "request", url: "https://a.test", query: { t: binding } },
+      { type: "setData", path: "/data/copy", value: binding },
+    ]) {
+      expect(error(action)).toBeUndefined();
+    }
+  });
+
+  test("the host validator refuses a derived secure value in a complete spec", () => {
+    const base = {
+      ...root,
+      id: "vault",
+      window: { placement: { type: "fullscreen" } },
+      data: { copy: "", rows: [{ t: "a" }] },
+    };
+    const at = (action: Record<string, unknown>) =>
+      validatePrototypeSpec({ ...base, root: { type: "button", label: "Go", onTap: [action] } });
+    expect(at({ type: "setData", path: "/data/copy", value: { derived: "secret" } })).toMatchObject(
+      {
+        success: false,
+        error: {
+          path: "root.onTap[0].value",
+          message: "Secure storage key state:token cannot be written to data",
+        },
+      },
+    );
+    // The contract has no derived form for route params or platform args.
+    expect(
+      at({ type: "platform", call: "clipboard.copy", args: { text: { derived: "secret" } } }),
+    ).toMatchObject({ success: false, error: { path: "root.onTap[0].args.text.derived" } });
+  });
+});

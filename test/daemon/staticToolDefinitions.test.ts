@@ -152,6 +152,7 @@ describe("getStaticToolDefinitions", () => {
   test("mixed tools advertise only their declarative read argument shapes", () => {
     const shapes = {
       clipboard: [{ argument: "action", values: ["get"] }],
+      shareSheet: [{ argument: "action", values: ["list"] }],
       keyboard: [{ argument: "action", values: ["detect", "listImes", "listProfiles"] }],
       prototype: [
         {
@@ -226,9 +227,11 @@ describe("getStaticToolDefinitions", () => {
         }
       }
     }
-    expect(advertised).toBe(5);
+    expect(advertised).toBe(6);
     for (const [name, args] of [
       ["clipboard", { action: "set" }],
+      ["shareSheet", { action: "select" }],
+      ["shareSheet", { action: "dismiss" }],
       ["keyboard", { action: "open" }],
       ["prototype", { action: "show" }],
       ["accessibility", { talkback: true }],

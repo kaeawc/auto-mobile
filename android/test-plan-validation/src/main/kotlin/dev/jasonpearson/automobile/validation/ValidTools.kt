@@ -92,6 +92,7 @@ object ValidTools {
         "setNotificationPolicy",
         "setUIState",
         "shake",
+        "shareSheet",
         "sqlQuery",
         "putAppFile",
         "swipeAt",

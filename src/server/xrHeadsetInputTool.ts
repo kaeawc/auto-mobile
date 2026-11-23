@@ -1,5 +1,8 @@
 import { z } from "zod/v4";
 import { ActionableError, type BootedDevice } from "../models";
+import { errorMessage } from "../models/describeUnknownError";
+import { logger } from "../utils/logger";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { formFactorFrom } from "../models/formFactor";
 import {
   GrpcXrHeadsetInputInjector,
@@ -104,10 +107,39 @@ async function defaultInjector(device: BootedDevice): Promise<XrHeadsetInputInje
   );
 }
 
+/** The guest logs this once per pointer event its simulated input manager does not understand. */
+export const XR_GUEST_REJECTION_LOG =
+  "Received unexpected message type from simulated input client";
+const XR_GUEST_LOG_SETTLE_MS = 500;
+
+/** Number of pointer events the guest has rejected so far, or undefined when logcat is unreadable. */
+export type GuestRejectionCounter = (device: BootedDevice) => Promise<number | undefined>;
+
+export function logcatGuestRejectionCounter(adbFactory: AdbClientFactory): GuestRejectionCounter {
+  return async (device) => {
+    try {
+      const { stdout } = await adbFactory
+        .create(device)
+        .executeCommand("logcat -d -s XrSimulatedInputManager:W", { timeoutMs: 5_000 });
+      return stdout.split("\n").filter((line) => line.includes(XR_GUEST_REJECTION_LOG)).length;
+    } catch (error) {
+      // Delivery verification is best-effort; the input itself was already sent.
+      logger.warn(`xrHeadsetInput could not read the guest log: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+  };
+}
+
+export function rejectedByGuestMessage(rejected: number, sent: number): string {
+  return `The emulator accepted ${sent} event(s) but the guest's XrSimulatedInputManager rejected ${rejected} of them ("${XR_GUEST_REJECTION_LOG}"), so the hand/eye input had no effect. This emulator and system image do not agree on the XR pointer message (seen with emulator 37.2.13 and the google-xr canary 8.0.0 image). Use tapOn on the panel instead, or try a google-xr image that matches the emulator.`;
+}
+
 export const createXrHeadsetInputHandler =
   (
     makeInjector: (device: BootedDevice) => Promise<XrHeadsetInputInjector> = defaultInjector,
     checkHeadset: HeadsetCheck = traitsHeadsetCheck(defaultDeviceTraits, defaultAdbClientFactory),
+    countRejections: GuestRejectionCounter = logcatGuestRejectionCounter(defaultAdbClientFactory),
+    timer: Pick<Timer, "sleep"> = defaultTimer,
   ) =>
   async (
     device: BootedDevice,
@@ -129,7 +161,23 @@ export const createXrHeadsetInputHandler =
       );
     }
     const injector = await makeInjector(device);
-    return createStructuredToolResponse(await injector.inject({ ...args, signal }));
+    const before = await countRejections(device);
+    const result = await injector.inject({ ...args, signal });
+    if (before === undefined) {
+      return createStructuredToolResponse(result);
+    }
+    await timer.sleep(XR_GUEST_LOG_SETTLE_MS);
+    const after = await countRejections(device);
+    const rejected = after === undefined ? 0 : after - before;
+    if (rejected <= 0) {
+      return createStructuredToolResponse(result);
+    }
+    return createStructuredToolResponse({
+      ...result,
+      success: false,
+      guestRejected: rejected,
+      message: rejectedByGuestMessage(rejected, result.events.length),
+    });
   };
 
 const xrHeadsetInputTool = defineDeviceTool({

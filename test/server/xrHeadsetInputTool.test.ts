@@ -17,7 +17,7 @@ import { toolJson } from "../helpers/toolResponse";
 
 const headset: BootedDevice = { name: "XR", deviceId: "emulator-5554", platform: "android" };
 
-function setup(isHeadset: boolean | undefined) {
+function setup(isHeadset: boolean | undefined, counts: Array<number | undefined> = []) {
   const sent: number[] = [];
   const requests: XrHeadsetInputRequest[] = [];
   const handler = createXrHeadsetInputHandler(
@@ -35,6 +35,8 @@ function setup(isHeadset: boolean | undefined) {
       };
     },
     async () => isHeadset,
+    async () => counts.shift(),
+    { sleep: async () => {} },
   );
   return { handler, sent, requests };
 }
@@ -55,6 +57,26 @@ describe("xrHeadsetInput tool", () => {
     expect(xrHeadsetInputResultSchema.safeParse(json).success).toBe(true);
     expect(sent).toEqual([3]);
     expect(requests[0].signal).toBe(signal);
+  });
+
+  test("reports success: false when the guest rejects the pointer events", async () => {
+    const { handler } = setup(true, [2, 5]);
+    const json = toolJson(
+      await handler(headset, { pointer: "hand", action: "select", x: 1, y: 2 }),
+    );
+    expect(json).toMatchObject({ success: false, guestRejected: 3 });
+    expect(String(json.message)).toContain("rejected 3 of them");
+    expect(xrHeadsetInputResultSchema.safeParse(json).success).toBe(true);
+  });
+
+  test("keeps success when the guest log shows no new rejections or cannot be read", async () => {
+    for (const counts of [[4, 4], [undefined]]) {
+      const { handler } = setup(true, counts);
+      const json = toolJson(
+        await handler(headset, { pointer: "eye", action: "point", x: 1, y: 2 }),
+      );
+      expect(json).toMatchObject({ success: true });
+    }
   });
 
   for (const isHeadset of [false, undefined]) {

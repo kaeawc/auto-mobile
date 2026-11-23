@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { registerMcpTools } from "../../src/server";
+import { deviceToolMutations } from "../../src/server/deviceMutationAdapters";
 import { registerDoctorTools } from "../../src/server/doctorTools";
 import { ToolRegistry, ToolRegistryClass } from "../../src/server/toolRegistry";
 import {
@@ -38,6 +39,20 @@ describe("device mutation tool coverage", () => {
     expect(Object.keys(DEVICE_MUTATION_TOOL_COVERAGE).filter((name) => !names.has(name))).toEqual(
       [],
     );
+  });
+
+  test("shareSheet journals the clipboard for label selection on Android and iOS", () => {
+    expect(
+      deviceToolMutations("shareSheet", { action: "select", label: "Copy" }, "android"),
+    ).toEqual([{ kind: "clipboard", key: "device" }]);
+    expect(deviceToolMutations("shareSheet", { action: "select", label: "Copy" }, "ios")).toEqual([
+      { kind: "clipboard", key: "device" },
+    ]);
+    expect(
+      deviceToolMutations("shareSheet", { action: "select", appId: "com.example" }, "android"),
+    ).toEqual([]);
+    expect(deviceToolMutations("shareSheet", { action: "dismiss" }, "android")).toEqual([]);
+    expect(deviceToolMutations("shareSheet", { action: "list" }, "android")).toEqual([]);
   });
 
   test("new hidden mutating tool fails the guard instead of silently gaining reset coverage", () => {

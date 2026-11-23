@@ -165,11 +165,14 @@ function dataWriteError(
     }
     return undefined;
   }
-  const key = bindingKey(value, strings(record(root.storage)?.secure));
+  const key = bindingKey(value, strings(record(root.storage)?.secure), root.derive);
   return key ? { path, message: `Secure storage key ${key} cannot be written to data` } : undefined;
 }
 
-/** Only state bindings are resolved here; literal strings do not expand placeholders. */
+/**
+ * State bindings and derived bindings over state are resolved here; literal strings do not expand
+ * placeholders.
+ */
 function bindingMapError(
   value: unknown,
   path: string,
@@ -179,7 +182,7 @@ function bindingMapError(
   const bindings = record(value) ?? {};
   const secure = strings(record(root.storage)?.secure);
   for (const name of Object.keys(bindings).sort()) {
-    const key = bindingKey(bindings[name], secure);
+    const key = bindingKey(bindings[name], secure, root.derive);
     if (key) {
       return {
         path: memberPath(path, name),
@@ -241,8 +244,12 @@ export function prototypeSecureStorageRequestError(
   return undefined;
 }
 
-/** The secure key a `{state}` value binding reads, a repeat template matching any row. */
-function bindingKey(value: unknown, secure: string[], derive?: unknown): string | undefined {
+/**
+ * The secure key a `{state}` value binding reads, a repeat template matching any row, or the first
+ * secure key among the state inputs of a `{derived}` binding. Derived entries read only data, state
+ * and literals, so one level of resolution covers every source.
+ */
+function bindingKey(value: unknown, secure: string[], derive: unknown): string | undefined {
   const binding = record(value);
   if (typeof binding?.state === "string") {
     return secureKeyFor(binding.state, secure);

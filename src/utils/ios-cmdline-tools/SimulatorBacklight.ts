@@ -70,7 +70,7 @@ export async function resolveDeveloperDirectory(
   const selected = await resolve(
     readEnvTrimmed(AMBIENT_ENV.DEVELOPER_DIR, env) || "/var/db/xcode_select_link",
   );
-  return selected.endsWith(".app") ? path.join(selected, "Contents/Developer") : selected;
+  return selected.endsWith(".app") ? path.posix.join(selected, "Contents/Developer") : selected;
 }
 
 function failureMessage(code: string, udid: string): string {

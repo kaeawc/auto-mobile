@@ -8,20 +8,22 @@ no privileges. Source: `src/features/utility/networkActivity/`.
 
 1. `ps -axo pid=,ppid=,rss=,pcpu=,command=` (the shared `readHostProcessTable` snapshot).
    `simulatorProcessTree` keeps the `launchd_sim` whose command names
-   `/CoreSimulator/Devices/<UDID>/` and every descendant. An empty tree means the simulator is not
+   `/CoreSimulator/Devices/<UDID>/` and every descendant. Other host processes that name the
+   directory are not roots. An empty tree means the simulator is not
    booted, and the read stops with an error.
 2. In parallel:
    - `lsof -nP -a -i -p <tree pids> -F pcPnT`: per process, each internet socket's protocol,
-     `local->remote` name and TCP state. lsof exits 1 with no output when no pid holds a socket;
-     that is an empty list, not a failure.
+     `local->remote` name and TCP state. lsof exits 1 when a listed pid has exited or none holds a
+     socket, and still prints what it found; exit 1 is parsed, not a failure unless stderr has text.
    - `nettop -P -L 1 -x -J bytes_in,bytes_out`: one host-wide sample of `<name>.<pid>,<in>,<out>`
      rows, joined to the tree by pid.
    - `simctl listapps`: each app's bundle path.
 3. A process gets an `appId` when its `ps` executable starts with an app's bundle path. The
    longest path wins, so an extension inside an app maps to that app. `ps` shows runtime-root apps
-   under `/var/run/...` and `listapps` under `/private/var/run/...`. Both drop `/private` before
+   under `/var/run/...` and `simctl listapps` under `/private/var/run/...`. Both drop `/private` before
    comparing.
-4. Processes with no socket and no bytes are left out. The name is lsof's, then nettop's (truncated
+4. Processes with no socket and no bytes are left out. The rest are sorted by bytes, then socket
+   count, and capped at 50; `activeProcessCount` and `truncated` report the cut. The name is lsof's, then nettop's (truncated
    to 15 characters), then the executable basename.
 
 ## Byte counts
@@ -33,7 +35,8 @@ count matched the server's sent-byte total exactly (2424879 bytes, #19020).
 ## Platform support
 
 Only an iOS Simulator is read. Android and physical iOS devices return `supported: false`, and a
-failed host command becomes a field `error` that fails the read.
+failed `ps` becomes a field `error`. A failed `lsof`, `nettop` or `simctl listapps` degrades only
+its part (no sockets, zero bytes, no `appId`) and adds a `warnings` entry.
 
 The design choice is recorded in
 [Read Simulator network activity with host tools](../../../devlog/2026-11-23-simulator-network-activity-host-tools.md).

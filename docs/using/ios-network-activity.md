@@ -23,6 +23,10 @@ traffic:
 | `bytesOut` | Bytes sent on the sockets open at read time.                                                                                           |
 
 `networkActivity.processCount` is the number of processes the simulator runs, active or not.
+`processes` lists at most 50 of them, busiest first (most bytes, then most sockets).
+`activeProcessCount` is how many had sockets or traffic; `truncated` is `true` when the quietest
+were dropped. `warnings` names any host tool that failed: without `nettop` the byte counts are 0,
+without `lsof` the sockets are empty, and without `simctl listapps` the `appId` is omitted.
 
 ```json
 {
@@ -63,4 +67,5 @@ for example that an app opens no new `ESTABLISHED` connection while it is offlin
 | ------------------------------------- | ------------------------------------------------------------------------------- |
 | `unsupported` lists `networkActivity` | The device is Android or a physical iPhone; only an iOS Simulator is supported. |
 | `error` says no processes were found  | The simulator is not booted. Boot it and call again.                            |
-| `error` says the read failed          | A host tool (`ps`, `lsof` or `nettop`) failed or timed out. Call again.         |
+| `error` says the read failed          | `ps` failed or timed out. Call again.                                           |
+| `warnings` is present                 | `lsof`, `nettop` or `simctl listapps` failed; that part is missing. Call again. |

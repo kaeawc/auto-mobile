@@ -25,9 +25,15 @@ export interface NetworkActivityProcess {
 
 export interface NetworkActivityState {
   supported: boolean;
-  /** Processes under the simulator's `launchd_sim` with sockets or traffic, by pid. */
+  /** Busiest processes with sockets or traffic: bytes, then socket count, descending; capped. */
   processes?: NetworkActivityProcess[];
   /** Processes in the simulator's tree when it was read, active or not. */
   processCount?: number;
+  /** Processes with sockets or traffic before the cap; `processes` holds at most 50. */
+  activeProcessCount?: number;
+  /** True when `activeProcessCount` exceeds the cap and the quietest processes were dropped. */
+  truncated?: boolean;
+  /** Host tools that failed; the rest of the snapshot is still returned. */
+  warnings?: string[];
   error?: string;
 }

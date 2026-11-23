@@ -1,7 +1,6 @@
 import { simulatorProcessTree } from "../../../devices/bootAdmission/psSnapshot";
 import { readHostProcessTable } from "../../../devices/bootAdmission/readHostProcessTable";
 import type { HostProcessRow } from "../../../models/HostProcessRow";
-import { toActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../models/describeUnknownError";
 import { commandFailureDetails } from "../../../utils/CommandError";
 import type { HostCommandExecutor } from "../../../utils/HostCommandExecutor";
@@ -68,35 +67,72 @@ function commandName(row: HostProcessRow): string {
   return executable.slice(executable.lastIndexOf("/") + 1) || row.command;
 }
 
+/** Most processes returned; the busiest by bytes, then sockets, are kept. */
+export const MAX_NETWORK_ACTIVITY_PROCESSES = 50;
+
+interface ToolRead<T> {
+  value: T;
+  warning?: string;
+}
+
+function degraded<T>(value: T, tool: string, error: unknown, effect: string): ToolRead<T> {
+  logger.warn(`[networkActivity] ${tool} failed: ${errorMessage(error)}`, error);
+  return { value, warning: `${tool} failed, ${effect}: ${errorMessage(error)}` };
+}
+
 async function readSockets(
   host: HostCommandExecutor,
   pids: readonly number[],
-): Promise<LsofProcessSockets[]> {
+): Promise<ToolRead<LsofProcessSockets[]>> {
   try {
     const result = await host.executeCommand(
       "lsof",
       ["-nP", "-a", "-i", "-p", pids.join(","), "-F", "pcPnT"],
       { timeoutMs: HOST_READ_TIMEOUT_MS, maxBuffer: HOST_READ_MAX_BUFFER_BYTES },
     );
-    return parseLsofInternetSockets(result.stdout);
+    return { value: parseLsofInternetSockets(result.stdout) };
   } catch (error) {
     const failure = commandFailureDetails(error);
-    if (failure.exitCode === 1 && failure.stdout.trim() === "") {
-      // lsof exits 1 with no output when none of the pids holds an internet socket.
-      logger.debug(`[networkActivity] lsof found no internet sockets: ${errorMessage(error)}`);
-      return [];
+    if (failure.exitCode === 1 && (failure.stdout.trim() !== "" || failure.stderr.trim() === "")) {
+      // lsof exits 1 when any listed pid has already exited, or when none holds an internet
+      // socket, and still prints the sockets it found.
+      return { value: parseLsofInternetSockets(failure.stdout) };
     }
-    throw toActionableError(error, "Failed to list simulator sockets with lsof");
+    return degraded([], "lsof", error, "sockets are missing");
   }
 }
 
-async function readBytes(host: HostCommandExecutor): Promise<Map<number, NettopProcessBytes>> {
-  const result = await host.executeCommand(
-    "nettop",
-    ["-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out"],
-    { timeoutMs: HOST_READ_TIMEOUT_MS, maxBuffer: HOST_READ_MAX_BUFFER_BYTES },
+async function readBytes(
+  host: HostCommandExecutor,
+): Promise<ToolRead<Map<number, NettopProcessBytes>>> {
+  try {
+    const result = await host.executeCommand(
+      "nettop",
+      ["-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out"],
+      { timeoutMs: HOST_READ_TIMEOUT_MS, maxBuffer: HOST_READ_MAX_BUFFER_BYTES },
+    );
+    return { value: parseNettopProcessBytes(result.stdout) };
+  } catch (error) {
+    return degraded(new Map(), "nettop", error, "byte counts are 0");
+  }
+}
+
+async function readApps(
+  listApps: () => Promise<IosInstalledAppRecord[]>,
+): Promise<ToolRead<IosInstalledAppRecord[]>> {
+  try {
+    return { value: await listApps() };
+  } catch (error) {
+    return degraded([], "simctl listapps", error, "appId is omitted");
+  }
+}
+
+function busiest(a: NetworkActivityProcess, b: NetworkActivityProcess): number {
+  return (
+    b.bytesIn + b.bytesOut - (a.bytesIn + a.bytesOut) ||
+    b.sockets.length - a.sockets.length ||
+    a.pid - b.pid
   );
-  return parseNettopProcessBytes(result.stdout);
 }
 
 /**
@@ -126,14 +162,25 @@ export async function readIosSimulatorNetworkActivity(
       tree.map((row) => row.pid),
     ),
     readBytes(dependencies.host),
-    dependencies.listApps(),
+    readApps(dependencies.listApps),
   ]);
-  const bundles = appBundles(apps);
-  const socketsByPid = new Map(sockets.map((entry) => [entry.pid, entry]));
-  const processes = tree
-    .map((row) => toProcess(row, socketsByPid.get(row.pid), bytes.get(row.pid), bundles))
-    .filter((process) => process.sockets.length > 0 || process.bytesIn > 0 || process.bytesOut > 0);
-  return { supported: true, processCount: tree.length, processes };
+  const bundles = appBundles(apps.value);
+  const socketsByPid = new Map(sockets.value.map((entry) => [entry.pid, entry]));
+  const active = tree
+    .map((row) => toProcess(row, socketsByPid.get(row.pid), bytes.value.get(row.pid), bundles))
+    .filter((process) => process.sockets.length > 0 || process.bytesIn > 0 || process.bytesOut > 0)
+    .sort(busiest);
+  const warnings = [sockets.warning, bytes.warning, apps.warning].filter(
+    (warning): warning is string => warning !== undefined,
+  );
+  return {
+    supported: true,
+    processCount: tree.length,
+    activeProcessCount: active.length,
+    ...(active.length > MAX_NETWORK_ACTIVITY_PROCESSES ? { truncated: true } : {}),
+    processes: active.slice(0, MAX_NETWORK_ACTIVITY_PROCESSES),
+    ...(warnings.length > 0 ? { warnings } : {}),
+  };
 }
 
 function toProcess(

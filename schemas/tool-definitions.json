@@ -11687,6 +11687,18 @@
             "processCount": {
               "type": "number"
             },
+            "activeProcessCount": {
+              "type": "number"
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "processes": {
               "type": "array",
               "items": {
@@ -49091,6 +49103,18 @@
             },
             "processCount": {
               "type": "number"
+            },
+            "activeProcessCount": {
+              "type": "number"
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "processes": {
               "type": "array",

@@ -334,6 +334,9 @@ const deviceStateOutputFields = {
     .object({
       ...deviceStateFieldOutputFields,
       processCount: z.number().optional(),
+      activeProcessCount: z.number().optional(),
+      truncated: z.boolean().optional(),
+      warnings: z.array(z.string()).optional(),
       processes: z
         .array(
           z.object({

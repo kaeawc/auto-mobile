@@ -5,7 +5,10 @@ import {
   simulatorProcessTree,
   parsePsSnapshot,
 } from "../../../../src/devices/bootAdmission/psSnapshot";
-import { readIosSimulatorNetworkActivity } from "../../../../src/features/utility/networkActivity/IosSimulatorNetworkActivity";
+import {
+  MAX_NETWORK_ACTIVITY_PROCESSES,
+  readIosSimulatorNetworkActivity,
+} from "../../../../src/features/utility/networkActivity/IosSimulatorNetworkActivity";
 import {
   parseLsofInternetSockets,
   parseNettopProcessBytes,
@@ -152,12 +155,117 @@ describe("readIosSimulatorNetworkActivity (#19020)", () => {
     expect(state.processes?.find((process) => process.pid === PROBE_PID)?.bytesIn).toBe(2424879);
   });
 
-  test("any other lsof failure is thrown", async () => {
+  test("lsof exiting 1 with partial output (a pid exited) still yields its sockets", async () => {
+    const host = fakeHost();
+    host.setCommandError(
+      "lsof",
+      Object.assign(new Error("Command failed: lsof"), { code: 1, stdout: LSOF, stderr: "" }),
+    );
+    const state = await readIosSimulatorNetworkActivity(UDID, {
+      host,
+      listApps: async () => [PROBE_APP],
+    });
+    expect(state.warnings).toBeUndefined();
+    expect(state.processes?.find((process) => process.pid === PROBE_PID)?.sockets).toHaveLength(1);
+  });
+
+  test("an lsof failure keeps the byte counts and warns", async () => {
     const host = fakeHost();
     host.setCommandError("lsof", Object.assign(new Error("lsof: timed out"), { code: 2 }));
-    await expect(
-      readIosSimulatorNetworkActivity(UDID, { host, listApps: async () => [] }),
-    ).rejects.toThrow("Failed to list simulator sockets with lsof");
+    const state = await readIosSimulatorNetworkActivity(UDID, { host, listApps: async () => [] });
+    expect(state.warnings).toEqual([expect.stringContaining("lsof failed")]);
+    expect(state.processes?.find((process) => process.pid === PROBE_PID)).toMatchObject({
+      sockets: [],
+      bytesIn: 2424879,
+    });
+  });
+
+  test("exit 1 with stderr and no output is an lsof failure", async () => {
+    const host = fakeHost();
+    host.setCommandError(
+      "lsof",
+      Object.assign(new Error("Command failed: lsof"), {
+        code: 1,
+        stdout: "",
+        stderr: "lsof: WARNING: can't stat() file system",
+      }),
+    );
+    const state = await readIosSimulatorNetworkActivity(UDID, { host, listApps: async () => [] });
+    expect(state.warnings).toEqual([expect.stringContaining("lsof failed")]);
+  });
+
+  test("a nettop failure keeps the sockets with zero bytes and warns", async () => {
+    const host = fakeHost();
+    host.setCommandError("nettop", new Error("nettop: not permitted"));
+    const state = await readIosSimulatorNetworkActivity(UDID, {
+      host,
+      listApps: async () => [PROBE_APP],
+    });
+    expect(state.warnings).toEqual([expect.stringContaining("nettop failed")]);
+    expect(state.processes?.find((process) => process.pid === PROBE_PID)).toMatchObject({
+      appId: "dev.automobile.netprobe19020",
+      bytesIn: 0,
+      bytesOut: 0,
+      sockets: [expect.objectContaining({ state: "ESTABLISHED" })],
+    });
+  });
+
+  test("a listapps failure omits appId, keeps the rest and warns", async () => {
+    const state = await readIosSimulatorNetworkActivity(UDID, {
+      host: fakeHost(),
+      listApps: async () => {
+        throw new Error("simctl listapps failed");
+      },
+    });
+    expect(state.warnings).toEqual([expect.stringContaining("simctl listapps failed")]);
+    const probe = state.processes?.find((process) => process.pid === PROBE_PID);
+    expect(probe?.appId).toBeUndefined();
+    expect(probe?.bytesIn).toBe(2424879);
+  });
+
+  test("processes are the busiest first and capped, with the active total and truncated", async () => {
+    // Derived by editing a copy of the captured ps fixture: 60 extra rows under launchd_sim,
+    // each given a lsof socket record, so more than the cap is active.
+    const extra = Array.from({ length: 60 }, (_, index) => 90000 + index);
+    const ps = `${PS}${extra.map((pid) => `${pid} 36068 100 0.0 /usr/bin/extra${pid}`).join("\n")}\n`;
+    const lsof = `${LSOF}${extra
+      .map((pid) => `p${pid}\ncextra${pid}\nf9\nPTCP\nn127.0.0.1:${pid}\nTST=LISTEN\n`)
+      .join("")}`;
+    const host = fakeHost();
+    host.setCommandResponse("ps -axo", createExecResult(ps, ""));
+    host.setCommandResponse("lsof", createExecResult(lsof, ""));
+    const state = await readIosSimulatorNetworkActivity(UDID, { host, listApps: async () => [] });
+    expect(state.processes).toHaveLength(MAX_NETWORK_ACTIVITY_PROCESSES);
+    expect(state.truncated).toBe(true);
+    expect(state.activeProcessCount).toBeGreaterThan(MAX_NETWORK_ACTIVITY_PROCESSES);
+    expect(state.processes?.[0]?.pid).toBe(PROBE_PID);
+  });
+
+  test("a small result is not truncated", async () => {
+    const state = await readIosSimulatorNetworkActivity(UDID, {
+      host: fakeHost(),
+      listApps: async () => [],
+    });
+    expect(state.truncated).toBeUndefined();
+    expect(state.activeProcessCount).toBe(state.processes?.length);
+  });
+
+  test("a host process naming the device directory is not a tree root", () => {
+    const rows = [
+      ...parsePsSnapshot(PS).rows,
+      {
+        pid: 99001,
+        ppid: 1,
+        rssBytes: 1,
+        cpuPercent: 0,
+        command: `tail -f /Users/user/Library/Developer/CoreSimulator/Devices/${UDID}/data/tmp/x.log`,
+      },
+      { pid: 99002, ppid: 99001, rssBytes: 1, cpuPercent: 0, command: "/usr/bin/child" },
+    ];
+    const pids = simulatorProcessTree(rows, UDID).map((row) => row.pid);
+    expect(pids).toHaveLength(310);
+    expect(pids).not.toContain(99001);
+    expect(pids).not.toContain(99002);
   });
 
   test("a simulator with no launchd_sim tree reports an error without running lsof", async () => {

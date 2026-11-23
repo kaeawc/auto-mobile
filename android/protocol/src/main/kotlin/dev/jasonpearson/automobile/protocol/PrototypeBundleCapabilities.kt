@@ -15,6 +15,7 @@ internal object PrototypeBundleCapabilities {
       if (node["type"] == JsonPrimitive("pager") && "stateKey" in node)
         caps.add("prototype_pager_state_key_v1")
       if (PrototypeMotionV3.required(node)) caps.add(PrototypeMotionV3.CAPABILITY)
+      if (PrototypeM3Expressive.required(node)) caps.add(PrototypeM3Expressive.CAPABILITY)
       caps.addAll(PrototypeBundleNodeCapabilities.collect(node))
       if (PrototypeStringConditions.uses(node)) caps.add("prototype_string_conditions_v1")
       fields(node, caps)
@@ -114,7 +115,7 @@ internal object PrototypeBundleCapabilities {
     val type = text(action["type"])
     if (type in PrototypeDataRules.dataActionTypes) caps.add("prototype_data_actions_v1")
     if (type == "prependData") caps.add("prototype_lazy_list_v1")
-    if (PrototypeDataRules.isKeyedAction(action)) caps.add("prototype_data_actions_v2")
+    if (PrototypeGeneratedValues.needsDataV2(action)) caps.add("prototype_data_actions_v2")
   }
 
   private fun fields(node: JsonObject, caps: MutableSet<String>) {
@@ -132,6 +133,7 @@ internal object PrototypeBundleCapabilities {
       caps.add("prototype_loading_states_v1")
     repeatCapabilities(node["repeat"] as? JsonObject, caps)
     PrototypeBindableFields.first<Unit>(node, "") { value, _, kind ->
+      if (kind == PrototypeBindableKind.DERIVED_CONDITION) caps.add("prototype_derive_v1")
       val bound =
         when (kind) {
           PrototypeBindableKind.TEXT -> text(value)?.let(PrototypeDataText::hasBinding) == true

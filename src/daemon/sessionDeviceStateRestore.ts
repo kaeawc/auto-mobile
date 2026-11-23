@@ -260,6 +260,21 @@ export class SessionDeviceStateRestore {
     return this.queued.retryAbandonedRotationRestore(deviceId);
   }
 
+  adoptRotationOriginalsForRecoveredSession(session: Session): void {
+    this.queued.adoptRotationOriginalsForRecoveredSession(session);
+  }
+
+  recordRotationOriginals(
+    deviceId: string,
+    state: RotationSessionState,
+  ): Promise<void> | undefined {
+    return this.queued.recordRotationOriginals(deviceId, state);
+  }
+
+  forgetRotationOriginals(deviceId: string, state: RotationSessionState): void {
+    this.queued.forgetRotationOriginals(deviceId, state);
+  }
+
   private abandonRotationRestore(
     deviceId: string,
     target: PendingRestore<RotationSessionState>,

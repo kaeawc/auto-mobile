@@ -16,6 +16,9 @@ The agent's contract is split across these pages:
 - [Layout and component contracts](prototype-agent-contracts.md)
 - [Saved prototypes, sharing and effects](prototype-agent-saved.md)
 
+Disposable prototype apps are described under
+[Disposable apps](prototype-agent-saved.md#disposable-apps).
+
 ## Background
 
 - [iOS prototype agent decisions](../../../devlog/2026-10-09-prototype-agent-ios-decisions.md)

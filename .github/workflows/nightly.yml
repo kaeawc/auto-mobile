@@ -27,12 +27,12 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
       - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.4
 
@@ -66,13 +66,13 @@ jobs:
       CLAUDE_CODE_VERSION: "2.1.311"
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           persist-credentials: false
 
       - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.4
 
@@ -106,13 +106,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           fetch-depth: 0
 
       - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.4
 
@@ -148,7 +148,7 @@ jobs:
     needs: [build-control-proxy-apk, build-ctrl-proxy-ios-ipa, build-video-server-jar]
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
           # Full history so the direct push to main isn't rejected as a shallow
@@ -157,24 +157,24 @@ jobs:
           token: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
 
       - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.4
 
       - name: "Download APK artifact"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: control-proxy-apk
           path: /tmp
 
       - name: "Download IPA artifact"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: ctrl-proxy-ios-ipa
           path: /tmp
 
       - name: "Download video-server jar artifact"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: video-server-jar
           path: /tmp
@@ -383,7 +383,7 @@ jobs:
       AUTOMOBILE_ALLOW_SHARED_DAEMON_NAMESPACE: "1"
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
@@ -396,7 +396,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: "Download CtrlProxy APK"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: control-proxy-apk
           path: android/control-proxy/build/outputs/apk/debug
@@ -447,7 +447,7 @@ jobs:
 
       - name: "Upload foldable diagnostics, screenshots and recordings"
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: foldable-posture-${{ matrix.profile }}
           path: |
@@ -467,14 +467,14 @@ jobs:
     needs: build-control-proxy-apk
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Download CtrlProxy APK"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: control-proxy-apk
           path: android/control-proxy/build/outputs/apk/debug
@@ -492,13 +492,13 @@ jobs:
 
       - name: "Upload Test Results"
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: junit-runner-emulator-test-results
           path: android/junit-runner/build/reports/tests/test/
 
       - name: "Publish Test Report"
-        uses: mikepenz/action-junit-report@v6
+        uses: mikepenz/action-junit-report@a16be3a69023e9bd7e748ede768b3282ea7b30ce # v6
         if: always()
         with:
           check_name: "JUnit Runner Emulator Test Report"
@@ -511,14 +511,14 @@ jobs:
     needs: build-control-proxy-apk
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Download CtrlProxy APK"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: control-proxy-apk
           path: android/control-proxy/build/outputs/apk/debug
@@ -536,13 +536,13 @@ jobs:
 
       - name: "Upload Test Results"
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: playground-automobile-emulator-test-results
           path: android/playground/app/build/reports/tests/test/
 
       - name: "Publish Test Report"
-        uses: mikepenz/action-junit-report@v6
+        uses: mikepenz/action-junit-report@a16be3a69023e9bd7e748ede768b3282ea7b30ce # v6
         if: always()
         with:
           check_name: "Playground Automobile Emulator Test Report"
@@ -564,14 +564,14 @@ jobs:
     needs: build-video-server-jar
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           lfs: false
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Download video-server jar"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: video-server-jar
           path: artifacts

@@ -8,7 +8,15 @@ enum PrototypeStrictCapabilities {
 
     static func required(_ spec: [String: JSONValue], includeAgentGates: Bool = false) -> Set<String> {
         var result = PrototypePlatformValidator.backendCapabilities(spec)
+        var authorizationRead = false
+        var fullNotifications = spec["notifications"] != nil
         func need(_ feature: String) { result.insert("prototype_\(feature)_v1") }
+        func platformRead(_ pointer: String) {
+            let tokens = PrototypeDataPointer.tokens(pointer)
+            guard tokens.first == "notifications" else { return }
+            if tokens == ["notifications", "authorization"] { authorizationRead = true }
+            else { fullNotifications = true }
+        }
         if PrototypeContractValidator.locatedActionTypes(.object(spec)).contains("hideKeyboard") {
             need("hide_keyboard")
         }
@@ -52,13 +60,23 @@ enum PrototypeStrictCapabilities {
         }
         if let colors = spec["theme"]?.objectFields?["colors"]?.objectFields,
            colors["light"] != nil || colors["dark"] != nil { need("theme_modes") }
-        func scan(_ value: JSONValue, field: String = "", routeAlias: Bool = false) {
+        func scan(_ value: JSONValue, field: String = "", routeAlias: Bool = false, remoteOnly: Bool = false) {
             if case let .array(items) = value { for item in items {
-                scan(item, routeAlias: routeAlias)
+                scan(item, routeAlias: routeAlias, remoteOnly: remoteOnly)
             }; return }
             guard let fields = value.objectFields else { return }
+            if let accessory = fields["ios"]?.objectFields?["bottomAccessory"] { scan(accessory, remoteOnly: true) }
+            if remoteOnly {
+                if fields["type"] == .string("image"),
+                   ["url", "placeholder", "error", "crossfade", "via"]
+                   .contains(where: { fields[$0] != nil }) { need("remote_image") }
+                for child in PrototypeStrictRepeats
+                    .children(fields, path: "") { scan(.object(child.value), remoteOnly: true) }
+                return
+            }
             if fields.count == 1, fields["value"] != nil { return }
             func textBinding(_ text: String) {
+                PrototypePlatformValidator.placeholders(text).forEach(platformRead)
                 if text.contains("{t:") { need("strings") }
                 if PrototypeDataText.substitutionLength(text, data: nil).recognized { need("data_model") }
             }
@@ -71,10 +89,16 @@ enum PrototypeStrictCapabilities {
             if PrototypeStylePolishV2.themedBorder(fields) { need("theme_modes") }
             if PrototypeStylePolishV2.required(fields) { result.insert(PrototypeStylePolishV2.capability) }
             if fields["semantics"] != nil { need("semantics") }
+            if fields["type"] == .string("image"),
+               ["url", "placeholder", "error", "crossfade", "via"]
+               .contains(where: { fields[$0] != nil }) { need("remote_image") }
             if fields["onAppear"] != nil { need("timers") }
             if fields["scrollLinked"] != nil || fields["scrollTransition"] != nil { need("scroll_motion") }
             if PrototypeMotionV3.required(fields) { result.insert(PrototypeMotionV3.capability) }
+            if PrototypeM3Expressive.required(fields) { result.insert(PrototypeM3Expressive.capability) }
             let type = fields["type"]?.stringValue ?? ""
+            if type.isEmpty, let pointer = fields["platform"]?.stringValue { platformRead(pointer) }
+            if !PrototypeDerivedValidator.conditionReferences(fields, path: "").isEmpty { need("derive") }
             if PrototypeStringConditions.uses(fields) { need("string_conditions") }
             let types = [
                 "startTimer": "timers",
@@ -159,20 +183,26 @@ enum PrototypeStrictCapabilities {
             }
             if ["setData", "appendData", "prependData", "upsertData", "removeData"]
                 .contains(type) { need("data_actions") }
-            if ["setData", "removeData"].contains(type),
-               fields["where"] != nil || fields["member"] != nil { result.insert("prototype_data_actions_v2") }
+            if PrototypeGeneratedValues.needsDataV2(fields) { result.insert("prototype_data_actions_v2") }
             if type == "upsertData" || (type == "appendData" && fields["maxItems"] != nil) || PrototypeChannels
                 .needsValueCapability(fields) { need("platform_realtime") }
             if type == "prependData" { need("lazy_list") }
             if type == "emit", fields["context"] != nil { need("emit_context") }
             if type == "platform" {
                 need("platform")
+                if fields["call"]?.stringValue?.hasPrefix("notifications.") == true { fullNotifications = true }
                 if fields["call"] == .string("share.open") { need("platform_share") }
                 if let capability = PrototypePlatformValidator.callCapability(fields["call"]?.stringValue) {
                     result.insert(capability)
                 }
             }
             for (key, child) in fields where !["ios", "android"].contains(key) {
+                if key == "screens" {
+                    for screen in (child.objectFields ?? [:]).values {
+                        scan(screen, routeAlias: routeAlias)
+                    }
+                    continue
+                }
                 if key == "form", field == "body" {
                     for binding in (child.objectFields ?? [:]).values {
                         scan(binding)
@@ -248,14 +278,26 @@ enum PrototypeStrictCapabilities {
         if let root = spec["root"] { scan(root) }
         if let handlers = spec["platform"] { scan(handlers) }
         for event in (spec["platform"]?.objectFields?["on"]?.objectFields ?? [:]).keys {
+            if event.hasPrefix("notifications.") { fullNotifications = true }
             if let capability = PrototypePlatformValidator.eventCapability(event) { result.insert(capability) }
         }
         for channel in (spec["channels"]?.objectFields ?? [:]).values { scan(channel) }
         if let scrim = spec["window"]?.objectFields?["placement"]?.objectFields?["scrim"],
            scrim.objectFields != nil { need("theme_modes") }
         if let requires = spec["requires"]?.objectFields {
+            let permissions: [JSONValue]
+            if case let .array(entries)? = requires["permissions"] { permissions = entries }
+            else { permissions = [] }
+            let notificationPermission = permissions.contains { $0.objectFields?["name"] == .string("notifications") }
             for module in PrototypeContractValidator
-                .strings(requires["platform"]) { need("platform"); need("platform_\(module)") }
+                .strings(requires["platform"])
+            {
+                need("platform")
+                // Authorization-only bindings use the permissions source without advertising delivery calls.
+                let permissionRead = module == "notifications" && authorizationRead && !fullNotifications &&
+                    notificationPermission
+                need("platform_\(permissionRead ? "permissions" : module)")
+            }
         }
         if spec["platform"] != nil { need("platform") }
         return result

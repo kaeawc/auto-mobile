@@ -94,13 +94,11 @@ enum PrototypeRepeat {
 
     static func expand(
         _ node: JSONValue, outer: PrototypeRepeatInstance?, formatter: PrototypeValueFormatter,
-        environment: PrototypeFormatEnvironment,
-        bindText: ((String, PrototypeRepeatInstance) -> String)? = nil
+        environment: PrototypeFormatEnvironment
     )
         -> JSONValue
     {
-        guard var fields = (outer?.bind(node, descendants: false, bindText: bindText) ?? node).objectFields
-        else { return node }
+        guard var fields = (outer?.bind(node, descendants: false) ?? node).objectFields else { return node }
         let lazy = fields["type"] == .string("list")
         if !lazy, case let .array(children)? = fields["children"] {
             if let spec = fields["repeat"]?.objectFields {
@@ -108,9 +106,7 @@ enum PrototypeRepeat {
                     of: spec, formatter: formatter, environment: environment, outer: outer
                 ).flatMap { instance in
                     children.enumerated().map { index, child in
-                        var bound = expand(
-                            child, outer: instance, formatter: formatter, environment: environment, bindText: bindText
-                        )
+                        var bound = expand(child, outer: instance, formatter: formatter, environment: environment)
                         if var anchored = bound.objectFields, let identity = instance.identity {
                             // Every template child needs an identity; only the first is a scroll anchor.
                             anchored[identityField] = .string("\(identity)/children[\(index)]")
@@ -124,7 +120,7 @@ enum PrototypeRepeat {
                 })
             } else {
                 fields["children"] = .array(children.map {
-                    expand($0, outer: outer, formatter: formatter, environment: environment, bindText: bindText)
+                    expand($0, outer: outer, formatter: formatter, environment: environment)
                 })
             }
         }
@@ -132,14 +128,12 @@ enum PrototypeRepeat {
         let slots = fields["type"] == .string("adaptive") ? PrototypeAdaptive.slots : ["child", "header", "footer"]
         for name in slots {
             if let child = fields[name] {
-                fields[name] = expand(
-                    child, outer: outer, formatter: formatter, environment: environment, bindText: bindText
-                )
+                fields[name] = expand(child, outer: outer, formatter: formatter, environment: environment)
             }
         }
         if let screens = fields["screens"]?.objectFields {
             fields["screens"] = .object(screens.mapValues {
-                expand($0, outer: outer, formatter: formatter, environment: environment, bindText: bindText)
+                expand($0, outer: outer, formatter: formatter, environment: environment)
             })
         }
         return .object(fields)
@@ -368,7 +362,9 @@ enum PrototypeRepeat {
             }
         case .string("button")?, .string("fab")?: string("label", &fields)
         // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
-        case .string("image")?: string("asset", &fields)
+        case .string("image")?:
+            string("asset", &fields)
+            string("url", &fields)
         case .string("listItem")?:
             string("headline", &fields)
             string("supporting", &fields)
@@ -498,7 +494,6 @@ extension PrototypeRepeat {
                         for (name, value) in scope.items[index].objectFields ?? [:] {
                             values["outer.\(name)"] = value
                         }
-                        values["$outerIndex"] = .number(Double(index))
                         return .object(values)
                     }
                 })
@@ -684,14 +679,9 @@ struct PrototypeRepeatInstance {
     var identity: String?
 
     /// One template node bound to this instance; descendants are bound too.
-    func bind(
-        _ node: JSONValue, descendants: Bool = true,
-        bindText: ((String, PrototypeRepeatInstance) -> String)? = nil
-    )
-        -> JSONValue
-    {
+    func bind(_ node: JSONValue, descendants: Bool = true) -> JSONValue {
         guard case var .object(fields) = node else { return node }
-        PrototypeRepeat.bindTextFields(&fields) { bindText?($0, self) ?? interpolate($0) }
+        PrototypeRepeat.bindTextFields(&fields, transform: interpolate)
         bindComponentActions(&fields)
         if fields["type"] == .string("pasteButton"), let into = fields["into"]?.stringValue {
             fields["into"] = .string(bindDataPath(into))
@@ -725,11 +715,11 @@ struct PrototypeRepeatInstance {
         }
         guard descendants else { return .object(fields) }
         if case let .array(children)? = fields["children"] {
-            fields["children"] = .array(children.map { bind($0, bindText: bindText) })
+            fields["children"] = .array(children.map { bind($0) })
         }
-        if let child = fields["child"] { fields["child"] = bind(child, bindText: bindText) }
+        if let child = fields["child"] { fields["child"] = bind(child) }
         if case let .object(screens)? = fields["screens"] {
-            fields["screens"] = .object(screens.mapValues { bind($0, bindText: bindText) })
+            fields["screens"] = .object(screens.mapValues { bind($0) })
         }
         return .object(fields)
     }
@@ -862,7 +852,8 @@ struct PrototypeRepeatInstance {
             bindString("key", in: &fields)
         case .string("emit")?:
             bindEmit(&fields)
-        case .string("setData")?, .string("appendData")?, .string("prependData")?, .string("removeData")?:
+        case .string("setData")?, .string("appendData")?, .string("prependData")?, .string("upsertData")?,
+             .string("removeData")?:
             bindDataAction(&fields)
         case .string("startTimer")?:
             if case let .array(actions)? = fields["actions"] {
@@ -895,6 +886,10 @@ struct PrototypeRepeatInstance {
     /// text placeholders, `into` binds like a data path, binding objects bind like a data value,
     /// and the follow-up lists bind recursively.
     private func bindRequest(_ fields: inout [String: JSONValue]) {
+        if var selector = fields["where"]?.objectFields, let binding = selector["equals"]?.objectFields {
+            selector["equals"] = bindDataValue(binding)
+            fields["where"] = .object(selector)
+        }
         bindString("url", in: &fields)
         bindString("statusKey", in: &fields)
         if case let .string(path)? = fields["into"] { fields["into"] = .string(bindDataPath(path)) }

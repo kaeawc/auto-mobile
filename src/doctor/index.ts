@@ -13,6 +13,7 @@ import {
 import { createProductionCoreDeviceProbe } from "../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { runSystemChecks } from "./checks/system";
 import { runAndroidChecks, runPostRepairAndroidChecks } from "./checks/android";
+import type { DisposableAppDoctorDependencies } from "./checks/disposableApps";
 import {
   runIosChecks,
   runPostRepairIosChecks,
@@ -80,6 +81,7 @@ function collectRecommendations(allChecks: CheckResult[]): string[] {
  */
 export interface RunDoctorDependencies {
   iosDependencies?: IosDoctorDependencies;
+  disposableApps?: DisposableAppDoctorDependencies;
   runSystemChecks?: () => CheckResult[];
   runAndroidChecks?: (options: DoctorOptions) => Promise<CheckResult[]>;
   runIosChecks?: (options: DoctorOptions) => Promise<CheckResult[]>;
@@ -111,7 +113,9 @@ function resolveDoctorRunners(dependencies: RunDoctorDependencies): ResolvedDoct
     createIosDoctorDependencies({ coreDeviceProbe: createProductionCoreDeviceProbe() });
   return {
     system: dependencies.runSystemChecks ?? runSystemChecks,
-    android: dependencies.runAndroidChecks ?? runAndroidChecks,
+    android:
+      dependencies.runAndroidChecks ??
+      ((options) => runAndroidChecks(options, dependencies.disposableApps)),
     ios: dependencies.runIosChecks ?? ((options) => runIosChecks(options, ios)),
     autoMobile: dependencies.runAutoMobileChecks ?? runAutoMobileChecks,
     postRepairAndroid: dependencies.runPostRepairAndroidChecks ?? runPostRepairAndroidChecks,

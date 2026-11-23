@@ -156,6 +156,7 @@ const fixtures: Record<string, Node> = {
   prototype_icon_effects_v1: { type: "icon", name: "home", effect: { type: "bounce" } },
   prototype_routes_v1: { ...label, onTap: [{ type: "pop", stack: "nav", force: true }] },
   prototype_style_polish_v2: { ...label, style: { cornerStyle: "continuous" } },
+  prototype_m3_expressive_v1: { type: "loadingIndicator" },
   prototype_tooltip_v1: {
     type: "tooltip",
     text: "Tip",
@@ -176,6 +177,7 @@ const fixtures: Record<string, Node> = {
     child: { type: "spacer" },
   },
   prototype_strings_v1: { ...label, text: "{t:title}" },
+  prototype_remote_image_v1: { type: "image", url: "https://example.com/image.png" },
   prototype_semantics_v1: { ...label, semantics: { heading: true } },
   prototype_nested_repeat_v1: {
     type: "column",
@@ -740,3 +742,29 @@ test("layout direction is an independent root window gate", () => {
     "window.layoutDirection",
   );
 });
+
+for (const container of containers) {
+  for (const action of [
+    { type: "setState", key: "id", value: { generate: "id" } },
+    {
+      type: "appendData",
+      path: "/data/rows",
+      value: { value: { id: { generate: "id" }, at: { now: "iso" } } },
+    },
+    {
+      type: "request",
+      url: "https://example.test",
+      into: "/data/rows",
+      where: { field: "id", equals: { lastGenerated: true } },
+    },
+  ]) {
+    test(`generated and keyed request gate covers ${container.name} ${container.field ?? ""} ${action.type}`, () => {
+      const candidate = container.wrap({ ...label, onTap: [action] });
+      expect(
+        prototypeRequiredCapabilities(candidate).some(
+          (gate) => gate.capability === "prototype_data_actions_v2",
+        ),
+      ).toBe(true);
+    });
+  }
+}

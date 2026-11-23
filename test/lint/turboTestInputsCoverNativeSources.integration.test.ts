@@ -703,6 +703,10 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
       "bare dir in a `cd ios/control-proxy && swift test` doc line; Sources/ under it is a declared input",
     ],
     [
+      "ios/carplay-power",
+      "named only inside the expected CarPlay-not-projecting error message asserted by observeCarPlay.test.ts; no file under it is read",
+    ],
+    [
       "ios/screen-capture",
       "named only inside the workflow-YAML text asserted by webrtcDeviceIntegrationWorkflow.test.ts",
     ],

@@ -1,7 +1,8 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, test } from "bun:test";
 import { registerPerformanceMonitorSessionCleanup } from "../../../src/daemon/performanceMonitorSessionCleanup";
-import type { LivePerformanceData } from "../../../src/daemon/performancePushSocketServer";
+import type { LivePerformanceData } from "../../../src/daemon/streams/performancePushSocketServer";
 import { PS_SNAPSHOT_ARGS } from "../../../src/devices/bootAdmission/psSnapshot";
 import { PerformanceMonitor } from "../../../src/features/performance/PerformanceMonitor";
 import {
@@ -9,6 +10,10 @@ import {
   type PerfSample,
 } from "../../../src/features/performance/PerfWindowBuffer";
 import { SdkFrameMetricsStore } from "../../../src/features/performance/SdkFrameMetricsStore";
+import {
+  beginCapturedCommand,
+  runWithFixtureCapture,
+} from "../../../src/utils/fixtureCapture/fixtureCaptureScope";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSessionCleanupManager } from "../../fakes/FakeSessionCleanupManager";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
@@ -56,8 +61,11 @@ class SnapshotExec {
   stdout = capture + secondAppRow;
   error: Error | null = null;
   readonly calls: { file: string; args: string[] }[] = [];
+  /** Whether each call ran inside a fixture capture scope. */
+  readonly inCaptureScope: boolean[] = [];
   execute = async (file: string, args: string[]): Promise<{ stdout: string; stderr: string }> => {
     this.calls.push({ file, args });
+    this.inCaptureScope.push(beginCapturedCommand([file, ...args]) !== undefined);
     if (this.error) {
       throw this.error;
     }
@@ -109,6 +117,25 @@ describe("PerformanceMonitor subprocess and timer cost", () => {
     console.log(`idle wakeups / simulated minute: ${timer.wakeups}`);
     expect(timer.wakeups).toBe(0);
     expect(timer.getPendingIntervalCount()).toBe(0);
+  });
+
+  test("sampler ticks armed inside a tool call run outside its fixture capture", async () => {
+    const { timer, exec, monitor } = setup();
+    const captureDeps = {
+      writer: { write: async () => {} },
+      timer,
+      sourceIdentity: async () => ({ automobileVersion: "0", sourceTreeState: "clean" as const }),
+    };
+    await runWithFixtureCapture("observe", captureDeps, async () => {
+      // A real interval keeps the arming call's async context; bind models that on FakeTimer.
+      const armInterval = timer.setInterval.bind(timer);
+      timer.setInterval = (callback, ms) => armInterval(AsyncLocalStorage.bind(callback), ms);
+      monitor.startMonitoring(deviceA, bundleId, "ios");
+      timer.setInterval = armInterval;
+      await advanceTime(timer, 500);
+    });
+    expect(exec.inCaptureScope.length).toBeGreaterThan(0);
+    expect(exec.inCaptureScope).not.toContain(true);
   });
 
   test("first registration arms one interval; last removal clears it and registration restarts it", async () => {

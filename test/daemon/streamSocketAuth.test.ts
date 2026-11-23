@@ -3,7 +3,7 @@ import {
   InputDeviceOwnedError,
 } from "../../src/daemon/inputDeviceOwnership";
 import { SessionNoLongerOwnsDeviceError } from "../../src/models/sessionNoLongerOwnsDevice";
-import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { describe, expect, test } from "bun:test";
@@ -12,7 +12,7 @@ import {
   STREAM_SOCKET_AUTH_ENV,
   streamAuthRefusalFields,
   type StreamAuthSessionManager,
-} from "../../src/daemon/streamSocketAuth";
+} from "../../src/daemon/streams/streamSocketAuth";
 import { releasingSessionHarness } from "../helpers/releasingSessionHarness";
 import { ActionableError } from "../../src/models";
 import { PLAN_LABEL_SESSION_SOURCE } from "../../src/daemon/sessionManager";

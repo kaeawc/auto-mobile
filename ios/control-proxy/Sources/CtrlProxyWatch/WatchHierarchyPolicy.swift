@@ -14,13 +14,15 @@ enum WatchTapRoute: Equatable {
 /// Route a point tap without querying XCTest. `clockfaceFrame` is read only on the clockface path.
 func watchTapRoute(
     x: Double, y: Double, hasAlerts: Bool, appForeground: Bool, clockfaceFrame: () -> CGRect
-) throws -> WatchTapRoute {
+)
+    throws -> WatchTapRoute
+{
     if hasAlerts { return .systemAlert }
     if appForeground { return .app }
-    return .clockface(try watchTapNormalizedOffset(x: x, y: y, frame: clockfaceFrame()))
+    return try .clockface(watchTapNormalizedOffset(x: x, y: y, frame: clockfaceFrame()))
 }
 
-/// Alerts retain the app's gesture path so permission sheets keep their scroll behavior.
+/// Alerts over the foreground app use its gesture path to preserve permission-sheet scrolling.
 enum WatchSwipeRoute: Equatable {
     case app
     case systemAlert
@@ -30,7 +32,7 @@ enum WatchSwipeRoute: Equatable {
 
 /// Route swipes without querying XCTest or touching a backgrounded app.
 func watchSwipeRoute(hasAlerts: Bool, appForeground: Bool, clockfaceForeground: Bool) -> WatchSwipeRoute {
-    if hasAlerts { return .systemAlert }
+    if hasAlerts { return appForeground ? .systemAlert : .system }
     if appForeground { return .app }
     return clockfaceForeground ? .clockface : .system
 }

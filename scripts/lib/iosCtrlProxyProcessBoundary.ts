@@ -11,6 +11,10 @@ export const EXCEPTIONS = new Map<string, string>([
     "Read-only ps probe of an Android emulator pid's process group; never touches the iOS runner.",
   ],
   [
+    "src/features/audit/IosOnDemandAuditEngines.ts",
+    "Read-only ps RSS read of one simulator app pid for performanceAudit memory; never touches the iOS runner.",
+  ],
+  [
     "src/features/performance/PerformanceMonitor.ts",
     "Collects app metrics, not CtrlProxy lifecycle state.",
   ],

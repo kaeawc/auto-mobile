@@ -196,6 +196,26 @@ class SavedPrototypeControllerTest {
   }
 
   @Test
+  fun `webView node is refused with its path before assets or store are accessed`() = runTest {
+    val webViewSpec =
+      Json.decodeFromString<PrototypeSpec>(
+        """{"id":"panel","requires":{"platform":["webview"]},"window":{"placement":{"type":"fullscreen"}},"root":{"type":"column","children":[{"type":"text","text":"Hi"},{"type":"webView","url":"https://example.com/post","allowedOrigins":["https://example.com"]}]}}""",
+      )
+    controller().save("web", webViewSpec, "Panel", null)
+    val result = onlyReply("web")
+    assertEquals(SavedPrototypeErrorCode.UNSUPPORTED_CAPABILITY, result.errorCode)
+    // Same text as the host refusal pinned in test/server/prototypeToolSaved.test.ts.
+    assertEquals(
+      "The webView node at root.children[1] is not drawn by saved prototypes on Android. " +
+        "Remove the webView node and save again. Nothing was saved.",
+      result.error,
+    )
+    assertFalse(result.success)
+    assertTrue(assets.reads.isEmpty())
+    assertTrue(store.stored.isEmpty())
+  }
+
+  @Test
   fun `every store rejection returns its typed code and message once`() = runTest {
     for (reason in enumValues<SavedPrototypeRejection>()) {
       val backing =

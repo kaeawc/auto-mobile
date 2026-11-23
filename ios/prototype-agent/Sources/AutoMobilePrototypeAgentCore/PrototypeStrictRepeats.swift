@@ -352,7 +352,8 @@ struct PrototypeStrictRepeats {
     {
         let at = repeatPath ?? path
         let nodeImages: Int = switch node["type"] {
-        case .string("image"): max(1, imageUses(node["asset"]))
+        case .string("image"): (node["url"] == nil ? max(1, imageUses(node["asset"])) : 0) +
+            imageUses(node["placeholder"]?.objectFields?["asset"]) + imageUses(node["error"]?.objectFields?["asset"])
         case .string("videoPlayer"): imageUses(node["poster"])
         default: PrototypeStrictBindings.array(node["items"])
             .reduce(0) { $0 + imageUses($1.objectFields?["image"]) }

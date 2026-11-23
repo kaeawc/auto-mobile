@@ -22,6 +22,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeCheckboxNode
 import dev.jasonpearson.automobile.protocol.PrototypeChipNode
 import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
 import dev.jasonpearson.automobile.protocol.PrototypeCondition
+import dev.jasonpearson.automobile.protocol.PrototypeDataWhere
 import dev.jasonpearson.automobile.protocol.PrototypeDatePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeDecrementAction
 import dev.jasonpearson.automobile.protocol.PrototypeDerivedRows
@@ -42,6 +43,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeListItemNode
 import dev.jasonpearson.automobile.protocol.PrototypeListItemSwitch
 import dev.jasonpearson.automobile.protocol.PrototypeListItemTrailing
 import dev.jasonpearson.automobile.protocol.PrototypeListNode
+import dev.jasonpearson.automobile.protocol.PrototypeLoadingIndicatorNode
 import dev.jasonpearson.automobile.protocol.PrototypeMapNode
 import dev.jasonpearson.automobile.protocol.PrototypeMenuEntry
 import dev.jasonpearson.automobile.protocol.PrototypeMenuNode
@@ -107,7 +109,6 @@ private data class RepeatInstance(
   val index: Int,
   val source: JsonObject = JsonObject(emptyMap()),
   val outerAlias: String? = null,
-  val textSources: PrototypeListTextSources? = null,
 )
 
 private fun PrototypeNode.repeatSpec(): PrototypeRepeat? =
@@ -163,7 +164,6 @@ internal fun prototypeChildEntries(
   path: String,
   bind: Boolean = true,
   formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
-  textSources: PrototypeListTextSources? = null,
 ): List<PrototypeChildEntry> {
   if (node is PrototypeAdaptiveNode) return adaptiveChildEntries(node, path)
   if (node is PrototypeListNode)
@@ -185,17 +185,16 @@ internal fun prototypeChildEntries(
     }
   }
   val rows = projectedRepeatRows(node, repeat, path, bind, formatter)
-  return repeat.repeatedChildEntries(children, rows, path, bind, textSources)
+  return repeatedChildEntries(children, repeat, rows, path, bind)
 }
 
-private fun PrototypeRepeat.repeatedChildEntries(
+private fun repeatedChildEntries(
   children: List<PrototypeNode>,
+  repeat: PrototypeRepeat,
   rows: List<Map<String, PrototypeScalar>>,
   path: String,
   bind: Boolean,
-  textSources: PrototypeListTextSources?,
 ): List<PrototypeChildEntry> {
-  val repeat = this
   return rows.flatMapIndexed { itemIndex, projected ->
     val instance =
       RepeatInstance(
@@ -205,14 +204,13 @@ private fun PrototypeRepeat.repeatedChildEntries(
         repeat.sourceItems?.getOrNull(itemIndex)
           ?: JsonObject(projected.mapValues { EmitContextResolver.scalar(it.value) }),
         repeat.outerAlias,
-        textSources,
       )
     val identity =
       if (bind) repeat.key?.let { projected[it]?.renderedText() } ?: itemIndex.toString()
       else itemIndex.toString()
     children.mapIndexed { index, child ->
       PrototypeChildEntry(
-        if (bind || repeat.sourceItems != null) child.boundWithText(instance) else child,
+        if (bind || repeat.sourceItems != null) child.bound(instance) else child,
         "$path.repeat[$identity].children[$index]",
         if (child.visibleWhen != null) (itemIndex * (repeat.stagger ?: 0)).coerceAtMost(600) else 0,
       )
@@ -246,17 +244,6 @@ private fun projectedRepeatRows(
   val error = PrototypeDerivedRows.validate(node, rows, repeat.sourceItems, repeat.outerAlias)
   require(error == null) { "$path${error?.path?.removePrefix("root")}: ${error?.message}" }
   return rows
-}
-
-private fun PrototypeNode.boundWithText(instance: RepeatInstance): PrototypeNode {
-  val bound = bound(instance)
-  val sources = instance.textSources ?: return bound
-  return resolvePrototypeListNodeText(
-    bound,
-    this,
-    sources,
-    if (sources.shield) instance::display else instance::interpolate,
-  )
 }
 
 private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
@@ -303,7 +290,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
   val styleWhen = styleWhen?.map { PrototypeStyleWhen(it.`when`.bound(instance), it.style) }
   val visibleWhen = visibleWhen?.bound(instance)
   val shared = shared?.let { it.copy(key = instance.interpolate(it.key)) }
-  fun List<PrototypeNode>.bound() = if (nested != null) this else map { it.boundWithText(instance) }
+  fun List<PrototypeNode>.bound() = if (nested != null) this else map { it.bound(instance) }
   return when (this) {
     is PrototypeBoxNode ->
       copy(
@@ -386,7 +373,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         shared = shared,
         visibleWhen = visibleWhen,
-        screens = screens.mapValues { (_, child) -> child.boundWithText(instance) },
+        screens = screens.mapValues { (_, child) -> child.bound(instance) },
       )
     is PrototypePagerNode ->
       copy(
@@ -465,7 +452,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
               onRefresh = it.onRefresh.map { action -> action.bound(instance) },
             )
           },
-        child = child.boundWithText(instance),
+        child = child.bound(instance),
       )
     is PrototypeTooltipNode ->
       copy(
@@ -484,7 +471,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
-        child = child.boundWithText(instance),
+        child = child.bound(instance),
       )
     is PrototypeBottomSheetNode ->
       copy(
@@ -495,10 +482,11 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
-        child = child.boundWithText(instance),
+        child = child.bound(instance),
       )
     is PrototypeImageNode ->
       copy(
+        url = url?.let(instance::interpolate),
         semantics = semantics,
         onAppear = onAppear,
         onTap = onTap,
@@ -541,7 +529,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         placeholder = placeholder?.let(instance::display),
         trailingActions = trailingActions?.map { it.bound(instance) },
         onSubmit = onSubmit?.map { it.bound(instance) },
-        child = child?.boundWithText(instance),
+        child = child?.bound(instance),
       )
     is PrototypeTextFieldNode ->
       copy(
@@ -577,11 +565,11 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         shared = shared,
         visibleWhen = visibleWhen,
-        list = list?.boundWithText(instance),
-        detail = detail?.boundWithText(instance),
-        content = content?.boundWithText(instance),
-        main = main?.boundWithText(instance),
-        supporting = supporting?.boundWithText(instance),
+        list = list?.bound(instance),
+        detail = detail?.bound(instance),
+        content = content?.bound(instance),
+        main = main?.bound(instance),
+        supporting = supporting?.bound(instance),
         selectionKey = selectionKey?.let(instance::interpolate),
         stateKey = stateKey?.let(instance::interpolate),
         openKey = openKey?.let(instance::interpolate),
@@ -638,6 +626,21 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         label = instance.display(label),
+        split =
+          split?.let { authored ->
+            authored.copy(
+              menu =
+                authored.menu.map { item ->
+                  if (item is PrototypeMenuEntry)
+                    item.copy(
+                      label = instance.display(item.label),
+                      trailingText = item.trailingText?.let(instance::display),
+                      onTap = item.onTap?.map { it.bound(instance) },
+                    )
+                  else item
+                },
+            )
+          },
       )
     is PrototypeSliderNode ->
       copy(
@@ -733,7 +736,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         text = text?.let(instance::display),
         confirm = confirm.bound(instance),
         dismiss = dismiss?.bound(instance),
-        child = child?.boundWithText(instance),
+        child = child?.bound(instance),
       )
     is PrototypeIconButtonNode ->
       copy(
@@ -755,6 +758,18 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         label = label?.let(instance::display),
+        menu =
+          menu?.let { authored ->
+            authored.copy(
+              items =
+                authored.items.map {
+                  it.copy(
+                    label = instance.display(it.label),
+                    onTap = it.onTap.map { action -> action.bound(instance) },
+                  )
+                },
+            )
+          },
       )
     is PrototypeSegmentedButtonNode ->
       copy(
@@ -869,6 +884,15 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
       )
+    is PrototypeLoadingIndicatorNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
     is PrototypeListNode -> this // Nested lists in repeat templates are rejected by validation.
     is PrototypeChartNode ->
       copy(
@@ -939,18 +963,21 @@ private fun PrototypeSwipeAction.bound(instance: RepeatInstance) =
 private fun PrototypeAppBarAction.bound(instance: RepeatInstance) =
   copy(label = instance.display(label), onTap = onTap?.map { it.bound(instance) })
 
-private fun PrototypeRequestAction.boundRequest(instance: RepeatInstance) =
-  copy(
+private fun PrototypeRequestAction.boundRequest(instance: RepeatInstance): PrototypeRequestAction {
+  val where = where
+  return copy(
     url = instance.interpolate(url),
     headers = headers?.mapValues { (_, entry) -> instance.requestEntry(entry) },
     query = query?.mapValues { (_, entry) -> instance.requestEntry(entry) },
     body = body?.let(instance::dataValue),
     into = into?.let(instance::dataPath),
+    where = where?.boundWhere(instance),
     append = append?.let { it.copy(to = instance.dataPath(it.to)) },
     statusKey = statusKey?.let(instance::interpolate),
     onSuccess = onSuccess?.map { it.bound(instance) },
     onError = onError?.map { it.bound(instance) },
   )
+}
 
 private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
   when (this) {
@@ -1006,14 +1033,23 @@ private fun RepeatInstance.routeParams(params: Map<String, JsonElement>): Map<St
 private fun PrototypeAction.boundDataAction(instance: RepeatInstance): PrototypeAction? =
   when (this) {
     is PrototypeSetDataAction ->
-      copy(path = instance.dataPath(path), value = instance.dataValue(value))
+      copy(
+        path = instance.dataPath(path),
+        value = instance.dataValue(value),
+        where = where?.boundWhere(instance),
+      )
     is PrototypePrependDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
     is PrototypeAppendDataAction ->
       copy(path = instance.dataPath(path), value = instance.dataValue(value))
-    is PrototypeRemoveDataAction -> copy(path = instance.dataPath(path))
+    is PrototypeRemoveDataAction ->
+      copy(path = instance.dataPath(path), where = where?.boundWhere(instance))
     else -> null
   }
+
+/** A keyed selector binds `{item}` / `{index}` like a request's `where`. */
+private fun PrototypeDataWhere.boundWhere(instance: RepeatInstance) =
+  copy(equals = instance.dataValue(equals))
 
 /** Only a whole `{index}` segment binds in a data path; the validator refuses anything else. */
 private fun RepeatInstance.dataPath(path: String): String =
@@ -1116,11 +1152,10 @@ internal fun bindPrototypeListRow(
   node: PrototypeListNode,
   item: JsonObject,
   index: Int,
-  textSources: PrototypeListTextSources? = null,
 ): PrototypeNode =
   node.children
     .single()
-    .boundWithText(
+    .bound(
       RepeatInstance(
         node.repeat.`as`,
         item
@@ -1130,9 +1165,27 @@ internal fun bindPrototypeListRow(
               PrototypeScalar.serializer(),
               value,
             )
-          },
+          }
+          .mapValues { (_, value) -> shieldPrototypeRowScalar(value) },
         index,
         source = item,
-        textSources = textSources,
       ),
     )
+
+private const val ROW_SHIELD = '\uE000'
+
+/**
+ * Row values are bound before the lazy row's data text resolves, so a literal `{data:` or
+ * `{platform:` inside one must not be scanned as an authored placeholder. The marker is removed by
+ * [unshieldPrototypeRowText] once the node's own text has resolved.
+ */
+private fun shieldPrototypeRowScalar(scalar: PrototypeScalar): PrototypeScalar =
+  if (scalar is PrototypeScalar.Text)
+    PrototypeScalar.Text(
+      scalar.value
+        .replace("{data:", "{${ROW_SHIELD}data:")
+        .replace("{platform:", "{${ROW_SHIELD}platform:"),
+    )
+  else scalar
+
+internal fun unshieldPrototypeRowText(text: String): String = text.replace("{$ROW_SHIELD", "{")

@@ -1,3 +1,4 @@
+import { prototypeActionNeedsDataV2 } from "./prototypeGeneratedBindings";
 import { prototypeChannelHandlers } from "./prototypeChannelHandlers";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 /**
@@ -155,6 +156,7 @@ export type FieldKind =
   | "text"
   | "operand"
   | "substring"
+  | "derivedCondition"
   | "emitName"
   | "key"
   | "emitBinding"
@@ -233,11 +235,12 @@ function mapKeyList(data: Raw, key: string, path: string, visit: FieldVisitor): 
 }
 
 function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
+  mapField(condition, "derived", path, { kind: "derivedCondition", visit });
   mapField(condition, "data", path, { kind: "routePointer", visit });
   mapField(condition, "key", path, { kind: "key", visit });
   mapKeyList(condition, "valid", path, visit);
   const operandVisit: FieldVisitor = (value, fieldPath, kind) =>
-    visit(value, fieldPath, kind, Object.hasOwn(condition, "data"));
+    visit(value, fieldPath, kind, "data" in condition);
   mapField(condition, "equals", path, { kind: "operand", visit: operandVisit });
   mapField(condition, "notEquals", path, { kind: "operand", visit: operandVisit });
   mapField(condition, "contains", path, { kind: "substring", visit: operandVisit });
@@ -279,9 +282,6 @@ function mapEmitAction(action: Raw, path: string, visit: FieldVisitor): void {
 function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
   if (action.type === "prependData") {
     visit(action, path, "prependData");
-  }
-  if (action.where !== undefined || action.member !== undefined) {
-    visit(action, path, "keyedData");
   }
   const where = record(action.where);
   if (where) {
@@ -339,6 +339,9 @@ function mapRouteAction(action: Raw, path: string, visit: FieldVisitor): void {
 }
 
 function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
+  if (prototypeActionNeedsDataV2(action)) {
+    visit(action, path, "keyedData");
+  }
   mapRouteAction(action, path, visit);
   if (
     ["setData", "appendData", "prependData", "upsertData", "removeData"].includes(
@@ -414,6 +417,10 @@ function mapRequestEntries(action: Raw, field: string, path: string, visit: Fiel
 /** `url` and literal header/query strings are text; `into` is a data path; follow-ups recurse. */
 function mapRequestAction(action: Raw, path: string, visit: FieldVisitor): void {
   visit(action, path, "request");
+  const where = record(action.where);
+  if (where) {
+    action.where = { ...where, equals: mapBinding(where.equals, `${path}.where.equals`, visit) };
+  }
   if (action.via === "device") {
     visit(action, path, "deviceRequest");
   }
@@ -513,9 +520,28 @@ function mapPart(part: Raw, path: string, visit: FieldVisitor): Raw {
 /** Component fields that take placeholders besides a text node's `text`. */
 const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVisitor) => void> = {
   // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
-  image: (node, path, visit) => mapField(node, "asset", path, { kind: "text", visit }),
-  button: (node, path, visit) => mapField(node, "label", path, { kind: "text", visit }),
-  fab: (node, path, visit) => mapField(node, "label", path, { kind: "text", visit }),
+  image: (node, path, visit) => {
+    mapField(node, "asset", path, { kind: "text", visit });
+    mapField(node, "url", path, { kind: "text", visit });
+  },
+  button: (node, path, visit) => {
+    mapField(node, "label", path, { kind: "text", visit });
+    // An M3 Expressive split button's menu entries bind like `menu.items` (#15258).
+    mapObject(node, "split", path, (split, splitPath) => {
+      mapList(split, "menu", splitPath, (entry, entryPath) => {
+        mapField(entry, "trailingText", entryPath, { kind: "text", visit });
+        return mapPart(entry, entryPath, visit);
+      });
+      return split;
+    });
+  },
+  fab: (node, path, visit) => {
+    mapField(node, "label", path, { kind: "text", visit });
+    mapObject(node, "menu", path, (menu, menuPath) => {
+      mapList(menu, "items", menuPath, (entry, entryPath) => mapPart(entry, entryPath, visit));
+      return menu;
+    });
+  },
   segmentedButton: (node, path, visit) =>
     mapList(node, "options", path, (entry, entryPath) => {
       mapField(entry, "label", entryPath, { kind: "text", visit });

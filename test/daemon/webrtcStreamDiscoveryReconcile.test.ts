@@ -6,7 +6,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { resolveWebRtcStreamDevice } from "../../src/daemon/webrtcStreamSocketServer";
+import { resolveWebRtcStreamDevice } from "../../src/daemon/streams/webrtcStreamSocketServer";
 import type { BootedDevice } from "../../src/models";
 
 /**

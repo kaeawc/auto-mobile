@@ -30,7 +30,7 @@ import type { LayoutWarning } from "../../src/models/ObservationInsets";
 import { setElementProvenance } from "../../src/features/observe/output/elementProvenance";
 import { logger } from "../../src/utils/logger";
 import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResult";
-import { buildObservationScreenshotUri } from "../../src/daemon/observationResourceUris";
+import { buildObservationScreenshotUri } from "../../src/daemon/streams/observationResourceUris";
 import {
   RESOURCE_URIS as OBSERVATION_RESOURCE_URIS,
   registerObservationResources,

@@ -47,6 +47,11 @@ internal object PrototypeRequestRules {
           "request" ->
             requestError(value, path)
               ?: appendError(value, path, (context.root as? JsonObject)?.get("data") as? JsonObject)
+              ?: keyedTargetError(
+                value,
+                path,
+                (context.root as? JsonObject)?.get("data") as? JsonObject,
+              )
           else -> null
         }
       if (error != null) return error
@@ -58,6 +63,9 @@ internal object PrototypeRequestRules {
     action.text("url")?.let(::requestUrlError)?.let {
       return fail("$at.url", it)
     }
+    if ("member" in action && "where" !in action) return fail("$at.member", "member requires where")
+    if ("where" in action && action.text("into") == null)
+      return fail("$at.where", "where requires into")
     val method = action.text("method") ?: PrototypeRequests.DEFAULT_METHOD
     if (action["body"] != null && method in PrototypeRequests.BODYLESS_METHODS) {
       return fail("$at.body", "A GET or HEAD request cannot have a body")
@@ -67,6 +75,20 @@ internal object PrototypeRequestRules {
     }
     return requestEntryError(action["headers"], at, "headers")
       ?: requestEntryError(action["query"], at, "query")
+  }
+
+  private fun keyedTargetError(
+    action: JsonObject,
+    at: String,
+    data: JsonObject?,
+  ): PrototypeSpecError? {
+    val into = action.text("into") ?: return null
+    if ("where" !in action || PrototypeRepeatTemplate.dataPathHasIndex(into)) return null
+    val pointer = PrototypeDataWriter.pathPointer(into) ?: return null
+    val target = PrototypeDataPointer.resolve(data, pointer)
+    return if (target != null && target !is kotlinx.serialization.json.JsonArray)
+      fail("$at.into", "Keyed request into target is not an array")
+    else null
   }
 
   private fun appendError(action: JsonObject, at: String, data: JsonObject?): PrototypeSpecError? {

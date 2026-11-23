@@ -19,10 +19,28 @@ struct PrototypeListRepeat: Decodable {
     let items: Items
     let `as`: String
     let key: String
-    let platformSnapshot: [String: JSONValue]?
-    enum CodingKeys: String, CodingKey {
-        case items, `as`, key
-        case platformSnapshot = "_platform"
+}
+
+/// Row values bind before the row's data text resolves, so a literal `{data:` or `{platform:` inside
+/// one is marked here and restored afterwards instead of being scanned as an authored placeholder.
+private enum RowShield {
+    static let marker = "\u{E000}"
+
+    static func shield(_ value: JSONValue) -> JSONValue {
+        guard case let .string(text) = value else { return value }
+        return .string(
+            text.replacingOccurrences(of: "{data:", with: "{\(marker)data:")
+                .replacingOccurrences(of: "{platform:", with: "{\(marker)platform:")
+        )
+    }
+
+    static func unshield(_ value: JSONValue) -> JSONValue {
+        switch value {
+        case let .string(text): .string(text.replacingOccurrences(of: "{\(marker)", with: "{"))
+        case let .array(items): .array(items.map(unshield))
+        case let .object(fields): .object(fields.mapValues(unshield))
+        default: value
+        }
     }
 }
 
@@ -50,7 +68,7 @@ enum PrototypeLazyList {
 
     /// The row's template with its item bound and data resolved, before decoding.
     static func resolvedRow(
-        node: PrototypeNode, data: [String: JSONValue]?, index: Int
+        node: PrototypeNode, data: [String: JSONValue]?, derived: [String: JSONValue] = [:], index: Int
     )
         -> (key: String, json: JSONValue)?
     {
@@ -58,52 +76,62 @@ enum PrototypeLazyList {
               case let .array(items)? = spec.items.resolve(data),
               items.indices.contains(index) else { return nil }
         let fields = PrototypeDataValues.project(items[index].objectFields ?? [:]).objectFields ?? [:]
+        let projected = fields.mapValues(RowShield.shield)
         let instance = PrototypeRepeatInstance(
-            alias: spec.as, item: fields, index: index, sourceItem: items[index].objectFields,
+            alias: spec.as, item: projected, index: index, sourceItem: items[index].objectFields,
             identity: fields[spec.key]?.displayString
         )
-        // Fill authored text tokens once; only authored pointers bind row context before lookup.
+        // Row tokens bind first, so `{data:/rows/{index}/name}` is a complete pointer before it resolves.
         let sources = PrototypeDataResolver.resolveRepeatSources(raw, data: data)
         let expanded = PrototypeRepeat.expand(
-            sources, outer: instance, formatter: FoundationPrototypeValueFormatter(), environment: .device(),
-            bindText: { text, row in
-                PrototypeDataText.bind(text, data: data, platform: spec.platformSnapshot, bindRow: row.interpolate)
-            }
+            sources, outer: instance, formatter: FoundationPrototypeValueFormatter(), environment: .device()
         )
-        let bound = PrototypeDataResolver.resolveRoot(
-            expanded, data: data, platform: spec.platformSnapshot, resolveText: false
-        )
-        return (fields[spec.key]?.displayString ?? "", bound)
+        let bound = PrototypeDataResolver.resolveRoot(expanded, data: data, derived: derived)
+        return (fields[spec.key]?.displayString ?? "", RowShield.unshield(bound))
     }
 
-    static func row(node: PrototypeNode, data: [String: JSONValue]?, index: Int) throws -> Row? {
-        guard let resolved = resolvedRow(node: node, data: data, index: index) else { return nil }
+    static func row(
+        node: PrototypeNode, data: [String: JSONValue]?, derived: [String: JSONValue] = [:], index: Int
+    )
+        throws -> Row?
+    {
+        guard let resolved = resolvedRow(node: node, data: data, derived: derived, index: index) else { return nil }
         let row = try JSONDecoder().decode(PrototypeNode.self, from: JSONEncoder().encode(resolved.json))
         return Row(key: resolved.key, index: index, node: row)
     }
 
-    static func rows(node: PrototypeNode, data: [String: JSONValue]?) throws -> [Row] {
-        try keys(node: node, data: data).indices.compactMap { try row(node: node, data: data, index: $0) }
+    static func rows(
+        node: PrototypeNode, data: [String: JSONValue]?, derived: [String: JSONValue] = [:]
+    )
+        throws -> [Row]
+    {
+        try keys(node: node, data: data).indices.compactMap {
+            try row(node: node, data: data, derived: derived, index: $0)
+        }
     }
 
     /// Owned by a single lazy cell, so a malformed row is absent and warns once per cell lifetime.
     final class RowDecoder {
         private var reportedFailure = false
         private let warning: (String) -> Void
-        private let load: (PrototypeNode, [String: JSONValue]?, Int) throws -> Row?
+        private let load: (PrototypeNode, [String: JSONValue]?, [String: JSONValue], Int) throws -> Row?
 
         init(
             warning: @escaping (String) -> Void = { lazyListLog.warning("\($0, privacy: .private)") },
-            load: @escaping (PrototypeNode, [String: JSONValue]?, Int) throws -> Row? = {
-                try row(node: $0, data: $1, index: $2)
+            load: @escaping (PrototypeNode, [String: JSONValue]?, [String: JSONValue], Int) throws -> Row? = {
+                try row(node: $0, data: $1, derived: $2, index: $3)
             }
         ) {
             self.warning = warning
             self.load = load
         }
 
-        func decode(node: PrototypeNode, data: [String: JSONValue]?, index: Int) -> Row? {
-            do { return try load(node, data, index) }
+        func decode(
+            node: PrototypeNode, data: [String: JSONValue]?, derived: [String: JSONValue] = [:], index: Int
+        )
+            -> Row?
+        {
+            do { return try load(node, data, derived, index) }
             catch {
                 if !reportedFailure {
                     reportedFailure = true

@@ -17,6 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -199,34 +201,20 @@ private class PrototypeListKeys(var keys: List<String>, var hasHeader: Boolean)
 
 private val listNodeJson = Json { ignoreUnknownKeys = false }
 
-internal class PrototypeListTextSources(
-  val data: JsonObject?,
-  val platform: JsonObject?,
-  /** Whether inserted values carry a shield (#18628); the renderer unshields them at the end. */
-  val shield: Boolean = false,
-)
-
-/** Fill text from the authored template, never scanning values inserted by row binding. */
+/** Resolve each node after row binding, including children bound by a nested repeat. */
 internal fun resolvePrototypeListNodeText(
   node: PrototypeNode,
-  template: PrototypeNode,
-  sources: PrototypeListTextSources,
-  bindRow: (String) -> String,
+  data: JsonObject?,
+  shield: Boolean = false,
 ): PrototypeNode {
   val json = listNodeJson
   val raw = json.encodeToJsonElement(PrototypeNode.serializer(), node).jsonObject
-  val authored = json.encodeToJsonElement(PrototypeNode.serializer(), template).jsonObject
-  val resolved =
-    PrototypeDataResolver.resolveNodeText(
-      raw,
-      sources.data,
-      sources.platform,
-      PrototypeDataResolver.NodeTextOptions(authored, bindRow, sources.shield),
-    )
-  if (resolved == raw) return node
-  val decoded = json.decodeFromJsonElement(PrototypeNode.serializer(), resolved)
+  val resolved = PrototypeDataResolver.resolveNodeText(raw, data, shield)
+  val unshielded = unshieldPrototypeRowJson(resolved).jsonObject
+  if (unshielded == raw) return node
+  val decoded = json.decodeFromJsonElement(PrototypeNode.serializer(), unshielded)
   // The wire format omits runtime repeat metadata. Keep bound repeats and descendants intact;
-  // each descendant fills its own authored text with its repeat context.
+  // each descendant resolves its own text only after its row tokens have bound.
   return restorePrototypeListContainerChildren(node, decoded)
 }
 
@@ -305,4 +293,12 @@ private fun restorePrototypeListOtherChildren(
         footer = node.footer,
       )
     else -> decoded
+  }
+
+private fun unshieldPrototypeRowJson(element: JsonElement): JsonElement =
+  when (element) {
+    is JsonObject -> JsonObject(element.mapValues { unshieldPrototypeRowJson(it.value) })
+    is JsonArray -> JsonArray(element.map(::unshieldPrototypeRowJson))
+    is JsonPrimitive ->
+      if (element.isString) JsonPrimitive(unshieldPrototypeRowText(element.content)) else element
   }

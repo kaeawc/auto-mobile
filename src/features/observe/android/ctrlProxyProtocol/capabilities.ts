@@ -326,6 +326,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
   PROTOTYPE_CUSTOM_SHADERS_CAPABILITY,
+  "prototype_remote_image_v1",
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_MULTI_SURFACE_CAPABILITY,
   PROTOTYPE_ANCHOR_CAPABILITY,
@@ -530,10 +531,13 @@ export const PROTOTYPE_STYLE_POLISH_V2_CAPABILITY = "prototype_style_polish_v2";
 
 export const PROTOTYPE_TOOLTIP_CAPABILITY = "prototype_tooltip_v1";
 
+export const PROTOTYPE_M3_EXPRESSIVE_CAPABILITY = "prototype_m3_expressive_v1";
+
 export const PROTOTYPE_DRAWER_CAPABILITY = "prototype_drawer_v1";
 
 export const PROTOTYPE_STRINGS_CAPABILITY = "prototype_strings_v1";
 
+export const PROTOTYPE_REMOTE_IMAGE_CAPABILITY = "prototype_remote_image_v1";
 export const PROTOTYPE_SEMANTICS_CAPABILITY = "prototype_semantics_v1";
 
 export const PROTOTYPE_DERIVE_CAPABILITY = "prototype_derive_v1";

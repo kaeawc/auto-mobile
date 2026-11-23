@@ -17,7 +17,7 @@ import type { AccessibilityHierarchy } from "../../navigation/ScreenFingerprint"
 import {
   getDeviceDataStreamServer,
   type PerformanceStreamData,
-} from "../../../daemon/deviceDataStreamSocketServer";
+} from "../../../daemon/streams/deviceDataStreamSocketServer";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { appWindowsOnly } from "../hierarchyLayer";
 import { logger } from "../../../utils/logger";

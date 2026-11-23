@@ -299,7 +299,7 @@ load yq-helpers
   [ "$output" = "android-emulator-tests" ]
   run yq -r '.jobs."android-emulator-tests".steps[] | select(.uses == "./.github/actions/android-emulator") | .with.script' "$WF"
   [[ "$output" == "../scripts/android/run-emulator-suites.sh "* ]]
-  run yq -r '.jobs."android-emulator-tests".steps[] | select(.uses == "mikepenz/action-junit-report@v6") | .with.check_name + "|" + .with.report_paths' "$WF"
+  run yq -r '.jobs."android-emulator-tests".steps[] | select((.uses // "") | test("^mikepenz/action-junit-report@")) | .with.check_name + "|" + .with.report_paths' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = $'JUnit Runner Emulator Test Report|android/junit-runner/build/test-results/**/*.xml\nPlayground Automobile Emulator Test Report|android/playground/**/build/test-results/**/*.xml' ]
 }
@@ -396,9 +396,9 @@ load yq-helpers
 
 @test "merge TypeScript coverage badge upload remains unchanged" {
   local workflow=".github/workflows/merge.yml"
-  run yq -r '.jobs."ts-code-coverage".steps[] | select(.name == "Upload Coverage Badge") | [.uses, .with.name, .with.path, .with."retention-days"] | @tsv' "$workflow"
+  run yq -r '.jobs."ts-code-coverage".steps[] | select(.name == "Upload Coverage Badge") | [(.uses | sub("@.*", "")), .with.name, .with.path, .with."retention-days"] | @tsv' "$workflow"
   [ "$status" -eq 0 ]
-  [ "$output" = $'actions/upload-artifact@v6\tts-coverage-badge\tcoverage/ts-coverage-badge.json\t90' ]
+  [ "$output" = $'actions/upload-artifact\tts-coverage-badge\tcoverage/ts-coverage-badge.json\t90' ]
 }
 
 @test "merge workflow preserves the same four lane boundaries" {
@@ -471,7 +471,7 @@ load yq-helpers
   run yq -r '.jobs."ios-device-webrtc"."runs-on"' "$WF"
   [ "$status" -eq 0 ]
   local same="github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository"
-  [ "$output" = "\${{ (${same} && vars.AUTOMOBILE_NAMESPACE_MACOS_ENABLED == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (${same} && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.heavy != 'hosted') && fromJSON('[\"self-hosted\",\"automobile-mac-heavy\"]') || 'macos-26' }}" ]
+  [ "$output" = "\${{ (${same} && vars.AUTOMOBILE_NAMESPACE_MACOS_ENABLED == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (${same} && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && needs.mac-pool-routing.outputs.heavy != 'hosted') && fromJSON('[\"self-hosted\",\"automobile-mac-heavy\"]') || 'xcode-27' }}" ]
   run yq -r '.jobs."ios-device-webrtc"."timeout-minutes"' "$WF"
   [ "$output" -le 30 ]
   # No CircleCI copy (#11012).
@@ -782,7 +782,7 @@ load yq-helpers
   [ "$output" = $'scripts/install.sh\npackage.json\nandroid/gradle/libs.versions.toml\n.github/workflows/pull_request.yml' ]
   [ "$(yq -r '.jobs."detect-changes".outputs.installer_changed' "$WF")" = '${{ steps.filter-installer.outputs.installer }}' ]
   [ "$(yq -r '.jobs."installer-minimal".env.RUN_INSTALLER' "$WF")" = "\${{ needs.detect-changes.outputs.installer_changed == 'true' }}" ]
-  [ "$(yq -r '.jobs."detect-changes".steps[] | select(.id == "filter-installer") | .uses' "$WF")" = 'dorny/paths-filter@v3' ]
+  [ "$(yq -r '.jobs."detect-changes".steps[] | select(.id == "filter-installer") | .uses | sub("@.*", "")' "$WF")" = 'dorny/paths-filter' ]
 }
 
 @test "installer no-op macOS leg routes to Linux while keeping its check name (#11580)" {

@@ -1,5 +1,5 @@
 import { prototypeSpecNodeRoots, prototypeNodeChildren } from "./prototypeNodeChildren";
-import { record } from "./prototypeTemplate";
+import { mapBindableFields, record } from "./prototypeTemplate";
 export function prototypeFormatFields(spec: unknown): string[] {
   const fields = Object.values(record(record(spec)?.derive) ?? {}).some(
     (entry) =>
@@ -44,6 +44,12 @@ export function prototypeDeriveFields(spec: unknown): string[] {
     if (!value) {
       continue;
     }
+    mapBindableFields(value, path, (field, at, kind) => {
+      if (kind === "derivedCondition") {
+        fields.push(at);
+      }
+      return field;
+    });
     if (Object.hasOwn(record(record(value.repeat)?.items) ?? {}, "derived")) {
       fields.push(`${path}.repeat.items.derived`);
     }

@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "id": "expressive",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "mode": "day"
+    },
+    "root": {
+      "type": "fab",
+      "testTag": "create",
+      "icon": "add",
+      "contentDescription": "Create",
+      "menu": {
+        "items": [
+          {
+            "icon": "add",
+            "label": "Item 0",
+            "onTap": [
+              {
+                "type": "emit",
+                "name": "x"
+              }
+            ]
+          },
+          {
+            "icon": "add",
+            "label": "Bare"
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.menu.items[1].onTap"
+}

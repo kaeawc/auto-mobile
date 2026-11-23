@@ -9,7 +9,7 @@ import {
 } from "../../src/daemon/ownerDisconnectRelease";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SESSION_ACTIVITY_CLOCKS, SESSION_LIVENESS_CLOCKS } from "../../src/daemon/sessionClocks";
-import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { SessionScopedStreamAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
 import type { BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { foreignOwnedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";

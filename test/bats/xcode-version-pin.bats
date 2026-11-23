@@ -39,7 +39,7 @@ off_pin() {
       for (const config of configs) {
         for (const step of job.steps ?? []) {
           const picks = [];
-          if (step.uses === "maxim-lobanov/setup-xcode@v1") picks.push(step.with?.["xcode-version"]);
+          if (step.uses?.split("@")[0] === "maxim-lobanov/setup-xcode") picks.push(step.with?.["xcode-version"]);
           const run = typeof step.run === "string" ? step.run : "";
           for (const m of run.matchAll(/select-self-hosted-xcode\.sh(?:\s+--[\w-]+)*(?:\s+"([^"]+)"|\s+(?!--)([^\s"]+))?/g)) picks.push(m[1] ?? m[2] ?? pin);
           if (step.uses === "./.github/actions/ios-simulator-bring-up") picks.push(step.with?.["xcode-version"]);
@@ -144,4 +144,64 @@ fake_toolchain() {
   [ "${status}" -eq 0 ]
   [[ "${output}" == *"Pinned Xcode ${pin} is not installed; using the active Xcode 26.6."* ]]
   [[ "${output}" == *"[]" ]]
+}
+
+# Scripts that run xcodebuild, xcrun or swift without selecting the pin, each with its reason.
+# Every other such script under scripts/ must call select_pinned_xcode (or the CI selector),
+# so a host whose xcode-select names an older Xcode still builds on the pin.
+EXEMPT_SCRIPTS=(
+  # Text scans and lint over other scripts; they run no Xcode tool.
+  scripts/all_fast_validate_checks.sh
+  scripts/check-no-new-direct-xcodebuild.sh
+  scripts/ios/xctestrunner_test_filter.sh
+  # End-user installer: reports the user's own Xcode and runtimes.
+  scripts/install.sh
+  # Release builders and signers: their workflows select the pin with setup-xcode first.
+  scripts/ci/notarize-macos-artifact.sh
+  scripts/ios/build-audio-loopback-helper-release.sh
+  scripts/ios/build-network-filter-probe.sh
+  scripts/ios/build-screen-capture-helper-release.sh
+  scripts/ios/build-simulator-runner-release.sh
+  scripts/ios/build-tvos-runner-release.sh
+  scripts/ios/ctrl-proxy-create-ipa.sh
+  scripts/ios/sign-ios-frameworks.sh
+  scripts/ios/sign-macos-products.sh
+  scripts/release/capture-protoviewer-policy-fixtures.sh
+  # Helpers only called by build scripts that already selected the pin.
+  scripts/ios/patch-ctrl-proxy-ui-test-runner-icon.sh
+  scripts/ios/prototype-effects-metallib.sh
+  # simctl on simulators that already exist; no build and no SDK lookup.
+  scripts/ios/ctrl-proxy-uninstall.sh
+  scripts/ios/kill-all-simulators.sh
+  scripts/ios/navigation-graph-sdk-event-integration.sh
+  scripts/ios/prototype-record-goldens.sh
+  scripts/ios/saved-prototype-smoke.sh
+  scripts/ios/shutdown-main-simulator.sh
+  # Sources scripts/local-dev/lib/ctrl-proxy-ios.sh, which selects the pin.
+  scripts/local-dev/hot-reload.sh
+  # Builds SwiftFormat itself with whatever Swift is installed.
+  scripts/swiftformat/install_swiftformat.sh
+)
+
+@test "every script that runs an Xcode tool selects the pin or has a stated exemption" {
+  local offenders="" f exempt
+  while IFS= read -r f; do
+    grep -v -E '^[[:space:]]*#' "${f}" \
+      | grep -q -E '(^|[^A-Za-z_-])(xcodebuild|xcrun|swift (build|test|package))([^A-Za-z_-]|$)' || continue
+    grep -q -E 'select_pinned_xcode|select-self-hosted-xcode' "${f}" && continue
+    exempt=false
+    for e in "${EXEMPT_SCRIPTS[@]}"; do [[ "${f}" == "${e}" ]] && exempt=true; done
+    [[ "${exempt}" == true ]] || offenders+="${f}"$'\n'
+  done < <(git ls-files 'scripts/*.sh')
+  if [[ -n "${offenders}" ]]; then
+    echo "Scripts running Xcode tools without select_pinned_xcode:" >&2
+    echo "${offenders}" >&2
+    return 1
+  fi
+}
+
+@test "every exempt script still exists" {
+  for e in "${EXEMPT_SCRIPTS[@]}"; do
+    [[ -f "${e}" ]] || { echo "stale exemption: ${e}" >&2; return 1; }
+  done
 }

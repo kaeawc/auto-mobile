@@ -214,6 +214,11 @@ class PrototypeController(
   private val storage: PrototypeStoragePersistence? = null,
   /** The transports behind `request` actions (#12528). */
   private val httpClients: PrototypeHttpClients = PrototypeHttpClients.Unavailable,
+  /**
+   * The transports behind `channels` (#14269); each shown prototype gets its own `realtime` module.
+   * Null leaves `channels` without a module.
+   */
+  private val realtime: PrototypeRealtimeConfig? = null,
   /** Where requests wait for their response; they are cancelled when their prototype ends. */
   private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
   /** Device-compiled uniform declarations, checked even for hidden/styleWhen nodes. */
@@ -690,6 +695,7 @@ class PrototypeController(
           if (preservePages) previous?.runtime?.current?.stacks.orEmpty() else emptyMap(),
         storage = opened.session,
         httpClients = httpClients,
+        realtime = realtime,
         uploadAssets = uploadAssets,
         platform = platform,
         platformLimiter = platformLimiter,
@@ -971,7 +977,35 @@ class PrototypeController(
     PrototypeTrace.asyncSection(PrototypeTrace.SYNC_APPEARANCE) {
       syncAppearance(runtime, model)
       syncTextFieldFocus(runtime, model)
+      syncBackdropShape(runtime, model)
     }
+  }
+
+  /**
+   * A runtime change can reshape a floating root (an 18dp radius patched to 0), so its card blur
+   * window must clip to the new shape. The window is replaced only when the shape changed; a failed
+   * replace keeps the old request and is retried on the next change.
+   */
+  private suspend fun syncBackdropShape(runtime: PrototypeRuntime, model: PrototypeRenderModel) {
+    val surface = surfaceOf(runtime) ?: return
+    val request = surface.request
+    if (request.backdrop == null || request.placement !is PrototypePlacement.Floating) return
+    val shape = prototypeRootBackdropShape(model)
+    if (shape == request.backdropShape) return
+    val updated = request.copy(backdropShape = shape)
+    val host = surface.host
+    val applied =
+      !host.isShowing ||
+        try {
+          host.replace(updated.copy(animateEnter = false))
+        } catch (error: CancellationException) {
+          throw error
+        } catch (error: Exception) {
+          Log.w("PrototypeController", "Prototype host failed to reshape its backdrop", error)
+          false
+        }
+    if (applied) surface.request = updated
+    else Log.w("PrototypeController", "Prototype host failed to reshape its backdrop")
   }
 
   /**
@@ -1214,6 +1248,7 @@ class PrototypeController(
     val runtime = surface.runtime
     val id = runtime.current.spec.id
     return PrototypeStatusEntry(
+      images = runtime.remoteImageActivity.counts(),
       id = id,
       persistent = runtime.persistent,
       state = runtime.publicState,

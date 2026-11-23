@@ -1,5 +1,6 @@
 import { GUIDE_DISPOSABLE_APPS, GUIDE_PLATFORM_NAMESPACES } from "./prototypeGuideProseMore";
 import { GUIDE_MOTION_V3 } from "./prototypeGuideMotionV3";
+import { GUIDE_M3_EXPRESSIVE } from "./prototypeGuideM3Expressive";
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
 import {
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
@@ -192,7 +193,7 @@ are reported in \`platformNotes\`.
 
 ## Loading, empty and error states
 
-State-key \`contains\`/\`startsWith\` compare UTF-16 substrings/prefixes, case-sensitive with no Unicode normalization. Literal operands are nonempty strings up to 256 UTF-16 units; repeat placeholders always bind as text (a numeric item renders as its text), and an empty substituted operand holds for every string. \`lengthGt\`/\`lengthLt\` compare UTF-16 length strictly against literal integers 0..100000 (\`😀\` has length 2). Missing or non-string state values fail all four. They are valid only with \`key\`, wherever a condition is accepted, and require \`prototype_string_conditions_v1\`.
+String \`contains\`/\`startsWith\` compare UTF-16 substrings/prefixes, case-sensitive with no Unicode normalization. Literal operands are nonempty strings up to 256 UTF-16 units; repeat placeholders always bind as text (a numeric item renders as its text), and an empty substituted operand holds for every string. \`lengthGt\`/\`lengthLt\` compare UTF-16 length strictly against literal integers 0..100000 (\`😀\` has length 2). Missing or non-string values fail all four. They use \`key\` or \`derived\` and require \`prototype_string_conditions_v1\`.
 
 (needs \`prototype_loading_states_v1\`) \`{data: "/feed", empty: true}\` holds when the value is
 missing, \`[]\`, \`{}\` or \`""\`; \`empty: false\` is its inverse. It replaces the comparison, so
@@ -459,7 +460,7 @@ Optional \`caret\` is \`auto\` (default), \`top\`, \`bottom\`, \`start\` or \`en
 
 \`drawer\` requires \`prototype_drawer_v1\`, \`edge: "start"|"end"\`, boolean \`openWhen: {key, equals}\` and a \`child\` node. Start/end follow layout direction. The renderer fixes panel width; there is no width field. Optional \`scrim\` accepts the same color value (including mode pairs) as bottomSheet and defaults to the scrim role. Optional \`dismissOnSwipe\` defaults to true, as for bottomSheet. Both nodes accept the common node fields, including \`onTap\`, but no long-press or double-tap handlers.
 
-## Menu and select
+${GUIDE_M3_EXPRESSIVE}## Menu and select
 
 \`menu\` and \`select\` require \`prototype_menus_v1\`; the host refuses them before showing or uploading assets when the connected renderer lacks it.
 
@@ -781,10 +782,10 @@ are rejected; a missing text path renders empty.
   placeholders are not charged. Crossing the total fails at that field with \`Substituted text total limit exceeded\`.
   During state interpolation, a replacement that would exceed the per-call substitution limit stays
   as written, and later placeholders may still substitute.
-- A condition uses exactly one of \`key\`, \`data\`, \`platform\`, \`valid\`, \`all\`, \`any\`, \`not\`. A data condition has exactly
-  one comparison: \`equals\` (same scalar type and value), \`notEquals\` (its inverse, including missing
-  or non-scalar), \`gt\` or \`lt\` (numbers only, otherwise false), or \`empty\` (data only). \`equals\`/\`notEquals\` operands are
-  literals; repeat placeholders there are rejected. Key forms also accept \`contains\`, \`startsWith\`, \`lengthGt\` or \`lengthLt\` (see string conditions). \`bottomSheet.openWhen\` remains boolean state.
+- A condition uses exactly one of \`key\`, \`data\`, \`platform\`, \`derived\`, \`valid\`, \`all\`, \`any\` or \`not\`.
+  Data and derived conditions require one comparison: \`equals\` (same scalar type and value), \`notEquals\` (its inverse,
+  including missing or non-scalar), \`gt\` or \`lt\` (numbers only), or \`empty\`. Data conditions require literal equality
+  operands. Key and derived conditions also accept string comparisons. \`bottomSheet.openWhen\` uses boolean state.
 
 The host validates data and repeat paths; the device resolves bindings once per show before
 repeat expansion. All data uses require \`prototype_data_model_v1\`; an older device is refused
@@ -1030,7 +1031,7 @@ export const GUIDE_ERRORS = `## Common validation errors
 | \`Repeat path does not resolve to an array\` / \`Repeat path resolves to more than 128 items\` / \`Repeat path item <i> is not an object\` | Point to an array of objects within the repeat item limit. |
 | \`Duplicate repeat key "x" (items <i> and <j>)\` | Give every item a unique rendered identity. |
 | \`Bound state key "x" is invalid (repeat item <i>)\` | A path-bound key must form a valid state key; error is at repeat.items.path. |
-| \`Requires key or data or platform\` | Supply one condition source with exactly one comparison. |
+| \`Requires key or data or platform or derived\` | Supply one condition source with exactly one comparison. |
 | \`Repeat path cell limit exceeded\` | Reduce path-bound repeats or the scalar members projected per item; see \`MAX_PROTOTYPE_REPEAT_PATH_CELLS\`. |
 | \`Substituted text total limit exceeded\` | Reduce bindable fields, replacement lengths or repeat items; see \`MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL\`. |
 | \`Repeat placeholder in a data condition operand is not supported\` | Use a literal operand; state conditions still bind repeat operands. |

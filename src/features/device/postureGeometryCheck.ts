@@ -4,7 +4,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
-import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
+import { resolveIosRunnerRotation } from "../observe/iosObserveRotation";
 import { describeTransposedLayout } from "../observe/transposedLayoutGeometry";
 import type { PostureOperation } from "./postureCommands";
 
@@ -20,7 +20,7 @@ const isRotation = (value: unknown): value is number =>
 
 /**
  * Names a disagreement between the runner's own capture geometry and the observation built from
- * it: the runner's rotation, normalized as observe normalizes it (a fixed portrait display
+ * it: the runner's rotation, normalized as its tap geometry uses it (a fixed portrait display
  * reports 0), is a different orientation from the observed one, or the observation is
  * portrait-reported with a landscape layout (#18245).
  */
@@ -29,7 +29,7 @@ export function describePostureGeometryMismatch(
 ): string | undefined {
   const runner = observation.viewHierarchy?.rotation;
   const normalizedRunner = isRotation(runner)
-    ? resolveIosObserveRotation(runner, observation.screenSize)
+    ? resolveIosRunnerRotation(runner, observation.screenSize)
     : undefined;
   const observed = observation.rotation;
   if (
@@ -61,7 +61,7 @@ export interface PostureGeometryCheck {
 
 /**
  * Names a disagreement between the runner's refreshed rotation and observe, normalized as observe
- * normalizes the runner's capture rotation.
+ * normalizes a fixed portrait display (the runner's stale portrait is kept).
  */
 export function describeRunnerGeometryMismatch(
   reply: RunnerGeometryReply,
@@ -72,7 +72,7 @@ export function describeRunnerGeometryMismatch(
   if (!isRotation(runner) || !isRotation(observed)) {
     return undefined;
   }
-  const normalizedRunner = resolveIosObserveRotation(runner, observation.screenSize);
+  const normalizedRunner = resolveIosRunnerRotation(runner, observation.screenSize);
   if (!isRotation(normalizedRunner) || normalizedRunner % 2 === observed % 2) {
     return undefined;
   }

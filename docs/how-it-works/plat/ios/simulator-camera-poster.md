@@ -20,8 +20,7 @@ validation.
 
 Setting a poster also turns it on for apps that `launchApp` does not start: the home screen,
 XCUITest and system relaunches. `IosCameraPosterDeviceWide` runs `simctl spawn <udid> launchctl
-setenv` for three variables in the simulator's launchd environment, which every process launchd
-starts afterwards inherits:
+setenv` for three variables. Every process launchd starts afterwards inherits them:
 
 - `AM_CAMERA_POSTER_DYLIB`: the poster library.
 - `AM_CAMERA_POSTER_CONFIG`: `<AutoMobile data dir>/ios-camera-poster/devices/<udid>.json`.
@@ -29,9 +28,9 @@ starts afterwards inherits:
   already set. It is set last, so no process loads the gate before it can find the poster library.
 
 The gate (`CameraPosterGate.c`) links only libSystem because every new process loads it. It loads
-the poster library only into a process whose executable path contains `.app/` (apps and app
-extensions), that has AVFoundation loaded, and that has a poster source: the per-launch
-variables, or a readable config file. Other processes are unchanged.
+the poster library only into a process that meets three conditions. Its executable path contains
+`.app/` (apps and app extensions). It has AVFoundation loaded. It has a poster source: the
+per-launch variables, or a readable config file. Other processes are unchanged.
 
 The config file holds `{"path": …}` for an image or `{"qr": …}` for a QR. The poster library
 reads it when the process starts if neither per-launch variable is set. The registry mirrors

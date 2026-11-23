@@ -1,6 +1,7 @@
 import { z } from "zod/v4";
 import type { BootedDevice } from "../../../models";
 import { errorMessage } from "../../../utils/describeUnknownError";
+import { logger } from "../../../utils/logger";
 import {
   HARDWARE_KEYBOARD_LAYOUTS,
   KEYBOARD_LANGUAGE_PATTERN,
@@ -88,6 +89,7 @@ export class KeyboardOperations {
       }
       return state;
     } catch (error) {
+      logger.warn(`keyboard device state failed: ${errorMessage(error)}`, error);
       return { ...state, error: errorMessage(error) };
     }
   }

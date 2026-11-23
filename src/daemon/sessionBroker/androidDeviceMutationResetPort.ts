@@ -176,7 +176,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       journalEntries,
     });
     const output = await this.execute("shell cmd clipboard clear", context, {
-      optionalClipboard: true,
+      unsupported: this.clipboardUnsupported,
     });
     if (this.unsupportedClipboard(output)) {
       logger.warn("Android cleaning skipped unsupported clipboard clear");
@@ -184,6 +184,9 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       throw new ActionableError("Android clipboard cleaning command failed");
     }
   }
+
+  private readonly clipboardUnsupported = (stdout: string, stderr: string): boolean =>
+    this.unsupportedClipboard(`${stdout}\n${stderr}`);
 
   private unsupportedClipboard(output: string): boolean {
     return /Unknown command:|Can't find service:|No shell command implementation|Service .* not found/i.test(
@@ -216,14 +219,9 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       const { command, success, confirms, timeoutMs, retryable, wakeSleptScreen } = step;
       const output = await this.execute(command, context, {
         timeoutMs,
-        optionalClipboard: mutation.kind === "clipboard",
         retryable,
         unsupported: step.unsupported,
       });
-      if (mutation.kind === "clipboard" && this.unsupportedClipboard(output)) {
-        logger.warn("Android cleaning skipped unsupported journal clipboard clear");
-        continue;
-      }
       if (step.unsupported?.(output, "")) {
         logger.warn(
           `Android cleaning skipped unsupported ${mutation.kind}:${mutation.key} restore`,
@@ -336,12 +334,10 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     // Legacy callers without a deadline retain one attempt; reset deadlines turn this into a floor.
     {
       timeoutMs = 2000,
-      optionalClipboard = false,
       retryable = true,
       unsupported,
     }: {
       timeoutMs?: number;
-      optionalClipboard?: boolean;
       retryable?: boolean;
       unsupported?: (stdout: string, stderr: string) => boolean;
     } = {},
@@ -385,9 +381,6 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
             );
       context.signal.throwIfAborted();
       await context.assertOwned();
-      if (optionalClipboard && this.unsupportedClipboard(`${result.stdout}\n${result.stderr}`)) {
-        return `${result.stdout}\n${result.stderr}`;
-      }
       if (unsupported?.(result.stdout, result.stderr)) {
         return `${result.stdout}\n${result.stderr}`;
       }
@@ -631,7 +624,7 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
   private clipboardCommands({ priorValue }: DeviceMutationInput): AndroidRevertCommand[] | null {
     const prior = priorValue.state === "present" ? priorValue.value : undefined;
     return priorValue.state === "absent" || prior === "" || prior === null
-      ? [{ command: "shell cmd clipboard clear" }]
+      ? [{ command: "shell cmd clipboard clear", unsupported: this.clipboardUnsupported }]
       : null;
   }
 

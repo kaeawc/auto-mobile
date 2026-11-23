@@ -4,8 +4,8 @@ import Foundation
 enum LoopbackMain {
     static let usage = "Usage: audio-loopback-helper play [--sample-rate N] | "
         + "capture (--duration-ms N | --until-stopped) [--sample-rate N] | "
-        + "tap --launchd-pid N (--duration-ms N | --until-stopped) [--sample-rate N] [--mute]. PCM is 16-bit little-endian mono; "
-        + "--until-stopped records until stdin closes."
+        + "tap --launchd-pid N (--duration-ms N | --until-stopped) [--sample-rate N] [--mute]. "
+        + "PCM is 16-bit little-endian mono; --until-stopped records until stdin closes."
 
     /// Runs one command and never returns: the process exits when the command ends.
     static func run(_ arguments: [String]) -> Never {

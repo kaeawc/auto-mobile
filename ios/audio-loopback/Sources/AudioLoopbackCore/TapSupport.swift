@@ -76,9 +76,9 @@ public struct MonoResampler {
     }
 }
 
-public extension Pcm16Mono {
+extension Pcm16Mono {
     /// 16-bit signed little-endian samples, clamped to full scale.
-    static func encode(_ samples: [Float]) -> Data {
+    public static func encode(_ samples: [Float]) -> Data {
         var data = Data(count: samples.count * bytesPerFrame)
         data.withUnsafeMutableBytes { raw in
             let out = raw.bindMemory(to: Int16.self)

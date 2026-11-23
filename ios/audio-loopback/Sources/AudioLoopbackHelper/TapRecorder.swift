@@ -7,9 +7,9 @@ import os
 /// the device's current audio clients; a running tap's process list cannot change, so the tap and its
 /// aggregate are rebuilt whenever a client starts or stops. A tap delivers frames only while a tapped
 /// process is playing, so once no frames have arrived for `lagMs` the output is padded with silence up
-/// to the wall clock: a capture always has its full duration, and quiet stretches keep their length. All mutable state is
-/// touched only on `queue`. The IOProc runs on its own `ioQueue`: stopping the aggregate waits for a
-/// running IOProc, so sharing one serial queue would deadlock a rebuild.
+/// to the wall clock: a capture always has its full duration, and quiet stretches keep their length.
+/// All mutable state is touched only on `queue`. The IOProc runs on its own `ioQueue`: stopping the
+/// aggregate waits for a running IOProc, so sharing one serial queue would deadlock a rebuild.
 final class TapRecorder: @unchecked Sendable {
     private static let tickMs = 20
     /// How long the tap may go without delivering before silence fills the gap; covers tap start-up and
@@ -205,8 +205,11 @@ final class TapRecorder: @unchecked Sendable {
             throw LoopbackError.status(status, "Reading the tap's format")
         }
         guard format.mFormatFlags & kAudioFormatFlagIsFloat != 0, format.mBitsPerChannel == 32 else {
-            throw LoopbackError(.audioFailed, "The tap delivers an unexpected format (flags \(format.mFormatFlags), "
-                + "\(format.mBitsPerChannel) bits).")
+            throw LoopbackError(
+                .audioFailed,
+                "The tap delivers an unexpected format (flags \(format.mFormatFlags), "
+                    + "\(format.mBitsPerChannel) bits)."
+            )
         }
         let interleaved = format.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0
         let channels = Int(format.mChannelsPerFrame)

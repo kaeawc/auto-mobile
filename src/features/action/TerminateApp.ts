@@ -153,6 +153,9 @@ export class TerminateApp extends BaseVisualChange {
           new AndroidUserTargetResolver(this.adb).resolve({
             packageName,
             explicitUserId: options?.userId,
+            // AAOS runs the driver as a secondary user (often 10) while user 0 is headless;
+            // follow it like launchApp and installApp do (#19061).
+            currentUser: this.device.formFactor === "automotive",
             installedOnly: true,
             includeForegroundApp: true,
             signal,

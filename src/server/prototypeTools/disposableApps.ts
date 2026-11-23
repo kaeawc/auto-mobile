@@ -7,6 +7,7 @@ import {
   type DisposableAppUninstallTarget,
 } from "../../features/prototype/disposableApp/DisposableAppManager";
 import type { DisposableAppPlatform } from "../../features/prototype/disposableApp/disposableAppId";
+import { isAndroidStampAssetId } from "../../features/prototype/disposableApp/android/AndroidStampZip";
 import { preparePrototypeAssets } from "../../features/prototype/prototypeAssetUploader";
 import { requireDisposableAppSimulator } from "../../features/prototype/disposableApp/ios/iosDisposableAppIdentity";
 import type { PrototypeJson } from "../../features/prototype/prototypeJson";
@@ -69,6 +70,15 @@ async function installInput(
   args: PrototypeArgs,
   readers: AssetReaders,
 ): Promise<DisposableAppInstallInput> {
+  const platform = appPlatform(device);
+  if (platform === "android") {
+    const invalid = (args.assets ?? []).find(({ id }) => !isAndroidStampAssetId(id));
+    if (invalid) {
+      throw new ActionableError(
+        `Android disposable app asset id '${invalid.id}' must be letters, digits, '_' or '-', optionally in dot-separated parts. Rename it in assets and in the spec, then retry.`,
+      );
+    }
+  }
   const prepared = await preparePrototypeAssets(
     args.assets ?? [],
     readers.assetFileReader,
@@ -81,7 +91,7 @@ async function installInput(
   // The schema requires app and a spec (inline or read from specPath) before dispatch.
   return {
     deviceId: device.deviceId,
-    platform: appPlatform(device),
+    platform,
     spec: args.spec as PrototypeJson,
     app: args.app!,
     assets: prepared.assets,

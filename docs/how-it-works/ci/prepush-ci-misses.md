@@ -25,3 +25,14 @@ acts on, so a pass locally means the matching required CI job would pass for the
 same diff. The shell lane is the selector `Shell Changed Files` runs, so its path
 list in `prepush.sh` (`shell_lane_for_path`) mirrors the `case` arms in
 `scripts/prepush-shell.sh`; `test/bats/prepush.bats` pins one path per arm.
+
+## Docs readability
+
+The shell lane runs the `docs-readability` Fast Validation check when a
+`docs/**/*.md` page or the readability checker changes. It runs
+`scripts/docs/check-readability.ts` on the docs pages changed since the
+merge-base with the lane's base ref, plus uncommitted and untracked edits, and
+fails on the same enforced findings the `Docs Readability Report` job reports.
+That job checks the whole docs tree, so a page already over budget on `main`
+still fails it while pre-push passes. See
+[the devlog entry](../../devlog/2026-11-23-docs-readability-prepush.md).

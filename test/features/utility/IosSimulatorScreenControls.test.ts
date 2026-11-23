@@ -7,6 +7,7 @@ import type { SimCtl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type { SimulatorBacklight } from "../../../src/utils/ios-cmdline-tools/SimulatorBacklight";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { hiddenDynamicIslands } from "../../../src/utils/ios-cmdline-tools/SimulatorDynamicIsland";
 
 const UDID = "994D7AD5-32E6-43AA-BB3E-CE61A8D277A1";
 
@@ -118,6 +119,7 @@ describe("IosSimulatorScreenControls (#19018)", () => {
     const subject = controls(springBoard, new FakeBacklight(springBoard));
 
     const hidden = await subject.set({ dynamicIsland: "hidden" });
+    expect(hiddenDynamicIslands.has(UDID)).toBe(true);
     const shown = await subject.set({ dynamicIsland: "visible" });
 
     expect(hidden).toEqual({
@@ -126,6 +128,8 @@ describe("IosSimulatorScreenControls (#19018)", () => {
       errors: [],
     });
     expect(shown.applied.dynamicIsland).toBe("visible");
+    // Only a hidden island is re-hidden after a simctl screenshot.
+    expect(hiddenDynamicIslands.has(UDID)).toBe(false);
     expect(springBoard.writes()).toEqual([
       [
         "spawn",

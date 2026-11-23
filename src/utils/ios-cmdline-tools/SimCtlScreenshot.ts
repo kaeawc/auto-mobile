@@ -23,6 +23,7 @@ import { raceWithDeadline } from "../raceWithDeadline";
 import { type IdGenerator } from "../IdGenerator";
 
 import { SimctlScreenshotError } from "./SimctlScreenshotError";
+import { hiddenDynamicIslands, hideDynamicIslandArgs } from "./SimulatorDynamicIsland";
 
 export interface SimCtlScreenshotContext {
   timer: Timer;
@@ -75,7 +76,9 @@ export class SimCtlScreenshot {
         label: "simctl screenshot temp directory",
       });
       const path = resolve(created, `screenshot-${this.context.idGenerator.next()}.png`);
-      return await this.captureScreenshotFile(deviceId, display, path, context);
+      const png = await this.captureScreenshotFile(deviceId, display, path, context);
+      await this.keepDynamicIslandHidden(deviceId);
+      return png;
     } catch (error) {
       throw error instanceof SimctlScreenshotError || !captureSignal.aborted
         ? error
@@ -89,6 +92,38 @@ export class SimCtlScreenshot {
       } finally {
         this.context.timer.clearTimeout(handle);
       }
+    }
+  }
+
+  /**
+   * `simctl io screenshot` hides the Dynamic Island while it captures and then writes the
+   * SpringBoard default back to NO, so re-hide an island displayConfig hid (#19018).
+   */
+  async keepDynamicIslandHidden(deviceId: string): Promise<void> {
+    if (!hiddenDynamicIslands.has(deviceId)) {
+      return;
+    }
+    try {
+      await raceWithDeadline(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            const child = this.context.spawnProcess(
+              "xcrun",
+              buildSimctlArgs(hideDynamicIslandArgs(deviceId)),
+            );
+            child.once("error", reject);
+            child.once("close", (code) =>
+              code === 0 ? resolve() : reject(new Error(`defaults write exited ${code}`)),
+            );
+          }),
+        { timer: this.context.timer, timeoutMs: 5_000, label: "Dynamic Island re-hide" },
+      );
+    } catch (error) {
+      // The capture already succeeded; the island stays visible until displayConfig hides it again.
+      logger.warn(
+        `Re-hiding the Dynamic Island on ${deviceId} failed: ${errorMessage(error)}`,
+        error,
+      );
     }
   }
 

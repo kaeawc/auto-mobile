@@ -37,7 +37,8 @@ turns the display off and on without a lock gesture:
 
 - `dynamicIsland: "hidden"` hides the island; `"visible"` shows it again. Only
   device types with a Dynamic Island change (iPhone 14 Pro and later, except the
-  16e and 17e). Screenshots never include the island.
+  16e and 17e). Screen recordings and the Simulator window show the change;
+  screenshots never include the island.
 - `backlight: false` turns the display off: the device locks and shows the dimmed
   Lock Screen. `backlight: true` lights the Lock Screen; unlock it with
   `wakeAndUnlock`.

@@ -176,8 +176,9 @@ export const displayConfigSchema = addDeviceTargetingToSchema(
         .enum(DYNAMIC_ISLAND_STATES)
         .optional()
         .describe(
-          "iOS Simulator: hide or show the Dynamic Island. Only device types with a Dynamic " +
-            "Island change. Screenshots never include the island. Omit to leave unchanged.",
+          "iOS Simulator: hide or show the Dynamic Island in screen recordings and the Simulator " +
+            "window (screenshots never include it). Only device types with a Dynamic Island " +
+            "change. Omit to leave unchanged.",
         ),
       backlight: z
         .boolean()

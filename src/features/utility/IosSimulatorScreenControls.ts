@@ -9,18 +9,16 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 
-/**
- * The SpringBoard default that hides the Dynamic Island. `-[SimDevice
- * setDynamicIslandSuppressed:error:]` only writes this key through CoreSimulatorBridge, and
- * SpringBoard observes it, so a `defaults` write has the same effect and can be read back (#19018).
- */
-export const DYNAMIC_ISLAND_DEFAULTS_DOMAIN = "com.apple.springboard";
-export const DYNAMIC_ISLAND_SUPPRESSED_KEY = "SBSuppressDynamicIslandCompletely";
+import {
+  DYNAMIC_ISLAND_DEFAULTS_DOMAIN,
+  DYNAMIC_ISLAND_SUPPRESSED_KEY,
+  hiddenDynamicIslands,
+  hideDynamicIslandArgs,
+} from "../../utils/ios-cmdline-tools/SimulatorDynamicIsland";
+
+export { DYNAMIC_ISLAND_DEFAULTS_DOMAIN, DYNAMIC_ISLAND_SUPPRESSED_KEY };
 /** SpringBoard posts 1 once the display is off and 0 while it is lit. */
 export const BACKLIGHT_BLANKED_NOTIFY_KEY = "com.apple.springboard.hasBlankedScreen";
-
-/** The journal key of the Dynamic Island default, in the `domain:key` preference form. */
-export const DYNAMIC_ISLAND_PREFERENCE_KEY = `${DYNAMIC_ISLAND_DEFAULTS_DOMAIN}:${DYNAMIC_ISLAND_SUPPRESSED_KEY}`;
 
 export const DYNAMIC_ISLAND_STATES = ["hidden", "visible"] as const;
 export type DynamicIslandState = (typeof DYNAMIC_ISLAND_STATES)[number];
@@ -165,10 +163,18 @@ export class IosSimulatorScreenControls {
   private async writeDynamicIsland(state: DynamicIslandState): Promise<string[]> {
     const args =
       state === "hidden"
-        ? ["write", DYNAMIC_ISLAND_DEFAULTS_DOMAIN, DYNAMIC_ISLAND_SUPPRESSED_KEY, "-bool", "YES"]
-        : ["delete", DYNAMIC_ISLAND_DEFAULTS_DOMAIN, DYNAMIC_ISLAND_SUPPRESSED_KEY];
+        ? hideDynamicIslandArgs(this.udid)
+        : [
+            "spawn",
+            this.udid,
+            "defaults",
+            "delete",
+            DYNAMIC_ISLAND_DEFAULTS_DOMAIN,
+            DYNAMIC_ISLAND_SUPPRESSED_KEY,
+          ];
+    hiddenDynamicIslands.set(this.udid, state === "hidden");
     try {
-      await this.simctl.executeCommandArgs(["spawn", this.udid, "defaults", ...args]);
+      await this.simctl.executeCommandArgs(args);
       return [];
     } catch (error) {
       if (state === "visible" && looksLikeMissingIosDefault(error)) {

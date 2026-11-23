@@ -8,6 +8,7 @@ import type {
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIosResidueInspector } from "../../fakes/FakeIosResidueInspector";
+import { hiddenDynamicIslands } from "../../../src/utils/ios-cmdline-tools/SimulatorDynamicIsland";
 
 function harness(commandError?: (args: string[]) => Error | undefined) {
   const commands: string[][] = [];
@@ -88,6 +89,18 @@ describe("iOS reset of the Simulator Dynamic Island and backlight (#19018)", () 
         "YES",
       ],
     ]);
+  });
+
+  test("a revert tells later screenshots whether the island stays hidden", async () => {
+    const { port, context } = harness();
+    hiddenDynamicIslands.set("UDID", true);
+
+    await port.revert(row("dynamicIsland", { state: "absent" }), context);
+    expect(hiddenDynamicIslands.has("UDID")).toBe(false);
+
+    await port.revert(row("dynamicIsland", { state: "present", value: true }), context);
+    expect(hiddenDynamicIslands.has("UDID")).toBe(true);
+    hiddenDynamicIslands.set("UDID", false);
   });
 
   test("deleting an island default that is already gone succeeds", async () => {

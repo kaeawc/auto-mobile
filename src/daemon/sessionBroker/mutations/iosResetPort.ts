@@ -28,7 +28,8 @@ import {
 import {
   DYNAMIC_ISLAND_DEFAULTS_DOMAIN,
   DYNAMIC_ISLAND_SUPPRESSED_KEY,
-} from "../../../features/utility/IosSimulatorScreenControls";
+  hiddenDynamicIslands,
+} from "../../../utils/ios-cmdline-tools/SimulatorDynamicIsland";
 import { iosBiometricEnrollmentTarget, iosBiometricRevertArgs } from "./iosBiometricRevert";
 import { STOREKIT_MUTATION_KIND, type IosStoreKitSessionReset } from "./storeKitSession";
 import {
@@ -466,9 +467,23 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         await context.assertOwned();
         break;
       default:
-        await (mutation.kind === "device-setting" && mutation.key === "backlight"
-          ? this.revertBacklight(prior === true, context)
-          : this.revertByCommand(mutation, context));
+        await this.revertOther(mutation, prior, context);
+    }
+  }
+
+  private async revertOther(
+    mutation: DeviceMutationInput,
+    prior: unknown,
+    context: DeviceMutationResetContext,
+  ): Promise<void> {
+    if (mutation.kind !== "device-setting" || mutation.key !== "backlight") {
+      await this.revertByCommand(mutation, context);
+    } else {
+      await this.revertBacklight(prior === true, context);
+    }
+    if (mutation.kind === "device-setting" && mutation.key === "dynamicIsland") {
+      // A later simctl screenshot re-hides only an island that is still meant to be hidden.
+      hiddenDynamicIslands.set(context.scope.deviceId, prior === true);
     }
   }
 

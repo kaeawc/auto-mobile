@@ -20,8 +20,14 @@ default directly:
 The default persists across reboots. Device types whose `capabilities.plist` sets
 `DeviceSupportsDynamicIsland` change: iPhone 14 Pro and Pro Max, every iPhone 15, 16, 17 and
 18 model except the 16e and 17e, iPhone Air and iPhone Duo. On other device types the write
-succeeds and changes nothing. `simctl io screenshot` never includes the island, so screenshots
-look the same either way.
+succeeds and changes nothing.
+
+`simctl io recordVideo` frames and the Simulator window show the island; a hidden island is gone
+from both. `simctl io screenshot` never includes the island: it suppresses the island while it
+captures and then writes the default back to NO, which shows a hidden island again. AutoMobile
+records each Simulator it hid the island on (for the daemon's lifetime) and writes the default
+back after each of its own simctl screenshots. A screenshot taken outside AutoMobile, or after a
+daemon restart, still shows the island until the next `dynamicIsland: "hidden"`.
 
 ## Backlight
 

@@ -10,9 +10,13 @@ enum PrototypeDerivedCollections {
             let rows = PrototypeStrictBindings.array(values[name]).map {
                 PrototypeDataValues.project($0.objectFields ?? [:])
             }
+            let nested = PrototypeRepeat.containsFieldSource(root)
             if node["type"] == .string("list") {
-                repeated["items"] = .object(["derived": .string(name), "_rows": .array(rows)])
+                repeated["items"] = .object([
+                    "derived": .string(name), "_rows": nested ? values[name] ?? .array(rows) : .array(rows),
+                ])
             } else {
+                if nested { repeated["_sourceItems"] = values[name] }
                 repeated["items"] = .array(rows)
             }
             node["repeat"] = .object(repeated)

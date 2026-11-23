@@ -6,7 +6,13 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 
 internal object PrototypeRepeatTokens {
-  fun token(inner: String, alias: String): PrototypeRepeatSegment? {
+  fun token(inner: String, alias: String, outerAlias: String? = null): PrototypeRepeatSegment? {
+    if (outerAlias != null && inner == "outerIndex")
+      return PrototypeRepeatSegment.Field("\$outerIndex")
+    if (outerAlias != null && inner.startsWith("$outerAlias.")) {
+      val name = inner.removePrefix("$outerAlias.")
+      return if (isFieldName(name)) PrototypeRepeatSegment.Field("outer.$name") else null
+    }
     if (inner == "index") return PrototypeRepeatSegment.Index
     val prefix = "$alias."
     val field = inner.removePrefix(prefix)
@@ -35,7 +41,7 @@ internal object PrototypeRepeatTokens {
     }
 
   fun isPlaceholder(inner: String): Boolean {
-    if (inner == "index") return true
+    if (inner == "index" || inner == "outerIndex") return true
     val dot = inner.indexOf('.')
     return dot > 0 &&
       isFieldName(inner.substring(0, dot)) &&

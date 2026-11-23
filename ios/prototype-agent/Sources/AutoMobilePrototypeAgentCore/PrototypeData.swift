@@ -174,11 +174,17 @@ struct PrototypeRepeatData {
 
 /// Scans authored UTF-16 once, just like Kotlin; replacement values are never scanned again.
 enum PrototypeDataText {
-    static func bind(_ text: String, data: [String: JSONValue]?, platform: [String: JSONValue]? = nil) -> String {
+    static func bind(
+        _ text: String, data: [String: JSONValue]?, platform: [String: JSONValue]? = nil,
+        deferData: Bool = false
+    )
+        -> String
+    {
         let units = Array(text.utf16)
         var result = ""
         var literalStart = 0
         scan(units, includePlatform: true) { open, close, pointer, isPlatform in
+            if deferData, !isPlatform { return true }
             result += String(decoding: units[literalStart ..< open], as: UTF16.self)
             result += rendered(pointer, data: isPlatform ? platform : data)
             literalStart = close + 1
@@ -277,20 +283,36 @@ enum PrototypeDataResolver {
         -> JSONValue
     {
         var repeats = PrototypeRepeatData(data: data)
-        return resolveRoot(root, data: data, platform: platform, derived: derived, repeats: &repeats)
+        return resolveRoot(root, data: data, platform: platform, derived: derived, repeats: &repeats, pass: .all)
     }
+
+    /// Resolves only `repeat` item sources, leaving every text and condition untouched, so a lazy row can
+    /// bind its row tokens before `{data:...}` pointers resolve and substituted values are never re-bound.
+    static func resolveRepeatSources(_ root: JSONValue, data: [String: JSONValue]?) -> JSONValue {
+        var repeats = PrototypeRepeatData(data: data)
+        return resolveRoot(root, data: data, platform: nil, derived: [:], repeats: &repeats, pass: .repeatsOnly)
+    }
+
+    /// `deferDataText` binds platform text and conditions, leaving data text for per-row binding.
+    private enum Pass { case all, repeatsOnly, deferDataText }
 
     private static func resolveRoot(
         _ root: JSONValue, data: [String: JSONValue]?, platform: [String: JSONValue]?,
-        derived: [String: JSONValue], repeats: inout PrototypeRepeatData
+        derived: [String: JSONValue], repeats: inout PrototypeRepeatData, pass: Pass
     )
         -> JSONValue
     {
         guard case var .object(fields) = root else { return root }
-        PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind($0, data: data, platform: platform) }
+        if pass != .repeatsOnly { PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind(
+            $0,
+            data: data,
+            platform: platform, deferData: pass == .deferDataText
+        ) } }
         let lazy = fields["type"] == .string("list")
-        if !lazy, let value = fields["repeat"] { fields["repeat"] = resolveRepeat(value, repeats: &repeats) }
-        for key in ["visibleWhen", "enabledWhen", "errorWhen"] {
+        if !lazy, let value = fields["repeat"] { fields["repeat"] = resolveRepeat(
+            value, repeats: &repeats, retainSource: PrototypeRepeat.containsFieldSource(root)
+        ) }
+        for key in ["visibleWhen", "enabledWhen", "errorWhen"] where pass != .repeatsOnly {
             if let value = fields[key] { fields[key] = resolveCondition(
                 value,
                 data: data,
@@ -298,7 +320,7 @@ enum PrototypeDataResolver {
                 derived: derived
             ) }
         }
-        if case let .array(styles)? = fields["styleWhen"] {
+        if pass != .repeatsOnly, case let .array(styles)? = fields["styleWhen"] {
             fields["styleWhen"] = .array(styles.map { entry in
                 guard case var .object(style) = entry, let condition = style["when"] else { return entry }
                 style["when"] = resolveCondition(condition, data: data, platform: platform, derived: derived)
@@ -306,7 +328,9 @@ enum PrototypeDataResolver {
             })
         }
         if let child = fields["child"] {
-            fields["child"] = resolveRoot(child, data: data, platform: platform, derived: derived, repeats: &repeats)
+            fields["child"] = resolveRoot(
+                child, data: data, platform: platform, derived: derived, repeats: &repeats, pass: pass
+            )
         } else if fields["type"] == .string("adaptive") {
             for slot in PrototypeAdaptive.slots {
                 if let child = fields[slot] { fields[slot] = resolveRoot(
@@ -314,12 +338,17 @@ enum PrototypeDataResolver {
                     data: data,
                     platform: platform,
                     derived: derived,
-                    repeats: &repeats
+                    repeats: &repeats, pass: pass
                 ) }
             }
         } else if case let .array(children)? = fields["children"] {
+            // Bind platform text now, but keep data pointers raw: each row binds `{index}` and
+            // `{row.x}` first, then resolves, so a pointer such as `{data:/rows/{index}/name}` stays whole.
+            let rowPass: Pass = pass == .all && lazy ? .deferDataText : pass
             fields["children"] = .array(children
-                .map { resolveRoot($0, data: data, platform: platform, derived: derived, repeats: &repeats) })
+                .map { resolveRoot(
+                    $0, data: data, platform: platform, derived: derived, repeats: &repeats, pass: rowPass
+                ) })
         }
         for name in ["header", "footer"] {
             if let child = fields[name] { fields[name] = resolveRoot(
@@ -327,21 +356,32 @@ enum PrototypeDataResolver {
                 data: data,
                 platform: platform,
                 derived: derived,
-                repeats: &repeats
+                repeats: &repeats, pass: pass
             ) }
         }
         if case let .object(screens)? = fields["screens"] {
             fields["screens"] = .object(screens
-                .mapValues { resolveRoot($0, data: data, platform: platform, derived: derived, repeats: &repeats) })
+                .mapValues { resolveRoot(
+                    $0, data: data, platform: platform, derived: derived, repeats: &repeats, pass: pass
+                ) })
         }
         return .object(fields)
     }
 
-    private static func resolveRepeat(_ value: JSONValue, repeats: inout PrototypeRepeatData) -> JSONValue {
+    private static func resolveRepeat(
+        _ value: JSONValue, repeats: inout PrototypeRepeatData, retainSource: Bool
+    )
+        -> JSONValue
+    {
         guard case var .object(fields) = value, case let .object(source)? = fields["items"] else {
             return value
         }
-        fields["items"] = repeats.items(source["path"]?.stringValue ?? "")
+        guard let pointer = source["path"]?.stringValue else { return value }
+        if retainSource, case let .array(rows)? = PrototypeDataPointer.resolve(repeats.data, pointer: pointer) {
+            fields["_sourceItems"] =
+                .array(Array(rows.filter { $0.objectFields != nil }.prefix(PrototypeLimits.maxRepeatItems)))
+        }
+        fields["items"] = repeats.items(pointer)
         return .object(fields)
     }
 

@@ -21,6 +21,29 @@ struct PrototypeListRepeat: Decodable {
     let key: String
 }
 
+/// Row values bind before the row's data text resolves, so a literal `{data:` or `{platform:` inside
+/// one is marked here and restored afterwards instead of being scanned as an authored placeholder.
+private enum RowShield {
+    static let marker = "\u{E000}"
+
+    static func shield(_ value: JSONValue) -> JSONValue {
+        guard case let .string(text) = value else { return value }
+        return .string(
+            text.replacingOccurrences(of: "{data:", with: "{\(marker)data:")
+                .replacingOccurrences(of: "{platform:", with: "{\(marker)platform:")
+        )
+    }
+
+    static func unshield(_ value: JSONValue) -> JSONValue {
+        switch value {
+        case let .string(text): .string(text.replacingOccurrences(of: "{\(marker)", with: "{"))
+        case let .array(items): .array(items.map(unshield))
+        case let .object(fields): .object(fields.mapValues(unshield))
+        default: value
+        }
+    }
+}
+
 /// Resolved independently so a renderer can compose rows without expanding the authored tree.
 enum PrototypeLazyList {
     static let capability = PrototypeAgentProtocol.lazyListCapability
@@ -53,11 +76,18 @@ enum PrototypeLazyList {
               case let .array(items)? = spec.items.resolve(data),
               items.indices.contains(index) else { return nil }
         let fields = PrototypeDataValues.project(items[index].objectFields ?? [:]).objectFields ?? [:]
-        let bound = PrototypeRepeatInstance(alias: spec.as, item: fields, index: index).bind(raw)
-        return (
-            fields[spec.key]?.displayString ?? "",
-            PrototypeDataResolver.resolveRoot(bound, data: data, derived: derived)
+        let projected = fields.mapValues(RowShield.shield)
+        let instance = PrototypeRepeatInstance(
+            alias: spec.as, item: projected, index: index, sourceItem: items[index].objectFields,
+            identity: fields[spec.key]?.displayString
         )
+        // Row tokens bind first, so `{data:/rows/{index}/name}` is a complete pointer before it resolves.
+        let sources = PrototypeDataResolver.resolveRepeatSources(raw, data: data)
+        let expanded = PrototypeRepeat.expand(
+            sources, outer: instance, formatter: FoundationPrototypeValueFormatter(), environment: .device()
+        )
+        let bound = PrototypeDataResolver.resolveRoot(expanded, data: data, derived: derived)
+        return (fields[spec.key]?.displayString ?? "", RowShield.unshield(bound))
     }
 
     static func row(

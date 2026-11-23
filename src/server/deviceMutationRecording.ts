@@ -5,9 +5,11 @@ import { ActionableError } from "../models/ActionableError";
 import type { MutationRecorder } from "../daemon/sessionBroker/mutations/recorder";
 import type { MutationValue } from "../daemon/sessionBroker/mutations/types";
 import { logger } from "../utils/logger";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import {
   androidPermissionMutations,
   deviceToolMutations,
+  type MutationTarget,
   type ToolMutation,
 } from "./deviceMutationAdapters";
 import { withoutSessionCoveredFallbacks } from "./deviceMutationAppFallback";
@@ -241,7 +243,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
     device: BootedDevice,
     { sessionUuid, signal = getAbortSignal() }: { sessionUuid?: string; signal?: AbortSignal } = {},
   ): Promise<void> {
-    let mutations = deviceToolMutations(name, args, device.platform);
+    let mutations = deviceToolMutations(name, args, device.platform, mutationTarget(device));
     if (mutations.length === 0) {
       return;
     }
@@ -301,7 +303,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
       const appId = await runWithAbortSignal(signal, () =>
         this.artifactReader.appId(device, args, signal),
       );
-      return deviceToolMutations(name, { ...args, appId }, device.platform);
+      return deviceToolMutations(name, { ...args, appId }, device.platform, mutationTarget(device));
     }
     if (name === "setAppPermissions" && device.platform === "android") {
       const resolve = this.artifactReader.androidPermissionTarget?.bind(this.artifactReader);
@@ -314,7 +316,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
       const spec = await this.specReader(args.specPath, signal);
       return spec === undefined
         ? mutations
-        : deviceToolMutations(name, { ...args, spec }, device.platform);
+        : deviceToolMutations(name, { ...args, spec }, device.platform, mutationTarget(device));
     }
     return mutations;
   }
@@ -376,4 +378,13 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
       return mutations.map(() => ({ state: "unobservable" }));
     }
   }
+}
+
+/** The target facts the adapters need; the iOS kind follows the prior reader's rule (#19016). */
+function mutationTarget(device: BootedDevice): MutationTarget {
+  return {
+    iosSimulator:
+      device.platform === "ios" &&
+      resolveIosDeviceKind({ deviceId: device.deviceId }) === "simulator",
+  };
 }

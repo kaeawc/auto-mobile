@@ -33,10 +33,10 @@ non-zero exit in an `ActionableError`. A CoreSimulator crash ends only that `osa
 Other ids from 0 to 24 showed no visible change on iOS 26.5 and are not exposed. The options are
 per boot: a Simulator shutdown turns them all off.
 
-## displayConfig contract
+## `displayConfig` contract
 
-- A read on a Simulator adds `current.renderOverlays` (every overlay). If the bridge fails, the read
-  still succeeds without that field, and the failure is logged at warn.
+- A read on a Simulator adds `current.renderOverlays` (every overlay). If the bridge fails, the
+  read fails with the bridge error.
 - A write sends only the named overlays and reports `previous` and `applied` for every overlay. An
   overlay that does not read back as requested makes the call fail with the read-back state.
 - `reset` (and `reset: "factory"`) writes every overlay off after the other fields reset.
@@ -44,9 +44,14 @@ per boot: a Simulator shutdown turns them all off.
 
 ## Session cleanup
 
-Each named overlay journals a `device-setting` row keyed `renderOverlay:<name>`; reset journals all
-of them. The prior is the boolean the bridge read before the call. The iOS keep-booted reset
-reverts each row through the same bridge and fails the revert when the overlay does not read back
-restored. An unreadable prior leaves the row unobservable, so the reset falls back to erase (see
+Release restores each overlay a session touched to the value it had before the session; it does
+not force overlays off. An overlay that was already on when the session started is on again after
+release, the same restore-prior contract as every other `displayConfig` setting.
+
+On a Simulator, each named overlay journals a `device-setting` row keyed `renderOverlay:<name>`,
+and reset journals all six. Android and physical iOS journal no overlay row. The prior is the
+boolean the bridge read before the call. The iOS keep-booted reset writes that prior back through
+the same bridge and fails the revert when the overlay does not read back restored. An unreadable
+prior leaves the row unobservable, so the reset falls back to erase (see
 [journal cleaning](../../session-broker-device-mutation-journal-cleaning.md)); the reboot leaves
 every overlay off.

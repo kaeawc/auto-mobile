@@ -49,8 +49,11 @@ const NON_SETTING_FIELDS = [
   "deviceId",
 ];
 
+/** iOS keys are for a Simulator target, where every display field (and overlay) applies. */
 function keysFor(args: Record<string, unknown>, platform: "android" | "ios"): string[] {
-  return deviceToolMutations("displayConfig", args, platform).map((entry) => entry.key);
+  return deviceToolMutations("displayConfig", args, platform, { iosSimulator: true }).map(
+    (entry) => entry.key,
+  );
 }
 
 describe("displayConfig mutation journaling covers every field (#14790)", () => {
@@ -75,7 +78,9 @@ describe("displayConfig mutation journaling covers every field (#14790)", () => 
         expect(keysFor({ [field]: expected.arg }, platform)).toEqual(key === null ? [] : [key]);
         if (key !== null) {
           expect(
-            deviceToolMutations("displayConfig", { [field]: expected.arg }, platform)[0],
+            deviceToolMutations("displayConfig", { [field]: expected.arg }, platform, {
+              iosSimulator: true,
+            })[0],
           ).toEqual({
             kind: "device-setting",
             key,
@@ -107,6 +112,25 @@ describe("displayConfig mutation journaling covers every field (#14790)", () => 
       "nightMode",
       ...RENDER_OVERLAYS.map((overlay) => `renderOverlay:${overlay}`),
     ]);
+  });
+
+  test("overlay rows are journaled only for an iOS Simulator target (#19016)", () => {
+    const overlayKeys = (target: { iosSimulator?: boolean }, args: Record<string, unknown>) =>
+      deviceToolMutations("displayConfig", args, "ios", target)
+        .map((entry) => entry.key)
+        .filter((key) => key.startsWith("renderOverlay:"));
+    // A physical-device reset must not gain unobservable overlay rows that block its revert.
+    expect(overlayKeys({ iosSimulator: false }, { reset: true })).toEqual([]);
+    expect(overlayKeys({}, { reset: true })).toEqual([]);
+    expect(overlayKeys({ iosSimulator: true }, { reset: true })).toHaveLength(
+      RENDER_OVERLAYS.length,
+    );
+    // A Simulator call naming only overlays is a mutation, not a read.
+    expect(
+      deviceToolMutations("displayConfig", { renderOverlays: { blendedLayers: false } }, "ios", {
+        iosSimulator: true,
+      }),
+    ).toEqual([{ kind: "device-setting", key: "renderOverlay:blendedLayers" }]);
   });
 
   test("render overlays record one row per overlay named, on or off (#19016)", () => {

@@ -71,20 +71,11 @@ export class RenderOverlayDisplay {
     this.control = control ?? new OsascriptSimulatorRenderOverlayControl();
   }
 
-  /** The overlays for a read; an unreadable state leaves them out rather than failing the read. */
+  /** The overlays for a read. An unreadable state throws, so the read fails rather than omit it. */
   async read(): Promise<RenderOverlayDisplayValues> {
-    if (!this.simulator) {
-      return {};
-    }
-    try {
-      return { renderOverlays: await this.control.read(this.identity.deviceId) };
-    } catch (error) {
-      logger.warn(
-        `[DisplayConfig] render overlay read failed on ${this.identity.deviceId}: ${errorMessage(error)}`,
-        error,
-      );
-      return {};
-    }
+    return this.simulator
+      ? { renderOverlays: await this.control.read(this.identity.deviceId) }
+      : {};
   }
 
   /**

@@ -3571,7 +3571,8 @@
               "type": "boolean"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "minProperties": 1
         },
         "reset": {
           "description": "Pass \"factory\" to restore platform defaults no matter which baselines were recorded, including after a daemon restart or for changes made outside a session: light theme, iOS content size large, accessibility display preferences off, font scale 1.0, density and size defaults. Pass true for the baseline-only reset described next. On Android, restore font scale, density and screen size to device defaults, and navigation mode and display cutout to the values recorded before they were first changed. Restore night mode only to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. Android reset never forces light mode. On the iOS Simulator, reset restores light appearance and the content size category displayConfig replaced earlier in this process. On both, restore each accessibility display preference that displayConfig changed earlier in this process.",

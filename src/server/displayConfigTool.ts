@@ -65,7 +65,9 @@ const renderOverlaysSchema = z
   .strict()
   .refine((value) => RENDER_OVERLAYS.some((overlay) => value[overlay] !== undefined), {
     message: "renderOverlays must name at least one overlay.",
-  });
+  })
+  // The refine is invisible to JSON Schema; publish the same rule to clients.
+  .meta({ minProperties: 1 });
 
 export const displayConfigSchema = addDeviceTargetingToSchema(
   z

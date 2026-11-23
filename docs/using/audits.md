@@ -95,8 +95,8 @@ To see rendering cost in screenshots, turn on the Simulator's Core Animation ove
 
 The result's `applied.renderOverlays` and `previous.renderOverlays` report every overlay, and a
 read reports them under `current.renderOverlays`. The overlays tint every app on screen until you
-turn them off, send `reset: true`, or shut the Simulator down. A session's keep-booted reset puts
-them back the way it found them. Android and physical iOS devices refuse `renderOverlays`.
+turn them off, send `reset: true`, or shut the Simulator down. Releasing a session puts each
+overlay it changed back to its value before the session, so one that was already on stays on. Android and physical iOS devices refuse `renderOverlays`.
 
 ## `measureStartup`
 

@@ -70,15 +70,15 @@ describe("displayConfig render overlays on the iOS Simulator (#19016)", () => {
     expect(result.current?.theme).toBe("light");
   });
 
-  test("a read whose overlay state is unreadable still returns the other values", async () => {
+  test("a read whose overlay state is unreadable fails instead of reporting success", async () => {
     const { overlays, config } = setup();
     overlays.failure = new Error("CoreSimulator unavailable");
 
     const result = await config.getConfig();
 
-    expect(result.success).toBe(true);
-    expect(result.current?.theme).toBe("light");
-    expect(result.current?.renderOverlays).toBeUndefined();
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("CoreSimulator unavailable");
+    expect(result.current).toBeUndefined();
   });
 
   test("reset turns every overlay off", async () => {

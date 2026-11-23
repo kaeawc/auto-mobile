@@ -72,13 +72,16 @@ private fun resolveDerivedRepeat(
   val name = repeat?.itemsDerived ?: return repeat
   val rows =
     prototypeCollectionRows(values[name]).map { row ->
-      row.mapValues { (_, value) ->
-        scalarJson.decodeFromJsonElement(PrototypeScalar.serializer(), value)
-      }
+      row
+        .filterValues { it is JsonPrimitive }
+        .mapValues { (_, value) ->
+          scalarJson.decodeFromJsonElement(PrototypeScalar.serializer(), value)
+        }
     }
-  val error = PrototypeDerivedRows.validate(node, rows)
+  val raw = prototypeCollectionRows(values[name])
+  val error = PrototypeDerivedRows.validate(node, rows, raw)
   require(error == null) { "${error?.path}: ${error?.message}" }
-  return repeat.copy(items = rows, itemsDerived = null)
+  return repeat.copy(items = rows, itemsDerived = null, sourceItems = raw)
 }
 
 private fun prototypeCollectionRows(value: JsonElement?): List<JsonObject> {
@@ -86,9 +89,12 @@ private fun prototypeCollectionRows(value: JsonElement?): List<JsonObject> {
     JsonObject(
       row.filter { (key, value) ->
         PrototypeRepeatTemplate.isFieldName(key) &&
-          value is JsonPrimitive &&
-          value != JsonNull &&
-          (value.isString || value.booleanOrNull != null || value.doubleOrNull?.isFinite() == true)
+          (value is JsonArray ||
+            (value is JsonPrimitive &&
+              value != JsonNull &&
+              (value.isString ||
+                value.booleanOrNull != null ||
+                value.doubleOrNull?.isFinite() == true)))
       },
     )
   }

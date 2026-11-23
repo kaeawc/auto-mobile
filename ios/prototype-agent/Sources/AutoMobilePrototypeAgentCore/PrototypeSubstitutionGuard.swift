@@ -19,30 +19,51 @@ private struct PrototypeSubstitutionGuard {
     struct Scope {
         let alias: String
         let items: [[String: JSONValue]]
+        var sourceItems: [[String: JSONValue]] = []
+        var outerAlias: String?
     }
 
     let data: [String: JSONValue]?
     let derived: PrototypeDerivedContext?
     let state: [String: JSONValue]
-    private var repeats: PrototypeRepeatData
     private var total = 0
 
     init(data: [String: JSONValue]?, derived: PrototypeDerivedContext?, state: [String: JSONValue]) {
         self.data = data
         self.derived = derived
         self.state = state
-        repeats = PrototypeRepeatData(data: data)
     }
 
     mutating func visit(_ node: JSONValue, path: String, scope: Scope?) throws {
         guard case let .object(fields) = node else { return }
-        if scope != nil, fields["repeat"] != nil {
-            throw PrototypeLimits.violation("\(path).repeat", "Nested repeat is not supported")
-        }
         for name in ["header", "footer"] {
             if let child = fields[name] { try visit(child, path: "\(path).\(name)", scope: scope) }
         }
         try ownFields(fields, path: path, scope: scope)
+        if let field = fields["repeat"]?.objectFields?["items"]?.objectFields?["field"]?.stringValue,
+           let scope
+        {
+            let repeated = fields["repeat"]?.objectFields ?? [:]
+            for (index, outer) in scope.items.enumerated() {
+                let source = scope.sourceItems.indices.contains(index) ? scope.sourceItems[index] : outer
+                var resolved = repeated
+                resolved["items"] = source[field]
+                let own = ownScope(["repeat": .object(resolved)])
+                let rows = (own?.items ?? []).map { row in
+                    var values = row
+                    for (name, value) in outer {
+                        values["outer.\(name)"] = value
+                    }
+                    values["$outerIndex"] = .number(Double(index))
+                    return values
+                }
+                let inner = Scope(alias: repeated["as"]?.stringValue ?? "item", items: rows, outerAlias: scope.alias)
+                for child in PrototypeStrictRepeats.children(fields, path: path) {
+                    try visit(.object(child.value), path: child.path, scope: inner)
+                }
+            }
+            return
+        }
         let childScope = ownScope(fields) ?? scope
         if case let .array(children)? = fields["children"] {
             for (index, child) in children.enumerated() {
@@ -67,9 +88,9 @@ private struct PrototypeSubstitutionGuard {
         }
         let source: JSONValue?
         if case let .object(pointer)? = spec["items"], let path = pointer["path"]?.stringValue {
-            source = repeats.items(path)
+            source = PrototypeDataPointer.resolve(data, pointer: path)
         } else {
-            source = spec["items"]
+            source = spec["_sourceItems"] ?? spec["items"]
         }
         guard case let .array(items)? = source else { return Scope(alias: alias, items: []) }
         let derive = (
@@ -88,7 +109,7 @@ private struct PrototypeSubstitutionGuard {
                 )
             }
             return [:]
-        })
+        }, sourceItems: items.compactMap(\.objectFields))
     }
 
     private mutating func field(
@@ -135,7 +156,7 @@ private struct PrototypeSubstitutionGuard {
     )
         throws
     {
-        let segments = PrototypeRepeat.segments(text, alias: scope.alias)
+        let segments = PrototypeRepeat.segments(text, alias: scope.alias, outerAlias: scope.outerAlias)
         let counts = segments.reduce(into: (indices: 0, fields: [String: Int]())) { counts, segment in
             switch segment {
             case .index: counts.indices += 1

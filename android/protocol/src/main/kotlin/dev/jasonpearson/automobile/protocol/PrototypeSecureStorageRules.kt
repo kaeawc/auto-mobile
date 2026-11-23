@@ -86,7 +86,8 @@ internal object PrototypeSecureStorageRules {
   }
 
   /**
-   * These value bindings read state directly; literal text does not expand `{key}` placeholders.
+   * These value bindings read state directly or through a derived value; literal text does not
+   * expand `{key}` placeholders.
    */
   private fun bindingMapError(
     bindings: JsonObject?,
@@ -96,8 +97,7 @@ internal object PrototypeSecureStorageRules {
   ): PrototypeSpecError? {
     val secure = root.member("storage")?.strings("secure").orEmpty()
     for ((name, binding) in bindings.orEmpty().toSortedMap()) {
-      val key = (binding as? JsonObject)?.text("state") ?: continue
-      val leaked = secureKeyFor(key, secure) ?: continue
+      val leaked = PrototypeSecureBindings.secureKey(binding, root, secure) ?: continue
       return fail(keyPath(path, name), "Secure storage key $leaked cannot be sent in $destination")
     }
     return null
@@ -224,7 +224,10 @@ internal object PrototypeSecureStorageRules {
   }
 }
 
-/** Secure storage keys a request or emit-context binding can read, directly or via derived. */
+/**
+ * Secure storage keys a value binding can read, directly or via derived. Derived entries read only
+ * data, state and literals, so one level of resolution covers every source.
+ */
 internal object PrototypeSecureBindings {
   fun secureKey(
     raw: JsonElement?,

@@ -99,6 +99,10 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
         let chordEnd = try XCTUnwrap(pressKey.range(of: "#endif", range: chordMatch.upperBound..<pressKey.endIndex))
         let chordBlock = pressKey[simulatorGate.lowerBound..<chordEnd.upperBound]
         XCTAssertTrue(chordBlock.contains("try await pressKeyboardChordViaHID(usages: usages, key: key)"))
+        // Cmd+H must be verified by the home screen appearing, never trusted from the dispatch (#19062).
+        XCTAssertTrue(chordBlock.contains("GesturePerformer.isHomeChord(usages)"))
+        XCTAssertTrue(chordBlock.contains("SpringBoardHomeScreenDetector.isShowing(in: springboard)"))
+        XCTAssertTrue(chordBlock.contains("GesturePerformer.homeChordNotDeliveredMessage"))
         XCTAssertTrue(chordBlock.contains("return nil"))
         XCTAssertLessThan(chordEnd.upperBound, focusGuard.lowerBound)
 

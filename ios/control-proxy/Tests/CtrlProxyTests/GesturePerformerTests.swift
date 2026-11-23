@@ -23,6 +23,13 @@ final class LetterChordUsageTests: XCTestCase {
         XCTAssertEqual(try GesturePerformer.letterChordUsages(key: "a", modifiers: ["META"]), [0xE3, 0x04])
     }
 
+    func testOnlyCmdHIsAVerifiableHomeChord() throws {
+        XCTAssertTrue(GesturePerformer.isHomeChord(try XCTUnwrap(GesturePerformer.letterChordUsages(key: "h", modifiers: ["meta"]))))
+        XCTAssertFalse(GesturePerformer.isHomeChord([0xE3, 0xE2, 0x07]))
+        XCTAssertFalse(GesturePerformer.isHomeChord([0xE0, 0x0B]))
+        XCTAssertTrue(GesturePerformer.homeChordNotDeliveredMessage.contains("pressButton home"))
+    }
+
     func testOnlyModifiedLettersUseTheChordPath() throws {
         XCTAssertNil(try GesturePerformer.letterChordUsages(key: "h", modifiers: []))
         XCTAssertNil(try GesturePerformer.letterChordUsages(key: "escape", modifiers: ["meta"]))

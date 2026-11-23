@@ -32,6 +32,17 @@ import os
                 if let usages = try GesturePerformer.letterChordUsages(key: normalizedKey, modifiers: modifiers) {
                     GesturePhaseDiagnostics.current?.begin("keyDelivery")
                     try await pressKeyboardChordViaHID(usages: usages, key: key)
+                    if GesturePerformer.isHomeChord(usages) {
+                        // The HID dispatch has no feedback, and some SpringBoards (iPhone Duo)
+                        // accept Cmd+H without acting on it (#19062): only report success once
+                        // the home screen is showing.
+                        let home = try await KeyboardWait.destructivePostCondition(clock: keyboardClock) {
+                            SpringBoardHomeScreenDetector.isShowing(in: springboard)
+                        }
+                        guard home else {
+                            throw GestureError.gestureFailed(GesturePerformer.homeChordNotDeliveredMessage)
+                        }
+                    }
                     return nil
                 }
             #endif

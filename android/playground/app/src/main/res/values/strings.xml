@@ -3,6 +3,8 @@
   <string name="appcompat_probe_button">AppCompat tap</string>
   <string name="appcompat_probe_count_zero">Taps: 0</string>
   <string name="appcompat_probe_count">Taps: %1$d</string>
+  <string name="share_source_button">Share text</string>
+  <string name="share_source_payload">AutoMobile share sheet demo</string>
   <string name="share_sink_name">AutoMobile Share Sink</string>
   <string name="share_sink_action">Action: %1$s</string>
   <string name="share_sink_mime_type">MIME type: %1$s</string>

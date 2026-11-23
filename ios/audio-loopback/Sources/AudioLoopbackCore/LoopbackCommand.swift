@@ -35,21 +35,42 @@ public enum LoopbackCommand: Equatable {
         guard ["play", "capture", "tap"].contains(command) else {
             throw ParseError.unknownCommand(command)
         }
-        let records = command != "play"
+        var options = Options(command: command)
+        var iterator = arguments.dropFirst().makeIterator()
+        while let flag = iterator.next() {
+            try options.apply(flag, &iterator)
+        }
+        if command == "play" {
+            return .play(sampleRate: options.sampleRate)
+        }
+        let bound = try captureBound(durationMs: options.durationMs, untilStopped: options.untilStopped)
+        guard command == "tap" else {
+            return .capture(sampleRate: options.sampleRate, durationMs: bound)
+        }
+        guard let launchdPid = options.launchdPid else {
+            throw ParseError.missingValue(flag: "--launchd-pid")
+        }
+        return .tap(launchdPid: launchdPid, sampleRate: options.sampleRate, durationMs: bound, mute: options.mute)
+    }
+
+    /// The flags seen so far; each command accepts only its own.
+    private struct Options {
+        let command: String
         var sampleRate = defaultSampleRate
         var durationMs: Int?
         var launchdPid: Int32?
         var untilStopped = false
         var mute = false
-        var iterator = arguments.dropFirst().makeIterator()
-        while let flag = iterator.next() {
+
+        mutating func apply(_ flag: String, _ iterator: inout IndexingIterator<ArraySlice<String>>) throws {
+            let records = command != "play"
             if flag == "--until-stopped", records {
                 untilStopped = true
-                continue
+                return
             }
             if flag == "--mute", command == "tap" {
                 mute = true
-                continue
+                return
             }
             guard let value = iterator.next() else {
                 throw ParseError.missingValue(flag: flag)
@@ -65,17 +86,6 @@ public enum LoopbackCommand: Equatable {
                 throw ParseError.unknownArgument(flag)
             }
         }
-        if command == "play" {
-            return .play(sampleRate: sampleRate)
-        }
-        let bound = try captureBound(durationMs: durationMs, untilStopped: untilStopped)
-        guard command == "tap" else {
-            return .capture(sampleRate: sampleRate, durationMs: bound)
-        }
-        guard let launchdPid else {
-            throw ParseError.missingValue(flag: "--launchd-pid")
-        }
-        return .tap(launchdPid: launchdPid, sampleRate: sampleRate, durationMs: bound, mute: mute)
     }
 
     /// A recording runs for `--duration-ms` or, with `--until-stopped`, until stdin closes; never both.

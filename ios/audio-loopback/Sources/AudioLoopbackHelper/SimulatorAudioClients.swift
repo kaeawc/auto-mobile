@@ -35,11 +35,8 @@ enum SimulatorAudioClients {
         let count = pids.withUnsafeMutableBytes { raw in
             proc_listallpids(raw.baseAddress, Int32(raw.count))
         }
-        guard count > 0 else {
-            return [:]
-        }
         var parents: [Int32: Int32] = [:]
-        for pid in pids.prefix(Int(count)) where pid > 0 {
+        for pid in pids.prefix(max(0, Int(count))) where pid > 0 {
             var info = proc_bsdinfo()
             let size = Int32(MemoryLayout<proc_bsdinfo>.size)
             if proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size {

@@ -20,8 +20,8 @@ final class TapSupportTests: XCTestCase {
         XCTAssertThrowsError(try LoopbackCommand.parse(["capture", "--mute", "--duration-ms", "5"])) { error in
             XCTAssertEqual(error as? LoopbackCommand.ParseError, .unknownArgument("--mute"))
         }
-        XCTAssertThrowsError(try LoopbackCommand.parse(["capture", "--launchd-pid", "9", "--duration-ms", "5"])) {
-            error in
+        let capturePid = ["capture", "--launchd-pid", "9", "--duration-ms", "5"]
+        XCTAssertThrowsError(try LoopbackCommand.parse(capturePid)) { error in
             XCTAssertEqual(error as? LoopbackCommand.ParseError, .unknownArgument("--launchd-pid"))
         }
     }

@@ -118,7 +118,7 @@ final class TapRecorder: @unchecked Sendable {
             return
         }
         ticks += 1
-        if ticks % Self.recheckTicks == 0 {
+        if ticks.isMultiple(of: Self.recheckTicks) {
             refresh()
         }
         let now = DispatchTime.now().uptimeNanoseconds

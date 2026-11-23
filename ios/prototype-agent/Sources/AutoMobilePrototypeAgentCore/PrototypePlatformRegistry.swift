@@ -202,6 +202,8 @@ public final class PrototypePlatformRegistry {
         let simulation = supportsSimulation ? [
             PrototypeAgentProtocol.platformSimulationCapability,
             PrototypeAgentProtocol.simulatePlatformRequest,
+            PrototypeAgentProtocol.platformOutcomesCapability,
+            PrototypeAgentProtocol.queueCallOutcomeRequest,
         ] : []
         let moduleCapabilities = modules.values.flatMap { module in
             (module as? PrototypeNotificationsModule)?.capabilities ?? [module.capability]

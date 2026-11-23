@@ -65,6 +65,19 @@ class PrototypePlatformSimulationControllerTest {
     assertFalse(replies.last().second)
     assertTrue(replies.last().third!!.contains("Unknown platform event"))
     assertEquals(1, events.count { it.name == PrototypePlatform.DELIVERED_EVENT_NAME })
+    val outcome = buildJsonObject { put("result", JsonNull) }
+    controller.queueCallOutcome("script", "panel", "test.echo", outcome)
+    assertEquals(Triple("script", true, null), replies.last())
+    controller.queueCallOutcome("wrong", "other", "test.echo", outcome)
+    assertEquals("wrong", replies.last().first)
+    assertFalse(replies.last().second)
+    assertTrue(replies.last().third!!.contains("inactive"))
+    controller.queueCallOutcome("unknown-call", "panel", "test.unknown", outcome)
+    assertFalse(replies.last().second)
+    assertTrue(replies.last().third!!.contains("Unknown platform call"))
     controller.dismiss("dismiss", "panel", false)
+    controller.queueCallOutcome("dismissed", "panel", "test.echo", outcome)
+    assertFalse(replies.last().second)
+    assertTrue(replies.last().third!!.contains("inactive"))
   }
 }

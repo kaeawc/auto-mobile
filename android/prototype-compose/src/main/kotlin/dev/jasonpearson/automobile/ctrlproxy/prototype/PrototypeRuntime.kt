@@ -240,6 +240,7 @@ class PrototypeRuntime(
 
   /** Called only after the host accepts the show. A preserving replacement seeds without firing. */
   suspend fun shown(preservingState: Boolean = false) {
+    platformDispatcher.outcomes.clear()
     // Posted first, so a realtime call this show makes queues behind its declarations.
     realtimeModule?.let {
       it.update(channelDeclarations(current.spec))
@@ -328,6 +329,19 @@ class PrototypeRuntime(
   fun timerReports(): List<PrototypeTimerReport> = timerEngine.reports()
 
   suspend fun advanceClock(ms: Int): Int = timerEngine.advance(ms)
+
+  /** Host-only outcome queue, scoped to this shown runtime. */
+  fun queueCallOutcome(call: String, outcome: JsonObject) {
+    check(current.active) { "Prototype is inactive" }
+    val owner =
+      requireNotNull(PrototypePlatformCalls.callOwner(call)) {
+        "Unknown platform call: $call"
+      }
+    require(owner in current.spec.requires?.platform.orEmpty()) {
+      "Declare $owner in requires.platform before simulation"
+    }
+    platformDispatcher.queueCallOutcome(call, outcome)
+  }
 
   /** Host-only injection, deliberately absent from the spec action vocabulary. */
   suspend fun simulatePlatformEvent(name: String, data: JsonObject): Boolean {

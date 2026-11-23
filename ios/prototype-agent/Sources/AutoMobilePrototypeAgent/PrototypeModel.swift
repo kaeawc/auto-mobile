@@ -345,6 +345,10 @@
         func pauseTimers() { timers.pause() }
         func resumeTimers() { timers.resume() }
 
+        func queueCallOutcome(id: String, call: String, outcome: JSONValue) -> String? {
+            platformDriver.queueCallOutcome(id: id, call: call, outcome: outcome, session: session)
+        }
+
         func simulatePlatformEvent(id: String, event: String, data: JSONValue) -> String? {
             platformDriver.simulate(id: id, event: event, data: data, session: session)
         }
@@ -515,6 +519,7 @@
                     return platform
                 }
             } catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
+            platformDriver.clearOutcomes()
             next.show(
                 seeded, reset: reset, appearance: appearance, locale: locale, specBytes: specBytes,
                 restoredState: prepared?.state, restoredStacks: prepared?.stacks
@@ -827,6 +832,7 @@
                 publish(event, timestamp: timestamp)
             }
             if wasShown, !session.isShown {
+                platformDriver.clearOutcomes()
                 realtimeModule?.close()
                 platformRegistry.configureNotifications(for: nil)
                 platformDriver.resetNotificationEvents()

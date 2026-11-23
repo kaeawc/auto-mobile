@@ -83,6 +83,8 @@ const READ_UNLESS_SET_FIELDS: Readonly<Record<string, readonly string[]>> = {
     "magnification",
     "magnificationScale",
     "extraDim",
+    "dynamicIsland",
+    "backlight",
     "reset",
   ],
   accessibility: ["talkback", "voiceover"],

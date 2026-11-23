@@ -54,6 +54,7 @@
             )
             super.init(model: model, contentEnabled: loaded != nil)
             guard let loaded else { return }
+            model.remoteImages = network.remoteImages
             let driver = network.driver()
             driver.onComplete = { [weak model] id, response in model?.completeRequest(id, response) }
             driver.onUploadProgress = { [weak model] id, key, value in
@@ -87,6 +88,7 @@
         }
 
         func updateNetwork(_ network: PrototypeNetworkConfiguration) {
+            model.remoteImages = network.remoteImages
             if let driver = model.requestDriver { network.apply(to: driver) }
         }
 

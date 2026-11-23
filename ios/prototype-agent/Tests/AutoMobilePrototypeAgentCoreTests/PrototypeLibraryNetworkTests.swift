@@ -6,6 +6,35 @@ import XCTest
 
 @MainActor
 final class PrototypeLibraryNetworkTests: XCTestCase {
+    func testImagesUseGatedPinnedFactoryAndCheckConnectionBeforeSending() async throws {
+        let connection = FakePinnedConnection(address: "192.168.1.1")
+        let connector = FakePinnedConnector([connection])
+        let gate = PrototypeLibraryNetworkGate(enabled: true)
+        var constructions = 0
+        let configuration = PrototypeLibraryNetwork.configuration(gate: gate, allowsCleartext: false) { _, _ in
+            constructions += 1
+            return self.pinnedConfiguration(FakeHostResolver(), connector)
+        }
+        do {
+            _ = try await configuration.remoteImages.load("https://public.example/library-image-\(UUID().uuidString)")
+            XCTFail("Private connection delivered image")
+        } catch {
+            XCTAssertEqual((error as? PrototypeHttpFailure)?.error.code, .blockedDestination)
+        }
+        XCTAssertEqual(constructions, 1)
+        XCTAssertEqual(connector.dials.count, 1)
+        XCTAssertTrue(connection.sent.isEmpty)
+        XCTAssertEqual(connection.receiveCount, 0)
+        gate.setEnabled(false)
+        do {
+            _ = try await configuration.remoteImages.load("https://public.example/disabled-image")
+            XCTFail("Disabled image used factory")
+        } catch {
+            XCTAssertTrue(error is PrototypeRemoteImageLoader.Failure)
+        }
+        XCTAssertEqual(constructions, 1)
+    }
+
     func testDriverDeliversCurrentDenialGuidance() async throws {
         try await checkDriverDenial(reenable: false)
     }

@@ -67,6 +67,7 @@ enum PrototypeAgentProtocol {
         glassCapability,
         scrollEdgeEffectCapability,
         stringsCapability,
+        remoteImageCapability,
         semanticsCapability,
         stringConditionsCapability,
         textFieldLeadingIconCapability,

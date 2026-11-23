@@ -1,3 +1,4 @@
+import type { FormFactor } from "../../../models/DeviceMatchCriteria";
 import type { ScreenLockCredentialType, ScreenLockRestoreReport } from "./ScreenLockTypes";
 
 /** A credential a session set, kept so that session can change it and its release can clear it. */
@@ -6,6 +7,8 @@ export interface SessionScreenLock {
   sessionId: string;
   type: ScreenLockCredentialType;
   credential: string;
+  /** The device's form factor when set: release builds its restore client without the device. */
+  formFactor?: FormFactor;
 }
 
 /** Release reports kept for late `releaseSession` replies, as for keep-awake reports. */

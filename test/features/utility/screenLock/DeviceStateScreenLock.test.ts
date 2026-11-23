@@ -34,6 +34,17 @@ function harness(options: {
 }
 
 describe("setDeviceState screenLock", () => {
+  test("records the device form factor so release targets the Automotive driver user (#19092)", async () => {
+    const { registry, state } = harness({
+      owner: "s-1",
+      device: { ...android, formFactor: "automotive" },
+    });
+
+    await state.setState({ screenLock: { type: "pin", credential: PIN } });
+
+    expect(registry.get("emulator-5554")?.formFactor).toBe("automotive");
+  });
+
   test("a session sets a PIN, records it for release, and returns no credential", async () => {
     const { client, registry, forgotten, state } = harness({ owner: "s-1" });
 

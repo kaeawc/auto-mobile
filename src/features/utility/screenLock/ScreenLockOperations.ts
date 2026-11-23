@@ -143,7 +143,7 @@ export class ScreenLockOperations {
     requested: { type: ScreenLockCredentialType; credential: string },
     { owner, ownLock }: { owner?: string; ownLock?: SessionScreenLock } = {},
   ): Promise<ScreenLockState> {
-    const deviceId = this.dependencies.device().deviceId;
+    const { deviceId, formFactor } = this.dependencies.device();
     const unlocked = isUnlocked(before);
     if (!unlocked && !ownLock && (before.secure === true || before.type !== "unknown")) {
       return preexistingRefusal(before);
@@ -157,7 +157,12 @@ export class ScreenLockOperations {
       return commandFailure(result.outcome, result.detail, `set-${requested.type}`);
     }
     if (owner !== undefined) {
-      this.dependencies.registry().record({ deviceId, sessionId: owner, ...requested });
+      this.dependencies.registry().record({
+        deviceId,
+        sessionId: owner,
+        ...requested,
+        ...(formFactor === undefined ? {} : { formFactor }),
+      });
     }
     await this.dependencies.forgetRememberedUnlock()(deviceId);
     return appliedSet(requested.type, unlocked, owner !== undefined, await client.read());

@@ -40,6 +40,37 @@ function setup(options: { adb?: FakeAdbExecutor; client?: FakeLockSettingsClient
   return { manager, registry, timer, forgotten };
 }
 
+describe("registerScreenLockSessionCleanup on Automotive (#19092)", () => {
+  test("release builds the restore client with the form factor recorded at set time", async () => {
+    const manager = new FakeSessionCleanupManager();
+    const registry = new ScreenLockRegistry();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const seen: Array<string | undefined> = [];
+    registerScreenLockSessionCleanup(manager, {
+      registry,
+      timer,
+      clientFactory: (device) => {
+        seen.push(device.formFactor);
+        return new FakeLockSettingsClient({ type: "pin", credential: PIN });
+      },
+      forgetRememberedUnlock: async () => {},
+    });
+    registry.record({
+      deviceId: DEVICE,
+      sessionId: "s-1",
+      type: "pin",
+      credential: PIN,
+      formFactor: "automotive",
+    });
+
+    manager.release("s-1", DEVICE);
+    await screenLockRestoreResult("s-1", { registry, timer });
+
+    expect(seen).toEqual(["automotive"]);
+  });
+});
+
 describe("registerScreenLockSessionCleanup", () => {
   test("release clears the session's credential over adb and reports it", async () => {
     const adb = new FakeAdbExecutor();

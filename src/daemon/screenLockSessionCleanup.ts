@@ -45,6 +45,7 @@ export function startScreenLockRestore(
     name: lock.deviceId,
     platform: "android",
     deviceId: lock.deviceId,
+    ...(lock.formFactor === undefined ? {} : { formFactor: lock.formFactor }),
   };
   // Not part of whichever request triggered the release: its abort must not cut the clear short.
   // Async, so a refusal to create the adb client becomes a reported failure like any other.

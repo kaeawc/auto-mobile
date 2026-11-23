@@ -395,13 +395,20 @@ export class ShareSheet {
     // have moved it off screen, so scroll back until it reappears.
     let current = scan.last;
     for (let back = 0; ; back++) {
-      const match = pageMatch(current.sheet);
-      if (match) {
-        const { x, y } = this.geometry.getElementCenter(match.element);
+      if (pageMatch(current.sheet)) {
         // The scan always swipes at least once before this tap.
         throwIfAborted(signal);
         await awaitWhileRequestIsLive(this.timer.sleep(SWIPE_SETTLE_MS), signal);
-        await this.sendInput(io, current.hierarchy, ["tap", String(x), String(y)], signal);
+        // The list may still have moved during the settle wait: tap the row where it is now.
+        const settled = await awaitWhileRequestIsLive(io.read(undefined, signal), signal);
+        const match = pageMatch(this.requireSheet(settled));
+        if (!match) {
+          throw new ActionableError(
+            `Share target ${JSON.stringify(selector)} was no longer visible after the list settled. Reopen the share sheet from the app and retry.`,
+          );
+        }
+        const { x, y } = this.geometry.getElementCenter(match.element);
+        await this.sendInput(io, settled, ["tap", String(x), String(y)], signal);
         return match.target;
       }
       const previous =

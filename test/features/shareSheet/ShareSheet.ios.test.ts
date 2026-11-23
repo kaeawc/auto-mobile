@@ -40,16 +40,20 @@ function makeShareSheet(hierarchy: ViewHierarchyResult = ios26) {
   const taps: Point[] = [];
   const timer = new FakeTimer();
   const reads: number[] = [];
-  const tool = new ShareSheet(device, {
-    platform: "ios",
-    async read() {
-      reads.push(timer.now());
-      return hierarchy;
+  const tool = new ShareSheet(
+    device,
+    {
+      platform: "ios",
+      async read() {
+        reads.push(timer.now());
+        return hierarchy;
+      },
+      async tap(point) {
+        taps.push(point);
+      },
     },
-    async tap(point) {
-      taps.push(point);
-    },
-  });
+    { timer },
+  );
   return { tool, reads, taps, timer };
 }
 

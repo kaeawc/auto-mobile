@@ -58,7 +58,7 @@ function handleCenterY(page: ViewHierarchyResult): number | undefined {
 function makeShareSheet(
   pages: ViewHierarchyResult[],
   targetDevice = device,
-  { expandTo }: { expandTo?: number } = {},
+  { expandTo, afterSettle }: { expandTo?: number; afterSettle?: ViewHierarchyResult } = {},
 ) {
   const inputs: Array<{ args: string[]; displayId?: number }> = [];
   const timer = new FakeTimer();
@@ -69,7 +69,8 @@ function makeShareSheet(
     {
       platform: "android",
       async read(minTimestamp) {
-        const capture = pages[position];
+        const capture =
+          afterSettle && timer.getSleepHistory().length > 0 ? afterSettle : pages[position];
         return minTimestamp === undefined
           ? capture
           : { ...capture, updatedAt: (pages[0].updatedAt ?? 0) + timer.now() };
@@ -240,6 +241,28 @@ describe("Android share sheet", () => {
     ]);
     // One settle wait for the list's overscroll before the tap.
     expect(timer.getSleepHistory()).toEqual([500]);
+  });
+
+  test("taps the row where the sheet is after the settle wait", async () => {
+    const expanded = { ...android14, hierarchy: structuredClone(android14.hierarchy) };
+    findNode(expanded, (node) => node.text === "Chrome").text = "Gmail";
+    const { tool, inputs } = makeShareSheet([android14, expanded], device, {
+      afterSettle: scrolled(expanded, 100),
+    });
+    await tool.execute({ action: "select", label: "Gmail" });
+    expect(inputs.at(-1)).toEqual({ args: ["tap", "540", "2085"], displayId: 0 });
+  });
+
+  test("refuses to tap when the target left the sheet during the settle wait", async () => {
+    const expanded = { ...android14, hierarchy: structuredClone(android14.hierarchy) };
+    findNode(expanded, (node) => node.text === "Chrome").text = "Gmail";
+    const { tool, inputs } = makeShareSheet([android14, expanded], device, {
+      afterSettle: renamed(expanded, "Gmail", "Other"),
+    });
+    await expect(tool.execute({ action: "select", label: "Gmail" })).rejects.toThrow(
+      /no longer visible/,
+    );
+    expect(inputs.some(({ args }) => args[0] === "tap")).toBe(false);
   });
 
   test("refuses a label repeated on a later page before tapping anything", async () => {

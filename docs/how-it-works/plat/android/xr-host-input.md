@@ -9,18 +9,21 @@ behind it is in the [devlog entry](../../../devlog/2026-11-23-xr-headset-hand-an
 
 ## Sources
 
-- `emulator_controller.proto`, package `android.emulation.control`. The live copy is in
-  `platform/hardware/google/aemu` at `protos/services/emulator-controller/` (branch `emu-main-dev`,
-  commit `36815ef3`). Releases up to 35.6 keep it in `platform/external/qemu` at
-  `android/android-grpc/services/emulator-controller/proto/`. The XR fields first appear in
-  `emu-35-4-release`; `emu-35-3-release` has none.
-- `EmulatorService.cpp` (`platform/external/qemu`, `emu-main-dev`, commit `5e512028`) turns each XR
-  field into an `xr_service::send*` call.
-- `android/android-emu/android/xr/XrService.cpp` and `android/emu/protos/xr_emulator_conn.proto`
+- [`emulator_controller.proto`](https://android.googlesource.com/platform/hardware/google/aemu/+/36815ef31763c79dfc42b461e6ce35264ead08c4/protos/services/emulator-controller/emulator_controller.proto),
+  package `android.emulation.control`, in `platform/hardware/google/aemu` (branch `emu-main-dev`).
+  Releases up to 35.6 keep it in
+  [`platform/external/qemu`](https://android.googlesource.com/platform/external/qemu/+/refs/heads/emu-35-4-release/android/android-grpc/services/emulator-controller/proto/emulator_controller.proto).
+  The XR fields first appear in `emu-35-4-release`; `emu-35-3-release` has none.
+- [`EmulatorService.cpp`](https://android.googlesource.com/platform/external/qemu/+/5e51202879523d4df1bca8ca6944129ff05df02b/android/android-grpc/services/emulator-controller/server/src/android/emulation/control/EmulatorService.cpp)
+  turns each XR field into an `xr_service::send*` call.
+- [`XrService.cpp`](https://android.googlesource.com/platform/external/qemu/+/5e51202879523d4df1bca8ca6944129ff05df02b/android/android-emu/android/xr/XrService.cpp)
+  and
+  [`xr_emulator_conn.proto`](https://android.googlesource.com/platform/external/qemu/+/5e51202879523d4df1bca8ca6944129ff05df02b/android/emu/protos/xr_emulator_conn.proto)
   carry those calls to the guest.
-- Android Studio's embedded emulator (`platform/tools/adt/idea`,
-  `streaming/.../emulator/EmulatorView.kt` and `xr/EmulatorXrInputController.kt`) is the reference
-  client.
+- Android Studio's embedded emulator is the reference client:
+  [`EmulatorView.kt`](https://android.googlesource.com/platform/tools/adt/idea/+/30f686a037f486d5feb8388ed5a74b896b962e50/streaming/src/com/android/tools/idea/streaming/emulator/EmulatorView.kt)
+  and
+  [`EmulatorXrInputController.kt`](https://android.googlesource.com/platform/tools/adt/idea/+/30f686a037f486d5feb8388ed5a74b896b962e50/streaming/src/com/android/tools/idea/streaming/emulator/xr/EmulatorXrInputController.kt).
 
 ## RPC
 

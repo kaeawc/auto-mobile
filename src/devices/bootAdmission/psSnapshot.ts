@@ -51,10 +51,7 @@ export function attributeSimulatorProcesses(
   rows: readonly HostProcessRow[],
   udids: readonly string[],
 ): Map<string, SimulatorProcessCost> {
-  const children = new Map<number, HostProcessRow[]>();
-  for (const row of rows) {
-    children.set(row.ppid, [...(children.get(row.ppid) ?? []), row]);
-  }
+  const children = childrenByParent(rows);
   const owner = new Map<number, string | null>();
   for (const udid of udids) {
     const marker = devicePathMarker(udid);
@@ -67,6 +64,31 @@ export function attributeSimulatorProcesses(
     }
   }
   return sumByOwner(rows, owner);
+}
+
+/**
+ * Every process of one simulator: the `launchd_sim` roots that name its device data directory
+ * and their descendants, in table order.
+ */
+export function simulatorProcessTree(
+  rows: readonly HostProcessRow[],
+  udid: string,
+): HostProcessRow[] {
+  const children = childrenByParent(rows);
+  const marker = devicePathMarker(udid);
+  const claimed = new Set<number>();
+  for (const root of rows.filter((row) => row.command.includes(marker))) {
+    collectTree(root, children, claimed);
+  }
+  return rows.filter((row) => claimed.has(row.pid));
+}
+
+function childrenByParent(rows: readonly HostProcessRow[]): Map<number, HostProcessRow[]> {
+  const children = new Map<number, HostProcessRow[]>();
+  for (const row of rows) {
+    children.set(row.ppid, [...(children.get(row.ppid) ?? []), row]);
+  }
+  return children;
 }
 
 function collectTree(

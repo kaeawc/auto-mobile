@@ -285,6 +285,7 @@ nav:
           - "Apple simulator sessions": using/device-ownership-apple.md
           - "Listing device images": using/device-images.md
           - "Reaching a host server": using/port-reverse.md
+          - "iOS Simulator network activity": using/ios-network-activity.md
       - "CI and shared hosts":
           - "Managed Macs and CI runners": using/managed-macs.md
           - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
@@ -406,6 +407,7 @@ nav:
           - "iOS Simulator audio isolation": how-it-works/plat/ios/simulator-audio-isolation.md
           - "iOS Simulator camera poster": how-it-works/plat/ios/simulator-camera-poster.md
           - "iOS Simulator framebuffer capture": how-it-works/plat/ios/simulator-framebuffer-capture.md
+          - "iOS Simulator network activity": how-it-works/plat/ios/simulator-network-activity.md
           - "iOS keep-booted reset": how-it-works/ios-keep-booted-reset.md
           - "iOS CarPlay template snapshots": how-it-works/plat/ios/carplay-template-snapshot.md
           - "iOS CarPlay prototypes": how-it-works/plat/ios/carplay-prototypes.md
@@ -512,6 +514,7 @@ nav:
   - "Devlog":
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
+      - "2026-11-23: Read Simulator network activity with host tools": devlog/2026-11-23-simulator-network-activity-host-tools.md
       - "2026-11-23: Capture Simulator video from the device framebuffer": devlog/2026-11-23-simulator-framebuffer-capture.md
       - "2026-11-23: No consumer keep rule for prototype icons": devlog/2026-11-23-prototype-icon-keep-rule.md
       - "2026-11-23: XR headset hand and eye input over emulator gRPC": devlog/2026-11-23-xr-headset-hand-and-eye-input.md

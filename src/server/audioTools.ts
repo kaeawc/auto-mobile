@@ -278,8 +278,10 @@ const captureAudioTool = defineDeviceTool({
     "rmsDbfs, peakDbfs, the share of 20 ms windows with sound (activeRatio), and silent. A guest " +
     "that plays nothing returns silent: true rather than an error. saveArtifact writes a WAV and " +
     "returns its host path. Assert loosely (silent or not, duration within a margin); loaded hosts " +
-    "can glitch real-time audio. A simulator is read from the host's loopback default output, which " +
-    "mixes every simulator on the host. Physical devices are refused.",
+    "can glitch real-time audio. A simulator is recorded with a Core Audio process tap of its own " +
+    "processes (route process-tap), so other simulators and host apps are not heard; no loopback " +
+    "device is needed. An audio-loopback helper without tap support falls back to the host's " +
+    "loopback default output (route host-loopback), which mixes every simulator. Physical devices are refused.",
   input: captureAudioInput,
   options: {
     defaultEnabled: false,

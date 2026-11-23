@@ -55,26 +55,39 @@ function parseError(line: string): HelperReport {
     : { code: rest.slice(0, space), message: rest.slice(space + 1) };
 }
 
-/** The tool error for a helper report; a missing loopback device is "unsupported", not a failure. */
+/** A tool error that keeps the helper's own failure code, so a caller can react to one. */
+export class LoopbackHelperError extends EmulatorAudioError {
+  constructor(
+    code: EmulatorAudioErrorCode,
+    message: string,
+    /** The helper's stable failure code (`usage`, `audio_failed`, ...), when it reported one. */
+    readonly helperCode?: string,
+  ) {
+    super(code, message);
+  }
+}
+
+/** The tool error for a helper report; a missing loopback device or simulator is "unsupported". */
 export function loopbackError(
   operation: LoopbackOperation,
   report: HelperReport | undefined,
   exitCode: number | null,
-): EmulatorAudioError {
-  const unsupported: Record<LoopbackOperation, [string, EmulatorAudioErrorCode]> = {
-    inject: ["no_loopback_input", "audio_injection_unsupported"],
-    capture: ["no_loopback_output", "audio_capture_unsupported"],
+): LoopbackHelperError {
+  const unsupported: Record<LoopbackOperation, [string[], EmulatorAudioErrorCode]> = {
+    inject: [["no_loopback_input"], "audio_injection_unsupported"],
+    capture: [["no_loopback_output", "no_simulator"], "audio_capture_unsupported"],
   };
-  const [missingCode, code] = unsupported[operation];
-  if (report?.code === missingCode) {
-    return new EmulatorAudioError(code, report.message);
+  const [missingCodes, code] = unsupported[operation];
+  if (report && missingCodes.includes(report.code)) {
+    return new LoopbackHelperError(code, report.message, report.code);
   }
   const detail = report
     ? `${report.code}: ${report.message}`
     : `the helper exited with code ${exitCode ?? "none"} and reported no error`;
-  return new EmulatorAudioError(
+  return new LoopbackHelperError(
     "audio_loopback_failed",
     `The host audio loopback ${operation === "inject" ? "playback" : "capture"} failed (${detail}).`,
+    report?.code,
   );
 }
 
@@ -104,6 +117,7 @@ export async function startLoopbackHelper(options: {
     pending = lines.pop() ?? "";
     for (const line of lines) {
       if (line.startsWith(LOOPBACK_READY_PREFIX)) {
+        logger.debug(`audio-loopback-helper: ${line}`);
         markReady();
       } else if (line.startsWith(LOOPBACK_ERROR_PREFIX)) {
         report = parseError(line);

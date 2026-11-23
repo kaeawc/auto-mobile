@@ -8,6 +8,10 @@ public enum LoopbackCommand: Equatable {
     /// Record from the loopback device the host's default output writes to: `durationMs`, or with nil
     /// (`--until-stopped`) until stdin closes.
     case capture(sampleRate: Int, durationMs: Int?)
+    /// Record one iOS Simulator's output with a Core Audio process tap over the processes descending
+    /// from its `launchd_sim` (#19046): no loopback driver, and no other simulator's audio. With `mute`
+    /// the device is silent on the host while the tap runs.
+    case tap(launchdPid: Int32, sampleRate: Int, durationMs: Int?, mute: Bool)
 
     public static let defaultSampleRate = 48000
     public static let maxSampleRate = 48000
@@ -28,13 +32,23 @@ public enum LoopbackCommand: Equatable {
         guard let command = arguments.first else {
             throw ParseError.missingCommand
         }
+        guard ["play", "capture", "tap"].contains(command) else {
+            throw ParseError.unknownCommand(command)
+        }
+        let records = command != "play"
         var sampleRate = defaultSampleRate
         var durationMs: Int?
+        var launchdPid: Int32?
         var untilStopped = false
+        var mute = false
         var iterator = arguments.dropFirst().makeIterator()
         while let flag = iterator.next() {
-            if flag == "--until-stopped", command == "capture" {
+            if flag == "--until-stopped", records {
                 untilStopped = true
+                continue
+            }
+            if flag == "--mute", command == "tap" {
+                mute = true
                 continue
             }
             guard let value = iterator.next() else {
@@ -43,29 +57,39 @@ public enum LoopbackCommand: Equatable {
             switch flag {
             case "--sample-rate":
                 sampleRate = try integer(flag, value, in: minSampleRate ... maxSampleRate)
-            case "--duration-ms" where command == "capture":
+            case "--duration-ms" where records:
                 durationMs = try integer(flag, value, in: 1 ... maxCaptureDurationMs)
+            case "--launchd-pid" where command == "tap":
+                launchdPid = try Int32(integer(flag, value, in: 2 ... Int(Int32.max)))
             default:
                 throw ParseError.unknownArgument(flag)
             }
         }
-        switch command {
-        case "play":
+        if command == "play" {
             return .play(sampleRate: sampleRate)
-        case "capture":
-            if untilStopped {
-                guard durationMs == nil else {
-                    throw ParseError.unknownArgument("--duration-ms")
-                }
-                return .capture(sampleRate: sampleRate, durationMs: nil)
-            }
-            guard let durationMs else {
-                throw ParseError.missingValue(flag: "--duration-ms")
-            }
-            return .capture(sampleRate: sampleRate, durationMs: durationMs)
-        default:
-            throw ParseError.unknownCommand(command)
         }
+        let bound = try captureBound(durationMs: durationMs, untilStopped: untilStopped)
+        guard command == "tap" else {
+            return .capture(sampleRate: sampleRate, durationMs: bound)
+        }
+        guard let launchdPid else {
+            throw ParseError.missingValue(flag: "--launchd-pid")
+        }
+        return .tap(launchdPid: launchdPid, sampleRate: sampleRate, durationMs: bound, mute: mute)
+    }
+
+    /// A recording runs for `--duration-ms` or, with `--until-stopped`, until stdin closes; never both.
+    private static func captureBound(durationMs: Int?, untilStopped: Bool) throws -> Int? {
+        if untilStopped {
+            guard durationMs == nil else {
+                throw ParseError.unknownArgument("--duration-ms")
+            }
+            return nil
+        }
+        guard let durationMs else {
+            throw ParseError.missingValue(flag: "--duration-ms")
+        }
+        return durationMs
     }
 
     private static func integer(_ flag: String, _ value: String, in range: ClosedRange<Int>) throws -> Int {
@@ -86,6 +110,8 @@ public enum LoopbackFailure: String, Equatable, Sendable {
     case noLoopbackOutput = "no_loopback_output"
     /// CoreAudio refused to open or start the device; the message carries the OSStatus.
     case audioFailed = "audio_failed"
+    /// The `--launchd-pid` process is not running, so the simulator is not booted.
+    case noSimulator = "no_simulator"
 }
 
 /// The stderr lines the daemon reads. One marker per line, so the daemon can match a prefix.

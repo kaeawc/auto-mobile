@@ -11,9 +11,12 @@ import {
   type EmulatorAudioErrorCode,
 } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError";
 import { durationMs, resampleMono, toMono, type PcmAudio } from "../../utils/audio/pcm";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { EmulatorAudioSession } from "./EmulatorAudioService";
 import {
+  LoopbackHelperError,
   startLoopbackHelper,
   type LoopbackHelperProcess,
   type LoopbackHelperSpawner,
@@ -38,8 +41,16 @@ export interface HostLoopbackAudioSessionDeps {
   /** The helper executable, or undefined when none is available. */
   helperPath: () => string | undefined | Promise<string | undefined>;
   launchHelper: LoopbackHelperSpawner;
+  /**
+   * The PID of the target simulator's `launchd_sim`. With one, capture taps that simulator's own
+   * processes (#19046) instead of reading the shared loopback output; undefined keeps the loopback.
+   */
+  launchdPid?: () => Promise<number | undefined>;
   timer?: Pick<Timer, "now" | "monotonicNow" | "setTimeout" | "clearTimeout">;
 }
+
+/** How a simulator capture was taken. */
+export type CaptureRoute = "process-tap" | "host-loopback";
 
 type EarlyEnd = Exclude<InjectionResult["reason"], "completed">;
 
@@ -91,10 +102,11 @@ function write(
 }
 
 /**
- * An iOS Simulator's microphone and speaker through the host's CoreAudio loopback devices (#13628,
- * #13629). The simulator records from the host default input and plays to the host default output, so
- * the helper plays into the default input's loopback device and reads back the default output's. Those
- * devices are shared by every simulator on the host; the service allows one injection at a time.
+ * An iOS Simulator's microphone and speaker through the host's CoreAudio devices (#13628, #13629).
+ * The simulator records from the host default input, so the helper plays into the default input's
+ * loopback device, which every simulator shares; the service allows one injection at a time. Capture
+ * taps the simulator's own processes (#19046), falling back to reading back the default output's
+ * loopback device, which mixes every simulator.
  */
 export class HostLoopbackAudioSession implements EmulatorAudioSession {
   private readonly timer: Pick<Timer, "now" | "monotonicNow" | "setTimeout" | "clearTimeout">;
@@ -194,9 +206,8 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
   async captureAudio(options: { durationMs: number; sampleRate?: number }): Promise<CaptureResult> {
     const sampleRate = helperRate(options.sampleRate ?? CAPTURE_SAMPLE_RATE);
     const received: Uint8Array[] = [];
-    const helper = await this.start(
-      "capture",
-      ["capture", "--duration-ms", String(options.durationMs), "--sample-rate", String(sampleRate)],
+    const { helper, route } = await this.startCapture(
+      ["--duration-ms", String(options.durationMs), "--sample-rate", String(sampleRate)],
       (chunk) => {
         received.push(chunk);
       },
@@ -220,14 +231,14 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     return {
       pcm: { sampleRate, channels: 1, samples },
       timedOut: timedOut || samples.length < expected,
+      route,
     };
   }
 
   async streamCapture(sink: PcmSink, options: { sampleRate?: number } = {}): Promise<AudioStream> {
     const sampleRate = helperRate(options.sampleRate ?? CAPTURE_SAMPLE_RATE);
-    const helper = await this.start(
-      "capture",
-      ["capture", "--until-stopped", "--sample-rate", String(sampleRate)],
+    const { helper } = await this.startCapture(
+      ["--until-stopped", "--sample-rate", String(sampleRate)],
       sink,
     );
     // Closing stdin asks the helper to write its last buffer and exit; a kill is the fallback. Only
@@ -296,6 +307,48 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
       child.kill("SIGTERM");
     }
     this.live.clear();
+  }
+
+  /**
+   * Starts a capture: a process tap of the simulator when its `launchd_sim` is known, else the shared
+   * loopback output. A helper too old for `tap` reports a usage error, and capture falls back.
+   */
+  private async startCapture(
+    args: string[],
+    onStdout: PcmSink,
+  ): Promise<{ helper: RunningLoopbackHelper; route: CaptureRoute }> {
+    const pid = await this.launchdPid();
+    if (pid !== undefined) {
+      try {
+        const helper = await this.start(
+          "capture",
+          ["tap", "--launchd-pid", String(pid), ...args],
+          onStdout,
+        );
+        return { helper, route: "process-tap" };
+      } catch (error) {
+        if (!(error instanceof LoopbackHelperError && error.helperCode === "usage")) {
+          throw error;
+        }
+        logger.info(
+          "The audio-loopback helper has no process-tap mode; capturing from the host loopback " +
+            "output, which mixes every simulator. Update the helper to isolate simulators.",
+        );
+      }
+    }
+    const helper = await this.start("capture", ["capture", ...args], onStdout);
+    return { helper, route: "host-loopback" };
+  }
+
+  private async launchdPid(): Promise<number | undefined> {
+    try {
+      return await this.deps.launchdPid?.();
+    } catch (error) {
+      logger.warn(
+        `Could not find the simulator's launchd_sim; capturing from the host loopback output: ${errorMessage(error)}`,
+      );
+      return undefined;
+    }
   }
 
   private async start(

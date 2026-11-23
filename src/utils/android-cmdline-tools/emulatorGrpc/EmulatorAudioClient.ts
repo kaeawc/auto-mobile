@@ -153,6 +153,8 @@ export interface CaptureResult {
   pcm: PcmAudio;
   /** True when the guest produced fewer frames than requested before the deadline. */
   timedOut: boolean;
+  /** How an iOS Simulator capture was taken, when it differs from the session's route. */
+  route?: "process-tap" | "host-loopback";
 }
 
 /**

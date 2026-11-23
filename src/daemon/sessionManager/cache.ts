@@ -363,10 +363,17 @@ export class SessionCache {
    * Record that a session degraded the device-wide network condition (issue
    * #6012), preserving the pre-session baseline to restore on release. Write-once
    * per session: the first degrade wins, so release always restores the same
-   * baseline the session first observed.
+   * baseline the session first observed. A device-wide degrade joining an
+   * existing per-app slot only adds its own restore obligation (#19045).
    */
   setNetworkCondition(sessionId: string, state: NetworkConditionSessionState): void {
-    if (this.host.getNetworkCondition(sessionId)) {
+    const existing = this.host.getNetworkCondition(sessionId);
+    if (existing) {
+      if (state.deviceWide && !existing.deviceWide) {
+        this.host.updateSessionCache(sessionId, {
+          networkCondition: { ...existing, deviceWide: true },
+        });
+      }
       return;
     }
     this.host.updateSessionCache(sessionId, { networkCondition: state });

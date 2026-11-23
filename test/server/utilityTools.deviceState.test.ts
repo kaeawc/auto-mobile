@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { compileAjv } from "../helpers/jsonSchemaCompile";
 import fs from "node:fs";
 import path from "node:path";
-import { registerUtilityTools } from "../../src/server/utilityTools";
+import { registerUtilityTools, setDeviceStateSchema } from "../../src/server/utilityTools";
 import { ActionableError } from "../../src/models/ActionableError";
 import { DeviceState } from "../../src/features/utility/DeviceState";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -24,6 +24,7 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeDevicectlDisplayInfoSource } from "../fakes/FakeDevicectlDisplayInfoSource";
+import { FakeIosSimulatorNetworkShaper } from "../fakes/FakeIosSimulatorNetworkShaper";
 import { FakeNetworkFilterBridge } from "../fakes/FakeNetworkFilterBridge";
 import { LocationRouteRegistry } from "../../src/features/utility/LocationRoutePlayer";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -33,6 +34,7 @@ isolateToolRegistry();
 
 // No test in this file may run the installed network-filter-controller.
 const networkFilterBridge = new FakeNetworkFilterBridge();
+let iosNetworkShaper = new FakeIosSimulatorNetworkShaper();
 
 const createBootedDevice = (
   deviceId: string,
@@ -240,9 +242,11 @@ describe("device state tools", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     networkFilterBridge.setState("not_installed");
+    iosNetworkShaper = new FakeIosSimulatorNetworkShaper();
     registerUtilityTools({
       networkFilterBridge,
       iosDisplayInfoSource: new FakeDevicectlDisplayInfoSource(),
+      iosNetworkShaper,
     });
     for (const name of ["getDeviceState", "setDeviceState"]) {
       const tool = ToolRegistry.getTool(name)!;
@@ -664,7 +668,7 @@ describe("device state tools", () => {
     expect(networkFilterBridge.statusCalls).toBeGreaterThan(0);
   });
 
-  test("setDeviceState refuses a device-wide networkCondition on an iOS simulator (#10264)", async () => {
+  test("setDeviceState shapes a whole iOS simulator through the socket shaper (#19045)", async () => {
     networkFilterBridge.setState("ready");
     const setTool = ToolRegistry.getTool("setDeviceState");
     const iosSim = createBootedDevice("12345678-1234-1234-1234-123456789ABC", "ios", "iPhone 16");
@@ -674,17 +678,17 @@ describe("device state tools", () => {
     });
 
     const payload = JSON.parse((response as { content: Array<{ text: string }> }).content[0].text);
-    expect(payload.success).toBe(false);
+    expect(payload.success).toBe(true);
     expect(payload.networkCondition).toMatchObject({
-      supported: false,
-      capability: "unsupported",
-      backend: "network-extension",
+      supported: true,
+      backend: "socket-shaper",
       scope: "device",
-      requestedProfile: "offline",
-      verified: false,
+      appliedProfile: "offline",
+      rebooted: true,
     });
-    expect(payload.networkCondition.error).toContain("networkCondition.appId");
-    expect(payload.networkCondition.error).not.toContain("host-side proxy");
+    expect(iosNetworkShaper.calls.map(({ op, udid }) => ({ op, udid }))).toEqual([
+      { op: "apply", udid: iosSim.deviceId },
+    ]);
     expect(networkFilterBridge.ruleCalls).toEqual([]);
   });
 
@@ -864,5 +868,17 @@ describe("device state tools", () => {
     expect(devicePool.getDevice("sim-b")?.sessionId).toBe("session-b");
 
     sessionManager.stopCleanupTimer();
+  });
+});
+
+describe("setDeviceState networkCondition bandwidth bounds (#19108)", () => {
+  test("accepts caps up to 100 Gbit/s and rejects larger ones before any device is shaped", () => {
+    for (const field of ["downloadKbps", "uploadKbps"] as const) {
+      const parse = (value: number) =>
+        setDeviceStateSchema.safeParse({ networkCondition: { profile: "none", [field]: value } });
+      expect(parse(0).success).toBe(true);
+      expect(parse(100_000_000).success).toBe(true);
+      expect(parse(10_000_000_000_000_000).success).toBe(false);
+    }
   });
 });

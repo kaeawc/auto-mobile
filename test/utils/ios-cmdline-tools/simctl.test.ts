@@ -664,7 +664,7 @@ describe("Simctl", function () {
             state: "available",
             source: "platform",
             reason:
-              "Per-app only: setDeviceState networkCondition offline or none with appId, within a session, through the opt-in network-extension backend (install and approval required; getDeviceState networkCondition reports its state). Device-wide conditions and latency or bandwidth profiles are unsupported.",
+              "Device-wide: setDeviceState networkCondition without appId applies any profile, latency, bandwidth or loss through a socket shaper the simulator boots with (a degrade reboots it whenever the current boot lacks the shaper). Per-app: offline or none with appId, within a session, through the opt-in network-extension backend (install and approval required).",
           },
           {
             id: "ios.simulator.connectivity",

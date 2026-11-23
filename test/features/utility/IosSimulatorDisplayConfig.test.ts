@@ -50,7 +50,8 @@ class FakeUiSimctl implements SimctlRunner {
   };
 
   writes(): string[][] {
-    return this.calls.filter((args) => args.length > 3);
+    // `simctl ui` writes; the Dynamic Island and backlight reads (#19018) are `spawn` calls.
+    return this.calls.filter((args) => args[0] === "ui" && args.length > 3);
   }
 }
 
@@ -63,6 +64,7 @@ function simulatorConfig(
     themeBaselines: new Map(),
     accessibilityBaselines: new Map(),
     contentSizeBaselines: baselines,
+    screenControls: { islandSupport: { supportsDynamicIsland: async () => true } },
   });
 }
 

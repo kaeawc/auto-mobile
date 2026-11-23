@@ -21,6 +21,15 @@ import type { DeviceMutationResetContext, DeviceMutationResetPort } from "./rese
 import { DEVICE_MUTATION_KINDS, type DeviceBaseline, type DeviceMutationInput } from "./types";
 import type { BaselineChange } from "./baseline";
 import { parseNotifyutilState } from "../../../utils/ios-cmdline-tools/notifyutil";
+import {
+  OsascriptSimulatorBacklight,
+  type SimulatorBacklight,
+} from "../../../utils/ios-cmdline-tools/SimulatorBacklight";
+import {
+  DYNAMIC_ISLAND_DEFAULTS_DOMAIN,
+  DYNAMIC_ISLAND_SUPPRESSED_KEY,
+  hiddenDynamicIslands,
+} from "../../../utils/ios-cmdline-tools/SimulatorDynamicIsland";
 import { iosBiometricEnrollmentTarget, iosBiometricRevertArgs } from "./iosBiometricRevert";
 import { STOREKIT_MUTATION_KIND, type IosStoreKitSessionReset } from "./storeKitSession";
 import {
@@ -135,6 +144,29 @@ function accessibilityDefaultCommand(udid: string, key: string, prior: unknown):
   ];
 }
 
+/**
+ * The settings stored as one boolean default: the accessibility preferences, and the Simulator's
+ * Dynamic Island default in SpringBoard's domain (#19018).
+ */
+function boolDefaultCommand(udid: string, key: string, prior: unknown): string[] | undefined {
+  const accessibilityKey = iosAccessibilityDefaultKey(key);
+  if (accessibilityKey) {
+    return accessibilityDefaultCommand(udid, accessibilityKey, prior);
+  }
+  if (key !== "dynamicIsland") {
+    return undefined;
+  }
+  return [
+    "spawn",
+    udid,
+    "defaults",
+    prior === undefined ? "delete" : "write",
+    DYNAMIC_ISLAND_DEFAULTS_DOMAIN,
+    DYNAMIC_ISLAND_SUPPRESSED_KEY,
+    ...(prior === undefined ? [] : ["-bool", prior === true ? "YES" : "NO"]),
+  ];
+}
+
 function iosGlobalSettingKey(key: string): string | undefined {
   return Object.entries(IOS_GLOBAL_SETTING_KEYS).find(([setting]) => setting === key)?.[1];
 }
@@ -157,6 +189,15 @@ async function iosGlobalSettingObservations(xml: string): Promise<DeviceBaseline
 
 function canRestoreIosSetting(mutation: DeviceMutationInput): boolean {
   const prior = mutation.priorValue;
+  // The Simulator's Dynamic Island default and display backlight (#19018).
+  if (mutation.key === "dynamicIsland") {
+    return (
+      prior.state === "absent" || (prior.state === "present" && typeof prior.value === "boolean")
+    );
+  }
+  if (mutation.key === "backlight") {
+    return prior.state === "present" && typeof prior.value === "boolean";
+  }
   if (prior.state !== "present") {
     // An absent Simulator accessibility default is off, and a restore deletes it again.
     return (
@@ -196,6 +237,8 @@ export interface IosMutationResetDependencies {
   trustStore: UserTrustStoreReader;
   residue: IosResidueInspector;
   storeKit: IosStoreKitSessionReset;
+  /** Relights a Simulator whose session turned the display off (#19018). */
+  backlight?: SimulatorBacklight;
 }
 
 interface IosAppGroupCleanup {
@@ -424,8 +467,35 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         await context.assertOwned();
         break;
       default:
-        await this.revertByCommand(mutation, context);
+        await this.revertOther(mutation, prior, context);
     }
+  }
+
+  private async revertOther(
+    mutation: DeviceMutationInput,
+    prior: unknown,
+    context: DeviceMutationResetContext,
+  ): Promise<void> {
+    if (mutation.kind !== "device-setting" || mutation.key !== "backlight") {
+      await this.revertByCommand(mutation, context);
+    } else {
+      await this.revertBacklight(prior === true, context);
+    }
+    if (mutation.kind === "device-setting" && mutation.key === "dynamicIsland") {
+      // A later simctl screenshot re-hides only an island that is still meant to be hidden.
+      hiddenDynamicIslands.set(context.scope.deviceId, prior === true);
+    }
+  }
+
+  /** simctl cannot set the backlight; CoreSimulator can (#19018). */
+  private async revertBacklight(active: boolean, context: DeviceMutationResetContext) {
+    await context.assertOwned();
+    await (this.dependencies.backlight ?? new OsascriptSimulatorBacklight()).setActive(
+      context.scope.deviceId,
+      active,
+      context.signal,
+    );
+    await context.assertOwned();
   }
 
   private async revertByCommand(
@@ -503,9 +573,9 @@ export class IosDeviceMutationResetPort implements DeviceMutationResetPort {
         String(prior),
       ];
     }
-    const accessibilityKey = iosAccessibilityDefaultKey(mutation.key);
-    if (accessibilityKey) {
-      return accessibilityDefaultCommand(udid, accessibilityKey, prior);
+    const defaultsCommand = boolDefaultCommand(udid, mutation.key, prior);
+    if (defaultsCommand) {
+      return defaultsCommand;
     }
     const preference = iosGlobalSettingKey(mutation.key);
     if (!preference) {

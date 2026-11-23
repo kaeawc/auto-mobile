@@ -165,10 +165,10 @@ internal class PrototypePlatformDispatcher(
       try {
         // A permission dialog waits for the user. Teardown/caller cancellation still releases it;
         // an elapsed wall-clock deadline must not report an error while the OS can still grant.
-        if (action.call == "permissions.request") invoke(call, action, args)
+        if (action.call == "permissions.request") invokeModule(registry, call, action, args)
         else
           withTimeoutOrNull((action.timeoutMs ?: DEFAULT_TIMEOUT_MS).toLong()) {
-            invoke(call, action, args)
+            invokeModule(registry, call, action, args)
           } ?: failure(PlatformErrorCode.TIMEOUT, "Platform call timed out")
       } catch (cancelled: CancellationException) {
         withContext(NonCancellable) {
@@ -183,26 +183,6 @@ internal class PrototypePlatformDispatcher(
         failure(PlatformErrorCode.PLATFORM_ERROR, error.message ?: "Platform call failed")
       }
     exclusively { settle(call, result) }
-  }
-
-  private suspend fun invoke(
-    call: Pending,
-    action: PrototypePlatformAction,
-    args: JsonObject,
-  ): PlatformCallResult {
-    val module =
-      registry.module(action.call)
-        ?: return failure(PlatformErrorCode.UNSUPPORTED, "No module registered for ${action.call}")
-    return when (val available = module.availability()) {
-      is PlatformAvailability.Unavailable ->
-        failure(PlatformErrorCode.UNAVAILABLE, available.reason)
-      is PlatformAvailability.NeedsPermission ->
-        failure(
-          PlatformErrorCode.PERMISSION_DENIED,
-          "Missing permissions: ${available.names.sorted().joinToString()}",
-        )
-      PlatformAvailability.Ready -> module.call(PlatformCall(call.id, action.call, args))
-    }
   }
 
   private suspend fun settle(call: Pending, result: PlatformCallResult) {
@@ -265,5 +245,29 @@ internal class PrototypePlatformDispatcher(
 
     fun failure(code: PlatformErrorCode, message: String) =
       PlatformCallResult.Failure(PlatformError(code, message.take(512)))
+  }
+}
+
+private suspend fun invokeModule(
+  registry: PrototypePlatformRegistry,
+  call: PrototypePlatformDispatcher.Pending,
+  action: PrototypePlatformAction,
+  args: JsonObject,
+): PlatformCallResult {
+  val module =
+    registry.module(action.call)
+      ?: return PrototypePlatformDispatcher.failure(
+        PlatformErrorCode.UNSUPPORTED,
+        "No module registered for ${action.call}",
+      )
+  return when (val available = module.availability()) {
+    is PlatformAvailability.Unavailable ->
+      PrototypePlatformDispatcher.failure(PlatformErrorCode.UNAVAILABLE, available.reason)
+    is PlatformAvailability.NeedsPermission ->
+      PrototypePlatformDispatcher.failure(
+        PlatformErrorCode.PERMISSION_DENIED,
+        "Missing permissions: ${available.names.sorted().joinToString()}",
+      )
+    PlatformAvailability.Ready -> module.call(PlatformCall(call.id, action.call, args))
   }
 }

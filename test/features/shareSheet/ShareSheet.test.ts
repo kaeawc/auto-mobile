@@ -35,33 +35,59 @@ async function loadFixture(filename: string): Promise<ViewHierarchyResult> {
 
 const android11 = await loadFixture("android11-chooser-observe.json");
 const android14 = await loadFixture("android14-intentresolver-observe.json");
+// API 37: the sheet as it opens (collapsed), and after dragging it open by its handle.
+const android37Collapsed = await loadFixture("android37-intentresolver-collapsed-observe.json");
+const android37Expanded = await loadFixture("android37-intentresolver-expanded-observe.json");
 const parser = new DefaultElementParser();
 const device: BootedDevice = { platform: "android", deviceId: "emulator-5554", name: "test" };
 const SWIPE_UP = { args: ["swipe", "540", "2148", "540", "1644", "350"], displayId: 0 };
 
-/** Pages model a list scrolled one page further per upward swipe and back per downward swipe. */
-function makeShareSheet(pages: ViewHierarchyResult[], targetDevice = device) {
+const EXPAND_14 = { args: ["swipe", "540", "1366", "540", "342", "350"], displayId: 0 };
+
+/** The y the expand drag starts from: the centre of a collapsed sheet's handle header. */
+function handleCenterY(page: ViewHierarchyResult): number | undefined {
+  const handle = extractAndroidShareSheet(page, parser)?.collapsedHandle?.bounds;
+  return handle && Math.round((handle.top + handle.bottom) / 2);
+}
+
+/**
+ * Pages model a list scrolled one page further per upward swipe and back per downward swipe.
+ * A drag from a collapsed sheet's handle opens `expandTo` when given; otherwise the sheet
+ * snaps back and the capture stays the same.
+ */
+function makeShareSheet(
+  pages: ViewHierarchyResult[],
+  targetDevice = device,
+  { expandTo }: { expandTo?: number } = {},
+) {
   const inputs: Array<{ args: string[]; displayId?: number }> = [];
   const timer = new FakeTimer();
+  timer.enableAutoAdvance();
   let position = 0;
-  const tool = new ShareSheet(targetDevice, {
-    platform: "android",
-    async read(minTimestamp) {
-      const capture = pages[position];
-      return minTimestamp === undefined
-        ? capture
-        : { ...capture, updatedAt: (pages[0].updatedAt ?? 0) + timer.now() };
+  const tool = new ShareSheet(
+    targetDevice,
+    {
+      platform: "android",
+      async read(minTimestamp) {
+        const capture = pages[position];
+        return minTimestamp === undefined
+          ? capture
+          : { ...capture, updatedAt: (pages[0].updatedAt ?? 0) + timer.now() };
+      },
+      async input(args, displayId) {
+        inputs.push({ args, displayId });
+        if (args[0] === "swipe" && Number(args[2]) === handleCenterY(pages[position])) {
+          position = expandTo ?? position;
+        } else if (args[0] === "swipe") {
+          const up = Number(args[2]) > Number(args[4]);
+          position = Math.max(0, Math.min(pages.length - 1, position + (up ? 1 : -1)));
+        }
+        timer.advanceTime(350);
+        return { stderr: "" };
+      },
     },
-    async input(args, displayId) {
-      inputs.push({ args, displayId });
-      if (args[0] === "swipe") {
-        const up = Number(args[2]) > Number(args[4]);
-        position = Math.max(0, Math.min(pages.length - 1, position + (up ? 1 : -1)));
-      }
-      timer.advanceTime(350);
-      return { stderr: "" };
-    },
-  });
+    { timer },
+  );
   return { tool, inputs, timer };
 }
 
@@ -140,7 +166,7 @@ describe("Android share sheet", () => {
     expect(await tool.execute({ action: "select", label: "AutoMobile Share Sink" })).toMatchObject({
       selected: { label: "AutoMobile Share Sink", kind: "app" },
     });
-    expect(inputs).toEqual([SWIPE_UP, { args: ["tap", "324", "2185"], displayId: 0 }]);
+    expect(inputs).toEqual([EXPAND_14, SWIPE_UP, { args: ["tap", "324", "2185"], displayId: 0 }]);
   });
 
   test("selects a package only when it is present on the row", async () => {
@@ -155,7 +181,7 @@ describe("Android share sheet", () => {
       expect(await tool.execute({ action: "select", appId: "com.example.nearby" })).toMatchObject({
         selected: { label: "Nearby Share", kind: "app", appId: "com.example.nearby" },
       });
-      expect(inputs).toEqual([SWIPE_UP, { args: ["tap", "108", "2185"], displayId: 0 }]);
+      expect(inputs).toEqual([EXPAND_14, SWIPE_UP, { args: ["tap", "108", "2185"], displayId: 0 }]);
     } finally {
       icon["resource-id"] = resourceId;
     }
@@ -206,8 +232,14 @@ describe("Android share sheet", () => {
       selected: { label: "Gmail", kind: "app" },
     });
     // The second swipe finds the end of the list before tapping.
-    expect(inputs).toEqual([SWIPE_UP, SWIPE_UP, { args: ["tap", "540", "2185"], displayId: 0 }]);
-    expect(timer.getSleepHistory()).toEqual([]);
+    expect(inputs).toEqual([
+      EXPAND_14,
+      SWIPE_UP,
+      SWIPE_UP,
+      { args: ["tap", "540", "2185"], displayId: 0 },
+    ]);
+    // One settle wait for the list's overscroll before the tap.
+    expect(timer.getSleepHistory()).toEqual([500]);
   });
 
   test("refuses a label repeated on a later page before tapping anything", async () => {
@@ -218,7 +250,7 @@ describe("Android share sheet", () => {
     ).rejects.toThrow(
       /Ambiguous share target "AutoMobile Share Sink".*Candidates: .*"left":216.*"left":432/,
     );
-    expect(inputs).toEqual([SWIPE_UP]);
+    expect(inputs).toEqual([EXPAND_14, SWIPE_UP]);
   });
 
   test("does not let the pinned Copy action vouch for a same-place row on the next page", async () => {
@@ -242,7 +274,12 @@ describe("Android share sheet", () => {
     expect(await tool.execute({ action: "select", label: "AutoMobile Share Sink" })).toMatchObject({
       selected: { label: "AutoMobile Share Sink", kind: "app" },
     });
-    expect(inputs).toEqual([SWIPE_UP, SWIPE_UP, { args: ["tap", "324", "2085"], displayId: 0 }]);
+    expect(inputs).toEqual([
+      EXPAND_14,
+      SWIPE_UP,
+      SWIPE_UP,
+      { args: ["tap", "324", "2085"], displayId: 0 },
+    ]);
   });
 
   test("scrolls back to a first-page match after scanning the rest of the list", async () => {
@@ -252,6 +289,7 @@ describe("Android share sheet", () => {
       selected: { label: "AutoMobile Share Sink", kind: "app" },
     });
     expect(inputs).toEqual([
+      EXPAND_14,
       SWIPE_UP,
       SWIPE_UP,
       { args: ["swipe", "540", "1644", "540", "2148", "350"], displayId: 0 },
@@ -259,30 +297,78 @@ describe("Android share sheet", () => {
     ]);
   });
 
+  test("drags a collapsed sheet open by its handle to reach rows below the first row", async () => {
+    // Messages is only in the expanded sheet's full app list.
+    const { tool, inputs } = makeShareSheet([android37Collapsed, android37Expanded], device, {
+      expandTo: 1,
+    });
+    expect(await tool.execute({ action: "select", label: "Messages" })).toMatchObject({
+      sheetKind: "android-intentresolver",
+      selected: { label: "Messages", kind: "app" },
+    });
+    expect(inputs).toEqual([
+      { args: ["swipe", "540", "1415", "540", "354", "350"], displayId: 0 },
+      { args: ["swipe", "540", "2100", "540", "1499", "350"], displayId: 0 },
+      { args: ["tap", "540", "2237"], displayId: 0 },
+    ]);
+  });
+
+  test("taps the full-list row for a suggested app the full list repeats", async () => {
+    // The expanded sheet shows Chrome in the suggested row and again in the full app list.
+    const { tool, inputs } = makeShareSheet([android37Collapsed, android37Expanded], device, {
+      expandTo: 1,
+    });
+    expect(await tool.execute({ action: "select", label: "Chrome" })).toMatchObject({
+      selected: { label: "Chrome", kind: "app" },
+    });
+    expect(inputs.at(-1)).toEqual({ args: ["tap", "756", "1936"], displayId: 0 });
+  });
+
+  test("still refuses two full-list rows with one label", async () => {
+    const expanded = renamed(android37Expanded, "Bluetooth", "Messages");
+    const { tool, inputs } = makeShareSheet([android37Collapsed, expanded], device, {
+      expandTo: 1,
+    });
+    await expect(tool.execute({ action: "select", label: "Messages" })).rejects.toThrow(
+      /Ambiguous share target "Messages"/,
+    );
+    expect(inputs.some(({ args }) => args[0] === "tap")).toBe(false);
+  });
+
+  test("scans the collapsed sheet when the drag does not open it", async () => {
+    const { tool, inputs } = makeShareSheet([android37Collapsed]);
+    expect(await tool.execute({ action: "select", label: "Gemini" })).toMatchObject({
+      selected: { label: "Gemini", kind: "app" },
+    });
+    expect(inputs.map(({ args }) => args[0])).toEqual(["swipe", "swipe", "tap"]);
+  });
+
   test("reports a missing verified package after the viewport stops changing", async () => {
     const { tool, inputs } = makeShareSheet([android14]);
     await expect(tool.execute({ action: "select", appId: "com.android.chrome" })).rejects.toThrow(
       /No share target matches.*Run shareSheet list/,
     );
-    expect(inputs.map(({ args }) => args[0])).toEqual(["swipe"]);
+    expect(inputs.map(({ args }) => args[0])).toEqual(["swipe", "swipe"]);
   });
 
   test("lists a sessionless device read through the connect-only observer capture", async () => {
     const requests: HierarchyCaptureRequest[] = [];
-    const tool = new ShareSheet(device, undefined, undefined, () => ({
-      async capture(request) {
-        requests.push(request);
-        const snapshot: HierarchySnapshot = {
-          captureId: "observer-read",
-          platform: "android",
-          requestedFreshness: request.freshness,
-          receivedAt: 0,
-          hierarchy: android14,
-          nodes: [],
-        };
-        return snapshot;
-      },
-    }));
+    const tool = new ShareSheet(device, undefined, {
+      captureFactory: () => ({
+        async capture(request) {
+          requests.push(request);
+          const snapshot: HierarchySnapshot = {
+            captureId: "observer-read",
+            platform: "android",
+            requestedFreshness: request.freshness,
+            receivedAt: 0,
+            hierarchy: android14,
+            nodes: [],
+          };
+          return snapshot;
+        },
+      }),
+    });
     const result = await runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
       tool.execute({ action: "list" }),
     );

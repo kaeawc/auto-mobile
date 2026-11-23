@@ -74,8 +74,9 @@ function cellTitle(node: ViewHierarchyNode): string | undefined {
     const attributes = nodeAttributes(child);
     return attributes.class === "UILabel" && attributes["resource-id"] === "cellTitleLabel";
   });
-  const text = title && nodeAttributes(title).text;
-  return typeof text === "string" ? text.trim() : undefined;
+  // iOS 27 exposes app cells as leaves whose own text is the target title.
+  const text = nodeAttributes(title ?? node).text;
+  return typeof text === "string" && text.trim() ? text.trim() : undefined;
 }
 
 function exposedDismissPoint(

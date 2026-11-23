@@ -48,7 +48,7 @@ export const shareSheetTool = defineDeviceTool({
 export function registerShareSheetTool(iosClientFactory?: IosShareSheetClientFactory): void {
   shareSheetTool.register(ToolRegistry, async (device, args, _progress, signal) => {
     try {
-      const shareSheet = new ShareSheet(device, undefined, iosClientFactory);
+      const shareSheet = new ShareSheet(device, undefined, { iosClientFactory });
       return createStructuredToolResponse(await shareSheet.execute(args, signal));
     } catch (error) {
       throw toActionableError(error, `Failed to ${args.action} on the share sheet`);

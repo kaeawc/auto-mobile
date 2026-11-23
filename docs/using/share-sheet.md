@@ -16,12 +16,13 @@ share sheet. Opening the sheet is the app's job (tap its Share button first).
   `app`, `direct` or `action` (for example Copy). Android includes `appId` only
   when it could verify the package.
 - `select` taps one target. Pass exactly one of `label` or `appId` (Android
-  only). Android scrolls the list when the target is not visible yet. iOS
-  identifies targets by label only and refuses `appId`.
+  only). Android opens a collapsed sheet and scrolls the list when the target
+  is not visible yet. iOS identifies targets by label only and refuses `appId`.
 - `dismiss` closes the sheet.
 
 An ambiguous label is refused with the candidates listed, rather than tapping
-the first match. Use a unique label or the `appId`. If no sheet is showing, the
+the first match. An Android suggested app that the full app list repeats counts
+once. Use a unique label or the `appId`. If no sheet is showing, the
 call fails and asks you to open it from the app first.
 
 ## Testing share flows

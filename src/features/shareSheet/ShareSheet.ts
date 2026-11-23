@@ -7,7 +7,7 @@ import {
 } from "../../models";
 import { requireAndroidOrIosPlatform, type AndroidOrIosPlatform } from "../../models/Platform";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { defaultTimer } from "../../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import {
   dispatchIosCoordinateTap,
@@ -19,7 +19,11 @@ import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture"
 import type { HierarchyCapture, HierarchyCaptureRequest } from "../observe/HierarchyCapture";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { isSessionlessDeviceRead } from "../toolSelection/toolSelectionContext";
-import { CHOOSER_SCAN_PAGES, swipeChooserList } from "../utility/chooserHierarchy";
+import {
+  CHOOSER_SCAN_PAGES,
+  expandChooserSheet,
+  swipeChooserList,
+} from "../utility/chooserHierarchy";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { extractAndroidShareSheet } from "./androidShareSheet";
@@ -45,7 +49,7 @@ interface AndroidShareSheetDevice {
 interface IosShareSheetDevice {
   platform: "ios";
   read(signal?: AbortSignal): Promise<ViewHierarchyResult>;
-  tap(point: Point, frameContext?: string, signal?: AbortSignal): Promise<void>;
+  tap(point: Point, signal?: AbortSignal): Promise<void>;
 }
 
 type AndroidSheet = NonNullable<ReturnType<typeof extractAndroidShareSheet>>;
@@ -57,9 +61,29 @@ interface AndroidSheetPage {
 
 const AMBIGUITY_GUIDANCE = "Use a unique label or verified appId.";
 const SCROLL_TOLERANCE_PX = 2;
+/**
+ * After a swipe, the list's overscroll stretch keeps animating with no change in the hierarchy,
+ * and RecyclerView takes a touch that lands during it as a drag that stops the animation instead
+ * of a click, so the tap reported success but opened nothing (#14246, API 37 device check).
+ */
+const SWIPE_SETTLE_MS = 500;
 
 function targetKey({ label, appId, kind }: ShareTarget): string {
   return JSON.stringify([label, appId ?? null, kind]);
+}
+
+function rowKey(row: AndroidShareRow): string {
+  return JSON.stringify([targetKey(row.target), row.primaryLabel ?? null]);
+}
+
+/**
+ * The intentresolver suggested-apps row repeats targets that the full app list below it also
+ * shows, so a suggested row with the same labels as a full-list row is that row, not a second
+ * candidate. Two full-list rows with one label stay ambiguous.
+ */
+function withoutSuggestedRepeats(rows: AndroidShareRow[]): AndroidShareRow[] {
+  const listed = new Set(rows.filter((row) => !row.suggested).map(rowKey));
+  return rows.filter((row) => !row.suggested || !listed.has(rowKey(row)));
 }
 
 function uniqueRowsByKey(sheet: AndroidSheet): Map<string, AndroidShareRow> {
@@ -125,6 +149,12 @@ interface ShareSheetResult {
 }
 
 export type ShareSheetCaptureFactory = (device: BootedDevice) => HierarchyCapture;
+
+interface ShareSheetDeps {
+  iosClientFactory?: IosShareSheetClientFactory;
+  captureFactory?: ShareSheetCaptureFactory;
+  timer?: Timer;
+}
 
 /**
  * A sessionless `list` (#10830) reads through the isolated observer capture, so a caller that
@@ -203,7 +233,7 @@ function iosShareSheetDevice(
       });
       return hierarchy.projectActionableHierarchy(capture);
     },
-    async tap(point, frameContext, signal) {
+    async tap(point, signal) {
       if (!iosClientFactory) {
         throw new ActionableError(
           "iOS share sheet controls require a configured iOS runner client.",
@@ -211,7 +241,6 @@ function iosShareSheetDevice(
       }
       await dispatchIosCoordinateTap(iosClientFactory(device), point, {
         durationMs: ORDINARY_TAP_DURATION_MS,
-        frameContext,
         options: { signal },
       });
     },
@@ -225,9 +254,16 @@ export class ShareSheet {
   constructor(
     private readonly device: BootedDevice,
     private readonly io?: AndroidShareSheetDevice | IosShareSheetDevice,
-    private readonly iosClientFactory?: IosShareSheetClientFactory,
-    private readonly captureFactory: ShareSheetCaptureFactory = createDeviceHierarchyCapture,
+    private readonly deps: ShareSheetDeps = {},
   ) {}
+
+  private get timer(): Timer {
+    return this.deps.timer ?? defaultTimer;
+  }
+
+  private get captureFactory(): ShareSheetCaptureFactory {
+    return this.deps.captureFactory ?? createDeviceHierarchyCapture;
+  }
 
   async execute(request: ShareSheetRequest, signal?: AbortSignal): Promise<ShareSheetResult> {
     const { action, appId, label } = request;
@@ -251,7 +287,7 @@ export class ShareSheet {
       const io =
         this.io?.platform === "ios"
           ? this.io
-          : iosShareSheetDevice(this.device, this.captureFactory, this.iosClientFactory);
+          : iosShareSheetDevice(this.device, this.captureFactory, this.deps.iosClientFactory);
       return this.executeIos(io, request, signal);
     }
 
@@ -304,7 +340,7 @@ export class ShareSheet {
           'The iOS share sheet has no tappable "dismiss popup" region. Observe the screen and close the share sheet using its visible controls.',
         );
       }
-      await this.tapIos(io, hierarchy, sheet.dismissPoint, signal);
+      await this.tapIos(io, sheet.dismissPoint, signal);
       return result;
     }
 
@@ -318,18 +354,15 @@ export class ShareSheet {
         `No share target matches ${JSON.stringify(label)}. Run shareSheet list to see current labels.`,
       );
     }
-    await this.tapIos(io, hierarchy, this.geometry.getElementCenter(match.element), signal);
+    await this.tapIos(io, this.geometry.getElementCenter(match.element), signal);
     return { ...result, selected: match.target };
   }
 
-  private async tapIos(
-    io: IosShareSheetDevice,
-    hierarchy: ViewHierarchyResult,
-    point: Point,
-    signal?: AbortSignal,
-  ): Promise<void> {
+  private async tapIos(io: IosShareSheetDevice, point: Point, signal?: AbortSignal): Promise<void> {
     throwIfAborted(signal);
-    await awaitWhileRequestIsLive(io.tap(point, hierarchy.frameContext, signal), signal);
+    // Like tapOn, send no frame context: the runner rejects the token from this skip-wait
+    // read as stale on iOS 27, although the sheet the point came from is still showing.
+    await awaitWhileRequestIsLive(io.tap(point, signal), signal);
   }
 
   private async select(
@@ -340,10 +373,12 @@ export class ShareSheet {
   ): Promise<ShareTarget> {
     const selector = appId ?? label;
     const pageMatch = (sheet: AndroidSheet): AndroidShareRow | undefined => {
-      const matches = sheet.rows.filter(({ target, primaryLabel }) =>
-        appId !== undefined
-          ? target.appId === appId
-          : target.label === label || primaryLabel === label,
+      const matches = withoutSuggestedRepeats(
+        sheet.rows.filter(({ target, primaryLabel }) =>
+          appId !== undefined
+            ? target.appId === appId
+            : target.label === label || primaryLabel === label,
+        ),
       );
       if (matches.length > 1) {
         throw ambiguousTarget(selector, matches, AMBIGUITY_GUIDANCE);
@@ -351,7 +386,11 @@ export class ShareSheet {
       return matches[0];
     };
 
-    const scan = await this.scanForMatch(io, initial, { pageMatch, selector }, signal);
+    // Refuse a label repeated on the visible page before moving the sheet at all.
+    pageMatch(initial.sheet);
+    // Rows below a collapsed sheet's first row are hidden until the sheet is dragged open.
+    const start = (await this.expandSheet(io, initial, signal)) ?? initial;
+    const scan = await this.scanForMatch(io, start, { pageMatch, selector }, signal);
     // Every matching row in the scanned list is the one candidate. The forward scan may
     // have moved it off screen, so scroll back until it reappears.
     let current = scan.last;
@@ -359,6 +398,9 @@ export class ShareSheet {
       const match = pageMatch(current.sheet);
       if (match) {
         const { x, y } = this.geometry.getElementCenter(match.element);
+        // The scan always swipes at least once before this tap.
+        throwIfAborted(signal);
+        await awaitWhileRequestIsLive(this.timer.sleep(SWIPE_SETTLE_MS), signal);
         await this.sendInput(io, current.hierarchy, ["tap", String(x), String(y)], signal);
         return match.target;
       }
@@ -386,13 +428,13 @@ export class ShareSheet {
     }: { pageMatch: (sheet: AndroidSheet) => AndroidShareRow | undefined; selector?: string },
     signal?: AbortSignal,
   ): Promise<{ last: AndroidSheetPage; swipes: number }> {
-    const candidates: AndroidShareRow[] = [];
+    let candidates: AndroidShareRow[] = [];
     let current = initial;
     let previous: { sheet: AndroidSheet; match?: AndroidShareRow } | undefined;
     for (let page = 0; ; page++) {
       const match = pageMatch(current.sheet);
       if (match && !(previous && isSameRowAfterScroll(previous, current.sheet, match))) {
-        candidates.push(match);
+        candidates = withoutSuggestedRepeats([...candidates, match]);
       }
       if (candidates.length > 1) {
         throw ambiguousTarget(selector, candidates, AMBIGUITY_GUIDANCE);
@@ -412,18 +454,27 @@ export class ShareSheet {
     }
   }
 
-  private async swipeList(
+  private async expandSheet(
     io: AndroidShareSheetDevice,
     { hierarchy, sheet }: AndroidSheetPage,
-    direction: "up" | "down",
     signal?: AbortSignal,
   ): Promise<AndroidSheetPage | null> {
-    const fresh = await swipeChooserList(hierarchy, sheet.list.bounds, {
-      direction,
+    if (!sheet.collapsedHandle) {
+      return null;
+    }
+    const fresh = await expandChooserSheet(hierarchy, sheet.collapsedHandle.bounds, {
       signal,
-      swipe: (args, signal) => io.input(args, hierarchy.displayId ?? undefined, signal),
-      read: (minTimestamp, signal) => io.read(minTimestamp, signal),
-      validate: (next, minTimestamp) => {
+      ...this.chooserGestureIo(io, hierarchy),
+    });
+    return fresh ? { hierarchy: fresh, sheet: this.requireSheet(fresh) } : null;
+  }
+
+  private chooserGestureIo(io: AndroidShareSheetDevice, hierarchy: ViewHierarchyResult) {
+    return {
+      swipe: (args: string[], signal?: AbortSignal) =>
+        io.input(args, hierarchy.displayId ?? undefined, signal),
+      read: (minTimestamp: number, signal?: AbortSignal) => io.read(minTimestamp, signal),
+      validate: (next: ViewHierarchyResult, minTimestamp: number) => {
         requireFreshCapture(next, minTimestamp);
         if (
           next.packageName !== hierarchy.packageName ||
@@ -434,6 +485,19 @@ export class ShareSheet {
           );
         }
       },
+    };
+  }
+
+  private async swipeList(
+    io: AndroidShareSheetDevice,
+    { hierarchy, sheet }: AndroidSheetPage,
+    direction: "up" | "down",
+    signal?: AbortSignal,
+  ): Promise<AndroidSheetPage | null> {
+    const fresh = await swipeChooserList(hierarchy, sheet.list.bounds, {
+      direction,
+      signal,
+      ...this.chooserGestureIo(io, hierarchy),
     });
     return fresh ? { hierarchy: fresh, sheet: this.requireSheet(fresh) } : null;
   }

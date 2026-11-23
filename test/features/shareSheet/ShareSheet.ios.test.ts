@@ -24,12 +24,20 @@ if (!viewHierarchy) {
   throw new Error("Missing captured iOS view hierarchy");
 }
 const ios26: ViewHierarchyResult = viewHierarchy;
+const ios27Capture: StructuredToolResponse<{ viewHierarchy: ViewHierarchyResult }> = await Bun.file(
+  new URL("../../fixtures/shareSheet/ios27-activityviewcontroller-observe.json", import.meta.url),
+).json();
+const ios27Hierarchy = getStructuredField(ios27Capture, "viewHierarchy");
+if (!ios27Hierarchy) {
+  throw new Error("Missing captured iOS 27 view hierarchy");
+}
+const ios27: ViewHierarchyResult = ios27Hierarchy;
 
 const parser = new DefaultElementParser();
 const device: BootedDevice = { platform: "ios", deviceId: "test-ios", name: "test" };
 
 function makeShareSheet(hierarchy: ViewHierarchyResult = ios26) {
-  const taps: Array<{ point: Point; frameContext?: string }> = [];
+  const taps: Point[] = [];
   const timer = new FakeTimer();
   const reads: number[] = [];
   const tool = new ShareSheet(device, {
@@ -38,8 +46,8 @@ function makeShareSheet(hierarchy: ViewHierarchyResult = ios26) {
       reads.push(timer.now());
       return hierarchy;
     },
-    async tap(point, frameContext) {
-      taps.push({ point, frameContext });
+    async tap(point) {
+      taps.push(point);
     },
   });
   return { tool, reads, taps, timer };
@@ -83,7 +91,7 @@ describe("iOS share sheet", () => {
     expect(taps).toEqual([]);
   });
 
-  test("taps the selected cell center with the captured frame context", async () => {
+  test("taps the selected cell center without a frame context", async () => {
     const { tool, taps, timer } = makeShareSheet();
     expect(await tool.execute({ action: "select", label: "Playground" })).toEqual({
       success: true,
@@ -91,8 +99,34 @@ describe("iOS share sheet", () => {
       sheetKind: "ios-activity-view-controller",
       selected: { label: "Playground", kind: "app" },
     });
-    expect(taps).toEqual([{ point: { x: 156, y: 663 }, frameContext: ios26.frameContext }]);
+    expect(taps).toEqual([{ x: 156, y: 663 }]);
     expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("lists iOS 27 app cells whose title is the cell's own text", async () => {
+    // iOS 27.2 app cells have no cellTitleLabel children; the action cells still do.
+    const { tool, taps } = makeShareSheet(ios27);
+    expect(await tool.execute({ action: "list" })).toEqual({
+      success: true,
+      action: "list",
+      sheetKind: "ios-activity-view-controller",
+      targets: [
+        { label: "Reminders", kind: "app" },
+        { label: "Playground", kind: "app" },
+        { label: "More", kind: "action" },
+        { label: "Copy", kind: "action" },
+        { label: "Save to Files", kind: "action" },
+      ],
+    });
+    expect(taps).toEqual([]);
+  });
+
+  test("selects an iOS 27 app cell by its own text", async () => {
+    const { tool, taps } = makeShareSheet(ios27);
+    expect(await tool.execute({ action: "select", label: "Playground" })).toMatchObject({
+      selected: { label: "Playground", kind: "app" },
+    });
+    expect(taps).toEqual([{ x: 157, y: 668 }]);
   });
 
   test("refuses duplicate labels without tapping", async () => {
@@ -129,7 +163,7 @@ describe("iOS share sheet", () => {
       action: "dismiss",
       sheetKind: "ios-activity-view-controller",
     });
-    expect(taps).toEqual([{ point: { x: 201, y: 437 }, frameContext: ios26.frameContext }]);
+    expect(taps).toEqual([{ x: 201, y: 437 }]);
   });
 
   test("uses the exposed area when the sheet covers the dismiss region center", async () => {
@@ -139,7 +173,7 @@ describe("iOS share sheet", () => {
     ];
     const { tool, taps } = makeShareSheet(expanded);
     await tool.execute({ action: "dismiss" });
-    expect(taps).toEqual([{ point: { x: 201, y: 150 }, frameContext: ios26.frameContext }]);
+    expect(taps).toEqual([{ x: 201, y: 150 }]);
   });
 
   test("does not tap a one-point exposed strip that rounds onto the sheet edge", async () => {
@@ -157,20 +191,22 @@ describe("iOS share sheet", () => {
 
   test("lists a sessionless device read through the connect-only observer capture", async () => {
     const requests: HierarchyCaptureRequest[] = [];
-    const tool = new ShareSheet(device, undefined, undefined, () => ({
-      async capture(request) {
-        requests.push(request);
-        const snapshot: HierarchySnapshot = {
-          captureId: "observer-read",
-          platform: "ios",
-          requestedFreshness: request.freshness,
-          receivedAt: 0,
-          hierarchy: ios26,
-          nodes: [],
-        };
-        return snapshot;
-      },
-    }));
+    const tool = new ShareSheet(device, undefined, {
+      captureFactory: () => ({
+        async capture(request) {
+          requests.push(request);
+          const snapshot: HierarchySnapshot = {
+            captureId: "observer-read",
+            platform: "ios",
+            requestedFreshness: request.freshness,
+            receivedAt: 0,
+            hierarchy: ios26,
+            nodes: [],
+          };
+          return snapshot;
+        },
+      }),
+    });
     const result = await runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
       tool.execute({ action: "list" }),
     );

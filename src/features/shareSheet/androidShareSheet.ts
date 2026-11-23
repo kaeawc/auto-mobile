@@ -9,6 +9,7 @@ import type { ShareRow } from "./ShareTarget";
 
 const INTENT_RESOLVER = "com.android.intentresolver";
 const HOSTS = new Set(["android", INTENT_RESOLVER]);
+const SUGGESTED_APPS_ID = `${INTENT_RESOLVER}:id/suggested_apps_container`;
 const ACTION_IDS = new Set([
   "android:id/chooser_copy_button",
   `${INTENT_RESOLVER}:id/copy`,
@@ -17,15 +18,20 @@ const ACTION_IDS = new Set([
 
 interface AndroidShareRow extends ShareRow {
   primaryLabel?: string;
+  /** In the intentresolver suggested-apps row, which repeats targets from the full app list. */
+  suggested?: boolean;
 }
 
 interface AndroidShareSheet {
   sheetKind: "android-intentresolver" | "android-legacy";
   rows: AndroidShareRow[];
   list: Element;
+  /** The drag handle header while the sheet is collapsed and can still expand. */
+  collapsedHandle?: Element;
 }
 
 type Properties = {
+  actions?: unknown;
   "resource-id"?: string;
   "content-desc"?: string;
   "visible-to-user"?: boolean | string;
@@ -55,7 +61,8 @@ export function extractAndroidShareSheet(
   }
 
   for (const root of parser.extractRootNodes(hierarchy)) {
-    let header = false;
+    let header: ViewHierarchyNode | undefined;
+    let expandable = false;
     let list: ViewHierarchyNode | undefined;
     let alwaysOrOnce = false;
     parser.traverseNode(root, (node: ViewHierarchyNode) => {
@@ -65,7 +72,11 @@ export function extractAndroidShareSheet(
       }
       switch (searchableNativeId(properties)) {
         case "android:id/chooser_header":
-          header = true;
+          header = node;
+          break;
+        case "android:id/contentPanel":
+          // The drawer layout offers "expand" only while collapsed.
+          expandable = Array.isArray(properties.actions) && properties.actions.includes("expand");
           break;
         case "android:id/resolver_list":
           list = node;
@@ -80,15 +91,31 @@ export function extractAndroidShareSheet(
     // the sharesheet header.
     if (header && list && !alwaysOrOnce) {
       const listElement = parser.parseNodeBounds(list);
+      const handle = expandable ? parser.parseNodeBounds(header) : null;
       if (listElement) {
         return {
           sheetKind: host === INTENT_RESOLVER ? "android-intentresolver" : "android-legacy",
           rows: extractRows(root, list, host, parser),
           list: listElement,
+          ...(handle ? { collapsedHandle: handle } : {}),
         };
       }
     }
   }
+}
+
+/**
+ * Follows a depth-first traversal and reports whether the current node sits below the nearest
+ * container with `containerId`.
+ */
+function insideContainer(containerId: string) {
+  let containerDepth = Infinity;
+  return (id: string | undefined, depth: number): boolean => {
+    if (depth <= containerDepth) {
+      containerDepth = id === containerId ? depth : Infinity;
+    }
+    return depth > containerDepth;
+  };
 }
 
 function extractRows(
@@ -99,7 +126,8 @@ function extractRows(
 ): AndroidShareRow[] {
   const rows: AndroidShareRow[] = [];
   let listDepth = Infinity;
-  let actionRowDepth = Infinity;
+  const inActionRow = insideContainer("android:id/chooser_action_row");
+  const inSuggestedApps = insideContainer(SUGGESTED_APPS_ID);
   let skipDepth = Infinity;
   parser.traverseNode(root, (node: ViewHierarchyNode, depth: number) => {
     if (depth > skipDepth) {
@@ -115,19 +143,18 @@ function extractRows(
       return;
     }
     const id = searchableNativeId(properties);
-    if (depth <= actionRowDepth) {
-      actionRowDepth = id === "android:id/chooser_action_row" ? depth : Infinity;
-    }
+    const actionRow = inActionRow(id, depth);
+    const suggested = inSuggestedApps(id, depth);
     if (!isTruthy(properties.clickable)) {
       return;
     }
     const scope = { host, inList: listDepth !== Infinity, depthInList: depth - listDepth };
-    const isAction = depth > actionRowDepth || ACTION_IDS.has(id ?? "");
+    const isAction = actionRow || ACTION_IDS.has(id ?? "");
     const row = isAction
       ? extractActionRow(node, properties, parser)
       : extractTargetRow(node, properties, scope, parser);
     if (row) {
-      rows.push(row);
+      rows.push(suggested && !isAction ? { ...row, suggested: true } : row);
       skipDepth = depth;
     }
   });

@@ -111,7 +111,7 @@ interface ChooserSwipe {
 export async function swipeChooserList(
   current: ViewHierarchyResult,
   bounds: ElementBounds | undefined,
-  { direction = "up", capturedAt, signal, swipe, read, validate }: ChooserSwipe,
+  { direction = "up", ...gesture }: ChooserSwipe,
 ): Promise<ViewHierarchyResult | null> {
   if (!bounds || bounds.bottom - bounds.top < 40) {
     return null;
@@ -121,9 +121,33 @@ export async function swipeChooserList(
   const lowerY = Math.round(bounds.bottom - height / 4);
   const upperY = Math.round(bounds.top + height / 4);
   const [fromY, toY] = direction === "up" ? [lowerY, upperY] : [upperY, lowerY];
+  return swipeAndRead(current, { x: centerX, fromY, toY }, gesture);
+}
+
+/**
+ * Drags a collapsed chooser sheet up by its handle and returns the refreshed tree when the
+ * sheet moved. A swipe inside a collapsed sheet's short list strip travels too little for the
+ * drawer to settle open, so it snaps back and the rows below stay hidden (#14246).
+ */
+export async function expandChooserSheet(
+  current: ViewHierarchyResult,
+  handle: ElementBounds,
+  gesture: Omit<ChooserSwipe, "direction">,
+): Promise<ViewHierarchyResult | null> {
+  const x = Math.round((handle.left + handle.right) / 2);
+  const fromY = Math.round((handle.top + handle.bottom) / 2);
+  // Ending a quarter of the way down from the top drags well past the drawer's halfway point.
+  return swipeAndRead(current, { x, fromY, toY: Math.round(fromY / 4) }, gesture);
+}
+
+async function swipeAndRead(
+  current: ViewHierarchyResult,
+  { x, fromY, toY }: { x: number; fromY: number; toY: number },
+  { capturedAt, signal, swipe, read, validate }: Omit<ChooserSwipe, "direction">,
+): Promise<ViewHierarchyResult | null> {
   throwIfAborted(signal);
   const result = await awaitWhileRequestIsLive(
-    swipe(["swipe", String(centerX), String(fromY), String(centerX), String(toY), "350"], signal),
+    swipe(["swipe", String(x), String(fromY), String(x), String(toY), "350"], signal),
     signal,
   );
   const failure = result.error || result.stderr?.trim();

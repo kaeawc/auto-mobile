@@ -285,6 +285,7 @@ final class StoreKitCommandTests: XCTestCase {
                     XCTAssertTrue(result.error?.contains("\(domain) \(code)") == true, result.error ?? "")
                     XCTAssertTrue(result.error?.contains("runner host app") == true, result.error ?? "")
                     XCTAssertTrue(result.error?.contains("Restart the daemon") == true, result.error ?? "")
+                    XCTAssertTrue(result.error?.contains("rebuild the runner") == true, result.error ?? "")
                     XCTAssertFalse(result.error?.contains("iOS 18 simulator") == true, result.error ?? "")
                 }
             }

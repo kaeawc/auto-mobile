@@ -340,6 +340,36 @@ const deviceStateOutputFields = {
     })
     .passthrough()
     .optional(),
+  // iOS Simulator per-process sockets and traffic read from host ps/lsof/nettop (#19020).
+  networkActivity: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      processCount: z.number().optional(),
+      activeProcessCount: z.number().optional(),
+      truncated: z.boolean().optional(),
+      warnings: z.array(z.string()).optional(),
+      processes: z
+        .array(
+          z.object({
+            pid: z.number(),
+            name: z.string(),
+            appId: z.string().optional(),
+            sockets: z.array(
+              z.object({
+                protocol: z.string(),
+                local: z.string(),
+                remote: z.string().optional(),
+                state: z.string().optional(),
+              }),
+            ),
+            bytesIn: z.number(),
+            bytesOut: z.number(),
+          }),
+        )
+        .optional(),
+    })
+    .passthrough()
+    .optional(),
 };
 
 /** Reads and writes share field states; early failures carry only identity and error. */

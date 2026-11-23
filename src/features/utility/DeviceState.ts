@@ -29,6 +29,10 @@ import { ClockOperations } from "./device-state/ClockOperations";
 import { createScreenLockOperations } from "./screenLock/ScreenLockOperations";
 import { createPowerOperations } from "./power/PowerOperations";
 import {
+  readNetworkActivity,
+  type NetworkActivityReader,
+} from "./networkActivity/NetworkActivityOperations";
+import {
   DEFAULT_DEVICE_STATE_FIELDS,
   EMPTY_STATE_SELECTION_ERROR,
   setDeviceStateInputIsEmpty,
@@ -190,6 +194,8 @@ export class DeviceState {
 
   private readonly keyboard: KeyboardOperations;
 
+  private readonly networkActivityReader?: NetworkActivityReader;
+
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
     this.keyboard = new KeyboardOperations({
@@ -235,6 +241,7 @@ export class DeviceState {
     this.iosRunnerLocation = dependencies.iosRunnerLocation;
     this.injectedNetworkFilterBridge = dependencies.networkFilterBridge;
     this.iosAppNetworkRule = dependencies.iosAppNetworkRule;
+    this.networkActivityReader = dependencies.networkActivity;
   }
 
   /** Created on first iOS Simulator network read so other paths never touch it. */
@@ -346,6 +353,9 @@ export class DeviceState {
         : {}),
       ...(include.includes("screenLock") ? { screenLock: await this.screenLock.read() } : {}),
       ...(include.includes("power") ? { power: await this.power.read() } : {}),
+      ...(include.includes("networkActivity")
+        ? { networkActivity: await readNetworkActivity(this.device, this.networkActivityReader) }
+        : {}),
     };
   }
 

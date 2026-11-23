@@ -26,6 +26,10 @@ export const EXCEPTIONS = new Map<string, string>([
     "src/features/observe/android/CtrlProxyForwardClientProbe.ts",
     "Reads host TCP connections to an Android ADB forward; never touches the iOS runner.",
   ],
+  [
+    "src/features/utility/networkActivity/IosSimulatorNetworkActivity.ts",
+    "Read-only lsof of a simulator's internet sockets for getDeviceState networkActivity (#19020); never touches the iOS runner.",
+  ],
 ]);
 
 export function repositoryPath(file: string): string {

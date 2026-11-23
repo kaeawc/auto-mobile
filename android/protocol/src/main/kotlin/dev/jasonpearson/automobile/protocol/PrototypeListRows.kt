@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.protocol
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -10,7 +11,13 @@ object PrototypeListRows {
    */
   fun items(list: PrototypeListNode, data: JsonObject?): List<JsonObject> =
     list.repeat.itemsPath
-      ?.let { PrototypeRepeatData(data, PrototypeRuntimeBudget.LARGE.maxListItems).items(it) }
+      ?.let { pointer ->
+        (PrototypeDataPointer.resolve(data, pointer) as? JsonArray)
+          .orEmpty()
+          .filterIsInstance<JsonObject>()
+          .take(PrototypeRuntimeBudget.LARGE.maxListItems)
+          .map { PrototypeDataValues.project(it, includeArrays = true) }
+      }
       .orEmpty()
 
   /** Stable identity has the same scalar spelling used by repeat key validation. */

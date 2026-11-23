@@ -10,6 +10,7 @@ import {
   parseLockSettingsCredentialType,
   scrubLockCredentials,
 } from "../../../../src/features/utility/screenLock/AndroidLockSettings";
+import { ActionableError } from "../../../../src/models/ActionableError";
 import { createExecResult } from "../../../../src/utils/execResult";
 import { logger } from "../../../../src/utils/logger";
 import { runExecSeam } from "../../../../src/utils/ExecSeam";
@@ -277,12 +278,70 @@ describe("AdbLockSettingsClient on an Automotive foreground user (#19060)", () =
     expect(adb.calls[0].args.slice(3, 5)).toEqual(["--user", "0"]);
   });
 
-  test("falls back to user 0 when the foreground user cannot be read", async () => {
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  test("throws instead of falling back to user 0 when the foreground user cannot be read (#19070)", async () => {
     const offline = new FakeAdbClient();
     offline.setCommandError("shell am get-current-user", new Error("offline"));
     const resolve = createLockUserResolver(offline, { formFactor: "automotive" });
-    expect(await resolve()).toBe(0);
-    warn.mockRestore();
+    const failure = await resolve().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect(String(failure)).toContain("foreground user");
+    expect(String(failure)).toContain("offline");
+  });
+
+  test("an unreadable foreground user fails the set and the read without running locksettings", async () => {
+    const adb = new FakeLockSettingsAdb();
+    const offline = new FakeAdbClient();
+    offline.setCommandError("shell am get-current-user", new Error("offline"));
+    const resolve = createLockUserResolver(offline, { formFactor: "automotive" });
+    const client = new AdbLockSettingsClient(adb, resolve);
+    await expect(client.setCredential("pin", "2468")).rejects.toBeInstanceOf(ActionableError);
+    await expect(client.read()).rejects.toBeInstanceOf(ActionableError);
+    expect(adb.calls).toEqual([]);
+  });
+});
+
+describe("AdbLockSettingsClient resolves the user once per operation (#19070)", () => {
+  test("the set and the read-back share the first resolved user", async () => {
+    const adb = new FakeLockSettingsAdb();
+    const answers = [10, 0];
+    let lookups = 0;
+    const client = new AdbLockSettingsClient(adb, async () => answers[lookups++] ?? 0);
+    adb.responses.push(execResult("Pin set to '2468'\n" + EXIT(0)));
+    await client.setCredential("pin", "2468");
+    adb.responses.push(execResult(fixture("dumpsys-lock-settings-pin-automotive-api34.txt")));
+    const reading = await client.read();
+    expect(lookups).toBe(1);
+    expect(adb.calls[0].args.slice(3, 5)).toEqual(["--user", "10"]);
+    expect(reading).toEqual({ type: "pin", secure: true });
+  });
+
+  test("a failed lookup is not retried into a different user within the operation", async () => {
+    const adb = new FakeLockSettingsAdb();
+    let lookups = 0;
+    const client = new AdbLockSettingsClient(adb, async () => {
+      lookups += 1;
+      if (lookups === 1) {
+        throw new ActionableError("foreground user unreadable");
+      }
+      return 10;
+    });
+    await expect(client.read()).rejects.toThrow("foreground user unreadable");
+    await expect(client.setCredential("pin", "2468")).rejects.toThrow("foreground user unreadable");
+    expect(lookups).toBe(1);
+    expect(adb.calls).toEqual([]);
+  });
+
+  test("each client resolves its own user", async () => {
+    let lookups = 0;
+    const resolve = async () => {
+      lookups += 1;
+      return 10;
+    };
+    await new AdbLockSettingsClient(new FakeLockSettingsAdb(), resolve).setCredential("pin", "1");
+    await new AdbLockSettingsClient(new FakeLockSettingsAdb(), resolve).setCredential("pin", "1");
+    expect(lookups).toBe(2);
   });
 });

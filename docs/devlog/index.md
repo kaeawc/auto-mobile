@@ -13,6 +13,7 @@ To add one, copy the [template](template.md).
 | Date       | Kind     | Entry                                                                                                                              |
 | ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-11-23 | decision | [iOS Simulator network shaping through a boot-injected socket shaper](2026-11-23-ios-simulator-boot-injected-network-shaper.md)    |
+| 2026-11-23 | decision | [Keyboard control through CoreSimulator](2026-11-23-simulator-keyboard-coresimulator.md)                                           |
 | 2026-11-23 | decision | [Reach Simulator render overlays through osascript](2026-11-23-simulator-render-overlays-osascript.md)                             |
 | 2026-11-23 | decision | [Read Simulator network activity with host tools](2026-11-23-simulator-network-activity-host-tools.md)                             |
 | 2026-11-23 | decision | [Docs readability in the pre-push shell lane](2026-11-23-docs-readability-prepush.md)                                              |

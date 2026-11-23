@@ -6,6 +6,7 @@ import { DefaultMutationPriorReader } from "../../../src/server/deviceMutationPr
 import type { BootedDevice } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIosResidueInspector } from "../../fakes/FakeIosResidueInspector";
+import { FakeSimulatorKeyboardBridge } from "../../fakes/FakeSimulatorKeyboardBridge";
 import { FakeSimulatorRenderOverlayControl } from "../../fakes/FakeSimulatorRenderOverlayControl";
 
 const UDID = "12345678-1234-1234-1234-123456789ABC";
@@ -31,6 +32,7 @@ function harness(withOverlays = true) {
       privacyGrants: { readServiceRows: async () => [] },
       residue: new FakeIosResidueInspector(),
       storeKit: { clear: async () => {} },
+      keyboard: new FakeSimulatorKeyboardBridge(),
       trustStore: { readUserTrustedCertificates: async () => [] },
       files: { realpath: async (path) => path, remove: async () => {} },
       pasteboard: { assertSettled: () => {}, write: async () => {} },

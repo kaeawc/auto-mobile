@@ -34,6 +34,7 @@ describe("setDeviceState journal intents", () => {
       screenLock: { type: "pin", credential: "1234" },
       power: { batterySaver: true },
       deviceCondition: { faults: { thermal: "critical" } },
+      keyboard: { hardwareKeyboard: false },
     };
     const fields = Object.keys(setDeviceStateSchema.shape).filter((key) => !routing.has(key));
     expect(fields.toSorted()).toEqual(Object.keys(samples).toSorted());
@@ -42,6 +43,21 @@ describe("setDeviceState journal intents", () => {
       expect(entries.length).toBeGreaterThan(0);
       expect(keysOf(entries)).not.toContain("opaque:tool:setDeviceState");
     }
+  });
+
+  test("keyboard records one revertible row per setting it changes (#19017)", () => {
+    expect(
+      keysOf(
+        deviceToolMutations(
+          "setDeviceState",
+          { keyboard: { hardwareKeyboard: false, hardwareLayout: "iso", language: "fr_FR" } },
+          "ios",
+        ),
+      ),
+    ).toEqual(["keyboard:hardware", "keyboard:language"]);
+    expect(
+      keysOf(deviceToolMutations("setDeviceState", { keyboard: { language: "ja_JP" } }, "ios")),
+    ).toEqual(["keyboard:language"]);
   });
 
   test("power records one intent per control it changes", () => {

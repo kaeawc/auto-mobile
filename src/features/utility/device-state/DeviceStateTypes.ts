@@ -54,6 +54,8 @@ import type { ScreenLockDeviceStateDependencies } from "../screenLock/ScreenLock
 import type { PowerState, SetPowerInput } from "../power/PowerTypes";
 import type { PowerDeviceStateDependencies } from "../power/PowerOperations";
 import type { CurrentDisplayState } from "./CurrentDisplayState";
+import type { KeyboardState, SetKeyboardStateInput } from "./KeyboardState";
+import type { SimulatorKeyboardBridge } from "../../../utils/ios/SimulatorKeyboardBridge";
 import type { NetworkActivityState } from "../networkActivity/NetworkActivityTypes";
 import type { NetworkActivityReader } from "../networkActivity/NetworkActivityOperations";
 
@@ -77,6 +79,7 @@ export interface DeviceStateResult {
   sensors?: DeviceSensorsState;
   screenLock?: ScreenLockState;
   power?: PowerState;
+  keyboard?: KeyboardState;
   networkActivity?: NetworkActivityState;
   /** Requested fields skipped because the current platform cannot support them. */
   unsupported?: DeviceStateField[];
@@ -95,6 +98,7 @@ export interface SetDeviceStateInput {
   cameraPoster?: SetDeviceCameraPosterInput;
   screenLock?: SetScreenLockInput;
   power?: SetPowerInput;
+  keyboard?: SetKeyboardStateInput;
 }
 
 /**
@@ -135,13 +139,14 @@ const DEVICE_STATE_WRITABLE_FIELD_PRESENCE: Record<keyof SetDeviceStateInput, tr
   cameraPoster: true,
   screenLock: true,
   power: true,
+  keyboard: true,
 };
 
 /**
  * Every field `setState` can write. The keys come from {@link SetDeviceStateInput},
  * and a unit test compares them with the advertised `setDeviceState` schema.
- * Location and cameraPoster are write-only because neither the applied coordinate nor
- * the camera frame can be read back.
+ * Location, cameraPoster and keyboard are write-only because neither the applied coordinate,
+ * the camera frame, nor CoreSimulator's keyboard state can be read back.
  */
 export const DEVICE_STATE_WRITABLE_FIELDS: readonly (keyof SetDeviceStateInput)[] = Object.freeze(
   Object.keys(DEVICE_STATE_WRITABLE_FIELD_PRESENCE) as (keyof SetDeviceStateInput)[],
@@ -222,6 +227,8 @@ export interface DeviceStateDependencies {
   screenLock?: ScreenLockDeviceStateDependencies;
   /** Android battery, Doze, standby, saver and thermal seams (#14084); a session supplies `mutation`. */
   power?: PowerDeviceStateDependencies;
+  /** iOS Simulator hardware keyboard and keyboard language seam (#19017). */
+  simulatorKeyboard?: SimulatorKeyboardBridge;
   /** iOS Simulator per-process sockets and traffic (#19020); defaults to host ps/lsof/nettop. */
   networkActivity?: NetworkActivityReader;
 }
@@ -237,6 +244,7 @@ export type RequestedDeviceStates = Pick<
   | "cameraPoster"
   | "screenLock"
   | "power"
+  | "keyboard"
 >;
 
 export const EMPTY_STATE_SELECTION_ERROR = "At least one device state field must be included";
@@ -252,7 +260,8 @@ export function setDeviceStateInputIsEmpty(input: SetDeviceStateInput): boolean 
     !input.clock &&
     !input.cameraPoster &&
     !input.screenLock &&
-    !input.power
+    !input.power &&
+    !input.keyboard
   );
 }
 

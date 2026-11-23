@@ -408,6 +408,7 @@ nav:
           - "iOS Simulator audio isolation": how-it-works/plat/ios/simulator-audio-isolation.md
           - "iOS Simulator camera poster": how-it-works/plat/ios/simulator-camera-poster.md
           - "iOS Simulator network shaper": how-it-works/plat/ios/simulator-network-shaper.md
+          - "iOS Simulator keyboard": how-it-works/plat/ios/simulator-keyboard.md
           - "iOS Simulator render overlays": how-it-works/plat/ios/simulator-render-overlays.md
           - "iOS Simulator Dynamic Island and backlight": how-it-works/plat/ios/simulator-island-and-backlight.md
           - "iOS Simulator framebuffer capture": how-it-works/plat/ios/simulator-framebuffer-capture.md
@@ -519,6 +520,7 @@ nav:
       - "Index": devlog/index.md
       - "Entry template": devlog/template.md
       - "2026-11-23: iOS Simulator network shaping through a boot-injected socket shaper": devlog/2026-11-23-ios-simulator-boot-injected-network-shaper.md
+      - "2026-11-23: Keyboard control through CoreSimulator": devlog/2026-11-23-simulator-keyboard-coresimulator.md
       - "2026-11-23: Reach Simulator render overlays through osascript": devlog/2026-11-23-simulator-render-overlays-osascript.md
       - "2026-11-23: Read Simulator network activity with host tools": devlog/2026-11-23-simulator-network-activity-host-tools.md
       - "2026-11-23: Docs readability in the pre-push shell lane": devlog/2026-11-23-docs-readability-prepush.md

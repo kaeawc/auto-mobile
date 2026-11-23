@@ -1,4 +1,5 @@
 import { watchPairResultSchema } from "../../utils/ios-cmdline-tools/SimulatorPairs";
+import { HARDWARE_KEYBOARD_LAYOUTS } from "../../utils/ios/SimulatorKeyboardBridge";
 import { disabledResourcesSchema } from "../../utils/deviceResourceSchemas";
 import { z } from "zod/v4";
 import { deviceDescriptionSchema } from "../../daemon/deviceDescription";
@@ -328,6 +329,16 @@ const deviceStateOutputFields = {
       preconditions: z.array(z.string()).optional(),
       restoreOnRelease: z.boolean().optional(),
       errorCode: z.string().optional(),
+    })
+    .passthrough()
+    .optional(),
+  // iOS Simulator hardware keyboard and keyboard language (#19017).
+  keyboard: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      hardwareKeyboard: z.boolean().optional(),
+      hardwareLayout: z.enum(HARDWARE_KEYBOARD_LAYOUTS).optional(),
+      language: z.string().optional(),
     })
     .passthrough()
     .optional(),

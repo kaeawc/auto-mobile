@@ -20,6 +20,7 @@ import {
   runSessionLocationMutation,
 } from "./sessionLocation";
 import { z } from "zod/v4";
+import { keyboardStateInputSchema } from "../features/utility/device-state/KeyboardState";
 import {
   changeLocalizationResultSchema,
   setActiveDeviceResultSchema,
@@ -487,6 +488,11 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
           ),
         screenLock: screenLockInputSchema.optional().describe(SCREEN_LOCK_INPUT_DESCRIPTION),
         power: powerInputSchema.optional().describe(POWER_INPUT_DESCRIPTION),
+        keyboard: keyboardStateInputSchema
+          .optional()
+          .describe(
+            "iOS Simulator hardware keyboard (connect or disconnect, with its layout) and keyboard language. A session restores the hardware keyboard to connected and the previous keyboard and language lists on reset.",
+          ),
         deviceCondition: z.unknown().optional().describe(DEVICE_CONDITION_FIELD_DESCRIPTION),
       })
       .strict(),
@@ -501,7 +507,8 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
       values.cameraPoster !== undefined ||
       values.deviceCondition !== undefined ||
       values.screenLock !== undefined ||
-      values.power !== undefined,
+      values.power !== undefined ||
+      values.keyboard !== undefined,
     {
       message: "At least one device state field must be provided",
     },
@@ -920,6 +927,7 @@ export function registerUtilityTools(options: RegisterUtilityToolsOptions = {}) 
       cameraPoster: args.cameraPoster,
       screenLock: args.screenLock,
       power: args.power,
+      keyboard: args.keyboard,
     };
     const applyLocationTracked = (input: SetDeviceStateInput): Promise<DeviceStateResult> =>
       input.location && !capture.sessionManager

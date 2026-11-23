@@ -365,6 +365,7 @@ enum PrototypeRepeat {
         case .string("image")?:
             string("asset", &fields)
             string("url", &fields)
+        case .string("webView")?: string("url", &fields)
         case .string("listItem")?:
             string("headline", &fields)
             string("supporting", &fields)
@@ -530,7 +531,15 @@ extension PrototypeRepeat {
         {
             throw PrototypeLimits.violation("\(path).repeat", "Nested repeat is not supported")
         }
-        for name in ["onTap", "onLongPress", "onDoubleTap", "onEndReached", "onAppear"] {
+        for name in [
+            "onTap",
+            "onLongPress",
+            "onDoubleTap",
+            "onEndReached",
+            "onAppear",
+            "onNavigate",
+            "onBlockedNavigation",
+        ] {
             try validateEmitActions(fields[name], path: "\(path).\(name)", scope: scope)
         }
         if let linkify = fields["linkify"]?.objectFields {
@@ -971,6 +980,7 @@ struct PrototypeRepeatInstance {
     private func bindCondition(_ condition: JSONValue) -> JSONValue {
         guard case var .object(fields) = condition else { return condition }
         bindString("key", in: &fields)
+        bindString("equalsKey", in: &fields)
         if case let .array(keys)? = fields["valid"] {
             fields["valid"] = .array(keys.map { .string(interpolate($0.stringValue ?? "")) })
         } else {

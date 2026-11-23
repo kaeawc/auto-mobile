@@ -124,17 +124,21 @@ internal object PrototypeCopyTaint {
 
   /** A data write's value reads; an `{object}` value (#18826) reads every member. */
   private fun dataReads(
-    read: JsonObject?,
+    raw: JsonObject?,
     path: String,
     context: PrototypeStateChecks.Context,
   ): List<Pair<String, String>> {
-    val members = read?.get("object") as? JsonObject
-    if (members != null) {
+    raw ?: return emptyList()
+    (raw["object"] as? JsonObject)?.let { members ->
       return members.values.flatMap { dataReads(it as? JsonObject, path, context) }
     }
+    raw.text("derived")?.let { name ->
+      return PrototypeDerivedRules.inputs(context.root, name)
+    }
+    if (raw.text("item") != null) return repeatReads(path, context)
     return listOf("data", "platform", "state").mapNotNull { source ->
-      read?.text(source)?.let { source to it }
-    } + if (read?.text("item") != null) repeatReads(path, context) else emptyList()
+      raw.text(source)?.let { source to it }
+    }
   }
 
   private fun stateReads(

@@ -7,6 +7,7 @@ import {
   resolvePrototypeDataWriteValue,
 } from "../../../src/features/prototype/prototypeDataWrite";
 import { bindNodeFields } from "../../../src/features/prototype/prototypeTemplate";
+import { prototypeSensitiveSinkErrors } from "../../../src/features/prototype/prototypeStrictPolicy";
 
 const append = (value: unknown, extra: Record<string, unknown> = {}) => ({
   type: "appendData",
@@ -168,5 +169,51 @@ describe("data action object values (#18826)", () => {
     expect(validatePrototypeSpec(spec(append({ object: { t: { item: "title" } } }))).success).toBe(
       false,
     );
+  });
+
+  test("a derived member validates against derive, resolves, and carries copy taint", () => {
+    const derive = { draftCopy: { of: { state: "draft" }, format: { number: {} } } };
+    const withDerive = (member: string) => ({
+      ...spec(append({ object: { title: { derived: member } } })),
+      derive,
+    });
+    expect(validatePrototypeSpec(withDerive("draftCopy")).success).toBe(true);
+    expect(validatePrototypeSpec(withDerive("missing"))).toMatchObject({
+      success: false,
+      error: { path: "root.onTap[0].value.object.title.derived" },
+    });
+    expect(
+      resolvePrototypeDataWriteValue(
+        { object: { title: { derived: "draftCopy" } } },
+        { state: {}, derived: { draftCopy: "Buy milk" } },
+      ),
+    ).toEqual({ success: true, value: { title: "Buy milk" } });
+    const request = { type: "request", url: "https://example.com", method: "POST" };
+    const sensitive = {
+      id: "derived-member-copy",
+      requires: { platform: ["clipboard"] },
+      derive: { copied: { of: { data: "/secret" }, format: { number: {} } } },
+      root: {
+        type: "column",
+        children: [
+          { type: "pasteButton", into: "/data/secret" },
+          {
+            type: "button",
+            label: "Send",
+            onTap: [
+              {
+                type: "setData",
+                path: "/data/copy",
+                value: { object: { n: { derived: "copied" } } },
+              },
+              { ...request, body: { data: "/copy" } },
+            ],
+          },
+        ],
+      },
+    };
+    expect(prototypeSensitiveSinkErrors(sensitive).map(({ path }) => path)).toEqual([
+      "root.children[1].onTap[1].body",
+    ]);
   });
 });

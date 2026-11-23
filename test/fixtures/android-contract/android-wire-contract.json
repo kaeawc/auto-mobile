@@ -8893,6 +8893,12 @@
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "equalsKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeContainer": [

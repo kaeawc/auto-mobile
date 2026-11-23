@@ -5,11 +5,13 @@ protocol PrototypeEmitContextInputs {
     func state(_ key: String) -> JSONValue?
     func page(_ id: String) -> Int?
     func data(_ pointer: String) -> JSONValue?
+    func derived(_ name: String) -> JSONValue?
     func platform(_ pointer: String) -> JSONValue?
     func event(_ pointer: String) -> JSONValue?
 }
 
 extension PrototypeEmitContextInputs {
+    func derived(_: String) -> JSONValue? { nil }
     func platform(_: String) -> JSONValue? { nil }
     func event(_: String) -> JSONValue? { nil }
 }
@@ -64,7 +66,7 @@ struct PrototypeEmitContext: Decodable {
         }
         let valid: Bool = switch kind {
         case "state", "page": value.stringValue.map { !$0.isEmpty } ?? false
-        case "item": value.stringValue.map(PrototypeRepeat.isFieldName) ?? false
+        case "item", "derived": value.stringValue.map(PrototypeRepeat.isFieldName) ?? false
         case "index": value == .bool(true)
         case "data", "platform": value.stringValue.map(PrototypeDataPointer.isValid) ?? false
         // Only event bindings allow the empty pointer to select the whole decoded event.
@@ -73,7 +75,7 @@ struct PrototypeEmitContext: Decodable {
         default: false
         }
         guard valid else {
-            if ["state", "item", "index", "page", "data", "platform", "event", "value"].contains(kind) {
+            if ["state", "item", "index", "page", "data", "derived", "platform", "event", "value"].contains(kind) {
                 throw violation(PrototypeLimits.dataMemberPath(path, key: kind), "Unknown property")
             }
             throw violation("\(path).state", "Required property")
@@ -104,6 +106,7 @@ struct PrototypeEmitContext: Decodable {
             if let key = binding["state"]?.stringValue { return inputs.state(key) ?? .null }
             if let id = binding["page"]?.stringValue { return inputs.page(id).map { .number(Double($0)) } ?? .null }
             if let pointer = binding["data"]?.stringValue { return inputs.data(pointer) ?? .null }
+            if let name = binding["derived"]?.stringValue { return inputs.derived(name) ?? .null }
             if let pointer = binding["platform"]?.stringValue { return inputs.platform(pointer) ?? .null }
             if let pointer = binding["event"]?.stringValue { return inputs.event(pointer) ?? .null }
             return binding["value"] ?? .null

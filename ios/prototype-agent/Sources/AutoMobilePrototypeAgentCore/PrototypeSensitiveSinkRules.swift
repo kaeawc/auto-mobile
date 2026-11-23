@@ -53,8 +53,9 @@ enum PrototypeSensitiveSinkRules {
             }
         }
         guard !seeds.isEmpty || !platformTaints.isEmpty else { return ([], checks) }
+        let derive = spec["derive"]?.objectFields ?? [:]
         guard let taints = propagateCopies(
-            seeds, platformTaints: platformTaints, nodes: nodes, actions: actions, maxChecks: maxChecks
+            seeds, platformTaints: platformTaints, nodes: nodes, actions: actions, derive: derive, maxChecks: maxChecks
         ) else {
             return (
                 [.invalidSpec(path: "$", message: "Secure copy taint analysis exceeds 4000000 overlap checks")],
@@ -233,7 +234,11 @@ enum PrototypeSensitiveSinkRules {
     }
 
     /// Collect typed data reads and setState operands; literal value bindings stay opaque.
-    private static func copies(nodes: [PrototypeLocatedValue], actions: [PrototypeLocatedValue]) -> [Copy] {
+    private static func copies(
+        nodes: [PrototypeLocatedValue], actions: [PrototypeLocatedValue], derive: [String: JSONValue]
+    )
+        -> [Copy]
+    {
         let writes: Set<String> = ["setData", "appendData", "prependData", "upsertData"]
         return actions.flatMap { action -> [Copy] in
             let intoState = action.value["type"] == .string("setState")
@@ -253,6 +258,13 @@ enum PrototypeSensitiveSinkRules {
             if !intoState, let members = value?.objectFields?["object"]?.objectFields {
                 return members.keys.sorted().flatMap { name -> [Copy] in
                     let member = members[name]?.objectFields
+                    if let member, member["derived"] != nil {
+                        return PrototypeDerivedValidator.sources(member, entries: derive).flatMap { binding in
+                            ["data", "state"].compactMap { source in
+                                binding[source]?.stringValue.map { copy(source, $0) }
+                            }
+                        }
+                    }
                     for source in ["data", "state"] {
                         if let from = member?[source]?.stringValue { return [copy(source, from)] }
                     }
@@ -264,10 +276,11 @@ enum PrototypeSensitiveSinkRules {
             }
             let read = value?.objectFields
             if let from = read?["platform"]?.stringValue { return [copy("platform", from)] }
-            if !intoState {
-                for source in ["data", "state"] {
-                    if let from = read?[source]?.stringValue { return [copy(source, from)] }
+            if !intoState, let read {
+                let sources = PrototypeDerivedValidator.sources(read, entries: derive).flatMap { binding in
+                    ["data", "state"].compactMap { source in binding[source]?.stringValue.map { copy(source, $0) } }
                 }
+                if !sources.isEmpty { return sources }
             }
             let text = intoState ? value?.stringValue : nil
             var result = text.map {
@@ -314,7 +327,7 @@ enum PrototypeSensitiveSinkRules {
     /// Bucketed source reads keep literal chains linear; nil fails closed at the check cap.
     private static func propagateCopies(
         _ seeds: [String], platformTaints: [String], nodes: [PrototypeLocatedValue], actions: [PrototypeLocatedValue],
-        maxChecks: Int
+        derive: [String: JSONValue], maxChecks: Int
     )
         -> (data: [String], state: [String])?
     {
@@ -338,7 +351,7 @@ enum PrototypeSensitiveSinkRules {
         var dataBuckets: [[UInt16]: [Copy]] = [:]
         var stateBuckets: [[UInt16]: [Copy]] = [:]
         var templatedState: [Copy] = []
-        for copy in copies(nodes: nodes, actions: actions) {
+        for copy in copies(nodes: nodes, actions: actions, derive: derive) {
             switch copy.source {
             case "data": dataBuckets[firstSegment(copy.from), default: []].append(copy)
             case "state":
@@ -391,9 +404,21 @@ enum PrototypeSensitiveSinkRules {
         -> [Field]
     {
         var fields: [Field] = []
+        let derive = spec["derive"]?.objectFields ?? [:]
         func binding(_ raw: JSONValue?, path: String, text: Bool = false) {
             if text, let value = raw?.stringValue { fields.append(.init(text: value, path: path)) }
             guard let form = raw?.objectFields else { return }
+            if form["derived"] != nil {
+                for source in PrototypeDerivedValidator.sources(form, entries: derive) {
+                    if let pointer = source["data"]?.stringValue {
+                        fields.append(.init(text: pointer, path: "\(path).derived", pointerSource: "data"))
+                    }
+                    if includeState, let state = source["state"]?.stringValue {
+                        fields.append(.init(text: state, path: "\(path).derived", key: true))
+                    }
+                }
+                return
+            }
             if let state = form["state"]?.stringValue {
                 if includeState { fields.append(.init(text: state, path: "\(path).state", key: true)) }
                 return

@@ -183,8 +183,9 @@ final class PrototypeContractValidatorTests: XCTestCase {
                 XCTFail("ACCEPTED \(url.lastPathComponent)")
             } catch let PrototypeLoadError.invalidSpec(path, message) {
                 XCTAssertEqual(path, fixture.expectedPath, url.lastPathComponent)
-                if url.lastPathComponent.hasPrefix("share-") || url.lastPathComponent.hasPrefix("glass-"),
-                   let expected = fixture.expectedMessage { XCTAssertEqual(message, expected, url.lastPathComponent) }
+                if ["share-", "glass-", "derive-binding-", "derive-equals-"]
+                    .contains(where: url.lastPathComponent.hasPrefix),
+                    let expected = fixture.expectedMessage { XCTAssertEqual(message, expected, url.lastPathComponent) }
             }
         }
         print("Checked \(invalid.count) invalid fixtures; 0 exemptions")

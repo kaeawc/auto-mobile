@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { ActionableError } from "../../../models/ActionableError";
+import { SingleFlight } from "../../../utils/cache/SingleFlight";
 import { formatCommandError } from "../../../utils/CommandError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { DefaultFileSystem, type FileSystem } from "../../../utils/filesystem/DefaultFileSystem";
@@ -11,6 +12,11 @@ import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator
 import type { HostProcessRow } from "../../../models/HostProcessRow";
 import { readHostProcessTable } from "../../../devices/bootAdmission/readHostProcessTable";
 import { logger } from "../../../utils/logger";
+import { isProcessRunning } from "../../../utils/processLiveness";
+import {
+  ctrlProxyClientLifecycle,
+  type CtrlProxyClientLifecycle,
+} from "../../observe/ctrlProxyClientLifecycle";
 import { getTempDir } from "../../../utils/tempDir";
 import {
   DefaultIosNetworkShaperDylibProvider,
@@ -52,10 +58,18 @@ export interface IosNetworkShaperReadResult {
 export interface IosSimulatorNetworkShaper {
   /** Writes the profile, rebooting the simulator with the shaper first when it is not injected. */
   apply(udid: string, profile: IosNetworkShaperProfile): Promise<IosNetworkShaperApplyResult>;
-  /** Removes shaping without a reboot; the injected shaper passes traffic through. */
+  /**
+   * Removes shaping without a reboot by deleting the profile file: the injected
+   * shaper passes traffic through, and later reads skip the process scan.
+   */
   clear(udid: string): Promise<void>;
-  /** Cheap when AutoMobile never shaped the simulator: no profile file, no process scan. */
+  /** Cheap when no profile is active: no profile file, no process scan. */
   read(udid: string): Promise<IosNetworkShaperReadResult>;
+  /**
+   * Deletes every profile whose writing process is gone, unshaping each simulator
+   * a crashed or stopped daemon left shaped; returns the UDIDs cleared.
+   */
+  clearOrphaned(): Promise<string[]>;
 }
 
 /** The environment variable the shaper reads its profile path from. */
@@ -65,7 +79,13 @@ const COMMAND_TIMEOUT_MS = 60_000;
 
 type ShaperFileSystem = Pick<
   FileSystem,
-  "existsSync" | "readFile" | "writeFile" | "ensureDir" | "rename" | "unlink"
+  "existsSync" | "readFile" | "writeFile" | "ensureDir" | "rename" | "unlink" | "readdir"
+>;
+
+/** The CtrlProxy client fence a shaped reboot runs around, as other simulator stops do. */
+export type ShaperRebootLifecycle = Pick<
+  CtrlProxyClientLifecycle,
+  "retireForShutdown" | "resumeAfterDeviceStart"
 >;
 
 export interface IosSimulatorNetworkShaperDependencies {
@@ -76,12 +96,18 @@ export interface IosSimulatorNetworkShaperDependencies {
   env?: NodeJS.ProcessEnv;
   /** Where per-simulator profile files live. */
   profileDirectory?: () => string;
+  lifecycle?: ShaperRebootLifecycle;
+  /** The pid recorded as a profile's owner; defaults to this process. */
+  ownerPid?: number;
+  isProcessRunning?: (pid: number) => boolean;
 }
 
 export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShaper {
   private readonly runner: HostCommandExecutor;
   private readonly fs: ShaperFileSystem;
   private readonly env: NodeJS.ProcessEnv;
+  /** One injection check and reboot per simulator, however many applies race. */
+  private readonly injections = new SingleFlight<string, boolean>();
 
   constructor(private readonly deps: IosSimulatorNetworkShaperDependencies = {}) {
     this.runner = deps.runner ?? new DefaultHostCommandExecutor();
@@ -90,8 +116,12 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
   }
 
   profilePath(udid: string): string {
+    return join(this.profilesDirectory(), `${udid.toUpperCase()}.conf`);
+  }
+
+  private profilesDirectory(): string {
     const directory = (this.deps.profileDirectory ?? (() => getTempDir("ios-network-shaper")))();
-    return join(directory, "profiles", `${udid.toUpperCase()}.conf`);
+    return join(directory, "profiles");
   }
 
   async apply(
@@ -102,18 +132,65 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
     const profilePath = this.profilePath(udid);
     // Written first so the condition holds from the first process of a shaped boot.
     await this.writeProfile(profilePath, profile);
-    if (await this.isInjected(udid, dylib, profilePath)) {
-      return { rebooted: false };
-    }
-    await this.rebootShaped(udid, dylib, profilePath);
-    return { rebooted: true };
+    await this.fs.writeFile(ownerPath(profilePath), `${this.deps.ownerPid ?? process.pid}\n`);
+    // A concurrent apply joins this flight instead of rebooting the simulator a second time.
+    const rebooted = await this.injections.run(udid.toUpperCase(), async () => {
+      if (await this.isInjected(udid, dylib, profilePath)) {
+        return false;
+      }
+      await this.rebootShaped(udid, dylib, profilePath);
+      return true;
+    });
+    return { rebooted };
   }
 
   async clear(udid: string): Promise<void> {
     const profilePath = this.profilePath(udid);
-    if (this.fs.existsSync(profilePath)) {
-      await this.writeProfile(profilePath, UNSHAPED_PROFILE);
+    await this.removeProfile(profilePath);
+  }
+
+  private async removeProfile(profilePath: string): Promise<void> {
+    // The shaper treats a missing profile file as unshaped.
+    for (const path of [profilePath, ownerPath(profilePath)]) {
+      if (this.fs.existsSync(path)) {
+        await this.fs.unlink(path);
+      }
     }
+  }
+
+  async clearOrphaned(): Promise<string[]> {
+    const directory = this.profilesDirectory();
+    if (!this.fs.existsSync(directory)) {
+      return [];
+    }
+    const names = (await this.fs.readdir(directory)).filter((name) => name.endsWith(".conf"));
+    const cleared: string[] = [];
+    for (const name of names) {
+      const profilePath = join(directory, name);
+      try {
+        if (await this.ownerIsAlive(profilePath)) {
+          continue;
+        }
+        await this.removeProfile(profilePath);
+        cleared.push(name.slice(0, -".conf".length));
+      } catch (error) {
+        logger.warn(`[NetworkShaper] could not clear orphaned profile ${name}`, error);
+      }
+    }
+    return cleared;
+  }
+
+  /** A profile with no readable owner pid is orphaned; a reused pid keeps it (the safe side). */
+  private async ownerIsAlive(profilePath: string): Promise<boolean> {
+    const owner = ownerPath(profilePath);
+    if (!this.fs.existsSync(owner)) {
+      return false;
+    }
+    const pid = Number.parseInt((await this.fs.readFile(owner)).trim(), 10);
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return false;
+    }
+    return (this.deps.isProcessRunning ?? ((value: number) => isProcessRunning(value)))(pid);
   }
 
   async read(udid: string): Promise<IosNetworkShaperReadResult> {
@@ -176,6 +253,22 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
   }
 
   private async rebootShaped(udid: string, dylib: string, profilePath: string): Promise<void> {
+    const lifecycle = this.deps.lifecycle ?? ctrlProxyClientLifecycle;
+    // Fence the CtrlProxy client so the runner's exit does not start a reconnect mid-reboot.
+    await lifecycle.retireForShutdown("ios", udid);
+    try {
+      await this.shutdownAndBootShaped(udid, dylib, profilePath);
+    } finally {
+      // The next CtrlProxy call reconnects to the freshly booted simulator.
+      lifecycle.resumeAfterDeviceStart("ios", udid);
+    }
+  }
+
+  private async shutdownAndBootShaped(
+    udid: string,
+    dylib: string,
+    profilePath: string,
+  ): Promise<void> {
     try {
       await this.runner.executeCommand("xcrun", ["simctl", "shutdown", udid], {
         timeoutMs: COMMAND_TIMEOUT_MS,
@@ -216,13 +309,10 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
   }
 }
 
-const UNSHAPED_PROFILE: IosNetworkShaperProfile = {
-  offline: false,
-  delayMs: 0,
-  downloadKbps: 0,
-  uploadKbps: 0,
-  packetLossPercent: 0,
-};
+/** The pid of the process that wrote a profile, beside it. */
+function ownerPath(profilePath: string): string {
+  return profilePath.replace(/\.conf$/, ".owner");
+}
 
 /** The shaper's `key=value` profile format. */
 export function formatShaperProfile(profile: IosNetworkShaperProfile): string {

@@ -36,7 +36,8 @@
     "mcp-skills",
     "ios/CameraPosterInjection/Injection/CameraPosterInjection.m",
     "ios/NetworkShaper/netshape.c",
-    "ios/NetworkShaper/libdns_services.tbd"
+    "ios/NetworkShaper/libdns_services.tbd",
+    "ios/NetworkShaper/LICENSE"
   ],
   "main": "dist/src/index.js",
   "publishConfig": {

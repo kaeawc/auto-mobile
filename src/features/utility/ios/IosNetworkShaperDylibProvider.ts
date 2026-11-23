@@ -10,6 +10,7 @@ import {
   type HostCommandExecutor,
 } from "../../../utils/HostCommandExecutor";
 import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator";
+import { AMBIENT_ENV, readEnvTrimmed } from "../../../config/env";
 import { logger } from "../../../utils/logger";
 import { getTempDir } from "../../../utils/tempDir";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../../utils/workingDirectory";
@@ -28,6 +29,8 @@ export const IOS_NETWORK_SHAPER_DNS_STUB = "ios/NetworkShaper/libdns_services.tb
 export const IOS_NETWORK_SHAPER_ARCHS = ["arm64", "x86_64"] as const;
 export const IOS_NETWORK_SHAPER_DYLIB_NAME = "libAMNetworkShaper.dylib";
 const BUILD_FLAVOR = "sim-universal";
+/** The repository's Xcode pin (`select_pinned_xcode`), present in a repo checkout only. */
+export const IOS_XCODE_PIN_SCRIPT = "scripts/ios/xcode_version.sh";
 const XCODE_HINT = "Install Xcode and run xcode-select --install";
 
 type ShaperFileSystem = Pick<
@@ -45,12 +48,20 @@ export interface IosNetworkShaperDylibDependencies {
   rootCandidates?: string[];
 }
 
+interface ShaperToolchain {
+  /** The build environment with the selected DEVELOPER_DIR, or undefined for the active Xcode. */
+  env?: NodeJS.ProcessEnv;
+  /** clang's path and the simulator SDK build, folded into the build cache key. */
+  identity: string;
+}
+
 /** Source-addressed, atomic simulator dylib builds; no compiler runs until a shaped boot. */
 export class DefaultIosNetworkShaperDylibProvider implements IosNetworkShaperDylibProvider {
   private readonly fs: ShaperFileSystem;
   private readonly runner: HostCommandExecutor;
   private readonly env: NodeJS.ProcessEnv;
   private readonly flights = new SingleFlight<string, string>();
+  private toolchain?: Promise<ShaperToolchain>;
 
   constructor(private readonly deps: IosNetworkShaperDylibDependencies = {}) {
     this.fs = deps.fileSystem ?? new DefaultFileSystem();
@@ -61,9 +72,12 @@ export class DefaultIosNetworkShaperDylibProvider implements IosNetworkShaperDyl
   async ensure(): Promise<string> {
     try {
       const { source, stub } = await this.findSources();
+      const toolchain = await this.resolveToolchain(source);
       const digest = createHash("sha256")
         .update(await this.fs.readFileBuffer(source))
         .update(await this.fs.readFileBuffer(stub))
+        // A different Xcode or simulator SDK is a different build.
+        .update(toolchain.identity)
         .digest("hex")
         .slice(0, 12);
       const directory = join(
@@ -71,7 +85,9 @@ export class DefaultIosNetworkShaperDylibProvider implements IosNetworkShaperDyl
         `${digest}-${BUILD_FLAVOR}`,
       );
       const output = join(directory, IOS_NETWORK_SHAPER_DYLIB_NAME);
-      return await this.flights.run(output, () => this.build({ source, stub }, directory, output));
+      return await this.flights.run(output, () =>
+        this.build({ source, stub }, toolchain, directory, output),
+      );
     } catch (error) {
       throw toActionableError(error, "Unable to prepare the iOS Simulator network shaper dylib");
     }
@@ -105,26 +121,85 @@ export class DefaultIosNetworkShaperDylibProvider implements IosNetworkShaperDyl
     );
   }
 
-  private async build(
-    { source, stub }: { source: string; stub: string },
-    directory: string,
-    output: string,
-  ): Promise<string> {
-    if (await this.isFile(output)) {
-      return output;
-    }
+  /** Memoized per provider; a failed resolution is retried by the next call. */
+  private resolveToolchain(source: string): Promise<ShaperToolchain> {
+    this.toolchain ??= this.readToolchain(source).catch((error: unknown) => {
+      this.toolchain = undefined;
+      throw error;
+    });
+    return this.toolchain;
+  }
+
+  /**
+   * The Xcode the build uses: the caller's DEVELOPER_DIR, else the repository pin in a repo
+   * checkout (the same `select_pinned_xcode` local build scripts use), else the active Xcode.
+   */
+  private async readToolchain(source: string): Promise<ShaperToolchain> {
+    const developerDir =
+      readEnvTrimmed(AMBIENT_ENV.DEVELOPER_DIR, this.env) ||
+      (await this.pinnedDeveloperDir(source));
+    const env = developerDir ? { ...this.env, DEVELOPER_DIR: developerDir } : undefined;
+    const options = env ? { env } : undefined;
     try {
-      await this.runner.executeCommand("xcrun", ["--sdk", "iphonesimulator", "--find", "clang"]);
+      const clang = await this.runner.executeCommand(
+        "xcrun",
+        ["--sdk", "iphonesimulator", "--find", "clang"],
+        options,
+      );
+      const sdk = await this.runner.executeCommand(
+        "xcrun",
+        ["--sdk", "iphonesimulator", "--show-sdk-build-version"],
+        options,
+      );
+      return { env, identity: `${clang.stdout.trim()}\n${sdk.stdout.trim()}` };
     } catch (error) {
       throw new ActionableError(
         `iOS network shaper compiler unavailable. ${XCODE_HINT}. ${formatCommandError(error, { command: "xcrun" })}`,
         { cause: error },
       );
     }
+  }
+
+  private async pinnedDeveloperDir(source: string): Promise<string | undefined> {
+    const script = join(dirname(dirname(dirname(source))), IOS_XCODE_PIN_SCRIPT);
+    if (!(await this.isFile(script))) {
+      return undefined;
+    }
+    try {
+      // Unset, so the pin is chosen rather than echoed back.
+      const env = { ...this.env };
+      delete env.DEVELOPER_DIR;
+      const result = await this.runner.executeCommand(
+        "bash",
+        [
+          "-c",
+          'source "$1" && select_pinned_xcode 2>/dev/null; printf %s "${DEVELOPER_DIR:-}"',
+          "xcode-pin",
+          script,
+        ],
+        { env },
+      );
+      return result.stdout.trim() || undefined;
+    } catch (error) {
+      // The active Xcode still builds a working shaper; the cache key records which one.
+      logger.warn(`[NetworkShaper] Xcode pin lookup failed; using the active Xcode`, error);
+      return undefined;
+    }
+  }
+
+  private async build(
+    { source, stub }: { source: string; stub: string },
+    toolchain: ShaperToolchain,
+    directory: string,
+    output: string,
+  ): Promise<string> {
+    if (await this.isFile(output)) {
+      return output;
+    }
     await this.fs.ensureDir(directory);
     const partial = `${output}.${(this.deps.idGenerator ?? defaultIdGenerator).next()}.tmp`;
     try {
-      await this.runBuildCommand("xcrun", [
+      await this.runBuildCommand(toolchain, "xcrun", [
         "--sdk",
         "iphonesimulator",
         "clang",
@@ -141,7 +216,7 @@ export class DefaultIosNetworkShaperDylibProvider implements IosNetworkShaperDyl
         "-o",
         partial,
       ]);
-      await this.runBuildCommand("codesign", ["-f", "-s", "-", partial]);
+      await this.runBuildCommand(toolchain, "codesign", ["-f", "-s", "-", partial]);
       await this.fs.rename(partial, output);
       return output;
     } finally {
@@ -156,9 +231,17 @@ export class DefaultIosNetworkShaperDylibProvider implements IosNetworkShaperDyl
     }
   }
 
-  private async runBuildCommand(command: string, args: string[]): Promise<void> {
+  private async runBuildCommand(
+    toolchain: ShaperToolchain,
+    command: string,
+    args: string[],
+  ): Promise<void> {
     try {
-      await this.runner.executeCommand(command, args);
+      await this.runner.executeCommand(
+        command,
+        args,
+        toolchain.env ? { env: toolchain.env } : undefined,
+      );
     } catch (error) {
       throw new ActionableError(
         `iOS network shaper compile/sign failed. ${XCODE_HINT}. ${formatCommandError(error, { command, args })}`,

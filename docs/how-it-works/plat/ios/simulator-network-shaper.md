@@ -10,7 +10,10 @@ auto-mobile-simulator `sim-netshape` crate. Background:
 - `IosNetworkShaperDylibProvider` compiles `netshape.c` with the simulator SDK's clang (arm64 and
   x86_64, linked against `libdns_services.tbd`, a stub for the runtime's private resolver
   library), signs it ad hoc and caches it under
-  `<data dir>/ios-network-shaper/<sha256 of both files>-sim-universal/`.
+  `<data dir>/ios-network-shaper/<hash>-sim-universal/`. The hash covers both files, clang's path
+  and the simulator SDK build.
+- The Xcode is the caller's `DEVELOPER_DIR`, else, in a repo checkout, the one
+  `select_pinned_xcode` in `scripts/ios/xcode_version.sh` picks, else the active Xcode.
 - `IosSimulatorNetworkShaper.apply` writes the profile to
   `<data dir>/ios-network-shaper/profiles/<UDID>.conf` (temp file plus rename), then checks
   whether the simulator's `launchd_sim` carries the shaper. It reads that process's environment
@@ -22,6 +25,9 @@ auto-mobile-simulator `sim-netshape` crate. Background:
   every process in the device loads the shaper, including WebKit's networking extension. A boot
   that does not carry it fails the call.
 - A new shaper build has a new path, so the next apply reboots once more.
+- The injection check and reboot run in a per-UDID `SingleFlight`, so concurrent applies share one
+  reboot. The reboot retires the CtrlProxy client first and re-admits it after boot
+  (`ctrlProxyClientLifecycle`), as other simulator stops do.
 
 ## The shaper
 
@@ -49,10 +55,15 @@ percent of UDP datagrams.
 - A device-wide degrade in a session registers the same `none` restore slot as an Android
   emulator degrade (`shouldRegisterNetworkRestore`). Release, rebind and TTL expiry restore through
   `defaultNetworkConditionRestorer`, which picks the iOS path for a simulator UDID.
-- `clear` rewrites the profile as unshaped and never reboots; the simulator keeps the inert shaper
-  until its next plain boot.
+- `clear` deletes the profile and owner files and never reboots; the simulator keeps the inert shaper until
+  its next plain boot.
 - Reads (`getDeviceState`) report the shaper only when a profile file exists and `launchd_sim`
-  carries it; otherwise they fall back to the network-extension state.
+  carries it; otherwise they fall back to the network-extension state. With no profile file they
+  run no process scan.
+- `apply` writes the daemon's pid to `<UDID>.owner` beside the profile. The restore slot lives in
+  session memory, so at startup, after rehydration, the daemon deletes every profile whose owner
+  pid is not running (`sweepStaleNetworkShaperProfiles`). That unshapes simulators a crashed or
+  stopped daemon left shaped and keeps a live peer's on a shared data dir.
 
 ## Limits
 

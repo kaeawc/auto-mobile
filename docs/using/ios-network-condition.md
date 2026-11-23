@@ -41,6 +41,8 @@ The first degrading call on a simulator shuts it down and boots it again with th
 result has `rebooted: true` and a `warning`; running apps were closed, so launch the app under
 test again. Later calls change the condition within a quarter second, with no reboot
 (`rebooted: false`).
+Two first calls at the same time share one reboot. AutoMobile reconnects to the simulator on the
+next call.
 
 ## Result
 
@@ -52,6 +54,12 @@ The result reports `backend: "socket-shaper"`, `scope: "device"`, `appliedProfil
 
 A session restores the normal network when it is released or rebinds. With `expiresInSeconds`,
 the condition is reset when the time runs out. Outside a session, send `reset: true` yourself.
+
+If the AutoMobile daemon stops or crashes while a simulator is shaped, the next daemon to start
+on the same data directory resets that simulator to the normal network. A condition set by
+another daemon that is still running is left alone.
+
+A reset stops shaping, so `getDeviceState` reports the one-app rules again.
 
 ## One app instead of the whole simulator
 

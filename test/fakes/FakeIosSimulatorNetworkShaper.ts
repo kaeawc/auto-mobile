@@ -32,15 +32,17 @@ export class FakeIosSimulatorNetworkShaper implements IosSimulatorNetworkShaper 
 
   async clear(udid: string): Promise<void> {
     this.calls.push({ op: "clear", udid });
-    if (this.profiles.has(udid)) {
-      this.profiles.set(udid, {
-        offline: false,
-        delayMs: 0,
-        downloadKbps: 0,
-        uploadKbps: 0,
-        packetLossPercent: 0,
-      });
-    }
+    // Like the real shaper: the profile is removed, so reads fall through to per-app rules.
+    this.profiles.delete(udid);
+  }
+
+  /** Simulators whose profile's writer is still running; the rest are orphaned. */
+  readonly liveOwners = new Set<string>();
+
+  async clearOrphaned(): Promise<string[]> {
+    const cleared = [...this.profiles.keys()].filter((udid) => !this.liveOwners.has(udid));
+    cleared.forEach((udid) => this.profiles.delete(udid));
+    return cleared;
   }
 
   async read(udid: string): Promise<IosNetworkShaperReadResult> {

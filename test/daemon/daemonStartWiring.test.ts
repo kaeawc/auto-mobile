@@ -369,6 +369,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
         events.push("http");
       },
       sweepStaleAppearanceConfigs: async () => {},
+      sweepStaleNetworkShaperProfiles: async () => {},
       redriveRecorderTeardowns: async () => {
         events.push("redrive");
         return true;
@@ -418,6 +419,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       publishHttpToken: () => {},
       startHttpIngress: async () => {},
       sweepStaleAppearanceConfigs: async () => {},
+      sweepStaleNetworkShaperProfiles: async () => {},
       redriveRecorderTeardowns: async () => true,
       bindControlSocket: bind,
       startServicesAfterSocketBind: async () => {
@@ -459,6 +461,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       openTerminalReleaseJournal: () => new NoopTerminalReleaseJournal(),
       startHttpIngress,
       sweepStaleAppearanceConfigs: async () => {},
+      sweepStaleNetworkShaperProfiles: async () => {},
       redriveRecorderTeardowns: async () => true,
       bindControlSocket: async () =>
         new UnixSocketServer("/memory/unbound.sock", DaemonState.getInstance()),
@@ -750,6 +753,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
         events.push("ingress");
       },
       sweepStaleAppearanceConfigs: async () => {},
+      sweepStaleNetworkShaperProfiles: async () => {},
       redriveRecorderTeardowns: async () => true,
       bindControlSocket: async () => {
         expect(tokenStore.read()).toBe("incumbent-token");

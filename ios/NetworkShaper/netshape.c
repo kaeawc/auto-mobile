@@ -1,4 +1,5 @@
 // Vendored from kaeawc/auto-mobile-simulator crates/sim-netshape/native/netshape.c (MIT, commit 6323130).
+// Copyright (c) 2024 Jason Pearson. MIT License: see LICENSE beside this file.
 // AutoMobile compiles it on demand (IosNetworkShaperDylibProvider) and boot-injects it (#19045).
 // sim-rs network shaper: a dylib injected into iOS-simulator processes (DYLD_INSERT_LIBRARIES).
 // It interposes BSD socket calls and applies a profile read from the file named by

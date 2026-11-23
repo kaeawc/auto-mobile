@@ -6,6 +6,7 @@ import {
   formatShaperProfile,
   parseShaperProfile,
   type IosNetworkShaperProfile,
+  type ShaperRebootLifecycle,
 } from "../../../../src/features/utility/ios/IosSimulatorNetworkShaper";
 import { parsePsSnapshot } from "../../../../src/devices/bootAdmission/psSnapshot";
 import { ActionableError } from "../../../../src/models/ActionableError";
@@ -19,6 +20,7 @@ const DYLIB = resolve(
   "/data/ios-network-shaper/ab77451dc09c-sim-universal/libAMNetworkShaper.dylib",
 );
 const PROFILE = join(resolve("/data/ios-network-shaper"), "profiles", `${UDID}.conf`);
+const OWNER = PROFILE.replace(/\.conf$/, ".owner");
 const LAUNCHD = `launchd_sim /devices/${UDID}/data/var/run/launchd_bootstrap.plist`;
 const LISTING = [
   "    1     0  12000   0.0 /sbin/launchd",
@@ -72,15 +74,28 @@ class SimulatorHost extends FakeHostCommandExecutor {
 function setup() {
   const fs = new FakeFileSystem();
   const runner = new SimulatorHost();
+  const lifecycleEvents: string[] = [];
+  const livePids = new Set([4242]);
+  const lifecycle: ShaperRebootLifecycle = {
+    retireForShutdown: async (platform, udid) => {
+      lifecycleEvents.push(`retire ${platform} ${udid}`);
+    },
+    resumeAfterDeviceStart: (platform, udid) => {
+      lifecycleEvents.push(`resume ${platform} ${udid}`);
+    },
+  };
   const shaper = new DefaultIosSimulatorNetworkShaper({
+    lifecycle,
     runner,
     fileSystem: fs,
     idGenerator: new FakeIdGenerator(),
     env: { PATH: "/usr/bin" },
     dylibProvider: { ensure: async () => DYLIB },
     profileDirectory: () => resolve("/data/ios-network-shaper"),
+    ownerPid: 4242,
+    isProcessRunning: (pid) => livePids.has(pid),
   });
-  return { fs, runner, shaper };
+  return { fs, runner, shaper, lifecycleEvents, livePids };
 }
 
 function simctlCalls(runner: FakeHostCommandExecutor) {
@@ -129,20 +144,73 @@ test("a failed boot is reported with the simctl command", async () => {
   await expect(h.shaper.apply(UDID, THREE_G)).rejects.toThrow("Rebooting the iOS Simulator");
 });
 
-test("clear writes an unshaped profile only when one exists, and never reboots", async () => {
+test("clear removes the profile, so a later read reports nothing and scans no processes", async () => {
   const h = setup();
   await h.shaper.clear(UDID);
   expect(h.fs.existsSync(PROFILE)).toBe(false);
   h.fs.setFile(PROFILE, formatShaperProfile(THREE_G));
+  h.runner.shaped = true;
   await h.shaper.clear(UDID);
-  expect(parseShaperProfile(await h.fs.readFile(PROFILE))).toEqual({
-    offline: false,
-    delayMs: 0,
-    downloadKbps: 0,
-    uploadKbps: 0,
-    packetLossPercent: 0,
-  });
+  expect(h.fs.existsSync(PROFILE)).toBe(false);
+  // The injected shaper still runs, but with no profile file it passes traffic through.
+  expect(await h.shaper.read(UDID)).toEqual({ injected: false });
   expect(h.runner.getExecutedCalls()).toEqual([]);
+});
+
+test("concurrent first applies on one simulator reboot it once", async () => {
+  const h = setup();
+  const results = await Promise.all([
+    h.shaper.apply(UDID, THREE_G),
+    h.shaper.apply(UDID, { ...THREE_G, offline: true }),
+  ]);
+  expect(results).toEqual([{ rebooted: true }, { rebooted: true }]);
+  expect(simctlCalls(h.runner).map(({ args }) => args[1])).toEqual([
+    "shutdown",
+    "boot",
+    "bootstatus",
+  ]);
+  // The later request's profile is the one in effect.
+  expect(parseShaperProfile(await h.fs.readFile(PROFILE)).offline).toBe(true);
+  // A later apply sees the injected boot and changes the profile live.
+  expect(await h.shaper.apply(UDID, THREE_G)).toEqual({ rebooted: false });
+  expect(simctlCalls(h.runner)).toHaveLength(3);
+});
+
+test("a shaped reboot fences the CtrlProxy client and re-admits it after boot", async () => {
+  const h = setup();
+  await h.shaper.apply(UDID, THREE_G);
+  expect(h.lifecycleEvents).toEqual([`retire ios ${UDID}`, `resume ios ${UDID}`]);
+  const failed = setup();
+  failed.runner.setCommandError("simctl boot", new Error("Unable to boot device"));
+  await expect(failed.shaper.apply(UDID, THREE_G)).rejects.toThrow("Rebooting");
+  expect(failed.lifecycleEvents).toEqual([`retire ios ${UDID}`, `resume ios ${UDID}`]);
+});
+
+test("clearOrphaned deletes only profiles whose writing process is gone", async () => {
+  const h = setup();
+  expect(await h.shaper.clearOrphaned()).toEqual([]);
+  await h.shaper.apply(UDID, THREE_G);
+  expect(await h.fs.readFile(OWNER)).toBe("4242\n");
+  const dir = join(resolve("/data/ios-network-shaper"), "profiles");
+  const peer = "7B3A3792-DB53-4654-BA94-27A1D305C3B7";
+  const ownerless = "0F0E0D0C-0000-4000-8000-000000000001";
+  h.fs.setFile(join(dir, `${peer}.conf`), "offline=1\n");
+  h.fs.setFile(join(dir, `${peer}.owner`), "777\n");
+  h.fs.setFile(join(dir, `${ownerless}.conf`), "offline=1\n");
+  h.fs.setFile(join(dir, "notes.txt"), "keep");
+  h.livePids.add(777);
+  const calls = h.runner.getExecutedCalls().length;
+
+  // This daemon (4242) and a live peer (777) still own theirs; only the ownerless one goes.
+  expect(await h.shaper.clearOrphaned()).toEqual([ownerless]);
+  // After a crash, 4242 is gone: the next daemon unshapes its simulator.
+  h.livePids.delete(4242);
+  expect(await h.shaper.clearOrphaned()).toEqual([UDID]);
+  expect(h.fs.existsSync(PROFILE)).toBe(false);
+  expect(h.fs.existsSync(OWNER)).toBe(false);
+  expect(h.fs.existsSync(join(dir, `${peer}.conf`))).toBe(true);
+  expect(h.fs.existsSync(join(dir, "notes.txt"))).toBe(true);
+  expect(h.runner.getExecutedCalls()).toHaveLength(calls);
 });
 
 test("read skips the process scan for a simulator AutoMobile never shaped", async () => {

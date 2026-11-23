@@ -250,8 +250,26 @@ describe("DeviceState iOS Simulator networkCondition (#10590, #10264)", () => {
     expect(reset.success).toBe(true);
     expect(reset.networkCondition).toMatchObject({ appliedProfile: "none", verified: true });
     expect(shaper.calls.map(({ op }) => op)).toEqual(["apply", "clear"]);
-    expect(shaper.profiles.get(iosSimulator.deviceId)?.offline).toBe(false);
+    expect(shaper.profiles.get(iosSimulator.deviceId)).toBeUndefined();
     expect(bridge.statusCalls).toBe(0);
+  });
+
+  test("after a device-wide reset, reads report this simulator's per-app rules again", async () => {
+    const bridge = new FakeNetworkFilterBridge();
+    bridge.setState("ready");
+    const shaper = new FakeIosSimulatorNetworkShaper();
+    const state = () => deviceState(bridge, context(), iosSimulator, shaper);
+
+    await state().setState({ networkCondition: { profile: "3g" } });
+    await state().setState({ networkCondition: { reset: true } });
+    await state().setState({ networkCondition: { profile: "offline", appId: APP } });
+    const read = await state().getState(["networkCondition"]);
+
+    expect(read.networkCondition).toMatchObject({
+      backend: "network-extension",
+      scope: "app",
+      rules: [{ appId: APP, profile: "offline", revision: 1, owner: "session-a" }],
+    });
   });
 
   test("device-wide packet loss alone is applied: the shaper enforces it", async () => {

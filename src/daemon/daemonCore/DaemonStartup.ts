@@ -8,6 +8,8 @@ import type {
   DaemonLifecycleState,
 } from "./DaemonCoreState";
 import { sweepStaleAppearanceConfigs } from "../appearanceConfigStartupSweep";
+import { sweepStaleNetworkShaperProfiles } from "../networkShaperStartupSweep";
+import { defaultIosSimulatorNetworkShaper } from "../../features/utility/ios/IosSimulatorNetworkShaper";
 import { createServer as createHttpServer } from "node:http";
 import { logger } from "../../utils/logger";
 import { setLogContextProvider } from "../../utils/logContext";
@@ -352,6 +354,9 @@ export class DaemonStartup {
           getPersistedSession: (sessionUuid) => this.host.readPersistedSession(sessionUuid),
         });
       },
+      sweepStaleNetworkShaperProfiles: async () => {
+        await sweepStaleNetworkShaperProfiles(defaultIosSimulatorNetworkShaper);
+      },
       redriveRecorderTeardowns: async () => {
         try {
           const state = await this.host.initializeRecordingTeardownRedriveState();
@@ -539,6 +544,7 @@ export class DaemonStartup {
       );
       await this.host.reownRehydratedManagedExecutions(rehydration.rehydrated);
       await this.host.startHost().sweepStaleAppearanceConfigs(rehydration);
+      await this.host.startHost().sweepStaleNetworkShaperProfiles();
     } catch (error) {
       logger.warn(`[Daemon] Session rehydration failed; continuing startup: ${error}`);
     }

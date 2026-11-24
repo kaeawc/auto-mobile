@@ -444,8 +444,10 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
     if (env === undefined || !env.includes(`${IOS_NETWORK_SHAPER_PROFILE_ENV}=${profilePath}`)) {
       return false;
     }
-    const inserted = parseDyldInsertLibraries(env).split(":");
-    return libraries.every((library) => inserted.includes(library));
+    // Match each library between ":" delimiters rather than splitting on ":", so a path that itself
+    // contains ":" (a Windows drive letter in tests) still matches exactly, and a prefix never does.
+    const inserted = `:${parseDyldInsertLibraries(env)}:`;
+    return libraries.every((library) => inserted.includes(`:${library}:`));
   }
 
   /** The booted simulator's launchd_sim environment, or undefined when it is not running. */

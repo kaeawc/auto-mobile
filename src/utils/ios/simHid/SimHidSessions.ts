@@ -167,6 +167,12 @@ export class SimHidSessions {
         this.options.idGenerator,
         this.options.timer,
       );
+      // A retired (timed-out) or exited helper is killed now, not at the next acquisition.
+      handle.transport.onClose(() => {
+        if (this.entries.get(deviceId) === entry) {
+          this.release(deviceId);
+        }
+      });
       this.failedAt.delete(deviceId);
       this.buildFailedAt = undefined;
       return entry.client;

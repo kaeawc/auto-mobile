@@ -6,9 +6,17 @@ private final class FakeSender: SimHidSender {
     var slept: [Double] = []
     var failAfter: Int?
     var notSentAfter: Int?
+    /// Fails only the attempt with this zero-based index; later sends succeed.
+    var failAttempt: Int?
+    var notSentAttempt: Int?
+    private(set) var attempts: [SimHidStep] = []
     private var clock = 0.0
 
     func send(_ step: SimHidStep) throws {
+        let attempt = attempts.count
+        attempts.append(step)
+        if attempt == notSentAttempt { throw SimHidNotSent(SimHidError("send-failed", "no message")) }
+        if attempt == failAttempt { throw SimHidError("send-failed", "boom") }
         if let notSentAfter, sent.count >= notSentAfter {
             throw SimHidNotSent(SimHidError("send-failed", "no message"))
         }
@@ -223,6 +231,57 @@ final class SimHidServerTests: XCTestCase {
         sender.notSentAfter = 1
         let ack = SimHidServer(sender: sender).handle(line: #"{"id":"7","cmd":"button","button":"home"}"#)
         XCTAssertTrue(ack.sent)
+    }
+
+    func testFailedTypingReleasesShiftBeforeAcking() {
+        // "A" is shift-down, a-down, a-up, shift-up; the a-down send fails after hand-off, so
+        // the a key may be down too.
+        let sender = FakeSender()
+        sender.failAttempt = 1
+        let ack = SimHidServer(sender: sender).handle(line: #"{"id":"8","cmd":"type","text":"A"}"#)
+        XCTAssertFalse(ack.ok)
+        XCTAssertTrue(ack.sent)
+        let shift = SimHidKeyboard.leftShift
+        let aUsage = SimHidKeyboard.usage(for: "a")?.usage ?? 0
+        XCTAssertEqual(Array(sender.attempts.dropFirst(2)), [
+            .key(usage: aUsage, down: false), .key(usage: shift, down: false),
+        ])
+    }
+
+    func testFailedSwipeLiftsTheFingerAtTheLastPoint() {
+        let sender = FakeSender()
+        sender.failAttempt = 2
+        let ack = SimHidServer(sender: sender).handle(
+            line: #"{"id":"9","cmd":"swipe","x":0,"y":0,"toX":10,"toY":0,"durationMs":34,"width":10,"height":10}"#
+        )
+        XCTAssertFalse(ack.ok)
+        guard case let .touch(failedPoint, _, .dragged) = sender.attempts[2] else {
+            return XCTFail("expected the failed step to be a drag")
+        }
+        XCTAssertEqual(sender.attempts.last, .touch(failedPoint, second: nil, phase: .up))
+        XCTAssertEqual(sender.attempts.count, 4)
+    }
+
+    func testFailedButtonReleasesTheButton() {
+        let sender = FakeSender()
+        sender.notSentAttempt = 1
+        let ack = SimHidServer(sender: sender).handle(line: #"{"id":"10","cmd":"button","button":"home"}"#)
+        XCTAssertTrue(ack.sent)
+        XCTAssertEqual(sender.attempts.last, .button(source: 0x0, down: false))
+        XCTAssertEqual(sender.attempts.count, 3)
+    }
+
+    func testFailedFirstStepThatMayHaveLandedIsReleased() {
+        let sender = FakeSender()
+        sender.failAttempt = 0
+        _ = SimHidServer(sender: sender).handle(line: #"{"id":"11","cmd":"button","button":"lock"}"#)
+        XCTAssertEqual(sender.attempts, [.button(source: 0x1, down: true), .button(source: 0x1, down: false)])
+    }
+
+    func testCompletedCommandSendsNoExtraRelease() {
+        let sender = FakeSender()
+        _ = SimHidServer(sender: sender).handle(line: #"{"id":"12","cmd":"key","key":"tab","modifiers":["shift"]}"#)
+        XCTAssertEqual(sender.attempts.count, 4)
     }
 
     func testEncodesAcksAndReadyAsSortedJSON() {

@@ -44,7 +44,8 @@ without modifiers, and `enter`, `tab`, `escape`, `backspace`, `delete` or an
 arrow.
 
 On an iOS simulator, key commands go to the simulator's hardware keyboard
-directly, so success means the simulator took the key. A key with no focused
-field does nothing; observe to check it landed. `meta+h` and the
+directly, so success means the simulator took the key. A text key with no
+focused field does nothing. Observe to check it landed. A shortcut such as
+`meta+alt+d` can still act without a focused field. `meta+h` and the
 `next`/`done`/`search`-style keys still use the runner, and so does `type` text.
 Set `AUTOMOBILE_DISABLE_IOS_SIM_HID=1` to send every key through the runner.

@@ -92,7 +92,12 @@ export class FakeSimHidClient implements SimHidClient {
   readonly commands: Array<{ command: SimHidCommand; timeoutMs: number }> = [];
   closed = false;
   constructor(public outcome: SimHidOutcome = { status: "delivered", elapsedMs: 1 }) {}
-  async send(command: SimHidCommand, timeoutMs: number): Promise<SimHidOutcome> {
+  async send(
+    command: SimHidCommand,
+    timeoutMs: number,
+    beforeWrite?: () => void,
+  ): Promise<SimHidOutcome> {
+    beforeWrite?.();
     this.commands.push({ command, timeoutMs });
     return this.outcome;
   }

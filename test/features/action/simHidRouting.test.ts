@@ -21,6 +21,7 @@ import { FakeSimHidClient, FakeSimHidSessionAccess } from "../../utils/ios/simHi
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { createExecResult } from "../../../src/utils/execResult";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
@@ -43,9 +44,11 @@ const UNREACHABLE = {
 /** Scripted HID route: one outcome per mode, recording every call. */
 class FakeRawInput implements IosSimulatorRawInput {
   readonly calls: Array<{ kind: string; mode: SimHidRouteMode; args: unknown }> = [];
+  readonly signals: Array<AbortSignal | undefined> = [];
   constructor(private readonly outcomes: Partial<Record<SimHidRouteMode, SimHidOutcome>> = {}) {}
   private record(kind: string, args: unknown, options: SimHidRouteOptions): SimHidOutcome {
     this.calls.push({ kind, mode: options.mode, args });
+    this.signals.push(options.signal);
     const outcome = this.outcomes[options.mode] ?? { status: "unavailable", reason: "not running" };
     if (outcome.status !== "unavailable") {
       options.onDispatch?.();
@@ -308,6 +311,40 @@ describe("iOS Simulator HID routing in actions", () => {
     expect(input.calls).toEqual([{ kind: "button", mode: "preferred", args: "lock" }]);
   });
 
+  test("PressButton power and held Home run the helper press under the request hold", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const client = new FakeIOSCtrlProxy(timer);
+    client.setHierarchyData({
+      packageName: "com.apple.springboard",
+      updatedAt: 1,
+      hierarchy: { className: "XCUIApplication" },
+    });
+    const spy = spyOnIosClientInstance(client);
+    restore = () => spy.mockRestore();
+    const input = new FakeRawInput({ preferred: delivered });
+    const fenced = new AbortController().signal;
+    const holds: Array<number | undefined> = [];
+    let marks = 0;
+    const action = new PressButton(simulator, null, timer, {
+      iosRawInput: input,
+      simctl: { executeCommandArgs: async () => createExecResult("", "") },
+      holdRequest: (_signal, timeoutMs, send, onDispatch) => {
+        holds.push(timeoutMs);
+        return send(fenced, () => onDispatch?.());
+      },
+    });
+    const caller = new AbortController().signal;
+    const power = await action.press("power", { signal: caller, onDispatch: () => marks++ });
+    expect(power.success).toBe(true);
+    const home = await action.press("home", { signal: caller, onDispatch: () => marks++ });
+    expect(home.success).toBe(true);
+    expect(input.calls.map((call) => call.args)).toEqual(["lock", "home"]);
+    expect(input.signals).toEqual([fenced, fenced]);
+    expect(holds).toHaveLength(2);
+    expect(marks).toBe(2);
+  });
+
   test("PressButton home presses the HID Home button instead of launching SpringBoard", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -334,6 +371,45 @@ describe("iOS Simulator HID routing in actions", () => {
     expect(input.calls).toEqual([{ kind: "button", mode: "preferred", args: "home" }]);
     expect(launches).toEqual([]);
     expect(client.getPressHomeRequestCount()).toBe(0);
+  });
+
+  test("ExecuteGesture re-checks the display fence after the launch settle, before the write", async () => {
+    const client = new FakeIOSCtrlProxy();
+    const spy = spyOnIosClientInstance(client);
+    restore = () => spy.mockRestore();
+    const helper = new FakeSimHidClient();
+    let rotated = false;
+    const stale = new StaleDisplayError({
+      observedGeneration: 1,
+      currentGeneration: 2,
+      retry: "observe",
+    });
+    const input = new SessionIosSimulatorRawInput(
+      simulator.deviceId,
+      new FakeSimHidSessionAccess(helper, helper),
+      {
+        wait: async () => {
+          // The display rotates while the swipe waits for the launch to settle.
+          rotated = true;
+        },
+      },
+      0,
+    );
+    const fence = {
+      assertCurrent: () => {
+        if (rotated) {
+          throw stale;
+        }
+      },
+    };
+    await expect(
+      new ExecuteGesture(simulator).swipe(
+        { x1: 10, y1: 700, x2: 10, y2: 100 },
+        { duration: 300, displayFence: fence, simulatorHid: { input, screen: SCREEN } },
+      ),
+    ).rejects.toBe(stale);
+    expect(helper.commands).toEqual([]);
+    expect(client.getSwipeHistory()).toEqual([]);
   });
 
   test("ExecuteGesture swipes through the helper, and through it again when CtrlProxy is down", async () => {

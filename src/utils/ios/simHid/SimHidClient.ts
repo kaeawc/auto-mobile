@@ -15,7 +15,11 @@ import {
  * too: a queued command's timeout starts when it is written, not while it waits its turn.
  */
 export interface SimHidClient {
-  send(command: SimHidCommand, timeoutMs: number): Promise<SimHidOutcome>;
+  /**
+   * `beforeWrite` runs right before the command is written, after any wait in the queue; if it
+   * throws, nothing is written and `send` rejects with that error.
+   */
+  send(command: SimHidCommand, timeoutMs: number, beforeWrite?: () => void): Promise<SimHidOutcome>;
   readonly closed: boolean;
   close(): void;
 }
@@ -24,6 +28,8 @@ interface Queued {
   command: SimHidCommand;
   timeoutMs: number;
   resolve: (outcome: SimHidOutcome) => void;
+  reject: (error: unknown) => void;
+  beforeWrite?: () => void;
 }
 
 interface InFlight {
@@ -54,12 +60,16 @@ export class TransportSimHidClient implements SimHidClient {
     return this.isClosed;
   }
 
-  send(command: SimHidCommand, timeoutMs: number): Promise<SimHidOutcome> {
+  send(
+    command: SimHidCommand,
+    timeoutMs: number,
+    beforeWrite?: () => void,
+  ): Promise<SimHidOutcome> {
     if (this.isClosed) {
       return Promise.resolve({ status: "unavailable", reason: "sim-hid-helper has exited" });
     }
-    return new Promise<SimHidOutcome>((resolve) => {
-      this.queue.push({ command, timeoutMs, resolve });
+    return new Promise<SimHidOutcome>((resolve, reject) => {
+      this.queue.push({ command, timeoutMs, resolve, reject, beforeWrite });
       this.writeNext();
     });
   }
@@ -81,14 +91,18 @@ export class TransportSimHidClient implements SimHidClient {
     }
   }
 
-  private write({ command, timeoutMs, resolve }: Queued): void {
+  private write({ command, timeoutMs, resolve, reject, beforeWrite }: Queued): void {
+    try {
+      beforeWrite?.();
+    } catch (error) {
+      // The caller's precondition (e.g. a display fence) failed after its queue wait: nothing
+      // was written, so the error is the command's definite result.
+      reject(error);
+      this.writeNext();
+      return;
+    }
     const id = this.idGenerator.next();
-    const timeout = this.timer.setTimeout(() => {
-      this.finish(id, {
-        status: "indeterminate",
-        reason: `sim-hid-helper did not reply within ${timeoutMs} ms`,
-      });
-    }, timeoutMs);
+    const timeout = this.timer.setTimeout(() => this.timeOut(id, timeoutMs), timeoutMs);
     this.inFlight = { id, resolve, timeout };
     try {
       this.transport.send(JSON.stringify({ id, ...command }));
@@ -111,6 +125,25 @@ export class TransportSimHidClient implements SimHidClient {
     this.timer.clearTimeout(entry.timeout);
     entry.resolve(outcome);
     this.writeNext();
+  }
+
+  /**
+   * A helper that stops replying may be hung, so it is retired instead of handed the next
+   * command: the timed-out command stays indeterminate (it may have run), never-written queued
+   * commands become unavailable, and closing lets the next acquisition start a fresh helper.
+   */
+  private timeOut(id: string, timeoutMs: number): void {
+    const entry = this.inFlight;
+    if (!entry || entry.id !== id) {
+      return;
+    }
+    this.inFlight = undefined;
+    entry.resolve({
+      status: "indeterminate",
+      reason: `sim-hid-helper did not reply within ${timeoutMs} ms`,
+    });
+    logger.warn(`sim-hid-helper did not reply within ${timeoutMs} ms; retiring it`);
+    this.close();
   }
 
   private handleLine(line: string): void {

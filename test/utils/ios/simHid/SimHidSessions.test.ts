@@ -44,6 +44,19 @@ describe("SimHidSessions", () => {
     expect(launcher.launches[0]!.kills).toBe(1);
   });
 
+  test("a command timeout kills the helper and the next acquire starts a fresh one", async () => {
+    const { launcher, sessions, timer } = setup();
+    const first = await sessions.acquire(SIM, 1000);
+    const pending = first!.send({ cmd: "button", button: "home" }, 500);
+    timer.advanceTime(500);
+    expect((await pending).status).toBe("indeterminate");
+    expect(launcher.launches[0]!.kills).toBe(1);
+    const second = await sessions.acquire(SIM, 1000);
+    expect(second).toBeDefined();
+    expect(second).not.toBe(first);
+    expect(launcher.launches).toHaveLength(2);
+  });
+
   test("a failed spawn is not retried until the cooldown passes", async () => {
     const { launcher, provider, sessions, timer } = setup();
     launcher.failure = new Error("spawn EAGAIN");

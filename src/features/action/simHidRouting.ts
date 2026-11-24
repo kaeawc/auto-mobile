@@ -4,6 +4,7 @@ import { logger } from "../../utils/logger";
 import type {
   IosSimulatorRawInput,
   SimHidRouteMode,
+  SimHidRouteOptions,
 } from "../../utils/ios/simHid/IosSimulatorRawInput";
 import type { SimHidOutcome, SimHidScreenSize } from "../../utils/ios/simHid/SimHidProtocol";
 import type { IosCoordinateTapClient } from "./coordinateTapDispatch";
@@ -34,6 +35,43 @@ export function withSimulatorHidTaps(
       ? undefined
       : resolveIosRawInput(device, injected.iosRawInput);
   return rawInput ? new SimHidCoordinateTapClient(ctrlProxy, rawInput, screen) : ctrlProxy;
+}
+
+/** Runs one dispatch under the caller's request hold: `send` gets the fenced signal. */
+export type SimHidRequestHold = <T>(
+  signal: AbortSignal | undefined,
+  send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
+  onDispatch?: () => void,
+) => Promise<T>;
+
+/**
+ * The HID route with every command run under `hold`, so a helper press is serialized with other
+ * held requests and sees the fenced signal, like the runner and simctl paths. `onDispatch` marks
+ * the caller for a command that carries no dispatch callback of its own.
+ */
+export function heldRawInput(
+  input: IosSimulatorRawInput | undefined,
+  onDispatch: (() => void) | undefined,
+  hold: SimHidRequestHold,
+): IosSimulatorRawInput | undefined {
+  if (!input) {
+    return undefined;
+  }
+  const run = (
+    options: SimHidRouteOptions,
+    send: (options: SimHidRouteOptions) => Promise<SimHidOutcome>,
+  ): Promise<SimHidOutcome> =>
+    hold(
+      options.signal,
+      (fenced, marks) => send({ ...options, signal: fenced, onDispatch: marks }),
+      options.onDispatch ?? onDispatch,
+    );
+  return {
+    tap: (request, options) => run(options, (held) => input.tap(request, held)),
+    swipe: (request, options) => run(options, (held) => input.swipe(request, held)),
+    key: (key, modifiers, options) => run(options, (held) => input.key(key, modifiers, held)),
+    button: (button, options) => run(options, (held) => input.button(button, held)),
+  };
 }
 
 type PressReply = {

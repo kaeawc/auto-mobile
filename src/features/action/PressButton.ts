@@ -24,7 +24,7 @@ import { resolveIosHomeBackend } from "../../utils/ios-cmdline-tools/IosHomeBack
 import { isNavigationPressButton, resolveAndroidKeyCode } from "./pressButtonPolicy";
 import { indeterminatePressResult, rejectStepsOnPlainButton } from "./pressButtonResults";
 import type { IosSimulatorRawInput } from "../../utils/ios/simHid/IosSimulatorRawInput";
-import { resolveIosRawInput, routeSimulatorPowerPress } from "./simHidRouting";
+import { heldRawInput, resolveIosRawInput, routeSimulatorPowerPress } from "./simHidRouting";
 import { holdDurationOf, prepareAndroidKeyevent, rejectUnsupportedHold } from "./androidKeyHold";
 import {
   acceptIosHomeAlreadyOnSpringboard,
@@ -200,6 +200,13 @@ export class PressButton extends BaseVisualChange {
     }
     const request = send(signal, () => onDispatch?.());
     return liveWait ? awaitWhileRequestIsLive(request, signal) : request;
+  }
+
+  /** The HID route under the runner's request hold (#19118); see {@link heldRawInput}. */
+  private heldIosRawInput(timeoutMs?: number, onDispatch?: () => void) {
+    return heldRawInput(this.iosRawInput, onDispatch, (signal, send, marks) =>
+      this.awaitDispatchedRequest(signal, timeoutMs, send, { onDispatch: marks }),
+    );
   }
 
   async execute(button: string, call?: PressButtonCall): Promise<PressButtonResult>;
@@ -853,10 +860,10 @@ export class PressButton extends BaseVisualChange {
                 }),
               { onDispatch: onRunnerDispatch },
             );
-      const result =
-        normalizedButton === "power" && this.iosRawInput
-          ? await routeSimulatorPowerPress(this.iosRawInput, dispatch, pressRunner)
-          : await pressRunner();
+      const heldInput = normalizedButton === "power" ? this.heldIosRawInput(timeoutMs) : undefined;
+      const result = heldInput
+        ? await routeSimulatorPowerPress(heldInput, dispatch, pressRunner)
+        : await pressRunner();
       this.assertHeldRequestLive(signal);
       onRecentAppsRoute?.((result as { recentAppsRoute?: string }).recentAppsRoute);
       return result.success
@@ -929,7 +936,7 @@ export class PressButton extends BaseVisualChange {
               adb: null,
               timer: this.timer,
               simctl,
-              collaborators: { iosRawInput: this.iosRawInput ?? null },
+              collaborators: { iosRawInput: this.heldIosRawInput(timeoutMs, onDispatch) ?? null },
             }).executeIosHomeNavigation({
               frameContext,
               timeoutMs,

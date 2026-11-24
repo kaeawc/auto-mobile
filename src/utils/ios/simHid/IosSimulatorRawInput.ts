@@ -30,6 +30,11 @@ export interface SimHidRouteOptions {
    * for an `unavailable` outcome, so a caller that falls back to CtrlProxy is not yet dispatched.
    */
   onDispatch?: () => void;
+  /**
+   * Runs immediately before the command is written to the helper, after the launch settle and any
+   * queue wait. A throw (e.g. a stale display fence) aborts the command with nothing sent.
+   */
+  beforeWrite?: () => void;
 }
 
 /** Raw-coordinate and key input for one iOS Simulator through sim-hid-helper (#19118). */
@@ -130,7 +135,7 @@ export class SessionIosSimulatorRawInput implements IosSimulatorRawInput {
   private async send(
     command: SimHidCommand,
     gestureMs: number,
-    { mode, signal, onDispatch }: SimHidRouteOptions,
+    { mode, signal, onDispatch, beforeWrite }: SimHidRouteOptions,
     touch: boolean,
   ): Promise<SimHidOutcome> {
     throwIfAborted(signal);
@@ -145,7 +150,10 @@ export class SessionIosSimulatorRawInput implements IosSimulatorRawInput {
       await this.launchSettle.wait(this.deviceId);
     }
     throwIfAborted(signal);
-    const outcome = await client.send(command, gestureMs + SIM_HID_REPLY_HEADROOM_MS);
+    const outcome = await client.send(command, gestureMs + SIM_HID_REPLY_HEADROOM_MS, () => {
+      throwIfAborted(signal);
+      beforeWrite?.();
+    });
     if (outcome.status !== "unavailable") {
       onDispatch?.();
     }

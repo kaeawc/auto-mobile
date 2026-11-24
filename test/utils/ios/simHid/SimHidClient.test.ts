@@ -82,6 +82,18 @@ describe("TransportSimHidClient", () => {
     });
   });
 
+  test("a timeout retires the helper instead of writing the next command to it", async () => {
+    const { transport, timer, client } = setup();
+    const pending = client.send({ cmd: "button", button: "lock" }, 500);
+    const queued = client.send({ cmd: "ping" }, 500);
+    timer.advanceTime(500);
+    expect((await pending).status).toBe("indeterminate");
+    expect((await queued).status).toBe("unavailable");
+    expect(transport.sent).toHaveLength(1);
+    expect(transport.isClosed).toBe(true);
+    expect(client.closed).toBe(true);
+  });
+
   test("a helper exit settles pending commands as indeterminate and refuses later ones", async () => {
     const { transport, client } = setup();
     const pending = client.send({ cmd: "button", button: "home" }, 1000);
@@ -92,6 +104,25 @@ describe("TransportSimHidClient", () => {
       status: "unavailable",
       reason: "sim-hid-helper has exited",
     });
+  });
+
+  test("beforeWrite runs after the queue wait; a throw writes nothing and the next command runs", async () => {
+    const { transport, client } = setup();
+    const first = client.send({ cmd: "button", button: "home" }, 1000);
+    let checked = 0;
+    const fenced = client.send({ cmd: "ping" }, 1000, () => {
+      checked++;
+      throw new Error("display changed");
+    });
+    const third = client.send({ cmd: "button", button: "lock" }, 1000);
+    expect(checked).toBe(0);
+    transport.reply(JSON.stringify({ id: "a", ok: true, sent: true }));
+    await first;
+    await expect(fenced).rejects.toThrow("display changed");
+    expect(checked).toBe(1);
+    expect(transport.sent.map((line) => JSON.parse(line).cmd)).toEqual(["button", "button"]);
+    transport.reply(JSON.stringify({ id: "b", ok: true, sent: true }));
+    expect((await third).status).toBe("delivered");
   });
 
   test("a failed write sent nothing", async () => {

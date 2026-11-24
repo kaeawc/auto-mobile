@@ -55,6 +55,7 @@ public struct SimHidServer {
         }
         let start = sender.nowMs()
         var sent = false
+        var held = SimHidHeldInput()
         for step in steps {
             if case let .wait(ms) = step {
                 sender.sleep(milliseconds: ms)
@@ -63,15 +64,29 @@ public struct SimHidServer {
             do {
                 try sender.send(step)
             } catch let notSent as SimHidNotSent {
+                release(held)
                 return SimHidAck(id: request.id, ok: false, sent: sent, error: notSent.error)
             } catch {
                 // A failure after hand-off (completion error, timeout) may still have delivered
                 // the message, so the caller must not replay it on another input path.
+                held.record(step)
+                release(held)
                 return SimHidAck(id: request.id, ok: false, sent: true, error: simHidError(error))
             }
+            held.record(step)
             sent = true
         }
         return SimHidAck(id: request.id, ok: true, sent: sent, elapsedMs: rounded(sender.nowMs() - start))
+    }
+
+    /// Best-effort release of whatever a failed command may have left down (keys, buttons, a
+    /// touch), so the persistent helper never starts the next command with shift or a finger held.
+    /// Each release is attempted even when an earlier one fails; release errors are not reported
+    /// because the ack already carries the command's own failure.
+    private func release(_ held: SimHidHeldInput) {
+        for step in held.releaseSteps() {
+            try? sender.send(step)
+        }
     }
 
     public static func encode(_ value: some Encodable) -> String {
@@ -85,6 +100,38 @@ public struct SimHidServer {
 
     private func rounded(_ ms: Double) -> Double {
         (ms * 100).rounded() / 100
+    }
+}
+
+/// Input a command has pressed and not yet released, in press order.
+struct SimHidHeldInput {
+    private(set) var keys: [UInt32] = []
+    private(set) var buttons: [UInt32] = []
+    private(set) var touch: (first: SimHidPoint, second: SimHidPoint?)?
+
+    mutating func record(_ step: SimHidStep) {
+        switch step {
+        case let .key(usage, down):
+            keys.removeAll { $0 == usage }
+            if down { keys.append(usage) }
+        case let .button(source, down):
+            buttons.removeAll { $0 == source }
+            if down { buttons.append(source) }
+        case let .touch(point, second, phase):
+            touch = phase == .up ? nil : (point, second)
+        case .wait:
+            break
+        }
+    }
+
+    /// Key-ups and button-ups in reverse press order, then a touch-up at the last touch point.
+    func releaseSteps() -> [SimHidStep] {
+        var steps: [SimHidStep] = keys.reversed().map { .key(usage: $0, down: false) }
+        steps += buttons.reversed().map { .button(source: $0, down: false) }
+        if let touch {
+            steps.append(.touch(touch.first, second: touch.second, phase: .up))
+        }
+        return steps
     }
 }
 

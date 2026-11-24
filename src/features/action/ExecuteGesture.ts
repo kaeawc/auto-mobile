@@ -410,7 +410,8 @@ export class ExecuteGesture extends BaseVisualChange {
     options.displayFence?.assertCurrent();
     const outcome = await hid.input.swipe(
       { from: { x: x1, y: y1 }, to: { x: x2, y: y2 }, durationMs: duration, screen: hid.screen },
-      { mode, signal: call.signal },
+      // The fence is re-checked at the write: the launch settle and the helper queue can wait.
+      { mode, signal: call.signal, beforeWrite: () => options.displayFence?.assertCurrent() },
     );
     switch (outcome.status) {
       case "delivered":

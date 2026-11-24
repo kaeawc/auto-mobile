@@ -276,6 +276,37 @@ steps:
     expect(result.failedStep?.failureObservation).toBeUndefined();
   });
 
+  test("a waitFor timeout returned as a normal result is still unmet (#19123)", async () => {
+    ToolRegistry.register(
+      "observe",
+      "non-error timeout observe",
+      z.strictObject({
+        platform: z.string().optional(),
+        deviceId: z.string().optional(),
+        sessionUuid: z.string().optional(),
+        device: z.string().optional(),
+        waitFor: z.record(z.string(), z.unknown()).optional(),
+      }),
+      async () =>
+        createStructuredToolResponse({
+          ...timedOut(["Settings"]),
+          awaitDuration: 2500,
+          settled: false,
+          unsettledBy: [{ elementId: "com.example:id/sheet", field: "bounds" }],
+        }),
+    );
+    const plan = planWith(`      - type: elementVisible
+        selector: { text: Done }
+`);
+
+    const result = await run(plan, "android");
+
+    expect(result.success).toBe(false);
+    expect(result.failedStep?.error).toStartWith(
+      'Expectation 1/1 (elementVisible text="Done") failed: not satisfied after 2500ms',
+    );
+  });
+
   test("a step without expectations never observes", async () => {
     const plan = new YamlPlanSerializer().importPlanFromYaml(`name: plain
 steps:

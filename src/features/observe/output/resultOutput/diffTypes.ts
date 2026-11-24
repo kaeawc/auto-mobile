@@ -252,6 +252,8 @@ export interface ObserveDiff {
   settleMs?: number;
   /** Same as a full observation's `settlePolls` (#9591); copied from the post-action observation. */
   settlePolls?: number;
+  /** Same as a full observation's `unsettledBy` (#19123); copied from the post-action observation. */
+  unsettledBy?: ObserveResult["unsettledBy"];
   added: ObserveDiffNode[];
   removed: ObserveDiffNode[];
   /** Wire form only: what `added` held once the list itself is dropped (#19122). */

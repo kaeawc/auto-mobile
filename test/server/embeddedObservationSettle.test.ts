@@ -2537,3 +2537,47 @@ describe("explicit-display deferred terminal capture failure", () => {
     });
   });
 });
+
+describe("embedded observation unsettledBy (#19123)", () => {
+  const unsettledBy = [{ elementId: "com.android.settings:id/progress", field: "checked" }];
+
+  async function stampedObservation(result: (observation: ObserveResult) => SettleResult) {
+    const settledCapture = obs(AIRPLANE_ROW_INFLATED, 11);
+    const response = createStructuredToolResponse({
+      success: true,
+      observation: obs(AIRPLANE_ROW_HALF_INFLATED, 10),
+    });
+    await settleEmbeddedObservationInResponse(response, {
+      name: "tapOn",
+      args: {},
+      internal: false,
+      timer: new FakeTimer(),
+      createSettleObserve: () => ({ execute: async () => result(settledCapture) }),
+    });
+    return readToolEnvelopePayload(response)!.payload.observation as ObserveResult;
+  }
+
+  test("stamps what kept an adopted capture unsettled next to settled: false", async () => {
+    const observation = await stampedObservation((capture) => ({
+      observation: capture,
+      settled: false,
+      polls: 4,
+      waitMs: 1000,
+      terminalReason: "timeout",
+      unsettledBy,
+    }));
+
+    expect(observation.settled).toBe(false);
+    expect(observation.unsettledBy).toEqual(unsettledBy);
+  });
+
+  test("omits unsettledBy on a settled capture", async () => {
+    const observation = await stampedObservation((capture) => ({
+      ...settleResult(capture),
+      unsettledBy,
+    }));
+
+    expect(observation.settled).toBe(true);
+    expect(observation).not.toHaveProperty("unsettledBy");
+  });
+});

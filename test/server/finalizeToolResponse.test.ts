@@ -1917,9 +1917,10 @@ describe("finalizeToolResponse", () => {
         },
         screenshotFormat: "png",
         screenshotMimeType: "image/png",
-        settled: true,
+        settled: false,
         settleMs: 550,
         settlePolls: 2,
+        unsettledBy: [{ elementId: "com.example:id/progress", field: "checked" }],
         accessibilityAuditSkipped: "settled_capture_adopted",
         surface: "tile",
       });

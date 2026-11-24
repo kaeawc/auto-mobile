@@ -1,5 +1,5 @@
 import { type WireHierarchyNodeSlot } from "../observeResultWire";
-import { STATUS_BAR_ROOT_IDS } from "../../../../utils/androidStatusBar";
+import { isStatusBarDiffSubtreeId } from "../../../../utils/androidStatusBar";
 import type { ObserveResult } from "../../../../models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../../models/ViewHierarchyResult";
 import { nodeAttributes as hierarchyNodeAttributes } from "../../../../models/ViewHierarchyResult";
@@ -137,7 +137,7 @@ export function flattenForDiff(
     if (collapseKeyboard && isKeyboardNodeForDiff(node, rec, iosKeyboardVisible)) {
       return;
     }
-    if (skipStatusBar && STATUS_BAR_ROOT_IDS.has(String(rec["resource-id"] ?? ""))) {
+    if (skipStatusBar && isStatusBarDiffSubtreeId(rec["resource-id"])) {
       return;
     }
     const localKey = nodeKey(rec, siblingIndex);

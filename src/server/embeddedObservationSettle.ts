@@ -12,7 +12,7 @@ import { isAdoptableCapture } from "../features/observe/isAdoptableCapture";
 import { followUpDisplaySelector } from "../features/observe/DisplaySelection";
 import type { BootedDevice } from "../models";
 import type { displayInventoryOutcome } from "../models/DeviceInfo";
-import type { ObserveResult } from "../models/ObserveResult";
+import type { ObserveResult, UnsettledNode } from "../models/ObserveResult";
 import type { Platform } from "../models/Platform";
 import type { SettleObserve, SettleOptions } from "../features/observe/interfaces/SettleObserve";
 import { hierarchyUpdatedAtToMillis } from "../features/observe/observeTimestamp";
@@ -89,6 +89,8 @@ export interface EmbeddedObservationSettleOutcome {
   settleMs?: number;
   /** Re-observations the gate took; absent when it did not run or a read threw. */
   settlePolls?: number;
+  /** Adopted unsettled capture only: what was still changing between reads (#19123). */
+  unsettledBy?: UnsettledNode[];
 }
 
 /**
@@ -178,6 +180,7 @@ export async function settleEmbeddedObservation(
       settled: result.settled,
       settleMs: elapsed(),
       settlePolls: result.polls,
+      ...(!result.settled && result.unsettledBy ? { unsettledBy: result.unsettledBy } : {}),
     });
   } catch (error) {
     // Nothing here may fail an action that ALREADY RAN. A settle read that
@@ -387,6 +390,18 @@ function terminalCaptureOutcome(
 ): EmbeddedObservationSettleOutcome {
   const failed = applyTerminalCaptureFailure(outcome.observation, input.args, input.signal);
   return { ...outcome, settled: failed ? false : outcome.settled };
+}
+
+/** The gate's unsettled cause for the wire; never a stale one carried on the capture. */
+function withUnsettledBy(
+  observation: ObserveResult,
+  outcome: EmbeddedObservationSettleOutcome,
+): ObserveResult {
+  const stamped: ObserveResult = { ...observation, unsettledBy: outcome.unsettledBy };
+  if (outcome.unsettledBy === undefined) {
+    delete stamped.unsettledBy;
+  }
+  return stamped;
 }
 
 /**
@@ -717,7 +732,7 @@ async function settleEmbeddedObservationResponse(
   writeToolEnvelopePayload(view, {
     ...view.payload,
     observation: {
-      ...outcome.observation,
+      ...withUnsettledBy(outcome.observation, outcome),
       settled: outcome.settled,
       ...settleTiming(outcome),
     },

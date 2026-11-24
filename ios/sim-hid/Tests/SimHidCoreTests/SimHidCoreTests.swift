@@ -270,7 +270,7 @@ final class SimHidServerTests: XCTestCase {
         )
         XCTAssertFalse(ack.ok)
         XCTAssertTrue(ack.sent)
-        guard case let .touch(_, _, phase) = sender.attempts.last! else {
+        guard let last = sender.attempts.last, case let .touch(_, _, phase) = last else {
             return XCTFail("expected a touch release")
         }
         XCTAssertEqual(phase, .up)

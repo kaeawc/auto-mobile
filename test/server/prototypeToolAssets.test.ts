@@ -1,5 +1,5 @@
 import { toolIsError, toolStructured } from "../helpers/toolResponse";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { registerPrototypeTools, prototypeOutputSchema } from "../../src/server/prototypeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
@@ -7,6 +7,7 @@ import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakePrototypeAssetFileReader } from "../fakes/FakePrototypeAssetFileReader";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
+import { warmedTests } from "../helpers/warmedTests";
 
 const device: BootedDevice = { deviceId: "fake-prototype", platform: "android", name: "Fake" };
 const png = Buffer.concat([
@@ -24,15 +25,14 @@ describe("prototype tool assets", () => {
   let client: FakeCtrlProxy;
   let reader: FakePrototypeAssetFileReader;
   let observationReads: string[];
-  let restore: () => void;
-  let unsubscribe: () => void;
-  beforeEach(() => {
-    restore = preserveToolRegistry();
+  let teardown: (() => void) | undefined;
+  function setUp(): void {
+    const restore = preserveToolRegistry();
     const timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
     reader = new FakePrototypeAssetFileReader().addFile("/img/logo.png", png);
     observationReads = [];
-    unsubscribe = registerPrototypeTools({
+    const unsubscribe = registerPrototypeTools({
       clientFactory: () => client,
       clock: timer,
       timer,
@@ -42,11 +42,23 @@ describe("prototype tool assets", () => {
         return uri === shotUri ? { bytes: png } : { error: "Observation id gone is superseded." };
       },
     });
+    teardown = () => {
+      unsubscribe();
+      restore();
+    };
+  }
+  function tearDown(): void {
+    teardown?.();
+    teardown = undefined;
+  }
+  // The first show pays one-time module and schema compilation: warmedTests runs it once in
+  // beforeAll, outside the per-test budget. Every test starts from a fresh registration made by
+  // the reset after the one before it.
+  const warmed = warmedTests(() => {
+    tearDown();
+    setUp();
   });
-  afterEach(() => {
-    unsubscribe();
-    restore();
-  });
+  afterAll(tearDown);
 
   async function call(input: Record<string, unknown>, signal?: AbortSignal) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(
@@ -59,7 +71,7 @@ describe("prototype tool assets", () => {
   }
   const assets = [{ id: "logo", path: "/img/logo.png" }];
 
-  test("show uploads each asset before the prototype and reports what was stored", async () => {
+  warmed("show uploads each asset before the prototype and reports what was stored", async () => {
     const order: string[] = [];
     const putAsset = client.requestPutPrototypeAsset.bind(client);
     const show = client.requestShowPrototype.bind(client);

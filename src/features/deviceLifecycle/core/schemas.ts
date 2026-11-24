@@ -431,7 +431,8 @@ export const getAndroidSchema = devicePreparationTimeoutSchema
       .min(1)
       .optional()
       .describe(
-        "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android). Omit both avdName and deviceId to select a device: a running phone emulator first, then a configured phone AVD (cold-booted)",
+        "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android). Omit both avdName and deviceId to select a device: with no requires, the running device the session already holds; else a running phone emulator first, then a configured phone AVD (cold-booted). " +
+          "requires narrows that phone choice; only panels above 1, posture, screenRound or vehicle.motion selects another form factor instead",
       ),
     deviceId: z
       .string()

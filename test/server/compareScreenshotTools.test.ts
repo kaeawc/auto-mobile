@@ -5,6 +5,11 @@ import type { BootedDevice, ScreenshotResult } from "../../src/models";
 import { SharpBackend } from "../../src/utils/image/backend/SharpBackend";
 import { FakeVisualBaselineStore } from "../fakes/FakeVisualBaselineStore";
 import { solidPng } from "../helpers/pngFixtures";
+import {
+  WATCH_REGIONS_NEED_FOREGROUND_APP_MESSAGE,
+  WATCH_REGIONS_NEED_RUNNER_MESSAGE,
+} from "../../src/features/visual/DeviceVisualScreen";
+import { WatchRunnerError } from "../../src/features/watch/WatchRunnerError";
 
 const ANDROID: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 
@@ -165,5 +170,151 @@ describe("compareScreenshot on an Apple TV simulator (#16725)", () => {
     expect(recorded.structuredContent).toMatchObject({ status: "recorded" });
     const [baseline] = [...store.baselines.values()];
     expect(await backend.metadata(baseline.png)).toMatchObject({ width: 4, height: 4 });
+  });
+});
+
+describe("compareScreenshot on an Apple Watch simulator (#19056)", () => {
+  const WATCH: BootedDevice = {
+    name: "Apple Watch Series 10",
+    platform: "watchos",
+    deviceId: "watch-udid",
+  };
+  const backend = new SharpBackend();
+
+  function watchHandler(
+    store: FakeVisualBaselineStore,
+    options: { runner: boolean; png: Buffer; captures?: string[]; hierarchyError?: Error },
+  ) {
+    return createCompareScreenshotHandler({
+      store,
+      imageBackend: backend,
+      watchRunnerConnected: () => options.runner,
+      watchScreenshot: async (device) => {
+        options.captures?.push(device.deviceId);
+        return options.png;
+      },
+      tvosRunnerConnected: () => {
+        throw new Error("a watch never consults the tvOS runner");
+      },
+      // Runner bounds are points: a 2x4-point screen behind a 4x8-pixel screenshot.
+      hierarchyCaptureFactory: () => ({
+        capture: async (request) => {
+          if (options.hierarchyError) {
+            throw options.hierarchyError;
+          }
+          return {
+            captureId: "watch-capture",
+            platform: "ios",
+            requestedFreshness: request.freshness,
+            receivedAt: 0,
+            nodes: [],
+            hierarchy: { hierarchy: { node: {} }, screenWidth: 2, screenHeight: 4 },
+          };
+        },
+      }),
+      readSettings: async () => {
+        throw new Error("an Apple Watch has no display settings reader");
+      },
+      writeFile: async () => {},
+      now: () => "2026-11-23T00:00:00.000Z",
+    });
+  }
+
+  test("without a runner, records and compares the full simctl screenshot", async () => {
+    const store = new FakeVisualBaselineStore();
+    const captures: string[] = [];
+    const white = solidPng(4, 8, [255, 255, 255, 255]);
+    const recorded = (await watchHandler(store, { runner: false, png: white, captures })(WATCH, {
+      baseline: "face",
+      mode: "record",
+    } as never)) as ToolResult;
+    expect(compareScreenshotResultSchema.parse(recorded.structuredContent)).toMatchObject({
+      status: "recorded",
+      profile: { platform: "watchos", width: 4, height: 8, density: null, fontScale: null },
+    });
+    const changed = solidPng(4, 8, [255, 255, 255, 255], [{ x: 0, y: 0, color: [0, 0, 0, 255] }]);
+    const compared = (await watchHandler(store, { runner: false, png: changed, captures })(WATCH, {
+      baseline: "face",
+      mode: "compare",
+    } as never)) as ToolResult;
+    expect(compared.structuredContent).toMatchObject({
+      status: "compared",
+      match: false,
+      diffPixels: 1,
+      comparedPixels: 32,
+    });
+    expect(captures).toEqual(["watch-udid", "watch-udid"]);
+  });
+
+  test("without a runner, a target or mask region is refused with the way forward", async () => {
+    const call = watchHandler(new FakeVisualBaselineStore(), {
+      runner: false,
+      png: solidPng(4, 8, [255, 255, 255, 255]),
+    });
+    await call(WATCH, { baseline: "face", mode: "record" } as never);
+    await expect(
+      call(WATCH, {
+        baseline: "face",
+        mode: "compare",
+        mask: [{ rect: { left: 0, top: 0, right: 1, bottom: 1 } }],
+      } as never),
+    ).rejects.toThrow(WATCH_REGIONS_NEED_RUNNER_MESSAGE);
+    await expect(
+      call(WATCH, {
+        baseline: "face",
+        mode: "record",
+        target: { rect: { left: 0, top: 0, right: 1, bottom: 1 } },
+      } as never),
+    ).rejects.toThrow(WATCH_REGIONS_NEED_RUNNER_MESSAGE);
+  });
+
+  test("with the runner, a point rectangle crops the matching screenshot pixels", async () => {
+    const store = new FakeVisualBaselineStore();
+    const recorded = (await watchHandler(store, {
+      runner: true,
+      png: solidPng(4, 8, [255, 255, 255, 255]),
+    })(WATCH, {
+      baseline: "button",
+      mode: "record",
+      target: { rect: { left: 0, top: 0, right: 2, bottom: 2 } },
+    } as never)) as ToolResult;
+    expect(recorded.structuredContent).toMatchObject({ status: "recorded" });
+    const [baseline] = [...store.baselines.values()];
+    expect(await backend.metadata(baseline.png)).toMatchObject({ width: 4, height: 4 });
+  });
+
+  test("a backgrounded runner app still compares the full screen but refuses regions", async () => {
+    const store = new FakeVisualBaselineStore();
+    const hierarchyError = new WatchRunnerError(
+      "target app is not foreground",
+      "app_not_foreground",
+    );
+    const options = { runner: true, png: solidPng(4, 8, [255, 255, 255, 255]), hierarchyError };
+    const recorded = (await watchHandler(store, options)(WATCH, {
+      baseline: "face",
+      mode: "record",
+    } as never)) as ToolResult;
+    expect(recorded.structuredContent).toMatchObject({
+      status: "recorded",
+      profile: { platform: "watchos", width: 4, height: 8 },
+    });
+    await expect(
+      watchHandler(store, options)(WATCH, {
+        baseline: "face",
+        mode: "compare",
+        target: { rect: { left: 0, top: 0, right: 1, bottom: 1 } },
+      } as never),
+    ).rejects.toThrow(WATCH_REGIONS_NEED_FOREGROUND_APP_MESSAGE);
+  });
+
+  test("any other runner hierarchy failure fails the comparison", async () => {
+    const call = watchHandler(new FakeVisualBaselineStore(), {
+      runner: true,
+      png: solidPng(4, 8, [255, 255, 255, 255]),
+      hierarchyError: new WatchRunnerError("runner disconnected", "runner_disconnected"),
+    });
+    await expect(call(WATCH, { baseline: "face", mode: "record" } as never)).rejects.toThrow(
+      "runner disconnected",
+    );
   });
 });

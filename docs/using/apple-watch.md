@@ -132,6 +132,8 @@ Besides the device management above, these tools accept a watch:
 - `terminateApp`
 - `crashApp`
 - `getLogs`
+- `videoRecording`
+- `compareScreenshot`
 - `executePlan`
 
 <!-- watchos-supported-tools:end -->
@@ -144,6 +146,22 @@ Every other tool refuses a watch before doing anything, with:
 
 [Apple Watch tool behavior](apple-watch-tools.md) describes what each of these tools does on a
 watch, including `rotateCrown`, notifications and Smart Stack widgets.
+
+## Record and compare the screen
+
+`videoRecording` records the watch screen like an iOS Simulator's, up to 3600 seconds. A start
+with `audio: true` fails: watch recordings have no audio. `executePlan` records the run too.
+
+`compareScreenshot` records and compares named screenshot baselines. A watch baseline is kept per
+screenshot size; density, font scale and theme are always `null` in its profile.
+
+- Without the automation runner, only the full screen is compared. A `target` or `mask` is
+  refused; call `startDevice` to prepare the runner.
+- With the runner, `target` and `mask` take an `elementId` or a `rect` in points, as `observe`
+  reports them.
+- When the runner's app is in the background, for example on the watch face, only the full screen
+  is compared. Launch the app with `launchApp` before using `target` or `mask`.
+- A watch has no system bars, so `ignoreSystemBars` has no effect.
 
 ## Limits
 
@@ -160,5 +178,6 @@ watch, including `rotateCrown`, notifications and Smart Stack widgets.
   reason; call `startDevice` to restart the runner. A disconnected runner AutoMobile did not start
   is not restarted: restart it yourself before trying again.
 - No pinch, multi-touch or drag.
+- No side button. `pressButton` supports `home` only, which presses the Digital Crown.
 - Prototypes do not run on a watch. To mock up a watch screen, use a watch-sized prototype spec on a
   phone instead (see [Watch-sized mockups](../tools.md#watch-sized-mockups)).

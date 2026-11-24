@@ -3,6 +3,10 @@ import { androidAutoProjectionSchema } from "../../models/AndroidAutoProjection"
 import { carAppTemplatesSchema } from "../../models/CarAppTemplates";
 import { IMPORTED_PROTOTYPE_CONTENT } from "../../features/observe/importedPrototypeContent";
 import {
+  MAX_DIFF_SUMMARY_LABELS,
+  MAX_DIFF_SUMMARY_LABEL_LENGTH,
+} from "../../features/observe/output/resultOutput/diffTypes";
+import {
   observationIdSchema,
   observationDeviceIdSchema,
   observationScreenshotResourceUriSchema,
@@ -245,15 +249,18 @@ export const observeDiffNodeSchema = z
   })
   .passthrough();
 
-/** Count and up to 5 labels of the nodes an action diff no longer lists (#19122). */
+/** Count and a few labels of the nodes an action diff no longer lists (#19122). */
 const observeDiffNodeSummarySchema = z
   .object({
     count: z.number().int().positive(),
     labels: z
-      .array(z.string())
-      .max(5)
+      .array(z.string().max(MAX_DIFF_SUMMARY_LABEL_LENGTH))
+      .max(MAX_DIFF_SUMMARY_LABELS)
       .optional()
-      .describe("Up to 5 distinct node labels (label, else element id)."),
+      .describe(
+        `Up to ${MAX_DIFF_SUMMARY_LABELS} distinct node labels (label, else element id), ` +
+          `each at most ${MAX_DIFF_SUMMARY_LABEL_LENGTH} characters.`,
+      ),
   })
   .optional();
 

@@ -109,6 +109,12 @@ export interface ObserveDiffNodeSummary {
 export const MAX_DIFF_SUMMARY_LABELS = 5;
 
 /**
+ * Longest summary label, in UTF-16 code units including the trailing ellipsis:
+ * an unprojected label is the raw `text`, which can be a whole paragraph (#19145).
+ */
+export const MAX_DIFF_SUMMARY_LABEL_LENGTH = 60;
+
+/**
  * Compact diff of one observation against a baseline. `isDiff` is a discriminant
  * so a consumer can tell a diff apart from a full `ObserveResult` (which has no
  * such marker). Empty `added`/`removed`/`changed` and absent `fields` means the
@@ -377,9 +383,15 @@ export interface FlatObserveNode {
   key: string;
   attributes: Record<string, unknown>;
   ancestorClasses: readonly string[];
+  /** The enclosing flattened node; absent on a root. Used to find a row's title. */
+  parent?: FlatObserveNode;
 }
 
 export interface DiffRepairNode extends ObserveDiffNode {
   pathKey: string;
   ancestorClasses: readonly string[];
+  /** Captured source node, when the leftover came from a flattened hierarchy. */
+  source?: ViewHierarchyNode;
+  /** The enclosing flattened node, for the row title of a label-less control. */
+  parent?: FlatObserveNode;
 }

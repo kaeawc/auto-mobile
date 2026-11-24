@@ -191,7 +191,7 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -823,7 +823,7 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -1340,7 +1340,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -2445,6 +2445,11 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
+          "type": "string",
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
+        },
         "baseline": {
           "type": "string",
           "minLength": 1,
@@ -2482,7 +2487,7 @@
               },
               "required": ["left", "top", "right", "bottom"],
               "additionalProperties": false,
-              "description": "Platform-native screen rectangle: Android pixels, iOS and tvOS points"
+              "description": "Platform-native screen rectangle: Android pixels, iOS, tvOS and watchOS points"
             }
           },
           "additionalProperties": false
@@ -2517,7 +2522,7 @@
                 },
                 "required": ["left", "top", "right", "bottom"],
                 "additionalProperties": false,
-                "description": "Platform-native screen rectangle: Android pixels, iOS and tvOS points"
+                "description": "Platform-native screen rectangle: Android pixels, iOS, tvOS and watchOS points"
               }
             },
             "additionalProperties": false
@@ -2544,10 +2549,6 @@
             }
           },
           "additionalProperties": false
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2685,7 +2686,12 @@
     },
     "_meta": {
       "automobile/deviceReadOnly": true,
-      "automobile/requires": ["platform:android", "platform:ios", "platform:tvos"]
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos"
+      ]
     }
   },
   {
@@ -4055,7 +4061,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -6055,11 +6061,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -9516,11 +9523,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -10185,7 +10193,7 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios", "platform:tvos"]
+      "automobile/requires": ["platform:android", "platform:tvos"]
     }
   },
   {
@@ -10796,7 +10804,7 @@
     "_meta": {
       "automobile/embeddedSdkOnly": true,
       "automobile/deviceReadOnly": true,
-      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
+      "automobile/requires": ["sdkEmbed", "platform:android"]
     }
   },
   {
@@ -13252,7 +13260,7 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -15521,11 +15529,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -19288,11 +19297,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -19852,7 +19862,7 @@
     "_meta": {
       "automobile/embeddedSdkOnly": true,
       "automobile/deviceReadOnly": true,
-      "automobile/requires": ["sdkEmbed", "platform:android", "platform:ios"]
+      "automobile/requires": ["sdkEmbed", "platform:android"]
     }
   },
   {
@@ -22304,7 +22314,7 @@
           "values": ["get"]
         }
       ],
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -27807,7 +27817,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -30128,11 +30138,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -32775,11 +32786,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -39389,11 +39401,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -41045,7 +41058,7 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -42879,11 +42892,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -43493,7 +43507,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -45291,11 +45305,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -45856,7 +45871,7 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -46805,7 +46820,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -52499,11 +52514,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -54599,11 +54615,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -56723,11 +56740,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -60723,11 +60741,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -63756,11 +63775,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -65812,11 +65832,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -66231,8 +66252,9 @@
           "enum": ["start", "stop"]
         },
         "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "deviceId": {
           "type": "string"
@@ -66535,7 +66557,12 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios", "platform:tvos"]
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos"
+      ]
     }
   },
   {
@@ -67025,7 +67052,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -67458,7 +67485,7 @@
       }
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -67586,7 +67613,7 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   }
 ]

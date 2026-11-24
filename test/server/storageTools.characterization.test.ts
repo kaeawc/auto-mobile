@@ -133,23 +133,6 @@ test.each(toolNames)("%s wraps unrelated client failures", async (name) => {
   await expect(result).rejects.toMatchObject({ cause: failure });
 });
 
-test.each(["listDataStores", "getDataStore"])(
-  "%s rejects iOS before creating a client",
-  async (name) => {
-    let created = false;
-    useStorageToolsDependenciesForTesting({
-      androidClientFactory: () => {
-        created = true;
-        return fakeClient();
-      },
-    });
-    await expect(handler(name)({ ...device, platform: "ios" }, args)).rejects.toThrow(
-      "Android-only",
-    );
-    expect(created).toBe(false);
-  },
-);
-
 test.each(["setKeyValue", "removeKeyValue", "clearKeyValueFile"])(
   "%s waits for mutation before emitting the entries update",
   async (name) => {

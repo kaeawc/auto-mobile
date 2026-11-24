@@ -186,7 +186,7 @@ export async function stopVideoRecordingsBeforeShutdown(
       timeoutMs: context.timeoutMs,
     });
     const platform = context.device.platform;
-    // Video recording does not support watchOS or visionOS, so neither has recordings to stop.
+    // Video recording does not support visionOS, so a Vision Pro has no recordings to stop.
     if (!isVideoRecordingPlatform(platform)) {
       return;
     }

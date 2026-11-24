@@ -289,10 +289,14 @@ describe.each(["watchos", "tvos", "visionos"] as const)(
             await tool.handler({ sessionUuid: session });
             return `${tool.name}: resolved`;
           } catch (error) {
-            return error instanceof ActionableError &&
-              error.message === unsupportedPlatformToolMessage(tool.name, platform)
-              ? "rejected"
-              : `${tool.name}: ${String(error)}`;
+            // A tool restricted to other platforms names its own platforms instead (#18721).
+            const restricted = tool.platforms !== undefined && !tool.platforms.includes(platform);
+            const expected = restricted
+              ? error instanceof ActionableError &&
+                error.message.startsWith(`${tool.name} is only supported on `)
+              : error instanceof ActionableError &&
+                error.message === unsupportedPlatformToolMessage(tool.name, platform);
+            return expected ? "rejected" : `${tool.name}: ${String(error)}`;
           }
         }),
       );
@@ -390,12 +394,19 @@ describe("a device-aware tool refuses a requested tvOS platform before session r
   });
 });
 
-test("tvOS opts into videoRecording and compareScreenshot (#16725)", () => {
+test("tvOS and watchOS opt into videoRecording and compareScreenshot (#16725, #19056)", () => {
   for (const tool of ["videoRecording", "compareScreenshot"]) {
-    expect(() => assertToolSupportsDevicePlatform(tool, appleTv)).not.toThrow();
-    expect(() => assertRequestedPlatformSupported(tool, { platform: "tvos" })).not.toThrow();
-    expect(APPLE_PLATFORM_SUPPORTED_TOOLS.watchos.has(tool)).toBe(false);
+    for (const [device, platform] of [
+      [appleTv, "tvos"],
+      [watch, "watchos"],
+    ] as const) {
+      expect(() => assertToolSupportsDevicePlatform(tool, device)).not.toThrow();
+      expect(() => assertRequestedPlatformSupported(tool, { platform })).not.toThrow();
+    }
     expect(APPLE_PLATFORM_SUPPORTED_TOOLS.visionos.has(tool)).toBe(false);
+    expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).toThrow(
+      new ActionableError(unsupportedPlatformToolMessage(tool, "visionos")),
+    );
   }
 });
 

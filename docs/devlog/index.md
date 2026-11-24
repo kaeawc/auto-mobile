@@ -16,6 +16,7 @@ regenerates the table below.
 | Date | Kind | Entry |
 | --- | --- | --- |
 | 2026-11-23 | decision | [XR headset hand and eye input over emulator gRPC](2026-11-23-xr-headset-hand-and-eye-input.md) |
+| 2026-11-23 | decision | [Apple Watch evidence tools, and no side button yet](2026-11-23-watchos-evidence-tools-and-side-button.md) |
 | 2026-11-23 | decision | [Reach Simulator render overlays through osascript](2026-11-23-simulator-render-overlays-osascript.md) |
 | 2026-11-23 | decision | [Read Simulator network activity with host tools](2026-11-23-simulator-network-activity-host-tools.md) |
 | 2026-11-23 | decision | [Keyboard control through CoreSimulator](2026-11-23-simulator-keyboard-coresimulator.md) |
@@ -31,6 +32,7 @@ regenerates the table below.
 | 2026-11-21 | decision | [Prototype media runtime placement spike](2026-11-21-prototype-media-runtime-placement-spike.md) |
 | 2026-11-21 | concept | [iOS Simulator audio routing open questions](2026-11-21-ios-simulator-audio-routing-open-questions.md) |
 | 2026-11-20 | decision | [Fixture capture mode](2026-11-20-fixture-capture-mode.md) |
+| 2026-11-19 | decision | [Typed platform restriction for device-aware tools](2026-11-19-typed-tool-platform-restriction.md) |
 | 2026-11-19 | decision | [Committed page bundle and one export budget](2026-11-19-prototype-web-page-bundle.md) |
 | 2026-11-19 | decision | [Per-runtime prototype budgets](2026-11-19-prototype-runtime-budgets.md) |
 | 2026-11-19 | decision | [Material 3 Expressive components drawn from stable primitives](2026-11-19-m3-expressive-stable-primitives.md) |

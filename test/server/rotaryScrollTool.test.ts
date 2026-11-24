@@ -9,7 +9,7 @@ import {
 import { DEVICE_TRAITS_TIMEOUT_MS } from "../../src/server/bootedDeviceTraits";
 import { androidDeviceTraits, FakeDeviceTraits } from "../fakes/FakeDeviceTraits";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
-import { ActionableError, type BootedDevice } from "../../src/models";
+import type { BootedDevice } from "../../src/models";
 import type { RotaryScroller, RotaryScrollResult } from "../../src/features/wear/RotaryScroll";
 import { screenFingerprint } from "../../src/server/rotaryScrollTool";
 import { AdbRotaryScroller } from "../../src/features/wear/RotaryScroll";
@@ -18,7 +18,6 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { toolJson } from "../helpers/toolResponse";
 
 const android: BootedDevice = { name: "Wear", deviceId: "emulator-5554", platform: "android" };
-const ios: BootedDevice = { name: "iPhone", deviceId: "sim-1", platform: "ios" };
 
 function setup(result: RotaryScrollResult, watch: boolean | "unreadable" = true) {
   const calls: number[] = [];
@@ -84,12 +83,6 @@ describe("rotaryScroll tool", () => {
     const response = await handler(android, { delta: 1 });
     expect((response as { isError?: boolean }).isError).toBe(true);
     expect(toolJson(response).reason).toContain("No rotary candidate");
-  });
-
-  test("is Android-only, refused before the watch check", async () => {
-    const { handler, watchChecks } = setup({ success: true, delta: 1, attempts: [] });
-    await expect(handler(ios, { delta: 1 })).rejects.toBeInstanceOf(ActionableError);
-    expect(watchChecks).toEqual([]);
   });
 
   test("a watch gets no warning", async () => {

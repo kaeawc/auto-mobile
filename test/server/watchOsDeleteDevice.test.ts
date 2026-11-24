@@ -25,6 +25,8 @@ import type { AppleDevice } from "../../src/utils/ios-cmdline-tools/SimCtlSuppor
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { useEmptyVideoRecordings } from "../helpers/emptyVideoRecordings";
+import { resetVideoRecordingManagerDependencies } from "../../src/daemon/videoRecordingManager";
 import { WatchRunnerLifecycle } from "../../src/features/watch/WatchRunnerLifecycle";
 import { FakeWatchRunnerLauncher } from "../fakes/FakeWatchRunnerLauncher";
 import { watchRunners } from "../../src/features/watch/WatchRunnerRegistry";
@@ -61,6 +63,7 @@ describe("deleteDevice on an Apple Watch simulator", () => {
     DaemonState.getInstance().reset();
     sessionManager?.stopCleanupTimer();
     sessionManager = undefined;
+    resetVideoRecordingManagerDependencies();
   };
   beforeEach(cleanup);
   afterEach(cleanup);
@@ -94,6 +97,8 @@ describe("deleteDevice on an Apple Watch simulator", () => {
       await new WatchSimulatorLifecycle(simctl, inventory).shutdown(device);
     };
     const timer = new FakeTimer();
+    // A watch delete stops its active recordings first (#19056); answer without the real DB.
+    await useEmptyVideoRecordings(timer);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {

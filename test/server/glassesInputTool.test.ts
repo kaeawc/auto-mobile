@@ -10,7 +10,7 @@ import { FakeDeviceTraits, androidDeviceTraits } from "../fakes/FakeDeviceTraits
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { DEVICE_TRAITS_TIMEOUT_MS } from "../../src/server/bootedDeviceTraits";
-import { ActionableError, type BootedDevice } from "../../src/models";
+import type { BootedDevice } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
 import { toolJson } from "../helpers/toolResponse";
 
@@ -81,14 +81,6 @@ describe("glassesInput tool", () => {
     const response = await handler(android, { gesture: "tap" });
     expect(response.isError).toBe(true);
     expect(glassesInputResultSchema.safeParse(toolJson(response)).success).toBe(true);
-  });
-  test("rejects iOS before traits or input", async () => {
-    const { handler, checks, calls } = setup();
-    await expect(
-      handler({ ...android, platform: "ios" }, { gesture: "tap" }),
-    ).rejects.toBeInstanceOf(ActionableError);
-    expect(checks).toEqual([]);
-    expect(calls).toEqual([]);
   });
   test("validates gestures, axes and bounded integer counts including tap", () => {
     for (const count of [1, 20]) {

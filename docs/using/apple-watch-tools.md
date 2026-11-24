@@ -184,4 +184,4 @@ host app tap.
 
 `executePlan` replays a plan on a watch with `platform: "watchos"`, including one `recordToolCalls`
 recorded on a watch. Each step runs as the same tool called directly. A step whose tool does not
-accept a watch fails with the standard refusal. Plans on a watch record no video.
+accept a watch fails with the standard refusal. Plans on a watch record video.

@@ -31,8 +31,9 @@ setup() {
   grep -qF 'scripts/android/ensure-emulator-sdk.sh' "$workflow"
   ! grep -q reactivecircus "$workflow"
 }
-@test "third party actions are SHA pinned with major version comments" {
-  run awk '/uses:/ && !/uses: \.\// && !/uses: [^@]+@[a-f0-9]{40} # v[0-9]+$/ {print; bad=1} END {exit bad}' "$workflow"
+# Dependabot rewrites the trailing comment to the full release tag (# v7.0.1), so accept any vN[.N...].
+@test "third party actions are SHA pinned with version tag comments" {
+  run awk '/uses:/ && !/uses: \.\// && !/uses: [^@]+@[a-f0-9]{40} # v[0-9]+(\.[0-9]+)*$/ {print; bad=1} END {exit bad}' "$workflow"
   [ "$status" -eq 0 ]
 }
 @test "artifact names are unique, matrix interpolated, and summary always runs" {

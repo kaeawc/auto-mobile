@@ -11,10 +11,7 @@ setup() {
 }
 
 # action|majors|reason: exactly these majors may coexist; any other major still fails.
-ALLOWED_SPLITS=(
-  "actions/upload-artifact|4 6 7|build-desktop-conveyor.yml (desktop packaging) is still on v4; gradle-task-run pins v7.0.1 through Dependabot"
-  "actions/setup-java|4 5|build-desktop-conveyor.yml (desktop packaging) is still on v4"
-)
+ALLOWED_SPLITS=()
 
 # Prints "action major" for every remote `uses:` under .github/, reading the major from the
 # `# <tag>` comment of a SHA pin, or from the ref itself when it is a tag.

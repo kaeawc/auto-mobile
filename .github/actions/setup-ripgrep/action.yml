@@ -32,7 +32,7 @@ runs:
     # archive's SHA-256 after restore and after download (#17624).
     - name: "Cache pinned ripgrep download"
       if: steps.check-rg.outputs.installed != 'true'
-      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/auto-mobile/tools/ripgrep
         key: tool-download-ripgrep-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/actions/setup-ripgrep/ripgrep_version.sh') }}

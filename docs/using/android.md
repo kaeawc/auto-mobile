@@ -6,12 +6,31 @@ AutoMobile drives Android devices and emulators through the Android SDK and
 ## Get a device
 
 - Call `getAndroid` to acquire a device. Pass `avdName` to boot a named Android
-  Virtual Device, or `deviceId` for a device that is already running. See the
-  [FAQ](../faq.md).
+  Virtual Device, or `deviceId` for a device that is already running. With
+  neither and no `requires`, `getAndroid` picks a phone: a running phone
+  emulator first, otherwise it cold-boots a configured phone AVD. If there is no
+  phone to pick, the error tells you to call `listDeviceImages` and pass one of
+  the names as `avdName`. See the [FAQ](../faq.md).
 - Call `listDevices` to see devices, and `listDeviceImages` to see the system
   images you can boot. See [Listing device images](device-images.md).
 - A device your session holds takes calls only from that session. See
   [Device ownership](device-ownership.md).
+
+## When `getAndroid` fails
+
+- Right after a cold boot, `adb install` can fail with no reason while the
+  package manager starts. `getAndroid` retries that install within
+  `automationReadyTimeoutMs`. This covers a first install and an upgrade of an
+  older CtrlProxy.
+- If the call still fails after it cold-booted an emulator, the error message
+  ends with `deviceLeft` and a next step:
+  - `deviceLeft: shutdown`: the call is stopping the emulator it cold-booted.
+  - `deviceLeft: booted`: the emulator is still running.
+  - `deviceLeft: unknown`: the call could not confirm the emulator's state.
+- A device that was already running before the call is left running, and the
+  error does not add `deviceLeft`.
+- The next step is to call `getAndroid` again with the same `avdName` (or the
+  same arguments when you passed none).
 
 ## Android-only tools and features
 

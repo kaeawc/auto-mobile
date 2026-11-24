@@ -222,6 +222,8 @@ resource id, view id, content-desc and text. A label-less control (no text or
 content-desc, such as `switchWidget`) paired this way shows a state change
 (`checked`, `selected`, `state-description`) only when it kept its bounds and
 its row title. Otherwise the diff lists the two sides as removed and added.
+Android window roots key on `windowId`, so a closing window reads as removed
+rather than as a `windowId` change on the window beneath it.
 
 A requested post-action screenshot is published under the same `observationId`
 as the hierarchy it should match. Only a settle-gated action can replace its

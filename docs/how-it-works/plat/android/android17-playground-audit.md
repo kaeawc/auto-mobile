@@ -1,6 +1,6 @@
 # Android 17 (targetSdk 37) audit: Playground app
 
-Playground modules read `targetSdk = 37`, `compileSdk = 37` and `buildTools = 37.0.0` from the
+Playground modules read `targetSdk = 37`, `compileSdk = 37.1` and `buildTools = 37.0.0` from the
 version catalog (`android/gradle/libs.versions.toml`). Robolectric stays capped at SDK 35, with the
 app test pin at SDK 30 and CtrlProxy at SDK 24.
 

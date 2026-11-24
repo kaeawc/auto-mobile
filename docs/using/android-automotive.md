@@ -257,7 +257,9 @@ SDK with the route off, since `enable` does nothing in a non-debuggable build.
 
 ```kotlin
 android {
-  compileSdk = 37
+  compileSdk {
+    version = release(37) { minorApiLevel = 1 }
+  }
 }
 
 dependencies {
@@ -265,8 +267,8 @@ dependencies {
 }
 ```
 
-The SDK requires `compileSdk` 37 or newer and brings a Kotlin 2.4 standard library, so build the app
-with Kotlin 2.3 or newer. The app already depends on the Car App Library (`androidx.car.app`); the SDK
+The SDK requires `compileSdk` 37.1 or newer (install `platforms;android-37.1` with `sdkmanager`)
+and brings a Kotlin 2.4 standard library, so build the app with Kotlin 2.3 or newer. The app already depends on the Car App Library (`androidx.car.app`); the SDK
 does not add it.
 
 Turn the route on once and pass each template through `record` as `onGetTemplate` returns it:

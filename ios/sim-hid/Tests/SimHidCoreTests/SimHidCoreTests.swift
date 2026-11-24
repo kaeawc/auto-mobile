@@ -9,6 +9,8 @@ private final class FakeSender: SimHidSender {
     /// Fails only the attempt with this zero-based index; later sends succeed.
     var failAttempt: Int?
     var notSentAttempt: Int?
+    /// Interrupts the wait with this zero-based index, as stdin EOF does in the helper.
+    var interruptSleep: Int?
     private(set) var attempts: [SimHidStep] = []
     private var clock = 0.0
 
@@ -24,9 +26,14 @@ private final class FakeSender: SimHidSender {
         sent.append(step)
     }
 
-    func sleep(milliseconds: Double) {
+    func sleep(milliseconds: Double) -> Bool {
+        if slept.count == interruptSleep {
+            slept.append(0)
+            return false
+        }
         slept.append(milliseconds)
         clock += milliseconds
+        return true
     }
 
     func nowMs() -> Double {
@@ -289,6 +296,42 @@ final class SimHidServerTests: XCTestCase {
         let sender = FakeSender()
         sender.failAttempt = 0
         _ = SimHidServer(sender: sender).handle(line: #"{"id":"11","cmd":"button","button":"lock"}"#)
+        XCTAssertEqual(sender.attempts, [.button(source: 0x1, down: true), .button(source: 0x1, down: false)])
+    }
+
+    func testInterruptedLongPressLiftsTheFinger() {
+        // #19163: a session released mid long-press stops the helper; the touch must come up.
+        let sender = FakeSender()
+        sender.interruptSleep = 0
+        let ack = SimHidServer(sender: sender).handle(
+            line: #"{"id":"13","cmd":"tap","x":5,"y":5,"holdMs":9000,"width":10,"height":10}"#
+        )
+        XCTAssertEqual(ack, SimHidAck(id: "13", ok: false, sent: true, error: SimHidError.interrupted))
+        let center = SimHidPoint(x: 0.5, y: 0.5)
+        XCTAssertEqual(sender.attempts, [
+            .touch(center, second: nil, phase: .down), .touch(center, second: nil, phase: .up),
+        ])
+    }
+
+    func testInterruptedSwipeLiftsTheFingerAtTheLastPoint() {
+        let sender = FakeSender()
+        sender.interruptSleep = 1
+        let ack = SimHidServer(sender: sender).handle(
+            line: #"{"id":"14","cmd":"swipe","x":0,"y":0,"toX":10,"toY":0,"durationMs":34,"width":10,"height":10}"#
+        )
+        XCTAssertEqual(ack.error, SimHidError.interrupted)
+        XCTAssertTrue(ack.sent)
+        guard case let .touch(lastDrag, _, .dragged) = sender.attempts[1] else {
+            return XCTFail("expected a drag before the interrupted wait")
+        }
+        XCTAssertEqual(sender.attempts.count, 3)
+        XCTAssertEqual(sender.attempts.last, .touch(lastDrag, second: nil, phase: .up))
+    }
+
+    func testInterruptedButtonHoldReleasesTheButton() {
+        let sender = FakeSender()
+        sender.interruptSleep = 0
+        _ = SimHidServer(sender: sender).handle(line: #"{"id":"15","cmd":"button","button":"lock","holdMs":2000}"#)
         XCTAssertEqual(sender.attempts, [.button(source: 0x1, down: true), .button(source: 0x1, down: false)])
     }
 

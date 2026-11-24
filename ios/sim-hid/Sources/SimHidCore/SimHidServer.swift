@@ -5,7 +5,9 @@ import Foundation
 /// `SimHidNotSent`, which a sender throws only when nothing was handed to SimulatorKit.
 public protocol SimHidSender {
     func send(_ step: SimHidStep) throws
-    func sleep(milliseconds: Double)
+    /// Waits between steps. Returns false when the wait was interrupted (the helper is stopping,
+    /// #19163), so the command stops and releases what it holds instead of finishing.
+    func sleep(milliseconds: Double) -> Bool
     func nowMs() -> Double
 }
 
@@ -58,8 +60,11 @@ public struct SimHidServer {
         var held = SimHidHeldInput()
         for step in steps {
             if case let .wait(ms) = step {
-                sender.sleep(milliseconds: ms)
-                continue
+                if sender.sleep(milliseconds: ms) { continue }
+                // Stopped mid-hold (a released session's long press, #19163): lift the finger now,
+                // or the next helper's first touch-down lands on a touch that is still down.
+                release(held)
+                return SimHidAck(id: request.id, ok: false, sent: sent, error: SimHidError.interrupted)
             }
             do {
                 try sender.send(step)
@@ -133,6 +138,10 @@ struct SimHidHeldInput {
         }
         return steps
     }
+}
+
+extension SimHidError {
+    static let interrupted = SimHidError("interrupted", "sim-hid-helper stopped before the command finished")
 }
 
 public func simHidError(_ error: Error) -> SimHidError {

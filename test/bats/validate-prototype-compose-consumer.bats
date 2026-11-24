@@ -152,6 +152,44 @@ TOML
   [ -z "$output" ]
 }
 
+@test "compile_sdk_dsl renders a minor compileSdk as AGP's release block" {
+  run compile_sdk_dsl "37.1"
+  [ "$status" -eq 0 ]
+  [ "$output" = "compileSdk { version = release(37) { minorApiLevel = 1 } }" ]
+}
+
+@test "compile_sdk_dsl treats a major-only compileSdk as minor 0" {
+  run compile_sdk_dsl "37"
+  [ "$status" -eq 0 ]
+  [ "$output" = "compileSdk { version = release(37) { minorApiLevel = 0 } }" ]
+}
+
+@test "compile_sdk_dsl rejects a value that is not <major> or <major>.<minor>" {
+  run compile_sdk_dsl "37.1.0"
+  [ "$status" -ne 0 ]
+  run compile_sdk_dsl "android-37"
+  [ "$status" -ne 0 ]
+  run compile_sdk_dsl ""
+  [ "$status" -ne 0 ]
+}
+
+@test "the consumer project compiles against the catalog's compileSdk and targetSdk" {
+  cat >"${FIX}/libs.versions.toml" <<'TOML'
+[versions]
+build-android-agp = "9.5.2"
+build-kotlin = "2.4.0"
+androidx-activity-compose = "1.13.0"
+build-android-compileSdk = "37.1"
+build-android-minSdk = "24"
+build-android-targetSdk = "37"
+TOML
+  mkdir -p "${FIX}/consumer"
+  PROJECT_ROOT="${PWD}" ANDROID_HOME="${FIX}/sdk" \
+    write_consumer_project "${FIX}/consumer" "${FIX}/repo" "g:a:1" "${FIX}/libs.versions.toml"
+  grep -qxF "  compileSdk { version = release(37) { minorApiLevel = 1 } }" "${FIX}/consumer/build.gradle.kts"
+  grep -qxF "    targetSdk = 37" "${FIX}/consumer/build.gradle.kts"
+}
+
 @test "the script rejects an unknown argument with a usage exit" {
   run bash "${SCRIPT}" --bogus
   [ "$status" -eq 2 ]

@@ -1,4 +1,5 @@
 import com.android.build.api.dsl.LibraryExtension
+import dev.jasonpearson.automobile.buildlogic.sdk.AndroidCompileSdk
 import org.gradle.api.JavaVersion
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.kotlin.dsl.configure
@@ -12,13 +13,16 @@ pluginManager.apply("automobile.kotlin-common")
 pluginManager.apply("com.android.library")
 
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
-val androidCompileSdk = libs.findVersion("build-android-compileSdk").get().requiredVersion.toInt()
+val androidCompileSdk =
+  AndroidCompileSdk.parse(libs.findVersion("build-android-compileSdk").get().requiredVersion)
 val androidBuildTools = libs.findVersion("build-android-buildTools").get().requiredVersion
 val androidMinSdk = libs.findVersion("build-android-minSdk").get().requiredVersion.toInt()
 val javaTarget = libs.findVersion("build-java-target").get().requiredVersion
 
 extensions.configure<LibraryExtension> {
-  compileSdk = androidCompileSdk
+  compileSdk {
+    version = release(androidCompileSdk.major) { minorApiLevel = androidCompileSdk.minor }
+  }
   buildToolsVersion = androidBuildTools
 
   defaultConfig {

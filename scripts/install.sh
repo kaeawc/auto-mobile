@@ -278,7 +278,8 @@ show_installation_progress() {
 # Read the required Android compileSdk version from libs.versions.toml so the
 # installer never hardcodes the platform number — bumping
 # `build-android-compileSdk` is the single source of truth.
-# Echoes the version (e.g. "37") on success; non-zero exit if missing/unreadable.
+# Echoes the version (e.g. "37", or "37.1" for a minor SDK release, whose
+# platform installs as android-37.1) on success; non-zero exit if missing/unreadable.
 read_required_compile_sdk() {
     local toml_file="$1"
     [[ -f "${toml_file}" ]] || return 1

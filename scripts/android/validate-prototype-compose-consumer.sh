@@ -99,6 +99,15 @@ for dep in root.findall("m:dependencies/m:dependency", ns):
 PY
 }
 
+# Echo the AGP Kotlin DSL compileSdk block for a build-android-compileSdk catalog
+# value, "<major>" or "<major>.<minor>" (Compose 1.13 AARs require 37.1, which a
+# plain `compileSdk = <int>` cannot express). Non-zero exit on any other form.
+compile_sdk_dsl() {
+  local value="$1"
+  [[ "$value" =~ ^([0-9]+)(\.([0-9]+))?$ ]] || return 1
+  echo "compileSdk { version = release(${BASH_REMATCH[1]}) { minorApiLevel = ${BASH_REMATCH[3]:-0} } }"
+}
+
 # Echo the version of a [versions] key in a Gradle version catalog.
 catalog_version() {
   python3 - "$1" "$2" <<'PY'
@@ -140,15 +149,18 @@ run_logged() {
 
 write_consumer_project() {
   local consumer_dir="$1" repo="$2" coordinate="$3" catalog="$4"
-  local agp kotlin activity compile_sdk min_sdk
+  local agp kotlin activity compile_sdk compile_sdk_block min_sdk target_sdk
   agp="$(catalog_version "$catalog" build-android-agp)"
   kotlin="$(catalog_version "$catalog" build-kotlin)"
   activity="$(catalog_version "$catalog" androidx-activity-compose)"
   compile_sdk="$(catalog_version "$catalog" build-android-compileSdk)"
   min_sdk="$(catalog_version "$catalog" build-android-minSdk)"
-  for value in "$agp" "$kotlin" "$activity" "$compile_sdk" "$min_sdk"; do
+  target_sdk="$(catalog_version "$catalog" build-android-targetSdk)"
+  for value in "$agp" "$kotlin" "$activity" "$compile_sdk" "$min_sdk" "$target_sdk"; do
     [ -n "$value" ] || usage_error "could not read consumer versions from ${catalog}"
   done
+  compile_sdk_block="$(compile_sdk_dsl "$compile_sdk")" ||
+    usage_error "build-android-compileSdk must be <major> or <major>.<minor>, got '${compile_sdk}'"
 
   local source_dir="${consumer_dir}/src/main/kotlin/dev/jasonpearson/automobile/prototypeconsumer"
   mkdir -p "$source_dir"
@@ -183,12 +195,12 @@ plugins {
 
 android {
   namespace = "dev.jasonpearson.automobile.prototypeconsumer"
-  compileSdk = ${compile_sdk}
+  ${compile_sdk_block}
 
   defaultConfig {
     applicationId = "dev.jasonpearson.automobile.prototypeconsumer"
     minSdk = ${min_sdk}
-    targetSdk = ${compile_sdk}
+    targetSdk = ${target_sdk}
     versionCode = 1
     versionName = "1"
   }

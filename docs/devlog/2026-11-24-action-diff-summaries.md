@@ -2,7 +2,7 @@
 
 - Kind: decision
 - Date: 2026-11-24
-- Source: #19122, #19142, #11637
+- Source: #19122, #19142, #19146, #11637
 - Shaped: [Interaction loop](../how-it-works/mcp/interaction-loop.md)
 
 ## Context
@@ -49,3 +49,6 @@ is regenerated. Positional keys of Android window roots now contain `w<windowId>
 so a window that is re-created with a new id reads as removed and added rather
 than changed. Clients that need the full node attributes of what appeared still
 read the `skeleton`.
+
+#19146 later required a re-paired label-less control to keep its row title as
+well as its bounds, and capped each summary label at 60 characters.

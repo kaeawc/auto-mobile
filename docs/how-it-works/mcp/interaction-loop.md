@@ -131,11 +131,6 @@ stability, using the settle primitive of standalone
 hierarchies are structurally equal, bounded at 1000 ms and cancelled with the
 request. In-place and scroll actions keep their single capture.
 
-The comparison ignores the Android SystemUI status bar: its root subtrees, the
-allowlisted status-bar ids and the cell-signal rows (`mobile_*`,
-`signal_cluster*`). An emulator's simulated signal rewrites `mobile_combo` on
-every read. Notification-shade and quick-settings rows still count.
-
 The settle treats a node as volatile for its remaining comparisons when only the
 node's text or visibility changes in a comparison and in either of the two
 before it. Examples: a running clock or stopwatch, a paused stopwatch
@@ -184,12 +179,6 @@ capture passed the gate:
   reaches structural stability (an animation that moves or adds nodes, a
   list still loading). Re-observe if screen completeness matters.
 
-An adopted capture whose bound expired also carries `unsettledBy`. It holds up
-to 3 `{elementId, label, field}` entries from the last same-screen comparison
-that changed. `field` is the first changed attribute, `added`, `removed`, or a
-top-level field name (then alone). A screen switch or a running animation
-clears it.
-
 When the gate ran, the observation carries `settleMs` (milliseconds the gate
 spent re-observing) and `settlePolls` (how many re-observations it took). A
 `settled: false` result with `settleMs` near the budget means the screen
@@ -198,9 +187,9 @@ settle read that fails or is cancelled returns the action's own capture with
 `settled: false` and `settleMs` but no `settlePolls`. Both fields are absent when
 the action was never gated.
 
-In diff mode (`--actions-diff-observe`) `settled`, `settleMs`, `settlePolls` and
-`unsettledBy` ride on the diff alongside `activeWindow` and `freshness`, so one
-accessor works in both modes. A diff with no node, display or field change, projected or not,
+In diff mode (`--actions-diff-observe`) `settled`, `settleMs` and `settlePolls`
+ride on the diff alongside `activeWindow` and `freshness`, so one accessor works
+in both modes. A diff with no node, display or field change, projected or not,
 carries `unchanged: true` when its `skeleton`, `context` and `keyboard` equal the
 ones the baseline's response delivered. It then leaves those three out; every
 other diff carries them. A baseline whose response carried no skeleton never yields
@@ -213,19 +202,28 @@ nodes with no affordance. It counts them for actionable nodes in
 `relayout: {count, dx?, dy?}`. `dx` and `dy` appear only when every counted change
 shares the same non-zero left or top offset. A resize in place adds neither.
 
-An action diff replaces the added and removed node lists, which the `skeleton`
-already covers, with `addedSummary` and `removedSummary`: `{count, labels?}`
-with up to 5 distinct labels (label, else element id). Each is absent when empty.
+A delivered action diff leaves out the `added` and `removed` node lists, because
+the `skeleton` already lists every actionable node. In their place it carries
+`addedSummary` and `removedSummary`: `{count, labels?}`, with up to 5 distinct
+labels (`label`, else element id), each cut to 60 characters with an ellipsis.
+A summary is absent when its list is empty.
 
-A non-scroll action that replaced the screen's actionable content returns a full
-observation (`mode: "full"`, `reason: "screen_changed"`). Either at least 3 nodes
-were both added and removed, or at least 3 were added and 1 removed, as when a
-dialog closes. In both cases that count is at least half the `skeleton`.
+A skeleton-projected action that is not a scroll ships the full observation
+instead of a diff when it replaced the screen's actionable content. That holds
+in two cases. At least 3 nodes were both added and removed, and they cover at
+least half of the current skeleton. Or at least 3 nodes were added, they cover
+half of it, and any node was removed. Navigating between sub-screens of one
+activity, or closing a dialog that reveals many rows, therefore returns the new
+screen. A pure expansion (nothing removed) stays a diff.
 
-The diff pairs a label-less control whose resource id is unique on both sides
-and whose bounds did not change, so a relayout of its ancestors keeps its state
-change in `changed`. Android window roots key on `windowId`, so a closing window
-reads as removed.
+An ancestor whose bounds change re-keys its subtree, so its nodes no longer
+match by position. The diff then pairs leftover nodes that share a unique
+resource id, view id, content-desc and text. A label-less control (no text or
+content-desc, such as `switchWidget`) paired this way shows a state change
+(`checked`, `selected`, `state-description`) only when it kept its bounds and
+its row title. Otherwise the diff lists the two sides as removed and added.
+Android window roots key on `windowId`, so a closing window reads as removed
+rather than as a `windowId` change on the window beneath it.
 
 A requested post-action screenshot is published under the same `observationId`
 as the hierarchy it should match. Only a settle-gated action can replace its
@@ -277,5 +275,3 @@ The default compact action metadata section is on its own page:
 
 - [Post-action screenshot timing](../../devlog/2026-11-10-interaction-loop-screenshot-timing.md)
 - [Stateless success reductions in the response envelope](../../devlog/2026-11-15-stateless-envelope-reductions.md)
-- [Action diffs summarize added and removed nodes](../../devlog/2026-11-24-action-diff-summaries.md)
-- [Stable wait timeout is a result, not an error](../../devlog/2026-11-24-stable-wait-timeout-not-error.md)

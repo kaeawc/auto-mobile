@@ -127,8 +127,8 @@ export function flattenForDiff(
   const walk = (
     node: ViewHierarchyNode | undefined,
     siblingIndex: number,
-    parentPath: string,
     ancestorClasses: readonly string[],
+    parent: FlatObserveNode | undefined,
   ): void => {
     if (!node || typeof node !== "object") {
       return;
@@ -141,23 +141,25 @@ export function flattenForDiff(
       return;
     }
     const localKey = nodeKey(rec, siblingIndex);
-    const pathKey = parentPath === "" ? localKey : `${parentPath}${PATH_KEY_SEP}${localKey}`;
-    out.push({
+    const pathKey = parent ? `${parent.pathKey}${PATH_KEY_SEP}${localKey}` : localKey;
+    const flat: FlatObserveNode = {
       source: node,
       pathKey,
       key: localKey,
       attributes: diffNodeAttributes(rec),
       ancestorClasses,
-    });
+      ...(parent ? { parent } : {}),
+    };
+    out.push(flat);
     const className = classNameForDiff(rec);
     const childAncestorClasses =
       className === "" ? ancestorClasses : [...ancestorClasses, className];
     toNodeArray(node.node).forEach((child, index) =>
-      walk(child, index, pathKey, childAncestorClasses),
+      walk(child, index, childAncestorClasses, flat),
     );
   };
   toNodeArray(obs.viewHierarchy?.hierarchy?.node).forEach((root, index) =>
-    walk(root, index, "", []),
+    walk(root, index, [], undefined),
   );
   return out;
 }

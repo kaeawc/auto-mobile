@@ -1,8 +1,12 @@
 import { z } from "zod/v4";
-import { ActionableError, toActionableError } from "../../models/ActionableError";
-import { runExecSeam } from "../ExecSeam";
+import { ActionableError } from "../../models/ActionableError";
 import { execFileAsync, type ExecFileAsync } from "../HostCommandExecutor";
-import { resolveDeveloperDirectory } from "../ios-cmdline-tools/SimulatorBacklight";
+import {
+  coreSimulatorJxaScript,
+  resolveDeveloperDirectory,
+  runCoreSimulatorJxa,
+  type CoreSimulatorJxaFailure,
+} from "../ios-cmdline-tools/CoreSimulatorJxa";
 
 /**
  * Physical layout of the simulated hardware keyboard. CoreSimulator takes the Apple USB keyboard
@@ -46,46 +50,25 @@ export interface SimulatorKeyboardBridge {
   ): Promise<void>;
 }
 
-/**
- * JavaScript for Automation run by `osascript`: it loads the system CoreSimulator framework and
- * calls `-[SimDevice setHardwareKeyboardEnabled:keyboardType:error:]` or
- * `-[SimDevice setKeyboardLanguage:error:]` on the booted device. The error out-parameter is passed
- * as null because the JXA bridge crashes when it boxes the returned NSError. A separate process
- * keeps the private framework out of the daemon.
- */
-export const SIMULATOR_KEYBOARD_JXA = `
-ObjC.import("Foundation");
-function run(argv) {
-  const developerDir = argv[0], udid = argv[1], action = argv[2];
-  const bundle = $.NSBundle.bundleWithPath("/Library/Developer/PrivateFrameworks/CoreSimulator.framework");
-  if (bundle.isNil() || !bundle.load) return JSON.stringify({ error: "private-api-unavailable" });
-  const contextClass = $.NSClassFromString("SimServiceContext");
-  if (contextClass.isNil()) return JSON.stringify({ error: "private-api-unavailable" });
-  const context = contextClass.sharedServiceContextForDeveloperDirError($(developerDir), null);
-  if (context.isNil()) return JSON.stringify({ error: "private-api-unavailable" });
-  const set = context.defaultDeviceSetWithError(null);
-  if (set.isNil()) return JSON.stringify({ error: "private-api-unavailable" });
-  const id = $.NSUUID.alloc.initWithUUIDString($(udid));
-  const device = id.isNil() ? id : set.devicesByUDID.objectForKey(id);
-  if (device.isNil()) return JSON.stringify({ error: "device-not-found" });
-  if (Number(device.state) !== 3) return JSON.stringify({ error: "device-not-booted" });
-  const ok = action === "hardware"
+/** Runs after the shared CoreSimulator prelude: argv[2] is the action, then its arguments. */
+const KEYBOARD_BODY = `
+  const ok = argv[2] === "hardware"
     ? device.setHardwareKeyboardEnabledKeyboardTypeError(argv[3] === "1", Number(argv[4]), null)
     : device.setKeyboardLanguageError($(argv[3]), null);
   return JSON.stringify({ ok: ok === true });
-}
 `;
 
-const outputSchema = z.union([
-  z.object({ ok: z.boolean() }).strict(),
-  z
-    .object({ error: z.enum(["private-api-unavailable", "device-not-found", "device-not-booted"]) })
-    .strict(),
-]);
+/**
+ * The `osascript` script that calls `-[SimDevice setHardwareKeyboardEnabled:keyboardType:error:]`
+ * or `-[SimDevice setKeyboardLanguage:error:]` on the booted device.
+ */
+export const SIMULATOR_KEYBOARD_JXA = coreSimulatorJxaScript(KEYBOARD_BODY, true);
+
+const resultSchema = z.object({ ok: z.boolean() }).strict();
 
 const CALL_TIMEOUT_MS = 30_000;
 
-function failureMessage(code: string, udid: string): string {
+function failureMessage(code: CoreSimulatorJxaFailure, udid: string): string {
   switch (code) {
     case "device-not-found":
       return `Simulator ${udid} is not in the default CoreSimulator device set.`;
@@ -93,15 +76,6 @@ function failureMessage(code: string, udid: string): string {
       return `Simulator ${udid} is not booted; boot it before changing its keyboard.`;
     default:
       return "CoreSimulator's SimDevice keyboard API is unavailable; check that DEVELOPER_DIR or xcode-select points at a supported Xcode.";
-  }
-}
-
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text.trim());
-  } catch (error) {
-    // Unparseable output falls through to the schema failure, which reports the text.
-    return { unparseable: String(error) };
   }
 }
 
@@ -152,35 +126,21 @@ export class OsascriptSimulatorKeyboardBridge implements SimulatorKeyboardBridge
     args: string[],
     options?: SimulatorKeyboardCallOptions,
   ): Promise<boolean> {
-    const argv = [
-      "-l",
-      "JavaScript",
-      "-e",
-      SIMULATOR_KEYBOARD_JXA,
-      await this.developerDirectory(),
-      udid,
-      ...args,
-    ];
-    let stdout: string;
-    try {
-      const result = await runExecSeam(
-        (execOptions) => this.exec("osascript", argv, execOptions),
-        { timeoutMs: CALL_TIMEOUT_MS, ...(options?.signal ? { signal: options.signal } : {}) },
-        { command: "osascript", args: ["-l", "JavaScript", "<simulator keyboard>", udid, ...args] },
-      );
-      stdout = result.stdout;
-    } catch (error) {
-      throw toActionableError(error, `Simulator keyboard call failed on ${udid}`);
-    }
-    const parsed = outputSchema.safeParse(parseJson(stdout));
-    if (!parsed.success) {
-      throw new ActionableError(
-        `Simulator keyboard call on ${udid} printed unexpected output: ${stdout.trim().slice(0, 200)}`,
-      );
-    }
-    if ("error" in parsed.data) {
-      throw new ActionableError(failureMessage(parsed.data.error, udid));
-    }
-    return parsed.data.ok;
+    const result = await runCoreSimulatorJxa(
+      {
+        udid,
+        body: KEYBOARD_BODY,
+        args,
+        requireBooted: true,
+        timeoutMs: CALL_TIMEOUT_MS,
+        ...(options?.signal ? { signal: options.signal } : {}),
+        resultSchema,
+        label: "keyboard",
+        scriptPlaceholder: "<simulator keyboard>",
+        describeFailure: (code) => failureMessage(code, udid),
+      },
+      { exec: this.exec, developerDirectory: this.developerDirectory },
+    );
+    return result.ok;
   }
 }

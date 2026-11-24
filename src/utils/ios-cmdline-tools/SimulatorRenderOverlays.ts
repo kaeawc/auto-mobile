@@ -3,7 +3,7 @@ import { ActionableError, toActionableError } from "../../models/ActionableError
 import { commandFailureDetails } from "../CommandError";
 import { errorMessage } from "../describeUnknownError";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../HostCommandExecutor";
-import { resolveDeveloperDirectory } from "./SimulatorBacklight";
+import { resolveDeveloperDirectory } from "./CoreSimulatorJxa";
 
 /**
  * Core Animation render overlays the Simulator's Debug menu offers (#19016), keyed by the

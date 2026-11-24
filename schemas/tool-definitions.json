@@ -10320,7 +10320,7 @@
           "additionalProperties": false
         },
         "avdName": {
-          "description": "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android). Omit both avdName and deviceId to select a device: a running phone emulator first, then a configured phone AVD (cold-booted)",
+          "description": "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android). Omit both avdName and deviceId to select a device: the running device the session already holds, else a running phone emulator first, then a configured phone AVD (cold-booted). requires narrows that phone choice; only panels above 1, posture, screenRound or vehicle selects another form factor instead",
           "type": "string",
           "minLength": 1
         },

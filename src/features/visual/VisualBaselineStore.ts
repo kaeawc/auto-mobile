@@ -62,7 +62,7 @@ export const nodeBaselineFs: BaselineFs = {
 
 const baselineMetadataSchema = z.object({
   profile: z.object({
-    platform: z.enum(["android", "ios", "tvos"]),
+    platform: z.enum(["android", "ios", "tvos", "watchos"]),
     width: z.number(),
     height: z.number(),
     density: z.number().nullable(),

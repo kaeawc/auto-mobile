@@ -32,7 +32,7 @@ describe("assertDeviceInToolPlatforms (#18721)", () => {
     const platforms: ToolPlatforms = ["android", "tvos"];
     expect(() => assertDeviceInToolPlatforms("focusNavigate", platforms, TV)).not.toThrow();
     expect(() => assertDeviceInToolPlatforms("focusNavigate", platforms, IPHONE)).toThrow(
-      "focusNavigate is only supported on Android and tvOS; IPHONE-UDID is iOS.",
+      "focusNavigate is only supported on Android and tvOS; IPHONE-UDID is iOS. Target a device running Android or tvOS instead.",
     );
   });
 });

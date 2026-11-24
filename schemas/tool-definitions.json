@@ -40587,7 +40587,7 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {
@@ -50712,7 +50712,7 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios"]
+      "automobile/requires": ["platform:android"]
     }
   },
   {

@@ -7,9 +7,11 @@ import { PLATFORM_LABELS, type Platform } from "../models/Platform";
  */
 export type ToolPlatforms = readonly [Platform, ...Platform[]];
 
-function platformList(platforms: ToolPlatforms): string {
+function platformList(platforms: ToolPlatforms, conjunction: "and" | "or"): string {
   const labels = platforms.map((platform) => PLATFORM_LABELS[platform]);
-  return labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+  return labels.length === 1
+    ? labels[0]
+    : `${labels.slice(0, -1).join(", ")} ${conjunction} ${labels.at(-1)}`;
 }
 
 export function toolPlatformRestrictionMessage(
@@ -17,10 +19,10 @@ export function toolPlatformRestrictionMessage(
   platforms: ToolPlatforms,
   device: Pick<BootedDevice, "platform" | "deviceId">,
 ): string {
-  const supported = platformList(platforms);
+  // A device runs one platform, so the target suggestion offers the alternatives with "or" (#19172).
   return (
-    `${toolName} is only supported on ${supported}; ${device.deviceId} is ` +
-    `${PLATFORM_LABELS[device.platform]}. Target a device running ${supported} instead.`
+    `${toolName} is only supported on ${platformList(platforms, "and")}; ${device.deviceId} is ` +
+    `${PLATFORM_LABELS[device.platform]}. Target a device running ${platformList(platforms, "or")} instead.`
   );
 }
 

@@ -42,11 +42,19 @@ export function boundsKey(bounds: unknown): string {
  * (e.g. `checked`) keep the same key and surface as `changed`. On its own it is
  * not globally unique — `FlatObserveNode.pathKey` prefixes the ancestor chain to
  * disambiguate identical cells living in different subtrees.
+ *
+ * A window root (an Android node stamped with an integer `windowId`) is keyed
+ * by that id instead of its sibling index (#19122): full-screen window roots
+ * carry no id or text and share bounds, so a closing sheet's root would
+ * otherwise pair with the app window root that slid into its index.
  */
 function nodeKey(node: Record<string, unknown>, siblingIndex: number): string {
   const resourceId = node["resource-id"] ?? "";
   const text = node["text"] ?? "";
-  return [resourceId, boundsKey(node["bounds"]), text, siblingIndex].join("\0");
+  const windowId = node["windowId"] ?? hierarchyNodeAttributes(node).windowId;
+  const position =
+    typeof windowId === "number" && Number.isInteger(windowId) ? `w${windowId}` : siblingIndex;
+  return [resourceId, boundsKey(node["bounds"]), text, position].join("\0");
 }
 
 /**

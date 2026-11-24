@@ -96,6 +96,19 @@ export interface ObserveDiffRelayout {
 }
 
 /**
+ * Count of the nodes an action diff dropped from `added` or `removed`, with up
+ * to {@link MAX_DIFF_SUMMARY_LABELS} distinct labels (`label ?? elementId`)
+ * so a client can tell what appeared or went away (#19122).
+ */
+export interface ObserveDiffNodeSummary {
+  count: number;
+  labels?: string[];
+}
+
+/** Most labels an {@link ObserveDiffNodeSummary} carries. */
+export const MAX_DIFF_SUMMARY_LABELS = 5;
+
+/**
  * Compact diff of one observation against a baseline. `isDiff` is a discriminant
  * so a consumer can tell a diff apart from a full `ObserveResult` (which has no
  * such marker). Empty `added`/`removed`/`changed` and absent `fields` means the
@@ -235,6 +248,10 @@ export interface ObserveDiff {
   settlePolls?: number;
   added: ObserveDiffNode[];
   removed: ObserveDiffNode[];
+  /** Wire form only: what `added` held once the list itself is dropped (#19122). */
+  addedSummary?: ObserveDiffNodeSummary;
+  /** Wire form only: what `removed` held once the list itself is dropped (#19122). */
+  removedSummary?: ObserveDiffNodeSummary;
   changed: ObserveDiffNodeChange[];
   /** Skeleton projection only: bounds-only moves left out of `changed` (#18348). */
   relayout?: ObserveDiffRelayout;

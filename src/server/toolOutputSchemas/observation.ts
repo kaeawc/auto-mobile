@@ -245,6 +245,18 @@ export const observeDiffNodeSchema = z
   })
   .passthrough();
 
+/** Count and up to 5 labels of the nodes an action diff no longer lists (#19122). */
+const observeDiffNodeSummarySchema = z
+  .object({
+    count: z.number().int().positive(),
+    labels: z
+      .array(z.string())
+      .max(5)
+      .optional()
+      .describe("Up to 5 distinct node labels (label, else element id)."),
+  })
+  .optional();
+
 /** A node matched across baseline/next whose non-key attributes changed. */
 export const observeDiffNodeChangeSchema = z
   .object({
@@ -415,6 +427,12 @@ export const observeDiffSchema = z
       .describe(
         "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
       ),
+    addedSummary: observeDiffNodeSummarySchema.describe(
+      "Nodes that appeared since the previous observation: their count and up to 5 labels. Absent when none appeared.",
+    ),
+    removedSummary: observeDiffNodeSummarySchema.describe(
+      "Nodes that went away since the previous observation: their count and up to 5 labels. Absent when none went away.",
+    ),
     changed: z.array(observeDiffNodeChangeSchema),
     relayout: z
       .object({

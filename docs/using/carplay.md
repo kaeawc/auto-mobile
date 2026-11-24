@@ -1,8 +1,8 @@
 # CarPlay on iOS simulators
 
-AutoMobile cannot observe, record or tap the CarPlay screen yet. What works today is reading the
-templates your app shows on CarPlay, and acting on them, through the AutoMobile iOS SDK in a Debug
-build. This page covers that path and what is not supported.
+AutoMobile cannot observe or record the CarPlay screen yet. What works today is tapping it at
+coordinates, and reading the templates your app shows on CarPlay, and acting on them, through the
+AutoMobile iOS SDK in a Debug build. This page covers those paths and what is not supported.
 
 ## What works today
 
@@ -11,6 +11,10 @@ build. This page covers that path and what is not supported.
   as JSON.
 - `POST /carplay/action`: select a list row, image-row element, alert action or tab, go back, or
   pop to the root template.
+- `startDevice` with `carPlay: {}` turns on the CarPlay screen of an iOS 26.x simulator without
+  the Simulator window. See [Turn on the CarPlay screen with `startDevice`](#turn-on-the-carplay-screen-with-startdevice).
+- `tapAt` with `display: "carPlay"` taps that screen. See
+  [Tap the CarPlay screen](#tap-the-carplay-screen).
 - The `carPlay` device resource setting turns CarPlay vehicle connectivity off on a simulator. See
   [Configuring device resources](../how-it-works/device-resources-configuring.md).
 
@@ -21,7 +25,87 @@ No MCP tool reads the template tree or sends these actions. `observe`, screensho
 
 In Simulator, choose **I/O > External Displays > CarPlay**. A booted simulator lists the CarPlay
 screen even while this window is closed, so the listing does not mean the screen is showing.
-AutoMobile does not open or close the window for you.
+AutoMobile does not open or close the window for you; to turn the screen on without it, use
+`startDevice` as below.
+
+## Turn on the CarPlay screen with `startDevice`
+
+An iPhone simulator can show its CarPlay screen with no Simulator.app window. Ask for it with
+`startDevice`.
+
+### Requirements
+
+- An iPhone simulator on an iOS 26.x runtime from Xcode 26.x. Apple does not support CarPlay on the
+  iOS 27 Simulator.
+- Two local executables, named by environment variables on the daemon:
+  - `AUTOMOBILE_CARPLAY_POWER_HELPER_PATH`: the carplay-power-helper, which turns on the CarPlay
+    screen.
+  - `AUTOMOBILE_CARPLAY_PROJECTION_PROBE_PATH`: the CarPlay projection probe, which confirms the
+    screen is the car display. Use an absolute path.
+
+### Request it
+
+Pass `carPlay: {}` to `startDevice` for an iPhone simulator:
+
+```json
+{
+  "platform": "ios",
+  "deviceId": "<simulator UDID>",
+  "carPlay": {}
+}
+```
+
+Once the simulator is ready and bound to your session, AutoMobile turns on its CarPlay screen and
+checks that the simulator now reports it as the car display. The response gains a `carPlay` block:
+
+| Field       | Description                                       |
+| ----------- | ------------------------------------------------- |
+| `display`   | The car display's identity, for example `Car[2]`. |
+| `displayId` | The simulator screen id of the car display.       |
+
+The simulator forgets the CarPlay screen whenever it boots, including after `killDevice` or when a
+released device is reset. Pass `carPlay: {}` on each `startDevice` call that needs it; asking again
+on a simulator that already shows CarPlay is harmless.
+
+### Errors
+
+| Error                                                                                                            | What to do                                                                                                                                                                                                                      |
+| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `carPlay needs an iOS iPhone simulator`                                                                          | Use `platform: "ios"`. Android phones use [Android Auto](android-auto.md).                                                                                                                                                      |
+| `[unsupported-runtime] Headless CarPlay needs an iOS 26.x runtime ...`                                           | The simulator runs iOS 27 or later. Create an iOS 26.x simulator with Xcode 26.x and request it there.                                                                                                                          |
+| A message asking you to set `AUTOMOBILE_CARPLAY_POWER_HELPER_PATH` or `AUTOMOBILE_CARPLAY_PROJECTION_PROBE_PATH` | Build the executable, set the variable for the daemon, restart the daemon and retry.                                                                                                                                            |
+| `... is ready and bound to session ..., but its CarPlay display is not available`                                | The simulator stays ready and held by your session. The rest of the message says what failed. Fix it and call `startDevice` again, or release the device. If the screen is not the car display, reboot the simulator and retry. |
+
+## Tap the CarPlay screen
+
+Once `startDevice` has turned on the CarPlay screen, tap it with `tapAt` and `display: "carPlay"`.
+On that screen, `x` and `y` are pixels, since the CarPlay screen is 800x480 with the origin at the
+top left:
+
+```json
+{
+  "deviceId": "<simulator UDID>",
+  "display": "carPlay",
+  "x": 558,
+  "y": 80
+}
+```
+
+It needs the same simulator and the same two executables as `startDevice` with `carPlay`. AutoMobile
+first checks that the CarPlay screen is the car display, then sends one touch down and up. The
+response gives the point and a `carPlay` block with `display`, `displayId`, `width` and `height`. It
+reports the tap that was sent, not what changed on the screen.
+
+Only a plain tap at `x` and `y` works there: `image`, `coordinateSpace` other than `absolute`,
+`action` other than `tap`, `durationMs`, `snapshotId`, `pointer` and `layer` are refused.
+
+| Error                                                               | What to do                                                                                    |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `... is attached but not projecting ...` or `No CarPlay screen ...` | Call `startDevice` with `carPlay: {}` on this simulator, then retry. No touch was sent.       |
+| `[carplay-not-powered] ...`                                         | The CarPlay screen is off, for example after a reboot. Call `startDevice` with `carPlay: {}`. |
+| `[unsupported-runtime] ...`                                         | CarPlay taps need an iOS 26.x simulator.                                                      |
+| `[usage] Tap point ... is outside ...`                              | Use a point inside the CarPlay screen's width and height.                                     |
+| `[hid-failed] ...`                                                  | The simulator refused the touch. Reboot it, request `carPlay` again and retry.                |
 
 ## Register your CarPlay scene
 
@@ -109,7 +193,7 @@ trigger their handlers from outside. Malformed JSON, an unknown `action`, or `se
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | CarPlay screenshots, `observe` and `videoRecording` | No capture surface is available yet; CarPlay screen captures time out or come back black.                           |
 | CarPlay in the device list                          | Device listings do not report a CarPlay screen yet.                                                                 |
-| Tapping, swiping or typing on the CarPlay screen    | Interaction tools drive the phone screen only. Use `POST /carplay/action` for template actions.                     |
+| `tapOn`, swiping or typing on the CarPlay screen    | Only `tapAt` reaches it, at coordinates. Use `POST /carplay/action` for template actions.                           |
 | Physical iPhones, cars and head units               | Only simulators are supported.                                                                                      |
 | Apple's CarPlay Simulator app                       | AutoMobile does not connect to it. Use the CarPlay window in Simulator.                                             |
 | CarPlay prototypes                                  | Prototypes draw only on the phone screen. See [CarPlay prototypes](../how-it-works/plat/ios/carplay-prototypes.md). |

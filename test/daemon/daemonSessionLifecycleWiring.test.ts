@@ -7,6 +7,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { iosCameraPosterDeviceConfig } from "../../src/features/utility/ios/IosCameraPosterDeviceConfig";
 
 afterEach(() => {
   mock.restore();
@@ -44,8 +45,29 @@ function hostWith(calls: string[]): DaemonSessionLifecycleHost {
     hasActiveSessionExecution: () => false,
     latestSessionExecutionDeadlineMs: () => undefined,
     cancelExecutionsForExpiryRelease: () => {},
+    iosCameraPosterDaemonHooks: {
+      resetStale: () => void calls.push("iosCameraPoster.resetStale"),
+      watchBoots: () => void calls.push("iosCameraPoster.watchBoots"),
+    },
   };
 }
+
+test("the iOS camera poster daemon hooks come from the host, never the real data dir", () => {
+  const timer = new FakeTimer();
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  const removeAll = spyOn(iosCameraPosterDeviceConfig, "removeAll");
+  const calls: string[] = [];
+  try {
+    wireSessionLifecycle(manager, timer, hostWith(calls));
+    expect(calls.filter((call) => call.startsWith("iosCameraPoster."))).toEqual([
+      "iosCameraPoster.resetStale",
+      "iosCameraPoster.watchBoots",
+    ]);
+    expect(removeAll).not.toHaveBeenCalled();
+  } finally {
+    manager.stopCleanupTimer();
+  }
+});
 
 describe("wireSessionLifecycle", () => {
   const managers: SessionManager[] = [];
@@ -71,7 +93,7 @@ describe("wireSessionLifecycle", () => {
     wireSessionLifecycle(manager, timer, hostWith([]));
 
     // The location, network, App Links, device-condition, iOS camera poster, kill-profile, emulator sensor, emulator audio, display-profile, keyboard-profile, port-reverse, Android Auto, status bar, performance, screen
-    // lock, system-alert, BLE peripheral, power, profiling and recording cleanups register first (each takes a release listener and an unbound
+    // lock, system-alert, BLE peripheral, power, profiling, performance trace and recording cleanups register first (each takes a release listener and an unbound
     // listener), then the daemon's own, in this order.
     expect(order).toEqual([
       "onSessionRelease",
@@ -112,6 +134,17 @@ describe("wireSessionLifecycle", () => {
       "onSessionDeviceUnbound",
       "onSessionRelease",
       "onSessionDeviceUnbound",
+      "onSessionRelease",
+      "onSessionDeviceUnbound",
+      "onSessionRelease",
+      "onSessionDeviceUnbound",
+      // AXBridge follows the existing feature hooks without reordering them.
+      "onSessionCreated",
+      "onDeviceOwnershipChange",
+      "onSessionRelease",
+      "onSessionDeviceUnbound",
+      // The sim-hid-helper lifecycle follows AXBridge (#19118).
+      "onSessionCreated",
       "onSessionRelease",
       "onSessionDeviceUnbound",
       "onDeviceOwnershipChange",

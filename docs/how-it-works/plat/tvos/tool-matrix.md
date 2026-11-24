@@ -80,7 +80,6 @@ fields identified by secure metadata, always redact their values.
 | `barrier`                  | not-supported     | Plan-only multi-device primitive.                                                                                                                |
 | `biometricAuth`            | refused-by-design | Apple TV has no biometric sensor.                                                                                                                |
 | `captureAudio`             | not-supported     |                                                                                                                                                  |
-| `captureTrace`             | not-supported     | Needs runner work.                                                                                                                               |
 | `changeLocalization`       | not-supported     |                                                                                                                                                  |
 | `clearKeyValueFile`        | not-supported     |                                                                                                                                                  |
 | `clearMockNetwork`         | not-supported     |                                                                                                                                                  |
@@ -128,7 +127,7 @@ fields identified by secure metadata, always redact their values.
 | `listDeviceImages`         | pass              |                                                                                                                                                  |
 | `listDevices`              | pass              | Filters with `platform: "tvos"`.                                                                                                                 |
 | `manufacturerProfile`      | refused-by-design | Android-only.                                                                                                                                    |
-| `measureStartup`           | refused-by-design | Android-only.                                                                                                                                    |
+| `measureStartup`           | refused-by-design | Available on Android and iOS Simulator.                                                                                                          |
 | `mediaSession`             | refused-by-design | Android-only.                                                                                                                                    |
 | `mockNetwork`              | not-supported     |                                                                                                                                                  |
 | `multiTouch`               | refused-by-design | No touch surface.                                                                                                                                |
@@ -191,7 +190,7 @@ fields identified by secure metadata, always redact their values.
 | `wakeAndUnlock`            | refused-by-design | No keyguard.                                                                                                                                     |
 | `windowMode`               | refused-by-design | Android-only.                                                                                                                                    |
 
-Totals: 27 pass, 49 not-supported, 40 refused-by-design, 6 host-only. The tvOS
+Totals: 27 pass, 48 not-supported, 40 refused-by-design, 6 host-only. The tvOS
 allowlist also holds `startDevice`, which is not in the published tool
 definitions; it boots the simulator and connects the runner.
 

@@ -2,11 +2,11 @@ import { Socket } from "node:net";
 import {
   TelemetryPushSocketServer,
   type TelemetryFilter,
-} from "../../src/daemon/telemetryPushSocketServer";
+} from "../../src/daemon/streams/telemetryPushSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 import { streamSubscribeAuthCases } from "../helpers/streamSubscribeAuthCases";
-import type { StreamSocketAuthenticator } from "../../src/daemon/streamSocketAuth";
+import type { StreamSocketAuthenticator } from "../../src/daemon/streams/streamSocketAuth";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as database from "../../src/db/database";
 import * as network from "../../src/db/networkEventRepository";

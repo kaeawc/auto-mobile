@@ -12,13 +12,15 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /**
  * A literal list template: the container's children are instantiated once per [items] entry, with
- * `{as.field}` and `{index}` bound per instance. Each item maps field names to scalar values.
+ * `{as.field}` and `{index}` bound per instance. Each item exposes scalar fields and may carry an
+ * inner array of object rows.
  */
 @Serializable(with = PrototypeRepeatSerializer::class)
 data class PrototypeRepeat(
@@ -29,6 +31,11 @@ data class PrototypeRepeat(
   val derive: Map<String, PrototypeDerivedEntry>? = null,
   val stagger: Int? = null,
   val itemsDerived: String? = null,
+  val itemsField: String? = null,
+  /** Raw object rows retain nested arrays; [items] remains the scalar template projection. */
+  val sourceItems: List<JsonObject>? = null,
+  /** Runtime-only enclosing alias; outer values live in the projected rows. */
+  val outerAlias: String? = null,
 )
 
 @Serializable
@@ -40,7 +47,7 @@ private data class PrototypeRepeatWire(
   val stagger: Int? = null,
 )
 
-/** Keeps dynamic sources in `items.path` or `items.derived`, alongside literal item arrays. */
+/** Keeps path, derived and inner field sources alongside literal object rows. */
 object PrototypeRepeatSerializer :
   PrototypeJsonValueSerializer<PrototypeRepeat>("PrototypeRepeat") {
   override fun fromJson(value: JsonElement): PrototypeRepeat {
@@ -49,14 +56,24 @@ object PrototypeRepeatSerializer :
     val source = wire.items as? JsonObject
     val pointer = source?.get("path") as? JsonPrimitive
     val derived = source?.get("derived") as? JsonPrimitive
+    val field = source?.get("field") as? JsonPrimitive
     val pathSource = source?.keys == setOf("path") && pointer?.isString == true
     val derivedSource = source?.keys == setOf("derived") && derived?.isString == true
-    if (source != null && !pathSource && !derivedSource) {
-      throw kotlinx.serialization.SerializationException("Expected repeat path or derived source")
+    val fieldSource = source?.keys == setOf("field") && field?.isString == true
+    val recognizedSource = pathSource || derivedSource || fieldSource
+    if (source != null && !recognizedSource) {
+      throw kotlinx.serialization.SerializationException(
+        "Expected repeat path, derived or field source",
+      )
     }
-    val items =
-      if (source == null) json.decodeFromJsonElement<List<Map<String, PrototypeScalar>>>(wire.items)
-      else emptyList()
+    val raw = if (source == null) wire.items.jsonArray.map { it.jsonObject } else emptyList()
+    val items = raw.map { row ->
+      row
+        .filterValues { it is JsonPrimitive }
+        .mapValues { (_, value) ->
+          json.decodeFromJsonElement<PrototypeScalar>(value)
+        }
+    }
     return PrototypeRepeat(
       items,
       wire.`as`,
@@ -65,14 +82,18 @@ object PrototypeRepeatSerializer :
       wire.derive,
       wire.stagger,
       derived?.content,
+      field?.content,
+      raw.takeIf { rows -> rows.any { row -> row.values.any { it !is JsonPrimitive } } },
     )
   }
 
   override fun toJson(value: PrototypeRepeat): JsonElement {
     val json = PrototypeSpecValidator.json
     val items =
-      value.itemsDerived?.let { buildJsonObject { put("derived", it) } }
+      value.itemsField?.let { buildJsonObject { put("field", it) } }
+        ?: value.itemsDerived?.let { buildJsonObject { put("derived", it) } }
         ?: value.itemsPath?.let { buildJsonObject { put("path", it) } }
+        ?: value.sourceItems?.let(::JsonArray)
         ?: json.encodeToJsonElement(value.items)
     return json.encodeToJsonElement(
       PrototypeRepeatWire(items, value.`as`, value.key, value.derive, value.stagger),
@@ -116,18 +137,6 @@ object PrototypeGridColumnsSerializer :
 }
 
 /**
- * `linkify` on a text node: the [kinds] to detect, the [style] of a match and the actions a tap
- * runs. [onTap] stays JSON because its `{match}` bindings are bound per match before decoding
- * ([PrototypeLinkify.actions]).
- */
-@Serializable
-data class PrototypeLinkifyOptions(
-  val kinds: List<String>,
-  val style: PrototypeTextSpanStyle? = null,
-  val onTap: JsonArray,
-)
-
-/**
  * The displayed text, with each authored text field resolved by the same caller-supplied binder.
  */
 fun prototypePlainText(node: PrototypeTextNode, resolve: (String) -> String = { it }): String =
@@ -165,38 +174,6 @@ object PrototypeMenuItemSerializer :
 }
 
 @Serializable data class PrototypePagerPeek(val start: Double? = null, val end: Double? = null)
-
-@Serializable
-data class PrototypeWindow(
-  val placement: PrototypePlacement,
-  val opacity: Int = 100,
-  /**
-   * `system` (default when absent) stacks above system UI as an accessibility overlay; `app` stacks
-   * just above apps, below the shade, keyboard and screenshot preview, and needs
-   * SYSTEM_ALERT_WINDOW.
-   */
-  val layer: String? = null,
-  /**
-   * `session` (default when absent) ends the prototype with its host session; `device` keeps it
-   * interactive after the last client disconnects and disables the idle timeout.
-   */
-  val persistence: String? = null,
-  /** Fullscreen host chrome: `none` by default, or `bar`; device persistence defaults to `bar`. */
-  val chrome: String? = null,
-  /** Opt-in window-local dead-tap events; coordinates never include field contents. */
-  val deadTaps: Boolean? = null,
-  /** Blur or tonal fill behind the window (`prototype_backdrop_v1`, #15126). */
-  val backdrop: PrototypeBackdrop? = null,
-  val transition: String? = null,
-  /** Overlay-scoped window controls (`prototype_platform_window_controls_v1`, #14320). */
-  val keepScreenOn: Boolean? = null,
-  /** Protocol parity only; Android does not advertise or apply layout direction. */
-  val layoutDirection: String? = null,
-  /** `"system"` or a whole 0-100 brightness. */
-  val brightness: JsonElement? = null,
-  val orientation: String? = null,
-  val statusBar: String? = null,
-)
 
 /**
  * `source = "device"` asks for Android 12+ dynamic colour; `seed` generates a scheme from one
@@ -264,8 +241,8 @@ data class PrototypeSpec(
   val derive: Map<String, PrototypeDerivedEntry>? = null,
   /** The state keys and `/data` pointers the device keeps across shows (#12522). */
   val storage: PrototypeStorageBlock? = null,
-  /** What the spec needs from the platform before show (#14294). */
-  val requires: PrototypeRequires? = null,
+  /** Capability declarations or platform requirements checked before show (#14294). */
+  @Serializable(with = PrototypeRequiresSerializer::class) val requires: PrototypeRequires? = null,
   /** `platform.on`: action lists run when a platform event is delivered (#14294). */
   val platform: PrototypePlatformHandlers? = null,
   /** Validated channel declarations; no transport is installed by the contract slice. */
@@ -283,18 +260,9 @@ data class PrototypeSpec(
   /** Declared media players (#14253); contract only, no runtime plays them yet. */
   val media: JsonObject? = null,
   val strings: JsonObject? = null,
+  /** Validated inbound entries; the runtime binds them only while opening a registered URL. */
+  val links: JsonArray? = null,
 )
-
-/** The root `requires` block (#14294): platform modules, permissions and background needs. */
-@Serializable
-data class PrototypeRequires(
-  val platform: List<String>? = null,
-  val permissions: List<PrototypePermissionRequirement>? = null,
-  val background: List<String>? = null,
-)
-
-/** One declared permission: a canonical [name] and the [purpose] shown to the user. */
-@Serializable data class PrototypePermissionRequirement(val name: String, val purpose: String)
 
 @Serializable
 enum class PrototypeValidateOn {

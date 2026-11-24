@@ -11,6 +11,14 @@ export const EXCEPTIONS = new Map<string, string>([
     "Read-only ps probe of an Android emulator pid's process group; never touches the iOS runner.",
   ],
   [
+    "src/features/audit/IosOnDemandAuditEngines.ts",
+    "Read-only ps RSS read of one simulator app pid for performanceAudit memory; never touches the iOS runner.",
+  ],
+  [
+    "src/features/utility/ios/SimulatorBootEnvironment.ts",
+    "Read-only ps read of one simulator's launchd_sim environment for the camera poster (#19047); never touches the iOS runner.",
+  ],
+  [
     "src/features/performance/PerformanceMonitor.ts",
     "Collects app metrics, not CtrlProxy lifecycle state.",
   ],
@@ -19,8 +27,20 @@ export const EXCEPTIONS = new Map<string, string>([
     "Read-only ps snapshot for simulator fleet cost (#6696) and Android boot admission; never touches the iOS runner.",
   ],
   [
+    "src/utils/ios-cmdline-tools/launchdSimPid.ts",
+    "Read-only pgrep for a simulator's launchd_sim PID, which audio capture taps (#19046); never touches the iOS runner.",
+  ],
+  [
+    "src/features/utility/ios/IosSimulatorNetworkShaper.ts",
+    "Read-only ps -E read of one simulator launchd_sim's environment for the network shaper (#19045); never touches the iOS runner.",
+  ],
+  [
     "src/features/observe/android/CtrlProxyForwardClientProbe.ts",
     "Reads host TCP connections to an Android ADB forward; never touches the iOS runner.",
+  ],
+  [
+    "src/features/utility/networkActivity/IosSimulatorNetworkActivity.ts",
+    "Read-only lsof of a simulator's internet sockets for getDeviceState networkActivity (#19020); never touches the iOS runner.",
   ],
 ]);
 

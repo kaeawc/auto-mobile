@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { decodePrototypeEvent } from "../../../src/features/observe/android/CtrlProxyPrototypes";
-import { PROTOTYPE_PLATFORM_CAPABILITY } from "../../../src/features/observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
+  PROTOTYPE_PLATFORM_CAPABILITY,
+} from "../../../src/features/observe/android/ctrlProxyProtocol";
 import {
   PROTOTYPE_SPEC_CAPABILITY_GATES,
   requiredPrototypeCapabilities,
+  prototypeRequiredCapabilities,
 } from "../../../src/features/prototype/prototypeCapabilityGates";
 import {
   PROTOTYPE_PLATFORM_DELIVERED_EVENT_NAME,
@@ -18,6 +22,7 @@ import {
   PROTOTYPE_PLATFORM_MODULE_GATES,
   prototypePlatformFields,
   prototypePlatformModuleFields,
+  prototypeIosNotificationFallbackPaths,
   prototypePlatformUnsupportedMessage,
 } from "../../../src/features/prototype/prototypePlatformGates";
 import {
@@ -25,6 +30,7 @@ import {
   prototypePlatformDeliveredEventOf,
 } from "../../../src/features/prototype/prototypePlatformEvent";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
+import { specCapabilityRefusal } from "../../../src/server/prototypeTools/preflight";
 
 const window = { placement: { type: "fullscreen" } };
 const echo = { type: "platform", call: "test.echo", args: { message: { value: "hi" } } };
@@ -47,6 +53,94 @@ describe("permissions module contract", () => {
       max: 16,
       unique: true,
     });
+  });
+
+  test("request options accept only an optional provisional boolean", () => {
+    const request = (options: unknown) =>
+      spec(
+        {
+          requires: {
+            platform: ["permissions"],
+            permissions: [{ name: "notifications", purpose: "Send updates" }],
+          },
+        },
+        {
+          type: "button",
+          label: "Allow",
+          onTap: [
+            {
+              type: "platform",
+              call: "permissions.request",
+              args: { names: { value: ["notifications"] }, options: { value: options } },
+            },
+          ],
+        },
+      );
+    for (const options of [{}, { provisional: false }, { provisional: true }]) {
+      expect(validatePrototypeSpec(request(options)).success).toBe(true);
+    }
+    for (const options of [
+      null,
+      true,
+      [],
+      "provisional",
+      { provisional: "true" },
+      { unknown: true },
+    ]) {
+      expect(validatePrototypeSpec(request(options)).success).toBe(false);
+    }
+  });
+
+  test("iOS authorization-only reads use permissions without granting notification delivery", () => {
+    const authorization = spec(
+      {
+        requires: {
+          platform: ["notifications"],
+          permissions: [{ name: "notifications", purpose: "Send updates" }],
+        },
+      },
+      { type: "text", text: "{platform:/notifications/authorization}" },
+    );
+    expect(validatePrototypeSpec(authorization).success).toBe(true);
+    const caps = (value: unknown, platform: "ios" | "android") =>
+      prototypeRequiredCapabilities(value, platform).map((gate) => gate.capability);
+    expect(caps(authorization, "ios")).toContain("prototype_platform_permissions_v1");
+    expect(caps(authorization, "ios")).not.toContain("prototype_platform_notifications_v1");
+    expect(caps(authorization, "android")).toContain("prototype_platform_notifications_v1");
+    const variants = [
+      { ...authorization, requires: { platform: ["notifications"] } },
+      {
+        ...authorization,
+        notifications: { channels: [{ id: "updates", name: "Updates", importance: "default" }] },
+      },
+      { ...authorization, root: { type: "text", text: "{platform:/notifications/badge}" } },
+      { ...authorization, platform: { on: { "notifications.opened": [] } } },
+      {
+        ...authorization,
+        root: {
+          type: "button",
+          label: "Cancel",
+          onTap: [
+            {
+              type: "platform",
+              call: "notifications.cancel",
+              args: { all: { value: true } },
+            },
+          ],
+        },
+      },
+    ];
+    for (const value of variants) {
+      expect(caps(value, "ios")).toContain("prototype_platform_notifications_v1");
+    }
+    expect(
+      validatePrototypeSpec({
+        ...authorization,
+        requires: {
+          permissions: [{ name: "notifications", purpose: "Send updates" }],
+        },
+      }).success,
+    ).toBe(false);
   });
 
   test("changed is the only event, and every name has a state in the shared vocabulary", () => {
@@ -153,6 +247,42 @@ describe("notifications module contract", () => {
     expect(notifications.calls.schedule.capability).toBe(
       "prototype_platform_notifications_scheduled_v1",
     );
+  });
+
+  test("the iOS notifications gate directs an injected agent to the standalone Viewer", () => {
+    const spec = { requires: { platform: ["notifications"] } };
+    const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+      (entry) => entry.capability === notifications.capability,
+    )!;
+    expect(gate.fields(spec)).toEqual(["requires.platform[0]"]);
+    expect(gate.unsupportedMessage(gate.fields(spec), "ios")).toContain(
+      "the standalone iOS Prototype Viewer",
+    );
+    expect(gate.unsupportedMessage(gate.fields(spec), "android")).toContain("connected CtrlProxy");
+  });
+
+  test("locates iOS notification fields that fall back to plain content", () => {
+    const spec = {
+      root: {
+        type: "button",
+        onTap: [
+          {
+            type: "platform",
+            call: "notifications.post",
+            args: { style: { value: { type: "bigText" } } },
+          },
+          {
+            type: "platform",
+            call: "notifications.schedule",
+            args: { progress: { value: { value: 0.5 } }, style: { state: "style" } },
+          },
+        ],
+      },
+    };
+    expect(prototypeIosNotificationFallbackPaths(spec)).toEqual([
+      "root.onTap[1].args.progress",
+      "root.onTap[1].args.style",
+    ]);
   });
 
   test("a notifications.push handler needs prototype_platform_push_v1 on top of the module", () => {
@@ -415,6 +545,78 @@ describe("platform capability gates", () => {
     );
   });
 
+  test("platform vocabulary refusals identify each runtime and its upgrade path", () => {
+    const cases = [
+      ["ctrlproxy", "android", "connected CtrlProxy", "Update the connected CtrlProxy"],
+      [
+        "iosAgent",
+        "ios",
+        "connected iOS prototype agent",
+        "Relaunch the app with launchApp prototype: true",
+      ],
+      ["iosViewer", "ios", "iOS Prototype Viewer", "Update the iOS Prototype Viewer"],
+      ["protoviewer", "android", "ProtoViewer", "Update ProtoViewer"],
+      [
+        "disposableApp",
+        "android",
+        "disposable app",
+        "Reinstall the disposable app with a template",
+      ],
+      [
+        "embedded",
+        "ios",
+        "embedded prototype runtime",
+        "Check the host app's prototype SDK and module configuration",
+      ],
+    ] as const;
+    for (const [runtime, platform, name, advice] of cases) {
+      const message = prototypePlatformUnsupportedMessage(["requires"], platform, runtime);
+      expect(message).toContain(`The ${name} does not advertise prototype_platform_v1`);
+      expect(message).toContain(advice);
+    }
+  });
+
+  test("app-only platform modules offer the installed app when refused by an overlay", () => {
+    for (const name of ["biometric", "permissions", "secureStorage"]) {
+      const gate = PROTOTYPE_PLATFORM_MODULE_GATES.find(
+        ({ capability }) => capability === PROTOTYPE_PLATFORM_MODULES[name].capability,
+      )!;
+      expect(gate.unsupportedMessage(["requires"], "android", "ctrlproxy")).toContain(
+        "Install the spec as a disposable app",
+      );
+      expect(gate.unsupportedMessage(["requires"], "android", "protoviewer")).toContain(
+        "Update ProtoViewer",
+      );
+    }
+  });
+
+  test("preflight uses the connected runtime's advice for missing permissions capability", async () => {
+    const candidate = spec({ requires: { platform: ["permissions"] } });
+    const ios = {
+      supportsCapability: (capability: string) => capability === PROTOTYPE_PLATFORM_CAPABILITY,
+    };
+    const viewer = {
+      supportsCapability: (capability: string) =>
+        ios.supportsCapability(capability) ||
+        capability === PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
+    };
+    const android = {
+      supportsCommand: async (capability: string) => ios.supportsCapability(capability),
+    };
+    expect((await specCapabilityRefusal({ android }, candidate, undefined))?.error).toContain(
+      "Install the spec as a disposable app",
+    );
+    expect((await specCapabilityRefusal({ ios }, candidate, undefined))?.error).toContain(
+      "Save and open the spec in the iOS Prototype Viewer",
+    );
+    expect((await specCapabilityRefusal({ ios: viewer }, candidate, undefined))?.error).toContain(
+      "Update the iOS Prototype Viewer",
+    );
+    expect(
+      (await specCapabilityRefusal({ ios, disposableApp: true }, candidate, undefined))?.error,
+    ).toContain("Reinstall the disposable app with a template");
+  });
+
   test("specs without the vocabulary need no platform gate", () => {
     expect(prototypePlatformFields(spec({}, { type: "text", text: "{data:/x}" }))).toEqual([]);
   });
@@ -452,6 +654,19 @@ describe("platform events", () => {
       prototypePlatformCallEventOf(decode(frame(PROTOTYPE_PLATFORM_EVENT_NAME, failed))!)?.error
         ?.code,
     ).toBe("permission_denied");
+  });
+
+  test("decodes runtime telemetry alongside an approximate location result", () => {
+    const location = {
+      ...finished,
+      call: "location.request",
+      approximate: true,
+      mode: "real",
+      inFlight: 0,
+    };
+    expect<unknown>(
+      prototypePlatformCallEventOf(decode(frame(PROTOTYPE_PLATFORM_EVENT_NAME, location))!),
+    ).toEqual(location);
   });
 
   test("decodes a delivered event with truncated data", () => {

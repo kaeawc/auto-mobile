@@ -171,6 +171,68 @@ final class PrototypeLibraryTests: XCTestCase {
         ))
     }
 
+    @MainActor
+    func testSecureStorageIsScopedToTheLibraryEntryAcrossResetAndDeletion() async throws {
+        let files = PrototypeLibraryFakeFileSystem()
+        let secureStore = FakeSecureValueStore()
+        let library = try PrototypeLibraryStore(
+            root: root, storageRoot: storage, files: files, secureStorage: secureStore
+        )
+        try store(files, id: first).add(bundle(spec), label: "One", source: .file)
+        try store(files, id: second).add(bundle(spec), label: "Two", source: .file)
+        let registry = PrototypePlatformRegistry(modules: [PrototypeSecureStorageModule(store: secureStore)])
+        let firstRegistry = registry.withSecureStorage(library.scopedSecureStorage(secureStore, for: first))
+        let secondRegistry = registry.withSecureStorage(library.scopedSecureStorage(secureStore, for: second))
+        let firstStore = try XCTUnwrap(firstRegistry.forPresentation().secureStorage)
+        let secondStore = try XCTUnwrap(secondRegistry.forPresentation().secureStorage)
+        let id = "demo"
+        let key = "state:token"
+        let otherKey = "state:other"
+        let one = PrototypeSecureEntry(version: 1, value: "one")
+        let two = PrototypeSecureEntry(version: 1, value: "two")
+
+        try firstStore.write(id: id, key: key, entry: one)
+        try secondStore.write(id: id, key: key, entry: two)
+        try firstStore.write(id: id, key: otherKey, entry: one)
+        try firstStore.delete(id: id, key: otherKey)
+        XCTAssertEqual(try firstStore.readAll(id: id).entries, [key: one])
+        XCTAssertEqual(try secondStore.readAll(id: id).entries, [key: two])
+        XCTAssertTrue(try secureStore.readAll(id: id).entries.isEmpty)
+
+        XCTAssertEqual(try firstStore.deleteAll(id: id), 1)
+        XCTAssertTrue(try firstStore.readAll(id: id).entries.isEmpty)
+        XCTAssertEqual(try secondStore.readAll(id: id).entries, [key: two])
+        try firstStore.write(id: id, key: key, entry: one)
+
+        let firstDirectory = try library.storageURL(first)
+        let secondDirectory = try library.storageURL(second)
+        try library.resetStorage(first, secureStorage: firstStore)
+        XCTAssertFalse(files.exists(firstDirectory))
+        XCTAssertTrue(try firstStore.readAll(id: id).entries.isEmpty)
+        XCTAssertTrue(files.exists(secondDirectory))
+        XCTAssertEqual(try secondStore.readAll(id: id).entries, [key: two])
+
+        try library.delete(second)
+        XCTAssertThrowsError(try library.load(second))
+        XCTAssertFalse(files.exists(secondDirectory))
+        XCTAssertThrowsError(try secondStore.write(id: id, key: key, entry: two))
+        XCTAssertTrue(try secondStore.readAll(id: id).entries.isEmpty)
+    }
+
+    func testSecureResetFailurePropagatesAndPreservesPlaintextForRetry() throws {
+        let files = PrototypeLibraryFakeFileSystem()
+        let library = try store(files)
+        let directory = try library.storageURL(first)
+        let secureStore = FakeSecureValueStore()
+        secureStore.deleteAllFailure = true
+        let scoped = library.scopedSecureStorage(secureStore, for: first)
+
+        XCTAssertThrowsError(try library.resetStorage(first, secureStorage: scoped)) { error in
+            XCTAssertTrue(error is FakeSecureValueStore.Failure)
+        }
+        XCTAssertTrue(files.exists(directory))
+    }
+
     func testLoadRevalidatesSpecAndReportsPath() throws {
         let files = PrototypeLibraryFakeFileSystem()
         let library = try store(files)
@@ -332,7 +394,12 @@ final class PrototypeLibraryTests: XCTestCase {
         }
         var fields = try JSONDecoder().decode([String: JSONValue].self, from: spec)
         fields["requires"] = .array([.string("prototype_future_v1")])
-        XCTAssertThrowsError(try library.add(bundle(JSONEncoder().encode(fields)), label: "Future", source: .file))
+        XCTAssertThrowsError(try library.add(bundle(JSONEncoder().encode(fields)), label: "Future", source: .file)) {
+            XCTAssertEqual(
+                $0 as? PrototypeLibraryImportFailure,
+                .needsNewerViewer(missing: ["prototype_future_v1"])
+            )
+        }
         XCTAssertEqual(try library.list().entries.count, 0)
     }
 

@@ -1,3 +1,4 @@
+import type { RotationOriginalsPersistence } from "./rotationOriginalsPersistence";
 import type { IosAppNetworkRule } from "../features/networkFilter/IosAppNetworkRuleClient";
 import type { DeviceClockRestoreRegistry } from "../features/utility/DeviceClock";
 import type { BiometricEnrollment, NetworkConditionProfile } from "../features/utility/DeviceState";
@@ -59,6 +60,8 @@ export interface NetworkConditionRestoreTarget {
    * the target was captured — newer than any apply this session sent.
    */
   iosAppRule?: IosAppNetworkRule;
+  /** Also restore the device-wide condition to `profile` (always true without `iosAppRule`). */
+  deviceWide: boolean;
 }
 
 /** What SessionDeviceStateRestore needs from the session manager that owns it (#11795). */
@@ -136,6 +139,8 @@ export interface SessionDeviceStateRestoreOptions {
   screenReaderBackoff: BackoffPolicy;
   rotation: (device: BootedDevice) => RotationRestorer;
   rotationBackoff: BackoffPolicy;
+  /** Durable session rotation originals (#18847); absent keeps them in memory only. */
+  rotationOriginals?: RotationOriginalsPersistence;
   clock: (device: BootedDevice) => ClockRestorer;
   /** The registry that serializes clock restores per device; defaults to the process-wide one. */
   clockRegistry?: DeviceClockRestoreRegistry;

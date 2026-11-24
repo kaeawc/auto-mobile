@@ -71,7 +71,7 @@ export const keyboardResultSchema = z
 const sendKeysErrorCodeSchema = z
   .string()
   .describe(
-    'Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode. EDITOR_ACTION_MISMATCH: the device reported a semantic key (next, previous, done, search, send, go) as not performed, either because the focused field did not carry out the action or, for done/search/send/go below Android API 30, because the Enter key could not be delivered; observe the screen before retrying. Instead of next use key:"tab" or a selector for the next field; for a submit action tap the submit control if there is one, otherwise key:"enter" may submit, though a multiline field can insert a newline instead.',
+    'Stable failure code. NO_FOCUSED_EDITABLE: no editable field has focus; focus the field (tap it, or tapOn with focus), then retry sendKeys without a mode. EDITOR_ACTION_MISMATCH: the device reported a semantic key (next, previous, done, search, send, go) as not performed, either because the focused field did not carry out the action or, for done/search/send/go below Android API 30, because the Enter key could not be delivered; observe the screen before retrying. Instead of next use key:"tab" or a selector for the next field; for a submit action tap the submit control if there is one, otherwise key:"enter" may submit, though a multiline field can insert a newline instead. KEYBOARD_INTRODUCTION (iOS): the keyboard\'s one-time "slide to type" introduction covers the keyboard and sendKeys could not dismiss it; tap its Continue button, then retry.',
   );
 
 /** IME fields live on each command result, never on the sendKeys envelope. */
@@ -268,6 +268,16 @@ export const tapOnResultSchema = z
     selectedElements: z.array(selectedElementSchema).optional(),
     skipped: z.literal("already-checked").optional(),
     error: z.string().optional(),
+    retryable: z
+      .boolean()
+      .optional()
+      .describe("True when the failure is transient and the same call can be retried"),
+    hierarchyUnavailableReason: z
+      .string()
+      .optional()
+      .describe(
+        "Set when no view hierarchy read during the search was usable (e.g. service_recovering), so the element could not be looked up",
+      ),
     pinnedDisplay: pinnedDisplaySchema.optional(),
     displayInventory: displayInventoryUnavailableSchema.optional(),
     staleDisplay: staleDisplaySchema.optional(),

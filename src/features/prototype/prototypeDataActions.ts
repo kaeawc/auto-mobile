@@ -1,10 +1,11 @@
 import {
   PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY,
+  PROTOTYPE_DATA_ACTIONS_V3_CAPABILITY,
   PROTOTYPE_DATA_ACTIONS_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
 import { prototypeDataPathPointer, resolvePrototypeDataPointer } from "./prototypeData";
 import { prototypeFieldsOfKind } from "./prototypeEmitContext";
-import { templateSegments, type Binding } from "./prototypeTemplate";
+import { record, templateSegments, type Binding } from "./prototypeTemplate";
 
 /**
  * Host-side rules for the `setData`, `appendData` and `removeData` actions (#12519). The contract
@@ -47,9 +48,26 @@ export function prototypeKeyedDataActionsUnsupportedMessage(
   fields: readonly string[],
   platform: "android" | "ios",
 ): string {
+  return prototypeDataActionsUnsupportedMessage(fields, platform)
+    .replace(PROTOTYPE_DATA_ACTIONS_CAPABILITY, PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY)
+    .replace(
+      "the setData, appendData, prependData or removeData action",
+      "keyed writes or generated value bindings",
+    );
+}
+
+/** Data actions whose `value` is an `{object}` of member bindings (#18826). */
+export function prototypeObjectDataActionFields(spec: unknown): string[] {
+  return prototypeFieldsOfKind(spec, "objectData");
+}
+
+export function prototypeObjectDataActionsUnsupportedMessage(
+  fields: readonly string[],
+  platform: "android" | "ios",
+): string {
   return prototypeDataActionsUnsupportedMessage(fields, platform).replace(
     PROTOTYPE_DATA_ACTIONS_CAPABILITY,
-    PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY,
+    PROTOTYPE_DATA_ACTIONS_V3_CAPABILITY,
   );
 }
 
@@ -152,12 +170,64 @@ export function prototypeDataActionsError(
   return undefined;
 }
 
+/** True when an `upsertData` key names an `{object}` member that can carry its identity. */
+function objectKeyNamesMember(key: string, members: Record<string, unknown>): boolean {
+  const name = key.split("/")[1] ?? "";
+  const member = Object.hasOwn(members, name) ? record(members[name]) : undefined;
+  if (!member || !Object.hasOwn(member, "value")) {
+    return member !== undefined;
+  }
+  const rest = key.slice(name.length + 1);
+  const identity = rest === "" ? member.value : resolvePrototypeDataPointer(member.value, rest);
+  return identity !== undefined && identity !== null;
+}
+
+/**
+ * An `{object}` value's literal members (#18826). An `upsertData` key's first pointer segment must
+ * name a member, and when that member is a literal the rest of the key must resolve non-null in it.
+ */
+function dataObjectLiteralError(
+  action: Record<string, unknown>,
+  members: Record<string, unknown>,
+  at: string,
+  dataError: (data: unknown) => unknown,
+): PrototypeDataActionError | undefined {
+  const key = typeof action.key === "string" ? action.key : "";
+  if (action.type === "upsertData" && !objectKeyNamesMember(key, members)) {
+    return {
+      path: `${at}.key`,
+      message:
+        "upsertData key pointer must start with an object value member, non-null when that member is a literal",
+    };
+  }
+  const invalid = Object.keys(members)
+    .sort()
+    .find((name) => {
+      const member = record(members[name]);
+      return (
+        member !== undefined &&
+        Object.hasOwn(member, "value") &&
+        dataError({ value: member.value }) !== undefined
+      );
+    });
+  return invalid === undefined
+    ? undefined
+    : {
+        path: `${at}.value.object.${invalid}.value`,
+        message: "A data write value must be a string, boolean, finite number, array or object",
+      };
+}
+
 function dataActionLiteralError(
   action: Record<string, unknown>,
   at: string,
   dataError: (data: unknown) => unknown,
 ): PrototypeDataActionError | undefined {
   const value = (action.value ?? {}) as Record<string, unknown>;
+  const members = Object.hasOwn(value, "object") ? record(value.object) : undefined;
+  if (members) {
+    return dataObjectLiteralError(action, members, at, dataError);
+  }
   if (action.type === "upsertData" && Object.hasOwn(value, "value")) {
     const key = typeof action.key === "string" ? action.key : "";
     const identity = resolvePrototypeDataPointer(value.value, key);

@@ -31,7 +31,7 @@ import {
 import { bindingPoolGate } from "../../daemon/sessionBroker/provisioning/poolGate";
 import { BINDING_INPUT_SNAPSHOT_MAX_AGE_MS } from "../../daemon/inputDeviceOwnership";
 import { resolveToolSelectionBaseSessionUuid } from "../../features/toolSelection/selectionSessionResolver";
-import type { DevicePool } from "../../daemon/devicePool";
+import type { DevicePool, PooledDevice } from "../../daemon/devicePool";
 import {
   assertControlNotOnForeignDaemonDevice,
   assertInputRequesterHoldsDevice,
@@ -67,6 +67,7 @@ import type { ExecutionTargetContext } from "./executionTarget";
 import type { AuditRunner } from "./audit";
 import type { NavigationToolCallRecorder } from "./navigationRecording";
 import type { DeviceMutationRecording } from "../deviceMutationRecording";
+import { noteFixtureCaptureDevice } from "../../utils/fixtureCapture/fixtureCaptureScope";
 
 export function journaledDeviceHandler(
   name: string,
@@ -650,6 +651,19 @@ function runReportingDispatch<T>(
   return runWithToolDispatchReporter(call?.markDispatched, run);
 }
 
+/** The one pool read fixture capture needs: the image the pool admitted for a device. */
+export interface AdmittedImageReads {
+  getDevice(deviceId: string): Pick<PooledDevice, "androidImage"> | null | undefined;
+}
+
+/** A session-routed target is sparse; the pool's admitted image carries its OS facts (#18896). */
+function noteResolvedCaptureDevice(
+  device: BootedDevice,
+  pool: AdmittedImageReads | undefined = defaultDaemonContext.devicePool(),
+): void {
+  noteFixtureCaptureDevice(device, pool?.getDevice(device.deviceId)?.androidImage);
+}
+
 export async function invokeResolvedDeviceHandler(input: {
   target: ExecutionTargetContext & { device: BootedDevice };
   name: string;
@@ -664,6 +678,8 @@ export async function invokeResolvedDeviceHandler(input: {
   /** The tool's typed platform restriction (#18721); absent for an unrestricted tool. */
   platforms?: ToolPlatforms;
   isResponseFailure: (response: unknown) => boolean;
+  /** Pool reads for the capture device's admitted image; defaults to the daemon's pool. */
+  devicePool?: AdmittedImageReads;
 }): Promise<any> {
   const { target, name, args, handler, progress, signal, navigationRecorder, traits } = input;
   // A restricted tool never reaches its handler on another platform (#18721); checked first so a
@@ -671,6 +687,7 @@ export async function invokeResolvedDeviceHandler(input: {
   assertDeviceInToolPlatforms(name, input.platforms, target.device);
   // Fail closed: a watch never reaches a tool that has not opted in (#14899).
   assertToolSupportsDevicePlatform(name, target.device);
+  noteResolvedCaptureDevice(target.device, input.devicePool);
   if (target.deviceRead) {
     // A read-only device read is not this caller's use of the device: no navigation recording
     // and no audit run on a device the caller may not hold (#10830).

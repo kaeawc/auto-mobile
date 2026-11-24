@@ -17,8 +17,7 @@ import kotlinx.serialization.json.contentOrNull
  * Rules for the `webView` node (#14312) that the contract cannot express, the twin of TypeScript's
  * `prototypeWebView.ts`: `webview` in `requires.platform`; allowed origins that name a DNS host,
  * never an IP literal or `localhost`; a literal URL authority that is one of the allowed origins;
- * and navigation, title and back keys that name declared state of the right type. Contract only: no
- * runtime draws a web view.
+ * and navigation, title and back keys that name declared state of the right type.
  */
 object PrototypeWebView {
   /** An imported page cannot load subresources while the library's network switch is off. */
@@ -29,11 +28,18 @@ object PrototypeWebView {
    * order shared with Swift: adaptive slots (adaptive only), `header` then `footer` (list only),
    * `child`, `children`, then `screens` by UTF-16 key order. JSON key order never matters.
    */
-  fun importError(spec: JsonObject, networkAllowed: Boolean): ImportError? {
-    if (networkAllowed) return null
+  fun importError(spec: JsonObject, networkAllowed: Boolean): ImportError? =
+    if (networkAllowed) null else nodePath(spec)?.let(::ImportError)
+
+  /**
+   * The path of the spec's first `webView` node under `root`, in the [importError] order, or null
+   * when it has none. Saved prototypes refuse such a spec: no saved route draws a web view
+   * (#18906).
+   */
+  fun nodePath(spec: JsonObject): String? {
     val root = spec["root"] as? JsonObject ?: return null
-    fun first(node: JsonObject, path: String): ImportError? =
-      if (node.text("type") == "webView") ImportError(path)
+    fun first(node: JsonObject, path: String): String? =
+      if (node.text("type") == "webView") path
       else importChildren(node, path).firstNotNullOfOrNull { (child, at) -> first(child, at) }
     return first(root, "root")
   }
@@ -94,7 +100,7 @@ object PrototypeWebView {
   }
 
   /** `localhost`, a `.localhost` name, or a host a URL parser would read as an IP address. */
-  internal fun privateHost(host: String): Boolean =
+  fun privateHost(host: String): Boolean =
     host == "localhost" ||
       host.endsWith(".localhost") ||
       ipLikeLabel.matches(host.substringAfterLast('.'))

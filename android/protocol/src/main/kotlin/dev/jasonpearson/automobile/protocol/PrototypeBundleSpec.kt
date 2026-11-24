@@ -30,7 +30,9 @@ internal object PrototypeBundleSpec {
         bundleRequire(styles.none { "shader" in it }, custom_shaders_unsupported, "spec.json")
       }
     }
-    val context = PrototypeStateChecks.Context()
+    // The bundle format admits the largest runtime budget, as the host's bundle check does; the
+    // importing runtime then validates against its own budget and the bundle's requires (#18804).
+    val context = PrototypeStateChecks.Context(PrototypeRuntimeBudget.LARGE)
     bundleRequire(
       PrototypeSpecInput.validateInput(value.toString(), context)
         is PrototypeSpecValidation.Success,
@@ -41,7 +43,11 @@ internal object PrototypeBundleSpec {
     val images = linkedSetOf<String>()
     val fonts = linkedSetOf<String>()
     for (node in nodes(spec)) {
-      if (text(node["type"]) == "image") addImage(node["asset"], images)
+      if (text(node["type"]) == "image") {
+        addImage(node["asset"], images)
+        addImage((node["placeholder"] as? JsonObject)?.get("asset"), images)
+        addImage((node["error"] as? JsonObject)?.get("asset"), images)
+      }
       PrototypeMapMarkerAssets.asset(node)?.let(images::add)
       for (item in (node["items"] as? JsonArray).orEmpty()) addImage(
         (item as? JsonObject)?.get("image"),

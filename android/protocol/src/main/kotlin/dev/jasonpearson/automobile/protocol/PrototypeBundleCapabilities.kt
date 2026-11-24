@@ -15,6 +15,7 @@ internal object PrototypeBundleCapabilities {
       if (node["type"] == JsonPrimitive("pager") && "stateKey" in node)
         caps.add("prototype_pager_state_key_v1")
       if (PrototypeMotionV3.required(node)) caps.add(PrototypeMotionV3.CAPABILITY)
+      if (PrototypeM3Expressive.required(node)) caps.add(PrototypeM3Expressive.CAPABILITY)
       caps.addAll(PrototypeBundleNodeCapabilities.collect(node))
       if (PrototypeStringConditions.uses(node)) caps.add("prototype_string_conditions_v1")
       fields(node, caps)
@@ -92,6 +93,12 @@ internal object PrototypeBundleCapabilities {
 
   private fun actions(action: JsonObject, caps: MutableSet<String>) {
     val type = text(action["type"])
+    if (
+      PrototypeBindableFields.firstAction(action, "") { _, _, kind ->
+        true.takeIf { kind.requiresDerive() }
+      } != null
+    )
+      caps.add("prototype_derive_v1")
     dataActions(action, caps)
     if (PrototypeChannels.needsRealtimeCapability(action))
       caps.add("prototype_platform_realtime_v1")
@@ -114,7 +121,8 @@ internal object PrototypeBundleCapabilities {
     val type = text(action["type"])
     if (type in PrototypeDataRules.dataActionTypes) caps.add("prototype_data_actions_v1")
     if (type == "prependData") caps.add("prototype_lazy_list_v1")
-    if (PrototypeDataRules.isKeyedAction(action)) caps.add("prototype_data_actions_v2")
+    if (PrototypeGeneratedValues.needsDataV2(action)) caps.add("prototype_data_actions_v2")
+    if (PrototypeObjectDataValue.isObjectValueAction(action)) caps.add("prototype_data_actions_v3")
   }
 
   private fun fields(node: JsonObject, caps: MutableSet<String>) {
@@ -130,13 +138,9 @@ internal object PrototypeBundleCapabilities {
       )
     )
       caps.add("prototype_loading_states_v1")
-    val repeat = node["repeat"] as? JsonObject
-    if (repeat?.containsKey("derive") == true) caps.add("prototype_format_v1")
-    if ((repeat?.get("items") as? JsonObject)?.containsKey("derived") == true)
-      caps.add("prototype_derive_v1")
-    if (repeat?.let { "key" in it || it["items"] is JsonObject } == true)
-      caps.add("prototype_data_model_v1")
+    repeatCapabilities(node["repeat"] as? JsonObject, caps)
     PrototypeBindableFields.first<Unit>(node, "") { value, _, kind ->
+      if (kind.requiresDerive()) caps.add("prototype_derive_v1")
       val bound =
         when (kind) {
           PrototypeBindableKind.TEXT -> text(value)?.let(PrototypeDataText::hasBinding) == true
@@ -150,6 +154,15 @@ internal object PrototypeBundleCapabilities {
       listOfNotNull(node["enabledWhen"], node["visibleWhen"], node["errorWhen"]) +
         (node["styleWhen"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.get("when") }
     if (conditions.any { hasField(it, setOf("data"), emptySet()) })
+      caps.add("prototype_data_model_v1")
+  }
+
+  private fun repeatCapabilities(repeat: JsonObject?, caps: MutableSet<String>) {
+    if (PrototypeNestedRepeat.requiresCapability(repeat)) caps.add("prototype_nested_repeat_v1")
+    if (repeat?.containsKey("derive") == true) caps.add("prototype_format_v1")
+    if ((repeat?.get("items") as? JsonObject)?.containsKey("derived") == true)
+      caps.add("prototype_derive_v1")
+    if (repeat?.let { "key" in it || it["items"] is JsonObject } == true)
       caps.add("prototype_data_model_v1")
   }
 

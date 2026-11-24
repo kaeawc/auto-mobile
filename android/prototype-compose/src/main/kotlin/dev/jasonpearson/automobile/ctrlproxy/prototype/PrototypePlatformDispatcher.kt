@@ -5,7 +5,7 @@ import dev.jasonpearson.automobile.protocol.PrototypePlatformCalls
 import dev.jasonpearson.automobile.prototype.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Runtime-owned subscriptions and calls; all mutations and callbacks execute under the host lock.
@@ -39,17 +39,24 @@ internal class PrototypePlatformDispatcher(
   }
 
   private val rateLimiter = PrototypePlatformRateLimiter(monotonicMs)
+  internal val outcomes = PrototypePlatformOutcomes()
   private val pending = linkedMapOf<String, Pending>()
   private val subscriptions = mutableListOf<Job>()
   @Volatile private var closed = false
   private var subscribed = false
 
+  fun inFlightByModule(): Map<String, Int> =
+    synchronized(pending) {
+      pending.values.groupingBy { it.action.call.substringBefore('.') }.eachCount()
+    }
+
   fun subscribe() {
     if (subscribed || closed) return
     subscribed = true
     for (module in registry.modules) {
-      // The host already publishes measured device state and debounced events under this lock.
-      if (module is PrototypeDeviceModule) continue
+      // The host already publishes measured device state and debounced events under this lock;
+      // the realtime sink publishes its own state and events inside the same lock (#14269).
+      if (module is PrototypeDeviceModule || module is PrototypeRealtimeModule) continue
       subscriptions +=
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
           module.state.collect { state -> exclusively { if (!closed) publish(module.name, state) } }
@@ -72,6 +79,17 @@ internal class PrototypePlatformDispatcher(
     if (!module.simulate(event)) return false
     deliverEvent(module, event, simulated = true)
     return true
+  }
+
+  fun queueCallOutcome(call: String, outcome: JsonObject) {
+    val module = requireNotNull(registry.module(call)) { "No module registered for $call" }
+    require(module.supportsSimulation) {
+      "unsupported: platform module does not support simulation"
+    }
+    synchronized(pending) {
+      check(!closed) { "Prototype is inactive" }
+      outcomes.enqueue(call, outcome)
+    }
   }
 
   private suspend fun deliverEvent(
@@ -104,21 +122,21 @@ internal class PrototypePlatformDispatcher(
       return
     }
     rateLimiter.recordAdmission(action.call)
-    call.job =
-      scope.launch(start = CoroutineStart.LAZY) { runCall(call, action, args ?: return@launch) }
     val registered =
       synchronized(pending) {
         if (closed) false
         else {
+          val scripted = outcomes.consume(action.call)
+          call.job =
+            scope.launch(start = CoroutineStart.LAZY) {
+              if (scripted != null) exclusively { settle(call, scripted) }
+              else runCall(call, action, checkNotNull(args))
+            }
           pending[call.id] = call
           true
         }
       }
-    if (registered) call.job.start()
-    else {
-      limiter.release()
-      call.job.cancel()
-    }
+    if (registered) call.job.start() else limiter.release()
   }
 
   /** Why a call cannot start, or null once it holds a limiter slot. */
@@ -147,10 +165,10 @@ internal class PrototypePlatformDispatcher(
       try {
         // A permission dialog waits for the user. Teardown/caller cancellation still releases it;
         // an elapsed wall-clock deadline must not report an error while the OS can still grant.
-        if (action.call == "permissions.request") invoke(call, action, args)
+        if (action.call == "permissions.request") invokeModule(registry, call, action, args)
         else
           withTimeoutOrNull((action.timeoutMs ?: DEFAULT_TIMEOUT_MS).toLong()) {
-            invoke(call, action, args)
+            invokeModule(registry, call, action, args)
           } ?: failure(PlatformErrorCode.TIMEOUT, "Platform call timed out")
       } catch (cancelled: CancellationException) {
         withContext(NonCancellable) {
@@ -165,26 +183,6 @@ internal class PrototypePlatformDispatcher(
         failure(PlatformErrorCode.PLATFORM_ERROR, error.message ?: "Platform call failed")
       }
     exclusively { settle(call, result) }
-  }
-
-  private suspend fun invoke(
-    call: Pending,
-    action: PrototypePlatformAction,
-    args: JsonObject,
-  ): PlatformCallResult {
-    val module =
-      registry.module(action.call)
-        ?: return failure(PlatformErrorCode.UNSUPPORTED, "No module registered for ${action.call}")
-    return when (val available = module.availability()) {
-      is PlatformAvailability.Unavailable ->
-        failure(PlatformErrorCode.UNAVAILABLE, available.reason)
-      is PlatformAvailability.NeedsPermission ->
-        failure(
-          PlatformErrorCode.PERMISSION_DENIED,
-          "Missing permissions: ${available.names.sorted().joinToString()}",
-        )
-      PlatformAvailability.Ready -> module.call(PlatformCall(call.id, action.call, args))
-    }
   }
 
   private suspend fun settle(call: Pending, result: PlatformCallResult) {
@@ -203,7 +201,11 @@ internal class PrototypePlatformDispatcher(
 
   /** Called under the interaction lock, before the old runtime is removed. */
   suspend fun cancel() {
-    val calls = synchronized(pending) { pending.values.toList().also { pending.clear() } }
+    val calls =
+      synchronized(pending) {
+        outcomes.clear()
+        pending.values.toList().also { pending.clear() }
+      }
     calls.forEach {
       it.job.cancel()
       limiter.release()
@@ -218,6 +220,7 @@ internal class PrototypePlatformDispatcher(
     val calls =
       synchronized(pending) {
         closed = true
+        outcomes.clear()
         pending.values.toList().also { pending.clear() }
       }
     subscriptions.forEach { it.cancel() }
@@ -242,5 +245,29 @@ internal class PrototypePlatformDispatcher(
 
     fun failure(code: PlatformErrorCode, message: String) =
       PlatformCallResult.Failure(PlatformError(code, message.take(512)))
+  }
+}
+
+private suspend fun invokeModule(
+  registry: PrototypePlatformRegistry,
+  call: PrototypePlatformDispatcher.Pending,
+  action: PrototypePlatformAction,
+  args: JsonObject,
+): PlatformCallResult {
+  val module =
+    registry.module(action.call)
+      ?: return PrototypePlatformDispatcher.failure(
+        PlatformErrorCode.UNSUPPORTED,
+        "No module registered for ${action.call}",
+      )
+  return when (val available = module.availability()) {
+    is PlatformAvailability.Unavailable ->
+      PrototypePlatformDispatcher.failure(PlatformErrorCode.UNAVAILABLE, available.reason)
+    is PlatformAvailability.NeedsPermission ->
+      PrototypePlatformDispatcher.failure(
+        PlatformErrorCode.PERMISSION_DENIED,
+        "Missing permissions: ${available.names.sorted().joinToString()}",
+      )
+    PlatformAvailability.Ready -> module.call(PlatformCall(call.id, action.call, args))
   }
 }

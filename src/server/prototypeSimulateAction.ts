@@ -1,4 +1,8 @@
 import {
+  validatePrototypePlatformOutcome,
+  prototypePlatformOutcomesUnsupportedMessage,
+} from "../features/prototype/prototypePlatformOutcomes";
+import {
   prototypePlatformSimulationIssue,
   prototypePlatformSimulationUnsupportedMessage,
 } from "../features/prototype/prototypePlatformSimulation";
@@ -6,6 +10,7 @@ import type { SimulatePrototypePlatformMessage } from "../features/observe/andro
 import { PROTOTYPE_PUSH_EVENT } from "../features/prototype/prototypePushSimulate";
 import {
   PROTOTYPE_TIMERS_CAPABILITY,
+  PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY,
   PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY,
   type PrototypeResult,
 } from "../features/observe/android/ctrlProxyProtocol";
@@ -31,9 +36,12 @@ import type { prototypeSchema } from "./prototypeTools/schemas";
 export interface PrototypeSimulateTarget {
   android?: Pick<
     AndroidPrototypeTransport,
-    "supportsCommand" | "advanceClock" | "simulatePlatformEvent"
+    "supportsCommand" | "advanceClock" | "simulatePlatformEvent" | "queueCallOutcome"
   >;
-  ios?: Pick<IosPrototypeTransport, "supportsCapability" | "advanceClock">;
+  ios?: Pick<
+    IosPrototypeTransport,
+    "supportsCapability" | "advanceClock" | "simulatePlatformEvent" | "queueCallOutcome"
+  >;
   /** Push delivery routes; no runtime accepts a simulated push yet, so devices supply none. */
   push?: PrototypePushRoutes;
   /** The shown prototype's media module; no runtime exposes one to simulate yet. */
@@ -44,7 +52,7 @@ export interface PrototypeSimulateTarget {
 /** The simulate slice of the validated prototype input. */
 export type PrototypeSimulateInput = Pick<
   z.output<typeof prototypeSchema>,
-  "id" | "advanceTimeMs" | "event" | "data" | "transport" | "timeoutMs"
+  "id" | "advanceTimeMs" | "event" | "call" | "outcome" | "data" | "transport" | "timeoutMs"
 >;
 interface PrototypeClockOutput {
   success: boolean;
@@ -61,6 +69,9 @@ export async function performPrototypeSimulate(
   target: PrototypeSimulateTarget,
   args: PrototypeSimulateInput,
 ): Promise<PrototypeSimulateOutput> {
+  if (args.call !== undefined) {
+    return queueCallOutcome(target, args);
+  }
   if (args.event !== undefined && isPrototypeMediaSimEvent(args.event)) {
     return simulatePrototypeMedia(target.media, {
       id: args.id!,
@@ -82,6 +93,37 @@ export async function performPrototypeSimulate(
   }
   return advancePrototypeClock(target, args);
 }
+async function queueCallOutcome(
+  target: PrototypeSimulateTarget,
+  args: PrototypeSimulateInput,
+): Promise<PrototypeClockOutput> {
+  const call = args.call!;
+  const { issue, outcome } = validatePrototypePlatformOutcome(call, args.outcome);
+  if (issue) {
+    return { success: false, error: issue[1] };
+  }
+  try {
+    const supported = target.android
+      ? await target.android.supportsCommand(PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY)
+      : target.ios?.supportsCapability(PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY);
+    if (!supported) {
+      return { success: false, error: prototypePlatformOutcomesUnsupportedMessage() };
+    }
+    const reply = await (target.android ?? target.ios!).queueCallOutcome(
+      { id: args.id!, call, outcome },
+      args.timeoutMs,
+    );
+    return reply.success
+      ? { success: true }
+      : { success: false, error: reply.error ?? "Could not queue platform call outcome" };
+  } catch (error) {
+    logger.warn("[prototype] queue platform call outcome request failed", error);
+    return {
+      success: false,
+      error: toActionableError(error, "Could not queue platform call outcome").message,
+    };
+  }
+}
 async function simulatePlatformEvent(
   target: PrototypeSimulateTarget,
   args: PrototypeSimulateInput,
@@ -91,16 +133,17 @@ async function simulatePlatformEvent(
     return { success: false, error: issue[1] };
   }
   try {
-    if (
-      !target.android ||
-      !(await target.android.supportsCommand(PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY))
-    ) {
+    const supported = target.android
+      ? await target.android.supportsCommand(PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY)
+      : target.ios?.supportsCapability(PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY);
+    if (!supported) {
       return { success: false, error: prototypePlatformSimulationUnsupportedMessage() };
     }
-    const reply = await target.android.simulatePlatformEvent(
+    const runtime = target.android ?? target.ios!;
+    const reply = await runtime.simulatePlatformEvent(
       args.id!,
       args.event!,
-      args.data as SimulatePrototypePlatformMessage["data"] /* validated by prototypePlatformSimulationIssue */,
+      args.data as SimulatePrototypePlatformMessage["data"],
       args.timeoutMs,
     );
     return reply.success
@@ -158,6 +201,8 @@ export function validatePrototypeSimulateInput(
     advanceTimeMs?: number;
     event?: string;
     data?: unknown;
+    call?: string;
+    outcome?: unknown;
     transport?: string;
   },
   ctx: z.RefinementCtx,
@@ -175,13 +220,19 @@ function simulateInputIssue(value: {
   advanceTimeMs?: number;
   event?: string;
   data?: unknown;
+  call?: string;
+  outcome?: unknown;
   transport?: string;
 }): [string, string] | undefined {
   if (value.id === undefined) {
     return ["id", "simulate requires id"];
   }
-  if ((value.advanceTimeMs === undefined) === (value.event === undefined)) {
-    return ["advanceTimeMs", "simulate requires exactly one of advanceTimeMs or event"];
+  const modeIssue = simulateModeIssue(value);
+  if (modeIssue) {
+    return modeIssue;
+  }
+  if (value.call !== undefined) {
+    return simulateCallInputIssue(value);
   }
   if (value.event !== undefined) {
     return simulateEventInputIssue(value.event, value.data, value.transport);
@@ -190,6 +241,37 @@ function simulateInputIssue(value: {
     return [value.data === undefined ? "transport" : "data", "data and transport need event"];
   }
   return undefined;
+}
+function simulateModeIssue(value: {
+  advanceTimeMs?: number;
+  event?: string;
+  call?: string;
+  outcome?: unknown;
+}): [string, string] | undefined {
+  if ((value.call === undefined) !== (value.outcome === undefined)) {
+    return value.call === undefined
+      ? ["call", "simulate outcome requires call"]
+      : ["outcome", "simulate call requires outcome"];
+  }
+  const modes = [value.advanceTimeMs, value.event, value.call];
+  if (modes.filter((mode) => mode !== undefined).length !== 1) {
+    return [
+      "advanceTimeMs",
+      "simulate requires exactly one of advanceTimeMs, event, or call with outcome",
+    ];
+  }
+  return undefined;
+}
+function simulateCallInputIssue(value: {
+  call?: string;
+  outcome?: unknown;
+  data?: unknown;
+  transport?: string;
+}): [string, string] | undefined {
+  if (value.data !== undefined || value.transport !== undefined) {
+    return [value.data === undefined ? "transport" : "data", "data and transport need event"];
+  }
+  return validatePrototypePlatformOutcome(value.call!, value.outcome).issue;
 }
 function simulateEventInputIssue(
   event: string,

@@ -5,12 +5,14 @@ import Foundation
 @MainActor
 final class PrototypePlatformDriver {
     let registry: PrototypePlatformRegistry
+    var realtime: PrototypeRealtimeModule?
     private let clock: any PrototypeClock
     private var calls: [String: Task<Void, Never>] = [:]
     private var deadlines: [String: any PrototypeTimerHandle] = [:]
     private var started: [String: Int] = [:]
     private var subscriptions: [String: Task<Void, Never>] = [:]
     private var observing = false
+    private var outcomes = PrototypePlatformOutcomes()
     var onComplete: ((String, PlatformCallResult, Int) -> Void)?
     var onEvent: ((PlatformEvent) -> Void)?
     var onState: (([String: JSONValue]) -> Void)?
@@ -18,6 +20,29 @@ final class PrototypePlatformDriver {
     init(registry: PrototypePlatformRegistry, clock: any PrototypeClock) {
         self.registry = registry
         self.clock = clock
+    }
+
+    func simulate(id: String, event: String, data: JSONValue, session: PrototypeSession) -> String? {
+        PrototypePlatformSimulation.apply(id: id, event: event, data: data, session: session, registry: registry) {
+            onState?(registry.snapshot)
+            onEvent?($0)
+        }
+    }
+
+    func queueCallOutcome(id: String, call: String, outcome: JSONValue, session: PrototypeSession) -> String? {
+        if let refusal = PrototypePlatformSimulation.callRefusal(
+            id: id,
+            call: call,
+            session: session,
+            registry: registry
+        ) {
+            return refusal
+        }
+        return outcomes.enqueue(call: call, outcome: outcome)
+    }
+
+    func clearOutcomes() {
+        outcomes.clear()
     }
 
     func subscribe() {
@@ -46,6 +71,31 @@ final class PrototypePlatformDriver {
         }
     }
 
+    /// Seed before publishing a show. A rejected seed leaves the previous configuration listening
+    /// again; the caller subscribes after publishing a successful show.
+    func seedForShow(
+        _ spec: PrototypeSpec,
+        previousLocationBlock: JSONValue?,
+        previousSensorsBlock: JSONValue?,
+        previousSessionID: Int,
+        sessionID: Int,
+        snapshot: () -> [String: JSONValue]
+    )
+        throws -> PrototypeSpec
+    {
+        resetSessionEvents()
+        registry.configure(locationBlock: spec.locationBlock)
+        registry.configure(sensorsBlock: spec.sensorsBlock, sessionID: sessionID)
+        do {
+            return try spec.replacingPlatform(snapshot())
+        } catch {
+            registry.configure(locationBlock: previousLocationBlock)
+            registry.configure(sensorsBlock: previousSensorsBlock, sessionID: previousSessionID)
+            subscribe()
+            throw error
+        }
+    }
+
     /// Only the session-configured built-ins need fresh streams. Preserve global and host-supplied
     /// streams across shows: cancelling an iterator permanently terminates that AsyncStream.
     func resetSessionEvents() {
@@ -54,6 +104,10 @@ final class PrototypePlatformDriver {
         {
             subscriptions.removeValue(forKey: name)?.cancel()
         }
+    }
+
+    func resetNotificationEvents() {
+        subscriptions.removeValue(forKey: "notifications")?.cancel()
     }
 
     func stopEvents() {
@@ -76,17 +130,25 @@ final class PrototypePlatformDriver {
     private func start(_ job: PrototypePlatformJob) {
         let id = job.call.callId
         started[id] = clock.nowMilliseconds
-        deadlines[id] = clock.schedule(afterMilliseconds: job.timeoutMs) { [weak self] in
-            MainActor.assumeIsolated {
-                self?.finish(id, .failure(.timeout, "Platform call timed out"))
+        if Self.hasDeadline(job.call.call) {
+            deadlines[id] = clock.schedule(afterMilliseconds: job.timeoutMs) { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.finish(id, .failure(.timeout, "Platform call timed out"))
+                }
             }
         }
         let registry = registry
+        let scriptedResult = outcomes.hasQueued(call: job.call.call)
+            ? Self.invalidArguments(job.call) ?? outcomes.consume(call: job.call.call)
+            : nil
+        let realtime = realtime
         calls[id] = Task { [weak self] in
             guard !Task.isCancelled else { return }
             let result: PlatformCallResult
-            let name = String(job.call.call.split(separator: ".").first ?? "")
-            if let module = registry.modules[name] {
+            let name = job.call.moduleName
+            let resolved: (any PrototypePlatformModule)? = name == "realtime" ? realtime : registry.modules[name]
+            if let scriptedResult { result = scriptedResult }
+            else if let module = resolved {
                 switch module.availability() {
                 case .ready:
                     if let invalid = Self.invalidArguments(job.call) { result = invalid }
@@ -98,6 +160,9 @@ final class PrototypePlatformDriver {
             self?.finish(id, result)
         }
     }
+
+    /// Permission prompts wait for the user, including when the action specifies timeoutMs.
+    nonisolated static func hasDeadline(_ call: String) -> Bool { call != "permissions.request" }
 
     nonisolated static func invalidArguments(_ call: PlatformCall) -> PlatformCallResult? {
         let parts = call.call.split(separator: ".")

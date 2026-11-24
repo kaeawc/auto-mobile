@@ -120,6 +120,10 @@ const CLASSIFICATION: Classification = {
       controls: [{ action: "setPolicy", policy: "allow" }, { action: "clear" }],
     },
     prototype: PROTOTYPE_ARGS,
+    shareSheet: {
+      reads: [{ action: "list" }],
+      controls: [{ action: "select", label: "Copy" }, { action: "dismiss" }],
+    },
     sqlQuery: {
       reads: [{ query: "SELECT * FROM t" }],
       controls: [{ query: "DELETE FROM t" }, { query: "SELECT 1; DELETE FROM t" }],
@@ -164,8 +168,6 @@ const CLASSIFICATION: Classification = {
     "openLink",
     // Starts and stops an on-device tracer (perfetto) or a device-attached xctrace.
     "performanceTrace",
-    // Starts and stops an on-device Perfetto recorder from typed categories; heapDump makes the app write a dump.
-    "captureTrace",
     // Feeds, then stops feeding, audio into the emulator microphone.
     "injectAudioInput",
     "stopAudioInput",
@@ -181,6 +183,7 @@ const CLASSIFICATION: Classification = {
     "recentApps",
     "rotaryScroll",
     "glassesInput",
+    "xrHeadsetInput",
     "ambient",
     "rotateCrown",
     "reconcileDeviceResources",

@@ -92,15 +92,25 @@ requests (`prototypePlatformEvent.ts`). Authored emit names cannot start with `p
 generalizes the single reserved `prototype_request` name.
 
 **Host event simulation.** `prototype {action:"simulate",id,event:"test.tick",data:{count:7}}`
-uses the authenticated CtrlProxy connection and requires `prototype_platform_simulation_v1`.
+uses the authenticated CtrlProxy or iOS agent connection and requires `prototype_platform_simulation_v1`.
 The event must exist in the contract's `platformModules` table. Existing event data schemas
 (currently `cast.*`) are enforced; other events accept any JSON object. The complete delivered
 payload, including `simulated:true`, must fit 4096 UTF-8 bytes. The module must be declared in `requires.platform`
 and opt in through `PrototypePlatformModule.simulate`; the default returns unsupported without
-mutations. Debug `TestPlatformModule` supports `test.tick`. The dispatcher publishes the module's
+mutations. Debug `TestPlatformModule` supports `test.tick`; the iOS agent registers its reference
+`test` module only with `AUTOMOBILE_PROTOTYPE_AGENT_TEST_HOOKS=1`. The dispatcher publishes the module's
 state, runs the ordinary `platform.on` handler and reports `prototype_platform_event` with
 `simulated:true`. Injection is a host wire request, never a spec action. Push and media keep their
-existing routes. Call outcomes, state seeding, `platformMode` and iOS injection are unavailable.
+existing routes.
+
+**Scripted call outcomes.** The authenticated `queue_prototype_call_outcome` request requires
+`prototype_platform_outcomes_v1`. It queues a JSON result or a platform error for a known call and
+an active prototype. The owning module must be declared, registered and opted in to simulation.
+The runtime validates the outcome and enforces the 4096-byte budget before inserting it. Each
+runtime holds a FIFO of up to 16 outcomes per call name and clears it on show or close.
+Argument validation, rate limits and in-flight limits apply before consuming an outcome.
+When one is queued, the normal completion path uses it and skips module availability and invocation.
+With an empty queue, the dispatcher calls the module as usual.
 
 **Device state.** The `device` module exposes `/platform/device/widthClass` on both
 platforms: Android reports Material `compact` (<600dp), `medium` (600–839dp), or
@@ -132,3 +142,12 @@ module in release; debug additionally registers the permission-free test module.
 
 The shared fixtures `test/fixtures/prototype-spec/valid/platform-*.json` and
 `invalid/platform-*.json` are replayed by the TypeScript, Kotlin and Swift validators.
+
+## Runtime observability
+
+| Feature                 | Android runtime                                                                                                                                    |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Platform runtime report | CtrlProxy and disposable apps return `platformRuntime` with registered module availability, known modes, and pending call counts.                  |
+| Host status mirror      | A successful show or inspect supplies the latest report for the scope. Platform call completions update mode and in-flight counts for that report. |
+
+The report lives alongside the spec's `/platform` state. See [Platform runtime report](../../../using/prototype-embedding.md#platform-runtime-report) for the tool fields and show notes.

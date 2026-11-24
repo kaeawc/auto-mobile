@@ -1,0 +1,173 @@
+{
+  "table": [
+    {
+      "path": "/post/{postId}"
+    }
+  ],
+  "cases": [
+    {
+      "url": "amp-feedly://post/41",
+      "registration": {
+        "schemes": ["amp-feedly"],
+        "web": []
+      },
+      "expected": {
+        "entryIndex": 0,
+        "captures": {
+          "postId": "41"
+        },
+        "query": {}
+      }
+    },
+    {
+      "url": "amp-other://post/41",
+      "registration": {
+        "schemes": ["amp-feedly"],
+        "web": []
+      },
+      "expected": null
+    },
+    {
+      "url": "https://evil.test/post/41",
+      "registration": {
+        "schemes": ["amp-feedly"],
+        "web": []
+      },
+      "expected": null
+    },
+    {
+      "url": "AMP-FEEDLY://post/41",
+      "registration": {
+        "schemes": ["amp-feedly"],
+        "web": []
+      },
+      "expected": {
+        "entryIndex": 0,
+        "captures": {
+          "postId": "41"
+        },
+        "query": {}
+      }
+    },
+    {
+      "url": "amp-extra://post/41",
+      "registration": {
+        "schemes": ["AMP-EXTRA"],
+        "web": []
+      },
+      "expected": {
+        "entryIndex": 0,
+        "captures": {
+          "postId": "41"
+        },
+        "query": {}
+      }
+    },
+    {
+      "url": "https://evil.test/post/41",
+      "registration": {
+        "schemes": ["amp-feedly"],
+        "web": [
+          {
+            "scheme": "https",
+            "host": "good.test"
+          }
+        ]
+      },
+      "expected": null
+    },
+    {
+      "url": "https://good.test/post/41",
+      "registration": {
+        "schemes": ["amp-feedly"],
+        "web": [
+          {
+            "scheme": "https",
+            "host": "good.test"
+          }
+        ]
+      },
+      "expected": {
+        "entryIndex": 0,
+        "captures": {
+          "postId": "41"
+        },
+        "query": {}
+      }
+    },
+    {
+      "url": "http://good.test/post/41",
+      "registration": {
+        "schemes": ["amp-feedly"],
+        "web": [
+          {
+            "scheme": "https",
+            "host": "good.test"
+          }
+        ]
+      },
+      "expected": null
+    },
+    {
+      "url": "https://good.test:8443/post/41",
+      "registration": {
+        "schemes": ["amp-feedly"],
+        "web": [
+          {
+            "scheme": "https",
+            "host": "good.test"
+          }
+        ]
+      },
+      "expected": null
+    },
+    {
+      "url": "https://user@good.test/post/41",
+      "registration": {
+        "schemes": ["amp-feedly"],
+        "web": [
+          {
+            "scheme": "https",
+            "host": "good.test"
+          }
+        ]
+      },
+      "expected": null
+    },
+    {
+      "url": "not a URL",
+      "registration": {
+        "schemes": ["amp-feedly"],
+        "web": []
+      },
+      "expected": null
+    },
+    {
+      "url": "https://good.test:443/post/41",
+      "registration": {
+        "schemes": ["amp-feedly"],
+        "web": [
+          {
+            "scheme": "https",
+            "host": "good.test"
+          }
+        ]
+      },
+      "expected": {
+        "entryIndex": 0,
+        "captures": {
+          "postId": "41"
+        },
+        "query": {}
+      }
+    },
+    {
+      "url": "https://evil.test/post/41",
+      "registration": {
+        "schemes": ["amp-feedly", "https"],
+        "web": []
+      },
+      "expected": null
+    }
+  ]
+}

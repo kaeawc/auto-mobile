@@ -19,9 +19,16 @@ internal class RuntimeAttachTarget(
   override var showingId: String? = null
     private set
 
+  override var showingStartSequence: Long? = null
+    private set
+
   var runtime: PrototypeRuntime? = null
     set(value) {
-      if (value != null && value !== field) showingId = ledger.nextShowingId()
+      if (value != null && value !== field) {
+        showingId = ledger.nextShowingId()
+        // Set before the runtime emits: every sequence from here on belongs to this showing.
+        showingStartSequence = ledger.lastSequence + 1
+      }
       field = value
     }
 
@@ -64,6 +71,7 @@ internal class RuntimeAttachTarget(
       if (current == null)
         buildJsonObject {
           showingId?.let { put("showingId", it) }
+          showingStartSequence?.let { put("showingStartSequence", it) }
           put("shown", false)
           put("id", JsonNull)
           put("pages", JsonObject(emptyMap()))
@@ -87,12 +95,15 @@ internal class RuntimeAttachTarget(
             storage = current.storage?.report(),
             timers = current.timerReports(),
             feedbackLog = current.feedbackLog.snapshot(),
+            platformRuntime =
+              current.platformRuntimeReport(PrototypePlatformReport.Runtime.DISPOSABLE_APP),
             degradedEffects = prototypeEffectReport(model.root, current.effectHealth),
           )
         JsonObject(
           attachJson.encodeToJsonElement(PrototypeStatusEntry.serializer(), entry).jsonObject +
             ("shown" to JsonPrimitive(true)) +
-            ("showingId" to JsonPrimitive(showingId)),
+            ("showingId" to JsonPrimitive(showingId)) +
+            ("showingStartSequence" to JsonPrimitive(showingStartSequence)),
         )
       }
     }
@@ -109,7 +120,10 @@ internal class RuntimeAttachTarget(
   }
 
   private fun validate(spec: JsonObject): PrototypeSpec =
-    when (val validation = PrototypeSpecValidator.validate(spec.toString())) {
+    when (
+      val validation =
+        PrototypeSpecValidator.validate(spec.toString(), budget = PrototypeRuntimeBudget.LARGE)
+    ) {
       is PrototypeSpecValidation.Success -> validation.spec
       is PrototypeSpecValidation.Failure ->
         error("${validation.error.path}: ${validation.error.message}")

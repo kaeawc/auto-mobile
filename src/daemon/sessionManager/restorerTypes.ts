@@ -1,3 +1,4 @@
+import type { RotationOriginalsLedger } from "../rotationOriginalsLedger";
 import type { DbWriteBarrier } from "../../db/dbWriteBarrier";
 import type { ScreenReaderRestoreState } from "../../features/accessibility/ScreenReaderRestore";
 import type { RotationRestoreState } from "../../features/action/Rotate";
@@ -58,6 +59,13 @@ export interface NetworkConditionSessionState {
    * than resetting the whole device.
    */
   iosAppRule?: IosAppNetworkRuleSessionState;
+  /**
+   * The session also degraded the whole device (an Android emulator, or the iOS
+   * Simulator socket shaper, #19045). A slot with no `iosAppRule` is device-wide
+   * too; this flag keeps that obligation when an app rule shares the slot, so
+   * release, rebind and TTL expiry restore both.
+   */
+  deviceWide?: boolean;
 }
 
 /** What a pending network restore must write, resolved before any await. */
@@ -113,6 +121,11 @@ export interface SessionManagerOptions {
   /** Simulator enrollment restore seam, parallel to keep-awake so tests never invoke simctl. */
   biometricEnrollmentRestorer?: (device: BootedDevice) => BiometricEnrollmentRestorer;
   restorers?: DeviceStateRestorerFactories;
+  /**
+   * Durable store for session rotation originals (#18847), so a restart after a default `rotate`
+   * still restores auto-rotate at the device's next session start. Omitted keeps them in memory.
+   */
+  rotationOriginalsLedger?: RotationOriginalsLedger;
 }
 
 /** Narrow seam for restoring the device-wide network condition on release. */

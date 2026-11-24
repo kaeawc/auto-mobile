@@ -44,6 +44,11 @@
       android:theme="@style/Theme.AutoMobile.AppCompatProbe" />
 
     <activity
+      android:name=".ShareSourceActivity"
+      android:exported="true"
+      android:theme="@style/Theme.AutoMobile.AppCompatProbe" />
+
+    <activity
       android:name=".ShareSinkActivity"
       android:exported="true"
       android:label="@string/share_sink_name"

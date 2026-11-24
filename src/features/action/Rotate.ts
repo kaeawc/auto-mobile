@@ -1,8 +1,7 @@
 import { verifyIosRotationDisplayRead, type IosDisplayPixelProbe } from "./iosRotateDisplayProbe";
 import {
   awaitIosRunnerRecovery,
-  unrestoredIosOrientationWarning,
-  type IosRotateRunner,
+  restoreIosOrientationAfterFailure,
 } from "./iosRotateRunnerRecovery";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
@@ -20,7 +19,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { restoreTargetIosOrientation, verifyIosRotation } from "./iosRotateVerification";
+import { iosRotatePanel, requestIosRotate, verifyIosRotation } from "./iosRotateVerification";
 import { ROTATION_READ_FLOOR_MS } from "../observe/Idle";
 import {
   orientationFromRotation,
@@ -37,6 +36,10 @@ import {
 } from "./RotationOrientationReader";
 import { RotationOutcomes, type AutoRotatePlan } from "./RotationOutcomes";
 import { RotationEndConfirmation } from "./RotationEndConfirmation";
+import {
+  refuseRotateOnFixedOrientationDevice,
+  type RotateXrOptions,
+} from "./RotateUnsupportedError";
 import {
   DEVICE_STATE_ROTATION_LOCK,
   ROTATION_RETURN_CONFIRMATION_TIMEOUT_MS,
@@ -56,7 +59,7 @@ interface AndroidRotationWrites {
   restoreOnFailure: (result: RotateResult) => Promise<RotateResult>;
 }
 
-export interface RotateOptions {
+export interface RotateOptions extends RotateXrOptions {
   iosDisplayPixelProbe?: IosDisplayPixelProbe;
   deadlineMs?: number;
   sessionRotation?: <T>(mutation: (slot?: RotationRestoreSlot) => Promise<T>) => Promise<T>;
@@ -159,7 +162,7 @@ export class Rotate extends BaseVisualChange {
       captureUser: true,
       signal,
     });
-    await this.captureDeviceStateRotationLock(state, signal);
+    await this.store.captureDeviceStateRotationLock(state, signal);
     return state;
   }
 
@@ -207,6 +210,7 @@ export class Rotate extends BaseVisualChange {
           }
           return await this.executeIosRotation(orientation, progress, perf, signal);
         case "android":
+          await refuseRotateOnFixedOrientationDevice(this.device, this.adb, this.options, signal);
           if (display !== 0) {
             return await this.rotateNonDefaultDisplay(
               orientation,
@@ -368,7 +372,10 @@ export class Rotate extends BaseVisualChange {
           const client = IOSCtrlProxyClient.getInstance(this.device);
           runner = client;
           const result = await perf.track("iOSRotation", () =>
-            awaitWhileRequestIsLive(client.requestRotate(orientation, 5000, perf), signal),
+            awaitWhileRequestIsLive(
+              requestIosRotate(client, orientation, perf, iosRotatePanel(observation)),
+              signal,
+            ),
           );
 
           timedOut = result.timedOut === true;
@@ -431,49 +438,10 @@ export class Rotate extends BaseVisualChange {
     });
     return verified.success
       ? verified
-      : await this.restoreIosOrientationAfterFailure(verified, runner, previousObservation, {
+      : await restoreIosOrientationAfterFailure(verified, runner, previousObservation, {
           perf,
           signal,
         });
-  }
-
-  /**
-   * A rotate the display could not honor (SpringBoard ignores landscape) still leaves the device
-   * orientation changed, so the next app launches rotated. Put the prior orientation back.
-   */
-  private async restoreIosOrientationAfterFailure(
-    failed: RotateResult,
-    client: IosRotateRunner | undefined,
-    previousObservation: ObserveResult | undefined,
-    call: { perf: RotationPerf; signal?: AbortSignal },
-  ): Promise<RotateResult> {
-    const { perf, signal } = call;
-    const prior = restoreTargetIosOrientation(previousObservation);
-    if (!client || prior === "unknown" || prior === failed.orientation) {
-      return failed;
-    }
-    try {
-      throwIfAborted(signal);
-      const restored = await perf.track("iOSRotationRestore", () =>
-        awaitWhileRequestIsLive(client.requestRotate(prior, 5000, perf), signal),
-      );
-      if (restored.timedOut) {
-        client.ensureRecoveryStarted();
-        const recovery = await awaitIosRunnerRecovery(client, "rotate restore", signal);
-        return { ...failed, warning: `${unrestoredIosOrientationWarning(prior)} ${recovery}` };
-      }
-      if (!restored.success) {
-        throw new Error(restored.error ?? "runner reported failure");
-      }
-      return failed;
-    } catch (error) {
-      throwIfAborted(signal);
-      logger.warn(`iOS rotation restore to ${prior} failed: ${errorMessage(error)}`, error);
-      return {
-        ...failed,
-        warning: unrestoredIosOrientationWarning(prior),
-      };
-    }
   }
 
   private async executeAndroidRotation(
@@ -579,17 +547,6 @@ export class Rotate extends BaseVisualChange {
     }
   }
 
-  /** Captured once, with the session's first originals, before any write can change it. */
-  private async captureDeviceStateRotationLock(
-    state: RotationRestoreState,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const lock = await this.store.readSetting("secure", DEVICE_STATE_ROTATION_LOCK, signal);
-    if (lock !== null) {
-      state.deviceStateRotationLock = lock;
-    }
-  }
-
   private rotationCallSettings(
     autoRotateState: "locked" | "enabled" | "unknown",
     slot?: RotationRestoreSlot,
@@ -621,12 +578,12 @@ export class Rotate extends BaseVisualChange {
             settings.previousUserRotation = state.userRotation;
           }
           if (!original) {
-            await this.captureDeviceStateRotationLock(state, signal);
+            await this.store.captureDeviceStateRotationLock(state, signal);
           }
           throwIfAborted(signal);
           slot.get();
           if (!original) {
-            slot.record(state);
+            await slot.record(state);
           }
         }
         settings.started = true;
@@ -723,7 +680,11 @@ export class Rotate extends BaseVisualChange {
       {
         autoRotateState,
         plan: {
-          preserveLock,
+          // A session's omitted lock holds an already-matching orientation like `true` (#18833);
+          // an unreadable auto-rotate setting keeps the no-write fallback.
+          preserveLock:
+            preserveLock ||
+            (slot !== undefined && lockOrientation === undefined && autoRotateState === "enabled"),
           restoreAutomaticRotation,
           beforeWrite: settings.beforeWrite,
           cleanup,
@@ -751,8 +712,9 @@ export class Rotate extends BaseVisualChange {
     // regardless of whether it was already off beforehand. Remember the
     // pre-existing value so it can be restored once the forced rotation
     // completes, instead of leaving auto-rotate permanently disabled
-    // (#6129). An explicit persistent request takes ownership of this state,
-    // while omission and false preserve the known prior auto-rotate state.
+    // (#6129). true, and omission in a device session (#18833), keep auto-rotate
+    // off so the orientation holds until session release restores the originals;
+    // false and direct-call omission turn auto-rotate back on before returning.
 
     try {
       this.outcomes.logAutoRotatePlan(autoRotateState, preserveLock, restoreAutomaticRotation);
@@ -769,7 +731,7 @@ export class Rotate extends BaseVisualChange {
           throwIfAborted(signal);
           cleanup.needed = shouldRestoreAutoRotate && autoRotateState !== "locked";
           await this.planDeviceStateLock(cleanup, {
-            shouldRestoreAutoRotate: shouldRestoreAutoRotate || plan.restoreAfterConfirmation,
+            shouldRestoreAutoRotate,
             autoRotateState,
             signal,
           });
@@ -798,7 +760,7 @@ export class Rotate extends BaseVisualChange {
       let warning: string | undefined;
       let restoreConfirmed = true;
 
-      if (shouldRestoreAutoRotate || plan.restoreAfterConfirmation) {
+      if (shouldRestoreAutoRotate) {
         ({ achievedOrientation, warning, restoreConfirmed } =
           await this.outcomes.restoreAutoRotateAndConfirmOrientation(orientation, signal, cleanup));
       }
@@ -976,19 +938,10 @@ export class Rotate extends BaseVisualChange {
       slot,
       signal,
     });
-    let { achievedOrientation, warning } = confirmation;
+    const { achievedOrientation } = confirmation;
+    let { warning } = confirmation;
     if (achievedOrientation === orientation) {
-      let restoreConfirmed = !restoreFailure;
-      if (plan.restoreAfterConfirmation) {
-        const restored = await this.outcomes.restoreAutoRotateAndConfirmOrientation(
-          orientation,
-          signal,
-          cleanup,
-        );
-        achievedOrientation = restored.achievedOrientation;
-        warning = [warning, restored.warning].filter(Boolean).join(" ") || undefined;
-        restoreConfirmed = restored.restoreConfirmed;
-      }
+      const restoreConfirmed = !restoreFailure;
       const result = await this.outcomes.finalizeAndroidRotation({
         orientation,
         value,

@@ -2,11 +2,11 @@ import { createHash } from "node:crypto";
 import type { AndroidStampToolchain } from "../../../../../src/features/prototype/disposableApp/android/AndroidStampToolchain";
 import type {
   AndroidStampZip,
-  AndroidStampAsset,
   AndroidStampContent,
 } from "../../../../../src/features/prototype/disposableApp/android/AndroidStampZip";
 import type { DisposableAppSigner } from "../../../../../src/features/prototype/disposableApp/android/DisposableAppSigner";
 import type { AndroidDisposableAppStampInput } from "../../../../../src/features/prototype/disposableApp/android/AndroidDisposableAppStamper";
+import type { DisposableAppAsset } from "../../../../../src/features/prototype/disposableApp/DisposableAppManager";
 import { FakeFileSystem } from "../../../../fakes/FakeFileSystem";
 
 export class FakeDisposableAppSigner implements DisposableAppSigner {
@@ -38,7 +38,8 @@ export class FakeAndroidStampToolchain implements AndroidStampToolchain {
 }
 export class FakeAndroidStampZip implements AndroidStampZip {
   spec = "";
-  assets: readonly AndroidStampAsset[] = [];
+  assets: readonly DisposableAppAsset[] = [];
+  iconLayers?: AndroidStampContent["iconLayers"];
   colors: ReadonlyMap<string, number> = new Map();
   constructor(private readonly calls: string[]) {}
   assemble(_template: Buffer, _linked: Buffer, content: AndroidStampContent): Buffer {
@@ -46,6 +47,7 @@ export class FakeAndroidStampZip implements AndroidStampZip {
     this.spec = content.spec;
     this.assets = content.assets;
     this.colors = content.colors ?? new Map();
+    this.iconLayers = content.iconLayers;
     return Buffer.from("assembled");
   }
 }
@@ -63,6 +65,7 @@ export function stampInput(): AndroidDisposableAppStampInput {
     },
     appId: "dev.jasonpearson.automobile.app.feedly",
     label: "Feedly",
+    slug: "feedly",
     spec: '{"root":{"type":"column"}}',
     permissions: [],
     enabledComponents: [],

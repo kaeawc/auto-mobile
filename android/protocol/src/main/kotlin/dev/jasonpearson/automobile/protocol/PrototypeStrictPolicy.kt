@@ -87,14 +87,15 @@ internal object PrototypeStrictPolicy {
     }
     val shares = SharePolicy.fields(context)
     val sinks =
-      (requestFields(context) + channelFields + shares)
+      (requestFields(spec, context) + channelFields + shares)
         .sortedBy { it.path }
         .filter { isSinkBinding(it, requests) || it in shares }
     var expandedBytes = 0L
     for (field in sinks) {
-      val scope = scopes.firstOrNull { field.path.startsWith("${it.path}.children[") }
+      val matching = PrototypeRepeatValidator.applicableScopes(scopes, field.path)
       expandedBytes +=
-        field.text.toByteArray(Charsets.UTF_8).size.toLong() * maxOf(1, scope?.items?.size ?: 1)
+        field.text.toByteArray(Charsets.UTF_8).size.toLong() *
+          maxOf(1, matching.sumOf { it.items.size })
       if (expandedBytes > 4194304)
         return PrototypeSpecError(
           field.path,
@@ -132,7 +133,7 @@ internal object PrototypeStrictPolicy {
       }
       .toSet()
 
-  private fun requestFields(context: PrototypeStateChecks.Context): List<Field> {
+  private fun requestFields(spec: JsonObject, context: PrototypeStateChecks.Context): List<Field> {
     val fields = mutableListOf<Field>()
     for (node in context.nodes) {
       PrototypeBindableFields.first<Boolean>(node.value, node.path) { raw, at, kind ->
@@ -148,11 +149,18 @@ internal object PrototypeStrictPolicy {
     for (action in context.actions) {
       PrototypeBindableFields.firstAction<Boolean>(action.value, action.path) { raw, at, kind ->
         val text = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content
-        if (
-          text != null &&
-            kind in listOf(PrototypeBindableKind.REQUEST_TEXT, PrototypeBindableKind.KEY)
-        )
-          fields.add(Field(text, at, kind == PrototypeBindableKind.KEY))
+        if (text != null) {
+          when (kind) {
+            PrototypeBindableKind.REQUEST_TEXT,
+            PrototypeBindableKind.KEY ->
+              fields.add(Field(text, at, kind == PrototypeBindableKind.KEY))
+            PrototypeBindableKind.DERIVED_BINDING ->
+              PrototypeDerivedRules.inputs(spec, text)
+                .filter { (source, _) -> source == "state" }
+                .forEach { (_, key) -> fields.add(Field(key, at, true)) }
+            else -> Unit
+          }
+        }
         null
       }
     }
@@ -217,7 +225,8 @@ internal object PrototypeStrictPolicy {
 
   private fun isSinkBinding(field: Field, requests: List<String>): Boolean =
     // The binding visitor exposes request/data/emit/platform state bindings as KEY fields.
-    (field.key && field.path.endsWith(".state")) || inRequest(field.path, requests)
+    (field.key && (field.path.endsWith(".state") || field.path.endsWith(".derived"))) ||
+      inRequest(field.path, requests)
 
   private fun inRequest(path: String, requests: List<String>): Boolean = requests.any { at ->
     path == "$at.url" ||
@@ -230,13 +239,22 @@ internal object PrototypeStrictPolicy {
     scopes: List<PrototypeRepeatValidator.Scope>,
     secure: Set<String>,
   ): Boolean {
-    val scope = scopes.firstOrNull { field.path.startsWith("${it.path}.children[") }
+    val matching = PrototypeRepeatValidator.applicableScopes(scopes, field.path)
     val texts =
-      if (scope == null || !PrototypeRepeatFields.hasPlaceholder(field.text, scope.alias))
-        listOf(field.text)
+      if (matching.isEmpty()) listOf(field.text)
       else
-        scope.items.mapIndexed { index, item ->
-          PrototypeRepeatTemplate.bind(field.text, scope.alias, item, index)
+        matching.flatMap { scope ->
+          // Literal state bindings still need a check when the repeat has no rows.
+          if (
+            PrototypeRepeatTemplate.segments(field.text, scope.alias, scope.outerAlias).all {
+              it is PrototypeRepeatSegment.Literal
+            }
+          )
+            listOf(field.text)
+          else
+            scope.items.mapIndexed { index, item ->
+              PrototypeRepeatTemplate.bind(field.text, scope.alias, item, index, scope.outerAlias)
+            }
         }
     return texts.any { text ->
       if (field.key) text in secure else secure.any { text.contains("{$it}") }
@@ -258,7 +276,10 @@ internal object PrototypeStrictPolicy {
 
   fun required(spec: JsonObject): Set<String> {
     val scanner = CapabilityScanner()
+    scanner.result.addAll(declaredPrototypeCapabilities(spec["requires"]))
     scanner.envelope(spec)
+    if ("links" in spec) scanner.result.add("prototype_links_v1")
+    spec["links"]?.let { scanner.scan(it) }
     spec["root"]?.let { scanner.scan(it) }
     (spec["channels"] as? JsonObject).orEmpty().values.forEach { scanner.scan(it) }
     scanner.platform(spec)
@@ -301,6 +322,7 @@ internal object PrototypeStrictPolicy {
   // Each feature applies when its node type has any of the listed fields.
   private val typeFieldFeatures =
     mapOf(
+      "image" to mapOf("remote_image" to listOf("url", "placeholder", "error", "crossfade", "via")),
       "text" to mapOf("rich_text" to listOf("spans")),
       "textField" to
         mapOf(
@@ -396,12 +418,30 @@ internal object PrototypeStrictPolicy {
       if (spec["platform"] != null) need("platform")
     }
 
-    fun scan(value: JsonElement, field: String = "", routeAlias: Boolean = false) {
+    fun scan(
+      value: JsonElement,
+      field: String = "",
+      routeAlias: Boolean = false,
+      remoteOnly: Boolean = false,
+    ) {
       if (value is JsonArray) {
-        value.forEach { scan(it, routeAlias = routeAlias) }
+        value.forEach { scan(it, routeAlias = routeAlias, remoteOnly = remoteOnly) }
         return
       }
       val fields = value as? JsonObject ?: return
+      if (remoteOnly) {
+        for (entry in PrototypePatchNodes.tree(fields, emptyList(), "")) {
+          val node = entry.node
+          if (
+            node.text("type") == "image" &&
+              listOf("url", "placeholder", "error", "crossfade", "via").any { it in node }
+          )
+            need("remote_image")
+          (node["ios"] as? JsonObject)?.get("bottomAccessory")?.let { scan(it, remoteOnly = true) }
+        }
+        return
+      }
+      (fields["ios"] as? JsonObject)?.get("bottomAccessory")?.let { scan(it, remoteOnly = true) }
       if (fields.size == 1 && fields.containsKey("value")) return
       if (PrototypeStringConditions.uses(fields)) need("string_conditions")
       val alias = routeAlias || (fields["repeat"] as? JsonObject)?.text("as") == "route"
@@ -453,17 +493,26 @@ internal object PrototypeStrictPolicy {
 
     private fun nodeFeatures(fields: JsonObject, routeAlias: Boolean) {
       if ("shared" in fields) result.add("prototype_shared_element_v2")
-      val binding =
-        PrototypeBindableFields.first<Boolean>(fields, "") { raw, _, kind ->
-          if (usesData(raw, kind)) true else null
-        }
-      if (binding == true) need("data_model")
+      PrototypeBindableFields.first<Unit>(fields, "") { raw, _, kind ->
+        if (kind.requiresDerive()) need("derive")
+        if (usesData(raw, kind)) need("data_model")
+        null
+      }
       polishFeatures(fields, routeAlias, result, ::need)
       val type = fields.text("type") ?: ""
       typeNamespaceFeatures(type, fields, ::need)
       iconEffectNeeds(type, fields).forEach(::need)
       typeFeatures[type]?.let(::need)
-      if (PrototypeDataRules.isKeyedAction(fields)) result.add("prototype_data_actions_v2")
+      if (
+        type in PrototypeSpecValidator.actionTypes &&
+          PrototypeBindableFields.firstAction(fields, "") { _, _, kind ->
+            true.takeIf { kind.requiresDerive() }
+          } != null
+      )
+        need("derive")
+      if (PrototypeGeneratedValues.needsDataV2(fields)) result.add("prototype_data_actions_v2")
+      if (PrototypeObjectDataValue.isObjectValueAction(fields))
+        result.add("prototype_data_actions_v3")
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)
       }
@@ -490,6 +539,7 @@ internal object PrototypeStrictPolicy {
 
     private fun repeatFeatures(child: JsonElement) {
       val repeatSpec = child as? JsonObject
+      if (PrototypeNestedRepeat.requiresCapability(repeatSpec)) need("nested_repeat")
       if (repeatSpec?.containsKey("derive") == true) need("format")
       if ((repeatSpec?.get("items") as? JsonObject)?.containsKey("derived") == true) need("derive")
       if (repeatSpec?.get("stagger") != null) need("window_motion")
@@ -609,6 +659,7 @@ private fun polishFeatures(
   if (PrototypeStylePolishV2Rules.required(fields))
     result.add(PrototypeStylePolishV2Rules.CAPABILITY)
   if (PrototypeMotionV3.required(fields)) result.add(PrototypeMotionV3.CAPABILITY)
+  if (PrototypeM3Expressive.required(fields)) result.add(PrototypeM3Expressive.CAPABILITY)
   if (PrototypeChannels.needsRealtimeCapability(fields)) need("platform_realtime")
   if (fields.text("type") == "platform" && fields.text("call") == "share.open")
     need("platform_share")
@@ -641,7 +692,7 @@ private fun typeNamespaceFeatures(type: String, fields: JsonObject, need: (Strin
 private val freeFormMaps = setOf("headers", "query", "params", "args")
 
 private fun scansValuesOnly(key: String, field: String): Boolean =
-  (key == "form" && field == "body") || key in freeFormMaps
+  (key == "form" && field == "body") || key == "screens" || key in freeFormMaps
 
 // Only the contract's action slots hold actions. Arbitrary JSON, such as a channel route's
 // equality literal, may carry the same type string, so this gate reads located actions only.

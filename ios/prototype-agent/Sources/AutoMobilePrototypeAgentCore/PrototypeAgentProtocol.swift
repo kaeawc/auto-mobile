@@ -47,6 +47,7 @@ enum PrototypeAgentProtocol {
         dataModelCapability,
         dataActionsCapability,
         dataActionsV2Capability,
+        dataActionsV3Capability,
         networkCapability,
         networkDeviceCapability,
         networkUploadCapability,
@@ -67,6 +68,7 @@ enum PrototypeAgentProtocol {
         glassCapability,
         scrollEdgeEffectCapability,
         stringsCapability,
+        remoteImageCapability,
         semanticsCapability,
         stringConditionsCapability,
         textFieldLeadingIconCapability,
@@ -77,6 +79,7 @@ enum PrototypeAgentProtocol {
         contentTransitionCapability,
         formatCapability,
         deriveCapability,
+        nestedRepeatCapability,
         menusCapability,
         tooltipCapability,
         drawerCapability,
@@ -111,6 +114,7 @@ enum PrototypeAgentProtocol {
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
     /// `reset` on an agent that does not advertise it.
+    static let linksCapability = "prototype_links_v1"
     static let windowControlsCapability = "prototype_platform_window_controls_v1"
     static let hideKeyboardCapability = "prototype_hide_keyboard_v1"
     /// Advertised only through the registered `PrototypeSettingsModule`, never the static list.
@@ -118,6 +122,7 @@ enum PrototypeAgentProtocol {
     static let showInPlaceCapability = "prototype_show_in_place_v1"
     static let scrollMotionCapability = "prototype_scroll_motion_v1"
     static let deriveCapability = "prototype_derive_v1"
+    static let nestedRepeatCapability = "prototype_nested_repeat_v1"
     static let formatCapability = "prototype_format_v1"
     static let pagerStateKeyCapability = "prototype_pager_state_key_v1"
     static let layoutDirectionCapability = "prototype_layout_direction_v1"
@@ -193,6 +198,8 @@ enum PrototypeAgentProtocol {
     /// `change` event named for the `/data/...` path with `{op, value?, revision}` (#12519). Same name
     /// as the CtrlProxy capability; the host refuses a spec using one on an agent without it.
     static let dataActionsV2Capability = "prototype_data_actions_v2"
+    /// `{object}` data-action values whose members are flat bindings (#18826).
+    static let dataActionsV3Capability = "prototype_data_actions_v3"
     static let dataActionsCapability = "prototype_data_actions_v1"
     /// The `request` action (#12529): host-proxied calls (`via: "host"`, the default) through
     /// `prototype_request` / `prototype_response` frames, and the `/data`, `__meta`, `statusKey` and
@@ -222,6 +229,7 @@ enum PrototypeAgentProtocol {
     /// Locale string tables and integer plural resolution (#14210).
     static let stringsCapability = "prototype_strings_v1"
     /// Authored accessibility semantics and live announcements (#14210).
+    static let remoteImageCapability = "prototype_remote_image_v1"
     static let semanticsCapability = "prototype_semantics_v1"
     /// `{data, empty}` conditions and style `shimmer` on box, row, column and card (#14207, #14689).
     static let loadingStatesCapability = "prototype_loading_states_v1"
@@ -263,6 +271,10 @@ enum PrototypeAgentProtocol {
     /// iOS 26+), a tonal fill where blur is unavailable, and `backdrop: blur|fallback` in the show reply.
     static let backdropCapability = "prototype_backdrop_v1"
     static let timersCapability = "prototype_timers_v1"
+    static let queueCallOutcomeRequest = "queue_prototype_call_outcome"
+    static let platformOutcomesCapability = "prototype_platform_outcomes_v1"
+    static let simulatePlatformRequest = "simulate_prototype_platform"
+    static let platformSimulationCapability = "prototype_platform_simulation_v1"
     static let advanceClockRequest = "advance_prototype_clock"
     /// Atomic in-place `/data`, `/state` and `replaceNode` patches with revisions and state conflicts
     /// (#11675). Same name as the CtrlProxy capability; the host sends `patch_prototype` only to an agent

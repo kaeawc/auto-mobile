@@ -73,18 +73,20 @@ object PrototypeDerive {
   private fun affected(entry: PrototypeDerivedEntry, changed: PrototypeDeriveChanges): Boolean {
     val source = entry.collection?.get("of")?.jsonObject ?: entry.of
     val pointer = source["data"]?.jsonPrimitive?.content
-    val keys =
-      if (entry.collection == null) listOfNotNull(source["state"]?.jsonPrimitive?.content)
-      else
-        PrototypeCollection.clauses(entry.collection).mapNotNull {
-          it["value"]?.jsonObject?.get("state")?.jsonPrimitive?.content
-        }
-    return keys.any { it in changed.stateKeys } ||
+    return stateInputs(entry).any { it in changed.stateKeys } ||
       (pointer != null &&
         changed.dataPointers.any {
           PrototypeDataPointer.overlaps(it, pointer)
         })
   }
+
+  /** The state keys whose values can affect this derived output. */
+  fun stateInputs(entry: PrototypeDerivedEntry): List<String> =
+    if (entry.collection == null) listOfNotNull(entry.of["state"]?.jsonPrimitive?.content)
+    else
+      PrototypeCollection.clauses(entry.collection).mapNotNull {
+        it["value"]?.jsonObject?.get("state")?.jsonPrimitive?.content
+      }
 
   private fun value(
     entry: PrototypeDerivedEntry,

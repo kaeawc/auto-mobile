@@ -43,7 +43,7 @@ export const actionModelOptions = {
   fieldDocs: {},
   variantDocs: {
     setData:
-      "`setData`, `appendData` and `removeData` change the prototype's own `/data` on the device\n(`prototype_data_actions_v1`, #12519). [path] is `/data/<RFC 6901 pointer>`; inside a `repeat`, a\nwhole `{index}` segment binds to the current row. [value] is an emit-context binding without\n`page`: `{value}`, `{state}`, `{data}` and, in a repeat, `{item}` or `{index}`.",
+      "`setData`, `appendData` and `removeData` change the prototype's own `/data` on the device\n(`prototype_data_actions_v1`, #12519). [path] is `/data/<RFC 6901 pointer>`; inside a `repeat`, a\nwhole `{index}` segment binds to the current row. [value] is an emit-context binding without\n`page`: `{value}`, `{state}`, `{data}` and, in a repeat, `{item}` or `{index}`; or (with\n`prototype_data_actions_v3`, #18826) `{object}` whose members are each one of those forms.",
     request:
       "An HTTP call from a tap (`prototype_network_v1`, #12523): the response goes to [into] (and its\n`<into>__meta` sibling), [statusKey] follows `loading`, `success` and `error`, and [onSuccess] or\n[onError] runs afterwards. [headers] and [query] entries are a literal string or a value binding\n(`{state}`, `{data}`, `{value}`, and `{item}` / `{index}` in a repeat), kept as JSON because both\nforms share a slot; [body] is a binding. [method] defaults to GET and [via] to `host`.",
     platform:
@@ -69,6 +69,8 @@ export const nodeModelOptions = {
     },
     // A one-key media source union (#14253); the contract walk validates it.
     "videoPlayer.source": { kotlin: "JsonObject" },
+    "image.placeholder": { kotlin: "JsonObject" },
+    "image.error": { kotlin: "JsonObject" },
     // `true`, `false` or `"whenVisible"` (#14253).
     "videoPlayer.autoplay": { kotlin: "JsonElement" },
     // A literal camera or a `{data}` pointer to one (#14309); the contract walk validates it.
@@ -221,9 +223,6 @@ export const nodeActionTypeRefs = {
   },
   textSpan: {
     kotlin: "PrototypeTextSpan",
-  },
-  linkify: {
-    kotlin: "PrototypeLinkifyOptions",
   },
   iconName: {
     kotlin: "String",

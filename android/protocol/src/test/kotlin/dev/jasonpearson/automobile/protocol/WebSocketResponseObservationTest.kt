@@ -115,6 +115,30 @@ class WebSocketResponseObservationTest : WebSocketResponseTestSupport() {
   }
 
   @Test
+  fun `inbound link events round trip dedicated kinds with null names`() {
+    for ((kind, wireKind, payload) in
+      listOf(
+        Triple(
+          PrototypeEventKind.LINK_OPENED,
+          "link_opened",
+          """{"url":"amp-demo://post/41","entry":"/post/{postId}"}""",
+        ),
+        Triple(
+          PrototypeEventKind.LINK_UNMATCHED,
+          "link_unmatched",
+          """{"url":"amp-demo://missing"}""",
+        ),
+      )) {
+      val literal =
+        """{"type":"prototype_event","timestamp":42,"id":"panel","sequence":1,"kind":"$wireKind","name":null,"payload":$payload,"state":{},"pages":{}}"""
+      val decoded = assertIs<PrototypeEvent>(json.decodeFromString<WebSocketResponse>(literal))
+      assertEquals(kind, decoded.kind)
+      assertNull(decoded.name)
+      assertEquals(literal, json.encodeToString<WebSocketResponse>(decoded))
+    }
+  }
+
+  @Test
   fun `prototype appearance round trips in a show result, a status entry and an event`() {
     val appearance = """{"mode":"dark","source":"override","deviceDark":false}"""
     val shown =

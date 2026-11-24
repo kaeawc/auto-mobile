@@ -26,6 +26,29 @@ import os
             let normalizedKey = key.lowercased()
             try GesturePerformer.validateDestructiveKeyModifiers(normalizedKey: normalizedKey, modifiers: modifiers)
 
+            #if targetEnvironment(simulator)
+                // A letter chord is a system shortcut (Cmd+H, Cmd+Opt+D): send it as the
+                // simulator's hardware keyboard so it needs no focused field (#18908).
+                if let usages = try GesturePerformer.letterChordUsages(key: normalizedKey, modifiers: modifiers) {
+                    GesturePhaseDiagnostics.current?.begin("keyDelivery")
+                    try await pressKeyboardChordViaHID(usages: usages, key: key)
+                    if GesturePerformer.isHomeChord(usages) {
+                        // The HID dispatch has no feedback, and some SpringBoards (iPhone Duo)
+                        // accept Cmd+H without acting on it (#19062): only report success once
+                        // the home screen is showing.
+                        let home = try await KeyboardWait.destructivePostCondition(clock: keyboardClock) {
+                            catchingObjCExceptionNonThrowing({
+                                SpringBoardHomeScreenDetector.isShowing(in: springboard)
+                            }, fallback: false)
+                        }
+                        guard home else {
+                            throw GestureError.gestureFailed(GesturePerformer.homeChordNotDeliveredMessage)
+                        }
+                    }
+                    return nil
+                }
+            #endif
+
             guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
@@ -167,6 +190,8 @@ import os
                 keyboardKey = .leftArrow
             case "arrow_right":
                 keyboardKey = .rightArrow
+            case let letter where letter.count == 1 && ("a" ... "z").contains(letter):
+                keyboardKey = XCUIKeyboardKey(rawValue: letter)
             default:
                 throw GestureError.notSupported("Keyboard key: \(key)")
             }

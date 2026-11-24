@@ -1,4 +1,6 @@
+import type { ClearPrototypeStorageMessage } from "../../../prototype/prototypeStorageWire";
 /** Prototype lifecycle requests, results and push-event contracts. */
+import type { PrototypePlatformOutcome } from "../../../prototype/prototypePlatformOutcomes";
 import type { PrototypeHiddenReason } from "../../../prototype/prototypeHidden";
 import type { PrototypePatchOp } from "../../../prototype/prototypePatch";
 import type { PrototypePatchConflict } from "../../../prototype/prototypePatchWire";
@@ -146,6 +148,7 @@ export const SAVED_PROTOTYPE_ERROR_CODES = [
   "unsupported_format",
   "internal_error",
   "render_failed",
+  "unsupported_capability",
 ] as const;
 export type SavedPrototypeErrorCode = (typeof SAVED_PROTOTYPE_ERROR_CODES)[number];
 export function isSavedPrototypeErrorCode(value: unknown): value is SavedPrototypeErrorCode {
@@ -177,6 +180,16 @@ export interface RemovePrototypeAssetMessage {
   id: string;
 }
 
+export interface QueuePrototypeCallOutcomeMessage extends PrototypePlatformOutcomeRequest {
+  type: "queue_prototype_call_outcome";
+  requestId: string;
+}
+export interface PrototypePlatformOutcomeRequest {
+  id: string;
+  call: string;
+  outcome: PrototypePlatformOutcome;
+}
+
 export interface SimulatePrototypePlatformMessage {
   type: "simulate_prototype_platform";
   requestId: string;
@@ -195,6 +208,8 @@ export interface AdvancePrototypeClockMessage {
   advanceTimeMs: number;
 }
 export interface PrototypeResult {
+  /** The device runtime report, validated by the host before use. */
+  platformRuntime?: unknown;
   fired?: number;
   saved?: SavedPrototypeInfo;
   pin?: SavedPrototypePinInfo;
@@ -246,6 +261,9 @@ export interface PrototypeDegradedEffect {
 
 /** One prototype the device reported to `inspect_prototypes`. `id` is the prototype id (its spec id). */
 export interface PrototypeStatusEntry {
+  platformRuntime?: unknown;
+  /** Aggregate remote image states, with no URLs or per-image failures. */
+  images?: { loaded: number; failed: number; pending: number };
   /** Agent-owned read-only content of the shown spec; absent when it has none. */
   data?: PrototypeData;
   id: string;
@@ -293,6 +311,8 @@ export const PROTOTYPE_EVENT_KINDS = [
   "emit",
   "page_changed",
   "screen_changed",
+  "link_opened",
+  "link_unmatched",
   "dismissed",
   "appearance_changed",
   "change",
@@ -329,3 +349,18 @@ export interface PrototypeEvent {
   pages: Record<string, number>;
   stacks?: Record<string, PrototypeStackSnapshot>;
 }
+
+/** Every prototype request the client sends over the authenticated socket. */
+export type PrototypeRequestMessage =
+  | ShowPrototypeMessage
+  | DismissPrototypeMessage
+  | InspectPrototypesMessage
+  | PatchPrototypeMessage
+  | PinSavedPrototypeMessage
+  | SavePrototypeMessage
+  | ListSavedPrototypesMessage
+  | DeleteSavedPrototypeMessage
+  | ClearPrototypeStorageMessage
+  | AdvancePrototypeClockMessage
+  | SimulatePrototypePlatformMessage
+  | QueuePrototypeCallOutcomeMessage;

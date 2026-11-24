@@ -13,12 +13,14 @@ import {
   internalRestartResumeTargets,
 } from "./internalToolParams";
 import { disabledDeviceResourceReport } from "../utils/iosDeviceResourceImpact";
+import { noteFixtureCaptureDevice } from "../utils/fixtureCapture/fixtureCaptureScope";
 import type { DeviceBootResult } from "../devices/deviceBootSelection";
 import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { DeviceShuttingDownError } from "../models/deviceAcquisitionRefusals";
 import { ActionableError, BootedDevice, DeviceInfo, type Platform } from "../models";
+import { withRequestedCarPlay } from "./startDeviceCarPlay";
 import { withRequestedHeadUnit } from "./startDeviceHeadUnit";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
@@ -834,6 +836,13 @@ export function bootSourceLabel(source: "booted" | "cold-boot"): string {
   return source === "cold-boot" ? "started by this call" : "already booted";
 }
 
+/** A startDevice capture records the device it booted, with the same image facts (#18896). */
+function notePooledCaptureDevice(device: BootedDevice, sourceImage: DeviceInfo | undefined) {
+  const pooled = initializedDevicePool()?.getDevice(device.deviceId) ?? undefined;
+  noteFixtureCaptureDevice(device, sourceImage ?? pooled?.androidImage);
+  return pooled;
+}
+
 function buildBootedResponse(
   { device, source, provisioned, prebootDisabledResources }: DeviceBootResult,
   perf: ReturnType<typeof createPerformanceTracker>,
@@ -854,10 +863,11 @@ function buildBootedResponse(
 ) {
   perf.end();
   const timing = perf.getTimings();
+  const pooled = notePooledCaptureDevice(device, sourceImage);
   const description = describeDevice({
     kind: "booted",
     device,
-    pooled: initializedDevicePool()?.getDevice(device.deviceId) ?? undefined,
+    pooled,
     discovery: sourceImage,
     configured: configuredImage,
     session: { sessionId },
@@ -992,10 +1002,12 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
             progress,
             requestSignal,
           );
-          return await withRequestedHeadUnit(args.androidAuto, ready, {
-            signal: requestSignal,
-            totalDeadlineMs: deadlineMs,
-          });
+          const bounds = { signal: requestSignal, totalDeadlineMs: deadlineMs };
+          return await withRequestedCarPlay(
+            args.carPlay,
+            await withRequestedHeadUnit(args.androidAuto, ready, bounds),
+            bounds,
+          );
         },
       },
     );

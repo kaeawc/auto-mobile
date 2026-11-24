@@ -170,8 +170,54 @@ describe("prototype simulate and timer reports", () => {
     ]);
     expect(
       await call(ios, { action: "simulate", id: "panel", event: "test.tick", data: {} }),
-    ).toMatchObject({ success: false, error: expect.stringContaining("Android") });
+    ).toMatchObject({
+      success: false,
+      error: expect.stringContaining("the connected prototype runtime"),
+    });
     expect(agent.requests).toEqual([]);
+  });
+
+  test("queues the same host request over Android and iOS only when capable", async () => {
+    const request = { id: "panel", call: "test.echo", outcome: { result: null } };
+    const input = { action: "simulate", ...request };
+    for (const device of [android, ios]) {
+      expect(await call(device, input)).toMatchObject({
+        success: false,
+        error: expect.stringContaining("prototype_platform_outcomes_v1"),
+      });
+    }
+    expect(proxy.queueCallOutcomeRequests).toEqual([]);
+    expect(agent.requests).toEqual([]);
+
+    proxy.setSupportedCommands(["prototype_platform_outcomes_v1"]);
+    agent.handshake.capabilities.push(
+      "prototype_platform_outcomes_v1",
+      "queue_prototype_call_outcome",
+    );
+    for (const device of [android, ios]) {
+      expect(await call(device, input)).toMatchObject({ success: true });
+    }
+    expect(proxy.queueCallOutcomeRequests).toEqual([request]);
+    expect(agent.requests).toContainEqual({ type: "queue_prototype_call_outcome", body: request });
+  });
+
+  test("call and outcome are paired and exclude other simulate fields", () => {
+    const base = { action: "simulate", id: "panel" };
+    const call = "test.echo";
+    const outcome = { error: { code: "unavailable" } };
+    expect(prototypeSchema.safeParse({ ...base, call, outcome }).success).toBe(true);
+    for (const fields of [
+      { call },
+      { outcome },
+      { call, outcome, data: {} },
+      { call, outcome, transport: "auto" },
+      { call, outcome, advanceTimeMs: 10 },
+      { call, outcome, event: "test.tick", data: {} },
+      { call, outcome, action: "status" },
+      { call, outcome: { result: null, error: outcome.error } },
+    ]) {
+      expect(prototypeSchema.safeParse({ ...base, ...fields }).success).toBe(false);
+    }
   });
 
   test("simulate needs id and bounded integer advanceTimeMs", () => {
@@ -390,6 +436,33 @@ describe("prototype simulate and timer reports", () => {
     expect(patched).toMatchObject({ success: true });
     expect(patched.warning).toContain('cancelTimer id "unknown"');
   });
+  test("simulate platform routes to the capable iOS agent", async () => {
+    agent.handshake.capabilities.push(
+      "prototype_platform_simulation_v1",
+      "simulate_prototype_platform",
+    );
+    expect(
+      await call(ios, { action: "simulate", id: "p", event: "test.tick", data: { count: 7 } }),
+    ).toMatchObject({ success: true });
+    expect(agent.requests).toContainEqual({
+      type: "simulate_prototype_platform",
+      body: { id: "p", event: "test.tick", data: { count: 7 } },
+    });
+    expect(proxy.simulatePlatformRequests).toEqual([]);
+  });
+
+  test("simulate platform refuses an iOS agent without the capability", async () => {
+    expect(
+      await call(ios, { action: "simulate", id: "p", event: "test.tick", data: {} }),
+    ).toMatchObject({
+      success: false,
+      error: expect.stringContaining("prototype_platform_simulation_v1"),
+    });
+    expect(agent.requests.some((request) => request.type === "simulate_prototype_platform")).toBe(
+      false,
+    );
+  });
+
   test("simulate push input: event needs data, and excludes advanceTimeMs (#14285)", () => {
     const push = { type: "message", data: { text: "Hi" } };
     const accepted = [

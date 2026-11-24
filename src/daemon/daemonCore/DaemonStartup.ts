@@ -8,6 +8,8 @@ import type {
   DaemonLifecycleState,
 } from "./DaemonCoreState";
 import { sweepStaleAppearanceConfigs } from "../appearanceConfigStartupSweep";
+import { sweepStaleNetworkShaperProfiles } from "../networkShaperStartupSweep";
+import { defaultIosSimulatorNetworkShaper } from "../../features/utility/ios/IosSimulatorNetworkShaper";
 import { createServer as createHttpServer } from "node:http";
 import { logger } from "../../utils/logger";
 import { setLogContextProvider } from "../../utils/logContext";
@@ -30,18 +32,18 @@ import { StartupFailureTracker } from "../DaemonStartupFailureTracker";
 import { handleFatalDatabaseStartupFailure } from "../daemonStartupGuard";
 import { runStartupPrologue } from "../startupPrologue";
 import { startupBenchmark } from "../../utils/startupBenchmark";
-import { startVideoRecordingSocketServer } from "../videoRecordingSocketServer";
-import { startDeviceGestureRecordingSocketServer } from "../deviceGestureRecordingSocketServer";
-import { startDeviceSnapshotSocketServer } from "../deviceSnapshotSocketServer";
-import { startAppearanceSocketServer } from "../appearanceSocketServer";
-import { startPerformanceStreamSocketServer } from "../performanceStreamSocketServer";
-import { startPerformancePushSocketServer } from "../performancePushSocketServer";
-import { startDeviceDataStreamSocketServer } from "../deviceDataStreamSocketServer";
-import { startFailuresStreamSocketServer } from "../failuresStreamSocketServer";
-import { startFailuresPushSocketServer } from "../failuresPushSocketServer";
-import { startTelemetryPushSocketServer } from "../telemetryPushSocketServer";
-import { startWebRtcStreamSocketServer } from "../webrtcStreamSocketServer";
-import { startVideoStreamSocketServer } from "../videoStreamSocketServer";
+import { startVideoRecordingSocketServer } from "../streams/videoRecordingSocketServer";
+import { startDeviceGestureRecordingSocketServer } from "../streams/deviceGestureRecordingSocketServer";
+import { startDeviceSnapshotSocketServer } from "../streams/deviceSnapshotSocketServer";
+import { startAppearanceSocketServer } from "../streams/appearanceSocketServer";
+import { startPerformanceStreamSocketServer } from "../streams/performanceStreamSocketServer";
+import { startPerformancePushSocketServer } from "../streams/performancePushSocketServer";
+import { startDeviceDataStreamSocketServer } from "../streams/deviceDataStreamSocketServer";
+import { startFailuresStreamSocketServer } from "../streams/failuresStreamSocketServer";
+import { startFailuresPushSocketServer } from "../streams/failuresPushSocketServer";
+import { startTelemetryPushSocketServer } from "../streams/telemetryPushSocketServer";
+import { startWebRtcStreamSocketServer } from "../streams/webrtcStreamSocketServer";
+import { startVideoStreamSocketServer } from "../streams/videoStreamSocketServer";
 import { getDaemonSocketPathsByName } from "../socketPaths";
 import { prepareBindingRegistryForStartup } from "../sessionBroker/registry/legacySlotDeviceRetirement";
 import { createDaemonTerminalReleaseJournal } from "../terminalReleaseJournal";
@@ -352,6 +354,9 @@ export class DaemonStartup {
           getPersistedSession: (sessionUuid) => this.host.readPersistedSession(sessionUuid),
         });
       },
+      sweepStaleNetworkShaperProfiles: async () => {
+        await sweepStaleNetworkShaperProfiles(defaultIosSimulatorNetworkShaper);
+      },
       redriveRecorderTeardowns: async () => {
         try {
           const state = await this.host.initializeRecordingTeardownRedriveState();
@@ -472,6 +477,9 @@ export class DaemonStartup {
       startupStage("http token prepare", () => {
         startHost().prepareHttpToken();
       }),
+      // Before ingress so no apply can race the sweep; its own stage so a rehydration failure
+      // cannot skip it.
+      startupStage("network shaper sweep", () => this.sweepNetworkShaperProfiles()),
       startupStage("http ingress", () => startHost().startHttpIngress()),
       startupStage("device discovery", async () => {
         // Wait up to 5 seconds - emulators should already be running
@@ -541,6 +549,17 @@ export class DaemonStartup {
       await this.host.startHost().sweepStaleAppearanceConfigs(rehydration);
     } catch (error) {
       logger.warn(`[Daemon] Session rehydration failed; continuing startup: ${error}`);
+    }
+  }
+
+  private async sweepNetworkShaperProfiles(): Promise<void> {
+    try {
+      await this.host.startHost().sweepStaleNetworkShaperProfiles();
+    } catch (error) {
+      logger.warn(
+        `[Daemon] Network shaper sweep failed; continuing startup: ${errorMessage(error)}`,
+        error,
+      );
     }
   }
 

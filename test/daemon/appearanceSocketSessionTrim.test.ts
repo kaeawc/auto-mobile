@@ -3,7 +3,7 @@ import {
   AppearanceSocketServer,
   type AppearanceDeviceSource,
   type AppearanceSocketServerDependencies,
-} from "../../src/daemon/appearanceSocketServer";
+} from "../../src/daemon/streams/appearanceSocketServer";
 import type { AppearanceSocketRequest } from "../../src/daemon/wire/appearanceSocketTypes";
 import type { AppearanceConfig, BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";

@@ -26,7 +26,7 @@ import { XcodebuildClient } from "../../utils/ios-cmdline-tools/XcodebuildClient
 const PID_LOOKUP_TIMEOUT_MS = 5_000;
 
 /** Simulator apps run under launchd_sim; physical devices have no pid lookup yet. */
-async function resolveIosAppPid(
+export async function resolveIosAppPid(
   device: BootedDevice,
   appId: string,
   signal?: AbortSignal,
@@ -40,6 +40,26 @@ async function resolveIosAppPid(
     signal,
   );
   return findIosSimulatorAppProcessId(list.stdout, appId) ?? undefined;
+}
+
+/**
+ * `xctrace record --launch` rejects a bundle id on a simulator as "Path not found" (#18790); it
+ * takes the installed `.app` path. Physical devices keep the bundle id.
+ */
+export async function resolveIosLaunchTarget(
+  device: BootedDevice,
+  appId: string,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  if (resolveIosDeviceKind({ deviceId: device.deviceId }) !== "simulator") {
+    return undefined;
+  }
+  const container = await new SimCtlClient(device).executeCommandArgs(
+    ["get_app_container", device.deviceId, appId, "app"],
+    PID_LOOKUP_TIMEOUT_MS,
+    signal,
+  );
+  return container.stdout.trim() || undefined;
 }
 
 /** Find `trace_processor_shell` once; a missing binary only limits Android summaries. */
@@ -72,6 +92,7 @@ export function createDefaultPerformanceTraceManager(): PerformanceTraceManager 
     ios: new XctraceRecorder({
       host,
       resolvePid: resolveIosAppPid,
+      resolveLaunchTarget: resolveIosLaunchTarget,
       timer: defaultTimer,
       environment: new HostXctraceEnvironment({
         xcodebuild: new XcodebuildClient(),
@@ -97,4 +118,11 @@ export function createDefaultPerformanceTraceManager(): PerformanceTraceManager 
     idGenerator: defaultIdGenerator,
     timer: defaultTimer,
   });
+}
+
+let defaultManager: PerformanceTraceManager | undefined;
+
+/** The daemon's one trace manager, shared by the tool and the session cleanup; built on first use. */
+export function getDefaultPerformanceTraceManager(): PerformanceTraceManager {
+  return (defaultManager ??= createDefaultPerformanceTraceManager());
 }

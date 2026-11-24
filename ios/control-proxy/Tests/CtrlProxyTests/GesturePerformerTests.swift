@@ -10,6 +10,38 @@ final class ConsumerButtonUsageTests: XCTestCase {
     }
 }
 
+final class LetterChordUsageTests: XCTestCase {
+    func testLetterChordsPressModifiersFirstThenTheLetter() throws {
+        XCTAssertEqual(try GesturePerformer.letterChordUsages(key: "h", modifiers: ["meta"]), [0xE3, 0x0B])
+        XCTAssertEqual(
+            try GesturePerformer.letterChordUsages(key: "d", modifiers: ["meta", "alt"]), [0xE3, 0xE2, 0x07]
+        )
+        XCTAssertEqual(
+            try GesturePerformer.letterChordUsages(key: "Z", modifiers: ["ctrl", "shift", "ctrl"]),
+            [0xE0, 0xE1, 0x1D]
+        )
+        XCTAssertEqual(try GesturePerformer.letterChordUsages(key: "a", modifiers: ["META"]), [0xE3, 0x04])
+    }
+
+    func testOnlyCmdHIsAVerifiableHomeChord() throws {
+        XCTAssertTrue(try GesturePerformer.isHomeChord(XCTUnwrap(GesturePerformer.letterChordUsages(
+            key: "h",
+            modifiers: ["meta"]
+        ))))
+        XCTAssertFalse(GesturePerformer.isHomeChord([0xE3, 0xE2, 0x07]))
+        XCTAssertFalse(GesturePerformer.isHomeChord([0xE0, 0x0B]))
+        XCTAssertTrue(GesturePerformer.homeChordNotDeliveredMessage.contains("pressButton home"))
+    }
+
+    func testOnlyModifiedLettersUseTheChordPath() throws {
+        XCTAssertNil(try GesturePerformer.letterChordUsages(key: "h", modifiers: []))
+        XCTAssertNil(try GesturePerformer.letterChordUsages(key: "escape", modifiers: ["meta"]))
+        XCTAssertNil(try GesturePerformer.letterChordUsages(key: "arrow_left", modifiers: ["shift"]))
+        XCTAssertNil(try GesturePerformer.letterChordUsages(key: "1", modifiers: ["meta"]))
+        XCTAssertThrowsError(try GesturePerformer.letterChordUsages(key: "h", modifiers: ["hyper"]))
+    }
+}
+
 final class ImeActionKeySelectionTests: XCTestCase {
     private let actions = ["send", "done", "go", "search", "next"]
 

@@ -6,6 +6,8 @@ import { imeCommitUnitFields } from "../../observe/android/CtrlProxyText";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { withImeActionApproximationWarning } from "../imeActionApproximationWarning";
 import type { SendKeysTextClient } from "../SendKeys";
+import { errorMessage } from "../../../utils/describeUnknownError";
+import { logger } from "../../../utils/logger";
 
 export function createSendKeysTextClient(
   device: BootedDevice,
@@ -93,6 +95,15 @@ export function createSendKeysTextClient(
         abortSignal: signal,
         ...(deadlineMs === undefined ? {} : { deadlineMs }),
       });
+    },
+    tapPoint: async ({ x, y }, signal) => {
+      try {
+        return (await client.requestTapCoordinates({ x, y, timeoutMs: 5000, signal })).success;
+      } catch (error) {
+        signal?.throwIfAborted();
+        logger.warn(`[iOS sendKeys] Tap at (${x}, ${y}) failed: ${errorMessage(error)}`);
+        return false;
+      }
     },
     ime: async (action, signal, onDispatch) =>
       client.requestImeAction(action, 5000, undefined, { abortSignal: signal, onDispatch }),

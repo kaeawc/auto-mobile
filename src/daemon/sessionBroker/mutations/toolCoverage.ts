@@ -193,9 +193,15 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
       "tapAt",
       "tapOn",
       "wakeAndUnlock",
+      "xrHeadsetInput",
     ],
     "Pointer, key and gesture input changes no persistent device state; the target app's own effects are app-owned and outside the journal's scope, and the baseline clean covers shared settings, packages and files.",
     "notJournaled",
+  ),
+  ...tools(
+    ["shareSheet"],
+    "Selection by label can invoke the system Copy action, so it records the clipboard prior. Listing, dismissal and selection by verified package dispatch no clipboard action.",
+    "journaled",
   ),
   ...tools(
     ["terminateApp", "crashApp", "appLifecycle"],
@@ -203,7 +209,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "notJournaled",
   ),
   ...tools(
-    ["performanceTrace", "captureTrace", "heapDump", "videoRecording", "recordDeviceGestures"],
+    ["performanceTrace", "heapDump", "videoRecording", "recordDeviceGestures"],
     "Writes host-side artifacts; the device-side recording, trace or heap dump file is removed after the pull (session release removes one left behind), and gesture capture only reads input events.",
     "notJournaled",
   ),

@@ -1,3 +1,4 @@
+import { defaultIosCameraPosterDaemonHooks } from "../iosCameraPosterSessionCleanup";
 import { lazyDeviceClaims, StoreDeviceClaimMirror, type DeviceClaimMirror } from "../deviceClaims";
 import { localClaimRegistryExpectation } from "../deviceClaimRegistryExpectation";
 import type { DeviceClaimMirrorHub } from "../deviceClaimMirrorHub";
@@ -12,7 +13,7 @@ import { holderOf } from "../deviceBinding";
 import { wireSessionLifecycle } from "../daemonSessionLifecycleWiring";
 import type { SessionReleaseReason } from "../releaseReasons";
 import { type BindingExclusion } from "../sessionBroker/provisioning/exclusion";
-import { getDaemonStreamDeviceLifecycleEmitter } from "../streamDeviceLifecycleEvents";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../streams/streamDeviceLifecycleEvents";
 import {
   cancelAndReleaseSession as cancelExecutionsAndReleaseSession,
   cancelExecutionsCutBySessionRelease,
@@ -222,7 +223,7 @@ export class DaemonSessions {
         defaultPersonaRestoreRegistry.retireDevice(deviceId);
         defaultSystemAlertPolicyRegistry.retireDevice(deviceId);
         defaultKeyboardProfileRestoreRegistry.retireDevice(deviceId);
-        defaultDisplayInventoryProvider.invalidate(deviceId);
+        defaultDisplayInventoryProvider.retire(deviceId);
         this.host.services.deviceReadiness().clearExplicitDevicePin(deviceId);
         this.host.services.deviceSessionRegistry().onDeviceDisconnected(deviceId);
         // Full removal: prune AFTER epoch retirement, which also invalidates frames.
@@ -320,6 +321,7 @@ export class DaemonSessions {
         this.latestSessionExecutionDeadlineMs(sessionId, options),
       cancelExecutionsForExpiryRelease: (sessionId, cancellation, query, releasedDeviceId) =>
         this.cancelExecutionsForExpiryRelease(sessionId, cancellation, query, releasedDeviceId),
+      iosCameraPosterDaemonHooks: defaultIosCameraPosterDaemonHooks,
     });
   }
 

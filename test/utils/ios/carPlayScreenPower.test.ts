@@ -48,6 +48,23 @@ describe("CarPlay screen power", () => {
       ["/helper with spaces", "udid", "power-on"],
     ]);
   });
+  test("caps power-on's exec timeout at the caller's budget and forwards its signal", async () => {
+    const seen: unknown[] = [];
+    const powerer = new DefaultCarPlayScreenPowerer(
+      async (_file, _args, options) => {
+        seen.push(options);
+        return { stdout: encoded, stderr: "" };
+      },
+      { AUTOMOBILE_CARPLAY_POWER_HELPER_PATH: "/helper" },
+    );
+    const signal = new AbortController().signal;
+    await powerer.powerOn("udid", { signal, timeoutMs: 7000 });
+    await powerer.powerOn("udid");
+    expect(seen).toEqual([
+      { timeout: 7000, maxBuffer: 1024 * 1024, signal },
+      { timeout: 135000, maxBuffer: 1024 * 1024 },
+    ]);
+  });
   test("maps every stable helper error from stderr", async () => {
     for (const code of [
       "device-not-found",
@@ -56,6 +73,9 @@ describe("CarPlay screen power", () => {
       "unsupported-runtime",
       "no-carplay-screen",
       "power-on-failed",
+      "unsupported-screen-type",
+      "carplay-not-powered",
+      "hid-failed",
     ]) {
       const powerer = new DefaultCarPlayScreenPowerer(
         async () => {

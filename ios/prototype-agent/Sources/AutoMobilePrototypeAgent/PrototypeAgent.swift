@@ -5,9 +5,10 @@ import UIKit
 private let prototypeLog = Logger(subsystem: "dev.jasonpearson.automobile.prototype-agent", category: "prototype")
 
 /// Entry point called from the dyld constructor in Loader.c. The constructor runs before
-/// UIApplication exists, so everything waits for the main run loop.
+/// UIApplication exists: install delegate hooks without creating it, then boot on the main run loop.
 @_cdecl("am_prototype_agent_start")
 public func amPrototypeAgentStart() {
+    MainActor.assumeIsolated { PrototypeURLDelivery.install() }
     DispatchQueue.main.async {
         PrototypeAgent.shared.boot()
     }
@@ -16,6 +17,7 @@ public func amPrototypeAgentStart() {
 /// For an app linking the agent directly (the viewer); run instead of, not after, the Loader.c injection constructor.
 @_cdecl("am_prototype_agent_start_standalone")
 public func amPrototypeAgentStartStandalone() {
+    MainActor.assumeIsolated { PrototypeURLDelivery.install() }
     DispatchQueue.main.async {
         PrototypeAgent.bootStandalone()
     }
@@ -165,7 +167,11 @@ final class PrototypeAgent: NSObject {
             return
         }
 
-        let agent = PrototypeAgent(mode: .standalone, registry: .feedbackModules())
+        let agent = PrototypeAgent(
+            mode: .standalone,
+            runtime: .disposableApp,
+            registry: .feedbackModules(secureStorage: KeychainPrototypeSecureValueStore())
+        )
         instance = agent
         agent.boot()
     }
@@ -174,6 +180,7 @@ final class PrototypeAgent: NSObject {
         guard instance == nil else { return }
         let agent = PrototypeAgent(model: model)
         instance = agent
+        PrototypeURLDelivery.hookExistingDelegates()
         agent.viewerHosted = true
         agent.booted = true
         agent.viewerSaveBack = PrototypeViewerSaveBack(savedSpecId: savedSpecId, layoutDirectory: layoutDirectory)
@@ -184,7 +191,7 @@ final class PrototypeAgent: NSObject {
             capabilities: PrototypeViewerHostCapabilities.advertised(
                 model.mode.advertising(PrototypeTestHooks.capabilities(
                     enabled: false,
-                    registryCapabilities: model.platformRegistry.capabilities
+                    registryCapabilities: model.platformRegistry.capabilities + PrototypeURLDelivery.capabilities
                 ))
             ),
             maxAuthenticatedClients: 1,
@@ -214,6 +221,7 @@ final class PrototypeAgent: NSObject {
         server.onClientCountChanged = { [weak agent] count in agent?.clientCountChanged(count) }
         agent.server = server
         agent.installRequestDriver()
+        PrototypeURLDelivery.inbox.attach(model)
         server.start()
     }
 
@@ -229,14 +237,26 @@ final class PrototypeAgent: NSObject {
     let model: PrototypeModel
     private var outbox: PrototypeEventOutbox<[String: Any]>
 
-    init(mode: PrototypeLifecycleMode = .session, registry: PrototypePlatformRegistry = .system) {
+    init(
+        mode: PrototypeLifecycleMode = .session,
+        runtime: PrototypePlatformReport.Runtime = .iosAgent,
+        registry: PrototypePlatformRegistry = .system,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
+        testHooksEnabled = PrototypeTestHooks.isEnabled(environment: environment)
         // No concrete permission-needing modules are approved for injection yet (#14289).
-        model = PrototypeModel(mode: mode, storage: PrototypeStorageCoordinator.fileBacked(), registry: registry)
+        model = PrototypeModel(
+            mode: mode,
+            runtime: runtime,
+            storage: PrototypeStorageCoordinator.fileBacked(secure: registry.secureStorage),
+            registry: registry.withTestHooks(environment: environment)
+        )
         outbox = PrototypeEventOutbox(mode: mode)
         super.init()
     }
 
     private init(model: PrototypeModel) {
+        testHooksEnabled = PrototypeTestHooks.isEnabled(environment: ProcessInfo.processInfo.environment)
         self.model = model
         outbox = PrototypeEventOutbox(mode: model.mode)
         super.init()
@@ -262,7 +282,7 @@ final class PrototypeAgent: NSObject {
     /// The flags last applied, so an unrelated state change posts no accessibility notification.
     private var appliedAccessibility = PrototypeHostAccessibility.hidden
 
-    private var testHooksEnabled = false
+    private let testHooksEnabled: Bool
     /// Authenticated host connections, as last reported by the server on the main queue.
     private var connectedClients = 0
     /// Hide-for-screenshot hold (#9305); the prototype window stays hidden while it is active.
@@ -284,8 +304,8 @@ final class PrototypeAgent: NSObject {
             return
         }
 
+        PrototypeURLDelivery.hookExistingDelegates()
         booted = true
-        testHooksEnabled = PrototypeTestHooks.isEnabled(environment: ProcessInfo.processInfo.environment)
         NSLog(
             "[AutoMobilePrototypeAgent] %@ (protocol %d) loaded into %@, listening on 127.0.0.1:%d",
             PrototypeAgentProtocol.agentVersion,
@@ -297,7 +317,7 @@ final class PrototypeAgent: NSObject {
             configuration: configuration,
             capabilities: model.mode.advertising(PrototypeTestHooks.capabilities(
                 enabled: testHooksEnabled,
-                registryCapabilities: model.platformRegistry.capabilities
+                registryCapabilities: model.platformRegistry.capabilities + PrototypeURLDelivery.capabilities
             ))
         ) { [weak self] message, reply in
             self?.handle(message, reply: reply)
@@ -324,6 +344,7 @@ final class PrototypeAgent: NSObject {
         server.start()
         self.server = server
         installRequestDriver()
+        PrototypeURLDelivery.inbox.attach(model)
     }
 
     /// Wires the `request` action (#12529): `via: "host"` calls go out as `prototype_request` frames
@@ -614,6 +635,20 @@ final class PrototypeAgent: NSObject {
             // No update_prototype (#10550): a same-id show_prototype replaces the shown prototype.
             case "dismiss_prototype":
                 dismissPrototype(message, result: result)
+            case PrototypeAgentProtocol.queueCallOutcomeRequest:
+                guard let id = message["id"] as? String, !id.isEmpty,
+                      let call = message["call"] as? String,
+                      let raw = message["outcome"], let outcome = PrototypeRequestWire.json(raw)
+                else { return result(false, "queue_prototype_call_outcome needs id, call and JSON outcome") }
+                let error = model.queueCallOutcome(id: id, call: call, outcome: outcome)
+                result(error == nil, error)
+            case PrototypeAgentProtocol.simulatePlatformRequest:
+                guard let id = message["id"] as? String, !id.isEmpty,
+                      let event = message["event"] as? String,
+                      let raw = message["data"], let data = PrototypeRequestWire.json(raw)
+                else { return result(false, "simulate_prototype_platform needs id, event and JSON object data") }
+                let error = model.simulatePlatformEvent(id: id, event: event, data: data)
+                result(error == nil, error)
             case PrototypeAgentProtocol.advanceClockRequest:
                 guard let id = message["id"] as? String, !id.isEmpty,
                       let raw = message["advanceTimeMs"] as? NSNumber,
@@ -684,6 +719,7 @@ final class PrototypeAgent: NSObject {
 
     private func showPrototype(_ message: [String: Any], result: ProtocolResult) throws {
         let spec = try decode(PrototypeSpec.self, message["spec"])
+        if let refusal = model.platformRegistry.notificationRefusal(for: spec) { return result(false, refusal) }
         // The host resolves element anchors to bounds (#9316); drawing one that it did not
         // would silently misplace the node, so the show is refused and nothing changes.
         if let path = spec.root.unresolvedAnchorPath() {
@@ -718,6 +754,7 @@ final class PrototypeAgent: NSObject {
         var extra = missingAssetsExtra()
         let degraded = model.degradedEffects()
         if !degraded.isEmpty { extra["degradedEffects"] = degraded }
+        if let platformRuntime = model.platformRuntime { extra["platformRuntime"] = platformRuntime.foundationObject }
         extra.merge(model.session.navigationSnapshot) { _, navigation in navigation }
         if let appearance = model.session.appearance { extra["appearance"] = appearance.wireObject }
         if let plan = model.backdropPlan { extra["backdrop"] = plan.mode.rawValue }

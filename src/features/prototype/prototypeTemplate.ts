@@ -1,3 +1,4 @@
+import { prototypeActionNeedsDataV2 } from "./prototypeGeneratedBindings";
 import { prototypeChannelHandlers } from "./prototypeChannelHandlers";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 /**
@@ -30,6 +31,8 @@ export type Segment =
 export interface Binding {
   alias: string;
   index: boolean;
+  /** The enclosing repeat alias, when binding an inner row. */
+  outerAlias?: string;
 }
 
 export function record(value: unknown): Raw | undefined {
@@ -41,6 +44,13 @@ export function record(value: unknown): Raw | undefined {
 function token(inner: string, binding: Binding): Segment | undefined {
   if (binding.index && inner === "index") {
     return { kind: "index" };
+  }
+  if (binding.outerAlias && inner === "outerIndex") {
+    return { kind: "field", name: "$outerIndex" };
+  }
+  if (binding.outerAlias && inner.startsWith(`${binding.outerAlias}.`)) {
+    const name = inner.slice(binding.outerAlias.length + 1);
+    return STATE_KEY.test(name) ? { kind: "field", name: `outer.${name}` } : undefined;
   }
   const prefix = `${binding.alias}.`;
   const name = inner.slice(prefix.length);
@@ -146,6 +156,9 @@ export type FieldKind =
   | "text"
   | "operand"
   | "substring"
+  | "derivedCondition"
+  | "derivedBinding"
+  | "equalsKey"
   | "emitName"
   | "key"
   | "emitBinding"
@@ -156,6 +169,7 @@ export type FieldKind =
   | "deviceRequest"
   | "uploadRequest"
   | "keyedData"
+  | "objectData"
   | "prependData"
   | "scrollTo"
   | "hideKeyboard"
@@ -224,11 +238,16 @@ function mapKeyList(data: Raw, key: string, path: string, visit: FieldVisitor): 
 }
 
 function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
+  mapField(condition, "derived", path, { kind: "derivedCondition", visit });
   mapField(condition, "data", path, { kind: "routePointer", visit });
   mapField(condition, "key", path, { kind: "key", visit });
+  if (condition.equalsKey !== undefined) {
+    visit(condition.equalsKey, `${path}.equalsKey`, "equalsKey");
+  }
+  mapField(condition, "equalsKey", path, { kind: "key", visit });
   mapKeyList(condition, "valid", path, visit);
   const operandVisit: FieldVisitor = (value, fieldPath, kind) =>
-    visit(value, fieldPath, kind, Object.hasOwn(condition, "data"));
+    visit(value, fieldPath, kind, "data" in condition);
   mapField(condition, "equals", path, { kind: "operand", visit: operandVisit });
   mapField(condition, "notEquals", path, { kind: "operand", visit: operandVisit });
   mapField(condition, "contains", path, { kind: "substring", visit: operandVisit });
@@ -241,10 +260,18 @@ function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
 }
 
 /** A `{state}` binding names a (possibly repeat-bound) key; every other form is an emit binding. */
-function mapBinding(value: unknown, at: string, visit: FieldVisitor): unknown {
+function mapBinding(
+  value: unknown,
+  at: string,
+  visit: FieldVisitor,
+  allowDerived = false,
+): unknown {
   const binding = record(value);
   if (binding && typeof binding.data === "string") {
     visit(binding.data, `${at}.data`, "routePointer");
+  }
+  if (allowDerived && typeof binding?.derived === "string") {
+    visit(binding.derived, `${at}.derived`, "derivedBinding");
   }
   return binding && Object.hasOwn(binding, "state")
     ? { ...binding, state: visit(binding.state, `${at}.state`, "key") }
@@ -260,7 +287,7 @@ function mapEmitAction(action: Raw, path: string, visit: FieldVisitor): void {
         const at = prototypeContractPatterns.pathKey.test(name)
           ? `${path}.context.${name}`
           : `${path}.context[${JSON.stringify(name)}]`;
-        return [name, mapBinding(value, at, visit)];
+        return [name, mapBinding(value, at, visit, true)];
       }),
     );
   }
@@ -271,17 +298,39 @@ function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
   if (action.type === "prependData") {
     visit(action, path, "prependData");
   }
-  if (action.where !== undefined || action.member !== undefined) {
-    visit(action, path, "keyedData");
-  }
   const where = record(action.where);
   if (where) {
-    action.where = { ...where, equals: mapBinding(where.equals, `${path}.where.equals`, visit) };
+    action.where = {
+      ...where,
+      equals: mapBinding(where.equals, `${path}.where.equals`, visit, true),
+    };
   }
   mapField(action, "path", path, { kind: "dataPath", visit });
   if (action.type !== "removeData" && action.value !== undefined) {
-    action.value = mapBinding(action.value, `${path}.value`, visit);
+    action.value = mapDataValue(action, path, visit);
   }
+}
+
+/**
+ * A data action's value; an `{object}` value (#18826) marks the whole action for its capability
+ * gate and binds each member as its own value at `<path>.value.object.<member>`.
+ */
+function mapDataValue(action: Raw, path: string, visit: FieldVisitor): unknown {
+  const value = record(action.value);
+  const members = value && Object.hasOwn(value, "object") ? record(value.object) : undefined;
+  if (!members) {
+    return mapBinding(action.value, `${path}.value`, visit, true);
+  }
+  visit(action, path, "objectData");
+  return {
+    ...value,
+    object: Object.fromEntries(
+      Object.entries(members).map(([name, member]) => [
+        name,
+        mapBinding(member, memberPath(`${path}.value.object`, name), visit, true),
+      ]),
+    ),
+  };
 }
 
 function mapTimerAction(action: Raw, path: string, visit: FieldVisitor): void {
@@ -330,6 +379,9 @@ function mapRouteAction(action: Raw, path: string, visit: FieldVisitor): void {
 }
 
 function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
+  if (prototypeActionNeedsDataV2(action)) {
+    visit(action, path, "keyedData");
+  }
   mapRouteAction(action, path, visit);
   if (
     ["setData", "appendData", "prependData", "upsertData", "removeData"].includes(
@@ -395,7 +447,9 @@ function mapRequestEntries(action: Raw, field: string, path: string, visit: Fiel
         const at = memberPath(`${path}.${field}`, name);
         return [
           name,
-          typeof value === "string" ? visit(value, at, "text") : mapBinding(value, at, visit),
+          typeof value === "string"
+            ? visit(value, at, "text")
+            : mapBinding(value, at, visit, field === "query"),
         ];
       }),
     );
@@ -405,6 +459,10 @@ function mapRequestEntries(action: Raw, field: string, path: string, visit: Fiel
 /** `url` and literal header/query strings are text; `into` is a data path; follow-ups recurse. */
 function mapRequestAction(action: Raw, path: string, visit: FieldVisitor): void {
   visit(action, path, "request");
+  const where = record(action.where);
+  if (where) {
+    action.where = { ...where, equals: mapBinding(where.equals, `${path}.where.equals`, visit) };
+  }
   if (action.via === "device") {
     visit(action, path, "deviceRequest");
   }
@@ -443,7 +501,7 @@ function mapRequestBody(value: unknown, path: string, visit: FieldVisitor): unkn
           ? part
           : {
               ...fields,
-              value: mapBinding(fields.value, `${path}.multipart[${index}].value`, visit),
+              value: mapBinding(fields.value, `${path}.multipart[${index}].value`, visit, true),
             };
       }),
     };
@@ -455,12 +513,12 @@ function mapRequestBody(value: unknown, path: string, visit: FieldVisitor): unkn
       form: Object.fromEntries(
         Object.entries(form).map(([name, binding]) => [
           name,
-          mapBinding(binding, memberPath(`${path}.form`, name), visit),
+          mapBinding(binding, memberPath(`${path}.form`, name), visit, true),
         ]),
       ),
     };
   }
-  return body?.file === undefined ? mapBinding(value, path, visit) : value;
+  return body?.file === undefined ? mapBinding(value, path, visit, true) : value;
 }
 
 /** A `platform` call (#14294): each argument is a value binding, `into` the request grammar. */
@@ -504,9 +562,28 @@ function mapPart(part: Raw, path: string, visit: FieldVisitor): Raw {
 /** Component fields that take placeholders besides a text node's `text`. */
 const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVisitor) => void> = {
   // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
-  image: (node, path, visit) => mapField(node, "asset", path, { kind: "text", visit }),
-  button: (node, path, visit) => mapField(node, "label", path, { kind: "text", visit }),
-  fab: (node, path, visit) => mapField(node, "label", path, { kind: "text", visit }),
+  image: (node, path, visit) => {
+    mapField(node, "asset", path, { kind: "text", visit });
+    mapField(node, "url", path, { kind: "text", visit });
+  },
+  button: (node, path, visit) => {
+    mapField(node, "label", path, { kind: "text", visit });
+    // An M3 Expressive split button's menu entries bind like `menu.items` (#15258).
+    mapObject(node, "split", path, (split, splitPath) => {
+      mapList(split, "menu", splitPath, (entry, entryPath) => {
+        mapField(entry, "trailingText", entryPath, { kind: "text", visit });
+        return mapPart(entry, entryPath, visit);
+      });
+      return split;
+    });
+  },
+  fab: (node, path, visit) => {
+    mapField(node, "label", path, { kind: "text", visit });
+    mapObject(node, "menu", path, (menu, menuPath) => {
+      mapList(menu, "items", menuPath, (entry, entryPath) => mapPart(entry, entryPath, visit));
+      return menu;
+    });
+  },
   segmentedButton: (node, path, visit) =>
     mapList(node, "options", path, (entry, entryPath) => {
       mapField(entry, "label", entryPath, { kind: "text", visit });
@@ -765,6 +842,20 @@ export function bindCheckedKeys(value: Raw, instance: Instance): Raw {
 
 /** Visit root platform handler actions, in the contract's sorted event-name order. */
 export function visitPrototypeHandlerFields(spec: unknown, visit: FieldVisitor): void {
+  const links = record(spec)?.links;
+  if (Array.isArray(links)) {
+    links.forEach((entry, index) => {
+      const actions = record(entry)?.actions;
+      if (Array.isArray(actions)) {
+        actions.forEach((action, at) => {
+          const value = record(action);
+          if (value) {
+            mapAction(value, `links[${index}].actions[${at}]`, visit);
+          }
+        });
+      }
+    });
+  }
   for (const handler of prototypeChannelHandlers(spec)) {
     if (Array.isArray(handler.value)) {
       handler.value.forEach((value, index) => {

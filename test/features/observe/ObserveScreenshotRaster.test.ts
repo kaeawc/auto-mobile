@@ -431,7 +431,7 @@ test.each([
   [true, 0],
   [true, 1],
 ] as const)(
-  "iOS deviceId reads preserve native orientation (multi-panel: %s, rotation: %s)",
+  "iOS deviceId reads report the settled orientation (multi-panel: %s, rotation: %s)",
   async (multiPanel, rotation) => {
     const width = rotation === 0 ? 400 : 800;
     const height = rotation === 0 ? 800 : 400;
@@ -456,8 +456,10 @@ test.each([
       ? { width: width * 2, height: height * 2 }
       : { width: 800, height: 1600 };
     setCaptureSize(imageSize);
+    // A multi-panel raster that matches the screen shape is display-aligned, as in settled
+    // observe; single-panel rasters stay framebuffer-native (#18831).
     const fields = {
-      screenshotOrientation: "native",
+      screenshotOrientation: multiPanel ? "display" : "native",
       screenshotImageSize: imageSize,
       screenshotPixelsPerNativeUnit: { x: 2, y: 2 },
       screenshotScaleProvenance: "native-scale-confirmed",

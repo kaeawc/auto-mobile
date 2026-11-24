@@ -9,6 +9,13 @@ import dev.jasonpearson.automobile.protocol.PrototypeSetStateAction
 import dev.jasonpearson.automobile.protocol.PrototypeStyle
 import dev.jasonpearson.automobile.protocol.PrototypeStyleWhen
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.doubleOrNull
 
 /**
  * Pure evaluation of the spec's state vocabulary: conditions for `visibleWhen` and the next value
@@ -18,8 +25,11 @@ import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 internal fun PrototypeCondition.holds(
   state: Map<String, PrototypeScalar>,
   validity: Map<String, Boolean> = emptyMap(),
+  derivedValues: Map<String, JsonElement?> = emptyMap(),
 ): Boolean {
-  val stored = key?.let { state[it] }
+  val derivedName = derived
+  val raw = derivedName?.let { derivedValues[it] }
+  val stored = if (derivedName == null) key?.let { state[it] } else derivedScalar(raw)
   val number = (stored as? PrototypeScalar.Numeric)?.value
   val text = (stored as? PrototypeScalar.Text)?.value
   val all = all
@@ -32,22 +42,44 @@ internal fun PrototypeCondition.holds(
   val lengthGt = lengthGt
   val lengthLt = lengthLt
   val valid = valid
+  val comparedKey = equalsKey
   return when {
     valid != null -> valid.keys().all { validity[it] == true }
-    key != null && equals != null -> stored.sameValue(equals)
-    key != null && notEquals != null -> !stored.sameValue(notEquals)
+    comparedKey != null -> stored != null && stored.sameValue(state[comparedKey])
+    (key != null || derivedName != null) && equals != null -> stored.sameValue(equals)
+    (key != null || derivedName != null) && notEquals != null -> !stored.sameValue(notEquals)
     contains != null -> text != null && text.contains(contains)
     startsWith != null -> text != null && text.startsWith(startsWith)
     lengthGt != null -> text != null && text.length > lengthGt
     lengthLt != null -> text != null && text.length < lengthLt
     gt != null -> number != null && number > gt
     lt != null -> number != null && number < lt
-    all != null -> all.all { it.holds(state, validity) }
-    any != null -> any.any { it.holds(state, validity) }
-    not != null -> !not.holds(state, validity)
+    derivedName != null && empty != null -> derivedEmpty(raw) == empty
+    all != null -> all.all { it.holds(state, validity, derivedValues) }
+    any != null -> any.any { it.holds(state, validity, derivedValues) }
+    not != null -> !not.holds(state, validity, derivedValues)
     else -> false
   }
 }
+
+private fun derivedScalar(raw: JsonElement?): PrototypeScalar? {
+  val scalar = raw as? JsonPrimitive ?: return null
+  if (scalar.isString) return PrototypeScalar.Text(scalar.content)
+  scalar.booleanOrNull?.let {
+    return PrototypeScalar.BooleanValue(it)
+  }
+  return scalar.doubleOrNull?.takeIf { it.isFinite() }?.let { PrototypeScalar.Numeric(it) }
+}
+
+private fun derivedEmpty(raw: JsonElement?): Boolean =
+  when (raw) {
+    null,
+    JsonNull -> true
+    is JsonArray -> raw.isEmpty()
+    is JsonObject -> raw.isEmpty()
+    is JsonPrimitive ->
+      if (raw.isString) raw.content.isEmpty() else raw.doubleOrNull?.isFinite() == false
+  }
 
 /**
  * Strict equality as the host's `===` and Swift's `==` see it: same type and same value, where
@@ -107,10 +139,12 @@ internal fun resolvePrototypeStyle(
   styleWhen: List<PrototypeStyleWhen>?,
   state: Map<String, PrototypeScalar>,
   validity: Map<String, Boolean> = emptyMap(),
+  derivedValues: Map<String, JsonElement?> = emptyMap(),
 ): PrototypeStyle {
   var resolved = base ?: PrototypeStyle()
   for (entry in styleWhen.orEmpty()) {
-    if (entry.`when`.holds(state, validity)) resolved = resolved.mergedOver(entry.style)
+    if (entry.`when`.holds(state, validity, derivedValues))
+      resolved = resolved.mergedOver(entry.style)
   }
   return resolved
 }

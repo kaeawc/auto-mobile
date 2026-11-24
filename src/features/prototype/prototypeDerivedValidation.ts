@@ -7,7 +7,12 @@ import {
   type PrototypeValidationError,
 } from "./prototypeBindingValidation";
 import { dataPlaceholderSpans, resolvePrototypeDataPointer } from "./prototypeData";
-import { mapBindableFields, STATE_KEY } from "./prototypeTemplate";
+import {
+  mapBindableFields,
+  STATE_KEY,
+  visitPrototypeHandlerFields,
+  type FieldVisitor,
+} from "./prototypeTemplate";
 
 function fractionError(derive: unknown, path: string): PrototypeValidationError | undefined {
   for (const [name, raw] of Object.entries(object(derive) ?? {})) {
@@ -85,12 +90,18 @@ function repeatDerivedError(
 }
 
 function derivedReadError(
-  value: Record<string, unknown>,
-  path: string,
+  scan: (visit: FieldVisitor) => void,
   derived: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   let first: PrototypeValidationError | undefined;
-  mapBindableFields(value, path, (text, at, kind) => {
+  scan((text, at, kind) => {
+    if (
+      (kind === "derivedCondition" || kind === "derivedBinding") &&
+      typeof text === "string" &&
+      !Object.hasOwn(derived, text)
+    ) {
+      first ??= fail(at, `Unknown derived value ${JSON.stringify(text)}`);
+    }
     if (kind === "text" && typeof text === "string") {
       for (const { pointer: name } of dataPlaceholderSpans(text, "derived:", (name) =>
         STATE_KEY.test(name),
@@ -121,10 +132,17 @@ export function prototypeDerivedError(
     : {};
   for (const { value, path } of nodes) {
     const error =
-      derivedReadError(value, path, derived) ?? repeatDerivedError(value, path, data, values);
+      derivedReadError((visit) => mapBindableFields(value, path, visit), derived) ??
+      repeatDerivedError(value, path, data, values);
     if (error) {
       return error;
     }
   }
-  return undefined;
+  return derivedReadError(
+    (visit) =>
+      visitPrototypeHandlerFields(spec, (value, path, kind) =>
+        kind === "derivedBinding" ? visit(value, path, kind) : value,
+      ),
+    derived,
+  );
 }

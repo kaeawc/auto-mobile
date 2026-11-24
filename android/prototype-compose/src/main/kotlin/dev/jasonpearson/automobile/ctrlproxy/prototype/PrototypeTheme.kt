@@ -18,6 +18,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.luminance
@@ -32,6 +33,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpecTheme
 import dev.jasonpearson.automobile.protocol.PrototypeSpecThemeColors
 import dev.jasonpearson.automobile.protocol.PrototypeSpecThemeShapes
 import dev.jasonpearson.automobile.protocol.PrototypeSpecThemeTypography
+import dev.jasonpearson.automobile.protocol.PrototypeStyle
 
 /**
  * The prototype's own Material scheme: the window has no app theme, so without one every Material
@@ -710,6 +712,37 @@ internal fun prototypeCornerShape(shapes: Shapes, radius: PrototypeCornerRadius)
         bottomStart = (radius.bottomStart ?: 0.0).toFloat().dp,
       )
   }
+
+/**
+ * The root surface shape, using the renderer's corner and theme tokens. A card without a
+ * `cornerRadius` draws Material's default card shape (`shapes.medium`), so its backdrop matches it.
+ */
+@InternalAutoMobilePrototypeApi
+fun prototypeRootBackdropShape(model: PrototypeRenderModel): Shape {
+  val shapes = prototypeShapes(model.theme?.shapes)
+  val style = model.root.style.source
+  return if (
+    model.root.role == "card" && style.cornerRadius == null && style.glassMaterial() == null
+  )
+    shapes.medium
+  else prototypeSurfaceShape(shapes, style)
+}
+
+/**
+ * A node's surface shape. Without a `cornerRadius` it is a rectangle, except for a glass surface,
+ * whose documented default is a capsule.
+ */
+internal fun prototypeSurfaceShape(shapes: Shapes, style: PrototypeStyle): Shape {
+  val radius =
+    style.cornerRadius
+      ?: return if (style.surface == "glass") {
+        RoundedCornerShape(percent = FULL_CORNER_PERCENT)
+      } else {
+        RectangleShape
+      }
+  val rounded = prototypeCornerShape(shapes, radius)
+  return if (style.cornerStyle == "continuous") PrototypeContinuousShape(rounded) else rounded
+}
 
 /** Material You colours need API 31; older devices fall through to the seed or baseline. */
 private fun prototypeDynamicScheme(context: Context, theme: PrototypeThemeSpec): ColorScheme? =

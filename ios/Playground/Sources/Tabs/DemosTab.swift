@@ -98,6 +98,16 @@ struct DemosTab: View {
 
                 Section("UI Components") {
                     NavigationLink {
+                        EmbeddedPrototypeDemo()
+                    } label: {
+                        DemoRow(
+                            title: "Embedded Prototype",
+                            description: "A prototype drawn in-app by the native renderer library",
+                            icon: "rectangle.on.rectangle"
+                        )
+                    }
+
+                    NavigationLink {
                         FormDemo()
                     } label: {
                         DemoRow(
@@ -193,6 +203,15 @@ struct DemosTab: View {
                     .sheet(isPresented: $showStatusSheet) {
                         StatusSheetDemo()
                     }
+
+                    ShareLink(item: "AutoMobile share sheet demo") {
+                        DemoRow(
+                            title: "Share Text",
+                            description: "Opens the system share sheet",
+                            icon: "square.and.arrow.up"
+                        )
+                    }
+                    .accessibilityIdentifier("open_share_sheet")
 
                     NavigationLink {
                         UIKitSemanticLinksDemo()

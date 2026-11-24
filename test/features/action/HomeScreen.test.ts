@@ -213,6 +213,8 @@ describe("HomeScreen", () => {
         observeScreen: fakeObserveScreen,
         awaitIdle: fakeAwaitIdle,
         window: fakeWindow,
+        // These cases cover the simctl SpringBoard route; simHidRouting.test.ts covers the HID press.
+        iosRawInput: null,
       },
     });
 

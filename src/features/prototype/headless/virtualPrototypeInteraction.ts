@@ -1,10 +1,12 @@
 import type { PrototypeEvent, PrototypeState } from "../../observe/android/ctrlProxyProtocol";
 import { resolveEmitContext } from "../prototypeEmitContext";
 import { prototypeNodeChildren } from "../prototypeNodeChildren";
+import { memoizedPrototypeDerive } from "../prototypeDerive";
+import type { PrototypeDerivedEntry } from "../prototypeFormatSchema";
 import type { PrototypeJson } from "../prototypeSpec";
 import { record, renderScalar, type Raw } from "../prototypeTemplate";
 import { validatePrototypeSpec } from "../prototypeValidation";
-import { decide } from "../web/webCondition";
+import { decide, stringCondition } from "../web/webCondition";
 import { boundPages, normalizePagerState } from "./virtualPrototypePagers";
 import contract from "../../../../schemas/prototype-spec-contract.json";
 
@@ -115,7 +117,7 @@ const RUNNABLE_ACTIONS = new Set([
   "replace",
 ]);
 const STACK_ACTIONS = new Set(["push", "pop", "popToRoot", "replace"]);
-const CONTEXT_BINDINGS = new Set(["state", "page", "data", "value"]);
+const CONTEXT_BINDINGS = new Set(["state", "page", "data", "derived", "value"]);
 /** Fields the device interpolates `{key}` state tokens into before it renders them. */
 const INTERPOLATED_FIELDS = new Set(["text", "title"]);
 const STATE_TOKEN = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
@@ -211,58 +213,46 @@ function anyOf(decisions: Decision[]): Decision {
   return decisions.includes(undefined) ? undefined : false;
 }
 
-/** A string operator as `PrototypeCondition.holds` reads it: a non-string value never holds. */
-function stringOperator(raw: Raw, value: unknown): Decision {
-  const text = typeof value === "string" ? value : undefined;
-  if (typeof raw.contains === "string") {
-    return text !== undefined && text.includes(raw.contains);
-  }
-  if (typeof raw.startsWith === "string") {
-    return text !== undefined && text.startsWith(raw.startsWith);
-  }
-  if (typeof raw.lengthGt === "number") {
-    return text !== undefined && text.length > raw.lengthGt;
-  }
-  if (typeof raw.lengthLt === "number") {
-    return text !== undefined && text.length < raw.lengthLt;
-  }
-  return undefined;
-}
-
 /**
  * A `visibleWhen` or `enabledWhen` condition as the device runtime decides it, string operators
  * included; undefined for what the virtual device does not model (`data`, `platform`, `valid`).
  */
-export function decideVirtualCondition(condition: unknown, state: PrototypeState): Decision {
+export function decideVirtualCondition(
+  condition: unknown,
+  state: PrototypeState,
+  derived?: Raw,
+): Decision {
   const raw = record(condition);
   if (!raw) {
     return undefined;
   }
   if (Array.isArray(raw.all)) {
-    return allOf(raw.all.map((entry) => decideVirtualCondition(entry, state)));
+    return allOf(raw.all.map((entry) => decideVirtualCondition(entry, state, derived)));
   }
   if (Array.isArray(raw.any)) {
-    return anyOf(raw.any.map((entry) => decideVirtualCondition(entry, state)));
+    return anyOf(raw.any.map((entry) => decideVirtualCondition(entry, state, derived)));
   }
   if (raw.not !== undefined) {
-    const inner = decideVirtualCondition(raw.not, state);
+    const inner = decideVirtualCondition(raw.not, state, derived);
     return inner === undefined ? undefined : !inner;
   }
   if (typeof raw.key === "string") {
-    const text = stringOperator(raw, state[raw.key]);
+    const text = stringCondition(state[raw.key], raw);
     if (text !== undefined) {
       return text;
     }
   }
-  return decide(raw, { state, platform: "android" });
+  return decide(raw, { state, derived, platform: "android" });
 }
 
 /** Whether a node is shown; undefined when its `visibleWhen` cannot be decided here. */
-function isShown(node: Raw, state: PrototypeState): Decision {
+function isShown(node: Raw, state: PrototypeState, derived: Raw): Decision {
   if (OPEN_WHEN_NODES.has(String(node.type)) && !isOpen(node, state)) {
     return false;
   }
-  return node.visibleWhen === undefined ? true : decideVirtualCondition(node.visibleWhen, state);
+  return node.visibleWhen === undefined
+    ? true
+    : decideVirtualCondition(node.visibleWhen, state, derived);
 }
 
 function interpolated(text: string, state: PrototypeState): string {
@@ -399,7 +389,7 @@ const nodeName = (node: Raw): string =>
  * While a blocking layer is open, only nodes in the topmost one, or in a layer drawn above it,
  * are reachable: the device hoists open layers above the tree in tree order.
  */
-function visibleNodes(snapshot: VirtualPrototypeSnapshot): Visit[] {
+function visibleNodes(snapshot: VirtualPrototypeSnapshot, derived: Raw): Visit[] {
   const root = record(snapshot.spec.root);
   const pending: Visit[] = root ? [{ node: root, layer: 0 }] : [];
   const visits: Visit[] = [];
@@ -407,7 +397,7 @@ function visibleNodes(snapshot: VirtualPrototypeSnapshot): Visit[] {
   let topBlocking = 0;
   while (pending.length > 0) {
     const { node, handler: inherited, undecidable: above, layer: outer } = pending.shift()!;
-    const shown = isShown(node, snapshot.state);
+    const shown = isShown(node, snapshot.state, derived);
     if (shown === false) {
       continue;
     }
@@ -430,24 +420,34 @@ function visibleNodes(snapshot: VirtualPrototypeSnapshot): Visit[] {
   return visits.filter((visit) => visit.layer >= topBlocking);
 }
 
+function virtualDerivedValues({ spec, state }: VirtualPrototypeSnapshot): Raw {
+  return memoizedPrototypeDerive(
+    record(spec.derive) as Record<string, PrototypeDerivedEntry> | undefined,
+    spec.data,
+    state,
+  );
+}
+
 /** The first visible node the selector names: an exact text match first, then a substring. */
 export function findVirtualTapTarget(
   snapshot: VirtualPrototypeSnapshot,
   selector: VirtualTapSelector,
 ): VirtualTapTarget | undefined {
-  const visits = visibleNodes(snapshot);
+  const derived = virtualDerivedValues(snapshot);
+  const visits = visibleNodes(snapshot, derived);
   const matches = (exact: boolean) => (visit: Visit) =>
     selectorMatches(visit.node, selector, exact, snapshot.state);
   const match =
     visits.find(matches(true)) ??
     (selector.exactText === true ? undefined : visits.find(matches(false)));
-  return match ? tapTarget(match, snapshot.state) : undefined;
+  return match ? tapTarget(match, snapshot.state, derived) : undefined;
 }
 
-function tapTarget(visit: Visit, state: PrototypeState): VirtualTapTarget {
+function tapTarget(visit: Visit, state: PrototypeState, derived: Raw): VirtualTapTarget {
   const handler = visit.handler;
   const enabledWhen = handler?.node.enabledWhen;
-  const enabled = enabledWhen === undefined ? true : decideVirtualCondition(enabledWhen, state);
+  const enabled =
+    enabledWhen === undefined ? true : decideVirtualCondition(enabledWhen, state, derived);
   const undecidable =
     visit.undecidable ??
     (enabled === undefined ? `enabledWhen on ${nodeName(handler!.node)}` : undefined);
@@ -468,12 +468,13 @@ export function virtualFocusableField(
   snapshot: VirtualPrototypeSnapshot,
   key: string,
 ): Raw | undefined {
-  return visibleNodes(snapshot).find((visit) => {
+  const derived = virtualDerivedValues(snapshot);
+  return visibleNodes(snapshot, derived).find((visit) => {
     const handler = visit.handler;
     if (handler?.node !== visit.node || handler.interaction.type !== "focus") {
       return false;
     }
-    const target = tapTarget(visit, snapshot.state);
+    const target = tapTarget(visit, snapshot.state, derived);
     return handler.interaction.key === key && target.enabled && !target.undecidable;
   })?.node;
 }
@@ -636,11 +637,11 @@ function runEmit(action: Raw, draft: Draft): void {
   const bindings = record(action.context);
   draft.event("emit", String(action.name), (action.payload ?? null) as PrototypeJson);
   if (bindings) {
-    // `unsupportedContext` admits only state, page, data and value bindings.
     const resolved = resolveEmitContext(bindings as EmitBindings, {
       state: draft.state,
       pages: draft.pages,
       data: draft.spec.data as PrototypeJson | undefined,
+      derived: virtualDerivedValues(draft),
     });
     Object.assign(draft.steps.at(-1)!, resolved);
   }

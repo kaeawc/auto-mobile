@@ -369,6 +369,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
         events.push("http");
       },
       sweepStaleAppearanceConfigs: async () => {},
+      sweepStaleNetworkShaperProfiles: async () => {},
       redriveRecorderTeardowns: async () => {
         events.push("redrive");
         return true;
@@ -418,6 +419,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       publishHttpToken: () => {},
       startHttpIngress: async () => {},
       sweepStaleAppearanceConfigs: async () => {},
+      sweepStaleNetworkShaperProfiles: async () => {},
       redriveRecorderTeardowns: async () => true,
       bindControlSocket: bind,
       startServicesAfterSocketBind: async () => {
@@ -459,6 +461,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       openTerminalReleaseJournal: () => new NoopTerminalReleaseJournal(),
       startHttpIngress,
       sweepStaleAppearanceConfigs: async () => {},
+      sweepStaleNetworkShaperProfiles: async () => {},
       redriveRecorderTeardowns: async () => true,
       bindControlSocket: async () =>
         new UnixSocketServer("/memory/unbound.sock", DaemonState.getInstance()),
@@ -750,6 +753,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
         events.push("ingress");
       },
       sweepStaleAppearanceConfigs: async () => {},
+      sweepStaleNetworkShaperProfiles: async () => {},
       redriveRecorderTeardowns: async () => true,
       bindControlSocket: async () => {
         expect(tokenStore.read()).toBe("incumbent-token");
@@ -790,6 +794,52 @@ describe("Daemon.start() tool-call-end wiring", () => {
         expect(stopped).toBe(true);
         expect(timer.now()).toBe(0);
       }
+    } finally {
+      spies.reverse().forEach((spy) => spy.mockRestore());
+      internals.testHooks.stopSessionTimers();
+      timer.reset();
+    }
+  });
+
+  test("network shaper sweep runs before ingress even when session rehydration throws", async () => {
+    const { internals, timer, tokenStore } = await makeDaemon({ port: 3161, debug: true });
+    tokenStore.write("incumbent-token");
+    const events: string[] = [];
+    const spies = [
+      spyOn(bindingRegistryModule, "bindingRegistryFileExists").mockReturnValue(false),
+      spyOn(internals, "initializeDatabase").mockResolvedValue(undefined),
+      spyOn(internals, "initializeDevicePoolWithTimeout").mockResolvedValue(undefined),
+      spyOn(internals, "initializeIosServices").mockResolvedValue(undefined),
+      spyOn(logger, "info").mockImplementation(() => {}),
+      spyOn(logger, "warn").mockImplementation(() => {}),
+      spyOn(internals.getSessionManager(), "rehydratePersistedSessions").mockImplementation(
+        async () => {
+          events.push("rehydration");
+          throw new Error("rehydrate failed");
+        },
+      ),
+    ];
+    internals.testHooks.setStartHost({
+      ...internals.testHooks.processStartHost(),
+      enterProcess: () => {},
+      publishForwardLeaseOwner: () => {},
+      writeExitRecord: () => {},
+      writeEarlyOwnerRecord: async () => {},
+      openTerminalReleaseJournal: () => new NoopTerminalReleaseJournal(),
+      startHttpIngress: async () => {
+        events.push("ingress");
+      },
+      sweepStaleAppearanceConfigs: async () => {},
+      sweepStaleNetworkShaperProfiles: async () => {
+        events.push("sweep");
+      },
+      redriveRecorderTeardowns: async () => true,
+      bindControlSocket: async () =>
+        new UnixSocketServer("/memory/unbound.sock", DaemonState.getInstance(), timer),
+    });
+    try {
+      await internals.testHooks.startThroughSocketBind();
+      expect(events).toEqual(["sweep", "ingress", "rehydration"]);
     } finally {
       spies.reverse().forEach((spy) => spy.mockRestore());
       internals.testHooks.stopSessionTimers();

@@ -45,6 +45,9 @@ public enum CarPlayErrorCode: String, Codable, Sendable, CaseIterable {
     case unsupportedRuntime = "unsupported-runtime"
     case noCarPlayScreen = "no-carplay-screen"
     case powerOnFailed = "power-on-failed"
+    case unsupportedScreenType = "unsupported-screen-type"
+    case carPlayNotPowered = "carplay-not-powered"
+    case hidFailed = "hid-failed"
     case usage
 }
 

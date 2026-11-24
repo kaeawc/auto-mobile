@@ -15,7 +15,7 @@ import {
  * the first word; a `${}` hole reads as "…".
  */
 const ANDROID_ONLY_REFUSAL =
-  /^`?([\w…]+)`? (?:is Android-only|is only supported on Android|supports Android\b[^.;]*\bonly)/;
+  /^`?([\w…]+)`? (?:is Android-only|is only supported on Android(?! (?:or|and) )|supports Android\b[^.;]*\bonly)/;
 const MAY_MATCH = /Android-only|only supported on Android|supports Android/;
 
 export interface AndroidOnlyRefusal {

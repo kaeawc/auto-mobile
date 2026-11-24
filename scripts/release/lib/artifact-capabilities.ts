@@ -75,6 +75,7 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
     prototype_custom_shaders_v1:
       "AGSL shaders are Android-only by owner decision; the iOS agent and ProtoViewer refuse them (#15131)",
     prototype_loops_v1: "Attention loops are Android only until #14684",
+    prototype_m3_expressive_v1: "Material 3 Expressive components are Android only until #15258",
     prototype_motion_v3: "Expressive, press and layout animate are Android only until #14684",
     prototype_window_motion_v1: "Android window and repeat motion; iOS does not implement it",
     prototype_motion_v2:
@@ -87,6 +88,8 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
       "Device realtime channels are contract-only; the iOS agent does not implement device transport yet",
     prototype_platform_v1:
       "iOS agent validates platform specs but has no module registry yet (#14296)",
+    prototype_large_budget_v1:
+      "The larger runtime budget is for Android activity-hosted runtimes only; the iOS agent keeps the base limits (#18804)",
   },
 };
 

@@ -237,6 +237,7 @@ internal class PrototypeNodeMapping(
   private val derive: Map<String, PrototypeDerivedEntry> = emptyMap(),
   private val formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
   private val fillWindowRoot: Boolean = false,
+  private val resolveRowData: Boolean = false,
   private val derivedValues: Map<String, kotlinx.serialization.json.JsonElement?> =
     PrototypeDerive.evaluate(
       derive,
@@ -279,6 +280,7 @@ internal class PrototypeNodeMapping(
     pagerState: Map<String, PrototypeScalar>? = null,
     staggerDelayMs: Int = 0,
   ): PrototypeRenderNode {
+    val node = if (resolveRowData) resolvePrototypeListNodeText(node, data, shield = true) else node
     if (!repeatItemsHaveBrace && prototypeRepeatItemsHaveBrace(node)) repeatItemsHaveBrace = true
     val localState =
       derivedState +
@@ -341,7 +343,8 @@ internal class PrototypeNodeMapping(
     val selected =
       pager?.let { pages[it] } ?: (state[stateKey] as? PrototypeScalar.Numeric)?.value?.toInt() ?: 0
     val old = previous[path]
-    val authored = resolvePrototypeStyle(node.style, node.styleWhen, localState, validity)
+    val authored =
+      resolvePrototypeStyle(node.style, node.styleWhen, localState, validity, derivedValues)
     // Fixed-size window roots default to fill; explicit dimensions and descendants are unchanged.
     val resolved =
       if (path == "root" && fillWindowRoot)
@@ -353,17 +356,23 @@ internal class PrototypeNodeMapping(
     val style =
       old?.style?.takeIf { it.source === resolved || it.source == resolved }
         ?: mapPrototypeStyle(resolved)
+    val remoteUrl =
+      (node as? PrototypeImageNode)?.url?.let { interpolatePrototypeText(it, localState, inPager) }
+    fun accessibleText(value: String?): String? = value?.takeUnless {
+      remoteUrl != null && remoteUrl.isNotEmpty() && it.contains(remoteUrl)
+    }
     val mapped =
       PrototypeRenderNode(
         role,
         text,
-        node.testTag,
-        node.visibleWhen?.holds(localState, validity) ?: true,
+        accessibleText(node.testTag),
+        node.visibleWhen?.holds(localState, validity, derivedValues) ?: true,
         style,
         node.safeAreaPadding,
         prototypeNodeIconName(node),
         children,
-        (if (derive.isEmpty()) node
+        (if (node is PrototypeImageNode && node.url != null) node.copy(url = remoteUrl)
+          else if (derive.isEmpty()) node
           else
             PrototypeDerivedText.bindNode(node) {
               interpolatePrototypeText(it, derivedState, readLater = true)
@@ -374,12 +383,12 @@ internal class PrototypeNodeMapping(
         selected.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
         prototypeOpenWhen(node)?.let { state[it.key] == PrototypeScalar.BooleanValue(it.equals) }
           ?: false,
-        enabled = node.enabledCondition()?.holds(localState, validity) ?: true,
+        enabled = node.enabledCondition()?.holds(localState, validity, derivedValues) ?: true,
         // A shown error is read as is, so an inserted value in it loses its shield here.
         errorMessage =
-          prototypeShownError(node, localState, shownErrors, validity)
+          prototypeShownError(node, localState, shownErrors, validity, derivedValues)
             ?.let(PrototypeTextShield::unshield),
-        isError = prototypeIsError(node, localState, shownErrors, validity),
+        isError = prototypeIsError(node, localState, shownErrors, validity, derivedValues),
         checked =
           (prototypeToggleKey(node)
               ?: prototypeListItemToggleKey(node)
@@ -401,13 +410,19 @@ internal class PrototypeNodeMapping(
         minute = prototypeStateInt(state, (node as? PrototypeTimePickerNode)?.minuteKey),
         contentDescription =
           (node.semantics?.label ?: node.contentDescription)?.let {
-            interpolatePrototypeText(it, localState, inPager)
+            accessibleText(interpolatePrototypeText(it, localState, inPager))
           },
         semantics =
           node.semantics?.let { semantics ->
             semantics.copy(
-              label = semantics.label?.let { interpolatePrototypeText(it, localState, inPager) },
-              hint = semantics.hint?.let { interpolatePrototypeText(it, localState, inPager) },
+              label =
+                semantics.label?.let {
+                  accessibleText(interpolatePrototypeText(it, localState, inPager))
+                },
+              hint =
+                semantics.hint?.let {
+                  accessibleText(interpolatePrototypeText(it, localState, inPager))
+                },
             )
           },
         spans =
@@ -450,6 +465,7 @@ internal class PrototypeNodeMapping(
                   derive = derive,
                   derivedValues = derivedValues,
                   formatter = formatter,
+                  resolveRowData = true,
                   shieldedInputs = mayShield,
                 )
                 .map(
@@ -562,6 +578,7 @@ internal fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeWebViewNode -> "webView"
     is PrototypeCastButtonNode -> "castButton"
     is PrototypeCameraPreviewNode -> "cameraPreview"
+    is PrototypeLoadingIndicatorNode -> "loadingIndicator"
   }
 
 private fun prototypeNodeText(
@@ -593,6 +610,7 @@ private fun prototypeNodeText(
       node.title?.let { interpolatePrototypeText(it, localState, inPager) }.orEmpty()
     is PrototypeTooltipNode -> interpolatePrototypeText(node.text, localState, inPager)
     is PrototypeSnackbarNode -> interpolatePrototypeText(node.text, localState, inPager)
+    is PrototypeWebViewNode -> interpolatePrototypeText(node.url, localState, inPager)
     else -> ""
   }
 

@@ -410,6 +410,17 @@ internal class CtrlProxyActionRouter(private val service: CtrlProxy) : CtrlProxy
     service.launchRequestScope(requestId) { service.savedPrototypeController.delete(requestId, id) }
   }
 
+  override suspend fun queuePrototypeCallOutcome(
+    requestId: String?,
+    id: String,
+    call: String,
+    outcome: JsonObject,
+  ) {
+    service.launchRequestScope(requestId) {
+      service.prototypeController.queueCallOutcome(requestId, id, call, outcome)
+    }
+  }
+
   override suspend fun simulatePrototypePlatform(
     requestId: String?,
     id: String,

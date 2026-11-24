@@ -101,6 +101,10 @@ function sortedUnique(values: Iterable<string>): string[] {
   return [...new Set(values)].sort();
 }
 
+function moduleRequirements(requires: ReturnType<typeof prototypeRequiresSchema.parse>) {
+  return Array.isArray(requires) ? {} : requires;
+}
+
 function assertSpecPermissionsDeclared(spec: PrototypeJson): void {
   // Tool callers already validate the schema. Reuse the platform semantic rules here so direct
   // manager callers cannot bypass call/node permission checks, including inside components.
@@ -125,10 +129,11 @@ export function disposableAppDeclarations(spec: PrototypeJson): DisposableAppDec
     );
   }
   assertSpecPermissionsDeclared(spec);
-  const permissionEntries = parsed.data.permissions ?? [];
+  const declarations = moduleRequirements(parsed.data);
+  const permissionEntries = declarations.permissions ?? [];
   const permissions = sortedUnique(permissionEntries.map((entry) => entry.name));
-  const background = sortedUnique(parsed.data.background ?? []);
-  const modules = parsed.data.platform ?? [];
+  const background = sortedUnique(declarations.background ?? []);
+  const modules = declarations.platform ?? [];
   const services = background.flatMap((kind) => DISPOSABLE_APP_ANDROID_BACKGROUND[kind] ?? []);
   return {
     permissions,

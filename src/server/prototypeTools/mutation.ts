@@ -19,6 +19,7 @@ import type { PrototypeResult } from "../../features/observe/android/ctrlProxyPr
 import {
   PROTOTYPE_PATCH_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
+  PROTOTYPE_LARGE_BUDGET_CAPABILITY,
 } from "../../features/observe/android/ctrlProxyProtocol";
 import { PrototypeCommitGenerations } from "../../features/prototype/PrototypeCommitGenerations";
 import type { PrototypeEventSource } from "../../features/prototype/PrototypeEventCoordinator";
@@ -34,12 +35,15 @@ import { prototypeAppLayerVisibilityOutput } from "../../features/prototype/prot
 import { shownAppearance } from "../../features/prototype/prototypeAppearance";
 import { resolvePrototypeDisplayId } from "../../features/prototype/prototypeDisplay";
 import { prototypeGestureFields } from "../../features/prototype/prototypeGestures";
+import { prototypeIosNotificationFallbackPaths } from "../../features/prototype/prototypePlatformGates";
 import { parsePrototypeHiddenReason } from "../../features/prototype/prototypeHidden";
 import { PROTOTYPE_ZOOM_RENDERING_GATE } from "../../features/prototype/prototypeZoomTransition";
 import {
   prototypePlatformNotes,
+  prototypeRuntimeNotes,
   prototypeStringsFallbackNotes,
 } from "../../features/prototype/prototypePlatformNotes";
+import { parsePrototypePlatformReport } from "../../features/prototype/prototypePlatformReport";
 import { type PrototypeSpec } from "../../features/prototype/prototypeSpec";
 import { recordPrototypeTextShow } from "../../features/prototype/prototypeTextTarget";
 import { type PrototypeWindowChrome } from "../../features/prototype/prototypeWindowChrome";
@@ -49,6 +53,10 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { performPrototypePatch, type PrototypePatchQueue } from "../prototypePatchAction";
 import { shownSpecOutcome } from "../prototypeShownOutcome";
+import {
+  prototypeRuntimeBudget,
+  type PrototypeRuntimeBudget,
+} from "../../features/prototype/prototypeRuntimeBudget";
 import { sendPrototype, stageAssets } from "./assets";
 import { appLayerGrant, preflightMutation, specCapabilityRefusal } from "./preflight";
 import { prototypeSchema } from "./schemas";
@@ -168,7 +176,12 @@ export async function performPrototypeAction(
             ? target.android.supportsCommand(PROTOTYPE_PATCH_CAPABILITY)
             : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
         specRefusal: async (spec) =>
-          (await specCapabilityRefusal(target, spec, signal, { env: dependencies.env }))?.error ??
+          (
+            await specCapabilityRefusal(target, spec, signal, {
+              env: dependencies.env,
+              platform: device.platform === "android" ? "android" : "ios",
+            })
+          )?.error ??
           (await cachedPrototypeShaderAssetProblem(
             spec,
             device.deviceId,
@@ -264,26 +277,23 @@ async function performMutation(
         env: dependencies.env,
         superseded: () => isSuperseded(commits, scope, target, generation),
         beforeSend: async () => {
+          // Only a show that is sent looks up the budget its device writes are mirrored with.
+          ordering.budget = await targetBudget(prototypeTarget, args);
           // Last abort check before the grant, the event epoch and the device send.
           signal?.throwIfAborted();
           await appLayerGrant(prototypeTarget, device, args, { dependencies, signal })?.();
+          // The budget lookup and the grant suspend: a newer same-id show may have dispatched first,
+          // and this older spec must not follow it onto the device.
+          if (isSuperseded(commits, scope, target, generation)) {
+            return "superseded";
+          }
           // Last step before dispatch: a refusal, a failed upload, a lost race or a failed grant
           // must leave the event epoch of a prototype still on screen alone (#11394).
           startFreshShowEvents(events, scope, source, { target, args, inPlace });
           ordering.startedFreshEvents = args.action === "show" && !inPlace;
-          if (args.action === "show" && target.id) {
-            dependencies.store.beginShowDispatch(scope.deviceId, target.id);
-          }
           // From here the show is issued to the device: it may be on screen, so it is never withdrawn.
-          ordering.sent = true;
-          if (args.action === "show") {
-            ordering.specTicket = store.shownSpecs.beginShow(
-              scope.deviceId,
-              target.id,
-              args.replaceOthers,
-              device.platform === "android" ? "android" : "ios",
-            );
-          }
+          markShowIssued(ordering, { store, dependencies, args, device });
+          return undefined;
         },
       }),
     ).then(renderShowOutcome);
@@ -336,7 +346,6 @@ async function performMutation(
       displayId,
       signal,
     });
-    const spec = authoredArgs.spec;
     return {
       ...mutationReply,
       lastResult,
@@ -344,7 +353,10 @@ async function performMutation(
       ...anchorsOutput(resolved),
       ...(await showAdviceOutput(authoredArgs, device, dependencies, { result, signal })),
       ...visibility,
-      ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy, spec),
+      ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy, {
+        spec: authoredArgs.spec,
+        platform: device.platform,
+      }),
     };
   } catch (error) {
     recordPrototypeTextShow(device.deviceId, args.action, undefined, {
@@ -399,7 +411,10 @@ async function showAdviceOutput(
   {
     result,
     signal,
-  }: { result: Pick<PrototypeResult, "success" | "screenRound">; signal?: AbortSignal },
+  }: {
+    result: Pick<PrototypeResult, "success" | "screenRound" | "platformRuntime">;
+    signal?: AbortSignal;
+  },
 ): Promise<
   Pick<
     PrototypeOutput,
@@ -414,7 +429,7 @@ async function showAdviceOutput(
 > {
   const { success, screenRound: deviceScreenRound } = result;
   return {
-    ...(await platformNotesOutput(args, device, dependencies.target, success)),
+    ...(await platformNotesOutput(args, device, dependencies.target, result)),
     ...(args.action === "show" && success ? prototypeAccessibilityOutput(args.spec) : {}),
     ...(args.action === "show" && success ? prototypePlaceholderOutput(args.spec) : {}),
     ...(await prototypeScreenShapeOutput(
@@ -434,9 +449,9 @@ async function platformNotesOutput(
   args: z.infer<typeof prototypeSchema>,
   device: BootedDevice,
   target: PrototypeTarget,
-  success: boolean,
+  result: Pick<PrototypeResult, "success" | "platformRuntime">,
 ): Promise<Pick<PrototypeOutput, "platformNotes">> {
-  if (args.action !== "show" || !success) {
+  if (args.action !== "show" || !result.success) {
     return {};
   }
   const androidZoom =
@@ -452,30 +467,46 @@ async function platformNotesOutput(
         : target.ios?.supportsCapability(capability) === true,
     deviceOsMajor(device),
   );
+  const report = parsePrototypePlatformReport(result.platformRuntime);
+  if (report) {
+    notes.push(...prototypeRuntimeNotes(device.platform === "ios" ? "ios" : "android", report));
+  }
   notes.push(...prototypeStringsFallbackNotes(args.spec as PrototypeSpec, args.locale));
-  const gestures = device.platform === "ios" ? prototypeGestureFields(args.spec) : [];
-  if (gestures.length > 0) {
-    notes.push({
-      platform: "ios",
-      construct: "node.gestures",
-      effect: "substituted",
-      paths: gestures.slice(0, 20),
-      ...(gestures.length > 20 ? { total: gestures.length } : {}),
-      detail: [
-        ...(gestures.some((path) => path.endsWith(".onLongPress"))
-          ? [
-              "Long-press uses the platform default threshold (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).",
-            ]
-          : []),
-        ...(gestures.some((path) => path.endsWith(".onDoubleTap"))
-          ? [
-              "The double-tap window is the system's. With onDoubleTap, onTap fires only after that window elapses.",
-            ]
-          : []),
-      ].join(" "),
-    });
+  if (device.platform === "ios") {
+    const gestureNote = iosGestureNote(args.spec);
+    if (gestureNote) {
+      notes.push(gestureNote);
+    }
   }
   return notes.length > 0 ? { platformNotes: notes } : {};
+}
+
+function iosGestureNote(
+  spec: unknown,
+): NonNullable<PrototypeOutput["platformNotes"]>[number] | undefined {
+  const gestures = prototypeGestureFields(spec);
+  if (gestures.length === 0) {
+    return undefined;
+  }
+  return {
+    platform: "ios",
+    construct: "node.gestures",
+    effect: "substituted",
+    paths: gestures.slice(0, 20),
+    ...(gestures.length > 20 ? { total: gestures.length } : {}),
+    detail: [
+      ...(gestures.some((path) => path.endsWith(".onLongPress"))
+        ? [
+            "Long-press uses the platform default threshold (about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).",
+          ]
+        : []),
+      ...(gestures.some((path) => path.endsWith(".onDoubleTap"))
+        ? [
+            "The double-tap window is the system's. With onDoubleTap, onTap fires only after that window elapses.",
+          ]
+        : []),
+    ].join(" "),
+  };
 }
 
 /**
@@ -499,6 +530,19 @@ async function legacyInPlaceWarning(
     return undefined;
   }
   return `the connected CtrlProxy does not advertise ${PROTOTYPE_SHOW_IN_PLACE_CAPABILITY}, so prototype ${prototype.id} was re-shown fresh on its display: pager pages restarted. Update the connected CtrlProxy to keep pages.`;
+}
+
+/** The show target's runtime budget, which the host mirrors its device data writes with (#18804). */
+async function targetBudget(
+  target: PrototypeTarget,
+  args: { action: string },
+): Promise<PrototypeRuntimeBudget> {
+  const large =
+    args.action === "show" &&
+    (target.android
+      ? await target.android.supportsCommand(PROTOTYPE_LARGE_BUDGET_CAPABILITY)
+      : target.ios?.supportsCapability(PROTOTYPE_LARGE_BUDGET_CAPABILITY) === true);
+  return prototypeRuntimeBudget(large ? [PROTOTYPE_LARGE_BUDGET_CAPABILITY] : []);
 }
 
 /**
@@ -528,6 +572,8 @@ interface ShowOrdering {
   specTicket?: number;
   /** The MCP connection issuing the show, recorded on its spec revision (#17358). */
   mcpSessionId?: string;
+  /** The target runtime's budget, looked up once the show is sent (#18804). */
+  budget?: PrototypeRuntimeBudget;
 }
 
 function withdrawGeneration(ordering: ShowOrdering): void {
@@ -544,8 +590,12 @@ function endShownSpec(
 ): void {
   if (ordering.specTicket !== undefined) {
     const { shown, refusal } = outcome ? shownSpecOutcome(outcome) : {};
-    const { mcpSessionId } = ordering;
-    const attributed = shown && mcpSessionId !== undefined ? { ...shown, mcpSessionId } : shown;
+    const { mcpSessionId, budget } = ordering;
+    const attributed = shown && {
+      ...shown,
+      ...(mcpSessionId === undefined ? {} : { mcpSessionId }),
+      ...(budget === undefined ? {} : { budget }),
+    };
     store.shownSpecs.endShow(ordering.scope.deviceId, ordering.specTicket, attributed, refusal);
   }
 }
@@ -678,6 +728,31 @@ function commitMutation(
  * A newer show of the same id on this device started after this one, so it owns host status and
  * event buffers; this call reports only its own outcome and commits nothing.
  */
+function markShowIssued(
+  ordering: ShowOrdering,
+  issued: {
+    store: PrototypeStatusStore;
+    dependencies: PrototypeHandlerDependencies;
+    args: { action: PrototypeMutation; replaceOthers?: boolean };
+    device: BootedDevice;
+  },
+): void {
+  const { store, dependencies, args, device } = issued;
+  const { scope, target } = ordering;
+  if (args.action === "show" && target.id) {
+    dependencies.store.beginShowDispatch(scope.deviceId, target.id);
+  }
+  ordering.sent = true;
+  if (args.action === "show") {
+    ordering.specTicket = store.shownSpecs.beginShow(
+      scope.deviceId,
+      target.id,
+      args.replaceOthers,
+      device.platform === "android" ? "android" : "ios",
+    );
+  }
+}
+
 function supersededResult(
   dependencies: PrototypeHandlerDependencies,
   outcome: CommitOutcome,
@@ -780,12 +855,24 @@ function anchorsOutput(
     : {};
 }
 
+function notificationFallbackWarning(spec: unknown, platform: BootedDevice["platform"]) {
+  if (platform !== "ios") {
+    return undefined;
+  }
+  const paths = prototypeIosNotificationFallbackPaths(spec);
+  if (!paths.length) {
+    return undefined;
+  }
+  const remaining = paths.length > 20 ? ` and ${paths.length - 20} more fields` : "";
+  return `The iOS Prototype Viewer uses plain notification content for ${paths.slice(0, 20).join(", ")}${remaining}.`;
+}
+
 /** [landedWarning] is reported only when the mutation succeeded. */
 function missingAssetsOutput(
   result: PrototypeResult,
   warnings: readonly (string | undefined)[],
-  landedWarning?: string,
-  spec?: unknown,
+  landedWarning: string | undefined,
+  { spec, platform }: { spec: unknown; platform: BootedDevice["platform"] },
 ): {
   missingAssets?: string[];
   warning?: string;
@@ -798,6 +885,7 @@ function missingAssetsOutput(
     ...warnings,
     degraded.warning,
     result.success ? landedWarning : undefined,
+    result.success ? notificationFallbackWarning(spec, platform) : undefined,
     ...(result.success ? prototypeTimerWarnings(spec) : []),
     ...(result.success ? prototypeSensitiveWarnings(spec) : []),
     ...(result.success ? prototypeTopAppBarInsetWarnings(spec) : []),

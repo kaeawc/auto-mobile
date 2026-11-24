@@ -16,6 +16,7 @@ import {
 } from "../observe/android/ctrlProxyProtocol";
 import { prototypeZoomTransitionNotes } from "./prototypeZoomTransition";
 import { prototypeIconEffectNotes } from "./prototypeIconEffectNotes";
+import type { PrototypePlatformReport } from "./prototypePlatformReport";
 import type { PrototypeSpec } from "./prototypeSpec";
 
 export type PrototypePlatformNoteConstruct =
@@ -39,8 +40,9 @@ export type PrototypePlatformNoteConstruct =
   | "searchBar.icons"
   | "menu"
   | "select"
-  | "strings.fallback";
-export type PrototypePlatformNoteEffect = "ignored" | "substituted";
+  | "strings.fallback"
+  | `platform.${string}`;
+export type PrototypePlatformNoteEffect = "ignored" | "substituted" | "simulated";
 export interface PrototypePlatformNote {
   platform: "android" | "ios" | "all";
   construct: PrototypePlatformNoteConstruct;
@@ -53,6 +55,32 @@ export interface PrototypePlatformNote {
   /** icon.name: sorted distinct placeholders; strings.fallback: up to 20 referenced keys. */
   values?: string[];
   detail: string;
+}
+
+/** Show advisories for the reasons reported by the runtime. */
+export function prototypeRuntimeNotes(
+  platform: "android" | "ios",
+  report: PrototypePlatformReport,
+): PrototypePlatformNote[] {
+  return Object.entries(report.modules).flatMap(([module, { reason, mode }]) =>
+    reason
+      ? [
+          {
+            platform,
+            construct: `platform.${module}`,
+            effect:
+              mode === "fake" ||
+              mode === "simulated" ||
+              reason === "simulator" ||
+              reason === "fake_mode"
+                ? "simulated"
+                : "ignored",
+            paths: [],
+            detail: `${module}: ${reason}`,
+          },
+        ]
+      : [],
+  );
 }
 
 /** Frozen legacy set for agents without prototype_icon_sf_symbols_v1; no longer mirrored from Swift. */

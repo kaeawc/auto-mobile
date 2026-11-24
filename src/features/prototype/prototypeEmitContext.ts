@@ -5,6 +5,7 @@ import {
   type PrototypeEmitContextBinding,
   type PrototypeJson,
 } from "./prototypeSpec";
+import { resolvePrototypeDerivedBinding } from "./prototypeDerive";
 import { resolvePrototypeDataPointer } from "./prototypeData";
 import { expandPrototypeComponents } from "./prototypeComponents";
 import { mapBindableFields, record, type FieldKind } from "./prototypeTemplate";
@@ -29,6 +30,7 @@ export interface PrototypeEmitContextInputs {
   state: Readonly<Record<string, PrototypeJson>>;
   pages: Readonly<Record<string, number>>;
   data?: PrototypeJson;
+  derived?: Readonly<Record<string, unknown>>;
   /**
    * Names the runtime adds for the handler that ran the emit, after the authored entries and under
    * the same byte budget: `markerId` for a map's `onMarkerTap` (#16492). Validators refuse an
@@ -42,7 +44,7 @@ export interface ResolvedEmitContext {
 }
 type RuntimeBinding = Exclude<
   PrototypeEmitContextBinding,
-  { item: string } | { index: true } | { match: string }
+  { item: string } | { index: true } | { match: string } | { link: string }
 >;
 
 /**
@@ -65,7 +67,9 @@ export function resolveEmitContext(
             : null
           : "data" in binding
             ? resolvePrototypeDataPointer(inputs.data, binding.data)
-            : binding.value;
+            : "derived" in binding
+              ? resolvePrototypeDerivedBinding(inputs.derived, binding.derived)
+              : binding.value;
     return [name, (value ?? null) as PrototypeJson];
   });
   entries.push(...Object.entries(inputs.handlerContext ?? {}));

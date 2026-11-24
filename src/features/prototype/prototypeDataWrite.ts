@@ -1,3 +1,9 @@
+import { resolvePrototypeDerivedBinding } from "./prototypeDerive";
+import { prototypeGeneratedForms } from "./prototypeGeneratedBindings";
+import {
+  resolvePrototypeGeneratedJson,
+  type PrototypeActionContext,
+} from "./prototypeGeneratedValues";
 import { isPrototypeDataPointer } from "./prototypeData";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import type { PrototypeData, PrototypeDataActionValue, PrototypeJson } from "./prototypeSpec";
@@ -5,6 +11,7 @@ import { prototypeDataPathPointer, resolvePrototypeDataPointer } from "./prototy
 import { applyPrototypePatch, type PrototypePatchOp } from "./prototypePatch";
 import { record } from "./prototypeTemplate";
 import { prototypeDataError } from "./prototypeValidation";
+import { PROTOTYPE_BASE_BUDGET, type PrototypeRuntimeBudget } from "./prototypeRuntimeBudget";
 
 /**
  * The pure semantics of a `setData` / `appendData` / `prependData` / `removeData` action (#12519). Device runtimes
@@ -28,6 +35,7 @@ export type PrototypeDataWrite =
   | { op: "remove"; path: string; where?: PrototypeDataMatch };
 
 export type PrototypeDataWriteErrorCode =
+  | "lastGenerated_unset"
   | "invalid_path"
   | "invalid_value"
   | "ambiguous_match"
@@ -112,7 +120,10 @@ function setTargetRefusal(
     : undefined;
 }
 
-function valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult | undefined {
+function valueRefusal(
+  write: PrototypeDataWrite,
+  budget: PrototypeRuntimeBudget,
+): PrototypeDataWriteResult | undefined {
   if (write.op === "remove") {
     return undefined;
   }
@@ -130,12 +141,13 @@ function valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult | und
   if (["extend", "prepend"].includes(write.op) && !Array.isArray(write.value)) {
     return refused("invalid_value", `${name} needs an array value`);
   }
-  return maximumRefusal(write, name);
+  return maximumRefusal(write, name, budget);
 }
 
 function maximumRefusal(
   write: PrototypeDataWrite,
   name: string,
+  budget: PrototypeRuntimeBudget,
 ): PrototypeDataWriteResult | undefined {
   if (
     "maxItems" in write &&
@@ -143,7 +155,7 @@ function maximumRefusal(
     (!Number.isSafeInteger(write.maxItems) ||
       write.maxItems < 1 ||
       ((write.op === "upsert" || write.op === "append") &&
-        write.maxItems > contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS))
+        write.maxItems > budget.MAX_PROTOTYPE_DATA_ARRAY_ITEMS))
   ) {
     return refused("invalid_value", `${name} maxItems must be a positive safe integer`);
   }
@@ -232,6 +244,7 @@ function keyedWrite(
   data: PrototypeData,
   pointer: string,
   write: Extract<PrototypeDataWrite, { op: "set" | "remove" }>,
+  budget: PrototypeRuntimeBudget,
 ): PrototypeDataWriteResult {
   const { where } = write;
   const member = write.op === "set" ? write.member : undefined;
@@ -276,7 +289,7 @@ function keyedWrite(
   } else {
     changed[index] = { ...record(target[index]), [member]: write.value };
   }
-  return applyPrototypeDataWrite(data, { op: "set", path: write.path, value: changed });
+  return applyPrototypeDataWrite(data, { op: "set", path: write.path, value: changed }, budget);
 }
 
 /**
@@ -286,23 +299,25 @@ function keyedWrite(
  * start when maxItems is present. `prepend` inserts an ordered page at the start and trims
  * from the end, keeping the first maxItems rows; `remove` deletes an existing member or element
  * (later array elements shift down). The result must still satisfy the data limits, including
- * `MAX_PROTOTYPE_DATA_WRITE_BYTES`, or nothing is written.
+ * `MAX_PROTOTYPE_DATA_WRITE_BYTES`, or nothing is written. `budget` is the limits of the runtime
+ * the data lives in (#18804): the base budget unless it advertises a larger one.
  */
 export function applyPrototypeDataWrite(
   data: unknown,
   write: PrototypeDataWrite,
+  budget: PrototypeRuntimeBudget = PROTOTYPE_BASE_BUDGET,
 ): PrototypeDataWriteResult {
   const pointer = prototypeDataPathPointer(write.path);
   if (pointer === undefined) {
     return refused("invalid_path", `${write.path} is not a /data/<pointer> path`);
   }
-  const invalidValue = valueRefusal(write);
+  const invalidValue = valueRefusal(write, budget);
   if (invalidValue) {
     return invalidValue;
   }
   const current = (record(data) ?? {}) as PrototypeData;
   if (isKeyedWrite(write)) {
-    return keyedWrite(current, pointer, write);
+    return keyedWrite(current, pointer, write, budget);
   }
   const target = targetRefusal(current, pointer, write);
   if (target) {
@@ -314,8 +329,20 @@ export function applyPrototypeDataWrite(
   if (!applied.success) {
     return refused("not_found", `${write.path}: ${applied.error.message}`);
   }
-  const next = record(applied.spec.data);
-  const invalid = prototypeDataError(next, contract.limits.MAX_PROTOTYPE_DATA_WRITE_BYTES);
+  return writtenData(record(applied.spec.data), trimmed, budget);
+}
+
+/** The written data, unless it breaks the data limits of `budget`. */
+function writtenData(
+  next: Record<string, unknown> | undefined,
+  trimmed: number,
+  budget: PrototypeRuntimeBudget,
+): PrototypeDataWriteResult {
+  const invalid = prototypeDataError(
+    next,
+    budget.MAX_PROTOTYPE_DATA_WRITE_BYTES,
+    budget.MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
+  );
   if (!next || invalid) {
     const message = invalid?.message ?? "Data must stay an object";
     return refused(message.includes("limit") ? "limit_exceeded" : "invalid_value", message);
@@ -323,15 +350,24 @@ export function applyPrototypeDataWrite(
   return { success: true, data: next as PrototypeData, trimmed };
 }
 
-/** The binding forms a device resolves at the action; `item` and `index` are bound by repeat first. */
-export type PrototypeRuntimeDataActionValue = Exclude<
+type PrototypeRuntimeFlatValue = Exclude<
   PrototypeDataActionValue,
-  { item: string } | { index: true }
+  { item: string } | { index: true } | { link: string }
 >;
+
+/**
+ * The binding forms a device resolves at the action; `item` and `index` are bound by repeat first,
+ * including inside an `{object}` value (#18826), whose members are flat forms.
+ */
+export type PrototypeRuntimeDataActionValue =
+  | PrototypeRuntimeFlatValue
+  | { object: Record<string, PrototypeRuntimeFlatValue> };
 
 export interface PrototypeDataWriteInputs {
   state: Readonly<Record<string, PrototypeJson>>;
   data?: unknown;
+  derived?: Readonly<Record<string, unknown>>;
+  context?: PrototypeActionContext;
 }
 
 export type PrototypeDataWriteValueResult =
@@ -343,6 +379,13 @@ export function resolvePrototypeDataWriteValue(
   binding: PrototypeRuntimeDataActionValue,
   inputs: PrototypeDataWriteInputs,
 ): PrototypeDataWriteValueResult {
+  if ("object" in binding) {
+    return resolveObjectValue(binding.object, inputs);
+  }
+  const generated = resolveGeneratedBinding(binding, inputs.context);
+  if (generated) {
+    return generated;
+  }
   if ("value" in binding) {
     return { success: true, value: binding.value };
   }
@@ -354,6 +397,21 @@ export function resolvePrototypeDataWriteValue(
           error: { code: "invalid_value", message: `State key ${binding.state} is not set` },
         };
   }
+  if ("derived" in binding) {
+    const value = resolvePrototypeDerivedBinding(inputs.derived, binding.derived);
+    return value === undefined
+      ? {
+          success: false,
+          error: { code: "not_found", message: `Derived value ${binding.derived} is not set` },
+        }
+      : { success: true, value };
+  }
+  if (!("data" in binding)) {
+    return {
+      success: false,
+      error: { code: "invalid_value", message: "Unknown data write value binding" },
+    };
+  }
   const value = resolvePrototypeDataPointer(inputs.data, binding.data);
   return value === undefined
     ? {
@@ -361,4 +419,151 @@ export function resolvePrototypeDataWriteValue(
         error: { code: "not_found", message: `Data pointer ${binding.data} does not exist` },
       }
     : { success: true, value: value as PrototypeJson };
+}
+
+/**
+ * Each member resolves like a top-level value, in sorted name order (iOS cannot see authored order,
+ * and a `{generate}` member must precede a `{lastGenerated}` one identically everywhere); the first
+ * unresolved one fails the write.
+ */
+function resolveObjectValue(
+  members: Record<string, PrototypeRuntimeFlatValue>,
+  inputs: PrototypeDataWriteInputs,
+): PrototypeDataWriteValueResult {
+  const value: Record<string, PrototypeJson> = {};
+  for (const name of Object.keys(members).sort()) {
+    const member = resolvePrototypeDataWriteValue(members[name], inputs);
+    if (!member.success) {
+      return member;
+    }
+    Object.defineProperty(value, name, {
+      value: member.value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return { success: true, value };
+}
+
+function resolveGeneratedBinding(
+  binding: PrototypeRuntimeDataActionValue,
+  context: PrototypeActionContext | undefined,
+): PrototypeDataWriteValueResult | undefined {
+  const forms = prototypeGeneratedForms(binding);
+  if (forms.length > 0) {
+    if (!context) {
+      return {
+        success: false,
+        error: {
+          code: forms[0] === "lastGenerated" ? "lastGenerated_unset" : "invalid_value",
+          message: "Generated bindings require an action-list context",
+        },
+      };
+    }
+    let generated = context.lastGenerated !== undefined;
+    for (const form of forms) {
+      if (form === "generate") {
+        generated = true;
+      }
+      if (form === "lastGenerated" && !generated) {
+        return {
+          success: false,
+          error: {
+            code: "lastGenerated_unset",
+            message: "No preceding generate in this action list",
+          },
+        };
+      }
+    }
+    const value = "value" in binding ? binding.value : binding;
+    return { success: true, value: resolvePrototypeGeneratedJson(value, context) };
+  }
+  return undefined;
+}
+
+export function resolvePrototypeDataMatch(
+  selector: unknown,
+  inputs: PrototypeDataWriteInputs,
+):
+  | { success: true; where?: PrototypeDataMatch }
+  | { success: false; error: PrototypeDataWriteError } {
+  const where = record(selector);
+  if (!where) {
+    return { success: true };
+  }
+  const equals = resolvePrototypeDataWriteValue(
+    where.equals as PrototypeRuntimeDataActionValue,
+    inputs,
+  );
+  return equals.success
+    ? { success: true, where: { field: String(where.field), equals: equals.value } }
+    : equals;
+}
+
+/** Resolve at execution only; the mirror consumes the resulting write, never these bindings. */
+export function applyPrototypeDataAction(
+  action: Record<string, unknown>,
+  inputs: PrototypeDataWriteInputs,
+): PrototypeDataWriteResult {
+  const path = String(action.path);
+  const value =
+    action.type === "removeData"
+      ? undefined
+      : resolvePrototypeDataWriteValue(action.value as PrototypeRuntimeDataActionValue, inputs);
+  if (value && !value.success) {
+    return value;
+  }
+  const match = resolvePrototypeDataMatch(action.where, inputs);
+  if (!match.success) {
+    return match;
+  }
+  const { where } = match;
+  if (action.type === "removeData") {
+    return applyPrototypeDataWrite(inputs.data, { op: "remove", path, where });
+  }
+  if (!value?.success) {
+    return refused("invalid_value", "Missing action value");
+  }
+  return applyResolvedDataAction(action, inputs.data, value.value, where);
+}
+
+function applyResolvedDataAction(
+  action: Record<string, unknown>,
+  data: unknown,
+  value: PrototypeJson,
+  where?: PrototypeDataMatch,
+): PrototypeDataWriteResult {
+  const path = String(action.path);
+  const maxItems = typeof action.maxItems === "number" ? action.maxItems : undefined;
+  switch (action.type) {
+    case "setData":
+      return applyPrototypeDataWrite(data, {
+        op: "set",
+        path,
+        value: value,
+        where,
+        member: typeof action.member === "string" ? action.member : undefined,
+      });
+    case "appendData":
+      return applyPrototypeDataWrite(data, {
+        op: "append",
+        path,
+        value: value,
+        maxItems,
+      });
+    case "upsertData":
+      return applyPrototypeDataWrite(data, {
+        op: "upsert",
+        path,
+        value: value,
+        key: String(action.key),
+        maxItems,
+      });
+    case "prependData":
+      // One row, wrapped as the page `[row]` exactly as the Android and iOS runtimes do (#16715).
+      return applyPrototypeDataWrite(data, { op: "prepend", path, value: [value], maxItems });
+    default:
+      return refused("invalid_value", "Not a data action");
+  }
 }

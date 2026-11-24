@@ -65,6 +65,7 @@ enum PrototypeRouteFields {
         mutating func condition(_ value: Fields, _ path: String) {
             field(value, "data", path, pointer: true)
             field(value, "key", path)
+            field(value, "equalsKey", path)
             keys(value, "valid", path)
             for key in ["equals", "notEquals", "contains", "startsWith"] { field(value, key, path) }
             object(value, "not", path) { $0.condition($1, $2) }
@@ -142,7 +143,9 @@ enum PrototypeRouteFields {
                 walker.field(semantics, "hint", at)
             }
             switch type {
-            case "image": field(value, "asset", path)
+            case "image":
+                field(value, "asset", path)
+                field(value, "url", path)
             case "text":
                 field(value, "text", path)
                 object(value, "linkify", path) { $0.actions($1, $2) }

@@ -76,24 +76,41 @@ export interface PrototypeInstallInput {
   icon?: PrototypeIconInput;
 }
 
-const FACE_ID_USAGE_KEY = "NSFaceIDUsageDescription";
+export const FACE_ID_USAGE_KEY = "NSFaceIDUsageDescription";
 const DEFAULT_FACE_ID_USAGE = "Confirm your identity when a prototype asks you to authenticate.";
+
+function parsedRequires(spec: PrototypeJson) {
+  const parsed = prototypeRequiresSchema.parse(
+    spec && typeof spec === "object" && !Array.isArray(spec) ? (spec.requires ?? {}) : {},
+  );
+  return Array.isArray(parsed) ? {} : parsed;
+}
+
+/**
+ * A Face ID host without this key refuses biometric.authenticate (#14328), so an app that declares
+ * the `biometric` module keeps the template's string, or gets the default. Undefined otherwise.
+ */
+export function faceIdUsageString(
+  spec: PrototypeJson,
+  templateFaceIdUsage: unknown,
+): string | undefined {
+  if (!parsedRequires(spec).platform?.includes("biometric")) {
+    return undefined;
+  }
+  return typeof templateFaceIdUsage === "string" && templateFaceIdUsage.trim() !== ""
+    ? templateFaceIdUsage
+    : DEFAULT_FACE_ID_USAGE;
+}
 
 function permissionUsageStrings(
   spec: PrototypeJson,
   templateFaceIdUsage: unknown,
 ): Record<string, string> {
-  const requires = prototypeRequiresSchema.parse(
-    spec && typeof spec === "object" && !Array.isArray(spec) ? (spec.requires ?? {}) : {},
-  );
+  const requires = parsedRequires(spec);
   const strings: Record<string, string> = {};
-  // A Face ID host without this key refuses biometric.authenticate (#14328), so a saved app that
-  // declares the `biometric` module keeps the template's string, or gets the default.
-  if (requires.platform?.includes("biometric")) {
-    strings[FACE_ID_USAGE_KEY] =
-      typeof templateFaceIdUsage === "string" && templateFaceIdUsage.trim() !== ""
-        ? templateFaceIdUsage
-        : DEFAULT_FACE_ID_USAGE;
+  const faceId = faceIdUsageString(spec, templateFaceIdUsage);
+  if (faceId !== undefined) {
+    strings[FACE_ID_USAGE_KEY] = faceId;
   }
   for (const permission of requires.permissions ?? []) {
     // Notifications have no iOS Info.plist usage key.

@@ -918,6 +918,8 @@ data class PrototypeResult(
   val degradedEffects: List<PrototypeDegradedEffect>? = null,
   /** Single-runtime status returned by a disposable app's attach agent. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val status: JsonObject? = null,
+  /** The successful show's runtime and module availability. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val platformRuntime: PrototypePlatformReport? = null,
 ) : WebSocketResponse(), CorrelatedResponse
 
 /**
@@ -990,6 +992,8 @@ enum class SavedPrototypeErrorCode {
   @SerialName("unsupported_format") UNSUPPORTED_FORMAT,
   @SerialName("internal_error") INTERNAL_ERROR,
   @SerialName("render_failed") RENDER_FAILED,
+  /** The spec has a node the saved viewer cannot draw, such as `webView` (#18906). */
+  @SerialName("unsupported_capability") UNSUPPORTED_CAPABILITY,
 }
 
 @Serializable
@@ -1068,6 +1072,15 @@ data class PrototypeStackSnapshot(
   }
 }
 
+/** Aggregate image states; contains no remote URLs or per-image failures. */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class PrototypeRemoteImageCounts(
+  @EncodeDefault val loaded: Int = 0,
+  @EncodeDefault val failed: Int = 0,
+  @EncodeDefault val pending: Int = 0,
+)
+
 /**
  * One prototype the device is showing. [id] is the prototype id, which is its spec id.
  * [lastSequence] is the highest `prototype_event` sequence allocated for it, so a host resumes from
@@ -1112,6 +1125,9 @@ data class PrototypeStatusEntry(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val orientation: String? = null,
   /** `unsupported` when a style was requested: overlays do not own the status bar. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val statusBar: String? = null,
+  /** The module runtime snapshot for this presentation, when the runtime reports it. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val platformRuntime: PrototypePlatformReport? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val images: PrototypeRemoteImageCounts? = null,
 )
 
 /**
@@ -1141,6 +1157,10 @@ enum class PrototypeEventKind {
   @SerialName("page_changed") PAGE_CHANGED,
   /** A stack changed top or depth: `name` is its id, payload is `{screen, depth}`. */
   @SerialName("screen_changed") SCREEN_CHANGED,
+  /** An inbound link matched: `name` is null, payload is `{url, entry}`. */
+  @SerialName("link_opened") LINK_OPENED,
+  /** An inbound link did not match: `name` is null, payload is `{url}`. */
+  @SerialName("link_unmatched") LINK_UNMATCHED,
   @SerialName("dismissed") DISMISSED,
   /**
    * The resolved light or dark mode of a shown prototype changed (`prototype_appearance_v1`). The

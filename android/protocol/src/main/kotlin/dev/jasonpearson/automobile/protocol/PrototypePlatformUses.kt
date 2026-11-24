@@ -54,6 +54,11 @@ internal object PrototypePlatformUses {
     for ((handler, path) in PrototypeChannels.handlers(root)) {
       scan(handler, path, ScanContext(inHandler = true), found)
     }
+    (root["links"] as? JsonArray).orEmpty().forEachIndexed { index, entry ->
+      (entry as? JsonObject)?.get("actions")?.let {
+        scan(it, "links[$index].actions", ScanContext(), found)
+      }
+    }
     root["root"]?.let { scan(it, "root", ScanContext(), found) }
     for ((node, path) in context.nodes) {
       PrototypeBindableFields.first(node, path) { field, at, kind ->
@@ -161,29 +166,6 @@ internal object PrototypePlatformUses {
   }
 
   /** `{platform:/pointer}` placeholders, scanned exactly as `{data:/pointer}` ones. */
-  private fun placeholders(text: String): List<String> {
-    val prefix = "platform:"
-    val found = mutableListOf<String>()
-    var cursor = 0
-    while (cursor < text.length) {
-      if (text[cursor] != '{' || !text.startsWith(prefix, cursor + 1)) {
-        cursor++
-        continue
-      }
-      val end =
-        minOf(
-          text.length,
-          cursor + 2 + prefix.length + PrototypeSpecValidator.MAX_PROTOTYPE_DATA_POINTER_LENGTH,
-        )
-      val close = (cursor + 1 until end).firstOrNull { text[it] == '}' }
-      val pointer = close?.let { text.substring(cursor + 1 + prefix.length, it) }.orEmpty()
-      if (close != null && PrototypeDataPointer.isValid(pointer)) {
-        found.add(pointer)
-        cursor = close + 1
-      } else {
-        cursor++
-      }
-    }
-    return found
-  }
+  private fun placeholders(text: String): List<String> =
+    PrototypeDataText.pointers(text, "platform")
 }

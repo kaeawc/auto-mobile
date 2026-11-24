@@ -1,3 +1,18 @@
+import {
+  validatePrototypePlatformOutcome,
+  prototypePlatformOutcomesUnsupportedMessage,
+} from "../prototypePlatformOutcomes";
+import {
+  PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY,
+  type PrototypePlatformOutcomeRequest,
+} from "../../observe/android/ctrlProxyProtocol";
+import {
+  prototypePlatformSimulationIssue,
+  prototypePlatformSimulationUnsupportedMessage,
+  simulatePrototypePlatformMessage,
+} from "../prototypePlatformSimulation";
+import { PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
+import type { PrototypePlatformSimulationRequest } from "../../observe/android/ctrlProxyProtocol/prototypeMessages";
 import { parsePrototypeBackdrop } from "../prototypeBackdrop";
 import {
   prototypeShaderPatchSpec,
@@ -159,6 +174,7 @@ function toPrototypeResult(result: PrototypeAgentResult): PrototypeResult {
       : {}),
     ...prototypeDegradedEffectsField(result.degradedEffects),
     success: result.success,
+    platformRuntime: result.platformRuntime,
     requestId: result.requestId,
     ...resultCount("fired", result.fired),
     ...resultCount("cleared", result.cleared),
@@ -354,6 +370,51 @@ export class IosPrototypeTransport implements PrototypeTransport {
     return toPrototypeResult(await this.request("dismiss_prototype", body, timeoutMs));
   }
 
+  async queueCallOutcome(
+    request: PrototypePlatformOutcomeRequest,
+    timeoutMs?: number,
+  ): Promise<PrototypeResult> {
+    if (
+      !this.supportsCapability(PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY) ||
+      !this.supportsCapability("queue_prototype_call_outcome")
+    ) {
+      throw new ActionableError(prototypePlatformOutcomesUnsupportedMessage());
+    }
+    const { issue } = validatePrototypePlatformOutcome(request.call, request.outcome);
+    if (!request.id || issue) {
+      throw new ActionableError(issue?.[1] ?? "simulate requires id");
+    }
+    return toPrototypeResult(
+      await this.request("queue_prototype_call_outcome", { ...request }, timeoutMs),
+    );
+  }
+
+  async simulatePlatformEvent(
+    id: string,
+    event: string,
+    data: PrototypePlatformSimulationRequest["data"],
+    timeoutMs?: number,
+  ): Promise<PrototypeResult> {
+    if (
+      !this.supportsCapability(PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY) ||
+      !this.supportsCapability("simulate_prototype_platform")
+    ) {
+      throw new ActionableError(prototypePlatformSimulationUnsupportedMessage());
+    }
+    const issue = prototypePlatformSimulationIssue(event, data);
+    if (issue) {
+      throw new ActionableError(issue[1]);
+    }
+    const message = simulatePrototypePlatformMessage({ id, event, data });
+    return toPrototypeResult(
+      await this.request(
+        message.type,
+        { id: message.id, event: message.event, data: message.data },
+        timeoutMs,
+      ),
+    );
+  }
+
   async advanceClock(
     id: string,
     advanceTimeMs: number,
@@ -465,6 +526,10 @@ export class IosPrototypeTransport implements PrototypeTransport {
     return this.agent.handshake.showingId;
   }
 
+  get eventShowingStartSequence(): number | undefined {
+    return this.agent.handshake.showingStartSequence;
+  }
+
   get eventInstanceId(): string | undefined {
     return this.agent.handshake.appInstanceId;
   }
@@ -489,14 +554,12 @@ export class IosPrototypeTransport implements PrototypeTransport {
     };
   }
 
-  onEvent(listener: (event: PrototypeEvent) => void): () => void {
+  onEvent(listener: (event: PrototypeEvent) => unknown): () => void {
     return this.agent.onEvent((message) => {
       // Decode at the push boundary, as CtrlProxy does: malformed frames never reach listeners,
       // and a kind this host does not know arrives as a sequence-only marker.
       const decoded = decodePrototypeEvent(message, "[prototype-agent]");
-      if (decoded !== undefined) {
-        listener(decoded);
-      }
+      return decoded === undefined ? undefined : listener(decoded);
     });
   }
 

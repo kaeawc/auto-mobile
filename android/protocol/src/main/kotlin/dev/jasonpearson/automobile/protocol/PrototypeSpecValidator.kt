@@ -45,6 +45,11 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_PAGER_DP: Int = limit("MAX_PROTOTYPE_PAGER_DP")
   val MAX_PROTOTYPE_DEPTH: Int = limit("MAX_PROTOTYPE_DEPTH")
   val MAX_PROTOTYPE_IMAGES: Int = limit("MAX_PROTOTYPE_IMAGES")
+  val MAX_PROTOTYPE_MEDIA_ITEMS: Int = limit("MAX_PROTOTYPE_MEDIA_ITEMS")
+  val MAX_PROTOTYPE_MEDIA_TOTAL_BYTES: Int = limit("MAX_PROTOTYPE_MEDIA_TOTAL_BYTES")
+  val MAX_PROTOTYPE_MEDIA_IMAGE_BYTES: Int = limit("MAX_PROTOTYPE_MEDIA_IMAGE_BYTES")
+  val MAX_PROTOTYPE_MEDIA_VIDEO_BYTES: Int = limit("MAX_PROTOTYPE_MEDIA_VIDEO_BYTES")
+  val MAX_PROTOTYPE_MEDIA_AUDIO_BYTES: Int = limit("MAX_PROTOTYPE_MEDIA_AUDIO_BYTES")
   val MAX_PROTOTYPE_SPEC_NODES: Int = limit("MAX_PROTOTYPE_SPEC_NODES")
   val MAX_PROTOTYPE_SPEC_IMAGES: Int = limit("MAX_PROTOTYPE_SPEC_IMAGES")
   val MAX_PROTOTYPE_LOOPS: Int = limit("MAX_PROTOTYPE_LOOPS")
@@ -65,6 +70,7 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_STORAGE_KEYS: Int = limit("MAX_PROTOTYPE_STORAGE_KEYS")
   val MAX_PROTOTYPE_DATA_DEPTH: Int = limit("MAX_PROTOTYPE_DATA_DEPTH")
   val MAX_PROTOTYPE_LIST_ITEMS: Int = limit("MAX_PROTOTYPE_LIST_ITEMS")
+  val MAX_PROTOTYPE_INNER_REPEAT_ITEMS: Int = limit("MAX_PROTOTYPE_INNER_REPEAT_ITEMS")
   val MAX_PROTOTYPE_DATA_ARRAY_ITEMS: Int = limit("MAX_PROTOTYPE_DATA_ARRAY_ITEMS")
   val MAX_PROTOTYPE_REPEAT_PATH_CELLS: Int = limit("MAX_PROTOTYPE_REPEAT_PATH_CELLS")
   val MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH: Int = limit("MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH")
@@ -113,8 +119,9 @@ object PrototypeSpecValidator {
     supportedCapabilities: Set<String>? = null,
     library: Boolean = false,
     shareAssetIds: Set<String>? = null,
+    budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
   ): PrototypeSpecValidation {
-    val context = Context()
+    val context = Context(budget)
     val result = PrototypeSpecInput.validateInput(input, context)
     if (result is PrototypeSpecValidation.Failure) return result
     val error =
@@ -133,8 +140,9 @@ object PrototypeSpecValidator {
     supportedCapabilities: Set<String>? = null,
     library: Boolean = false,
     shareAssetIds: Set<String>? = null,
+    budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
   ): PrototypeSpecValidation =
-    if (input.size > MAX_PROTOTYPE_SPEC_BYTES)
+    if (input.size > budget.maxSpecBytes)
       PrototypeSpecValidation.Failure(PrototypeSpecError("$", "Spec byte limit exceeded"))
     else
       try {
@@ -145,6 +153,7 @@ object PrototypeSpecValidator {
           supportedCapabilities,
           library,
           shareAssetIds,
+          budget,
         )
       } catch (_: IllegalArgumentException) {
         PrototypeSpecValidation.Failure(PrototypeSpecError("$", "Invalid UTF-8"))
@@ -163,18 +172,22 @@ object PrototypeSpecValidator {
   }
 
   /** The caller supplies the same compact encoder it uses for full-spec writes. */
-  fun prepareStateWrites(spec: PrototypeSpec, encoder: Json): PrototypeStateWriteValidator {
+  fun prepareStateWrites(
+    spec: PrototypeSpec,
+    encoder: Json,
+    budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
+  ): PrototypeStateWriteValidator {
     val encoded =
       try {
         encoder.encodeToString(PrototypeSpec.serializer(), spec)
       } catch (_: IllegalArgumentException) {
         // An unserializable base may become serializable when the write replaces its state.
         // Defer to the full write path, which preserves its original exception or validation error.
-        return fullStateWrites(spec, encoder)
+        return fullStateWrites(spec, encoder, budget)
       }
-    val context = Context()
+    val context = Context(budget)
     if (PrototypeSpecInput.validateInput(encoded, context) !is PrototypeSpecValidation.Success) {
-      return fullStateWrites(spec, encoder)
+      return fullStateWrites(spec, encoder, budget)
     }
     val value = checkNotNull(context.root).jsonObject
     val checked = checkNotNull(context.stateBindings)
@@ -205,14 +218,14 @@ object PrototypeSpecValidator {
     return PrototypeStateWriteValidator { state ->
       // Encoding first preserves serialization exceptions, including non-finite numbers.
       val encodedState = encoder.encodeToString(serializer, state)
-      if (fixedBytes + encodedState.toByteArray(Charsets.UTF_8).size > MAX_PROTOTYPE_SPEC_BYTES) {
+      if (fixedBytes + encodedState.toByteArray(Charsets.UTF_8).size > budget.maxSpecBytes) {
         fail("", "Spec byte limit exceeded")
       } else {
         try {
           val stored = json.parseToJsonElement(PrototypeStrictJson.prepare(encodedState))
           if (!validNumberTokens(stored)) fail("", "Invalid JSON")
           else
-            storedStateError(stored, stateRule, value, keyframeKeys)
+            storedStateError(stored, stateRule, value, keyframeKeys, context)
               // Node rules run before binding checks, as platform rules do in full validation.
               ?: mediaNodeError(
                 JsonObject(value + ("state" to stored)),
@@ -248,8 +261,14 @@ object PrototypeSpecValidator {
     stateRule: JsonObject,
     value: JsonObject,
     keyframeKeys: List<Pair<String, String>>,
+    context: Context,
   ): PrototypeSpecError? =
     walk(stored, stateRule, "state", Context(), 0)
+      // Inbound setState bindings must still fit the candidate state's scalar types.
+      // Run before the remaining semantic checks, matching full structural validation.
+      ?: value["links"]?.let {
+        PrototypeInboundLinks.error(JsonObject(value + ("state" to stored)), context)
+      }
       ?: PrototypeKeyframesRules.unknownTriggerKey(keyframeKeys, stored as? JsonObject)
       ?: PrototypeStorageValidation.error(
         JsonObject(value + ("state" to stored)),
@@ -262,9 +281,12 @@ object PrototypeSpecValidator {
   private val stateWriteActionTypes =
     setOf("setState", "toggle", "increment", "decrement", "request", "platform")
 
-  private fun fullStateWrites(spec: PrototypeSpec, encoder: Json) =
+  private fun fullStateWrites(spec: PrototypeSpec, encoder: Json, budget: PrototypeRuntimeBudget) =
     PrototypeStateWriteValidator { state ->
-      (validate(encoder.encodeToString(PrototypeSpec.serializer(), spec.copy(state = state)))
+      (validate(
+          encoder.encodeToString(PrototypeSpec.serializer(), spec.copy(state = state)),
+          budget = budget,
+        )
           as? PrototypeSpecValidation.Failure)
         ?.error
     }
@@ -272,8 +294,10 @@ object PrototypeSpecValidator {
   internal fun validNumberTokens(root: JsonElement): Boolean =
     PrototypeSpecInput.validNumberTokens(root)
 
-  internal fun dataWriteError(value: JsonObject): PrototypeSpecError? =
-    PrototypeDataRules.dataWriteError(value)
+  internal fun dataWriteError(
+    value: JsonObject,
+    budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
+  ): PrototypeSpecError? = PrototypeDataRules.dataWriteError(value, budget)
 
   private val datePattern = Regex("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
   private val daysInMonth = intArrayOf(31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)

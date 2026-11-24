@@ -1,7 +1,7 @@
 import { ToolResponseSerialization } from "./ToolResponseSerialization";
 import { ObservationDisplayRenderer, isObserveResult } from "./ObservationDisplayRenderer";
 import { readToolEnvelopePayload, writeToolEnvelopePayload } from "../daemon/toolEnvelopePayload";
-import { isWatchObservation } from "../models/WatchObservation";
+import { isScreenshotOnlyAppleObservation } from "../models/WatchObservation";
 import type { ObserveResult } from "../models/ObserveResult";
 import { appendArtifactResourceLinks } from "./finalizeToolResponse/artifactResourceLinks";
 import type { FinalizeToolResponseContext } from "./finalizeToolResponse/contracts";
@@ -114,12 +114,11 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
 }
 
 /**
- * An observation the observe renderer projects and diffs. A watch observation has no hierarchy
- * (#14910): projecting it would serve an empty skeleton, which reads as an empty screen, and
- * diffing would make it a session baseline, so it is served as the handler built it.
+ * Screenshot-only Apple simulator observations bypass projection and diffing so they
+ * omit hierarchy fields and leave the session baseline intact.
  */
 function isRenderedObservation(payload: unknown): payload is ObserveResult {
-  return isObserveResult(payload) && !isWatchObservation(payload);
+  return isObserveResult(payload) && !isScreenshotOnlyAppleObservation(payload);
 }
 
 /** Share the request's cached complete JSON with the artifact writer. */

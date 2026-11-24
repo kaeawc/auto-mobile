@@ -10,6 +10,8 @@ public enum CaptureCapability: String, CaseIterable {
     case encodedVideoH264 = "encoded-video-h264"
     case simulatorHighlights = "simulator-highlights"
     case simulatorIdleEvidence = "simulator-idle-evidence"
+    /// `--simulator-udid` headless capture from the device framebuffer (#19015).
+    case simulatorFramebuffer = "simulator-framebuffer"
 }
 
 /// Formats a {@link CaptureCapability} into a stable, greppable stderr line the

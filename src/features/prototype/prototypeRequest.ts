@@ -1,3 +1,6 @@
+import { prototypeDataPathHasIndex } from "./prototypeDataActions";
+import type { PrototypeActionContext } from "./prototypeGeneratedValues";
+import type { PrototypeDataMatch } from "./prototypeDataWrite";
 import { prototypeRequestAppendError } from "./prototypeRequestAppend";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { forbiddenHeaderOf } from "./prototypeEgressPolicy";
@@ -7,15 +10,18 @@ import {
   PROTOTYPE_NETWORK_CAPABILITY,
   PROTOTYPE_NETWORK_DEVICE_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
-import { prototypeDataPathPointer } from "./prototypeData";
+import { prototypeDataPathPointer, resolvePrototypeDataPointer } from "./prototypeData";
 import { prototypeFieldsOfKind } from "./prototypeEmitContext";
 import type { PrototypeJson } from "./prototypeJson";
 import {
   resolvePrototypeDataWriteValue,
+  resolvePrototypeDataMatch,
   type PrototypeDataWriteInputs,
 } from "./prototypeDataWrite";
 import type { PrototypeRequestMethod } from "./prototypeRequestProtocol";
 import type { PrototypeDataActionValue } from "./prototypeActionValues";
+import type { PrototypeRuntimeKind } from "./prototypePlatformReport";
+import { prototypeRuntimeRefusalGuidance } from "./prototypeRuntimeRefusal";
 
 /**
  * Host-side rules for the `request` action (#12523). The contract types its fields; this module
@@ -52,34 +58,39 @@ function unsupported(
   fields: readonly string[],
   platform: "android" | "ios",
   capability: string,
-  { what, fallback }: { what: string; fallback: string },
+  { what, fallback, runtime }: { what: string; fallback: string; runtime?: PrototypeRuntimeKind },
 ): string {
-  const device = platform === "android" ? "connected CtrlProxy" : "connected iOS prototype agent";
-  const update =
-    platform === "android"
-      ? "Update the connected CtrlProxy"
-      : "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version";
+  const { device, advice } = prototypeRuntimeRefusalGuidance(platform, runtime);
   const more = fields.length > 1 ? ` (and ${fields.length - 1} more)` : "";
-  return `The ${device} does not advertise ${capability}, so it cannot run ${what} at ${fields[0]}${more}. Nothing was shown. ${update}, ${fallback}.`;
+  // The Android disposable shell supplies no transport for either request path.
+  const next =
+    platform === "android" && runtime === "disposableApp"
+      ? "Show the spec in CtrlProxy to use network requests, or load data with a /data patch instead"
+      : `${advice}, ${fallback}`;
+  return `The ${device} does not advertise ${capability}, so it cannot run ${what} at ${fields[0]}${more}. Nothing was shown. ${next}.`;
 }
 
 export function prototypeNetworkUnsupportedMessage(
   fields: readonly string[],
   platform: "android" | "ios",
+  runtime?: PrototypeRuntimeKind,
 ): string {
   return unsupported(fields, platform, PROTOTYPE_NETWORK_CAPABILITY, {
     what: "the request action",
     fallback: "or load data with a /data patch instead",
+    runtime,
   });
 }
 
 export function prototypeNetworkDeviceUnsupportedMessage(
   fields: readonly string[],
   platform: "android" | "ios",
+  runtime?: PrototypeRuntimeKind,
 ): string {
   return unsupported(fields, platform, PROTOTYPE_NETWORK_DEVICE_CAPABILITY, {
     what: 'a request with via "device"',
     fallback: 'or use via "host", which the host executes',
+    runtime,
   });
 }
 
@@ -198,6 +209,10 @@ function requestActionError(
   if (action.body !== undefined && (method === "GET" || method === "HEAD")) {
     return { path: `${at}.body`, message: "A GET or HEAD request cannot have a body" };
   }
+  const keyedError = requestKeyedFieldsError(action, at);
+  if (keyedError) {
+    return keyedError;
+  }
   const into =
     typeof action.into === "string" ? prototypeIntoError(action.into, "request") : undefined;
   if (into !== undefined) {
@@ -208,6 +223,19 @@ function requestActionError(
     prototypeRequestEntryError(action.headers, at, "headers") ??
     prototypeRequestEntryError(action.query, at, "query")
   );
+}
+
+function requestKeyedFieldsError(
+  action: Record<string, unknown>,
+  at: string,
+): PrototypeRequestActionError | undefined {
+  if (action.member !== undefined && action.where === undefined) {
+    return { path: `${at}.member`, message: "member requires where" };
+  }
+  if (action.where !== undefined && typeof action.into !== "string") {
+    return { path: `${at}.where`, message: "where requires into" };
+  }
+  return undefined;
 }
 
 /** Static checks for one structurally valid `request` (or reserved `emit`) action at `at`. */
@@ -232,12 +260,33 @@ export function prototypeRequestsError(
   for (const { value, path } of actions) {
     const error =
       prototypeRequestError(value, path) ??
-      (value.type === "request" ? prototypeRequestAppendError(value, path, data ?? {}) : undefined);
+      (value.type === "request"
+        ? (prototypeRequestAppendError(value, path, data ?? {}) ??
+          requestKeyedTargetError(value, path, data))
+        : undefined);
     if (error) {
       return error;
     }
   }
   return undefined;
+}
+
+function requestKeyedTargetError(
+  action: Record<string, unknown>,
+  at: string,
+  data: unknown,
+): PrototypeRequestActionError | undefined {
+  if (!action.where || typeof action.into !== "string" || prototypeDataPathHasIndex(action.into)) {
+    return undefined;
+  }
+  const pointer = prototypeDataPathPointer(action.into);
+  if (!pointer) {
+    return undefined;
+  }
+  const target = resolvePrototypeDataPointer(data, pointer);
+  return target !== undefined && !Array.isArray(target)
+    ? { path: `${at}.into`, message: "Keyed request into target is not an array" }
+    : undefined;
 }
 
 /**
@@ -297,13 +346,22 @@ export interface ResolvedPrototypeRequest {
   url: string;
   headers: Record<string, string>;
   body?: PrototypeJson;
+  where?: PrototypeDataMatch;
+  member?: string;
+  context?: PrototypeActionContext;
 }
 
 export type ResolvedPrototypeRequestResult =
   | { success: true; request: ResolvedPrototypeRequest }
-  | { success: false; error: { code: "invalid_request" | "invalid_url"; message: string } };
+  | {
+      success: false;
+      error: { code: "invalid_request" | "invalid_url" | "lastGenerated_unset"; message: string };
+    };
 
-type RuntimeBinding = Exclude<PrototypeDataActionValue, { item: string } | { index: true }>;
+type RuntimeBinding = Exclude<
+  PrototypeDataActionValue,
+  { item: string } | { index: true } | { link: string }
+>;
 const isBinding = (value: unknown): value is RuntimeBinding =>
   typeof value === "object" && value !== null;
 
@@ -315,7 +373,7 @@ function scalarText(value: PrototypeJson, what: string): { text: string } | { me
 
 type Failure = {
   success: false;
-  error: { code: "invalid_request" | "invalid_url"; message: string };
+  error: { code: "invalid_request" | "invalid_url" | "lastGenerated_unset"; message: string };
 };
 const failure = (code: Failure["error"]["code"], message: string): Failure => ({
   success: false,
@@ -343,7 +401,10 @@ function entryText(
 ): { text: string } | Failure {
   const bound = isBinding(raw) ? resolvePrototypeDataWriteValue(raw, inputs) : undefined;
   if (bound && !bound.success) {
-    return failure("invalid_request", `${what}: ${bound.error.message}`);
+    return failure(
+      bound.error.code === "lastGenerated_unset" ? bound.error.code : "invalid_request",
+      `${what}: ${bound.error.message}`,
+    );
   }
   const text = scalarText(bound ? bound.value : (raw as string), what);
   return "message" in text ? failure("invalid_request", text.message) : text;
@@ -413,10 +474,10 @@ function addHeader(headers: Record<string, string>, name: string, text: string) 
   return undefined;
 }
 
-/** Swift cannot keep JSON key order, so query entries use one canonical order everywhere. */
+/** Swift cannot keep JSON key order, so header and query entries use one canonical order everywhere. */
 function entriesOf(action: Record<string, unknown>, field: "headers" | "query") {
   const entries = Object.entries((action[field] ?? {}) as Record<string, unknown>);
-  return field === "query" ? entries.sort(compareUtf16) : entries;
+  return entries.sort(compareUtf16);
 }
 
 const compareUtf16 = ([a]: [string, unknown], [b]: [string, unknown]): number =>
@@ -440,6 +501,30 @@ export function resolvePrototypeRequest(
   if (!(target instanceof URL)) {
     return target;
   }
+  const entries = resolveRequestEntries(action, inputs);
+  if (!entries.success) {
+    return entries;
+  }
+  const payload = resolveRequestPayload(action, inputs);
+  if (!payload.success) {
+    return payload;
+  }
+  return {
+    success: true,
+    request: {
+      method:
+        (action.method as PrototypeRequestMethod | undefined) ?? PROTOTYPE_REQUEST_DEFAULT_METHOD,
+      url: withQuery(target, entries.query),
+      headers: entries.headers,
+      ...payload.fields,
+    },
+  };
+}
+
+function resolveRequestEntries(
+  action: Record<string, unknown>,
+  inputs: PrototypeDataWriteInputs,
+): { success: true; headers: Record<string, string>; query: [string, string][] } | Failure {
   const headers: Record<string, string> = {};
   const query: [string, string][] = [];
   for (const field of ["headers", "query"] as const) {
@@ -454,22 +539,37 @@ export function resolvePrototypeRequest(
       }
     }
   }
+  return { success: true, headers, query };
+}
+
+function resolveRequestPayload(
+  action: Record<string, unknown>,
+  inputs: PrototypeDataWriteInputs,
+): { success: true; fields: Partial<ResolvedPrototypeRequest> } | Failure {
   const body =
     action.body === undefined
       ? undefined
       : resolvePrototypeDataWriteValue(action.body as RuntimeBinding, inputs);
   if (body && !body.success) {
-    return failure("invalid_request", `body: ${body.error.message}`);
+    return failure(
+      body.error.code === "lastGenerated_unset" ? body.error.code : "invalid_request",
+      `body: ${body.error.message}`,
+    );
   }
-  const method =
-    (action.method as PrototypeRequestMethod | undefined) ?? PROTOTYPE_REQUEST_DEFAULT_METHOD;
+  const match = resolvePrototypeDataMatch(action.where, inputs);
+  if (!match.success) {
+    return failure(
+      match.error.code === "lastGenerated_unset" ? match.error.code : "invalid_request",
+      match.error.message,
+    );
+  }
   return {
     success: true,
-    request: {
-      method,
-      url: withQuery(target, query),
-      headers,
+    fields: {
       ...(body ? { body: body.value } : {}),
+      ...(match.where ? { where: match.where } : {}),
+      ...(typeof action.member === "string" ? { member: action.member } : {}),
+      ...(inputs.context ? { context: { ...inputs.context } } : {}),
     },
   };
 }

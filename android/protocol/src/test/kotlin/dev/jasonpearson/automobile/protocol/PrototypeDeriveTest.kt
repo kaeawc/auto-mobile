@@ -24,6 +24,64 @@ class PrototypeDeriveTest {
     }
   }
 
+  @Test
+  fun `derived condition names validate at the authored path`() {
+    val fixture =
+      Json.parseToJsonElement(File(fixtureDirectory(), "derive/conditions.json").readText())
+        .jsonObject
+    val spec = fixture.getValue("spec").jsonObject
+    assertTrue(PrototypeSpecValidator.validate(spec.toString()) is PrototypeSpecValidation.Success)
+    val root = spec.getValue("root").jsonObject
+    val children = root.getValue("children").jsonArray
+    val invalidChild =
+      JsonObject(
+        children.first().jsonObject + ("visibleWhen" to fixture.getValue("unknownCondition")),
+      )
+    val invalidRoot =
+      JsonObject(root + ("children" to JsonArray(listOf(invalidChild) + children.drop(1))))
+    val invalidSpec = JsonObject(spec + ("root" to invalidRoot))
+    val result = PrototypeSpecValidator.validate(invalidSpec.toString())
+    val expected = fixture.getValue("error").jsonObject
+    assertEquals(
+      PrototypeSpecError(
+        expected.getValue("path").jsonPrimitive.content,
+        expected.getValue("message").jsonPrimitive.content,
+      ),
+      (result as? PrototypeSpecValidation.Failure)?.error,
+    )
+  }
+
+  @Test
+  fun `new bindings and key comparisons independently require derive support`() {
+    val inputs =
+      listOf(
+        """{"root":{"type":"text","text":"Equal",
+                     "visibleWhen":{"key":"left","equalsKey":"right"}}}""",
+        """{"derive":{"scalar":{"of":{"value":1},"format":{"number":{}}}},
+             "root":{"type":"button","label":"Emit","onTap":[
+               {"type":"emit","name":"value","context":{"raw":{"derived":"scalar"}}}]}}""",
+      )
+    for (input in inputs) {
+      val json = Json.parseToJsonElement(input).jsonObject
+      val spec = buildJsonObject {
+        put("id", "derive-gate")
+        putJsonObject("window") { putJsonObject("placement") { put("type", "fullscreen") } }
+        json.forEach { (name, value) -> put(name, value) }
+      }
+      val required = PrototypeStrictPolicy.required(spec)
+      assertTrue("prototype_derive_v1" in required, input)
+      val bytes = spec.toString().toByteArray()
+      val references = PrototypeBundleSpec.references(bytes)
+      assertTrue("prototype_derive_v1" in PrototypeBundleCapabilities.required(references), input)
+      val result = PrototypeSpecValidator.validate(bytes, required - "prototype_derive_v1")
+      assertEquals(
+        PrototypeSpecError("$", "Unsupported capabilities: prototype_derive_v1"),
+        (result as? PrototypeSpecValidation.Failure)?.error,
+        input,
+      )
+    }
+  }
+
   private class Counter : PrototypeDeriveObserver {
     val names = mutableListOf<String>()
 

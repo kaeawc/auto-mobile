@@ -20,14 +20,80 @@ import Foundation
     }
 #endif
 
+/// Where the observed iPad app window sat: the app's frame and, when that frame is inset from
+/// the screen, its window's frame in screen space.
+struct ObservedWindowPlacement: Equatable {
+    let appFrame: CGRect
+    let windowFrame: CGRect?
+
+    func matches(_ other: Self) -> Bool {
+        func close(_ lhs: CGRect?, _ rhs: CGRect?) -> Bool {
+            guard let lhs, let rhs else { return lhs == nil && rhs == nil }
+            return abs(lhs.minX - rhs.minX) < 0.5 && abs(lhs.minY - rhs.minY) < 0.5 &&
+                abs(lhs.width - rhs.width) < 0.5 && abs(lhs.height - rhs.height) < 0.5
+        }
+        return close(appFrame, other.appFrame) && close(windowFrame, other.windowFrame)
+    }
+}
+
 /// A completed observation is reusable only for its app and rotation-change epoch.
 struct ObservedGestureGeometry {
-    let geometry: GestureCoordinateGeometry
+    var geometry: GestureCoordinateGeometry
     let bundleId: String?
     let generation: UInt64
+    /// The iPad window placement the geometry was derived from; nil off iPad.
+    var placement: ObservedWindowPlacement? = nil
+    /// A gesture already ran on this geometry, and may have moved, retiled or maximized the
+    /// window, so the next gesture re-reads the placement first (#19050).
+    var usedByGesture = false
 
     func current(bundleId: String?, generation: UInt64) -> GestureCoordinateGeometry? {
         self.bundleId == bundleId && self.generation == generation ? geometry : nil
+    }
+
+    /// The geometry for the window found at `live` (#19050). An unchanged placement keeps the
+    /// cache. A moved, retiled or full-screen window gets its new app size, window translation
+    /// and inset flag, so its gestures route as an observation of it would.
+    func refreshed(to live: ObservedWindowPlacement) -> Self {
+        guard let placement, !placement.matches(live), !geometry.pinnedToObservation else { return self }
+        let app = GestureSize(width: Double(live.appFrame.width), height: Double(live.appFrame.height))
+        let inset = hasMultiPanelMismatch(app: app, screen: geometry.screen)
+        let translation = inset ? live.windowFrame.flatMap { window in
+            windowedAppTranslation(
+                appOrigin: GesturePoint(x: Double(live.appFrame.minX), y: Double(live.appFrame.minY)),
+                appSize: app,
+                windowOrigin: GesturePoint(x: Double(window.minX), y: Double(window.minY)),
+                windowSize: GestureSize(width: Double(window.width), height: Double(window.height))
+            )
+        } : nil
+        var next = self
+        next.geometry = GestureCoordinateGeometry(
+            app: app, screen: geometry.screen, observation: geometry.observation, rotation: geometry.rotation,
+            appOrigin: geometry.appOrigin, screenOrigin: geometry.screenOrigin, windowTranslation: translation,
+            applicationDisplayId: geometry.applicationDisplayId, insetWindow: inset
+        )
+        next.placement = live
+        return next
+    }
+
+    /// The cache a gesture command routes on (#19050). The first command after an observation
+    /// uses it as observed. A later one re-reads the window placement only when the cached
+    /// geometry keeps the `XCUICoordinate` path, which queries the same app live anyway, so the
+    /// re-read adds no new stall. A command the cache already routes synthesized never queries
+    /// the app: its points are screen points wherever the window has moved, and a live query to
+    /// an app the previous gesture backgrounded can block the runner for ~90 s (#10624, #10858).
+    func routed(
+        synthesizes: (GestureCoordinateGeometry) -> Bool,
+        livePlacement: (GestureSize) -> ObservedWindowPlacement?
+    )
+        -> Self
+    {
+        var next = self
+        if usedByGesture, placement != nil, !synthesizes(geometry), let live = livePlacement(geometry.screen) {
+            next = refreshed(to: live)
+        }
+        next.usedByGesture = true
+        return next
     }
 }
 
@@ -68,16 +134,55 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
         var tracker = ForegroundTracker()
         var appSwitcherMayBeVisible = false
-        private var gestureGeometry: ObservedGestureGeometry?
+        var layout = ObservedLayout()
 
         /// Reuse the last completed observation without XCUI reads on the legacy gesture path.
         var observedGestureGeometry: GestureCoordinateGeometry? {
-            gestureGeometry?.current(bundleId: foregroundBundleId, generation: DeviceRotation.changeGeneration)
+            layout.gesture?.current(bundleId: foregroundBundleId, generation: DeviceRotation.changeGeneration)
+        }
+
+        /// The geometry a gesture command routes on, read once per command (#19050; see
+        /// `ObservedGestureGeometry.routed`). `synthesizes` says whether a geometry takes the
+        /// synthesized route for this command's target.
+        func routedGestureGeometry(
+            synthesizes: (GestureCoordinateGeometry) -> Bool
+        )
+            -> GestureCoordinateGeometry?
+        {
+            guard observedGestureGeometry != nil, let cached = layout.gesture else { return nil }
+            let next = cached.routed(synthesizes: synthesizes) { liveWindowPlacement(screen: $0) }
+            if next.placement != cached.placement {
+                logger.info(
+                    "gesture geometry refreshed: window moved inset=\(next.geometry.insetWindow, privacy: .public)"
+                )
+            }
+            layout.gesture = next
+            return next.geometry
+        }
+
+        private func liveWindowPlacement(screen: GestureSize) -> ObservedWindowPlacement? {
+            guard let bundleId = foregroundBundleId else { return nil }
+            do {
+                return try catchingObjCException {
+                    let app = XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId)
+                    let appFrame = app.frame
+                    let inset = hasMultiPanelMismatch(
+                        app: GestureSize(width: Double(appFrame.width), height: Double(appFrame.height)),
+                        screen: screen
+                    )
+                    return ObservedWindowPlacement(
+                        appFrame: appFrame, windowFrame: inset ? app.windows.firstMatch.frame : nil
+                    )
+                }
+            } catch {
+                logger.warning("app window placement unavailable; gestures use the observed one: \(error)")
+                return nil
+            }
         }
 
         public func refreshGeometry() throws -> RefreshGeometryResponse.Geometry? {
             // Invalidate before any foreground probing or capture that can fail.
-            gestureGeometry = nil
+            layout.invalidate()
             _ = try getViewHierarchy()
             return observedGestureGeometry.map {
                 RefreshGeometryResponse.Geometry(geometry: $0, foregroundBundleId: foregroundBundleId)
@@ -145,7 +250,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             app.skipUIInterruptions()
             tracker.setApplication(app, bundleId: nil, observe: false)
             elementCache.removeAll()
-            gestureGeometry = nil
+            layout.invalidate()
         }
 
         public func trackObservedBundleId(_ bundleId: String) {
@@ -158,7 +263,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             app.skipUIInterruptions()
             tracker.setApplication(app, bundleId: bundleId, observe: bundleId != "com.apple.springboard")
             elementCache.removeAll()
-            gestureGeometry = nil
+            layout.invalidate()
         }
 
         /// Explicitly switch the tracked foreground app to the given bundle ID, clearing caches.
@@ -175,8 +280,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 now: DispatchTime.now().uptimeNanoseconds
             )
             elementCache.removeAll()
+            layout.foregroundSwitched(appChanged: previousBundleId != bundleId)
             if previousBundleId != bundleId {
-                gestureGeometry = nil
                 print("[ElementLocator] Foreground app changed: \(previousBundleId ?? "nil") -> \(bundleId)")
             }
         }
@@ -264,7 +369,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             }
 
             elementCache.removeAll()
-            gestureGeometry = nil
+            layout.invalidate()
 
             // Use the observed app's bundle identifier for packageName
             let bundleId = foregroundBundleId ?? "com.apple.springboard"
@@ -349,9 +454,45 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 windowFrames: snapshot.children.filter { $0.elementType == .window }.map(\.frame)
             )
 
+            // An inset iPadOS window is captured relative to itself, except its keyboard, which
+            // XCTest reports in screen space. Observe reports both in screen space (#18830).
+            var observedWindowFrame: CGRect?
+            let windowTranslation = panel != nil ? nil : tracked("windowTranslation") {
+                Self.windowScreenTranslation(
+                    appFrame: snapshot.frame,
+                    screenFrame: CGRect(
+                        x: 0, y: 0, width: screenMetrics.fallbackWidth, height: screenMetrics.fallbackHeight
+                    ),
+                    windowFrame: {
+                        observedWindowFrame = self.observedAppWindowFrame()
+                        return observedWindowFrame
+                    }
+                )
+            }
+            // An iPad window tiled at the screen origin needs no translation but is still inset,
+            // and other app windows can share the screen with it (#18830).
+            let fallbackScreenFrame = CGRect(
+                x: 0, y: 0, width: screenMetrics.fallbackWidth, height: screenMetrics.fallbackHeight
+            )
+            func isInset(in screen: CGRect) -> Bool {
+                hasMultiPanelMismatch(
+                    app: GestureSize(width: Double(snapshot.frame.width), height: Double(snapshot.frame.height)),
+                    screen: GestureSize(width: Double(screen.width), height: Double(screen.height))
+                )
+            }
+            let mayBeInsetPadWindow = panel == nil && bundleId != "com.apple.springboard"
+                && UIDevice.current.userInterfaceIdiom == .pad && isInset(in: fallbackScreenFrame)
+            let windowedScreenFrame: CGRect? = windowTranslation != nil || mayBeInsetPadWindow
+                ? tracked("screenFrame") { springBoardScreenFrame() } ?? fallbackScreenFrame
+                : nil
+            // UIScreen bounds can be stale (#2683): confirm a tile at the origin against SpringBoard.
+            let insetScreenFrame = windowTranslation != nil ? windowedScreenFrame : windowedScreenFrame.flatMap {
+                isInset(in: $0) ? $0 : nil
+            }
+
             // Build hierarchy from snapshot (no more IPC calls - all data is local)
             var truncationReasons: Set<String> = []
-            let rawElement = tracked("buildHierarchy") {
+            let builtElement = tracked("buildHierarchy") {
                 buildElementInfoFromSnapshot(
                     snapshot,
                     depth: 0,
@@ -359,15 +500,20 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                     truncationReasons: &truncationReasons,
                     keyboardFocus: keyboardFocus,
                     disableAllFiltering: disableAllFiltering,
+                    keyboardScreenBounds: insetScreenFrame,
                     rootChildFilter: panel.map { selected in
                         { Self.displayId(of: $0) == selected.displayId }
                     }
                 )
             }
+            // A landscape iPad home screen can frame SpringBoard's windows in portrait (#18827).
+            let (rawElement, portraitSpringBoard) = bundleId == "com.apple.springboard" && panel == nil
+                ? Self.portraitSpringBoardWindowsInRootSpace(builtElement, deviceRotation: screenMetrics.rotation)
+                : (builtElement, nil)
 
             let hierarchyWithTypedTextInputs = tracked("mergeTypedTextInputs") {
                 let candidates = typedTextInputSnapshots.enumerated().map { index, textInputSnapshot in
-                    buildElementInfoFromSnapshot(
+                    let candidate = buildElementInfoFromSnapshot(
                         textInputSnapshot,
                         depth: 1,
                         screenBounds: screenBounds,
@@ -377,11 +523,17 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                         keyboardFocus: keyboardFocus,
                         disableAllFiltering: disableAllFiltering
                     )
+                    return portraitSpringBoard.map {
+                        Self.rotatedIntoLandscape(candidate, portraitSpringBoard: $0)
+                    } ?? candidate
                 }
-                return ElementLocator.mergeMissingTextInputCandidates(
+                let merged = ElementLocator.mergeMissingTextInputCandidates(
                     into: rawElement,
                     candidates: candidates
                 )
+                // Report the inset window's nodes in screen space so bounds line up with the
+                // screenshot (#18830). The windows still exist here, before the optimizer.
+                return windowTranslation.map { Self.translatedToScreen(merged, by: $0) } ?? merged
             }
 
             // Apply optimization - flatten structural wrappers and filter empty nodes
@@ -408,15 +560,6 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 )
             } ?? panelRootElement
 
-            // Get window info from snapshot
-            let windowInfo = WindowInfo(
-                id: 0,
-                type: 1, // Application window
-                isActive: true,
-                isFocused: true,
-                bounds: ElementBounds(clamping: frame)
-            )
-
             // Check for system alerts from multiple sources:
             // 1. Alerts in the app's own snapshot tree (permission dialogs presented within the app)
             // 2. Alerts in SpringBoard's tree (system dialogs managed by SpringBoard)
@@ -425,22 +568,26 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 try getSystemAlerts(
                     appSnapshot: snapshot,
                     truncationReasons: &truncationReasons,
-                    keyboardFocus: keyboardFocus
+                    keyboardFocus: keyboardFocus,
+                    portraitSpringBoard: portraitSpringBoard
                 )
             }
 
             // If there are system alerts, include them in the hierarchy
-            let finalHierarchy: UIElementInfo
+            let screenSpaceHierarchy: UIElementInfo
             if !systemAlertCapture.alerts.isEmpty {
                 // Create a wrapper that contains both the app hierarchy and alerts
                 var children = rootElement.node ?? []
-                children.append(
-                    contentsOf: Self.alertsInObservedSpace(
-                        systemAlertCapture.alerts,
-                        innerPanelPortraitHeight: innerPanelFrame.map { ElementBounds.clampedInt($0.height) }
-                    )
+                let alerts = Self.alertsInObservedSpace(
+                    systemAlertCapture.alerts,
+                    innerPanelPortraitHeight: innerPanelFrame.map { ElementBounds.clampedInt($0.height) }
                 )
-                finalHierarchy = UIElementInfo(
+                children.append(
+                    contentsOf: windowTranslation.map { translation in
+                        alerts.map { Self.translatedToScreen($0, by: translation) }
+                    } ?? alerts
+                )
+                screenSpaceHierarchy = UIElementInfo(
                     text: rootElement.text,
                     resourceId: rootElement.resourceId,
                     className: rootElement.className,
@@ -453,8 +600,41 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                     node: children
                 )
             } else {
-                finalHierarchy = rootElement
+                screenSpaceHierarchy = rootElement
             }
+
+            let windowBounds = ElementBounds(
+                clamping: windowTranslation.map { frame.offsetBy(dx: $0.x, dy: $0.y) } ?? frame
+            )
+            let backgroundWindows = insetScreenFrame.map { screenFrame in
+                tracked("backgroundWindows") {
+                    backgroundAppWindows(
+                        focusedBundleId: bundleId,
+                        focusedFrame: windowBounds,
+                        screenFrame: screenFrame,
+                        truncationReasons: &truncationReasons,
+                        disableAllFiltering: disableAllFiltering
+                    )
+                }
+            } ?? []
+            layout.windowFrames = backgroundWindows.isEmpty ? nil : ObservedWindowFrames(
+                focused: windowBounds,
+                background: backgroundWindows.map { (bundleId: $0.bundleId, frame: $0.frame) }
+            )
+            let finalHierarchy = insetScreenFrame.map {
+                Self.withRootBounds(
+                    Self.mergingBackgroundWindows(backgroundWindows, into: screenSpaceHierarchy),
+                    ElementBounds(clamping: $0)
+                )
+            } ?? screenSpaceHierarchy
+            let windowInfo = WindowInfo(
+                id: 0,
+                type: 1, // Application window
+                isActive: true,
+                isFocused: true,
+                bounds: windowBounds,
+                packageName: backgroundWindows.isEmpty ? nil : bundleId
+            )
 
             // Get screen scale and dimensions for coordinate conversion
             // iOS reports bounds in points, but screenshots are in pixels
@@ -506,7 +686,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 rootBounds: finalHierarchy.bounds,
                 fallbackWidth: currentScreenMetrics.fallbackWidth,
                 fallbackHeight: currentScreenMetrics.fallbackHeight,
-                elements: finalHierarchy.node ?? []
+                // A windowed app's nodes say nothing about the screen frame read above.
+                elements: insetScreenFrame == nil ? finalHierarchy.node ?? [] : []
             )
             let pixelDimensions = ElementLocator.computePixelDimensions(
                 pointWidth: screenWidth,
@@ -531,20 +712,30 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 rotation: GestureCoordinateGeometry.observationRotation(
                     hierarchyRotation, size: observationSize, app: appSize
                 ),
+                // An inset window's observed points are screen points (#18830), which lets
+                // its gestures take the synthesized route (#18960).
+                windowTranslation: windowTranslation.map { GesturePoint(x: Double($0.x), y: Double($0.y)) },
                 // Live SpringBoard reads see only the cover's frame; keep the observed panel.
-                pinnedToObservation: innerPanelFrame != nil
+                pinnedToObservation: innerPanelFrame != nil,
+                // A tile at the screen origin has no translation but is still inset (#19050).
+                insetWindow: insetScreenFrame != nil
             )
-            gestureGeometry = ObservedGestureGeometry(
+            layout.gesture = ObservedGestureGeometry(
                 geometry: geometry,
                 bundleId: bundleId,
-                generation: beforeHierarchyCapture.generation
+                generation: beforeHierarchyCapture.generation,
+                // Only an iPad app window can move under a later gesture (#19050).
+                placement: panel == nil && bundleId != "com.apple.springboard"
+                    && UIDevice.current.userInterfaceIdiom == .pad
+                    ? ObservedWindowPlacement(appFrame: snapshot.frame, windowFrame: observedWindowFrame)
+                    : nil
             )
 
             return ViewHierarchy(
                 packageName: bundleId,
                 hierarchy: finalHierarchy,
                 windowInfo: windowInfo,
-                windows: [windowInfo],
+                windows: Self.windowInfos(focused: windowInfo, background: backgroundWindows),
                 screenScale: currentScreenMetrics.scale,
                 screenWidth: screenWidth,
                 screenHeight: screenHeight,
@@ -562,6 +753,10 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         public init() {}
 
         var observedGestureGeometry: GestureCoordinateGeometry? { nil }
+        func routedGestureGeometry(
+            synthesizes _: (GestureCoordinateGeometry) -> Bool
+        )
+            -> GestureCoordinateGeometry? { nil }
 
         public func refreshGeometry() throws -> RefreshGeometryResponse.Geometry? {
             _ = try getViewHierarchy()

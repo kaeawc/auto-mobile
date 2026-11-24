@@ -1,10 +1,10 @@
 import { describe, it, expect } from "bun:test";
-import { TelemetryPushSocketServer } from "../../src/daemon/telemetryPushSocketServer";
-import { FailuresPushSocketServer } from "../../src/daemon/failuresPushSocketServer";
+import { TelemetryPushSocketServer } from "../../src/daemon/streams/telemetryPushSocketServer";
+import { FailuresPushSocketServer } from "../../src/daemon/streams/failuresPushSocketServer";
 import {
   DEFAULT_THRESHOLDS,
   PerformancePushSocketServer,
-} from "../../src/daemon/performancePushSocketServer";
+} from "../../src/daemon/streams/performancePushSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";

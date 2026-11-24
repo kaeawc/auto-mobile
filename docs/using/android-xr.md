@@ -92,6 +92,50 @@ Observe before each tap. `tapOn` with `text` or `elementId` is the most reliable
 panel; use `tapAt` only for points you read from a screenshot. When an app draws a Compose
 `SpatialPanel` that does not receive display touches, `tapAt` refuses; use `tapOn` or `tapAny`.
 
+`rotate` is not supported on headsets or glasses: the XR display ignores rotation settings. It
+fails at once with an error that says so and changes no setting. Use a phone, tablet or foldable
+for orientation tests.
+
+## Hand and eye input on a headset
+
+Enable the opt-in `xrHeadsetInput` tool to pinch with the simulated right hand or select with eye
+gaze. Use it for behavior that depends on hand or eye input. Panel buttons and rows are still more
+reliable through `tapOn`.
+
+```text
+xrHeadsetInput { pointer: "hand", action: "select", x: 1280, y: 900 }
+xrHeadsetInput { pointer: "eye", action: "point", x: 1280, y: 900 }
+xrHeadsetInput { pointer: "hand", action: "drag", x: 1280, y: 1200, toX: 1280, toY: 600 }
+```
+
+| Parameter    | Meaning                                                                              |
+| ------------ | ------------------------------------------------------------------------------------ |
+| `pointer`    | `hand`: the right-hand ray and pinch. `eye`: the gaze point and click.               |
+| `action`     | `select` aims, presses and releases. `point` only aims (hover). `drag` is hand-only. |
+| `x`, `y`     | Display pixels, 0 to 16384, in the same space as `observe` `screenSize` (2560×2558). |
+| `toX`, `toY` | `drag` only: where the pinch is released.                                            |
+| `holdMs`     | `select` only: how long the press lasts, 0 to 5000 ms, default 100.                  |
+| `durationMs` | `drag` only: how long the move takes, 0 to 10000 ms, default 300.                    |
+
+The result has `success`, `message`, `pointer`, `action`, `rpc`, `field` and `events`, the
+(`x`, `y`, `buttons`) sequence that was sent. The emulator sends no acknowledgement, so call
+`observe` afterwards to check the effect. When the guest log shows the system image rejected the
+events, `success` is `false` and `guestRejected` counts them; use `tapOn` on that image.
+
+- Needs an Android XR headset emulator, version 35.4 or newer, running on the same host with gRPC
+  enabled (the default). Older emulators ignore the events.
+- Any other device, or one whose form factor cannot be read, is refused before input is sent.
+  Check that `listDevices` reports `formFactor: "xr-headset"`.
+- `does not advertise a gRPC endpoint` means the emulator was started without gRPC or on another
+  host. Restart it on this host.
+- A refused gRPC call names its status. An access-list or token refusal means the emulator's gRPC
+  security rejected the call; restart the emulator on this host.
+- Only the right hand pinches. Left hand, grab, poke, hand joints and a gaze direction cannot be
+  sent. The emulator itself does not support them.
+
+For the exact emulator interface, see
+[XR headset host input](../how-it-works/plat/android/xr-host-input.md).
+
 ## Navigating a glasses app
 
 Glasses apps are driven by focus. Enable `glassesInput` and use it to move focus and click the

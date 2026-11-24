@@ -1,3 +1,4 @@
+import { prototypePlatformOutcomeSchema } from "../../features/prototype/prototypePlatformOutcomes";
 import { prototypeOwnKeyRecord } from "../../features/prototype/prototypeOwnKeyRecord";
 import {
   MAX_MOCK_DOCUMENT_BYTES,
@@ -47,6 +48,7 @@ import {
   MAX_DISPOSABLE_APP_SLUG_LENGTH,
 } from "../../features/prototype/disposableApp/disposableAppId";
 import { getRemovedToolActionHint } from "../../utils/removedTools";
+import { PROTOTYPE_LARGE_BUDGET } from "../../features/prototype/prototypeRuntimeBudget";
 import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "../../utils/schemaHelpers";
 import { validatePrototypeSavedInput } from "../prototypeSavedActions";
 import { validatePrototypeStorageInput } from "../prototypeStorageAction";
@@ -63,9 +65,13 @@ export const PROTOTYPE_TOOL_NAME = "prototype";
 const specDetailsSchema = specZ.object({ spec: prototypeSpecSchema });
 const stateDetailsSchema = prototypeSpecSchema.pick({ state: true });
 
-/** The first problem with an authored spec as `{path, text}`; `text` includes Zod's allowed values. */
+/**
+ * The first problem with an authored spec as `{path, text}`; `text` includes Zod's allowed values.
+ * The target is not known yet, so this admits the largest runtime budget (#18804); the show
+ * preflight refuses a spec over the base budget on a runtime without `prototype_large_budget_v1`.
+ */
 export function specProblem(spec: unknown): { path: string; text: string } | undefined {
-  const validated = validatePrototypeSpec(spec);
+  const validated = validatePrototypeSpec(spec, { budget: PROTOTYPE_LARGE_BUDGET });
   if (validated.success) {
     return undefined;
   }
@@ -183,16 +189,24 @@ const disposableAppInput = z
       .describe("Lowercase hyphenated words such as feedly or news-reader; names the app id"),
     label: z.string().min(1).max(120).describe("The launcher label, such as Feedly"),
     icon: z
-      .object({
-        backgroundColor: z
-          .string()
-          .regex(
-            /^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/,
-            "icon.backgroundColor must be #RRGGBB or #AARRGGBB",
-          )
-          .describe("#RRGGBB or #AARRGGBB behind the adaptive icon and splash screen"),
-      })
-      .strict()
+      .union([
+        z.strictObject({
+          backgroundColor: z
+            .string()
+            .regex(
+              /^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/,
+              "icon.backgroundColor must be #RRGGBB or #AARRGGBB",
+            )
+            .describe("#RRGGBB or #AARRGGBB behind the adaptive icon monogram and splash screen"),
+        }),
+        z.strictObject({
+          asset: z
+            .string()
+            .min(1)
+            .max(MAX_PROTOTYPE_ASSET_ID_LENGTH)
+            .describe("Id of a PNG or JPEG supplied in assets in this installApp call"),
+        }),
+      ])
       .optional(),
     ttlHours: z
       .number()
@@ -443,7 +457,20 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .max(128)
         .optional()
         .describe(
-          "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push, media.statusChanged|ended|error drives a media player; other known module events require Android prototype_platform_simulation_v1 and a module that supports simulation",
+          "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push, media.statusChanged|ended|error drives a media player; other known module events require prototype_platform_simulation_v1 and a module that supports simulation",
+        ),
+      call: z
+        .string()
+        .min(1)
+        .max(128)
+        .optional()
+        .describe(
+          "simulate only: queue an outcome for this known platform call, for example test.echo; requires prototype_platform_outcomes_v1",
+        ),
+      outcome: prototypePlatformOutcomeSchema
+        .optional()
+        .describe(
+          "simulate call only: exactly one result (any JSON value) or error; at most 4096 UTF-8 bytes total",
         ),
       data: prototypeOwnKeyRecord(z.string(), z.unknown())
         .optional()
@@ -461,12 +488,12 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .min(1)
         .optional()
         .describe(
-          "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; optional for status and inspect only to select an Android disposable app by its installed spec id; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
+          "Prototype id required for simulate, dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; optional for status and inspect only to select an Android disposable app by its installed spec id; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
         ),
       assets: assetsInput
         .optional()
         .describe(
-          "show, save or share only: images to upload before the prototype is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the prototype changes and names the assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
+          "Assets for show, save, share or installApp. Supply {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Device uploads are sequential. If an upload fails, the prototype stays unchanged and the result names any assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
         ),
       url: z
         .string()
@@ -544,7 +571,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .enum(PROTOTYPE_EVENT_KINDS)
         .optional()
         .describe(
-          "awaitEvent only: filter event kind. screen_changed (name = stack id, payload {screen, depth, params?}; params are the top entry's route params, present only when it has any) is sent only when the top screen, depth or top params change. page_changed (name = pager id, payload = the new zero-based page index) is sent when a pager settles on another page. appearance_changed (name null, payload {mode, source}) is sent once whenever the shown prototype's resolved light/dark mode changes, by a device advertising prototype_appearance_v1. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for several. A finished request action arrives as kind emit with eventName prototype_request",
+          "awaitEvent only: filter event kind. screen_changed (name = stack id, payload {screen, depth, params?}; params are the top entry's route params, present only when it has any) is sent only when the top screen, depth or top params change. page_changed (name = pager id, payload = the new zero-based page index) is sent when a pager settles on another page. link_opened (name null, payload {url,entry}) precedes matched inbound-link actions; link_unmatched (name null, payload {url}) runs no actions. appearance_changed (name null, payload {mode, source}) is sent once whenever the shown prototype's resolved light/dark mode changes, by a device advertising prototype_appearance_v1. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for several. A finished request action arrives as kind emit with eventName prototype_request",
         ),
       afterSequence: z
         .number()
@@ -607,6 +634,8 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "ops",
     "baseRevision",
     "advanceTimeMs",
+    "call",
+    "outcome",
     "event",
     "data",
     "transport",
@@ -656,7 +685,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     open: ["id"],
     share: ["spec", "specPath", "assets", "url"],
     clearStorage: ["id"],
-    simulate: ["id", "advanceTimeMs", "event", "data", "transport"],
+    simulate: ["id", "advanceTimeMs", "event", "data", "transport", "call", "outcome"],
     dismiss: ["id", "all"],
     testSessionBegin: ["id", "goal", "cohort"],
     testSessionEnd: ["id"],
@@ -671,7 +700,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     awaitEvent: ["id", "eventName", "kind", "afterSequence"],
     serve: ["id", "port", "remote", "idleTimeoutMs"],
     stop: [],
-    installApp: ["spec", "specPath", "app"],
+    installApp: ["spec", "specPath", "app", "assets"],
     listApps: [],
     uninstallApp: ["appId", "all", "expired"],
   };

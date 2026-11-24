@@ -28,12 +28,16 @@ public enum PrototypeStorageOption: Sendable, Hashable {
     /// Store values in an app-selected directory, using the same file format and id partitioning.
     case directory(URL)
 
-    func coordinator(clock: PrototypeClock = SystemPrototypeClock()) -> PrototypeStorageCoordinator? {
+    func coordinator(
+        clock: PrototypeClock = SystemPrototypeClock(), secure: (any PrototypeSecureValueStore)? = nil
+    )
+        -> PrototypeStorageCoordinator?
+    {
         switch self {
         case .none: nil
-        case .fileBacked: PrototypeStorageCoordinator.fileBacked(clock: clock)
+        case .fileBacked: PrototypeStorageCoordinator.fileBacked(clock: clock, secure: secure)
         case let .directory(url):
-            PrototypeStorageCoordinator(store: FilePrototypeStorageStore(directory: url), clock: clock)
+            PrototypeStorageCoordinator(store: FilePrototypeStorageStore(directory: url), clock: clock, secure: secure)
         }
     }
 }
@@ -44,6 +48,7 @@ public struct PrototypeNetworkConfiguration: Sendable {
     /// The returned body is bounded by the renderer before it enters prototype data.
     public typealias Client = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
 
+    var remoteImages = PrototypeRemoteImageLoader.shared
     let device: any PrototypeHttpClient
     private let handler: (any PrototypeHttpClient)?
 
@@ -53,7 +58,13 @@ public struct PrototypeNetworkConfiguration: Sendable {
     #if canImport(Network)
         /// A transport that enforces the egress policy by dialing only checked IP addresses.
         public static func pinned(allowsCleartext: Bool = false) -> PrototypeNetworkConfiguration {
-            PrototypeNetworkConfiguration(device: PrototypePinnedHttpClient(allowsCleartext: allowsCleartext))
+            var configuration =
+                PrototypeNetworkConfiguration(device: PrototypePinnedHttpClient(allowsCleartext: allowsCleartext))
+            configuration.remoteImages = PrototypeRemoteImageLoader(
+                client: configuration.device,
+                development: PrototypeRemoteImages.developmentLoopback && allowsCleartext
+            )
+            return configuration
         }
     #endif
 
@@ -69,6 +80,13 @@ public struct PrototypeNetworkConfiguration: Sendable {
     public init(deviceClient: Client? = nil, hostHandler: Client? = nil) {
         device = deviceClient.map { EmbeddedHttpClient(client: $0) } ?? PrototypeURLSessionClient()
         handler = hostHandler.map { EmbeddedHttpClient(client: $0) }
+        if deviceClient != nil {
+            // An app hook may add credentials, so its images never enter the app-wide URL-keyed
+            // memory or disk caches; only this configuration's loader can reuse them.
+            remoteImages = PrototypeRemoteImageLoader(
+                client: device, memory: PrototypeRemoteImageMemory(), directory: nil
+            )
+        }
     }
 
     @MainActor

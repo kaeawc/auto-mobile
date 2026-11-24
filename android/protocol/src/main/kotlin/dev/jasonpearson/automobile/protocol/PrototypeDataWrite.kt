@@ -61,6 +61,7 @@ sealed interface PrototypeDataWrite {
 }
 
 enum class PrototypeDataWriteErrorCode(val wireValue: String) {
+  LAST_GENERATED_UNSET("lastGenerated_unset"),
   INVALID_PATH("invalid_path"),
   INVALID_VALUE("invalid_value"),
   AMBIGUOUS_MATCH("ambiguous_match"),
@@ -95,19 +96,23 @@ object PrototypeDataWriter {
     return pointer.takeIf(PrototypeDataPointer::isValid)
   }
 
-  fun apply(data: JsonObject?, write: PrototypeDataWrite): PrototypeDataWriteResult {
+  fun apply(
+    data: JsonObject?,
+    write: PrototypeDataWrite,
+    budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
+  ): PrototypeDataWriteResult {
     val pointer =
       pathPointer(write.path)
         ?: return refused(
           PrototypeDataWriteErrorCode.INVALID_PATH,
           "${write.path} is not a /data/<pointer> path",
         )
-    valueRefusal(write)?.let {
+    valueRefusal(write, budget)?.let {
       return it
     }
     val current = data ?: JsonObject(emptyMap())
     if (PrototypeKeyedDataWrite.appliesTo(write))
-      return PrototypeKeyedDataWrite.apply(current, pointer, write)
+      return PrototypeKeyedDataWrite.apply(current, pointer, write, budget)
     targetRefusal(current, pointer, write)?.let {
       return it
     }
@@ -128,7 +133,7 @@ object PrototypeDataWriter {
         is PrototypeDataWrite.Remove -> remove(current, tokens)
       }
         as JsonObject
-    val invalid = PrototypeSpecValidator.dataWriteError(next)
+    val invalid = PrototypeSpecValidator.dataWriteError(next, budget)
     if (invalid != null) {
       val code =
         if (invalid.message.contains("limit")) PrototypeDataWriteErrorCode.LIMIT_EXCEEDED
@@ -138,11 +143,18 @@ object PrototypeDataWriter {
     return PrototypeDataWriteResult.Success(next, trimmed)
   }
 
-  private fun exceedsWindowLimit(write: PrototypeDataWrite, maxItems: Double): Boolean =
+  private fun exceedsWindowLimit(
+    write: PrototypeDataWrite,
+    maxItems: Double,
+    budget: PrototypeRuntimeBudget,
+  ): Boolean =
     (write is PrototypeDataWrite.Upsert || write is PrototypeDataWrite.Append) &&
-      maxItems > PrototypeSpecValidator.MAX_PROTOTYPE_DATA_ARRAY_ITEMS
+      maxItems > budget.maxDataArrayItems
 
-  private fun valueRefusal(write: PrototypeDataWrite): PrototypeDataWriteResult? {
+  private fun valueRefusal(
+    write: PrototypeDataWrite,
+    budget: PrototypeRuntimeBudget,
+  ): PrototypeDataWriteResult? {
     if (
       write is PrototypeDataWrite.Upsert &&
         (!PrototypeDataPointer.isValid(write.key) ||
@@ -165,7 +177,7 @@ object PrototypeDataWriter {
         "$name needs an array value",
       )
     val maxItems = PrototypeDataArrayWindow.maximum(write) ?: return null
-    return if (!positiveSafeInteger(maxItems) || exceedsWindowLimit(write, maxItems))
+    return if (!positiveSafeInteger(maxItems) || exceedsWindowLimit(write, maxItems, budget))
       refused(
         PrototypeDataWriteErrorCode.INVALID_VALUE,
         "$name maxItems must be a positive safe integer",
@@ -288,38 +300,50 @@ object PrototypeDataWriter {
     }
   }
 
-  /**
-   * `{state}` and `{data}` read the committed values at the action; a missing source is an error.
-   */
+  /** Bindings read the committed values at the action; a missing source is an error. */
   fun resolveValue(binding: EmitContextBinding, inputs: EmitContextInputs): PrototypeDataValue {
-    fun fail(code: PrototypeDataWriteErrorCode, message: String) =
-      PrototypeDataValue.Failure(PrototypeDataWriteError(code, message))
+    PrototypeGeneratedValues.resolveBinding(binding, inputs.actionContext)?.let {
+      return it
+    }
     return when {
+      "object" in binding ->
+        PrototypeObjectDataValue.resolve(binding.getValue("object") as? JsonObject, inputs)
       "value" in binding -> PrototypeDataValue.Resolved(binding.getValue("value"))
       "state" in binding -> {
         val key = binding.getValue("state").jsonPrimitive.content
         inputs.state(key)?.let(PrototypeDataValue::Resolved)
-          ?: fail(PrototypeDataWriteErrorCode.INVALID_VALUE, "State key $key is not set")
+          ?: PrototypeDataBindings.failure(
+            PrototypeDataWriteErrorCode.INVALID_VALUE,
+            "State key $key is not set",
+          )
       }
-      "data" in binding -> {
-        val pointer = binding.getValue("data").jsonPrimitive.content
-        inputs.data(pointer)?.let(PrototypeDataValue::Resolved)
-          ?: fail(PrototypeDataWriteErrorCode.NOT_FOUND, "Data pointer $pointer does not exist")
-      }
-      "platform" in binding || "event" in binding -> {
-        val source = if ("platform" in binding) "platform" else "event"
-        val pointer = binding.getValue(source).jsonPrimitive.content
-        val value = if (source == "platform") inputs.platform(pointer) else inputs.event(pointer)
-        value?.let(PrototypeDataValue::Resolved)
-          ?: fail(PrototypeDataWriteErrorCode.NOT_FOUND, "Data pointer $pointer does not exist")
-      }
+      "data" in binding || "derived" in binding ->
+        PrototypeDataBindings.resolveDataOrDerived(binding, inputs)
+      "platform" in binding || "event" in binding -> resolveSourcePointer(binding, inputs)
       else ->
-        fail(
+        PrototypeDataBindings.failure(
           PrototypeDataWriteErrorCode.INVALID_VALUE,
           "A data write value must be bound to a literal, state or data before it runs",
         )
     }
   }
+}
+
+/** `{platform}` and `{event}` read a pointer from their source; a missing one is `not_found`. */
+private fun resolveSourcePointer(
+  binding: EmitContextBinding,
+  inputs: EmitContextInputs,
+): PrototypeDataValue {
+  val source = if ("platform" in binding) "platform" else "event"
+  val pointer = binding.getValue(source).jsonPrimitive.content
+  val value = if (source == "platform") inputs.platform(pointer) else inputs.event(pointer)
+  return value?.let(PrototypeDataValue::Resolved)
+    ?: PrototypeDataValue.Failure(
+      PrototypeDataWriteError(
+        PrototypeDataWriteErrorCode.NOT_FOUND,
+        "Data pointer $pointer does not exist",
+      ),
+    )
 }
 
 sealed interface PrototypeDataValue {
@@ -377,4 +401,23 @@ internal object PrototypeDataArrayWindow {
       is PrototypeDataWrite.Prepend -> write.maxItems?.toDouble()
       else -> null
     }
+}
+
+internal object PrototypeDataBindings {
+  fun resolveDataOrDerived(
+    binding: EmitContextBinding,
+    inputs: EmitContextInputs,
+  ): PrototypeDataValue {
+    if ("derived" in binding) {
+      val name = binding.getValue("derived").jsonPrimitive.content
+      return inputs.derived(name)?.let(PrototypeDataValue::Resolved)
+        ?: failure(PrototypeDataWriteErrorCode.NOT_FOUND, "Derived value $name is not set")
+    }
+    val pointer = binding.getValue("data").jsonPrimitive.content
+    return inputs.data(pointer)?.let(PrototypeDataValue::Resolved)
+      ?: failure(PrototypeDataWriteErrorCode.NOT_FOUND, "Data pointer $pointer does not exist")
+  }
+
+  fun failure(code: PrototypeDataWriteErrorCode, message: String) =
+    PrototypeDataValue.Failure(PrototypeDataWriteError(code, message))
 }

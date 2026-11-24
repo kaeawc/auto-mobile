@@ -15,12 +15,20 @@ setup() {
   mkdir -p "${FIXTURE}/ios/prototype-agent/Shaders"
   touch "${FIXTURE}/ios/prototype-agent/Shaders/PrototypeEffects.metal"
   cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/Info.plist" \
+    "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/ProtoViewer.entitlements" \
     "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy" "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
   cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/"*.xcstrings "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
   touch "${FIXTURE}/ios/prototype-agent/ProtoViewer/ProtoViewerApp.swift" \
     "${FIXTURE}/ios/prototype-agent/Viewer/ViewerApp.swift" \
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/Core.swift" \
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgent/Agent.swift"
+  mkdir -p "${FIXTURE}/scripts/store-listing"
+  cat > "${FIXTURE}/scripts/store-listing/generate-icons.ts" <<'TS'
+import { mkdirSync, writeFileSync } from "node:fs";
+const out = process.argv[process.argv.indexOf("--out") + 1];
+mkdirSync(`${out}/ios/AppIcon.appiconset`, { recursive: true });
+writeFileSync(`${out}/ios/AppIcon.appiconset/AppIcon-1024.png`, "png");
+TS
   export BUILD_LOG="${BATS_TEST_TMPDIR}/build.log"
   cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -40,11 +48,24 @@ elif [[ "$3" == swiftc ]]; then
   [[ "$*" == *'/ProtoViewer/ProtoViewerApp.swift'* ]]
   [[ "$*" != *'/Viewer/ViewerApp.swift'* && "$*" != *'Loader.c'* ]]
   [[ "${BUILD_TEST_FAILURE:-}" != compiler ]] || exit 1
+  while [[ "$1" != -Xlinker ]]; do shift; done
+  [[ "$1 $2 $3 $4 $5 $6 $7" == '-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker' ]]
+  entitlements="$8"
   while [[ "$1" != -o ]]; do shift; done
+  python3 - "$entitlements" "$(dirname "$2")/ProtoViewer.app/Info.plist" <<'PY'
+from pathlib import Path
+import plistlib
+import sys
+
+entitlements, metadata = (plistlib.loads(Path(path).read_bytes()) for path in sys.argv[1:])
+bundle_id = metadata['CFBundleIdentifier']
+assert entitlements['application-identifier'] == bundle_id
+assert entitlements['keychain-access-groups'][0] == bundle_id
+PY
   printf 'slice\n' > "$2"
 else
   [[ "$1 $2 $3" == '--sdk macosx swift' ]]
-  app="${!#}"
+  app="${*: -2:1}"
   touch "$app/ProtoViewerIcon60x60@2x.png" "$app/ProtoViewerIcon60x60@3x.png"
 fi
 SCRIPT
@@ -68,13 +89,30 @@ if [[ "$1 ${3:-} ${4:-} ${5:-}" == '-extract raw -o -' ]]; then
   python3 -c 'import plistlib, sys; print(plistlib.load(open(sys.argv[2], "rb"))[sys.argv[1]])' "$2" "$6"
   exit 0
 fi
-[[ "$1" == -replace || "$1" == -lint ]]
+if [[ "$1" == -replace && "$3" == -string ]]; then
+  python3 - "$2" "$4" "$5" <<'PY'
+from pathlib import Path
+import plistlib
+import sys
+
+key, value, filename = sys.argv[1:]
+path = Path(filename)
+metadata = plistlib.loads(path.read_bytes())
+if key == 'keychain-access-groups.0':
+    metadata['keychain-access-groups'][0] = value
+else:
+    metadata[key] = value
+path.write_bytes(plistlib.dumps(metadata))
+PY
+  exit 0
+fi
+[[ "$1" == -lint ]]
 SCRIPT
   cat > "${MOCK_BIN}/codesign" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$*" >> "$BUILD_LOG"
-[[ "$1 $2 $3 $4" == '--force --sign - '* ]]
+printf 'codesign %s\n' "$*" >> "$BUILD_LOG"
+[[ $# -eq 4 && "$1 $2 $3" == '--force --sign -' && -f "$4/ProtoViewer" ]]
 SCRIPT
   chmod +x "${MOCK_BIN}/"{xcrun,lipo,plutil,codesign}
   export PATH="${MOCK_BIN}:${PATH}"
@@ -100,7 +138,7 @@ SCRIPT
   [[ "$output" == *' -verify_arch arm64'* ]]
   [[ "$output" == *' -verify_arch x86_64'* ]]
   [[ "$output" != *'-verify_arch arm64 x86_64'* ]]
-  [[ "$output" == *'--force --sign - '* ]]
+  [[ "$output" == *"codesign --force --sign - $OUT/ProtoViewer.app"* ]]
 }
 
 @test "plist declares prototype and JSON imports without ATS file sharing or compiled icon keys" {
@@ -245,4 +283,27 @@ PY
   touch "$OUT/ProtoViewer.app/en.lproj/Assets.car"
   run bash "$SCRIPT" "$OUT"
   [ "$status" -ne 0 ]
+}
+
+@test "fails fast with an install hint when bun is not on PATH" {
+  PATH="${MOCK_BIN}:/usr/bin:/bin"
+  command -v bun > /dev/null && skip "bun is installed under /usr/bin or /bin"
+  run bash "$SCRIPT" "$OUT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'bun is required to render the ProtoViewer icon'* ]]
+  [[ "$output" == *'install-bun-deps.sh'* ]]
+  [ ! -e "$OUT/ProtoViewer.app/ProtoViewerIcon60x60@2x.png" ]
+}
+
+@test "an unresolvable sharp fails immediately instead of auto-installing, and no app is signed" {
+  command -v bun > /dev/null || skip "bun is not installed"
+  cat > "${FIXTURE}/scripts/store-listing/generate-icons.ts" <<'TS'
+await import("sharp-package-that-does-not-exist");
+TS
+  run timeout 20 bash "$SCRIPT" "$OUT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'Icon generator failed'* ]]
+  [[ "$output" == *'install-bun-deps.sh'* ]]
+  run cat "$BUILD_LOG"
+  [[ "$output" != *'--force --sign - '* ]]
 }

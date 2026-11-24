@@ -1,3 +1,6 @@
+import { prototypeRemoteImageError } from "./prototypeRemoteImages";
+import { prototypeGeneratedValuesError } from "./prototypeGeneratedBindings";
+import { prototypeInboundLinksError } from "./prototypeInboundLinks";
 import { prototypeGlassObjectError } from "./prototypeGlass";
 import { iconNames, prototypeIconNameError } from "./prototypeIconNames";
 import { excludeAccessoryReferences } from "./prototypeBindingValidation";
@@ -17,7 +20,8 @@ import contract from "../../../schemas/prototype-spec-contract.json";
 import { logger } from "../../utils/logger";
 import { expandPrototypeComponents } from "./prototypeComponents";
 import { prototypeLazyListError, prototypeLazyListLimitError } from "./prototypeLazyList";
-import { imageSlotUses, nodeImageUses, repeatErrors, repeatKeyInstances } from "./prototypeRepeat";
+import { imageSlotUses, nodeImageUses } from "./prototypeImageUses";
+import { repeatErrors, repeatKeyInstances } from "./prototypeRepeat";
 import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { prototypeDataActionsError } from "./prototypeDataActions";
 import { prototypeTimersError, prototypeTimerActions } from "./prototypeTimers";
@@ -36,7 +40,9 @@ import { chargeMotionNode } from "./prototypeMotionBudget";
 import { prototypeKeyframesError } from "./prototypeKeyframes";
 import { effectUses } from "./prototypeEffects";
 import { jsonCost } from "./prototypeJsonCost";
-import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
+import { isPrototypeDataScalar, keyPath, prototypeDataError } from "./prototypeDataValueValidation";
+export { prototypeDataError } from "./prototypeDataValueValidation";
+import { prototypeSpecSchema, type PrototypeSpec } from "./prototypeSpec";
 import {
   Rule,
   PrototypeValidationError,
@@ -54,6 +60,11 @@ import {
 } from "./prototypeBindingValidation";
 export { type PrototypeValidationError } from "./prototypeBindingValidation";
 import { PrototypeScreenBudget, prototypeScreenBudgetMessage } from "./prototypeScreenBudget";
+import {
+  PROTOTYPE_BASE_BUDGET,
+  prototypeBudgetRule,
+  type PrototypeRuntimeBudget,
+} from "./prototypeRuntimeBudget";
 import {
   horizontalLazyError,
   pagerNodeError,
@@ -73,14 +84,10 @@ interface Context {
   videoNodes: number;
   /** Current nesting per bounded reference (see `nestedReferences`). */
   nesting: Record<string, number>;
+  /** The target runtime's budget (#18804): spec, data and list limits a capability can raise. */
+  limits: PrototypeRuntimeBudget;
 }
 const definitions: Record<string, Rule> = contract.definitions;
-function keyPath(path: string, key: string): string {
-  if (prototypeContractPatterns.pathKey.test(key)) {
-    return path ? `${path}.${key}` : key;
-  }
-  return `${path || "$"}[${JSON.stringify(key)}]`;
-}
 function bytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
@@ -335,7 +342,6 @@ function objectConstraint(
   }
   return undefined;
 }
-/** Single-trigger dependents are optional; a pipe-separated trigger group requires exactly one. */
 function formConstraint(
   data: Record<string, unknown>,
   rule: Rule,
@@ -347,15 +353,29 @@ function formConstraint(
       `Exactly one of ${rule.exactlyOne.join(", ")} is required`,
     );
   }
+  return dependentConstraint(data, rule, path);
+}
+
+/** Multi-trigger groups require one dependent unless the contract marks the group optional. */
+function dependentConstraint(
+  data: Record<string, unknown>,
+  rule: Rule,
+  path: string,
+): PrototypeValidationError | undefined {
   const dependencies = rule.dependents ?? {};
   for (const trigger of Object.keys(dependencies).sort()) {
     const dependents = dependencies[trigger];
     const present = dependents.filter((key) => Object.hasOwn(data, key));
-    if (!trigger.split("|").some((key) => Object.hasOwn(data, key))) {
+    const triggers = trigger.split("|");
+    if (!triggers.some((key) => Object.hasOwn(data, key))) {
       if (present.length > 0) {
-        return fail(keyPath(path, present[0]), `Requires ${trigger.split("|").join(" or ")}`);
+        return fail(keyPath(path, present[0]), `Requires ${triggers.join(" or ")}`);
       }
-    } else if (trigger.includes("|") && present.length !== 1) {
+    } else if (
+      triggers.length > 1 &&
+      !rule.optionalDependentGroups?.includes(trigger) &&
+      present.length !== 1
+    ) {
       const target = present[1] ?? dependents[0];
       return fail(keyPath(path, target), `Exactly one of ${dependents.join(", ")} is required`);
     }
@@ -507,10 +527,7 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
   number: numberValid,
   true: (value) => value === true,
   boolean: (value) => typeof value === "boolean",
-  scalar: (value) =>
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value)),
+  scalar: isPrototypeDataScalar,
   enum: (value, rule) =>
     (typeof value === "string" || typeof value === "boolean") &&
     (rule.values ?? []).includes(value),
@@ -519,54 +536,23 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
     return Number.isFinite(cost) && cost <= (rule.maxBytes ?? Infinity);
   },
 };
-/** Data uses the emit payload cost after its own stricter depth-first walk. */
-export function prototypeDataError(
+function visitData(
   value: unknown,
-  maxBytes: number = contract.limits.MAX_PROTOTYPE_DATA_BYTES,
+  _rule: Rule,
+  _path: string,
+  { context }: { context: Context; depth: number },
 ): PrototypeValidationError | undefined {
-  if (!object(value)) {
-    return fail("data", "Expected object");
-  }
-  return (
-    walkDataValue(value, "data", 1) ??
-    (jsonCost(value) > maxBytes ? fail("data", "Data byte limit exceeded") : undefined)
+  return budgetDataError(value, context.limits);
+}
+function budgetDataError(
+  value: unknown,
+  limits: PrototypeRuntimeBudget,
+): PrototypeValidationError | undefined {
+  return prototypeDataError(
+    value,
+    limits.MAX_PROTOTYPE_DATA_BYTES,
+    limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
   );
-}
-function dataChildren(value: unknown, path: string): { value: unknown; path: string }[] {
-  if (Array.isArray(value)) {
-    return value.map((child, index) => ({ value: child, path: `${path}[${index}]` }));
-  }
-  const data = object(value) ?? {};
-  return Object.keys(data)
-    .sort()
-    .map((key) => ({ value: data[key], path: keyPath(path, key) }));
-}
-function walkDataValue(
-  value: unknown,
-  path: string,
-  depth: number,
-): PrototypeValidationError | undefined {
-  if (!Array.isArray(value) && !object(value)) {
-    return primitiveChecks.scalar(value, { kind: "scalar" })
-      ? undefined
-      : fail(path, "Invalid data value");
-  }
-  if (depth > contract.limits.MAX_PROTOTYPE_DATA_DEPTH) {
-    return fail(path, "Data depth limit exceeded");
-  }
-  if (Array.isArray(value) && value.length > contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS) {
-    return fail(path, "Data array limit exceeded");
-  }
-  for (const child of dataChildren(value, path)) {
-    const error = walkDataValue(child.value, child.path, depth + 1);
-    if (error) {
-      return error;
-    }
-  }
-  return undefined;
-}
-function visitData(value: unknown): PrototypeValidationError | undefined {
-  return prototypeDataError(value);
 }
 function visitChoice(
   value: unknown,
@@ -637,7 +623,7 @@ function walk(
   if (handler) {
     return handler(value, rule, path, { context, depth });
   }
-  return primitiveChecks[rule.kind]?.(value, rule)
+  return primitiveChecks[rule.kind]?.(value, prototypeBudgetRule(rule, context.limits))
     ? undefined
     : fail(path, `Invalid ${rule.kind === "boundKey" ? "key" : rule.kind} value`);
 }
@@ -807,17 +793,7 @@ function platformArgumentError(
   rule: Rule,
   path: string,
 ): PrototypeValidationError | undefined {
-  const context: Context = {
-    nodes: [],
-    actions: [],
-    budget: new PrototypeScreenBudget(),
-    effects: 0,
-    animatedEffects: 0,
-    keyframeNodes: 0,
-    videoNodes: 0,
-    nesting: { container: 0, condition: 0, action: 0 },
-  };
-  return walk(value, rule, path, { context, depth: 0 });
+  return walk(value, rule, path, { context: newContext(PROTOTYPE_BASE_BUDGET), depth: 0 });
 }
 /** The host-owned vocabulary: the reserved `automobile-` testTag namespace, then the platform rules. */
 function hostVocabularyError(
@@ -852,7 +828,10 @@ function behaviourErrors(
   { repeats, componentTimers }: { repeats: PrototypeRepeatData; componentTimers: Located[] },
 ): PrototypeValidationError | undefined {
   return (
-    prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
+    prototypeGeneratedValuesError(context.actions) ??
+    prototypeDataActionsError(context.actions, data.data, (value) =>
+      budgetDataError(value, context.limits),
+    ) ??
     prototypeRequestsError(context.actions, data.data) ??
     hostVocabularyError(value, context) ??
     prototypeTimersError([...context.actions, ...componentTimers]) ??
@@ -866,18 +845,8 @@ function behaviourErrors(
   );
 }
 
-function walkedError(value: unknown, context: Context): PrototypeValidationError | undefined {
-  return (
-    walk(value, definitions.spec, "", { context, depth: 0 }) ?? excludeAccessoryReferences(context)
-  );
-}
-
-function validateValue(
-  value: unknown,
-  options: PrototypeStrictOptions,
-  componentTimers: Located[] = [],
-): PrototypeValidationResult {
-  const context: Context = {
+function newContext(limits: PrototypeRuntimeBudget): Context {
+  return {
     nodes: [],
     actions: [],
     budget: new PrototypeScreenBudget(),
@@ -886,11 +855,33 @@ function validateValue(
     keyframeNodes: 0,
     videoNodes: 0,
     nesting: { container: 0, condition: 0, action: 0 },
+    limits,
   };
+}
+/** The target runtime's budget; the base budget when the caller names none (#18804). */
+function budgetOf(options: PrototypeStrictOptions): PrototypeRuntimeBudget {
+  return options.budget ?? PROTOTYPE_BASE_BUDGET;
+}
+function walkedError(value: unknown, context: Context): PrototypeValidationError | undefined {
+  return (
+    walk(value, definitions.spec, "", { context, depth: 0 }) ??
+    prototypeRemoteImageError(context.nodes, object(value)?.state) ??
+    excludeAccessoryReferences(context) ??
+    prototypeInboundLinksError(value, context.nodes, context.actions)
+  );
+}
+
+function validateValue(
+  value: unknown,
+  options: PrototypeStrictOptions,
+  componentTimers: Located[] = [],
+): PrototypeValidationResult {
+  const limits = budgetOf(options);
+  const context = newContext(limits);
   const data = object(value) ?? {};
-  const repeats = new PrototypeRepeatData(data.data);
+  const repeats = new PrototypeRepeatData(data.data, limits.MAX_PROTOTYPE_LIST_ITEMS);
   const error =
-    prototypeLazyListLimitError(value) ??
+    prototypeLazyListLimitError(value, limits.MAX_PROTOTYPE_LIST_ITEMS) ??
     walkedError(value, context) ??
     prototypeRoutesError(value, context.nodes, context.actions) ??
     prototypeSharedElementError(context.nodes, repeats, context.actions) ??
@@ -918,7 +909,8 @@ function validateExpanded(
   if (!expansion.success) {
     return { success: false, error: expansion.error };
   }
-  if (expansion.expanded && bytes(expansion.spec) > MAX_PROTOTYPE_SPEC_BYTES) {
+  const specBytes = budgetOf(options).MAX_PROTOTYPE_SPEC_BYTES;
+  if (expansion.expanded && bytes(expansion.spec) > specBytes) {
     return { success: false, error: fail("$", "Expanded spec byte limit exceeded") };
   }
   // Expanded contract order comes first; append authored definitions not represented there.
@@ -936,7 +928,7 @@ function validateExpanded(
     ? result
     : {
         success: false,
-        error: { path: expansion.locate(result.error.path), message: result.error.message },
+        error: { ...result.error, path: expansion.locate(result.error.path) },
       };
 }
 /** Raw JSON strings measure transmitted UTF-8 bytes; object input measures compact JSON bytes. */
@@ -949,7 +941,7 @@ export function validatePrototypeSpec(
     if (input === undefined) {
       return { success: false, error: fail("$", "Expected JSON") };
     }
-    if (Buffer.byteLength(input, "utf8") > MAX_PROTOTYPE_SPEC_BYTES) {
+    if (Buffer.byteLength(input, "utf8") > budgetOf(options).MAX_PROTOTYPE_SPEC_BYTES) {
       return { success: false, error: fail("$", "Spec byte limit exceeded") };
     }
     const parsedJson = prototypeStrictJson(input);
@@ -965,7 +957,7 @@ export function validatePrototypeSpecBytes(
   bytes: Uint8Array,
   options: PrototypeStrictOptions = {},
 ): PrototypeValidationResult {
-  if (bytes.byteLength > MAX_PROTOTYPE_SPEC_BYTES) {
+  if (bytes.byteLength > budgetOf(options).MAX_PROTOTYPE_SPEC_BYTES) {
     return { success: false, error: fail("$", "Spec byte limit exceeded") };
   }
   try {

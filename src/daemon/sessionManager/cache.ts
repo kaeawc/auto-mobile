@@ -34,6 +34,8 @@ export interface SessionCacheHost {
     | "trackRotationSessionSetup"
     | "runRotationMutationExclusive"
     | "trackScreenReaderSessionSetup"
+    | "recordRotationOriginals"
+    | "forgetRotationOriginals"
     | "runScreenReaderMutationExclusive"
     | "bumpNetworkConditionGeneration"
     | "runNetworkConditionMutationExclusive"
@@ -296,6 +298,18 @@ export class SessionCache {
     return this.host.findSession(sessionId)?.cacheData.rotation;
   }
 
+  /** Durably save the session's first originals (#18847); undefined when persistence is off. */
+  recordRotationOriginals(
+    session: Session,
+    state: RotationSessionState,
+  ): Promise<void> | undefined {
+    return this.host.stateRestore.recordRotationOriginals(session.assignedDevice, state);
+  }
+
+  forgetRotationOriginals(session: Session, state: RotationSessionState): void {
+    this.host.stateRestore.forgetRotationOriginals(session.assignedDevice, state);
+  }
+
   trackRotationSessionSetup(
     session: Session,
     createSetup: (assertCurrentDevice: () => void) => Promise<void>,
@@ -349,10 +363,17 @@ export class SessionCache {
    * Record that a session degraded the device-wide network condition (issue
    * #6012), preserving the pre-session baseline to restore on release. Write-once
    * per session: the first degrade wins, so release always restores the same
-   * baseline the session first observed.
+   * baseline the session first observed. A device-wide degrade joining an
+   * existing per-app slot only adds its own restore obligation (#19045).
    */
   setNetworkCondition(sessionId: string, state: NetworkConditionSessionState): void {
-    if (this.host.getNetworkCondition(sessionId)) {
+    const existing = this.host.getNetworkCondition(sessionId);
+    if (existing) {
+      if (state.deviceWide && !existing.deviceWide) {
+        this.host.updateSessionCache(sessionId, {
+          networkCondition: { ...existing, deviceWide: true },
+        });
+      }
       return;
     }
     this.host.updateSessionCache(sessionId, { networkCondition: state });

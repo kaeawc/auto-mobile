@@ -260,17 +260,62 @@ import os
         )
             async throws
         {
-            guard let handle = openIOKitHandle() else {
-                throw GestureError.notSupported("\(button) HID support unavailable")
+            let hid = try openHIDKeyboardClient(label: button)
+            defer { dlclose(hid.handle) }
+            for index in 0 ..< count {
+                if index > 0 { try await keyboardClock.sleep(for: interval) }
+                guard let retainedKeyDown = hid.createKeyboardEvent(nil, mach_absolute_time(), 0x0C, usage, true, 0)
+                else {
+                    throw GestureError.notSupported("\(button) HID key-down event unavailable")
+                }
+                let keyDown = retainedKeyDown.takeRetainedValue()
+                guard let retainedKeyUp = hid.createKeyboardEvent(nil, mach_absolute_time(), 0x0C, usage, false, 0)
+                else {
+                    throw GestureError.notSupported("\(button) HID key-up event unavailable")
+                }
+                let keyUp = retainedKeyUp.takeRetainedValue()
+                hid.dispatchEvent(hid.client, keyDown)
+                hid.dispatchEvent(hid.client, keyUp)
             }
-            defer { dlclose(handle) }
+        }
+
+        /// Presses a keyboard-page (0x07) chord as the simulator's hardware keyboard does: each
+        /// usage goes down in order, then up in reverse. SpringBoard handles system shortcuts
+        /// (Cmd+H, Cmd+Opt+D) this way without a focused field (#18908).
+        func pressKeyboardChordViaHID(usages: [UInt32], key: String) async throws {
+            let hid = try openHIDKeyboardClient(label: key)
+            defer { dlclose(hid.handle) }
+            let sequence = usages.map { ($0, true) } + usages.reversed().map { ($0, false) }
+            for (index, (usage, down)) in sequence.enumerated() {
+                if index > 0 { try await keyboardClock.sleep(for: .milliseconds(30)) }
+                guard let retained = hid.createKeyboardEvent(nil, mach_absolute_time(), 0x07, usage, down, 0) else {
+                    throw GestureError.notSupported("\(key) HID keyboard event unavailable")
+                }
+                hid.dispatchEvent(hid.client, retained.takeRetainedValue())
+            }
+        }
+
+        private struct HIDKeyboardClient {
+            let handle: UnsafeMutableRawPointer
+            let createKeyboardEvent: IOHIDEventCreateKeyboardEventFn
+            let dispatchEvent: IOHIDEventSystemClientDispatchEventFn
+            let client: IOHIDEventSystemClientRef
+        }
+
+        /// Opens the private IOHID event-system client; the caller must `dlclose(handle)`.
+        private func openHIDKeyboardClient(label: String) throws -> HIDKeyboardClient {
+            guard let handle = openIOKitHandle() else {
+                throw GestureError.notSupported("\(label) HID support unavailable")
+            }
+            var opened = false
+            defer { if !opened { dlclose(handle) } }
 
             let createEventSymbol = dlsym(handle, "IOHIDEventCreateKeyboardEvent")
             let createClientSymbol = dlsym(handle, "IOHIDEventSystemClientCreate")
             let dispatchEventSymbol = dlsym(handle, "IOHIDEventSystemClientDispatchEvent")
 
             guard let createEventSymbol, let createClientSymbol, let dispatchEventSymbol else {
-                throw GestureError.notSupported("\(button) HID symbols unavailable")
+                throw GestureError.notSupported("\(label) HID symbols unavailable")
             }
 
             let createKeyboardEvent = unsafeBitCast(
@@ -287,23 +332,13 @@ import os
             )
 
             guard let retainedClient = createSystemClient(nil) else {
-                throw GestureError.notSupported("\(button) HID client unavailable")
+                throw GestureError.notSupported("\(label) HID client unavailable")
             }
-            let client = retainedClient.takeRetainedValue()
-
-            for index in 0 ..< count {
-                if index > 0 { try await keyboardClock.sleep(for: interval) }
-                guard let retainedKeyDown = createKeyboardEvent(nil, mach_absolute_time(), 0x0C, usage, true, 0) else {
-                    throw GestureError.notSupported("\(button) HID key-down event unavailable")
-                }
-                let keyDown = retainedKeyDown.takeRetainedValue()
-                guard let retainedKeyUp = createKeyboardEvent(nil, mach_absolute_time(), 0x0C, usage, false, 0) else {
-                    throw GestureError.notSupported("\(button) HID key-up event unavailable")
-                }
-                let keyUp = retainedKeyUp.takeRetainedValue()
-                dispatchEvent(client, keyDown)
-                dispatchEvent(client, keyUp)
-            }
+            opened = true
+            return HIDKeyboardClient(
+                handle: handle, createKeyboardEvent: createKeyboardEvent, dispatchEvent: dispatchEvent,
+                client: retainedClient.takeRetainedValue()
+            )
         }
 
         private func openIOKitHandle() -> UnsafeMutableRawPointer? {

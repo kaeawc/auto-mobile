@@ -2,6 +2,7 @@ test/fixtures/observe-output/ios-keyboard-duo-inner/*.json text eol=lf
 test/fixtures/visionos-settings/*.json text eol=lf
 test/fixtures/android-display/**/*.txt text eol=lf
 test/fixtures/xr-headset/*.json text eol=lf
+test/fixtures/shareSheet/*.json text eol=lf
 test/fixtures/android-xr/observe-spatial-panel-full-space-18022.json text eol=lf
 test/fixtures/android-xr/observe-spatial-panel-no-focus-18025.json text eol=lf
 test/fixtures/android-xr/observe-spatial-panel-host-window-missing-18022.json text eol=lf
@@ -24,6 +25,12 @@ test/fixtures/wear-tiles/*.txt text eol=lf
 test/fixtures/crashReports/* text eol=lf
 test/fixtures/android-display-config/*.txt text eol=lf
 test/fixtures/android-power/*.txt text eol=lf
+test/fixtures/android-alarm/*.txt text eol=lf
+test/fixtures/android-jobscheduler/*.txt text eol=lf
+test/fixtures/android-lock-settings/*.txt text eol=lf
+test/fixtures/android-process-state/*.txt text eol=lf
+test/fixtures/android-media-session/*.txt text eol=lf
+test/fixtures/android-emulator-sensors/*.txt text eol=lf
 test/fixtures/port-reverse-probe/*.txt text eol=lf
 test/fixtures/android-oem/**/*.txt text eol=lf
 test/fixtures/android-display-geometry/*.txt text eol=lf
@@ -52,6 +59,7 @@ test/fixtures/android-notification-channel/*.txt text eol=lf
 test/fixtures/android-notification-enabled/*.txt text eol=lf
 test/fixtures/android-app-links/*.txt text eol=lf
 test/fixtures/ios-simctl/*.txt text eol=lf
+test/fixtures/ios-render-overlays/* text eol=lf
 test/fixtures/ios-simctl/log-show-compact-crashtv-tvos26-5.txt text eol=lf
 test/fixtures/ios-simctl/crash-report-crashtv-tvos26-5.ips text eol=lf
 test/fixtures/android-emulator/*.txt text eol=lf
@@ -60,7 +68,9 @@ test/fixtures/killProfile/api35/*.txt text eol=lf
 test/fixtures/android-car-service/*.txt text eol=lf
 test/fixtures/android-pointer-probe/*.txt text eol=lf
 test/fixtures/android-startup/*.txt text eol=lf
+test/fixtures/ios-startup/** text eol=lf
 test/fixtures/android-profiling/*.txt text eol=lf
+test/fixtures/ios-profiling/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/ios-duo/*.json text eol=lf
 test/fixtures/ios-carplay/*.json text eol=lf
@@ -110,6 +120,7 @@ test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
 test/fixtures/ios/ios27-uikit-semantic-links-sdk-owner-duplicate.json text eol=lf
 test/fixtures/ios/watch-log-saving-notification.txt text eol=lf
+test/fixtures/ios/watch-log-saving-notification-foreground.txt text eol=lf
 test/fixtures/ios/ipad-ios27-*.json text eol=lf
 test/fixtures/ios/iphone17-ios26-*.json text eol=lf
 test/fixtures/ios/keyboard-modes/*.json text eol=lf
@@ -203,6 +214,7 @@ docs/img/favicon.ico -filter -diff -merge -text
 # Launcher / app icons consumed by the Android, iOS, and desktop builds — must be
 # direct git blobs, since build & packaging jobs check out with lfs: false.
 android/playground/app/src/main/res/mipmap-*/ic_launcher*.png -filter -diff -merge -text
+android/prototype-app-shell/src/main/res/drawable-nodpi/prototype_icon_*.png -filter -diff -merge -text
 ios/Playground/Sources/Assets.xcassets/AppIcon.appiconset/AppIcon.png -filter -diff -merge -text
 android/desktop-app/src/main/resources/icons/app-icon.png -filter -diff -merge -text
 # Read from a marketplace clone, which does not fetch LFS objects.
@@ -223,6 +235,7 @@ test/fixtures/android-display/fold-pixel10pf-api36/fold-*-hinge-angle0.txt -text
 
 # Shared prototype specs: preserve byte limits and path parity on Windows.
 test/fixtures/prototype-spec/**/*.json text eol=lf
+test/fixtures/prototype-platform-report/*.json text eol=lf
 test/fixtures/prototype-saved-layout/**/*.json text eol=lf
 test/fixtures/prototype-embedded-routing/*.json text eol=lf
 test/fixtures/prototype-egress-policy/*.json text eol=lf
@@ -248,6 +261,7 @@ test/fixtures/ios/merger-pairs/*.json text eol=lf
 android/control-proxy/src/test/resources/ime-traces/*.txt text eol=lf
 test/fixtures/ios-sim-fleet/*.txt text eol=lf
 test/fixtures/ios-sim-process-resolver/*.txt text eol=lf
+test/fixtures/ios-sim-network-activity/*.txt text eol=lf
 # Real `ps -axo pid=,ppid=,rss=,pcpu=,command=` capture with a running emulator (#11588).
 test/fixtures/android-boot-admission/*.txt text eol=lf
 test/fixtures/android-boot-admission/proc-*-status.txt text eol=lf
@@ -275,6 +289,7 @@ test/fixtures/ios-contract/runner-checkout-sdk-capabilities.json text eol=lf
 test/fixtures/ios-contract/runner-checkout-storage-capabilities.json text eol=lf
 ios/control-proxy/Tests/CtrlProxyTests/Fixtures/sdk-health-*.json text eol=lf
 ios/control-proxy/Tests/CtrlProxyTests/Fixtures/recent-apps/*.txt text eol=lf
+ios/control-proxy/Tests/CtrlProxyTests/Fixtures/springboard-ipad/*.json text eol=lf
 test/fixtures/android-contract/*.json text eol=lf
 test/fixtures/ios-ctrlproxy-request-snapshots.json text eol=lf
 test/fixtures/ios-tcc-photos/*.json text eol=lf
@@ -350,3 +365,5 @@ test/fixtures/android-xr-sendkeys/*.txt text eol=lf
 test/fixtures/observe-output/compose-control-shapes-17955/*.json text eol=lf
 test/fixtures/observe-output/compose-interop-3183/*.json text eol=lf
 test/fixtures/observe-output/swipeon-container-floating-bar-18338/*.json text eol=lf
+test/fixtures/prototype-spec/data/generated-values.json text eol=lf
+test/fixtures/android-rotation-legacy/*.txt text eol=lf

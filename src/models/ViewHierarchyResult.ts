@@ -195,6 +195,11 @@ export interface ContentHiddenRegion {
   bounds: ElementBounds;
   reason: "compose-interop-no-hide-descendants" | string;
   areaPercent: number;
+  /**
+   * Bounds of the ComposeView that owns the region, sent by CtrlProxy APKs that already clip the
+   * region to it (#18879). Consumed by the server's clip and not passed on to clients.
+   */
+  hostBounds?: ElementBounds;
 }
 
 export type Hierarchy = {
@@ -350,13 +355,15 @@ export type ViewHierarchyNode = {
   "live-region"?: string;
   /**
    * Captured on real nodes: iOS `role` and `hint-text` (`test/fixtures/observe-output/ios-keyboard-tabbar/observe-keyboard-up.json`)
-   * and the Android collection column index (`test/fixtures/identify-interactions/playground-text-fields.json`).
+   * and the Android collection column index (`test/fixtures/identify-interactions/playground-text-fields.json`)
+   * and row index (`test/fixtures/shareSheet/android37-intentresolver-expanded-observe.json`).
    */
   /** Emitted by the Android extractor (`ViewHierarchyExtractor.kt`) and the iOS runner. */
   focusable?: boolean | string;
   role?: string;
   "hint-text"?: string;
   "collection-column-index"?: number | string;
+  "collection-row-index"?: number | string;
   checkable?: boolean | string;
   selected?: boolean | string;
   /**

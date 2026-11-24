@@ -1,3 +1,4 @@
+import { prototypeDerivedInputs } from "./prototypeDerive";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { record, type Raw } from "./prototypeTemplate";
 import type { PrototypePlatformError } from "./prototypePlatform";
@@ -73,8 +74,7 @@ export function prototypeSecureStorageEmitError(
   const context = action.type === "emit" ? record(action.context) : undefined;
   const secure = strings(record(root.storage)?.secure);
   for (const [name, binding] of Object.entries(context ?? {})) {
-    const key = record(binding)?.state;
-    const leaked = typeof key === "string" ? secureKeyFor(key, secure) : undefined;
+    const leaked = bindingKey(binding, secure, root.derive);
     if (leaked) {
       return {
         path: memberPath(`${path}.context`, name),
@@ -100,9 +100,14 @@ export function prototypeSecureStorageActionError(
   root: Raw,
 ): PrototypePlatformError | undefined {
   if (DATA_WRITE_TYPES.has(action.type)) {
-    return dataWriteError(action.value, `${path}.value`, root);
+    return (
+      dataWriteError(action.value, `${path}.value`, root) ??
+      bindingMapError(action.where, `${path}.where`, root, "data actions")
+    );
   }
   switch (action.type) {
+    case "removeData":
+      return bindingMapError(action.where, `${path}.where`, root, "data actions");
     case "emit":
       return prototypeSecureStorageEmitError(action, path, root);
     case "request":
@@ -149,11 +154,25 @@ function dataWriteError(
   path: string,
   root: Raw,
 ): PrototypePlatformError | undefined {
-  const key = bindingKey(value, strings(record(root.storage)?.secure));
+  const members = record(record(value)?.object);
+  if (members) {
+    // An `{object}` value (#18826) binds each member like a top-level value.
+    for (const name of Object.keys(members).sort()) {
+      const error = dataWriteError(members[name], memberPath(`${path}.object`, name), root);
+      if (error) {
+        return error;
+      }
+    }
+    return undefined;
+  }
+  const key = bindingKey(value, strings(record(root.storage)?.secure), root.derive);
   return key ? { path, message: `Secure storage key ${key} cannot be written to data` } : undefined;
 }
 
-/** Only state bindings are resolved here; literal strings do not expand placeholders. */
+/**
+ * State bindings and derived bindings over state are resolved here; literal strings do not expand
+ * placeholders.
+ */
 function bindingMapError(
   value: unknown,
   path: string,
@@ -163,7 +182,7 @@ function bindingMapError(
   const bindings = record(value) ?? {};
   const secure = strings(record(root.storage)?.secure);
   for (const name of Object.keys(bindings).sort()) {
-    const key = bindingKey(bindings[name], secure);
+    const key = bindingKey(bindings[name], secure, root.derive);
     if (key) {
       return {
         path: memberPath(path, name),
@@ -190,7 +209,9 @@ export function prototypeSecureStorageRequestError(
   }
   const leak = (value: unknown, at: string): PrototypePlatformError | undefined => {
     const key =
-      typeof value === "string" ? placeholderKey(value, secure) : bindingKey(value, secure);
+      typeof value === "string"
+        ? placeholderKey(value, secure)
+        : bindingKey(value, secure, root.derive);
     return key
       ? {
           path: at,
@@ -205,6 +226,7 @@ export function prototypeSecureStorageRequestError(
       .map((name) => [record(value)![name], memberPath(at, name)] as const);
   const candidates: (readonly [unknown, string])[] = [
     [action.url, `${path}.url`],
+    [record(action.where)?.equals, `${path}.where.equals`],
     ...members(action.headers, `${path}.headers`),
     ...members(action.query, `${path}.query`),
     [action.body, `${path}.body`],
@@ -222,10 +244,25 @@ export function prototypeSecureStorageRequestError(
   return undefined;
 }
 
-/** The secure key a `{state}` value binding reads, a repeat template matching any row. */
-function bindingKey(value: unknown, secure: string[]): string | undefined {
-  const key = record(value)?.state;
-  return typeof key === "string" ? secureKeyFor(key, secure) : undefined;
+/**
+ * The secure key a `{state}` value binding reads, a repeat template matching any row, or the first
+ * secure key among the state inputs of a `{derived}` binding. Derived entries read only data, state
+ * and literals, so one level of resolution covers every source.
+ */
+function bindingKey(value: unknown, secure: string[], derive: unknown): string | undefined {
+  const binding = record(value);
+  if (typeof binding?.state === "string") {
+    return secureKeyFor(binding.state, secure);
+  }
+  if (typeof binding?.derived === "string" && secure.length > 0) {
+    for (const stateKey of prototypeDerivedInputs(derive, binding.derived).keys) {
+      const key = secureKeyFor(stateKey, secure);
+      if (key) {
+        return key;
+      }
+    }
+  }
+  return undefined;
 }
 
 /**

@@ -1,3 +1,4 @@
+import { prototypeGeneratedForm } from "./prototypeGeneratedBindings";
 import { prototypeAdaptiveError } from "./prototypeAdaptive";
 import { z } from "zod/v3";
 import { type KeyInstance } from "./prototypeRepeat";
@@ -15,9 +16,12 @@ export interface Rule {
   preferMatchingFields?: boolean;
   atMostOne?: string[];
   dependents?: Record<string, string[]>;
+  optionalDependentGroups?: string[];
   integer?: boolean;
   min?: number;
   max?: number;
+  /** A runtime-budget limit name whose budget value replaces `max` (#18804). */
+  maxLimit?: string;
   maxBytes?: number;
   maxDepth?: number;
   unique?: boolean;
@@ -34,6 +38,7 @@ export interface Rule {
 }
 
 export interface PrototypeValidationError {
+  code?: "lastGenerated_unset";
   path: string;
   message: string;
 }
@@ -512,7 +517,8 @@ function setStateBindingErrors(
     typeof key !== "string" ||
     action.operandTemplated ||
     value === undefined ||
-    dynamicStateValue(value)
+    dynamicStateValue(value) ||
+    prototypeGeneratedForm(value) !== undefined
   ) {
     return undefined;
   }
@@ -591,7 +597,11 @@ export const bound = ({ located, value, item, operandTemplated }: KeyInstance<Lo
 });
 
 function dynamicStateValue(value: unknown): boolean {
-  return object(value)?.event !== undefined || object(value)?.platform !== undefined;
+  return (
+    object(value)?.event !== undefined ||
+    object(value)?.platform !== undefined ||
+    object(value)?.link !== undefined
+  );
 }
 
 /** `empty` tests a `/data` value (#14207); state key and `/platform` conditions have no emptiness. */

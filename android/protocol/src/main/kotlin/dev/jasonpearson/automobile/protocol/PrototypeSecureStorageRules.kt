@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.fail
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.keyPath
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -85,7 +86,8 @@ internal object PrototypeSecureStorageRules {
   }
 
   /**
-   * These value bindings read state directly; literal text does not expand `{key}` placeholders.
+   * These value bindings read state directly or through a derived value; literal text does not
+   * expand `{key}` placeholders.
    */
   private fun bindingMapError(
     bindings: JsonObject?,
@@ -95,8 +97,7 @@ internal object PrototypeSecureStorageRules {
   ): PrototypeSpecError? {
     val secure = root.member("storage")?.strings("secure").orEmpty()
     for ((name, binding) in bindings.orEmpty().toSortedMap()) {
-      val key = (binding as? JsonObject)?.text("state") ?: continue
-      val leaked = secureKeyFor(key, secure) ?: continue
+      val leaked = PrototypeSecureBindings.secureKey(binding, root, secure) ?: continue
       return fail(keyPath(path, name), "Secure storage key $leaked cannot be sent in $destination")
     }
     return null
@@ -107,8 +108,7 @@ internal object PrototypeSecureStorageRules {
     val context = action.member("context") ?: return null
     val secure = root.member("storage")?.strings("secure") ?: return null
     for ((name, binding) in context) {
-      val key = (binding as? JsonObject)?.text("state") ?: continue
-      val leaked = secureKeyFor(key, secure) ?: continue
+      val leaked = PrototypeSecureBindings.secureKey(binding, root, secure) ?: continue
       return fail(
         keyPath("$path.context", name),
         "Secure storage key $leaked cannot be sent in an emit context",
@@ -118,9 +118,9 @@ internal object PrototypeSecureStorageRules {
   }
 
   /**
-   * A `request` that sends a secure key without `allowSecureInRequest: true`: a `{state}` binding
-   * in a header, query value or body (a whole body, a form entry or a multipart value), or a
-   * `{key}` placeholder in the URL, a header or a query value. Members are checked in sorted order.
+   * A `request` may read a secure key through a state binding, a derived query or body binding, or
+   * a text placeholder. Sending it requires `allowSecureInRequest: true`. Members are checked in
+   * sorted order.
    */
   private fun requestError(
     action: JsonObject,
@@ -151,7 +151,7 @@ internal object PrototypeSecureStorageRules {
         (value as? JsonPrimitive)
           ?.takeIf { it.isString }
           ?.let { placeholderKey(it.content, secure) }
-          ?: (value as? JsonObject)?.text("state")?.let { secureKeyFor(it, secure) }
+          ?: PrototypeSecureBindings.secureKey(value, root, secure)
       if (key != null)
         return fail(
           at,
@@ -185,7 +185,7 @@ internal object PrototypeSecureStorageRules {
    * `token_{item.id}` is expanded per row on the device, so each `{...}` placeholder may stand for
    * any text there.
    */
-  private fun secureKeyFor(stateKey: String, secure: List<String>): String? {
+  internal fun secureKeyFor(stateKey: String, secure: List<String>): String? {
     val literals = stateKey.split(Regex("\\{[^}]*\\}"))
     return secure.firstOrNull {
       it.startsWith("state:") && templateMatches(literals, it.removePrefix("state:"))
@@ -221,5 +221,27 @@ internal object PrototypeSecureStorageRules {
     if ((value as? JsonPrimitive)?.isString != true)
       return "Secure storage keys must hold a string state value"
     return if (entry in keys) "Secure storage key $entry is also listed in storage.keys" else null
+  }
+}
+
+/**
+ * Secure storage keys a value binding can read, directly or via derived. Derived entries read only
+ * data, state and literals, so one level of resolution covers every source.
+ */
+internal object PrototypeSecureBindings {
+  fun secureKey(
+    raw: JsonElement?,
+    root: JsonObject,
+    secure: List<String>,
+  ): String? {
+    if (secure.isEmpty()) return null
+    val binding = raw as? JsonObject ?: return null
+    binding.text("state")?.let {
+      return PrototypeSecureStorageRules.secureKeyFor(it, secure)
+    }
+    val name = binding.text("derived") ?: return null
+    return PrototypeDerivedRules.inputs(root, name).firstNotNullOfOrNull { (source, input) ->
+      if (source == "state") PrototypeSecureStorageRules.secureKeyFor(input, secure) else null
+    }
   }
 }

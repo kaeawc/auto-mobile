@@ -19,6 +19,7 @@ public enum PrototypeSpecStrictValidator {
             else { throw PrototypeContractValidator.invalid("$", "Expected prototype envelope") }
             let state = fields["state"]?.objectFields ?? [:]
             let modelData = fields["data"]?.objectFields
+            try PrototypeInboundLinks.validate(fields, context: context)
             try PrototypeRoutes.validate(fields, context: context)
             try PrototypeStrings.validate(spec: fields, nodes: context.locatedNodes)
             let entries = try PrototypeDerivedCollections.entries(fields["derive"])
@@ -43,8 +44,9 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeLimits.guardSubstitutedText(collections, data: modelData)
             try repeats.expanded(root.objectFields ?? [:], path: "root")
             try PrototypeStrictSemantics.storage(fields, context: context)
+            try PrototypeGeneratedValues.validate(context.actions)
             try PrototypeDataWrite.validate(actions: context.actions, data: modelData)
-            try PrototypeRequestValidator.validateActions(context.actions, state: state)
+            try PrototypeRequestValidator.validateActions(context.actions, state: state, data: modelData)
             try PrototypePlatformValidator.validateTestTags(nodes: context.locatedNodes)
             try PrototypePlatformValidator.validate(
                 requires: fields["requires"],
@@ -57,6 +59,8 @@ public enum PrototypeSpecStrictValidator {
                 sensors: fields["sensors"],
                 notifications: fields["notifications"],
                 media: fields["media"],
+                links: fields["links"],
+                derive: fields["derive"],
                 root: root,
                 state: state
             )
@@ -80,7 +84,7 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeLimits.guardAuthoredTree(root)
             try PrototypeMenus.validateAuthoredText(root)
             try PrototypeRepeat.validateEmitContexts(collections, data: modelData)
-            let resolved = PrototypeDataResolver.resolveRoot(collections, data: modelData)
+            let resolved = PrototypeDataResolver.resolveRoot(collections, data: modelData, derived: derivedValues)
             try PrototypeLimits.guardTree(resolved)
             let expanded = PrototypeRepeat.expand(resolved)
             try PrototypeBarScroll.validate(expanded)
@@ -184,11 +188,16 @@ public enum PrototypeSpecStrictValidator {
         }.map { PrototypeLocatedValue(value: ["stateKey": $0.value["stateKey"] ?? .null], path: $0.path) }
         let secure = Set(repeats.bound(secureNodes).compactMap { $0.value["stateKey"]?.stringValue })
         guard !secure.isEmpty else { return }
+        let derive = fields["derive"]?.objectFields ?? [:]
         var bindings: [(text: String, path: String, key: Bool, request: Bool)] = []
         func append(_ raw: JSONValue?, path: String, request: Bool = false) {
             if let text = raw?.stringValue { bindings.append((text, path, false, request)) }
-            if let key = raw?.objectFields?["state"]?.stringValue {
-                bindings.append((key, "\(path).state", true, request))
+            guard let binding = raw?.objectFields else { return }
+            let member = binding["derived"] == nil ? "state" : "derived"
+            for source in PrototypeDerivedValidator.sources(binding, entries: derive) {
+                if let key = source["state"]?.stringValue {
+                    bindings.append((key, "\(path).\(member)", true, request))
+                }
             }
         }
         for (id, raw) in fields["channels"]?.objectFields ?? [:] {

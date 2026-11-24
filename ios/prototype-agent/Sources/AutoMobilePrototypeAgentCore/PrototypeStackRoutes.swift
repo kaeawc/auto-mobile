@@ -236,6 +236,7 @@ enum PrototypeRouteBinder {
         private func condition(_ value: inout Object) {
             field(&value, "data", .pointer)
             field(&value, "key")
+            field(&value, "equalsKey")
             keys(&value, "valid")
             for key in ["equals", "notEquals"] { field(&value, key, .typed) }
             for key in ["contains", "startsWith"] { field(&value, key) }
@@ -334,7 +335,9 @@ enum PrototypeRouteBinder {
 
         private func componentFields(_ value: inout Object, type: String) {
             switch type {
-            case "image": field(&value, "asset")
+            case "image":
+                field(&value, "asset")
+                field(&value, "url")
             case "text":
                 field(&value, "text")
                 object(&value, "linkify") { actions(&$0) }

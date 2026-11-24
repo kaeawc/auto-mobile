@@ -1,4 +1,7 @@
-import { PROTOTYPE_DEAD_TAP_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_DEAD_TAP_CAPABILITY,
+  PROTOTYPE_LARGE_BUDGET_CAPABILITY,
+} from "../../features/observe/android/ctrlProxyProtocol";
 import { prototypeDeadTapsUnsupportedMessage } from "../../features/prototype/prototypeDeadTaps";
 import { z } from "zod/v4";
 import { createDeviceHierarchyCapture } from "../../features/observe/DeviceHierarchyCapture";
@@ -12,6 +15,7 @@ import {
   PROTOTYPE_APPEARANCE_CAPABILITY,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_MULTI_SURFACE_CAPABILITY,
+  PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
   PROTOTYPE_WINDOW_CHROME_CAPABILITY,
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
@@ -34,10 +38,15 @@ import {
 } from "../../features/prototype/prototypeShaders";
 import { prototypeRequiredCapabilities } from "../../features/prototype/prototypeCapabilityGates";
 import {
+  prototypeLargeBudgetFields,
+  prototypeLargeBudgetUnsupportedMessage,
+} from "../../features/prototype/prototypeRuntimeBudget";
+import {
   PROTOTYPE_IOS_MINIMUM_OS,
   prototypeIosMinimumOsNote,
 } from "../../features/prototype/prototypeIosMinimumOs";
 import { resolvePrototypeDisplayId } from "../../features/prototype/prototypeDisplay";
+import type { PrototypeRuntimeKind } from "../../features/prototype/prototypePlatformReport";
 import { type PrototypeSpec } from "../../features/prototype/prototypeSpec";
 import {
   resolvePrototypeWindowChrome,
@@ -209,38 +218,96 @@ function shaderRefusalFor(
   return optIn ? { success: false, error: optIn } : undefined;
 }
 
+interface SpecCapabilityTarget {
+  disposableApp?: true;
+  android?: Pick<NonNullable<PrototypeTarget["android"]>, "supportsCommand">;
+  ios?: Pick<NonNullable<PrototypeTarget["ios"]>, "supportsCapability">;
+}
+
+function specCapabilityRuntime(target: SpecCapabilityTarget): PrototypeRuntimeKind | undefined {
+  if (target.disposableApp) {
+    return "disposableApp";
+  }
+  if (target.android) {
+    return "ctrlproxy";
+  }
+  if (target.ios) {
+    return target.ios.supportsCapability(PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY)
+      ? "iosViewer"
+      : "iosAgent";
+  }
+  return undefined;
+}
+
+function unsupportedSpecCapability(
+  target: SpecCapabilityTarget,
+  gate: ReturnType<typeof prototypeRequiredCapabilities>[number],
+  platform: "android" | "ios",
+  iosMinimumOs: Readonly<Record<string, number>>,
+): PrototypeResult {
+  const note = platform === "ios" ? prototypeIosMinimumOsNote(gate.capability, iosMinimumOs) : "";
+  const runtime = specCapabilityRuntime(target);
+  const message = gate.unsupportedMessage(gate.fields, platform, runtime) + note;
+  return { success: false, error: new ActionableError(message).message };
+}
+
 /** Refuses spec-introduced features before a show or patch reaches the device. */
 export async function specCapabilityRefusal(
-  target: {
-    android?: Pick<NonNullable<PrototypeTarget["android"]>, "supportsCommand">;
-    ios?: Pick<NonNullable<PrototypeTarget["ios"]>, "supportsCapability">;
-  },
+  target: SpecCapabilityTarget,
   spec: unknown,
   signal: AbortSignal | undefined,
   {
     iosMinimumOs = PROTOTYPE_IOS_MINIMUM_OS,
     env,
-  }: { iosMinimumOs?: Readonly<Record<string, number>>; env?: NodeJS.ProcessEnv } = {},
+    platform = target.android || target.disposableApp ? "android" : "ios",
+  }: {
+    iosMinimumOs?: Readonly<Record<string, number>>;
+    env?: NodeJS.ProcessEnv;
+    platform?: "android" | "ios";
+  } = {},
 ): Promise<PrototypeResult | undefined> {
   const shaderRefusal = shaderRefusalFor(target, spec, env);
   if (shaderRefusal) {
     return shaderRefusal;
   }
-  for (const gate of prototypeRequiredCapabilities(spec, target.android ? "android" : "ios")) {
+  for (const gate of prototypeRequiredCapabilities(spec, platform)) {
     const supported = target.android
       ? await target.android.supportsCommand(gate.capability)
       : target.ios?.supportsCapability(gate.capability) === true;
     // A capability lookup may wait for the connection and handshake.
     signal?.throwIfAborted();
     if (!supported) {
-      const platform = target.android ? "android" : "ios";
-      const note =
-        platform === "ios" ? prototypeIosMinimumOsNote(gate.capability, iosMinimumOs) : "";
-      const message = gate.unsupportedMessage(gate.fields, platform) + note;
-      return { success: false, error: new ActionableError(message).message };
+      return unsupportedSpecCapability(target, gate, platform, iosMinimumOs);
     }
   }
-  return undefined;
+  return largeBudgetRefusal(target, spec, signal);
+}
+
+/** A spec over the base runtime budget needs a runtime advertising the large one (#18804). */
+async function largeBudgetRefusal(
+  target: {
+    android?: Pick<NonNullable<PrototypeTarget["android"]>, "supportsCommand">;
+    ios?: Pick<NonNullable<PrototypeTarget["ios"]>, "supportsCapability">;
+  },
+  spec: unknown,
+  signal: AbortSignal | undefined,
+): Promise<PrototypeResult | undefined> {
+  const fields = prototypeLargeBudgetFields(spec);
+  if (fields.length === 0) {
+    return undefined;
+  }
+  const supported = target.android
+    ? await target.android.supportsCommand(PROTOTYPE_LARGE_BUDGET_CAPABILITY)
+    : target.ios?.supportsCapability(PROTOTYPE_LARGE_BUDGET_CAPABILITY) === true;
+  signal?.throwIfAborted();
+  if (supported) {
+    return undefined;
+  }
+  const message = prototypeLargeBudgetUnsupportedMessage(
+    fields,
+    target.android ? "android" : "ios",
+  );
+  return { success: false, error: new ActionableError(message).message };
 }
 
 /**
@@ -526,7 +593,10 @@ export async function preflightMutation(
   const failure =
     iosResetRefusal(target, args) ??
     (args.action === "show" && args.spec !== undefined
-      ? await specCapabilityRefusal(target, args.spec, signal, { env: dependencies.env })
+      ? await specCapabilityRefusal(target, args.spec, signal, {
+          env: dependencies.env,
+          platform: device.platform === "android" ? "android" : "ios",
+        })
       : undefined) ??
     (await appearanceRefusal(target, args, signal)) ??
     (await windowOptionsRefusal(target, args, signal));

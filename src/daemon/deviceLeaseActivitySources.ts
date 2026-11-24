@@ -1,7 +1,7 @@
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { resolveCtrlProxyForwardLeaseIdleMs } from "../features/observe/shared/ctrlProxyForwardLeaseOwnership";
 import { executionTracker } from "./executionTracker";
-import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
+import { getDeviceDataStreamServer } from "./streams/deviceDataStreamSocketServer";
 import type { DeviceLeaseActivitySources } from "./deviceLeaseActivity";
 
 /** Production sources: tool tracker, stream server and CtrlProxy clients. */

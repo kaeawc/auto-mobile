@@ -98,9 +98,20 @@ export type PrototypeRepeatDerivedEntry = z.infer<typeof prototypeRepeatDerivedE
 
 export const prototypeRepeatItemsSchema = z.union([
   z
-    .array(z.record(keySchema, z.union([z.string(), z.number().finite(), z.boolean()])))
+    .array(
+      z.record(
+        keySchema,
+        z.union([
+          z.string(),
+          z.number().finite(),
+          z.boolean(),
+          z.array(z.record(keySchema, z.union([z.string(), z.number().finite(), z.boolean()]))),
+        ]),
+      ),
+    )
     .min(1)
     .max(128),
   z.object({ path: pointerSchema }).strict(),
   z.object({ derived: keySchema }).strict(),
+  z.object({ field: keySchema }).strict(),
 ]);

@@ -26,8 +26,13 @@ import type { WatchRunnerClient } from "../features/watch/WatchRunnerClient";
 import type { VisionosRunnerClient } from "../features/visionos/VisionosRunnerClient";
 import { WatchRunnerError } from "../features/watch/WatchRunnerError";
 import { watchRunners } from "../features/watch/WatchRunnerRegistry";
-import { normalizeWatchHierarchy } from "../features/watch/WatchHierarchy";
+import {
+  withWatchRunnerRead,
+  type WatchRunnerRecoveryLifecycle,
+} from "../features/watch/WatchRunnerRecovery";
+import { normalizeWatchHierarchy, type WatchHierarchy } from "../features/watch/WatchHierarchy";
 import { getWatchRunnerLifecycle } from "../features/watch/WatchRunnerLifecycle";
+import { readSettledWatchHierarchy } from "../features/watch/WatchNotificationLook";
 import {
   LaunchctlWatchTargetAppProbe,
   type WatchTargetAppProbe,
@@ -44,6 +49,7 @@ import {
   TVOS_RUNNER_UNAVAILABLE_MESSAGE,
   VISIONOS_HIERARCHY_UNAVAILABLE_MESSAGE,
   type AppleScreenshotOnlyPlatform,
+  type ScreenshotOnlyObservation,
   type WatchObservation,
 } from "../models/WatchObservation";
 import { writeRetainedScreenshot } from "../features/observe/ScreenshotRetention";
@@ -89,25 +95,30 @@ export const simctlWatchScreenshotSource: WatchScreenshotSource = {
     new SimCtlClient(device).screenshot(device.deviceId, display, signal),
 };
 
-export interface WatchObserveDependencies {
+export interface WatchObserveDependencies extends RetainedObservePngDependencies {
   screenshots?: WatchScreenshotSource;
   runner?: WatchRunnerClient;
   /** Recovers a disconnected lifecycle-owned tvOS runner; defaults to the shared lifecycle. */
   tvosRunnerLifecycle?: Pick<TvosRunnerLifecycle, "restartOwned" | "ownsRunner">;
+  /** Restarts a dropped lifecycle-owned watch runner; defaults to the shared lifecycle. */
+  watchRunnerLifecycle?: WatchRunnerRecoveryLifecycle;
   /** Starts or reuses the visionOS window-app runner; defaults to the shared runner lifecycle. */
   visionosRunner?: (deviceId: string, signal?: AbortSignal) => Promise<VisionosRunnerClient>;
   /** The window app each connected visionOS runner was started for; defaults to the shared registry. */
   visionosRunnerTargets?: Pick<VisionosRunnerRegistry, "targetBundleId">;
   /** Whether this call reads a device another session holds; defaults to the pool's holder. */
   heldDeviceRead?: (deviceId: string) => boolean;
+  /** watchOS: whether the runner's target app still has a process; defaults to launchctl. */
+  watchTargetApp?: WatchTargetAppProbe;
+}
+
+export interface RetainedObservePngDependencies {
   idGenerator?: IdGenerator;
   timer?: Timer;
   fileWriter?: ScreenshotFileWriter;
   pathProtection?: ScreenshotPathProtection;
   /** The retained screenshot directory; defaults to the shared observe screenshot cache. */
   cacheDir?: () => string;
-  /** watchOS: whether the runner's target app still has a process; defaults to launchctl. */
-  watchTargetApp?: WatchTargetAppProbe;
 }
 
 const defaultWatchTargetAppProbe: WatchTargetAppProbe = new LaunchctlWatchTargetAppProbe({
@@ -142,6 +153,10 @@ const WATCH_UNSUPPORTED_OPTIONS: readonly OptionCheck[] = [
   ["screenshotOptions", (args) => args.screenshotOptions !== undefined],
   ['screenshot: "none"', (args) => args.screenshot === "none"],
 ];
+
+export function unsupportedScreenshotOnlyObserveOptions(args: ObserveArgs): string[] {
+  return WATCH_UNSUPPORTED_OPTIONS.filter(([, isSet]) => isSet(args)).map(([name]) => name);
+}
 
 /** Options a runner hierarchy can honour: the full projection and element waits (#17309). */
 const RUNNER_HIERARCHY_OPTIONS: ReadonlySet<string> = new Set(["project", "waitFor"]);
@@ -194,9 +209,9 @@ export function assertWatchObserveOptions(
   hierarchyAvailable = false,
 ): void {
   const hasRunnerHierarchy = hierarchyAvailable;
-  const refused = WATCH_UNSUPPORTED_OPTIONS.filter(
-    ([name, isSet]) => isSet(args) && !(hasRunnerHierarchy && RUNNER_HIERARCHY_OPTIONS.has(name)),
-  ).map(([name]) => name);
+  const refused = unsupportedScreenshotOnlyObserveOptions(args).filter(
+    (name) => !(hasRunnerHierarchy && RUNNER_HIERARCHY_OPTIONS.has(name)),
+  );
   if (args.display !== undefined && args.display !== "active" && args.display !== displayKey) {
     refused.push(`display: "${args.display}"`);
   }
@@ -220,22 +235,27 @@ async function captureWatchPng(
   source: WatchScreenshotSource,
   signal: AbortSignal | undefined,
 ): Promise<{ png: Buffer; width: number; height: number }> {
+  const platform = screenshotOnlyPlatform(device);
+  const label = platform === "watchos" ? "watch" : NON_IOS_APPLE_PLATFORM_LABELS[platform];
+  const target = `${label} simulator ${device.deviceId}`;
   let png: Buffer;
   try {
     png = await source.capture(device, display, signal);
   } catch (error) {
-    throw toActionableError(
-      error,
-      `Failed to capture a screenshot of ${device.platform === "watchos" ? "watch" : NON_IOS_APPLE_PLATFORM_LABELS[screenshotOnlyPlatform(device)]} simulator ${device.deviceId} with simctl`,
-    );
+    throw toActionableError(error, `Failed to capture a screenshot of ${target} with simctl`);
   }
+  return { png, ...requireObservePngSize(png, target) };
+}
+
+export function requireObservePngSize(
+  png: Buffer,
+  label: string,
+): { width: number; height: number } {
   const size = detectImageMimeType(png) === "image/png" ? readImageHeaderDimensions(png) : null;
   if (!size) {
-    throw new ActionableError(
-      `simctl returned no readable PNG for ${device.platform === "watchos" ? "watch" : NON_IOS_APPLE_PLATFORM_LABELS[screenshotOnlyPlatform(device)]} simulator ${device.deviceId}; observe again.`,
-    );
+    throw new ActionableError(`simctl returned no readable PNG for ${label}; observe again.`);
   }
-  return { png, ...size };
+  return size;
 }
 
 /** A runner hierarchy, or the reason this read carries only a screenshot. */
@@ -333,7 +353,7 @@ async function watchHierarchyForObserve(
   if (screenshotOnlyPlatform(device) === "tvos") {
     return tvosHierarchyForObserve(device, args, signal, dependencies.tvosRunnerLifecycle);
   }
-  return appleRunnerHierarchy(device, args, signal, dependencies.runner);
+  return appleRunnerHierarchy(device, args, signal, dependencies);
 }
 
 /**
@@ -374,17 +394,49 @@ async function tvosHierarchyForObserve(
   }
 }
 
+/**
+ * How observe reads the watch runner hierarchy, or undefined when there is no runner. A dropped
+ * lifecycle-owned runner is restarted once (#18822), except on a sessionless read of a device
+ * another session holds, which only reuses its runner.
+ */
+function watchHierarchyReader(
+  device: BootedDevice,
+  signal: AbortSignal | undefined,
+  dependencies: WatchObserveDependencies,
+): (() => Promise<WatchHierarchy>) | undefined {
+  const runner = dependencies.runner ?? watchRunners.get(device.deviceId);
+  if (dependencies.runner || (dependencies.heldDeviceRead ?? isReadOfHeldDevice)(device.deviceId)) {
+    return runner && (() => runner.hierarchy(signal));
+  }
+  const lifecycle = dependencies.watchRunnerLifecycle ?? getWatchRunnerLifecycle();
+  // An exited xcodebuild unregisters its client while the lifecycle keeps ownership to restart it.
+  if (runner === undefined && !lifecycle.ownsRunner(device.deviceId)) {
+    return undefined;
+  }
+  return () =>
+    withWatchRunnerRead(device.deviceId, (client) => client.hierarchy(signal), signal, lifecycle);
+}
+
 async function appleRunnerHierarchy(
   device: BootedDevice,
   args: ObserveArgs,
   signal: AbortSignal | undefined,
-  injectedRunner?: WatchRunnerClient,
+  dependencies: WatchObserveDependencies,
 ): Promise<HierarchyOutcome> {
   const platform = screenshotOnlyPlatform(device);
-  const runner = injectedRunner ?? watchRunners.get(device.deviceId);
-  assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, runner !== undefined);
+  const read = watchHierarchyReader(device, signal, dependencies);
+  assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, read !== undefined);
+  if (!read) {
+    return {};
+  }
   try {
-    return runner ? { hierarchy: normalizeWatchHierarchy(await runner.hierarchy(signal)) } : {};
+    // A notification short look has no action buttons yet; return its long look (#18655).
+    const hierarchy = await readSettledWatchHierarchy(
+      read,
+      dependencies.timer ?? defaultTimer,
+      signal,
+    );
+    return { hierarchy: normalizeWatchHierarchy(hierarchy) };
   } catch (error) {
     if (error instanceof WatchRunnerError && error.errorCode === "app_not_foreground") {
       // A backgrounded fixture has no runner-visible hierarchy; its screenshot is still useful.
@@ -410,25 +462,54 @@ export async function observeWatch(
     timer,
   });
   const hierarchyOutcome = await withWatchAppNotRunning(device, observed, signal, dependencies);
+  const label = platform === "watchos" ? "watch" : NON_IOS_APPLE_PLATFORM_LABELS[platform];
+  const { capture, protection } = await captureRetainedObservePng(
+    device.deviceId,
+    () =>
+      captureWatchPng(
+        device,
+        display.captureKey,
+        dependencies.screenshots ??
+          defaultWatchScreenshotSource(device, hierarchyOutcome.unavailableReason === undefined),
+        signal,
+      ),
+    { ...dependencies, timer, signal, label: `${label} simulator screenshot` },
+  );
+  const payload = watchObservationPayload(
+    { ...capture, display: display.ref },
+    platform,
+    hierarchyOutcome,
+  );
+  return waitOutcome
+    ? createObserveWaitResponse(payload, waitOutcome, args.includeScreenshotImage, {
+        signal,
+        protection,
+      })
+    : createObserveResponse(payload, args.includeScreenshotImage, { signal, protection });
+}
+
+export async function captureRetainedObservePng(
+  deviceId: string,
+  capturePng: () => Promise<{ png: Buffer; width: number; height: number }>,
+  dependencies: RetainedObservePngDependencies & { signal?: AbortSignal; label: string },
+): Promise<{
+  capture: Omit<ScreenshotOnlyObservation, "display">;
+  protection: ScreenshotPathProtection;
+}> {
   const idGenerator = dependencies.idGenerator ?? defaultIdGenerator;
+  const timer = dependencies.timer ?? defaultTimer;
   const protection = dependencies.pathProtection ?? screenshotPathProtection;
   const directory = (dependencies.cacheDir ?? (() => TakeScreenshot.getCacheDir()))();
   protection.start(directory);
 
   const observationId = idGenerator.next();
-  const { png, width, height } = await captureWatchPng(
-    device,
-    display.captureKey,
-    dependencies.screenshots ??
-      defaultWatchScreenshotSource(device, hierarchyOutcome.unavailableReason === undefined),
-    signal,
-  );
+  const { png, width, height } = await capturePng();
   // A cancelled call must not leave a retained screenshot nobody will read.
-  signal?.throwIfAborted();
+  dependencies.signal?.throwIfAborted();
   const capturedAt = timer.now();
   const screenshotPath = path.join(
     directory,
-    screenshotFileName(capturedAt, device.deviceId, idGenerator.next(), "png"),
+    screenshotFileName(capturedAt, deviceId, idGenerator.next(), "png"),
   );
   try {
     await writeRetainedScreenshot(screenshotPath, png, {
@@ -436,15 +517,11 @@ export async function observeWatch(
       writer: dependencies.fileWriter ?? defaultScreenshotFileWriter,
     });
   } catch (error) {
-    throw toActionableError(
-      error,
-      `Failed to store the ${platform === "watchos" ? "watch" : NON_IOS_APPLE_PLATFORM_LABELS[platform]} simulator screenshot`,
-    );
+    throw toActionableError(error, `Failed to store the ${dependencies.label}`);
   }
-  const capture: Omit<WatchObservation, "hierarchyUnavailable"> = {
+  const capture: Omit<ScreenshotOnlyObservation, "display"> = {
     observationId,
-    deviceId: device.deviceId,
-    display: display.ref,
+    deviceId,
     updatedAt: capturedAt,
     screenSize: { width, height, units: "physical-pixels" },
     screenshotPath,
@@ -456,13 +533,7 @@ export async function observeWatch(
     screenshotCaptureSource: "device",
     screenshotCapturedAt: new Date(capturedAt).toISOString(),
   };
-  const payload = watchObservationPayload(capture, platform, hierarchyOutcome);
-  return waitOutcome
-    ? createObserveWaitResponse(payload, waitOutcome, args.includeScreenshotImage, {
-        signal,
-        protection,
-      })
-    : createObserveResponse(payload, args.includeScreenshotImage, { signal, protection });
+  return { capture, protection };
 }
 
 /** True for a watch read with no target-app content: backgrounded, or an empty tree (#18052). */

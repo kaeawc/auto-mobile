@@ -118,7 +118,20 @@ Bind original rows with \`repeat.items:{derived:"results"}\`.
 Optional \`reduce:{op:"count"}\` or \`reduce:{op:"sum"|"min"|"max",field:"amount"}\`
 runs after limit; numeric reductions ignore non-numbers and empty reductions yield zero.
 Reduced scalars support the existing format, locale and timeZone options.
-Collections and derived repeat items require \`prototype_derive_v1\`.
+Use a derived condition such as \`visibleWhen:{derived:"cartCount",gt:0}\`. These conditions compare
+raw values and follow their inputs. They accept equals, notEquals, gt, lt, empty, contains, startsWith,
+lengthGt and lengthLt.
+Use \`{derived:"cartCount"}\` in data action values and selectors, emit context, request query
+entries and request body values (including form and multipart values). The action reads the
+current raw value. Use \`{key:"confirm",equalsKey:"password"}\` to compare two set state keys.
+Collections, derived repeat items, derived conditions, derived bindings and equalsKey require
+\`prototype_derive_v1\`.
+For two-level repeats, put \`repeat:{items:{field:"lines"},as:"line"}\` on an inner container.
+Each outer item must hold a lines array of at most 100 object rows; empty arrays draw no inner rows.
+The inner alias must differ from the outer alias and route. Inner templates can read both
+\`{line.sku}\` and \`{order.id}\`; \`{index}\` is inner and \`{outerIndex}\` is outer.
+\`{outerIndex}\` is invalid elsewhere. State keys must bind valid declared keys for every pair.
+A third level is invalid. Nested repeats require \`prototype_nested_repeat_v1\`.
 Scalar and formatted collection entries and repeat derive maps require \`prototype_format_v1\`; use literal strings with older renderers.
 \`dateTime\`, \`duration\`, \`plural\`, and \`fileSize\` are unsupported follow-ups.
 `;
@@ -179,6 +192,10 @@ Pseudo-localisation transforms each table value and plural form while preserving
 Every node accepts \`semantics {heading?,liveRegion?: "polite"|"assertive",group?,label?,hint?,traits?: ["button"|"image"|"selected"]}\`, requiring \`prototype_semantics_v1\`. At least one field is required; traits are unique (1–3). Label/hint are nonempty and accept translations, data and state bindings. Label conflicts with contentDescription.
 Heading enables screen-reader navigation; empty-heading lint flags headings without text/label. Group contains child traversal. Android maps heading/liveRegion/traversal group, label to contentDescription, hint to onClickLabel for tap actions else stateDescription, and traits to Role.Button/Role.Image/selected. iOS maps header/button/image/selected traits, contain grouping, label/hint, and live-region change announcements (not initial render; assertive has high speech priority).
 Android observe exposes heading as the string "true" and live-region as polite/assertive; iOS snapshots currently expose no SwiftUI traits. Logical RTL swipe sides are outside this capability.
+
+## Remote images
+
+Image nodes accept exactly one of \`asset\` or \`url\`. The remote-image contract requires \`prototype_remote_image_v1\` for url/placeholder/error/crossfade/via. URL length is 1–2048 UTF-16 units; state, data, repeat and route text bindings apply. Static URLs require HTTPS (literal localhost/127.0.0.1/[::1] HTTP is for dev fixtures), with no credentials, whitespace or backslashes. Optional placeholder/error are strict {asset} or {color: hex or Material role}; their assets are referenced and budgeted. crossfade is boolean; via is device (default) or host (static URLs only). URL images do not consume the asset-image budget. Loader contract: 8 MiB/download, Android memory heap/8, iOS memory 64 MiB, per-app URL-keyed disk 128 MiB, six concurrent loads, no cookies/referrers, request egress policy and ProtoViewer network switch. State description is loading|loaded|error; inspect image counts are {loaded,failed,pending}. URLs never enter accessibility text, observe or events. Loading and these state reports have no runtime implementation.
 `;
 
 export const GUIDE_TEST_SESSIONS = `## User-testing sessions
@@ -229,10 +246,47 @@ written:
 
 \`value\` uses the emit.context binding forms except \`page\`: \`{value: json}\` is the literal,
 \`{state: key}\` reads state, \`{data: pointer}\` reads data, and \`{item: field}\` and
-\`{index: true}\` read the repeat row (repeat only). A written value must be data: strings, booleans,
+\`{index: true}\` read the repeat row (repeat only). \`{object: {title: {state: "draft"}, done: {value: false}}}\`
+writes an object built from 1-16 named members, each one of those five flat forms (no nesting), so an
+\`appendData\` of it adds a whole new row from a text field; an \`upsertData\` key must start with a member.
+A missing member source fails the write. A written value must be data: strings, booleans,
 finite numbers, arrays and objects, without null. Inside a repeat, a whole \`{index}\` segment of
 \`path\`, as in \`/data/cart/{index}\`, is bound to the current row; \`{index}\` anywhere else, or
 \`{alias.field}\`, is rejected.
+
+With \`prototype_data_actions_v2\`, values also accept \`{generate:"id"}\`,
+\`{now:"epochMs"}\`, \`{now:"iso"}\` and \`{lastGenerated:true}\`. Exact generated objects
+inside literal \`{value:json}\` expand too. Each occurrence resolves once when its action runs;
+only generate changes lastGenerated. A fresh action list starts unset. Requests capture its value
+at dispatch for their onSuccess/onError lists. An unset read is \`lastGenerated_unset\`.
+
+Canonical send pattern (declare \`data.messages: []\`):
+
+\`\`\`json
+[
+  {"type":"appendData","path":"/data/messages","value":{"value":{"id":{"generate":"id"},"status":"sending","at":{"now":"epochMs"}}}},
+  {"type":"request","method":"POST","url":"https://example.test/messages","body":{"lastGenerated":true},
+   "onSuccess":[{"type":"setData","path":"/data/messages","where":{"field":"id","equals":{"lastGenerated":true}},"member":"status","value":{"value":"sent"}}],
+   "onError":[{"type":"setData","path":"/data/messages","where":{"field":"id","equals":{"lastGenerated":true}},"member":"status","value":{"value":"failed"}}]}
+]
+\`\`\`
+
+Show a Retry button on failed rows. Its onTap sets that row's status to sending, then repeats the
+POST with \`{item:"id"}\` as body and selector in both callbacks; retry keeps the existing id.
+For a retry button inside the messages repeat, use this onTap list (onError restores failed):
+
+\`\`\`json
+[
+  {"type":"setData","path":"/data/messages","where":{"field":"id","equals":{"item":"id"}},"member":"status","value":{"value":"sending"}},
+  {"type":"request","method":"POST","url":"https://example.test/messages","body":{"item":"id"},
+   "onSuccess":[{"type":"setData","path":"/data/messages","where":{"field":"id","equals":{"item":"id"}},"member":"status","value":{"value":"sent"}}],
+   "onError":[{"type":"setData","path":"/data/messages","where":{"field":"id","equals":{"item":"id"}},"member":"status","value":{"value":"failed"}}]}
+]
+\`\`\`
+
+Like/unlike uses the same optimistic keyed write, with onError restoring the previous boolean.
+A keyed request may instead use \`into:"/data/messages"\`, \`where:{field:"id",equals:{lastGenerated:true}}\`
+and optional \`member\` to write the response to one matching row; metadata stays at messages__meta.
 
 The host validates pointer syntax and \`{index}\` use, rejects a literal value data cannot hold, and
 rejects an \`appendData\` or \`prependData\` whose target resolves in the spec's own \`data\` to something other than an
@@ -251,8 +305,9 @@ has written a prototype's data, a patch with \`/data\` ops needs \`baseRevision\
 newer than that revision touched an overlapping path (\`data\` lists those paths). A \`show\` makes its
 own \`data\` authoritative again and clears the history.
 
-Data actions require \`prototype_data_actions_v1\`. A show or patch result that contains one is
-refused on a device without it, before anything is shown or sent.
+Data actions require \`prototype_data_actions_v1\`, and an \`{object}\` value also
+\`prototype_data_actions_v3\`. A show or patch result that contains one is refused on a device without
+it, before anything is shown or sent.
 
 
 ### Realtime channels
@@ -322,12 +377,12 @@ Use notes to confirm what the current renderer can apply before relying on a nam
 
 export const GUIDE_PLATFORM = `## Platform features
 
-A spec reaches a platform feature through a module. Declare every module it uses in a root \`requires: {platform: [<module>], permissions?: [{name, purpose}], background?: [...]}\`; a call, handler or read of an undeclared module fails validation with a path, and a call's permissions must appear in \`requires.permissions\`. The host reads \`requires\` before show and refuses a device that lacks a module's capability, before anything is drawn.
+A spec reaches a platform feature through a module. Declare every module it uses in a root \`requires: {platform: [<module>], permissions?: [{name, purpose}], background?: [...], capabilities?: [<capability>]}\`; a call, handler or read of an undeclared module fails validation with a path, and a call's permissions must appear in \`requires.permissions\`. The host reads \`requires\` before show and refuses a device that lacks a module's capability, before anything is drawn.
 
 - **Call.** \`{type:"platform", call:"<module>.<op>", args, into?, statusKey?, timeoutMs?, onSuccess?, onError?}\` in any action list. \`args\` are strict per call; values are \`{value}\`, \`{state}\`, \`{data}\`, \`{platform}\`, \`{item}\`/\`{index}\` in a repeat, or \`{event}\` in a handler. \`into\` (a \`/data\` path) and \`statusKey\` (a declared string state key that moves loading, then success or error) behave as for \`request\`. A failure writes one of unsupported, unavailable, permission_denied, invalid_args, cancelled, timeout, too_many_in_flight or platform_error to \`<into>__meta.error\`. Each finished call is an emit event \`prototype_platform\` (\`{callId, call, outcome, error?, durationMs}\`).
 - **Handler.** A root \`platform: {on: {"<module>.<event>": [actions]}}\`. Inside a handler only, \`{event: "/pointer"}\` reads the event's data. Handlers run atomically like a tap and may use \`push\`, \`pop\`, data actions and further calls. A delivered event is an emit event \`prototype_platform_event\` (\`{event, data, truncated?, simulated?}\`).
 - **Read.** \`/platform/<module>/<key>\` is device-owned, read-only JSON: \`{platform:/device/os}\` in text, \`{platform: "/device/widthClass", equals: "expanded"}\` as a condition, \`{platform: pointer}\` as a value. It is not patchable or stored and is not part of the \`/data\` revision log.
-- **Simulate.** \`prototype {action:"simulate",id,event:"test.tick",data:{count:7}}\` injects a known module event on Android with \`prototype_platform_simulation_v1\`. The module must opt in (debug \`test.tick\` does), and be declared in \`requires.platform\`. Data follows its event schema where defined, otherwise accepts any JSON object; the delivered payload including \`simulated:true\` must fit 4096 UTF-8 bytes. Injection updates module state, runs the ordinary handler and reports \`prototype_platform_event\`. Unsupported modules fail without delivery. Push and media events keep their dedicated routes. Call outcomes and \`platformMode\` remain unavailable.
+- **Simulate.** \`prototype {action:"simulate",id,event:"test.tick",data:{count:7}}\` injects a known module event on Android and iOS with \`prototype_platform_simulation_v1\`. The module must opt in (debug \`test.tick\` does), and be declared in \`requires.platform\`. Data follows its event schema where defined, otherwise accepts any JSON object; the delivered payload including \`simulated:true\` must fit 4096 UTF-8 bytes. Injection updates module state, runs the ordinary handler and reports \`prototype_platform_event\`. Unsupported modules fail without delivery. Push and media events keep their dedicated routes. With \`prototype_platform_outcomes_v1\`, use \`prototype {action:"simulate",id,call:"test.echo",outcome:{result:"fake"}}\` (or \`outcome:{error:{code:"unavailable",message:"Try again"}}\`) to queue up to 16 outcomes per call of a declared, simulation-enabled module, consumed in order by valid calls until the queue empties or the prototype is shown again or closed.
 - **Names.** Authored emit names cannot start with \`prototype_\`.
 
 Each module needs \`prototype_platform_v1\` plus its own capability; a device without either refuses show, patch and \`replaceNode\` and names the capability. The table below is generated from the contract, so it lists every module, call, event and key a spec may name; a device can run only the modules whose capabilities it advertises:

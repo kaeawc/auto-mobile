@@ -321,7 +321,8 @@ export interface CtrlProxyTapDiagnostics {
     | "appRelativeObserved"
     | "displayTargeted"
     | "displayTargetedObserved";
-  route?: "xcuiCoordinate" | "displayTargetedRecord";
+  /** `simulatorHid`: the host SimulatorKit HID helper delivered it, not the runner (#19118). */
+  route?: "xcuiCoordinate" | "displayTargetedRecord" | "simulatorHid";
   targetDisplayId?: number;
   targetDisplayReason?: string;
   deviceIdiom?: string;
@@ -390,6 +391,9 @@ export type CtrlProxyShakeResult = BaseResult;
 
 /** Generic press button result from CtrlProxy iOS */
 export type CtrlProxyPressButtonResult = BaseResult;
+
+/** A foldable's active panel, sent with a rotate so the runner turns the device pose (#17047). */
+export type IosRotatePanel = "cover" | "inner";
 
 /** Rotate result from CtrlProxy iOS */
 export interface CtrlProxyRotateResult extends BaseResult {

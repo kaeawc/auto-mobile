@@ -16,7 +16,7 @@ extension PrototypeSpec {
             $0.collection != nil && PrototypeDerive.affected($0, changed: changed)
         }
         let rebuilt: PrototypeNode
-        if !changed.dataPointers.isEmpty || collectionChanged {
+        if !changed.dataPointers.isEmpty || collectionChanged || derivedConditionChanged(changed) {
             rebuilt = try Self.buildRoot(
                 authoredRoot, data: data, menuState: state, strings: strings, locales: locales,
                 platform: platformState, derive: derive, derivedValues: values, routes: routeScope
@@ -29,5 +29,17 @@ extension PrototypeSpec {
         var next = PrototypeSpec(replacing: self, data: data, root: rebuilt, derivedValues: values)
         next.derivedState = state
         return next
+    }
+
+    private func derivedConditionChanged(_ changed: PrototypeDeriveChanges) -> Bool {
+        let names = Set((derive ?? [:]).compactMap { name, entry in
+            PrototypeDerive.affected(entry, changed: changed) ? name : nil
+        })
+        guard !names.isEmpty, let root = authoredRoot.objectFields else { return false }
+        func usesChangedCondition(_ node: [String: JSONValue]) -> Bool {
+            PrototypeDerivedValidator.conditionReads(node, path: "").derived.contains { names.contains($0.name) }
+                || PrototypeStrictRepeats.children(node, path: "").contains { usesChangedCondition($0.value) }
+        }
+        return usesChangedCondition(root)
     }
 }

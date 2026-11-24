@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { telemetryEventIdentityKey } from "../../src/daemon/telemetryPushSocketServer";
+import { telemetryEventIdentityKey } from "../../src/daemon/streams/telemetryPushSocketServer";
 import { timelineBucketStart } from "../../src/db/failureTimelineBuckets";
 import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecorder";
 

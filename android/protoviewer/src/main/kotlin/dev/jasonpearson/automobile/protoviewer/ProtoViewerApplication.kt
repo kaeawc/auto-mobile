@@ -1,20 +1,27 @@
 package dev.jasonpearson.automobile.protoviewer
 
 import android.app.Application
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.net.toUri
+import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
+import dev.jasonpearson.automobile.ctrlproxy.prototype.CachedPrototypeRemoteImageLoader
+import dev.jasonpearson.automobile.ctrlproxy.prototype.FilePrototypeRemoteImageStore
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBiometricModule
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEgressPolicy
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLocationModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePermissionsModule
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRemoteImageTransport
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureValueStores
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWebFetchResult
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWebFetcher
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWebViewModule
 import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
-import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeDirectoryStore
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.protocol.PrototypeBundleDirectoryFileSystem
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
@@ -22,11 +29,14 @@ import dev.jasonpearson.automobile.prototype.PrototypeStorage
 import java.io.File
 import java.io.IOException
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 
@@ -44,7 +54,7 @@ class ProtoViewerApplication : Application() {
       SharedPreferencesContentBlocklist(app.getSharedPreferences("blocklist", MODE_PRIVATE))
     val repository =
       DirectoryLibraryRepository(
-        SavedPrototypeDirectoryStore(File(root, "prototypes"), limits = libraryLimits),
+        librarySavedStore(File(root, "prototypes")),
         DirectoryLibraryFiles(File(root, "metadata")),
         storage,
         ids,
@@ -96,6 +106,8 @@ class ProtoViewerApplication : Application() {
         settings =
           SharedPreferencesSettingsStore(app.getSharedPreferences("settings", MODE_PRIVATE)),
         blocklist = blocklist,
+        webDataWiper = AndroidPrototypeWebDataWiper(app),
+        imageContext = app,
       )
       .also { services ->
         services.shareImporter =
@@ -147,7 +159,9 @@ class ProtoViewerServices(
   val sharer: LibrarySharer? = null,
   val settings: SettingsStore,
   allowedClient: () -> PrototypeHttpClient = {
-    RetrofitPrototypeHttpClient(OkHttpClient(), policy = PrototypeEgressPolicy())
+    RetrofitPrototypeHttpClient(
+      OkHttpClient(),
+    )
   },
   val renderWatchdog: RenderWatchdog = DeadlineRenderWatchdog(),
   val renderer: ViewerRenderer = GuardedViewerRenderer,
@@ -155,11 +169,72 @@ class ProtoViewerServices(
     ::AndroidLocalNetworkPermission,
   val localNetworkGrant: LocalNetworkGrant = AndroidLocalNetworkGrant,
   val blocklist: ContentBlocklist,
+  private val webDataWiper: PrototypeWebDataWiper = PrototypeWebDataWiper {},
+  imageContext: Context? = null,
 ) {
   internal var shareImporter: ShareLibraryImporter? = null
   /** Every reader sees the library with hidden and blocked received content removed. */
   val repository: BlocklistLibraryRepository = BlocklistLibraryRepository(library, blocklist)
-  val networkClient = SettingsPrototypeHttpClient(settings, allowedClient)
+  private val deviceClient by lazy(allowedClient)
+  private val imageLoader by lazy {
+    val transport = deviceClient as? PrototypeRemoteImageTransport
+    if (imageContext != null && transport != null)
+      CachedPrototypeRemoteImageLoader(
+        transport,
+        FilePrototypeRemoteImageStore(imageContext.cacheDir.resolve("prototype-remote-images")),
+        BitmapPrototypeImageDecoder(),
+      )
+    else null
+  }
+  val networkClient =
+    SettingsPrototypeHttpClient(settings) { deviceClient }
+      .apply {
+        allowedImages = { imageLoader }
+      }
+  private val webTransport by lazy { ViewerWebFetcher() }
+
+  internal val webFetcher = PrototypeWebFetcher { url, method, headers ->
+    val epoch = settings.networkRevocations.value
+    fun permitted() = settings.allowNetwork.value && settings.networkRevocations.value == epoch
+    if (!permitted()) {
+      PrototypeWebFetchResult(403, "Forbidden", destinationBlocked = true)
+    } else {
+      val result = webTransport.fetch(url, method, headers)
+      if (permitted()) result
+      else {
+        result.body.close()
+        PrototypeWebFetchResult(403, "Forbidden", destinationBlocked = true)
+      }
+    }
+  }
+
+  internal suspend fun resetStorage(id: String): LibraryResult<Unit> = mutateStorage {
+    repository.resetStorage(id)
+  }
+
+  internal suspend fun delete(id: String): LibraryResult<Unit> = mutateStorage {
+    repository.delete(id)
+  }
+
+  private suspend fun mutateStorage(mutate: () -> LibraryResult<Unit>): LibraryResult<Unit> =
+    withContext(NonCancellable) {
+      val result = withContext(io) { mutate() }
+      if (result is LibraryResult.Success) wipeWebData() else result
+    }
+
+  @Suppress(
+    "TooGenericExceptionCaught",
+  ) // Android reports unavailable WebView providers as runtime errors.
+  private suspend fun wipeWebData(): LibraryResult<Unit> =
+    try {
+      webDataWiper.wipe()
+      LibraryResult.Success(Unit)
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: RuntimeException) {
+      Log.w("ProtoViewer", "Cannot clear WebView data: ${error.javaClass.simpleName}")
+      LibraryResult.Failure(LibraryError.Storage)
+    }
 
   // Outlives activities so a stop/destroy still finishes the renderer's pending disk flush.
   val flushScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -199,4 +274,5 @@ internal val protoViewerCapabilities: Set<String>
       PrototypeLocationModule.CAPABILITY +
       PrototypeBiometricModule.CAPABILITY +
       PrototypePermissionsModule.CAPABILITY +
-      PrototypeSecureStorageModule.CAPABILITY
+      PrototypeSecureStorageModule.CAPABILITY +
+      PrototypeWebViewModule.CAPABILITY

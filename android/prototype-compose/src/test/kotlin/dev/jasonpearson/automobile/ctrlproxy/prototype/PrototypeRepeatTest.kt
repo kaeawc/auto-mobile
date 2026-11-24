@@ -3,6 +3,10 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import dev.jasonpearson.automobile.protocol.*
 import java.io.File
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -269,6 +273,62 @@ class PrototypeRepeatTest {
   }
 
   @Test
+  fun `an upsert object value binds item and index members per row`() {
+    val upsert =
+      PrototypeButtonNode(
+        label = "Save",
+        onTap =
+          listOf(
+            PrototypeUpsertDataAction(
+              "/data/saved",
+              Json.parseToJsonElement(
+                  """{"object":{"id":{"item":"id"},"at":{"index":true},"done":{"value":true}}}""",
+                )
+                .jsonObject,
+              key = "/id",
+            ),
+          ),
+      )
+    val rows = mapPrototypeSpec(spec(list(upsert))).root.children
+    assertEquals(
+      Json.parseToJsonElement(
+        """{"object":{"id":{"value":"a"},"at":{"value":0},"done":{"value":true}}}""",
+      ),
+      (rows[0].source?.onTap?.get(0) as PrototypeUpsertDataAction).value,
+    )
+  }
+
+  @Test
+  fun `keyed set and remove data where binds the row item like the request where`() {
+    fun item(field: String) = buildJsonObject { put("item", field) }
+    fun literal(value: String) = buildJsonObject { put("value", value) }
+    val retry =
+      PrototypeButtonNode(
+        label = "Retry",
+        onTap =
+          listOf(
+            PrototypeSetDataAction(
+              "/data/messages",
+              literal("sending"),
+              PrototypeDataWhere("id", item("id")),
+              "status",
+            ),
+            PrototypeRemoveDataAction("/data/messages", PrototypeDataWhere("id", item("id"))),
+          ),
+      )
+    val rows = mapPrototypeSpec(spec(list(retry))).root.children
+    val tap = rows[0].source?.onTap
+    assertEquals(
+      buildJsonObject { put("value", "a") },
+      (tap?.get(0) as PrototypeSetDataAction).where?.equals,
+    )
+    assertEquals(
+      buildJsonObject { put("value", EmitContextResolver.scalar(PrototypeScalar.Numeric(7.0))) },
+      (rows[1].source?.onTap?.get(1) as PrototypeRemoveDataAction).where?.equals,
+    )
+  }
+
+  @Test
   fun `the container itself and non-template fields are not bound`() {
     val container =
       PrototypeColumnNode(
@@ -341,6 +401,36 @@ class PrototypeRepeatTest {
       "999999999999999 1000000000000000 1000000000000000000000 -2.5 0 0.00001",
       model.root.children.single().text,
     )
+  }
+
+  @Test
+  fun `platform actions bind statusKey into args and follow ups per row`() {
+    val copy =
+      PrototypePlatformAction(
+        call = "clipboard.copy",
+        args =
+          mapOf(
+            "text" to buildJsonObject { put("item", "label") },
+            "mode" to kotlinx.serialization.json.JsonPrimitive("plain"),
+          ),
+        into = "/data/copied/{index}",
+        statusKey = "copy_{index}",
+        onSuccess = listOf(PrototypeEmitAction("copied_{item.id}")),
+        onError =
+          listOf(PrototypeSetStateAction("failed_{item.id}", PrototypeScalar.BooleanValue(true))),
+      )
+    val rows =
+      mapPrototypeSpec(spec(list(PrototypeButtonNode(label = "Copy", onTap = listOf(copy)))))
+        .root
+        .children
+    val second = rows[1].source?.onTap?.single() as PrototypePlatformAction
+    assertEquals("copy_1", second.statusKey)
+    assertEquals("/data/copied/1", second.into)
+    assertEquals(buildJsonObject { put("value", "Beta") }, second.args?.get("text"))
+    assertEquals(kotlinx.serialization.json.JsonPrimitive("plain"), second.args?.get("mode"))
+    assertEquals(listOf(PrototypeEmitAction("copied_7")), second.onSuccess)
+    assertEquals("failed_7", (second.onError?.single() as PrototypeSetStateAction).key)
+    assertEquals("copy_0", (rows[0].source?.onTap?.single() as PrototypePlatformAction).statusKey)
   }
 
   @Test

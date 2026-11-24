@@ -3,7 +3,10 @@ import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
   keySchema,
+  dataWhereSchema,
+  dataMemberSchema,
   prototypeDataActionValueSchema,
+  prototypeValueBindingSchema,
   pointerSchema,
   stateKeySchema,
 } from "./prototypeActionValues";
@@ -20,7 +23,8 @@ import { PROTOTYPE_REQUEST_METHODS } from "./prototypeRequestProtocol";
  * literal body is `{value: json}`. `onSuccess` and `onError` are action lists; their nesting is
  * bounded by `MAX_PROTOTYPE_ACTION_DEPTH` in the contract walk, not in Zod.
  */
-const bindingValueSchema = z.union([z.string().max(4096), prototypeDataActionValueSchema]);
+const headerValueSchema = z.union([z.string().max(4096), prototypeValueBindingSchema]);
+const queryValueSchema = z.union([z.string().max(4096), prototypeDataActionValueSchema]);
 // Zod cannot name the union it is part of, so the follow-up lists are typed loosely here and
 // validated structurally by the contract walk and by the union itself at parse time.
 let followUps: (() => z.ZodTypeAny) | undefined;
@@ -57,8 +61,8 @@ export const requestActionSchema = z
     type: z.enum(["request"]),
     method: z.enum(PROTOTYPE_REQUEST_METHODS).optional(),
     url: z.string().min(1).max(2048),
-    headers: z.record(z.string().min(1), bindingValueSchema).optional(),
-    query: z.record(z.string().min(1), bindingValueSchema).optional(),
+    headers: z.record(z.string().min(1), headerValueSchema).optional(),
+    query: z.record(z.string().min(1), queryValueSchema).optional(),
     body: z
       .union([
         prototypeDataActionValueSchema,
@@ -86,6 +90,8 @@ export const requestActionSchema = z
           .strict(),
       ])
       .optional(),
+    where: dataWhereSchema.optional(),
+    member: dataMemberSchema.optional(),
     progressKey: keySchema.optional(),
     into: z
       .string()

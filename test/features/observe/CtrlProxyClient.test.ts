@@ -57,7 +57,7 @@ import {
   DeviceDataStreamSocketServer,
   installDeviceDataStreamSocketServerForTesting,
   stopDeviceDataStreamSocketServer,
-} from "../../../src/daemon/deviceDataStreamSocketServer";
+} from "../../../src/daemon/streams/deviceDataStreamSocketServer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
 import { FakeScreenshotBackoffScheduler } from "../../fakes/FakeScreenshotBackoffScheduler";
 import type {
@@ -4340,6 +4340,41 @@ describe("AndroidCtrlProxyClient", function () {
         "cancelled",
         "max_children",
         "future_code",
+      ]);
+    });
+
+    test("clips content-hidden regions to the screen and their Compose host (#18675)", function () {
+      const result = accessibilityServiceClient.convertToViewHierarchyResult({
+        updatedAt: 1,
+        packageName: "com.example",
+        screenWidth: 1080,
+        screenHeight: 2424,
+        windows: [{ id: 1, type: 1, bounds: { left: 0, top: 0, right: 1080, bottom: 2424 } }],
+        contentHiddenRegions: [
+          {
+            bounds: { left: 0, top: 478, right: 1080, bottom: 2486 },
+            reason: "compose-interop-no-hide-descendants",
+            areaPercent: 82,
+          },
+        ],
+        hierarchy: {
+          className: "android.widget.FrameLayout",
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2424 },
+          node: [
+            {
+              className: "androidx.compose.ui.platform.ComposeView",
+              bounds: { left: 0, top: 478, right: 1080, bottom: 2150 },
+            },
+          ],
+        },
+      });
+
+      expect(result.contentHiddenRegions).toEqual([
+        {
+          bounds: { left: 0, top: 478, right: 1080, bottom: 2150 },
+          reason: "compose-interop-no-hide-descendants",
+          areaPercent: 68,
+        },
       ]);
     });
 

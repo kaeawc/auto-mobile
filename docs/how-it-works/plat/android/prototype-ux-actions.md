@@ -28,9 +28,11 @@ Each nonempty context name has a strict binding object with exactly one key:
 - `{page: pagerId}` reads an existing pager's current numeric page.
 - `{data: pointer}` reads any JSON value via the existing data pointer syntax and
   `MAX_PROTOTYPE_DATA_POINTER_LENGTH`; it also requires `prototype_data_model_v1`.
+- `{derived: name}` reads the raw value of a top-level `derive` entry and requires
+  `prototype_derive_v1`.
 - `{value: json}` is literal JSON, subject to the emit payload depth limit.
 
-Missing state keys and data paths resolve to null. `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` bounds the
+Missing state keys, data paths, and derived values resolve to null. `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` bounds the
 number of entries. The resolved object's compact JSON UTF-8 bytes
 are bounded by `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`; this runtime count includes multibyte strings
 and compact JSON numbers, rather than the payload validator's conservative numeric cost.
@@ -52,7 +54,8 @@ or sheet binding's scalar type at runtime (renderer-enforced, #9300).
 on the device, so "add to cart" or "delete row" needs no agent round trip. They require
 `prototype_data_actions_v1` with `prototype_data_model_v1`; prepend also requires
 `prototype_lazy_list_v1`. Keyed `setData` and `removeData` additionally require
-`prototype_data_actions_v2`. The
+`prototype_data_actions_v2`, as do generated value bindings and keyed request writes, and an
+`{object}` value `prototype_data_actions_v3`. The
 host refuses a show, or a patch whose resulting spec contains one, on a device without it. It uses
 the same gate registry as every other capability (`PROTOTYPE_SPEC_CAPABILITY_GATES`, checked on
 the complete result of `show`, `patch` and `replaceNode`).
@@ -62,11 +65,31 @@ the complete result of `show`, `patch` and `replaceNode`).
   `/data` alone is refused. Inside a `repeat`, a whole `{index}` segment (`/data/cart/{index}`) binds
   to the current row; `{index}` elsewhere, outside a repeat, or `{alias.field}`, is a validation error.
 - `value` takes the `emit.context` binding forms except `page`: `{value: json}` (the literal form),
-  `{state: key}`, `{data: pointer}` and, in a repeat, `{item: field}` and `{index: true}`. A written
-  value is data: no null.
+  `{state: key}`, `{data: pointer}`, `{derived: name}` and, in a repeat, `{item: field}` and
+  `{index: true}`. A written value must satisfy the data rules. A missing derived value produces
+  `not_found`.
+- On these four writes only (#18826), `{object: {name: binding}}` writes an object. It has 1 to
+  `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` members named like path keys, and each member is one of the
+  six flat forms above or a generated binding (below). Members do not nest and resolve in sorted
+  name order, so a `{generate}` member precedes a `{lastGenerated}` one by name on every platform.
+  A generated member needs `prototype_data_actions_v2` too and counts in the static `lastGenerated`
+  check. A repeat binds `{item}`/`{index}` members per row. A missing member source fails the write
+  like a top-level one. An `upsertData` `key` must start with
+  a member name, and must resolve non-null when that member is a `{value}` literal. The
+  secure-storage and library copy-taint checks read each member.
+- Generated bindings are `{generate: "id"}`, `{now: "epochMs" | "iso"}` and `{lastGenerated: true}`.
+  They work in data-action values, setState values, request body/header/query bindings and selectors.
+  Exact one-key generated objects inside `{value: json}` expand recursively. Object members resolve
+  in ascending UTF-16 key order; arrays retain their order. Each occurrence resolves once at execution.
+  Ids use an injected `IdGenerator`; time uses `Timer.now()`. ISO time has UTC milliseconds and `Z`.
+  Each action-list invocation starts with no generated id. Only generate updates lastGenerated;
+  now leaves it unchanged. Requests copy the scope after resolving their own bindings, so delayed
+  success/error lists retain the dispatch id even after another action generates an id.
+  Validation rejects a statically unset read with `lastGenerated_unset`; runtime resolution returns
+  the same typed error for a missing scope or unset id. Follow-up generations affect only their copy.
 - `where: {field, equals: binding}` selects one object in the array at `path`, using JSON identity.
   No match returns `not_found`; duplicate matches return `ambiguous_match`. `equals` uses
-  `{value}`, `{state}`, `{data}` or repeat `{item}`/`{index}` bindings. On `setData`, optional
+  `{value}`, `{state}`, `{data}`, `{derived}`, generated forms or repeat `{item}`/`{index}` bindings. On `setData`, optional
   `member` creates or replaces that object member; omitting it replaces the whole element.
   `field` and `member` must be non-empty names without `/` or `~`; `member` requires `where`.
 - Semantics are one pure function, `applyPrototypeDataWrite` (`src/features/prototype/prototypeDataWrite.ts`),
@@ -82,12 +105,19 @@ the complete result of `show`, `patch` and `replaceNode`).
   `appendData`, `prependData` or keyed write whose target is not an array. A target created only by an earlier write is the device's
   to check.
 
+The shared `test/fixtures/prototype-spec/data/generated-values.json` cases supply initialData,
+seeded ids, clockMs, actions and FIFO mockResponses. Expected outputs are final data or errorCode.
+Request completions run after the containing list, exercising the captured scope.
+
 Each device write is reported on a `change` event, using existing wire fields so no event field is
 added:
 
 - `name` is the written `/data/...` path (for an append, the array);
 - `payload` is `{op: "set"|"append"|"extend"|"prepend"|"remove", value?, where?, member?, maxItems?, revision}`;
 - `validity` may accompany it.
+
+Values and selector equality in these events are already resolved on the device. Both host mirrors
+apply them verbatim; they never generate another id or timestamp.
 
 A `change` whose name is a data path must carry a valid payload or the host drops it.
 `awaitEvent` returns it like any other event.

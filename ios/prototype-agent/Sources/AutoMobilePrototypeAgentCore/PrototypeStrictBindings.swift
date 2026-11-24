@@ -4,6 +4,7 @@ struct PrototypeLocatedValue {
     let value: [String: JSONValue]
     let path: String
     var operandTemplated = false
+    var repeatItem: Int?
 }
 
 /// Located diagnostics for the binding rules also used for runtime state writes.
@@ -36,6 +37,7 @@ enum PrototypeStrictBindings {
             "secure",
             "keyboardType",
             "imeAction",
+            "allowedOrigins",
         ].contains($0.key) }
         if fields["type"] == .string("adaptive") { own["items"] = fields["items"] }
         if fields["type"] == .string("menu") { own["items"] = .array([]) }
@@ -107,7 +109,11 @@ enum PrototypeStrictBindings {
             try PrototypeAdaptive.validate(node.value, path: node.path, state: state)
             if let field = try field(node.value, state: state) { throw PrototypeContractValidator.invalid(
                 "\(node.path).\(field)",
-                "Invalid control binding"
+                node.repeatItem.map { index in
+                    let message = (try? PrototypeStateValidator.bindingRejection(control(node.value), state)?.message)
+                        ?? "Invalid control binding"
+                    return "\(message) (repeat item \(index))"
+                } ?? "Invalid control binding"
             ) }
         }
         for node in nodes {
@@ -137,7 +143,9 @@ enum PrototypeStrictBindings {
                         "Decrement requires a numeric state key"
                 ) }
                 if type == "setState", !action.operandTemplated, let operand = value["value"],
-                   operand.objectFields?["event"] == nil, operand.objectFields?["platform"] == nil
+                   PrototypeGeneratedValues.form(operand) == nil,
+                   operand.objectFields?["event"] == nil, operand.objectFields?["platform"] == nil,
+                   operand.objectFields?["link"] == nil
                 {
                     let controls = nodes.filter { boundKeys($0.value).contains(key) }
                     if Set(controls.compactMap { $0.value["type"]?.stringValue }).count == 1 {

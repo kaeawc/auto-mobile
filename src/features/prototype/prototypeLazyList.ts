@@ -91,7 +91,10 @@ function scrollInListError(entry: Entry, ancestors: readonly Entry[]): ListError
 }
 
 /** Prefer the list's source path over the generic data-array budget for oversized feeds. */
-export function prototypeLazyListLimitError(spec: unknown): ListError | undefined {
+export function prototypeLazyListLimitError(
+  spec: unknown,
+  listItems: number = contract.limits.MAX_PROTOTYPE_LIST_ITEMS,
+): ListError | undefined {
   let error: ListError | undefined;
   walkPrototypeNodes(spec, (node, path) => {
     const pointer = record(record(node.repeat)?.items)?.path;
@@ -99,10 +102,10 @@ export function prototypeLazyListLimitError(spec: unknown): ListError | undefine
       return;
     }
     const items = resolvePrototypeDataPointer(record(spec)?.data, pointer);
-    if (Array.isArray(items) && items.length > contract.limits.MAX_PROTOTYPE_LIST_ITEMS) {
+    if (Array.isArray(items) && items.length > listItems) {
       error ??= {
         path: `${path}.repeat.items.path`,
-        message: `Repeat path resolves to more than ${contract.limits.MAX_PROTOTYPE_LIST_ITEMS} items`,
+        message: `Repeat path resolves to more than ${listItems} items`,
       };
     }
   });

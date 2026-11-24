@@ -11,7 +11,6 @@ import { logger } from "../../utils/logger";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
-import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
 import {
   invalidateAfterDensityChange,
   resolveDensityCommand,
@@ -31,6 +30,8 @@ import {
 } from "./AndroidDisplayGeometry";
 import { DEFAULT_FONT_SCALE, type DisplayTheme, type FontScaleInput } from "./displayConfigTypes";
 import {
+  ANDROID_THEME_UNSUPPORTED_ERROR,
+  isNightModeUnsupported,
   nightModeArg,
   parseFontScaleSnapshot,
   parseNightMode,
@@ -50,7 +51,8 @@ import {
   displayFieldsOf,
   mergeGeometryChange,
   hasDisplayField,
-  mergedMessage,
+  mergeAccessibilityChange,
+  supportNotes,
   setInputContradiction,
 } from "./displayConfigInput";
 import {
@@ -58,14 +60,34 @@ import {
   requestedAccessibilityFields,
   unsupportedAccessibilityDisplay,
   type AccessibilityBaselineStore,
-  type AccessibilityDisplayChange,
   type AccessibilityDisplayField,
   type AccessibilityDisplayNotes,
   type AccessibilityDisplayRead,
   type AccessibilityDisplaySupportLevel,
   type AccessibilityDisplayValues,
 } from "./AccessibilityDisplayPreferences";
-import type { CtrlProxyAppearanceResult } from "../observe/ios/types";
+import {
+  IosSimulatorScreenControls,
+  hasScreenControlField,
+  type IosSimulatorScreenControlsDependencies,
+  type IosSimulatorScreenValues,
+} from "./IosSimulatorScreenControls";
+import {
+  SCREEN_CONTROLS_SIMULATOR_ONLY_ERROR,
+  setWithScreenControls,
+} from "./displayConfigScreenControls";
+import * as overlays from "./displayRenderOverlays";
+import * as simulatorOverlays from "../../utils/ios-cmdline-tools/SimulatorRenderOverlays";
+import {
+  iosRunnerAppearanceBackend,
+  type IosAppearanceBackend,
+  type IosRunnerAppearanceClient,
+} from "./IosRunnerAppearance";
+
+import { defaultThemeBaselines, type ThemeBaselineStore } from "./displayThemeBaselines";
+
+export type { IosRunnerAppearanceClient } from "./IosRunnerAppearance";
+export type { ThemeBaselineStore } from "./displayThemeBaselines";
 import { iosCtrlProxyClientFor } from "../observe/ios/iosCtrlProxyClientFor";
 
 /**
@@ -109,7 +131,12 @@ export {
   type DensityInput,
 } from "./androidDensityCommand";
 
-export interface DisplayConfigValues extends AccessibilityDisplayValues, DisplayGeometryValues {
+export interface DisplayConfigValues
+  extends
+    AccessibilityDisplayValues,
+    DisplayGeometryValues,
+    IosSimulatorScreenValues,
+    overlays.RenderOverlayDisplayValues {
   /** System text scale, or `"default"` when Android has no explicit override. */
   fontScale?: FontScaleInput;
   /**
@@ -138,6 +165,10 @@ export interface DisplayConfigSupport
   fontScale: boolean;
   density: boolean | "partial";
   theme: boolean;
+  /** iOS Simulator only (#19018). */
+  dynamicIsland?: boolean;
+  backlight?: boolean;
+  renderOverlays?: boolean;
 }
 
 export interface DisplayConfigResult {
@@ -158,7 +189,12 @@ export interface DisplayConfigResult {
   error?: string;
 }
 
-export interface SetDisplayConfigInput extends AccessibilityDisplayValues, DisplayGeometryInput {
+export interface SetDisplayConfigInput
+  extends
+    AccessibilityDisplayValues,
+    DisplayGeometryInput,
+    IosSimulatorScreenValues,
+    overlays.RenderOverlayDisplayInput {
   fontScale?: FontScaleInput;
   density?: DensityInput;
   theme?: DisplayTheme;
@@ -173,21 +209,7 @@ export interface SetDisplayConfigInput extends AccessibilityDisplayValues, Displ
   factory?: boolean;
 }
 
-/** Process-lifetime baseline for the first night-mode value this tool replaces. */
-export interface ThemeBaselineStore {
-  get(deviceId: string): DisplayTheme | undefined;
-  set(deviceId: string, theme: DisplayTheme): void;
-  delete(deviceId: string): void;
-}
-
-const defaultThemeBaselines: ThemeBaselineStore = new Map<string, DisplayTheme>();
-
-registerDeviceIncarnationListener({
-  name: "android-display-config-theme-baselines",
-  onDeviceIdentityReplaced: (deviceId) => defaultThemeBaselines.delete(deviceId),
-  // Snapshot restore and same-device re-pool retain guest night-mode state and its baseline.
-  onDeviceIncarnationChanged: () => {},
-});
+type ShellRead = { stdout: string; stderr: string };
 
 export interface DisplayConfigDependencies {
   themeBaselines?: ThemeBaselineStore;
@@ -201,20 +223,9 @@ export interface DisplayConfigDependencies {
   /** Process-lifetime baselines for the Simulator text size category this tool replaced. */
   contentSizeBaselines?: ContentSizeBaselineStore;
   geometry?: DisplayGeometryOptions;
-}
-
-/** The runner's `request_appearance` (`XCUIDevice.appearance`); physical iOS has no simctl. */
-export interface IosRunnerAppearanceClient {
-  requestAppearance(appearance?: "light" | "dark"): Promise<CtrlProxyAppearanceResult>;
-}
-
-/** Reads and writes a physical iOS device's light/dark appearance through the CtrlProxy runner. */
-interface IosAppearanceBackend {
-  /** Names the target in errors. */
-  readonly target: string;
-  read(): Promise<DisplayTheme | undefined>;
-  /** Resolves on success; rejects with the backend's own error. */
-  write(theme: "light" | "dark"): Promise<void>;
+  /** iOS Simulator Dynamic Island and backlight seams (#19018). */
+  screenControls?: IosSimulatorScreenControlsDependencies;
+  renderOverlays?: simulatorOverlays.SimulatorRenderOverlayControl;
 }
 
 const IOS_FONT_SCALE_UNSUPPORTED_ERROR =
@@ -247,6 +258,10 @@ export class DisplayConfig {
 
   private geometryOptions: DisplayGeometryOptions;
 
+  private screenControlOptions: IosSimulatorScreenControlsDependencies;
+
+  private overlayControl?: simulatorOverlays.SimulatorRenderOverlayControl;
+
   constructor(device: BootedDevice, dependencies: DisplayConfigDependencies = {}) {
     this.device = device;
     this.themeBaselines = dependencies.themeBaselines ?? defaultThemeBaselines;
@@ -256,6 +271,8 @@ export class DisplayConfig {
     this.iosRunnerAppearance = dependencies.iosRunnerAppearance;
     this.contentSizeBaselines = dependencies.contentSizeBaselines;
     this.geometryOptions = dependencies.geometry ?? {};
+    this.screenControlOptions = dependencies.screenControls ?? {};
+    this.overlayControl = dependencies.renderOverlays;
   }
 
   /** The accessibility display preferences (#14088) on this device, sharing this tool's seams. */
@@ -270,26 +287,9 @@ export class DisplayConfig {
 
   /** Physical iOS appearance through the runner; the Simulator uses {@link IosSimulatorDisplayConfig}. */
   private iosAppearance(): IosAppearanceBackend {
-    const runner = this.iosRunnerAppearance ?? iosCtrlProxyClientFor(this.device);
-    const call = async (appearance?: "light" | "dark") => {
-      const result = await runner.requestAppearance(appearance);
-      if (!result.success) {
-        throw new Error(
-          `CtrlProxy runner appearance request failed: ${result.error ?? "unknown error"}. ` +
-            "Physical-device theme control needs a runner that supports request_appearance.",
-        );
-      }
-      return result.appearance === "light" || result.appearance === "dark"
-        ? result.appearance
-        : undefined;
-    };
-    return {
-      target: "device",
-      read: () => call(),
-      write: async (theme) => {
-        await call(theme);
-      },
-    };
+    return iosRunnerAppearanceBackend(
+      this.iosRunnerAppearance ?? iosCtrlProxyClientFor(this.device),
+    );
   }
 
   /** iOS simulators expose `simctl`/`defaults`; physical iOS devices use the runner instead. */
@@ -309,6 +309,9 @@ export class DisplayConfig {
         fontScale: simulator,
         density: false,
         theme: true,
+        dynamicIsland: simulator,
+        backlight: simulator,
+        renderOverlays: simulator,
         ...(simulator ? {} : unsupportedAccessibilityDisplay().supported),
       };
     }
@@ -325,9 +328,7 @@ export class DisplayConfig {
   private unsupported(error: string): DisplayConfigResult {
     return {
       success: false,
-      deviceId: this.device.deviceId,
-      platform: this.platform,
-      supported: this.support(),
+      ...this.identity(),
       error,
     };
   }
@@ -366,10 +367,21 @@ export class DisplayConfig {
   /** The Simulator's theme and text size, or a physical device's theme from the runner. */
   private async getIosConfig(): Promise<DisplayConfigResult> {
     try {
-      const current = this.isIosSimulator()
-        ? await this.iosSimulator().read()
-        : await this.readIosThemeSnapshot();
-      return this.withAccessibilityRead(current, await this.accessibility().read());
+      if (!this.isIosSimulator()) {
+        return this.withAccessibilityRead(
+          await this.readIosThemeSnapshot(),
+          await this.accessibility().read(),
+        );
+      }
+      const controls = this.screenControls();
+      const island = await controls.supportsDynamicIsland();
+      const current = {
+        ...(await this.iosSimulator().read()),
+        ...(await controls.read(island)),
+        ...(await this.renderOverlays().read()),
+      };
+      const result = this.withAccessibilityRead(current, await this.accessibility().read());
+      return { ...result, supported: { ...result.supported, dynamicIsland: island } };
     } catch (error) {
       logger.warn(`[DisplayConfig] getConfig failed (iOS): ${errorMessage(error)}`, error);
       return this.failure(errorMessage(error));
@@ -379,9 +391,7 @@ export class DisplayConfig {
   private failure(error: string): DisplayConfigResult {
     return {
       success: false,
-      deviceId: this.device.deviceId,
-      platform: this.platform,
-      supported: this.support(),
+      ...this.identity(),
       error,
     };
   }
@@ -417,9 +427,7 @@ export class DisplayConfig {
     );
     return {
       success: false,
-      deviceId: this.device.deviceId,
-      platform: this.platform,
-      supported: this.support(),
+      ...this.identity(),
       error: errorMessage(error),
     };
   }
@@ -525,9 +533,7 @@ export class DisplayConfig {
     const error = allErrors.length > 0 ? allErrors.join("; ") : undefined;
     return {
       success: error === undefined,
-      deviceId: this.device.deviceId,
-      platform: this.platform,
-      supported: this.support(),
+      ...this.identity(),
       ...(applied ? { applied } : {}),
       previous,
       ...(error ? { error } : {}),
@@ -561,9 +567,7 @@ export class DisplayConfig {
     const restored = change.restoredContentSize;
     return {
       success: error === undefined,
-      deviceId: this.device.deviceId,
-      platform: this.platform,
-      supported: this.support(),
+      ...this.identity(),
       ...(change.applied ? { applied: change.applied } : {}),
       previous: change.previous,
       ...(error ? { error } : {}),
@@ -593,9 +597,7 @@ export class DisplayConfig {
       logger.warn(`[DisplayConfig] getConfig failed: ${errorMessage(error)}`, error);
       return {
         success: false,
-        deviceId: this.device.deviceId,
-        platform: this.platform,
-        supported: this.support(),
+        ...this.identity(),
         error: errorMessage(error),
       };
     }
@@ -634,9 +636,7 @@ export class DisplayConfig {
   private invalidRequest(error: string): DisplayConfigResult {
     return {
       success: false,
-      deviceId: this.device.deviceId,
-      platform: this.platform,
-      supported: this.support(),
+      ...this.identity(),
       error,
     };
   }
@@ -650,10 +650,33 @@ export class DisplayConfig {
     if (refusal) {
       return refusal;
     }
+    return this.renderOverlays().set(input, (rest) => this.setWithoutOverlays(rest));
+  }
+
+  private async setWithoutOverlays(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
     if (this.platform === "android" && (input.reset === true || hasDisplayGeometryField(input))) {
       return this.setWithGeometry(input);
     }
+    if (
+      this.platform === "ios" &&
+      this.isIosSimulator() &&
+      (input.reset === true || hasScreenControlField(input))
+    ) {
+      const controls = this.screenControls();
+      return setWithScreenControls(
+        input,
+        (rest) => this.setNonGeometry(rest),
+        controls,
+        this.identity(),
+      );
+    }
     return this.setNonGeometry(input);
+  }
+
+  /** The iOS Simulator's Core Animation render overlays (#19016). */
+  private renderOverlays(): overlays.RenderOverlayDisplay {
+    const simulator = this.platform === "ios" && this.isIosSimulator();
+    return new overlays.RenderOverlayDisplay(this.identity(), simulator, this.overlayControl);
   }
 
   /** Forget every recorded baseline: theme, accessibility preferences and Simulator text size. */
@@ -683,11 +706,19 @@ export class DisplayConfig {
       return display;
     }
     const change = prepared ? await geometry.apply(prepared) : await geometry.reset();
-    return mergeGeometryChange(display, change, {
-      deviceId: this.device.deviceId,
-      platform: this.platform,
-      supported: this.support(),
-    });
+    return mergeGeometryChange(display, change, this.identity());
+  }
+
+  private identity() {
+    return { deviceId: this.device.deviceId, platform: this.platform, supported: this.support() };
+  }
+
+  private screenControls(): IosSimulatorScreenControls {
+    return new IosSimulatorScreenControls(
+      this.device.deviceId,
+      this.simctl,
+      this.screenControlOptions,
+    );
   }
 
   private async setNonGeometry(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
@@ -706,7 +737,7 @@ export class DisplayConfig {
     const change = reset
       ? await accessibility.reset()
       : await accessibility.set(accessibilityValuesOf(input));
-    return this.mergeAccessibilityChange(display, change, reset);
+    return mergeAccessibilityChange(display, change, reset, this.identity());
   }
 
   /** Requests refused before any device command: contradictory, empty, or unsupported target. */
@@ -721,6 +752,9 @@ export class DisplayConfig {
     if (this.platform !== "android" && hasDisplayGeometryField(input)) {
       return this.unsupported(GEOMETRY_ANDROID_ONLY_ERROR);
     }
+    if (hasScreenControlField(input) && (this.platform !== "ios" || !this.isIosSimulator())) {
+      return this.unsupported(SCREEN_CONTROLS_SIMULATOR_ONLY_ERROR);
+    }
     return undefined;
   }
 
@@ -731,27 +765,6 @@ export class DisplayConfig {
     return this.isIosSimulator()
       ? this.setIosSimulatorConfig(input)
       : this.setIosDeviceConfig(input);
-  }
-
-  private mergeAccessibilityChange(
-    display: DisplayConfigResult | undefined,
-    change: AccessibilityDisplayChange,
-    reset: boolean,
-  ): DisplayConfigResult {
-    const errors = [...(display?.error ? [display.error] : []), ...change.errors];
-    const error = errors.length > 0 ? errors.join("; ") : undefined;
-    const message = mergedMessage(error, display?.message, reset, change.restored);
-    return {
-      success: error === undefined,
-      deviceId: this.device.deviceId,
-      platform: this.platform,
-      supported: { ...(display?.supported ?? this.support()), ...change.supported },
-      ...supportNotes(change.notes),
-      applied: { ...display?.applied, ...change.applied },
-      previous: { ...display?.previous, ...change.previous },
-      ...(error ? { error } : {}),
-      ...(message ? { message } : {}),
-    };
   }
 
   private async setAndroidConfig(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
@@ -765,13 +778,14 @@ export class DisplayConfig {
       const raw = await this.readRawValues(adb);
       previous = raw.restorableValues;
       physicalDensity = raw.physicalDensity;
+      if (input.theme !== undefined && raw.values.theme === undefined) {
+        return this.unsupported(ANDROID_THEME_UNSUPPORTED_ERROR);
+      }
     } catch (error) {
       logger.warn(`[DisplayConfig] setConfig pre-read failed: ${errorMessage(error)}`, error);
       return {
         success: false,
-        deviceId: this.device.deviceId,
-        platform: this.platform,
-        supported: this.support(),
+        ...this.identity(),
         error: errorMessage(error),
         message: errorMessage(error),
       };
@@ -811,9 +825,7 @@ export class DisplayConfig {
     const message = androidResultMessage(input.reset, expectedTheme, error);
     return {
       success: error === undefined,
-      deviceId: this.device.deviceId,
-      platform: this.platform,
-      supported: this.support(),
+      ...this.identity(),
       ...(applied ? { applied } : {}),
       previous,
       ...(error ? { error } : {}),
@@ -863,14 +875,14 @@ export class DisplayConfig {
     restorableValues: DisplayConfigValues;
     physicalDensity: number | undefined;
   }> {
-    const [fontRaw, densityRaw, nightRaw] = await Promise.all([
+    const [font, density, night] = await Promise.all([
       this.run(adb, "shell settings get system font_scale", "font scale"),
       this.run(adb, "shell wm density", "density"),
       this.run(adb, "shell cmd uimode night", "night mode"),
     ]);
-    const parsedDensity = parseWmDensity(densityRaw);
-    const fontScaleSnapshot = parseFontScaleSnapshot(fontRaw);
-    const theme = parseNightMode(nightRaw);
+    const parsedDensity = parseWmDensity(density.stdout);
+    const fontScaleSnapshot = parseFontScaleSnapshot(font.stdout);
+    const theme = parseNightMode(night.stdout);
     const unreadable: string[] = [];
     if (fontScaleSnapshot === undefined) {
       unreadable.push("font scale");
@@ -878,7 +890,7 @@ export class DisplayConfig {
     if (parsedDensity.effective === undefined) {
       unreadable.push("display density");
     }
-    if (theme === undefined) {
+    if (theme === undefined && !isNightModeUnsupported(night.stdout, night.stderr)) {
       unreadable.push("night mode");
     }
     if (unreadable.length > 0) {
@@ -1022,18 +1034,16 @@ export class DisplayConfig {
   }
 
   /**
-   * Read a command's stdout, rejecting shell-reported failures rather than
+   * Read a command's output, rejecting shell-reported failures rather than
    * fabricating a restoration baseline from partial output.
    */
-  private async run(adb: AdbExecutor, command: string, setting: string): Promise<string> {
+  private async run(adb: AdbExecutor, command: string, setting: string): Promise<ShellRead> {
     try {
-      const result = await adb.executeCommand(command, { noRetry: true });
-      const stdout = result.stdout;
-      const stderr = result.stderr ?? "";
+      const { stdout, stderr = "" } = await adb.executeCommand(command, { noRetry: true });
       if (outputLooksLikeShellFailure(stdout, stderr)) {
         throw new Error(`'${command}' reported: ${`${stdout} ${stderr}`.trim()}`);
       }
-      return stdout;
+      return { stdout, stderr };
     } catch (error) {
       throw new ActionableError(`${setting}: failed to read '${command}': ${errorMessage(error)}`, {
         cause: error,
@@ -1063,10 +1073,4 @@ export class DisplayConfig {
       return [`${setting}: '${command}' failed: ${errorMessage(error)}`];
     }
   }
-}
-
-function supportNotes(notes: AccessibilityDisplayNotes): {
-  supportNotes?: AccessibilityDisplayNotes;
-} {
-  return Object.keys(notes).length > 0 ? { supportNotes: notes } : {};
 }

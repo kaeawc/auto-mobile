@@ -248,6 +248,43 @@ describe("iOS saved prototype tool actions", () => {
     expect(installer.calls).toEqual([]);
     expect(reader.reads).toEqual([]);
   });
+  test("iOS save without ProtoViewer refuses a webView node before installer work", async () => {
+    const page = {
+      type: "webView",
+      url: "https://example.com/post",
+      allowedOrigins: ["https://example.com"],
+    };
+    const refused = await save({
+      spec: {
+        ...spec,
+        requires: { platform: ["webview"] },
+        root: { type: "column", children: [{ type: "text", text: "Hi" }, page] },
+      },
+    });
+    expect(refused).toEqual({
+      success: false,
+      errorCode: "unsupported_capability",
+      error: expect.stringContaining("root.children[1]"),
+    });
+    expect(refused.error).toContain("Install ProtoViewer");
+    expect(installer.calls).toEqual([]);
+  });
+  test("iOS save with pin or icon refuses a webView node without promising ProtoViewer", async () => {
+    const page = {
+      type: "webView",
+      url: "https://example.com/post",
+      allowedOrigins: ["https://example.com"],
+    };
+    const webSpec = { ...spec, requires: { platform: ["webview"] }, root: page };
+    for (const extra of [{ pin: true as const }, { icon: "logo" }]) {
+      const refused = await save({ spec: webSpec, assets, ...extra });
+      expect(refused).toMatchObject({ success: false, errorCode: "unsupported_capability" });
+      expect(refused.error).toContain("root");
+      expect(refused.error).not.toContain("Install ProtoViewer");
+      expect(refused.error).toContain("do not use ProtoViewer");
+    }
+    expect(installer.calls).toEqual([]);
+  });
 
   test("invalid spec reports the validator path before any installer or file call", async () => {
     const output = await save({ spec: { ...spec, root: { type: "unknown" } }, assets });

@@ -9,6 +9,7 @@
     @Observable
     final class PrototypeModel {
         @ObservationIgnored private(set) var session = PrototypeSession()
+        var remoteImages = PrototypeRemoteImageLoader.shared
         var nativeZoomStacks: Set<String> = []
         var design: PrototypeDesign { spec?.theme?.design ?? .platform }
         let iconMotionActivity = PrototypeIconMotionActivity()
@@ -272,6 +273,7 @@
         @ObservationIgnored let platformRegistry: PrototypePlatformRegistry
         @ObservationIgnored private lazy var platformDriver: PrototypePlatformDriver = {
             let driver = PrototypePlatformDriver(registry: platformRegistry, clock: clock)
+            driver.realtime = realtimeModule
             driver.onComplete = { [weak self] id, result, duration in
                 self?.apply(activity: false) { $0.completePlatformCall(
                     id,
@@ -283,8 +285,11 @@
             driver.onState = { [weak self] snapshot in self?.updatePlatformState(snapshot) }
             driver.onEvent = { [weak self] event in
                 self?.apply(activity: false) { session in
-                    do { return try session.deliverPlatformEvent(event.event, data: event.data) }
-                    catch { NSLog("Prototype platform event failed: %@", String(describing: error)); return [] }
+                    do { return try session.deliverPlatformEvent(
+                        event.event,
+                        data: event.data,
+                        simulated: event.simulated
+                    ) } catch { NSLog("Prototype platform event failed: %@", String(describing: error)); return [] }
                 }
             }
             return driver
@@ -292,6 +297,9 @@
 
         private func updatePlatformState(_ snapshot: [String: JSONValue]) {
             var combined = snapshot
+            if realtimeConfig != nil, let realtime = session.spec?.platformState["realtime"] {
+                combined["realtime"] = realtime
+            }
             combined.merge(deviceState.snapshot) { _, device in device }
             apply(activity: false) { session in
                 do { try session.setPlatformState(combined) }
@@ -337,6 +345,14 @@
         func pauseTimers() { timers.pause() }
         func resumeTimers() { timers.resume() }
 
+        func queueCallOutcome(id: String, call: String, outcome: JSONValue) -> String? {
+            platformDriver.queueCallOutcome(id: id, call: call, outcome: outcome, session: session)
+        }
+
+        func simulatePlatformEvent(id: String, event: String, data: JSONValue) -> String? {
+            platformDriver.simulate(id: id, event: event, data: data, session: session)
+        }
+
         func advanceClock(id: String, milliseconds: Int) -> PrototypeTimers.AdvanceResult {
             guard session.isShown, spec?.id == id else {
                 return .init(fired: 0, error: "Unknown prototype id: \(id)")
@@ -363,6 +379,27 @@
             escapeReveal.reveal()
         }
 
+        @ObservationIgnored private let realtimeConfig: PrototypeRealtimeConfig?
+        @ObservationIgnored private lazy var realtimeModule: PrototypeRealtimeModule? = {
+            guard let realtimeConfig else { return nil }
+            let sink = PrototypeChannelSink(
+                // A synchronous MainActor apply is the production exclusive section: it cannot
+                // suspend or re-enter the controller. Core tests inject a non-reentrant async mutex.
+                exclusively: { work in try work() },
+                isCurrent: { [weak self] channel in
+                    self?.session.isShown == true &&
+                        self?.session.spec?.channels?.objectFields?[channel] != nil
+                },
+                apply: { [weak self] effect in
+                    self?.apply(activity: false) { session in
+                        do { return try session.applyChannelEffect(effect) }
+                        catch { NSLog("Prototype realtime sink failed: %@", String(describing: error)); return [] }
+                    }
+                }
+            )
+            return PrototypeRealtimeModule(config: realtimeConfig, sink: sink, clock: clock)
+        }()
+
         @ObservationIgnored private let clock: PrototypeClock
 
         /// Stored values (#12526): restored by `show`, written back after changes and on dismissal. Nil
@@ -372,16 +409,21 @@
         @ObservationIgnored private var timerLifecycle: PrototypeTimerLifecycle?
 
         let mode: PrototypeLifecycleMode
+        private let runtime: PrototypePlatformReport.Runtime
 
         init(
             clock: PrototypeClock = SystemPrototypeClock(),
             mode: PrototypeLifecycleMode = .session,
+            runtime: PrototypePlatformReport.Runtime = .iosAgent,
             storage: PrototypeStorageCoordinator? = nil,
-            registry: PrototypePlatformRegistry = .system
+            registry: PrototypePlatformRegistry = .system,
+            realtime: PrototypeRealtimeConfig? = nil
         ) {
+            realtimeConfig = realtime
             platformRegistry = registry.forPresentation()
             self.clock = clock
             self.mode = mode
+            self.runtime = runtime
             self.storage = storage
             timerLifecycle = PrototypeTimerLifecycle(model: self)
         }
@@ -451,15 +493,33 @@
             // Stored values replace the spec's for the keys it lists before the first draw, and emit
             // nothing (#12526); the session only receives the result.
             let prepared = storage?.prepare(spec)
+            (platformRegistry.modules["secureStorage"] as? PrototypeSecureStorageModule)?
+                .restored(locked: prepared?.locked ?? [])
             // Drop buffered location/sensor events from the old session while keeping global and
             // host-supplied streams alive. New state must be seeded before the first draw.
-            platformDriver.resetSessionEvents()
-            platformRegistry.configure(locationBlock: (prepared?.spec ?? spec).locationBlock)
-            platformRegistry.configure(sensorsBlock: (prepared?.spec ?? spec).sensorsBlock, sessionID: showRevision + 1)
+            var carriedRealtime: JSONValue?
+            if realtimeConfig != nil, session.isShown, session.spec?.id == spec.id,
+               let realtime = session.spec?.platformState["realtime"]?.objectFields
+            {
+                carriedRealtime = .object(realtime.filter { spec.channels?.objectFields?[$0.key] != nil })
+            }
+            if session.spec?.id != spec.id { platformDriver.resetNotificationEvents() }
+            platformRegistry.configureNotifications(for: prepared?.spec ?? spec)
             let seeded: PrototypeSpec
-            do { seeded = try (prepared?.spec ?? spec).replacingPlatform(
-                platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }
-            ) } catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
+            do {
+                seeded = try platformDriver.seedForShow(
+                    prepared?.spec ?? spec,
+                    previousLocationBlock: session.spec?.locationBlock,
+                    previousSensorsBlock: session.spec?.sensorsBlock,
+                    previousSessionID: showRevision,
+                    sessionID: showRevision + 1
+                ) {
+                    var platform = platformRegistry.snapshot.merging(deviceState.snapshot) { _, device in device }
+                    if let carriedRealtime { platform["realtime"] = carriedRealtime }
+                    return platform
+                }
+            } catch { NSLog("Prototype platform seed failed: %@", String(describing: error)); return }
+            platformDriver.clearOutcomes()
             next.show(
                 seeded, reset: reset, appearance: appearance, locale: locale, specBytes: specBytes,
                 restoredState: prepared?.state, restoredStacks: prepared?.stacks
@@ -472,11 +532,12 @@
             let viewCommands = next.takeViewCommands()
             listAnchors = PrototypeStackListAnchorStore()
             publish(next, replacingSpec: true)
+            realtimeModule?.begin(prototypeID: spec.id)
+            realtimeModule?.update(session.resolvedChannels)
+            realtimeModule?.show()
             let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-            for var event in lifecycleEvents {
-                event.wireTimestamp = timestamp
-                onEmbeddedEvent?(event)
-                onEvent?(event.wireObject(timestamp: timestamp))
+            for event in lifecycleEvents {
+                publish(event, timestamp: timestamp)
             }
             platformDriver.perform(platformCommands)
             // A fresh stream cannot deliver the previous session's buffered shake/location events.
@@ -490,7 +551,8 @@
             syncSnackbarTimeouts()
             // An accepted show, including a same-id replace, is activity.
             if mode.expiresWhenIdle { idleTimer.arm() }
-            onVisibilityChange?(true)
+            PrototypeURLDelivery.inbox.flush(self)
+            onVisibilityChange?(session.isShown)
             viewCommandQueue.run(viewCommands, in: prototypeWindow)
             apply(activity: false) { _ in [] }
         }
@@ -505,6 +567,7 @@
                 outcome = result
                 return events
             }
+            realtimeModule?.update(session.resolvedChannels)
             return outcome
         }
 
@@ -659,6 +722,14 @@
             apply { $0.pasteClipboard(text, into: into) }
         }
 
+        func openLink(_ url: String, registeredSchemes: [String]) {
+            apply { $0.openLink(url, registeredSchemes: registeredSchemes) }
+        }
+
+        func webViewNavigation(_ update: PrototypeWebViewNavigation.Update) {
+            apply(activity: !update.actions.isEmpty) { $0.control(own: update.writes, then: update.actions) }
+        }
+
         func run(_ actions: [PrototypeAction]) {
             consumeDeadTap()
             apply { $0.run(actions) }
@@ -766,12 +837,14 @@
             }
             syncSnackbarTimeouts()
             let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-            for var event in events {
-                event.wireTimestamp = timestamp
-                onEmbeddedEvent?(event)
-                onEvent?(event.wireObject(timestamp: timestamp))
+            for event in events {
+                publish(event, timestamp: timestamp)
             }
             if wasShown, !session.isShown {
+                platformDriver.clearOutcomes()
+                realtimeModule?.close()
+                platformRegistry.configureNotifications(for: nil)
+                platformDriver.resetNotificationEvents()
                 platformRegistry.configure(locationBlock: nil)
                 platformRegistry.configure(sensorsBlock: nil)
                 hitRects.removeAll()
@@ -781,6 +854,21 @@
             timers.perform(timerCommands)
             platformDriver.perform(platformCommands)
             requestDriver?.perform(requestCommands)
+        }
+
+        private func publish(_ event: PrototypeEvent, timestamp: Int) {
+            var event = event
+            event.wireTimestamp = timestamp
+            if event.name == "prototype_platform",
+               var fields = event.payload.objectFields,
+               let call = fields["call"]?.stringValue,
+               let mode = platformRegistry.reportMode(for: String(call.prefix(while: { $0 != "." })))
+            {
+                fields["mode"] = .string(mode.rawValue)
+                event.payload = .object(fields)
+            }
+            onEmbeddedEvent?(event)
+            onEvent?(event.wireObject(timestamp: timestamp))
         }
 
         /// Upload progress follows ordinary state transitions without counting as user activity.
@@ -803,13 +891,26 @@
             )
         }
 
+        var platformRuntime: JSONValue? {
+            guard session.isShown else { return nil }
+            let appState: String? = switch UIApplication.shared.applicationState {
+            case .active: "active"
+            case .inactive: "inactive"
+            case .background: "background"
+            @unknown default: nil
+            }
+            return platformRegistry.report(
+                runtime: runtime, inFlight: session.platformInFlight, appState: appState
+            ).wireObject
+        }
+
         func status() -> [String: Any] {
             var status: [String: Any] = [
                 "shown": session.isShown,
                 "id": spec?.id as Any? ?? NSNull(),
                 "pages": pages,
                 "stacks": stacks.mapValues(\.wireObject),
-                "state": JSONValue.object(state).foundationObject,
+                "state": JSONValue.object(session.publicState).foundationObject,
                 "assets": assets.keys.sorted(),
                 "lastSequence": session.lastSequence,
             ]
@@ -821,6 +922,7 @@
             if !assetProblems.isEmpty { status["assetProblems"] = assetProblems.map(\.wireObject) }
             if let platform = session.spec?
                 .platformState { status["platform"] = JSONValue.object(platform).foundationObject }
+            if let platformRuntime { status["platformRuntime"] = platformRuntime.foundationObject }
             if let data = session.data { status["data"] = JSONValue.object(data).foundationObject }
             let degraded = degradedEffects()
             if !degraded.isEmpty { status["degradedEffects"] = degraded }

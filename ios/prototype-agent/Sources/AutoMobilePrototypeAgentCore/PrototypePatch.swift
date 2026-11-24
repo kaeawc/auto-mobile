@@ -268,7 +268,8 @@ enum PrototypePatch {
         return items
     }
 
-    private static func equal(_ left: JSONValue?, _ right: JSONValue?) -> Bool {
+    // Shared with channel route matchers: JSON string identity uses exact UTF-16.
+    static func equal(_ left: JSONValue?, _ right: JSONValue?) -> Bool {
         switch (left, right) {
         case (.null?, .null?): return true
         case let (.string(first)?, .string(second)?): return first.utf16.elementsEqual(second.utf16)
@@ -442,10 +443,10 @@ enum PrototypePatch {
     }
 
     /// The refusal for a patch that touches state without a usable `baseRevision`, or on a key a device
-    /// write changed after it (the conflict carries those keys' current values); nil when it may proceed.
+    /// write changed after it (the conflict carries those keys' current public values); nil when it may proceed.
     static func stateGuard(
         ops: JSONValue, baseRevision: Int?, revision: Int, stateRevisions: [String: Int],
-        state: [String: JSONValue]
+        state: [String: JSONValue], secure: [String] = []
     )
         -> PrototypePatchOutcome?
     {
@@ -463,7 +464,7 @@ enum PrototypePatch {
         guard !changed.isEmpty else { return nil }
         return .conflict(
             revision: revision,
-            state: state.filter { changed.contains($0.key) },
+            state: PrototypeSecureStorageRules.redact(state: state.filter { changed.contains($0.key) }, secure: secure),
             baseRevision: baseRevision
         )
     }

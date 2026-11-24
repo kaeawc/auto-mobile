@@ -1,0 +1,74 @@
+# waaagh App broker (kaeawc/waaagh#268): acts as the repository's GitHub App for a cloud session that
+# must never see the App's key. A session starts it (waaagh's app-broker.sh) with op=status to post
+# the `orchestrate/review` commit status on a PR's head, or op=merge to merge that PR at that head
+# once the App's own `orchestrate/review` there is success. The work is the kaeawc/waaagh
+# actions/app-broker composite action, pinned to a commit: it mints the App token from this
+# repository's GH_APP_ID / GH_APP_PRIVATE_KEY secrets, scoped to this repository and to the one
+# permission the write needs.
+# Triggers: a `repository_dispatch` event of type app-broker, with the request in client_payload
+# (op, pr, sha, state, description, method). Sending one needs only Contents write, which a Claude
+# Code cloud session has; workflow_dispatch needs Actions write, which it does not. workflow_dispatch
+# stays for a manual run from the Actions tab. Both are checked the same way.
+# Callers: the actors listed in the APP_BROKER_ACTORS repository variable (comma-separated logins),
+# else the repository owner.
+# Install: `app-broker.sh workflow` prints this file with the action pinned to the commit of the
+# newest kaeawc/waaagh release tag (`@<sha> # vX.Y.Z`); commit it as .github/workflows/app-broker.yml
+# in the target repository. Update: the repository's Dependabot (github-actions) bumps the pin.
+name: app-broker
+
+on:
+  repository_dispatch:
+    types: [app-broker]
+  workflow_dispatch:
+    inputs:
+      op:
+        description: "status (post orchestrate/review) or merge (merge at sha once it is success)"
+        required: true
+        type: choice
+        options: [status, merge]
+      pr:
+        description: "Pull request number"
+        required: true
+        type: string
+      sha:
+        description: "The PR head commit (40 hex characters) the status or merge is for"
+        required: true
+        type: string
+      state:
+        description: "op=status: the status state"
+        required: false
+        type: choice
+        options: [success, failure, pending, error]
+        default: success
+      description:
+        description: "op=status: the status description (at most 140 characters)"
+        required: false
+        type: string
+        default: ""
+      method:
+        description: "op=merge: the merge method"
+        required: false
+        type: choice
+        options: [squash, merge, rebase]
+        default: squash
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: read
+
+concurrency:
+  group: app-broker-${{ github.event.inputs.pr || github.event.client_payload.pr }}
+  cancel-in-progress: false
+
+jobs:
+  broker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Act as the App
+        uses: kaeawc/waaagh/actions/app-broker@805b65be6d0ca4435eff23247f7805ca8cbf4478 # v0.1.0
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          allowed-actors: ${{ vars.APP_BROKER_ACTORS }}

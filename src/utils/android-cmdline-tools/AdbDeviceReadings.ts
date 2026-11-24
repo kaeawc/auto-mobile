@@ -2,7 +2,7 @@ import { parseDeviceLock } from "./parseDeviceLock";
 import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
 import { rethrowDeviceTransportUnavailable } from "./AdbDeviceTransportUnavailableError";
 
-import { parseDumpsysUsers, parsePmListUsers } from "./parseAndroidUsers";
+import { dumpsysReportsUserStates, parseDumpsysUsers, parsePmListUsers } from "./parseAndroidUsers";
 
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
@@ -159,6 +159,11 @@ export class AdbDeviceReadings {
         signal,
       });
       const users = parseDumpsysUsers(result.stdout);
+
+      if (users.length > 0 && !dumpsysReportsUserStates(result.stdout)) {
+        logger.debug("[ADB] dumpsys user reports no user states, falling back to pm list users");
+        return await this.listUsersLegacy(signal);
+      }
 
       if (users.length > 0) {
         logger.info(

@@ -26,7 +26,14 @@ export class FakeLockSettingsClient implements LockSettingsClient {
   /** Readings returned before the stored lock is consulted (an unreadable dump, …). */
   nextReadings: LockSettingsReading[] = [];
 
+  /** The user this client targets (`--user`), as the real client's resolver would report. */
+  userId = 0;
+
   constructor(public lock: { type: ScreenLockCredentialType; credential: string } | null = null) {}
+
+  async targetUserId(): Promise<number> {
+    return this.userId;
+  }
 
   async read(): Promise<LockSettingsReading> {
     this.calls.push({ method: "read" });

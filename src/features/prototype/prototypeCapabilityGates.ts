@@ -1,3 +1,9 @@
+import { prototypeDeclaredCapabilities } from "./prototypeDeclaredCapabilities";
+import type { PrototypeRuntimeKind } from "./prototypePlatformReport";
+import {
+  PROTOTYPE_REMOTE_IMAGE_CAPABILITY,
+  prototypeRemoteImageFields,
+} from "./prototypeRemoteImages";
 import {
   PROTOTYPE_LOOPS_CAPABILITY,
   prototypeLoopFields,
@@ -46,6 +52,8 @@ import {
 } from "./prototypeSharedElement";
 import { prototypeTimerFields, prototypeTimersUnsupportedMessage } from "./prototypeTimers";
 import {
+  prototypeNestedRepeatFields,
+  prototypeNestedRepeatUnsupportedMessage,
   prototypeDeriveFields,
   prototypeDeriveUnsupportedMessage,
   prototypeFormatFields,
@@ -67,6 +75,7 @@ import {
   PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_FORMAT_CAPABILITY,
   PROTOTYPE_DERIVE_CAPABILITY,
+  PROTOTYPE_NESTED_REPEAT_CAPABILITY,
   PROTOTYPE_STACK_PATTERNS_CAPABILITY,
   PROTOTYPE_STACK_TRANSITIONS_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
@@ -100,6 +109,7 @@ import {
   PROTOTYPE_EMIT_CONTEXT_CAPABILITY,
   PROTOTYPE_CHECKS_CAPABILITY,
   PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY,
+  PROTOTYPE_DATA_ACTIONS_V3_CAPABILITY,
   PROTOTYPE_DATA_ACTIONS_CAPABILITY,
   PROTOTYPE_STORAGE_CAPABILITY,
   PROTOTYPE_NETWORK_CAPABILITY,
@@ -118,6 +128,8 @@ import {
 import {
   prototypeKeyedDataActionFields,
   prototypeKeyedDataActionsUnsupportedMessage,
+  prototypeObjectDataActionFields,
+  prototypeObjectDataActionsUnsupportedMessage,
   prototypeDataActionFields,
   prototypeDataActionsUnsupportedMessage,
 } from "./prototypeDataActions";
@@ -189,6 +201,11 @@ import {
 } from "./prototypeChecksCapability";
 
 import { PROTOTYPE_TOOLTIP_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { PROTOTYPE_M3_EXPRESSIVE_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeM3ExpressiveFields,
+  prototypeM3ExpressiveUnsupportedMessage,
+} from "./prototypeM3Expressive";
 import { prototypeTooltipFields, prototypeTooltipUnsupportedMessage } from "./prototypeTooltip";
 
 import { PROTOTYPE_DRAWER_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -239,6 +256,8 @@ import {
 } from "./prototypeMediaItems";
 
 import { PROTOTYPE_MOTION_TOKENS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { PROTOTYPE_LARGE_BUDGET_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { prototypeLargeBudgetFields } from "./prototypeRuntimeBudget";
 import {
   prototypeMotionTokenFields,
   prototypeMotionTokensUnsupportedMessage,
@@ -247,7 +266,11 @@ import {
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
   readonly fields: (spec: unknown, platform?: "android" | "ios") => string[];
-  readonly unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") => string;
+  readonly unsupportedMessage: (
+    fields: readonly string[],
+    platform: "android" | "ios",
+    runtime?: PrototypeRuntimeKind,
+  ) => string;
 }
 
 /** Spec-introduced features must be checked on both show and the complete patch result. */
@@ -278,6 +301,12 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_CONTENT_TRANSITION_CAPABILITY,
     fields: prototypeContentTransitionFields,
     unsupportedMessage: prototypeContentTransitionUnsupportedMessage,
+  },
+  {
+    capability: "prototype_links_v1",
+    fields: (spec) => (Object.hasOwn(record(spec) ?? {}, "links") ? ["links"] : []),
+    unsupportedMessage: (fields) =>
+      `The device does not advertise prototype_links_v1, required by ${fields[0]}. Nothing was shown.`,
   },
   {
     capability: PROTOTYPE_ROUTES_CAPABILITY,
@@ -332,14 +361,30 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypeTooltipUnsupportedMessage,
   },
   {
+    capability: PROTOTYPE_M3_EXPRESSIVE_CAPABILITY,
+    fields: prototypeM3ExpressiveFields,
+    unsupportedMessage: prototypeM3ExpressiveUnsupportedMessage,
+  },
+  {
     capability: PROTOTYPE_STRINGS_CAPABILITY,
     fields: prototypeStringsFields,
     unsupportedMessage: prototypeStringsUnsupportedMessage,
   },
   {
+    capability: PROTOTYPE_REMOTE_IMAGE_CAPABILITY,
+    fields: prototypeRemoteImageFields,
+    unsupportedMessage: (fields, platform) =>
+      `The ${platform} device does not advertise ${PROTOTYPE_REMOTE_IMAGE_CAPABILITY}; remote image fields at ${fields.join(", ")} must be replaced with a bundled asset: remove url and remote-image options. Nothing was shown.`,
+  },
+  {
     capability: PROTOTYPE_SEMANTICS_CAPABILITY,
     fields: prototypeSemanticsFields,
     unsupportedMessage: prototypeSemanticsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_NESTED_REPEAT_CAPABILITY,
+    fields: prototypeNestedRepeatFields,
+    unsupportedMessage: prototypeNestedRepeatUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_DERIVE_CAPABILITY,
@@ -571,6 +616,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     unsupportedMessage: prototypeChecksUnsupportedMessage,
   },
   {
+    capability: PROTOTYPE_DATA_ACTIONS_V3_CAPABILITY,
+    fields: prototypeObjectDataActionFields,
+    unsupportedMessage: prototypeObjectDataActionsUnsupportedMessage,
+  },
+  {
     capability: PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY,
     fields: prototypeKeyedDataActionFields,
     unsupportedMessage: prototypeKeyedDataActionsUnsupportedMessage,
@@ -622,12 +672,21 @@ export function prototypeRequiredCapabilities(
   fields: string[];
   unsupportedMessage: PrototypeSpecCapabilityGate["unsupportedMessage"];
 }[] {
-  return PROTOTYPE_SPEC_CAPABILITY_GATES.flatMap((gate) => {
+  const inferred = PROTOTYPE_SPEC_CAPABILITY_GATES.flatMap((gate) => {
     const fields = gate.fields(spec, platform);
     return fields.length === 0
       ? []
       : [{ capability: gate.capability, fields, unsupportedMessage: gate.unsupportedMessage }];
   });
+  const declared = prototypeDeclaredCapabilities(record(spec)?.requires)
+    .filter((capability) => !inferred.some((gate) => gate.capability === capability))
+    .map((capability) => ({
+      capability,
+      fields: ["requires"],
+      unsupportedMessage: () =>
+        `The device does not advertise ${capability}, required by requires. Nothing was shown.`,
+    }));
+  return [...inferred, ...declared];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -638,18 +697,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Capabilities the show preflight checks outside the gate table (#14536): any node anchor needs
  * prototype_anchor_v1, and an explicitly chromeless fullscreen window needs
  * prototype_window_chrome_v1 (the only chrome request the preflight refuses without it); window.deadTaps
- * true needs prototype_dead_tap_v1 (#14124).
+ * true needs prototype_dead_tap_v1 (#14124). A spec over the base runtime budget needs
+ * prototype_large_budget_v1 (#18804): a runtime limit, not a spec feature, so the native validators
+ * do not compute it.
  */
 function preflightCapabilities(spec: unknown): string[] {
   if (!isRecord(spec)) {
     return [];
   }
+  const large =
+    prototypeLargeBudgetFields(spec).length > 0 ? [PROTOTYPE_LARGE_BUDGET_CAPABILITY] : [];
   const window = isRecord(spec.window) ? spec.window : {};
   const fullscreen = isRecord(window.placement) && window.placement.type === "fullscreen";
   return [
     ...(hasPrototypeAnchors(spec) ? [PROTOTYPE_ANCHOR_CAPABILITY] : []),
     ...(fullscreen && window.chrome === "none" ? [PROTOTYPE_WINDOW_CHROME_CAPABILITY] : []),
     ...(window.deadTaps === true ? [PROTOTYPE_DEAD_TAP_CAPABILITY] : []),
+    ...large,
   ];
 }
 
@@ -657,19 +721,27 @@ function preflightCapabilities(spec: unknown): string[] {
  * Capability names required by the gate table alone: the set the native strict validators
  * (Kotlin and Swift) compute and the shared corpus records.
  */
-export function prototypeGateCapabilities(spec: unknown): string[] {
-  return [...new Set(prototypeRequiredCapabilities(spec).map((gate) => gate.capability))].sort();
+export function prototypeGateCapabilities(spec: unknown, platform?: "android" | "ios"): string[] {
+  return [
+    ...new Set(prototypeRequiredCapabilities(spec, platform).map((gate) => gate.capability)),
+  ].sort();
 }
 
 /** Capability names required by a spec, for the native-code resource's renderer contract. */
-export function requiredPrototypeCapabilities(spec: unknown): string[] {
-  return [...new Set([...prototypeGateCapabilities(spec), ...preflightCapabilities(spec)])].sort();
+export function requiredPrototypeCapabilities(
+  spec: unknown,
+  platform?: "android" | "ios",
+): string[] {
+  return [
+    ...new Set([...prototypeGateCapabilities(spec, platform), ...preflightCapabilities(spec)]),
+  ].sort();
 }
 
 /**
- * Every capability `requiredPrototypeCapabilities` can name: the gate table's and the preflight's.
+ * Every capability `requiredPrototypeCapabilities` can name: the gate table's and the preflight's,
+ * except `prototype_large_budget_v1`: the web library keeps the base runtime budget (#18804).
  * The web library advertises this set as of its release (#16453), so it refuses only a spec that
- * needs a capability added after it.
+ * needs a capability added after it or the large budget.
  */
 export function knownPrototypeCapabilities(): string[] {
   return [

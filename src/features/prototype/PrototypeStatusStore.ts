@@ -3,13 +3,12 @@ import { shownBackdrop, type PrototypeBackdropOutcome } from "./prototypeBackdro
 import { prototypeDegradedEffectsField, type DegradedEffect } from "./prototypeDegradedEffects";
 import type { PrototypeTimerReport } from "./prototypeTimerSchema";
 import type { PrototypeHiddenReason } from "./prototypeHidden";
-import { PrototypeShownSpecs } from "./PrototypeShownSpecs";
+import { applyDeviceDataWrite, PrototypeShownSpecs } from "./PrototypeShownSpecs";
 import {
   PrototypeSpecRevisions,
   type PrototypeSpecRevisionRecorder,
 } from "./prototypeSpecRevisions";
 import type { PrototypeData } from "./prototypeSpec";
-import { applyPrototypeDataWrite } from "./prototypeDataWrite";
 import { prototypeDataWriteOf } from "./prototypeDataWriteEvent";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
@@ -28,6 +27,12 @@ import {
   prototypeDeviceStatusOf,
   type PrototypeDeviceStatusMirror,
 } from "./prototypeDeviceStatusMirror";
+
+import { prototypePlatformCallEventOf } from "./prototypePlatformEvent";
+import {
+  parsePrototypePlatformReport,
+  type PrototypePlatformReport,
+} from "./prototypePlatformReport";
 
 export type PrototypeMutation = "show" | "dismiss";
 export interface PrototypeLastResult {
@@ -82,6 +87,7 @@ export interface PrototypeLastResult {
   timers?: PrototypeTimerReport[];
   /** The device's last haptic and sound calls for this prototype, from an `inspect` (#14329). */
   feedbackLog?: PrototypeFeedbackEntry[];
+  images?: { loaded: number; failed: number; pending: number };
   shaderFailures?: Record<string, string>;
   degradedEffects?: DegradedEffect[];
   success: boolean;
@@ -113,6 +119,7 @@ function adoptedWindowControls(
 }
 
 export interface AdoptedPrototype {
+  platformRuntime?: PrototypePlatformReport;
   data?: PrototypeData;
   id: string;
   persistent?: boolean;
@@ -124,6 +131,7 @@ export interface AdoptedPrototype {
   storage?: PrototypeStorageReport;
   timers?: PrototypeTimerReport[];
   feedbackLog?: PrototypeFeedbackEntry[];
+  images?: { loaded: number; failed: number; pending: number };
   shaderFailures?: Record<string, string>;
   degradedEffects?: DegradedEffect[];
   pages: PrototypeEvent["pages"];
@@ -138,6 +146,7 @@ export interface PrototypeStatus {
    * accuracy-only summary of the last `location.updated` (#16463).
    */
   platformStatus?: PrototypeDeviceStatusMirror;
+  platformRuntime?: PrototypePlatformReport;
 }
 export interface PrototypeScope {
   sessionUuid?: string;
@@ -161,6 +170,7 @@ export interface PrototypeStatusStore {
    * pages/state come from the device, replacing whatever the host remembered for this id.
    */
   adopt(scope: PrototypeScope, prototype: AdoptedPrototype): void;
+  clearPlatformRuntime(scope: PrototypeScope): void;
   recordEvent(scope: PrototypeScope, event: PrototypeEvent): void;
   /** The device reported a terminal dismissal for this prototype; its presence is gone. */
   dismissed(scope: PrototypeScope, id: string): void;
@@ -204,6 +214,11 @@ interface StoredPrototypeStatus extends PrototypeScope {
   snapshots?: Map<string, PrototypeEventState>;
   pendingSnapshots?: Map<string, PrototypeEventState>;
   platformStatus?: PrototypeDeviceStatusMirror;
+  platformRuntime?: {
+    id: string;
+    report: PrototypePlatformReport;
+    eventTimes: Map<string, number>;
+  };
 }
 
 /** Sets or, for undefined, removes the entry's reported data. */
@@ -307,6 +322,9 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ),
       ...(stored?.lastResult ? { lastResult: { ...stored.lastResult } } : {}),
       ...(stored?.platformStatus ? { platformStatus: structuredClone(stored.platformStatus) } : {}),
+      ...(stored?.platformRuntime
+        ? { platformRuntime: structuredClone(stored.platformRuntime.report) }
+        : {}),
     };
   }
 
@@ -348,23 +366,14 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     const patched = this.patchedFields(scope.deviceId, prototype.id);
     // Adoption transfers this id to the inspecting scope while retaining its siblings.
     this.clearShown(scope.deviceId, prototype.id);
-    const entry: PrototypeLastResult = {
-      id: prototype.id,
-      lastAction: "show",
-      adopted: true,
-      ...(prototype.persistent === undefined ? {} : { persistent: prototype.persistent }),
-      ...(prototype.suspended === true ? { suspended: true as const } : {}),
-      ...(prototype.hiddenReason ? { hiddenReason: prototype.hiddenReason } : {}),
-      ...adoptedWindowControls(prototype),
-      ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
-      ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
-      ...prototypeDegradedEffectsField(prototype.degradedEffects),
-      ...(prototype.timers ? { timers: structuredClone(prototype.timers) } : {}),
-      ...adoptedFeedbackLog(prototype),
-      shaderFailures: structuredClone(prototype.shaderFailures),
-      success: true,
-      timestamp: this.clock.now(),
-    };
+    const entry = this.createAdoptedResult(prototype);
+    if (prototype.platformRuntime) {
+      stored.platformRuntime = {
+        id: prototype.id,
+        report: structuredClone(prototype.platformRuntime),
+        eventTimes: new Map(),
+      };
+    }
     stored.lastResult = entry;
     stored.shown.set(prototype.id, {
       ...entry,
@@ -380,6 +389,35 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       lastKnown: true,
     });
     this.remember(key, stored);
+  }
+
+  private createAdoptedResult(prototype: AdoptedPrototype): PrototypeLastResult {
+    return {
+      id: prototype.id,
+      lastAction: "show",
+      adopted: true,
+      ...(prototype.persistent === undefined ? {} : { persistent: prototype.persistent }),
+      ...(prototype.suspended === true ? { suspended: true as const } : {}),
+      ...(prototype.hiddenReason ? { hiddenReason: prototype.hiddenReason } : {}),
+      ...adoptedWindowControls(prototype),
+      ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
+      ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
+      ...prototypeDegradedEffectsField(prototype.degradedEffects),
+      ...(prototype.timers ? { timers: structuredClone(prototype.timers) } : {}),
+      ...adoptedFeedbackLog(prototype),
+      images: structuredClone(prototype.images),
+      shaderFailures: structuredClone(prototype.shaderFailures),
+      success: true,
+      timestamp: this.clock.now(),
+    };
+  }
+
+  clearPlatformRuntime(scope: PrototypeScope): void {
+    const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
+    const stored = this.scopes.get(key);
+    if (stored) {
+      delete stored.platformRuntime;
+    }
   }
 
   /** Accepted pushes may precede the successful show acknowledgement. */
@@ -399,6 +437,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       shown: new Map<string, PrototypeLastResult>(),
     };
     this.recordDeviceStatus(stored, event);
+    this.recordPlatformRuntimeEvent(stored, event);
     stored.pendingSnapshots ??= new Map();
     const snapshot = eventSnapshot(event);
     stored.pendingSnapshots.set(event.id, snapshot);
@@ -413,10 +452,43 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     this.remember(key, stored);
   }
 
+  private recordPlatformRuntimeEvent(stored: StoredPrototypeStatus, event: PrototypeEvent): void {
+    const snapshot = stored.platformRuntime;
+    if (snapshot?.id !== event.id) {
+      return;
+    }
+    const call = prototypePlatformCallEventOf(event);
+    if (!call || call.simulated || (call.mode === undefined && call.inFlight === undefined)) {
+      return;
+    }
+    const name = call.call.slice(0, call.call.indexOf("."));
+    const module = snapshot.report.modules[name];
+    if (
+      !Object.hasOwn(snapshot.report.modules, name) ||
+      !module ||
+      (snapshot.eventTimes.get(name) ?? -Infinity) > event.timestamp
+    ) {
+      return;
+    }
+    snapshot.eventTimes.set(name, event.timestamp);
+    this.updatePlatformRuntimeModule(module, call);
+  }
+
+  private updatePlatformRuntimeModule(
+    module: PrototypePlatformReport["modules"][string],
+    call: NonNullable<ReturnType<typeof prototypePlatformCallEventOf>>,
+  ): void {
+    if (call.mode !== undefined) {
+      module.mode = call.mode;
+    }
+    if (call.inFlight !== undefined) {
+      module.inFlight = call.inFlight;
+    }
+  }
+
   /**
    * A delivered status change replaces that module's mirrored values whatever prototype received it,
-   * unless it is older on the device clock: `inspect` replays buffered events grouped by prototype,
-   * not in delivery order.
+   * unless it is older on the device clock: inspect replays events grouped by prototype.
    */
   private recordDeviceStatus(stored: StoredPrototypeStatus, event: PrototypeEvent): void {
     const reading = prototypeDeviceStatusOf(event);
@@ -482,8 +554,20 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       { ...presence, ...shownData(action, result, details.data) },
       details.replaceOthers,
     );
+    this.recordShowPlatformRuntime(stored, entry, result);
     this.remember(key, stored);
     return structuredClone(entry);
+  }
+
+  private recordShowPlatformRuntime(
+    stored: StoredPrototypeStatus,
+    entry: PrototypeLastResult,
+    result: PrototypeResult,
+  ): void {
+    if (entry.lastAction === "show" && result.success && entry.id) {
+      const report = parsePrototypePlatformReport(result.platformRuntime);
+      stored.platformRuntime = report && { id: entry.id, report, eventTimes: new Map() };
+    }
   }
 
   /**
@@ -496,24 +580,15 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     if (!write) {
       return;
     }
+    // Read before mirroring: a write the mirror cannot apply forgets the entry and its budget.
+    const budget = this.shownSpecs.budgetOf(deviceId, event.id);
     this.shownSpecs.recordDeviceDataWrite(deviceId, event.id, write);
     for (const stored of this.scopes.values()) {
       const entry = stored.deviceId === deviceId ? stored.shown.get(event.id) : undefined;
       if (!entry) {
         continue;
       }
-      const applied =
-        write.op === "remove"
-          ? applyPrototypeDataWrite(entry.data, {
-              op: "remove",
-              path: write.path,
-              where: write.where,
-            })
-          : write.value === undefined
-            ? undefined
-            : write.op === "extend" || write.op === "prepend"
-              ? applyPrototypeDataWrite(entry.data, { ...write, value: write.value })
-              : applyPrototypeDataWrite(entry.data, { ...write, value: write.value });
+      const applied = applyDeviceDataWrite(entry.data, write, budget);
       const written = { ...entry, ...newerRevision(entry, write.revision) };
       if (applied?.success) {
         written.data = applied.data;
@@ -716,6 +791,9 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     for (const known of this.scopes.values()) {
       if (known.deviceId !== deviceId) {
         continue;
+      }
+      if (id === undefined || known.platformRuntime?.id === id) {
+        delete known.platformRuntime;
       }
       if (id === undefined) {
         known.pendingSnapshots?.clear();

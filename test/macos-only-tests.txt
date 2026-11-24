@@ -25,11 +25,19 @@ portable test/features/utility/WatchNotificationDeliveryLog.test.ts     # pure w
 
 # --- portable: path has an iOS token but the test needs no iOS host --------------
 
+portable test/features/audit/IosOnDemandAuditEngines.test.ts              # fake observer, clock and process commands over a captured launchctl listing
 portable test/features/utility/ios/*.test.ts  # registry, env construction and injected compiler/filesystem only
+portable test/features/action/iosRotateFloatingWindow.test.ts           # pure rotate verification over captured iPad values
 portable test/daemon/iosCameraPosterSessionCleanup.test.ts  # fake session manager and in-memory registry only
+portable test/utils/ios-cmdline-tools/simulatorBootHooks.test.ts  # in-process listener set only; no simctl
 
 portable test/utils/ios/carPlayProjection.test.ts                        # JSON contract and injected exec only; no host processes
+portable test/utils/ios/carPlayCapture.test.ts                           # injected probe and screenshot only
 portable test/utils/ios/carPlayScreenPower.test.ts                       # JSON contract and injected exec only; no host processes
+portable test/utils/ios/carPlayDisplay.test.ts                           # fake powerer, probe and timer only; no host processes
+portable test/utils/ios/carPlayTap.test.ts                               # JSON contract, fake probe and injected exec only; no host processes
+portable test/utils/ios/healthKitSeeder*.test.ts                         # HealthKit seeder over fake runner, sheet, builder and FakeTimer; temp dirs only
+portable test/utils/ios/simctlHealthSimulatorRunner.test.ts              # injected exec only; no simctl runs
 
 # Source, workflow and script scans read repository files and run no iOS code.
 portable test/features/prototype/web/webIosParity*.test.ts               # Chromium/file-based parity checks; no iOS host commands
@@ -61,6 +69,7 @@ portable test/features/action/sendkeys/IosSdkTextRouting.test.ts        # sendKe
 portable test/features/action/SendKeys.iosSdkBridge.test.ts              # sendKeys executor over a fake router
 portable test/features/observe/collectors/IosObservationCollector.sdkBridge.test.ts # collector merge over fakes
 portable test/features/observe/collectors/IosObservationCollector.sdkWeb.test.ts # collector web merge over fakes
+portable test/features/observe/iosObserveRotation.test.ts # pure rotation resolver over a captured Duo fixture; no iOS host
 portable test/features/prototype/prototypeIosSpecContract.test.ts        # generator output equals the embedded Swift contract file
 portable test/features/prototype/prototypeIosIconSymbols.test.ts         # schema table equals generated Swift symbols
 portable test/features/storage/iosStorageDiscovery.test.ts           # pure parsing of the SDK storage capability payload
@@ -69,6 +78,8 @@ portable test/utils/iosDeviceResourceHazards.test.ts                    # pure h
 portable test/utils/iosDeviceResourceImpact.test.ts                     # pure catalog metadata and documentation parity, no iOS host
 
 # Fakes are shared by platform-neutral suites; their self-tests guard that drift.
+portable test/features/performance/IosStartupMeasurement.test.ts        # fake simctl and timer over captured logs
+portable test/features/performance/iosSceneReadyParsing.test.ts          # pure unified-log parser over captured fixtures
 portable test/fakes/FakeIOSCtrlProxy.test.ts                             # fake used outside iOS-only suites
 portable test/fakes/FakeIosVoiceOverDetector.test.ts                     # fake used outside iOS-only suites
 
@@ -107,6 +118,7 @@ portable test/features/observe/ios/IosSdkEventIngestor.test.ts           # share
 portable test/features/observe/output/IosChromeTapRefusalMarkers.test.ts # Android skeleton ignores an iOS hierarchy
 portable test/features/utility/DeviceStateIosNetworkCondition.test.ts    # Android never consults the iOS bridge
 portable test/features/utility/IosSimulatorDisplayConfig.test.ts         # contentSize refused on Android before any adb command
+portable test/features/utility/IosSimulatorScreenControls.test.ts        # fake simctl, backlight and FakeTimer only
 portable test/features/utility/ResolverElementSelectorIosScreenSize.test.ts # selector geometry for iOS and Android
 portable test/server/databaseIos.test.ts                                 # keeps the Android response shape; iOS discovery vs Android failure
 portable test/server/prototypeToolsIos.test.ts                           # shared prototype tool; Android inspect shape
@@ -116,6 +128,9 @@ portable test/utils/ios-cmdline-tools/iosDeviceType.property.test.ts     # Andro
 portable test/ctrlProxy/ios/IosRunnerLaunchGate.test.ts                  # FIFO admission and env parsing use no platform commands
 portable test/ctrlProxy/ios/IosRunnerLaunchFailure.test.ts               # pure output classification and PID failure ledger
 portable test/utils/ios-cmdline-tools/simctlFailureClassifier.test.ts # pure simctl failure-text classifier over captured fixtures and a fake port
+portable test/utils/ios-cmdline-tools/CoreSimulatorJxa.test.ts         # injected exec only; no osascript runs
+portable test/utils/ios-cmdline-tools/SimulatorBacklight.test.ts        # injected exec only; no osascript runs
+portable test/utils/ios-cmdline-tools/SimulatorDynamicIsland.test.ts    # fake spawn and FakeTimer only; no simctl runs
 portable test/ctrlProxy/ios/IosRunnerLaunchProgress.test.ts              # pure ps parsing and an injected fake host executor
 
 # --- macos: no iOS token in the path, but the test exercises only iOS code -------
@@ -127,3 +142,7 @@ macos test/utils/runtimeCompatibility.test.ts                            # impor
 macos test/devices/appleTvVisionRuntimeSupportedDeviceTypes.test.ts      # imports only the tvOS and visionOS provisioner checks
 
 portable test/features/observe/ios/CtrlProxyAccessibilityFocus.test.ts # delegate and decoder use the fake harness
+
+portable test/utils/ios/AXBridgeSessions.test.ts # injected preflight and launcher only
+portable test/utils/ios/AXBridgeProcessLauncher.test.ts # fake child streams and FakeTimer only
+portable test/utils/ios/AXBridgeClient.test.ts # fake transport and FakeTimer only

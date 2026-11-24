@@ -16,7 +16,7 @@ internal object PrototypeRepeatKeyBindings {
   fun checkedKeys(value: JsonObject): List<String> {
     val keys = mutableListOf<String>()
     PrototypeBindableFields.first<Boolean>(value, "") { field, _, kind ->
-      if (kind == PrototypeBindableKind.KEY) field.string()?.let(keys::add)
+      if (kind.isStateKey()) field.string()?.let(keys::add)
       null
     }
     keys.addAll((value["requireValid"] as? JsonArray).orEmpty().mapNotNull { it.string() })
@@ -32,7 +32,11 @@ internal object PrototypeRepeatKeyBindings {
   fun JsonObject.bound(field: String, scope: Scope, item: JsonObject, index: Int): JsonObject {
     val text = text(field) ?: return this
     return JsonObject(
-      this + (field to JsonPrimitive(PrototypeRepeatTemplate.bind(text, scope.alias, item, index))),
+      this +
+        (field to
+          JsonPrimitive(
+            PrototypeRepeatTemplate.bind(text, scope.alias, item, index, scope.outerAlias),
+          )),
     )
   }
 
@@ -64,7 +68,9 @@ internal object PrototypeRepeatKeyBindings {
               JsonArray(
                 keys.map { key ->
                   key.string()?.let {
-                    JsonPrimitive(PrototypeRepeatTemplate.bind(it, scope.alias, item, index))
+                    JsonPrimitive(
+                      PrototypeRepeatTemplate.bind(it, scope.alias, item, index, scope.outerAlias),
+                    )
                   } ?: key
                 },
               )),
@@ -76,10 +82,12 @@ internal object PrototypeRepeatKeyBindings {
   fun bindKeys(value: JsonObject, scope: Scope, item: JsonObject, index: Int): JsonObject {
     val replacements = mutableMapOf<String, JsonElement>()
     PrototypeBindableFields.first<Boolean>(value, "") { field, path, kind ->
-      if (kind == PrototypeBindableKind.KEY)
+      if (kind.isStateKey())
         field.string()?.let {
           replacements[path] =
-            JsonPrimitive(PrototypeRepeatTemplate.bind(it, scope.alias, item, index))
+            JsonPrimitive(
+              PrototypeRepeatTemplate.bind(it, scope.alias, item, index, scope.outerAlias),
+            )
         }
       null
     }

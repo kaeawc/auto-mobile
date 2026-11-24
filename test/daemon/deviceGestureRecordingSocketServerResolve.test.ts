@@ -10,7 +10,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import {
   createDeviceGestureRecordingDeviceResolution,
   resolveDeviceGestureRecordingDevice,
-} from "../../src/daemon/deviceGestureRecordingSocketServer";
+} from "../../src/daemon/streams/deviceGestureRecordingSocketServer";
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,

@@ -132,7 +132,12 @@ export class SessionNetworkConditionLifecycle {
       lastRevision: 0,
     };
     if (!existing) {
-      session.cacheData.networkCondition = { initialProfile: "none", iosAppRule: rule };
+      // A device-wide degrade already in the slot keeps its own restore obligation (#19045).
+      session.cacheData.networkCondition = {
+        initialProfile: "none",
+        iosAppRule: rule,
+        ...(state ? { deviceWide: true } : {}),
+      };
     }
     if (options.watch) {
       rule.watch = true;
@@ -247,6 +252,12 @@ export class SessionNetworkConditionLifecycle {
       return;
     }
     this.iosAppNetworkLeases.stop(session.sessionId);
+    const slot = session.cacheData.networkCondition;
+    if (slot?.deviceWide) {
+      // The device-wide degrade still needs restoring on release (#19045).
+      delete slot.iosAppRule;
+      return;
+    }
     delete session.cacheData.networkCondition;
   }
 

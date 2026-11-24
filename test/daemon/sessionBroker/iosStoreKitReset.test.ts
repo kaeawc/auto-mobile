@@ -20,6 +20,7 @@ import { StoreKitMutationPriorReader } from "../../../src/server/deviceMutationS
 import { FakeIosResidueInspector } from "../../fakes/FakeIosResidueInspector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { InMemoryStoreKitClearedSessions } from "../../../src/features/storekit/StoreKitClearedSessions";
+import { FakeSimulatorKeyboardBridge } from "../../fakes/FakeSimulatorKeyboardBridge";
 
 const UDID = "11111111-2222-4333-8444-555555555555";
 const IOS: BootedDevice = { deviceId: UDID, platform: "ios", name: "iPhone" };
@@ -63,6 +64,7 @@ function portRig() {
       trustStore: { readUserTrustedCertificates: unused },
       residue: new FakeIosResidueInspector(),
       storeKit,
+      keyboard: new FakeSimulatorKeyboardBridge(),
     },
     new FakeTimer(),
   );
@@ -181,6 +183,19 @@ describe("runner StoreKit session reset", () => {
     const rig = clear({ success: true, totalTimeMs: 1, transactions: [] });
     await rig.run();
     expect(rig.cleared.isCleared(UDID, "com.example.shop")).toBe(true);
+  });
+
+  test("a confirmed clear that answers after an overlapping touch leaves the bundle unclean", async () => {
+    const cleared = new InMemoryStoreKitClearedSessions();
+    const sender: StoreKitSender = {
+      requestStoreKit: async () => {
+        cleared.markTouched(UDID, "com.example.shop");
+        return { success: true, totalTimeMs: 1, transactions: [] };
+      },
+    };
+    const reset = new RunnerStoreKitSessionReset(() => sender, cleared);
+    await reset.clear(UDID, "com.example.shop", new AbortController().signal);
+    expect(cleared.isCleared(UDID, "com.example.shop")).toBe(false);
   });
 
   test("no runner session after a confirmed clear with no change since is already clean", async () => {

@@ -29,7 +29,7 @@ strings; they do not share the state-key restriction.
 | `MAX_PROTOTYPE_SPEC_NODES`           | 10000           | Nodes across the whole spec, every stack screen included (5x `MAX_PROTOTYPE_NODES`).                                                                                                                                                                                                                                                                      |
 | `MAX_PROTOTYPE_LIST_ITEMS`           | 2000            | Maximum rows per lazy list, read from its data path; ordinary path repeats remain capped at 128.                                                                                                                                                                                                                                                          |
 | `MAX_PROTOTYPE_DEPTH`                | 24              | Root has depth 1; only node nesting counts.                                                                                                                                                                                                                                                                                                               |
-| `MAX_PROTOTYPE_IMAGES`               | 32              | Per stack screen, counted like `MAX_PROTOTYPE_NODES`. Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again; lazy list row templates, headers and footers count once.                                                                                                                                         |
+| `MAX_PROTOTYPE_IMAGES`               | 32              | Per stack screen, counted like `MAX_PROTOTYPE_NODES`. Counts asset image nodes, remote placeholder/error assets and nav item image uses, including hidden ones; repeated asset IDs count again; lazy list row templates, headers and footers count once.                                                                                                  |
 | `MAX_PROTOTYPE_SPEC_IMAGES`          | 160             | Image uses across the whole spec, every stack screen included (5x `MAX_PROTOTYPE_IMAGES`).                                                                                                                                                                                                                                                                |
 | `MAX_PROTOTYPE_SPEC_BYTES`           | 1048576 (1 MiB) | UTF-8 bytes of raw JSON, including whitespace.                                                                                                                                                                                                                                                                                                            |
 | `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` | 16              | Maximum named bindings per emit.context.                                                                                                                                                                                                                                                                                                                  |
@@ -45,8 +45,34 @@ response cap (256 KiB) stays below both.
 The byte, node, depth, image, storage and in-flight limits
 are independent of row count: they bound frame size, memory and tree cost, and none of them grows with lazy
 rows. A row carries at most `MAX_PROTOTYPE_REPEAT_PATH_CELLS` / `MAX_PROTOTYPE_LIST_ITEMS` (32) scalar fields
-across a full list. Host validation is linear in rows (`benchmark/prototype-feed-limits.ts`). Feeds beyond these caps page or trim with `maxItems`; per-runtime
-budgets and multi-spec apps are not part of the contract.
+across a full list. Host validation is linear in rows (`benchmark/prototype-feed-limits.ts`). Feeds beyond these caps page or trim with `maxItems`;
+multi-spec apps are not part of the contract.
+
+Runtime budgets (#18804). The contract `limits` are the base budget. A runtime that advertises
+`prototype_large_budget_v1` validates against that entry of the contract's `runtimeBudgets` table
+instead. The limits not listed there, including nodes, depth and images per screen, stay the same in
+every runtime.
+
+| Limit                            | Base budget: overlay, iOS agent | `prototype_large_budget_v1`: disposable app, ProtoViewer, embedding app |
+| -------------------------------- | ------------------------------- | ----------------------------------------------------------------------- |
+| `MAX_PROTOTYPE_LIST_ITEMS`       | 2000                            | 10000                                                                   |
+| `MAX_PROTOTYPE_DATA_ARRAY_ITEMS` | 2000                            | 10000                                                                   |
+| `MAX_PROTOTYPE_SPEC_BYTES`       | 1048576 (1 MiB)                 | 4194304 (4 MiB)                                                         |
+| `MAX_PROTOTYPE_DATA_BYTES`       | 786432 (768 KiB)                | 3145728 (3 MiB)                                                         |
+| `MAX_PROTOTYPE_DATA_WRITE_BYTES` | 786432 (768 KiB)                | 3145728 (3 MiB)                                                         |
+
+A rule with `maxLimit` takes its bound from the named limit of the runtime's budget, and its literal
+`max` is the base value. The `list`, `appendData` and `upsertData` `maxItems` rules use it. Tool input
+and `specPath` files admit the large budget. A show then refuses a spec over the base budget on a
+runtime without the capability. `requiredPrototypeCapabilities` lists the capability for such a spec,
+including one whose data action literal is over the base budget.
+
+On the device, the validator and the runtime's state and data writes check the runtime's own budget.
+The host mirrors device data writes and validates patches with the budget of the runtime the spec was
+shown on. ProtoViewer's library store saves and reloads specs with ProtoViewer's budget. ProtoViewer
+bundles keep their own 1 MiB `spec.json` cap. The web library keeps the base budget and does not
+advertise the capability. See the
+[devlog entry](../../../devlog/2026-11-19-prototype-runtime-budgets.md).
 
 Stack-screen budgets (#14213). Renderers draw only a stack's top screen, so node and image bounds
 apply per screen rather than to every screen at once. The `MAX_PROTOTYPE_SPEC_NODES` /
@@ -142,7 +168,10 @@ is missing.
   members whose names match `^[A-Za-z_][A-Za-z0-9_]{0,63}$`; nested members stay in data and are invisible to
   templates. Optional `repeat.key` names a projected field present in every item; rendered identities use
   scalar text rendering and must be unique (7 and "7" collide), for literal lists too. Per-item field,
-  state-key, action and expanded node/image checks still run. Templates cannot nest repeats or pagers.
+  state-key, action and expanded node/image checks still run. Templates may nest one container repeat with a `{field}` source and `prototype_nested_repeat_v1`;
+  the source resolves against each outer item, with at most 100 object rows per item. Inner bindings
+  include both aliases, `{index}` (inner) and `{outerIndex}` (outer). Expanded budgets charge every pair.
+  A third level and pagers are invalid.
 - `MAX_PROTOTYPE_REPEAT_PATH_CELLS` bounds the sum across path-bound repeats in pre-order after component
   expansion (empty templates included): each instantiated object item costs its projected scalar members, or
   one if none; literal repeats are free. After the three path-source checks, exceeding it fails at
@@ -199,21 +228,21 @@ Compose rows retain identity across patches and reordering, unkeyed rows keep po
 Data is walked depth-first, with sorted object keys and array index order. At each container,
 depth precedes array length, then children; the byte check runs last.
 
-| Path                                                                                      | Message                                                                                                                                                               |
-| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `data`                                                                                    | `Expected object` when the root is not a plain object                                                                                                                 |
-| Offending data container                                                                  | `Data depth limit exceeded` or `Data array limit exceeded`                                                                                                            |
-| Offending value, e.g. `data.orders[0].title` or `data["a b"]`                             | `Invalid data value`                                                                                                                                                  |
-| `data` after the walk                                                                     | `Data byte limit exceeded`                                                                                                                                            |
-| Pointer field                                                                             | `Invalid pointer value`                                                                                                                                               |
-| `<node>.repeat.items`                                                                     | `Invalid union value` for neither array nor object                                                                                                                    |
-| `<node>.repeat.items.path` (in this order)                                                | `Repeat path does not resolve to an array`; `Repeat path resolves to more than 128 items`; `Repeat path item <i> is not an object`; `Repeat path cell limit exceeded` |
-| Bindable field                                                                            | `Substituted text total limit exceeded` (reduce bindable fields, replacement lengths or repeat items; `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL`)                         |
-| Authored bindable field, e.g. `root.children[0].text` or `root.children[0].onTap[0].name` | `Substituted text length limit exceeded` (after unknown repeat fields, before bound key/empty emit checks)                                                            |
-| Referencing template string                                                               | `Unknown repeat field "x"` (non-scalar members count as absent)                                                                                                       |
-| `<node>.repeat.items.path`                                                                | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix                                                |
-| `<node>.repeat.key`                                                                       | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair                                                             |
-| Condition `.key`                                                                          | `Exactly one of key, data, platform, all, any, not, valid is required`                                                                                                |
-| Condition comparison field                                                                | `Requires key or data or platform`; `Requires key`; `Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt is required`           |
-| Condition `.equals` / `.notEquals` in bindable visiting order                             | `Repeat placeholder in a data condition operand is not supported`                                                                                                     |
-| `<node>.repeat`                                                                           | Existing expanded node/image limit errors                                                                                                                             |
+| Path                                                                                      | Message                                                                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `data`                                                                                    | `Expected object` when the root is not a plain object                                                                                                                                                        |
+| Offending data container                                                                  | `Data depth limit exceeded` or `Data array limit exceeded`                                                                                                                                                   |
+| Offending value, e.g. `data.orders[0].title` or `data["a b"]`                             | `Invalid data value`                                                                                                                                                                                         |
+| `data` after the walk                                                                     | `Data byte limit exceeded`                                                                                                                                                                                   |
+| Pointer field                                                                             | `Invalid pointer value`                                                                                                                                                                                      |
+| `<node>.repeat.items`                                                                     | `Invalid union value` for neither array nor object                                                                                                                                                           |
+| `<node>.repeat.items.path` (in this order)                                                | `Repeat path does not resolve to an array`; `Repeat path resolves to more than 128 items`; `Repeat path item <i> is not an object`; `Repeat path cell limit exceeded`                                        |
+| Bindable field                                                                            | `Substituted text total limit exceeded` (reduce bindable fields, replacement lengths or repeat items; `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL`)                                                                |
+| Authored bindable field, e.g. `root.children[0].text` or `root.children[0].onTap[0].name` | `Substituted text length limit exceeded` (after unknown repeat fields, before bound key/empty emit checks)                                                                                                   |
+| Referencing template string                                                               | `Unknown repeat field "x"` (non-scalar members count as absent)                                                                                                                                              |
+| `<node>.repeat.items.path`                                                                | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix                                                                                       |
+| `<node>.repeat.key`                                                                       | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair; `Derived repeat key "<key>" has the same input for items <i> and <j>`                             |
+| Condition `.key`                                                                          | `Exactly one of key, data, platform, all, any, not, valid, derived is required`                                                                                                                              |
+| Condition comparison field                                                                | `Requires key or data or platform or derived`; `Requires key or derived`; `Requires key`; `Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt, equalsKey is required` |
+| Condition `.equals` / `.notEquals` in bindable visiting order                             | `Repeat placeholder in a data condition operand is not supported`                                                                                                                                            |
+| `<node>.repeat`                                                                           | Existing expanded node/image limit errors                                                                                                                                                                    |

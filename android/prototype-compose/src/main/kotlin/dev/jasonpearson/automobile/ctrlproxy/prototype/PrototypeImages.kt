@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -27,13 +28,16 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.exifinterface.media.ExifInterface
 import dev.jasonpearson.automobile.protocol.PrototypeDimension
 import dev.jasonpearson.automobile.protocol.PrototypeImageNode
-import dev.jasonpearson.automobile.protocol.PrototypeItem
 import dev.jasonpearson.automobile.protocol.PrototypeStyle
+import java.io.IOException
 
 /** Supplied by [PrototypeRuntimeContent]; null (previews, tests) draws every image as missing. */
 internal val LocalPrototypeImageCache = compositionLocalOf<PrototypeImageCache?> { null }
@@ -57,13 +61,15 @@ internal class BitmapPrototypeImage(val bitmap: Bitmap) : PrototypeDecodedImage 
 
 /**
  * [BitmapFactory] decoding with `inSampleSize` chosen by [prototypeImageSampleSize], so only a
- * display-sized bitmap is ever allocated (never the full-resolution one). Needs real Android bitmap
- * decoding, so it is verified on a device rather than in JVM unit tests; the sampling, caching and
- * fallback logic around it is unit tested with a fake decoder.
+ * display-sized bitmap is allocated within both pixel and byte budgets. EXIF orientation is applied
+ * after sampling, within half the budget so the source and its transformed copy fit together; the
+ * sizing and transform math can run without Android bitmap decoding.
  */
 @InternalAutoMobilePrototypeApi
-class BitmapPrototypeImageDecoder(private val maxPixels: Long = DEFAULT_MAX_DECODED_PIXELS) :
-  PrototypeImageDecoder {
+class BitmapPrototypeImageDecoder(
+  private val maxPixels: Long = DEFAULT_MAX_DECODED_PIXELS,
+  private val maxDecodedBytes: Long = DEFAULT_MAX_DECODED_BYTES,
+) : PrototypeImageDecoder {
   override fun decode(bytes: ByteArray, target: PrototypeImageTarget): PrototypeDecodedImage? =
     try {
       decodeSampled(bytes, target)
@@ -78,23 +84,64 @@ class BitmapPrototypeImageDecoder(private val maxPixels: Long = DEFAULT_MAX_DECO
   ): PrototypeDecodedImage? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-      Log.w(TAG, "Prototype image bytes are not decodable (${bytes.size} bytes)")
-      return null
-    }
-    val sampleSize = prototypeImageSampleSize(bounds.outWidth, bounds.outHeight, target, maxPixels)
-    if (!prototypeImageFitsBudget(bounds.outWidth, bounds.outHeight, sampleSize, maxPixels)) {
-      // The sample size is capped, so a header claiming absurd dimensions stays over budget.
-      Log.w(TAG, "Prototype image ${bounds.outWidth}x${bounds.outHeight} exceeds the decode budget")
+    // Bounds do not reliably report the eventual config. Reserve RGBA_F16's 8 bytes/pixel
+    // even for an ARGB_8888 candidate: a high-bit-depth source can override inPreferredConfig.
+    val orientation = imageOrientation(bytes)
+    // The EXIF transform allocates its copy while the sampled source is still alive.
+    val pixelBudget =
+      prototypeImageTransformPixelBudget(
+        prototypeImagePixelBudget(maxPixels, maxDecodedBytes, 8),
+        orientation,
+      )
+    val decodeTarget =
+      if (orientation in 5..8) PrototypeImageTarget(target.heightPx, target.widthPx) else target
+    val sampleSize =
+      prototypeImageSampleSize(bounds.outWidth, bounds.outHeight, decodeTarget, pixelBudget)
+    if (!prototypeImageFitsBudget(bounds.outWidth, bounds.outHeight, sampleSize, pixelBudget)) {
+      Log.w(TAG, "Prototype image has unreadable or over-budget dimensions")
       return null
     }
     val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.let(::BitmapPrototypeImage)
+    val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
+    if (decoded.allocationByteCount.toLong() > maxDecodedBytes) {
+      decoded.recycle()
+      return null
+    }
+    val oriented = orient(decoded, orientation)
+    if (oriented.allocationByteCount.toLong() > maxDecodedBytes) {
+      oriented.recycle()
+      return null
+    }
+    return BitmapPrototypeImage(oriented)
+  }
+
+  private fun imageOrientation(bytes: ByteArray): Int =
+    try {
+      bytes.inputStream().use {
+        ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)
+      }
+    } catch (_: IOException) {
+      // Some supported bitmap formats carry no EXIF; their pixels already have normal orientation.
+      1
+    }
+
+  private fun orient(bitmap: Bitmap, orientation: Int): Bitmap {
+    if (orientation !in 2..8) return bitmap
+    val matrix =
+      Matrix().apply { setValues(prototypeImageOrientationMatrix(orientation).toFloatArray()) }
+    try {
+      return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, false)
+    } finally {
+      // The source has never been published to the renderer or cache.
+      bitmap.recycle()
+    }
   }
 
   companion object {
     /** 4 Mi pixels, 16 MiB as ARGB_8888: above a 1080x2400 screen (about 2.6 Mi pixels). */
     const val DEFAULT_MAX_DECODED_PIXELS = 4L * 1024 * 1024
+
+    const val DEFAULT_MAX_DECODED_BYTES = 16L * 1024 * 1024
 
     private const val TAG = "PrototypeImageDecoder"
   }
@@ -184,15 +231,17 @@ internal fun prototypeAuthoredImageSize(node: PrototypeRenderNode): DpSize? {
 @Composable
 internal fun PrototypeImageContent(node: PrototypeRenderNode, modifier: Modifier) {
   val source = node.source as? PrototypeImageNode ?: return
-  if (prototypeAuthoredImageSize(node) != null) {
+  val imageModifier =
+    if (source.url != null) modifier.semantics(mergeDescendants = true) {} else modifier
+  if (source.url == null && prototypeAuthoredImageSize(node) != null) {
     val target = prototypeAuthoredImageTarget(node.style.source)
-    Box(modifier.defaultMinSize(24.dp, 24.dp)) { PrototypeImageBody(node, source, target) }
+    Box(imageModifier.defaultMinSize(24.dp, 24.dp)) { PrototypeImageBody(node, source, target) }
   } else {
     LocalPrototypeRenderWorkProbe.current?.invoke(
       PrototypeRenderWork.IMAGE_SUBCOMPOSITION,
       node.identity,
     )
-    BoxWithConstraints(modifier.defaultMinSize(24.dp, 24.dp)) {
+    BoxWithConstraints(imageModifier.defaultMinSize(24.dp, 24.dp)) {
       PrototypeImageBody(node, source, prototypeImageTarget(constraints))
     }
   }
@@ -222,10 +271,14 @@ private fun PrototypeImageBody(
   source: PrototypeImageNode,
   target: PrototypeImageTarget,
 ) {
+  if (source.url != null) {
+    RemoteImageBody(node, source, target)
+    return
+  }
   val background =
     prototypeThemedColor(node.style.background, node.style.source.background)
       ?: prototypePlaceholderColor(MaterialTheme.colorScheme)
-  val asset = prototypeModeValue(source.asset, LocalPrototypeDark.current)
+  val asset = source.asset?.let { prototypeModeValue(it, LocalPrototypeDark.current) }.orEmpty()
   val state = rememberPrototypeImage(asset, target)
   val image = (state as? PrototypeImageState.Ready)?.image as? BitmapPrototypeImage
   if (image != null) {
@@ -254,15 +307,6 @@ private fun PrototypeImageBody(
   }
 }
 
-@Composable
-private fun rememberPrototypeImageBitmap(image: BitmapPrototypeImage, asset: String): ImageBitmap {
-  val probe = LocalPrototypeRenderWorkProbe.current
-  return remember(image) {
-    probe?.invoke(PrototypeRenderWork.IMAGE_BITMAP_WRAP, asset)
-    image.imageBitmap
-  }
-}
-
 /**
  * Crop and fill need the image to take the node's whole box; an axis the author left to wrap
  * content keeps the image's natural size on that axis.
@@ -277,35 +321,86 @@ private fun fillAuthoredAxes(style: PrototypeStyle): Modifier {
 private fun PrototypeDimension?.isSized() =
   this is PrototypeDimension.Fill || this is PrototypeDimension.Dp
 
-/** A nav item's image, built-in icon or placeholder, per [prototypeNavigationVisual]. */
+internal val LocalPrototypeRemoteImages = compositionLocalOf<PrototypeRemoteImageLoader?> { null }
+internal val LocalPrototypeRemoteImageActivity =
+  compositionLocalOf<PrototypeRemoteImageActivity?> { null }
+
 @Composable
-internal fun PrototypeNavigationIcon(item: PrototypeItem) {
-  val dark = LocalPrototypeDark.current
-  val image = item.image?.let { prototypeModeValue(it, dark) }
-  val state = image?.let { rememberPrototypeImage(it, NAVIGATION_ICON_TARGET) }
-  when (val visual = prototypeNavigationVisual(item, state)) {
-    is PrototypeNavigationVisual.Image ->
-      (visual.image as? BitmapPrototypeImage)?.let {
-        Image(
-          rememberPrototypeImageBitmap(it, checkNotNull(image)),
-          contentDescription = null,
-          modifier = Modifier.size(24.dp),
-        )
-      } ?: NavigationPlaceholder()
-    is PrototypeNavigationVisual.Icon ->
-      Icon(checkNotNull(prototypeIcon(visual.name)), contentDescription = null)
-    PrototypeNavigationVisual.Loading ->
-      Box(Modifier.size(24.dp).background(prototypePlaceholderColor(MaterialTheme.colorScheme)))
-    PrototypeNavigationVisual.Placeholder -> NavigationPlaceholder()
+private fun rememberRemoteImage(
+  url: String,
+  target: PrototypeImageTarget,
+  enabled: Boolean,
+): PrototypeImageState {
+  val loader = LocalPrototypeRemoteImages.current.takeIf { enabled }
+  val activity = LocalPrototypeRemoteImageActivity.current
+  val session = remember(loader, url, target, activity) { PrototypeRemoteImageSession(activity) }
+  androidx.compose.runtime.LaunchedEffect(session) { session.load(loader, url, target) }
+  androidx.compose.runtime.DisposableEffect(session) { onDispose { session.close() } }
+  return session.state.collectAsState().value
+}
+
+@Composable
+private fun RemoteImageBody(
+  node: PrototypeRenderNode,
+  source: PrototypeImageNode,
+  target: PrototypeImageTarget,
+) {
+  val state = rememberRemoteImage(checkNotNull(source.url), target, source.via != "host")
+  Box(Modifier.semantics { stateDescription = prototypeRemoteImageDescription(state) }) {
+    if (source.crossfade == true && LocalPrototypeMotion.current) {
+      androidx.compose.animation.Crossfade(targetState = state, label = "prototype image") { shown
+        ->
+        RemoteImagePixels(node, source, target, shown)
+      }
+    } else RemoteImagePixels(node, source, target, state)
   }
 }
 
 @Composable
-private fun NavigationPlaceholder() {
-  Box(
-    Modifier.size(24.dp).background(prototypePlaceholderColor(MaterialTheme.colorScheme)),
-  )
+private fun RemoteImagePixels(
+  node: PrototypeRenderNode,
+  source: PrototypeImageNode,
+  target: PrototypeImageTarget,
+  state: PrototypeImageState,
+) {
+  val image = (state as? PrototypeImageState.Ready)?.image as? BitmapPrototypeImage
+  if (image != null) {
+    Image(
+      image.imageBitmap,
+      contentDescription = null,
+      modifier =
+        fillAuthoredAxes(node.style.source)
+          .prototypeZoomable(source.zoomable)
+          .prototypeImageTint(prototypeThemedColor(null, source.filter?.tint)),
+      contentScale = prototypeContentScale(source.contentScale),
+      colorFilter = source.filter?.let { prototypeImageColorFilter(it.saturation) },
+    )
+    return
+  }
+  val fallback =
+    if (state == PrototypeImageState.Loading) source.placeholder
+    else source.error ?: source.placeholder
+  val asset = (fallback?.get("asset") as? kotlinx.serialization.json.JsonPrimitive)?.content
+  val fallbackState = asset?.let { rememberPrototypeImage(it, target) }
+  val fallbackImage = (fallbackState as? PrototypeImageState.Ready)?.image as? BitmapPrototypeImage
+  if (fallbackImage != null) {
+    Image(
+      fallbackImage.imageBitmap,
+      contentDescription = null,
+      modifier = fillAuthoredAxes(node.style.source),
+      contentScale = prototypeContentScale(source.contentScale),
+    )
+  } else {
+    val color = (fallback?.get("color") as? kotlinx.serialization.json.JsonPrimitive)?.content
+    Box(
+      fillAuthoredAxes(node.style.source)
+        .defaultMinSize(24.dp, 24.dp)
+        .background(
+          prototypeThemedColor(
+            null,
+            color?.let { dev.jasonpearson.automobile.protocol.PrototypeModeValue.Single(it) },
+          ) ?: prototypePlaceholderColor(MaterialTheme.colorScheme),
+        ),
+    )
+  }
 }
-
-/** Nav icons are drawn at 24 dp; decode for up to xxxhdpi so they stay sharp on any display. */
-private val NAVIGATION_ICON_TARGET = PrototypeImageTarget(96, 96)

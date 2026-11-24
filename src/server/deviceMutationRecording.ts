@@ -5,9 +5,13 @@ import { ActionableError } from "../models/ActionableError";
 import type { MutationRecorder } from "../daemon/sessionBroker/mutations/recorder";
 import type { MutationValue } from "../daemon/sessionBroker/mutations/types";
 import { logger } from "../utils/logger";
+import { isRecord } from "./pipeline/isRecord";
+import { renderOverlayFromKey } from "../daemon/sessionBroker/mutations/renderOverlayMutation";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import {
   androidPermissionMutations,
   deviceToolMutations,
+  type MutationTarget,
   type ToolMutation,
 } from "./deviceMutationAdapters";
 import { withoutSessionCoveredFallbacks } from "./deviceMutationAppFallback";
@@ -241,7 +245,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
     device: BootedDevice,
     { sessionUuid, signal = getAbortSignal() }: { sessionUuid?: string; signal?: AbortSignal } = {},
   ): Promise<void> {
-    let mutations = deviceToolMutations(name, args, device.platform);
+    let mutations = deviceToolMutations(name, args, device.platform, mutationTarget(device));
     if (mutations.length === 0) {
       return;
     }
@@ -264,7 +268,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
       assertRecorderScope(recorder, ownerSessionUuid, device);
       matchingRecorder = recorder;
       mutations = await this.resolveMutations(name, args, device, { mutations, signal });
-      await this.recordMutations(name, device, recorder, { mutations, signal });
+      await this.recordMutations(name, device, recorder, { args, mutations, signal });
     } catch (error) {
       signal?.throwIfAborted();
       await this.recordingFailed(name, ownerSessionUuid, matchingRecorder, error);
@@ -301,7 +305,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
       const appId = await runWithAbortSignal(signal, () =>
         this.artifactReader.appId(device, args, signal),
       );
-      return deviceToolMutations(name, { ...args, appId }, device.platform);
+      return deviceToolMutations(name, { ...args, appId }, device.platform, mutationTarget(device));
     }
     if (name === "setAppPermissions" && device.platform === "android") {
       const resolve = this.artifactReader.androidPermissionTarget?.bind(this.artifactReader);
@@ -314,7 +318,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
       const spec = await this.specReader(args.specPath, signal);
       return spec === undefined
         ? mutations
-        : deviceToolMutations(name, { ...args, spec }, device.platform);
+        : deviceToolMutations(name, { ...args, spec }, device.platform, mutationTarget(device));
     }
     return mutations;
   }
@@ -323,7 +327,11 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
     name: string,
     device: BootedDevice,
     recorder: MutationRecorder,
-    { mutations, signal }: { mutations: readonly ToolMutation[]; signal?: AbortSignal },
+    {
+      args,
+      mutations,
+      signal,
+    }: { args: Record<string, unknown>; mutations: readonly ToolMutation[]; signal?: AbortSignal },
   ): Promise<void> {
     signal?.throwIfAborted();
     const baseline = async () => (await recorder.readBaseline?.()) ?? null;
@@ -343,8 +351,9 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
       signal?.throwIfAborted();
       return;
     }
-    const priorValues = await this.readPriors(device, missing, signal);
-    const recordedMutations = missing.map((mutation, index) => ({
+    const read = await this.readPriors(device, missing, signal);
+    const { rows, priors: priorValues } = withoutIdleResetOverlays(args, missing, read);
+    const recordedMutations = rows.map((mutation, index) => ({
       ...mutation,
       priorValue:
         mutation.kind === "opaque"
@@ -376,4 +385,39 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
       return mutations.map(() => ({ state: "unobservable" }));
     }
   }
+}
+
+/**
+ * A reset turns overlays off only where one is on, so its overlay rows (the ones the call did
+ * not name) are kept only when some overlay reads on; a reset that finds none on, or cannot
+ * read them, journals no overlay row and so costs no restore on release (#19016).
+ */
+export function withoutIdleResetOverlays(
+  args: Record<string, unknown>,
+  rows: readonly ToolMutation[],
+  priors: readonly MutationValue[],
+): { rows: ToolMutation[]; priors: MutationValue[] } {
+  const named = isRecord(args.renderOverlays) ? args.renderOverlays : {};
+  const resetDerived = (row: ToolMutation): boolean => {
+    const overlay = row.kind === "device-setting" ? renderOverlayFromKey(row.key) : undefined;
+    return overlay !== undefined && named[overlay] === undefined;
+  };
+  const anyOn = rows.some((row, index) => {
+    const prior = priors[index];
+    return resetDerived(row) && prior?.state === "present" && prior.value === true;
+  });
+  const keep = rows.map((row) => anyOn || !resetDerived(row));
+  return {
+    rows: rows.filter((_, index) => keep[index]),
+    priors: priors.filter((_, index) => keep[index]),
+  };
+}
+
+/** The target facts the adapters need; the iOS kind follows the prior reader's rule (#19016). */
+function mutationTarget(device: BootedDevice): MutationTarget {
+  return {
+    iosSimulator:
+      device.platform === "ios" &&
+      resolveIosDeviceKind({ deviceId: device.deviceId }) === "simulator",
+  };
 }

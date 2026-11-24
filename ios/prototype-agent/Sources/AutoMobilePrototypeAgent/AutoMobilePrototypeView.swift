@@ -7,7 +7,7 @@
     @MainActor
     public struct AutoMobilePrototypeView: View {
         private var renderer: PrototypeEmbeddedRenderer
-        private let identity: PrototypeEmbeddedIdentity
+        private var identity: PrototypeEmbeddedIdentity
 
         /// Decodes and validates the complete spec before rendering. Invalid or unsupported specs
         /// display a visible diagnostic and call `onLoadError` once when that presentation mounts.
@@ -24,6 +24,7 @@
             onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void = { _ in },
             onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void = { _ in }
         ) {
+            let registry = registry.withoutSecureStorage
             renderer = PrototypeEmbeddedRenderer(
                 spec: spec, assets: assets, storage: storage, network: network, options: options,
                 registry: registry,
@@ -32,6 +33,14 @@
             identity = PrototypeEmbeddedIdentity(
                 spec: spec, assets: assets, storage: storage, options: options, registry: registry
             )
+        }
+
+        /// Only disposable app hosts opt into their own Keychain namespace; the public view refuses it.
+        func standaloneStorage(registry: PrototypePlatformRegistry) -> Self {
+            var view = self
+            view.renderer.registry = registry
+            view.identity.registry = ObjectIdentifier(registry)
+            return view
         }
 
         /// Internal lifecycle seam for app hosts that must reset storage after the final flush.
@@ -67,7 +76,7 @@
         let fonts: [String: SHA256.Digest]
         let storage: PrototypeStorageOption
         let options: PrototypeEmbeddedOptions
-        let registry: ObjectIdentifier
+        var registry: ObjectIdentifier
 
         init(
             spec: Data,
@@ -92,7 +101,7 @@
         let storage: PrototypeStorageOption
         let network: PrototypeNetworkConfiguration
         let options: PrototypeEmbeddedOptions
-        let registry: PrototypePlatformRegistry
+        var registry: PrototypePlatformRegistry
         let onEvent: @MainActor (PrototypeEvent) -> Void
         let onDismiss: @MainActor (PrototypeDismissReason) -> Void
         let onLoadError: @MainActor (PrototypeLoadError) -> Void

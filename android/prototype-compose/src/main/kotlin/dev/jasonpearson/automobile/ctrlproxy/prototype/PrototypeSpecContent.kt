@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.chrisbanes.haze.rememberHazeState
 import dev.jasonpearson.automobile.protocol.*
 import dev.jasonpearson.automobile.protocol.resolvedSharedKey
 import kotlin.math.hypot
@@ -186,6 +187,8 @@ fun PrototypeRuntimeContent(
         LocalPrototypeStackScrollStores provides scrollStores,
         LocalPrototypeTextEpochs provides snapshot.textEpochs,
         LocalPrototypeScrollRequests provides snapshot.scrollRequests,
+        LocalPrototypeRemoteImages provides runtime.remoteImages,
+        LocalPrototypeRemoteImageActivity provides runtime.remoteImageActivity,
         LocalPrototypeImageCache provides images,
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
@@ -283,8 +286,11 @@ fun PrototypeSpecContent(
       val anchorLocals = remember { PrototypeAnchorLocals() }
       val menuLayers = remember { PrototypeMenuLayers() }
       val menuParents = remember(root) { prototypeMenuParents(root) }
+      val hazeState = rememberHazeState()
+      val glassLayers = remember(root, hazeState) { prototypeGlassLayers(root, hazeState) }
       CompositionLocalProvider(
         *prototypeContentLocals(root, scrollOffsets, anchorLocals, menuLayers, gestureTaps),
+        LocalPrototypeGlassLayers provides glassLayers,
       ) {
         PrototypeShaderFrameSampling(checkNotNull(LocalPrototypeShaderSession.current))
         Box(
@@ -298,6 +304,7 @@ fun PrototypeSpecContent(
             .onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
             .semantics { testTagsAsResourceId = true },
         ) {
+          if (glassLayers != null) Box(Modifier.matchParentSize().prototypeGlassBaseSource())
           val modals = prototypeModalLayers(root)
           PrototypeModalPage(modals) {
             RenderPrototypeNode(root, interact, windowRoot = true)
@@ -992,9 +999,11 @@ private fun RenderPrototypeNodeContent(
     "divider" -> RenderPrototypeDivider(node, modifier)
     "badge" -> RenderPrototypeBadge(node, modifier)
     "progress" -> RenderPrototypeProgress(node, modifier)
+    "loadingIndicator" -> RenderPrototypeLoadingIndicator(node, modifier)
     "list" ->
       RenderPrototypeLazyList(node, modifier, interact) { RenderPrototypeNode(it, interact) }
     "chart" -> RenderPrototypeChart(node, modifier)
+    "webView" -> RenderPrototypeWebView(node, modifier, interact)
     "timePicker" ->
       PrototypeCheckedControl(node, parentModifier) {
         RenderPrototypeTimePicker(node, modifier, controlInteract)
@@ -1121,7 +1130,7 @@ private fun RenderPrototypeTextField(
       if (prototypeTextFieldSecure(source.secure, source.keyboardType))
         PasswordVisualTransformation()
       else VisualTransformation.None
-    val multiline = source.multiline
+    val multiline = prototypeTextFieldMultiline(source.multiline, ime)
     // Omit line options for legacy fields: Compose's default is a growing field.
     if (source.variant == "outlined") {
       if (multiline == null) {
@@ -1590,10 +1599,7 @@ private fun prototypeNodeModifier(
   if (anchor == null || !prototypeAnchorCovers(anchor))
     modifier = authoredSizeModifier(modifier, style, weightAxis)
   modifier = modifier.alpha(prototypeAnimatedAlpha(node))
-  val roundedShape =
-    prototypeCornerShape(MaterialTheme.shapes, style.cornerRadius ?: PrototypeCornerRadius.Dp(0.0))
-  val shape =
-    if (style.cornerStyle == "continuous") PrototypeContinuousShape(roundedShape) else roundedShape
+  val shape = prototypeSurfaceShape(MaterialTheme.shapes, style)
   // Before clip/background/border so the shadow is drawn outside the clipped content.
   style.elevation
     ?.takeIf { style.shadows == null }
@@ -1616,7 +1622,10 @@ private fun prototypeNodeModifier(
     modifier
       .prototypeEffectOverlay(effects, shape, effectElapsed)
       .prototypeEffectLayer(effects, effectElapsed)
-  if (style.cornerRadius != null || style.cornerStyle != null) modifier = modifier.clip(shape)
+  modifier = modifier.prototypeGlassSource(node.identity)
+  if (style.cornerRadius != null || style.cornerStyle != null || style.surface == "glass")
+    modifier = modifier.clip(shape)
+  modifier = modifier.prototypeGlassEffect(node.identity, style.glassMaterial())
   prototypeThemedColor(node.style.background, style.background)?.let {
     modifier = modifier.background(prototypeAnimatedColor(node, it), shape)
   }
@@ -2087,7 +2096,9 @@ internal fun SemanticsPropertyReceiver.applyPrototypeAuthoredSemantics(
     authored.label?.let { contentDescription = it }
     authored.hint?.let {
       if (!node.source?.onTap.isNullOrEmpty()) onClick(label = it, action = null)
-      else stateDescription = listOfNotNull(state, it).joinToString(", ")
+      // Remote images reserve stateDescription for loading/loaded/error.
+      else if ((node.source as? PrototypeImageNode)?.url == null)
+        stateDescription = listOfNotNull(state, it).joinToString(", ")
     }
   }
 }

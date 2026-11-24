@@ -1,21 +1,55 @@
 import type { ObserveResult, RotateResult } from "../../models";
+import type { PerformanceTracker } from "../../utils/PerformanceTracker";
+import type { CtrlProxyRotateResult, IosRotatePanel } from "../observe/ios/types";
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
+
+const IOS_ROTATE_TIMEOUT_MS = 5000;
+
+/** A foldable's active panel; the runner rotates it through the simulator device pose (#17047). */
+export function iosRotatePanel(observation: ObserveResult | undefined): IosRotatePanel | undefined {
+  const role = observation?.display?.role;
+  return role === "cover" || role === "inner" ? role : undefined;
+}
+
+/** Sends the panel only for a foldable, so other devices keep the runner's XCUIDevice path. */
+export function requestIosRotate(
+  runner: {
+    requestRotate(
+      orientation: string,
+      timeoutMs?: number,
+      perf?: PerformanceTracker,
+      panel?: IosRotatePanel,
+    ): Promise<CtrlProxyRotateResult>;
+  },
+  orientation: string,
+  perf: PerformanceTracker | undefined,
+  panel: IosRotatePanel | undefined,
+): Promise<CtrlProxyRotateResult> {
+  return panel
+    ? runner.requestRotate(orientation, IOS_ROTATE_TIMEOUT_MS, perf, panel)
+    : runner.requestRotate(orientation, IOS_ROTATE_TIMEOUT_MS, perf);
+}
 
 type Orientation = "portrait" | "landscape" | "unknown";
 
 const IOS_ROTATION_UNSUPPORTED_ERROR =
   "Rotation is not supported on this display (the screen size did not change)";
+// Both foldable panels rotate through the device pose (#17047); what stays put is a foreground app
+// or screen that supports one axis there, such as Settings or the home screen on the cover.
 const IOS_COVER_ROTATION_UNSUPPORTED_ERROR =
-  "Rotation is not supported on the cover panel (the screen size did not change). Open the device to its inner panel (unfold the hinge) and retry there, or keep the current orientation.";
+  "The foreground app or screen does not rotate on the cover panel (the screen size did not change). Open the device to its inner panel (unfold the hinge) and retry there, or keep the current orientation.";
 
 // Name the panel the way the cover refusal does, so an inner-panel refusal on a foldable
-// does not read as an unnamed display (#17385). Other roles keep the generic wording.
-function rotationTargetName(previousObservation: ObserveResult | undefined): string {
-  return previousObservation?.display.role === "inner" ? "the inner panel" : "this display";
+// does not read as an unnamed display (#17385). A refusal is the foreground app's or screen's
+// limit (Settings and the home screen stay portrait on a phone), not the display's (#15003).
+function refusalSubject(previousObservation: ObserveResult | undefined): string {
+  return previousObservation?.display.role === "inner"
+    ? "The foreground app or screen does not rotate on the inner panel"
+    : "The foreground app or screen does not rotate on this display";
 }
 
 function unsupportedRotationError(previousObservation: ObserveResult | undefined): string {
-  return `Rotation is not supported on ${rotationTargetName(previousObservation)} (the screen size did not change)`;
+  return `${refusalSubject(previousObservation)} (the screen size did not change)`;
 }
 
 function unchangedSizeError(previousObservation: ObserveResult | undefined): string {
@@ -36,18 +70,22 @@ function coverPanelRefusalError(
 
 // Applied only after an observed rotation has been reconciled, so a refusal the display
 // contradicts still counts as a rotation on the inner panel.
-function innerPanelRefusal(
+function runnerRefusal(
   normalized: RotateResult,
   previousObservation: ObserveResult | undefined,
   runnerError: string | undefined,
 ): RotateResult {
-  return previousObservation?.display.role === "inner" &&
-    runnerError === IOS_ROTATION_UNSUPPORTED_ERROR
-    ? {
-        ...normalized,
-        error: `${unsupportedRotationError(previousObservation)}. Keep the current orientation.`,
-      }
-    : normalized;
+  if (runnerError !== IOS_ROTATION_UNSUPPORTED_ERROR) {
+    return normalized;
+  }
+  const error = unsupportedRotationError(previousObservation);
+  return {
+    ...normalized,
+    error:
+      previousObservation?.display.role === "inner"
+        ? `${error}. Keep the current orientation.`
+        : error,
+  };
 }
 
 function verifyIosRunnerFailure(
@@ -80,7 +118,7 @@ function verifyIosRunnerFailure(
       message: `Successfully rotated from ${previous} to ${current}`,
     };
   }
-  return innerPanelRefusal(normalized, previousObservation, result.error);
+  return runnerRefusal(normalized, previousObservation, result.error);
 }
 
 export function normalizeIosOrientation(orientation: string | undefined): Orientation {
@@ -155,6 +193,92 @@ function knownPositiveSize(observation: ObserveResult | undefined): boolean {
   return (observation?.screenSize.width ?? 0) > 0 && (observation?.screenSize.height ?? 0) > 0;
 }
 
+type Size = { width: number; height: number };
+
+function positiveSize(size: Size | undefined): size is Size {
+  return (
+    size !== undefined &&
+    Number.isFinite(size.width) &&
+    Number.isFinite(size.height) &&
+    size.width > 0 &&
+    size.height > 0
+  );
+}
+
+/**
+ * The whole display in points: the full screenshot raster divided by the runner's native scale.
+ * `screenSize` cannot give it, because it is the app window's size when the window floats (#18829).
+ */
+export function iosDisplayPointSize(observation: ObserveResult | undefined): Size | undefined {
+  const raster = observation?.screenshotImageSize;
+  const hierarchy = observation?.viewHierarchy;
+  const scale = hierarchy?.nativeScale ?? hierarchy?.screenScale;
+  if (!positiveSize(raster) || scale === undefined || !Number.isFinite(scale) || scale <= 0) {
+    return undefined;
+  }
+  return { width: raster.width / scale, height: raster.height / scale };
+}
+
+// One point of slack absorbs rounding between the raster and the runner's integer root bounds.
+const FULL_SCREEN_SLACK_POINTS = 1;
+
+/**
+ * An iPad app window that is not screen-sized (Windowed Apps, Stage Manager): the observed root
+ * fits inside the display in some orientation and fills it in none. Multi-panel (Duo) observations
+ * never count, so their panel refusals stay size-based.
+ */
+export function isFloatingIosWindow(observation: ObserveResult | undefined): boolean {
+  const role = observation?.display.role;
+  if (!observation || role === "cover" || role === "inner" || observation.otherDisplays?.length) {
+    return false;
+  }
+  const root = observation.screenSize;
+  const display = iosDisplayPointSize(observation);
+  if (!positiveSize(root) || !display) {
+    return false;
+  }
+  const orientations = [display, { width: display.height, height: display.width }];
+  const fits = orientations.filter(
+    (o) =>
+      root.width <= o.width + FULL_SCREEN_SLACK_POINTS &&
+      root.height <= o.height + FULL_SCREEN_SLACK_POINTS,
+  );
+  const fills = fits.some(
+    (o) =>
+      o.width - root.width <= FULL_SCREEN_SLACK_POINTS &&
+      o.height - root.height <= FULL_SCREEN_SLACK_POINTS,
+  );
+  return fits.length > 0 && !fills;
+}
+
+/**
+ * The runner's raw interface rotation only. `ObserveResult.rotation` is resolved through
+ * `resolveIosObserveRotation`, which synthesizes an axis from the window's shape when the runner
+ * reports none and overrides landscape on a portrait-shaped root; neither says anything about a
+ * floating window.
+ */
+function reportedIosOrientation(observation: ObserveResult | undefined): Orientation {
+  const rotation = observation?.viewHierarchy?.rotation;
+  if (rotation === 0 || rotation === 2) {
+    return "portrait";
+  }
+  return rotation === 1 || rotation === 3 ? "landscape" : "unknown";
+}
+
+// A floating window keeps its size when the device rotates, so its unchanged size is no evidence
+// that the rotation failed. Only the runner's raw interface rotation reaching the requested axis
+// confirms it, so a missing runner rotation keeps the refusal.
+function floatingWindowRotationConfirmed(
+  result: RotateResult,
+  requested: "portrait" | "landscape",
+  previousObservation: ObserveResult | undefined,
+): boolean {
+  return (
+    reportedIosOrientation(result.observation) === requested &&
+    (isFloatingIosWindow(previousObservation) || isFloatingIosWindow(result.observation))
+  );
+}
+
 // Only a cross-axis rotation must change the screen size. A same-axis repair
 // (the app already showed the requested axis but XCUIDevice still remembered
 // the other one) legitimately keeps its dimensions and must stay a success.
@@ -172,7 +296,8 @@ function isUnverifiedIosRotationSize(
       (current === requested || current === "unknown") &&
       knownPositiveSize(previousObservation) &&
       knownPositiveSize(result.observation) &&
-      iosRotationScreenSizeUnchanged(previousObservation, result)) === true
+      iosRotationScreenSizeUnchanged(previousObservation, result) &&
+      !floatingWindowRotationConfirmed(result, requested, previousObservation)) === true
   );
 }
 
@@ -255,6 +380,10 @@ function verifyCompletedIosRotation(
 }
 
 export function restoreTargetIosOrientation(observation: ObserveResult | undefined): Orientation {
+  // A floating window's shape says nothing about the device orientation (#18829).
+  if (isFloatingIosWindow(observation)) {
+    return reportedIosOrientation(observation);
+  }
   const { width, height } = observation?.screenSize ?? { width: 0, height: 0 };
   // Duo inner panels can report a stale portrait rotation while drawn landscape (#17101).
   if (width > 0 && height > 0 && width !== height) {
@@ -303,7 +432,7 @@ export function reconcileIosRotationWithDisplayRead(
     success: false,
     rotationPerformed: false,
     currentOrientation: current,
-    error: `Rotation is not supported on ${rotationTargetName(previousObservation)} (the display is still ${current} after the runner reported ${claim}). Keep the current orientation.`,
+    error: `${refusalSubject(previousObservation)} (the display is still ${current} after the runner reported ${claim}). Keep the current orientation.`,
     message: `Failed to rotate to ${requested}; the display is still ${current}.`,
   };
 }

@@ -48,6 +48,12 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "Opt-in plan health summary results and files.",
   },
   {
+    name: "AUTOMOBILE_CAPTURE_FIXTURES_DIR",
+    kind: "opt-in",
+    scope: "daemon",
+    reason: "Opt-in fixture capture; setting this path records every tool call's host commands.",
+  },
+  {
     name: "AUTOMOBILE_TOOL_OUTPUTS_DIR",
     kind: "opt-in",
     reason: "Opt-in persistent tool-output artifacts.",
@@ -249,6 +255,7 @@ export const NON_PATH_ENV_VARIABLES: readonly string[] = [
   "AUTOMOBILE_DEVICE_STREAMING_MAX_SESSION_MINUTES",
   "AUTOMOBILE_DEVICE_STREAMING_PROJECT",
   "AUTOMOBILE_DISABLED_TOOLS",
+  "AUTOMOBILE_DISABLE_IOS_SIM_HID",
   "AUTOMOBILE_DISABLE_PERF_AUDIT",
   "AUTOMOBILE_DOCTOR_TIMEOUT_MS",
   "AUTOMOBILE_EAGER_PREFETCH",

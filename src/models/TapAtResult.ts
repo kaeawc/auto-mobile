@@ -14,6 +14,6 @@ export interface TapAtResult extends BaseActionResult {
   action?: "tap" | "longPress" | "doubleTap";
   /** iOS/watchOS: observed screen change after a successful tap. */
   effect?: TapEffect;
-  /** The route the runner reports, e.g. "xcuiCoordinate" / "displayTargetedRecord"; absent when unreported. */
+  /** The route the runner reports, e.g. "xcuiCoordinate" / "displayTargetedRecord", or "simulatorHid"; absent when unreported. */
   dispatchRoute?: string;
 }

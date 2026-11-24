@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.ui.layout.ContentScale
 import dev.jasonpearson.automobile.protocol.*
+import kotlinx.serialization.json.*
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -10,6 +11,51 @@ class PrototypeImageSelectionTest {
   @org.junit.Before
   fun silenceIconWarnings() {
     prototypeIconWarning = {}
+  }
+
+  @Test
+  fun `fallback references include primitive mode ids and ignore data pointers`() {
+    val root =
+      PrototypeColumnNode(
+        children =
+          listOf(
+            PrototypeImageNode(
+              url = "https://example.com/a",
+              placeholder =
+                buildJsonObject {
+                  put(
+                    "asset",
+                    buildJsonObject {
+                      put("light", "loading-light")
+                      put("dark", "loading-dark")
+                    },
+                  )
+                },
+              error = buildJsonObject { put("asset", "error") },
+            ),
+            PrototypeImageNode(
+              url = "https://example.com/b",
+              placeholder =
+                buildJsonObject {
+                  put("asset", buildJsonObject { put("data", "/photo") })
+                },
+              error =
+                buildJsonObject {
+                  put(
+                    "asset",
+                    buildJsonObject {
+                      put("light", buildJsonObject { put("data", "/photo") })
+                      put("dark", "error-dark")
+                    },
+                  )
+                },
+            ),
+          ),
+      )
+    assertEquals(
+      listOf("loading-light", "loading-dark", "error", "error-dark"),
+      prototypeAssetReferences(root),
+    )
   }
 
   private class StubImage : PrototypeDecodedImage {

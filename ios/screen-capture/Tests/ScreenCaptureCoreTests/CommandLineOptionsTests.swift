@@ -210,4 +210,50 @@ final class CommandLineOptionsTests: XCTestCase {
             }
         }
     }
+
+    func testParsesSimulatorUDIDForFramebufferCapture() throws {
+        let options = try CommandLineOptions.parse([
+            "screen-capture-helper", "--simulator-udid", "F7A8CD0D-BB54-436C-934D-297774DEBC43",
+            "--simulator-fps", "30", "--encode", "h264",
+        ])
+
+        XCTAssertEqual(
+            options.mode,
+            .captureSimulatorFramebuffer(
+                udid: "F7A8CD0D-BB54-436C-934D-297774DEBC43",
+                fps: 30,
+                encode: .init(bitrate: .videoToolboxDefault)
+            )
+        )
+    }
+
+    func testRejectsSimulatorUDIDThatIsNotAUUID() {
+        XCTAssertThrowsError(try CommandLineOptions.parse([
+            "screen-capture-helper", "--simulator-udid", "booted", "--encode", "h264",
+        ])) { error in
+            XCTAssertEqual(
+                error as? CommandLineOptions.ParseError,
+                .invalidValue(flag: "--simulator-udid", value: "booted")
+            )
+        }
+    }
+
+    func testRejectsSimulatorUDIDWithWindowOrAudio() {
+        for extra in [["--simulator-window", "7"], ["--audio"]] {
+            XCTAssertThrowsError(try CommandLineOptions.parse(
+                [
+                    "screen-capture-helper",
+                    "--simulator-udid",
+                    "F7A8CD0D-BB54-436C-934D-297774DEBC43",
+                    "--encode",
+                    "h264",
+                ] + extra
+            )) { error in
+                guard case CommandLineOptions.ParseError.conflictingFlags = error else {
+                    XCTFail("expected conflictingFlags, got \(error)")
+                    return
+                }
+            }
+        }
+    }
 }

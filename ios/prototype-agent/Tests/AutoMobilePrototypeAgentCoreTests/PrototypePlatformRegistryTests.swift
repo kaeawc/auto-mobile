@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 private final class FakePlatformModule: PrototypePlatformModule {
-    let name = "test"
+    let name: String
     let capability = "prototype_platform_test_v1"
     var requiredInfoPlistKeys: [String] = []
     var available: PlatformAvailability = .ready
@@ -15,7 +15,8 @@ private final class FakePlatformModule: PrototypePlatformModule {
     var result: PlatformCallResult?
     var suspended: CheckedContinuation<PlatformCallResult, Never>?
 
-    init() {
+    init(name: String = "test") {
+        self.name = name
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(16))
     }
 
@@ -31,6 +32,10 @@ private final class FakePlatformModule: PrototypePlatformModule {
         suspended?.resume(returning: result)
         suspended = nil
     }
+}
+
+extension FakePlatformModule: PrototypePlatformReportModeSource {
+    var platformReportMode: PrototypePlatformReport.Mode? { .fake }
 }
 
 /// Reference test vocabulary only; production targets never register this module.
@@ -82,6 +87,15 @@ private final class PlatformClock: PrototypeClock {
 }
 
 final class PrototypePlatformRegistryTests: XCTestCase {
+    @MainActor
+    func testSnapshotPreservesRegisteredNotificationsModule() {
+        let module = FakePlatformModule(name: "notifications")
+        module.state = ["authorization": .string("blocked"), "badge": .number(2)]
+        let registry = PrototypePlatformRegistry(modules: [module])
+        XCTAssertEqual(registry.snapshot["notifications"], .object(module.state))
+        XCTAssertNil(PrototypePlatformRegistry().snapshot["notifications"])
+    }
+
     private func spec() throws -> PrototypeSpec {
         try JSONDecoder().decode(PrototypeSpec.self, from: Data("""
         {"id":"p","window":{"placement":{"type":"fullscreen"}},"requires":{"platform":["test"]},
@@ -126,6 +140,7 @@ final class PrototypePlatformRegistryTests: XCTestCase {
         XCTAssertEqual(events[2].state["status"], .string("success"))
         XCTAssertEqual(events[3].payload.objectFields?["callId"], .string(call.callId))
         XCTAssertEqual(events[3].payload.objectFields?["outcome"], .string("success"))
+        XCTAssertEqual(events[3].payload.objectFields?["inFlight"], .number(0))
         XCTAssertEqual(session.data?["result__meta"]?.objectFields?["durationMs"], .number(7))
     }
 
@@ -325,6 +340,34 @@ final class PrototypePlatformRegistryTests: XCTestCase {
     }
 
     @MainActor
+    func testReportReadsAvailabilityModeAndPendingCallsFromTheSession() throws {
+        let module = FakePlatformModule()
+        let registry = PrototypePlatformRegistry(modules: [module])
+        var session = PrototypeSession(clock: PlatformClock())
+        try session.show(spec())
+        _ = try session.run([action()])
+
+        let ready = registry.report(runtime: .iosAgent, inFlight: session.platformInFlight, appState: "active")
+        XCTAssertEqual(ready.runtime, .iosAgent)
+        XCTAssertEqual(ready.appState, "active")
+        XCTAssertEqual(ready.modules["test"], .init(
+            availability: .ready, mode: .fake, reason: .fakeMode, inFlight: 1
+        ))
+        XCTAssertNil(ready.permissions)
+
+        module.available = .needsPermission(["camera"])
+        let denied = registry.report(runtime: .iosAgent, inFlight: session.platformInFlight)
+        XCTAssertEqual(denied.modules["test"], .init(
+            availability: .unavailable, mode: .fake, reason: .permissionDenied, inFlight: 1
+        ))
+        module.available = .unavailable("unrecognized diagnostic")
+        let other = registry.report(runtime: .iosAgent, inFlight: [:])
+        XCTAssertEqual(other.modules["test"], .init(
+            availability: .unavailable, mode: .fake, reason: nil, inFlight: 0
+        ))
+    }
+
+    @MainActor
     func testInfoPlistFilteringAndCapabilities() {
         let module = FakePlatformModule()
         module.requiredInfoPlistKeys = ["NSCameraUsageDescription", "NSMicrophoneUsageDescription"]
@@ -383,6 +426,7 @@ final class PrototypePlatformRegistryTests: XCTestCase {
             module.onCall = { continuation.resume() }
             driver.perform([.start(job)])
         }
+        XCTAssertEqual(clock.timers.count, 1)
         clock.expire()
         module.answer(.success(.string("late")))
         await driver.settled()

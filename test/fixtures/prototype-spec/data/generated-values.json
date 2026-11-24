@@ -1,0 +1,531 @@
+[
+  {
+    "name": "generated id and fixed UTC clock",
+    "initialData": {
+      "rows": []
+    },
+    "ids": ["id-1", "id-2"],
+    "clockMs": 1700000000000,
+    "actions": [
+      {
+        "type": "appendData",
+        "path": "/data/rows",
+        "value": {
+          "value": {
+            "id": {
+              "generate": "id"
+            },
+            "status": "sending",
+            "at": {
+              "now": "epochMs"
+            }
+          }
+        }
+      },
+      {
+        "type": "setData",
+        "path": "/data/iso",
+        "value": {
+          "now": "iso"
+        }
+      },
+      {
+        "type": "setData",
+        "path": "/data/rows",
+        "where": {
+          "field": "id",
+          "equals": {
+            "lastGenerated": true
+          }
+        },
+        "member": "status",
+        "value": {
+          "value": "sent"
+        }
+      }
+    ],
+    "mockResponses": [],
+    "expected": {
+      "data": {
+        "rows": [
+          {
+            "id": "id-1",
+            "status": "sent",
+            "at": 1700000000000
+          }
+        ],
+        "iso": "2023-11-14T22:13:20.000Z"
+      }
+    }
+  },
+  {
+    "name": "request success captures first id before later generate",
+    "initialData": {
+      "rows": []
+    },
+    "ids": ["id-1", "id-2"],
+    "clockMs": 1700000000000,
+    "actions": [
+      {
+        "type": "appendData",
+        "path": "/data/rows",
+        "value": {
+          "value": {
+            "id": {
+              "generate": "id"
+            },
+            "status": "sending",
+            "at": {
+              "now": "epochMs"
+            }
+          }
+        }
+      },
+      {
+        "type": "request",
+        "url": "https://example.test/send",
+        "method": "POST",
+        "body": {
+          "lastGenerated": true
+        },
+        "onSuccess": [
+          {
+            "type": "setData",
+            "path": "/data/rows",
+            "where": {
+              "field": "id",
+              "equals": {
+                "lastGenerated": true
+              }
+            },
+            "member": "status",
+            "value": {
+              "value": "sent"
+            }
+          }
+        ],
+        "onError": [
+          {
+            "type": "setData",
+            "path": "/data/rows",
+            "where": {
+              "field": "id",
+              "equals": {
+                "lastGenerated": true
+              }
+            },
+            "member": "status",
+            "value": {
+              "value": "failed"
+            }
+          }
+        ]
+      },
+      {
+        "type": "appendData",
+        "path": "/data/rows",
+        "value": {
+          "value": {
+            "id": {
+              "generate": "id"
+            },
+            "status": "sending",
+            "at": {
+              "now": "epochMs"
+            }
+          }
+        }
+      }
+    ],
+    "mockResponses": [
+      {
+        "status": 200,
+        "body": {}
+      }
+    ],
+    "expected": {
+      "data": {
+        "rows": [
+          {
+            "id": "id-1",
+            "status": "sent",
+            "at": 1700000000000
+          },
+          {
+            "id": "id-2",
+            "status": "sending",
+            "at": 1700000000000
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "request error captures first id before later generate",
+    "initialData": {
+      "rows": []
+    },
+    "ids": ["id-1", "id-2"],
+    "clockMs": 1700000000000,
+    "actions": [
+      {
+        "type": "appendData",
+        "path": "/data/rows",
+        "value": {
+          "value": {
+            "id": {
+              "generate": "id"
+            },
+            "status": "sending",
+            "at": {
+              "now": "epochMs"
+            }
+          }
+        }
+      },
+      {
+        "type": "request",
+        "url": "https://example.test/send",
+        "method": "POST",
+        "body": {
+          "lastGenerated": true
+        },
+        "onSuccess": [
+          {
+            "type": "setData",
+            "path": "/data/rows",
+            "where": {
+              "field": "id",
+              "equals": {
+                "lastGenerated": true
+              }
+            },
+            "member": "status",
+            "value": {
+              "value": "sent"
+            }
+          }
+        ],
+        "onError": [
+          {
+            "type": "setData",
+            "path": "/data/rows",
+            "where": {
+              "field": "id",
+              "equals": {
+                "lastGenerated": true
+              }
+            },
+            "member": "status",
+            "value": {
+              "value": "failed"
+            }
+          }
+        ]
+      },
+      {
+        "type": "appendData",
+        "path": "/data/rows",
+        "value": {
+          "value": {
+            "id": {
+              "generate": "id"
+            },
+            "status": "sending",
+            "at": {
+              "now": "epochMs"
+            }
+          }
+        }
+      }
+    ],
+    "mockResponses": [
+      {
+        "status": 500,
+        "body": {}
+      }
+    ],
+    "expected": {
+      "data": {
+        "rows": [
+          {
+            "id": "id-1",
+            "status": "failed",
+            "at": 1700000000000
+          },
+          {
+            "id": "id-2",
+            "status": "sending",
+            "at": 1700000000000
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "keyed request into member",
+    "initialData": {
+      "rows": [
+        {
+          "id": "id-1"
+        }
+      ]
+    },
+    "ids": ["id-1", "id-2"],
+    "clockMs": 1700000000000,
+    "actions": [
+      {
+        "type": "request",
+        "url": "https://example.test/result",
+        "into": "/data/rows",
+        "where": {
+          "field": "id",
+          "equals": {
+            "value": "id-1"
+          }
+        },
+        "member": "result"
+      }
+    ],
+    "mockResponses": [
+      {
+        "status": 200,
+        "body": {
+          "ok": true
+        }
+      }
+    ],
+    "expected": {
+      "data": {
+        "rows": [
+          {
+            "id": "id-1",
+            "result": {
+              "ok": true
+            }
+          }
+        ],
+        "rows__meta": {
+          "status": 200,
+          "headers": {},
+          "durationMs": 0
+        }
+      }
+    }
+  },
+  {
+    "name": "keyed request missing",
+    "initialData": {
+      "rows": []
+    },
+    "ids": ["id-1", "id-2"],
+    "clockMs": 1700000000000,
+    "actions": [
+      {
+        "type": "request",
+        "url": "https://example.test/result",
+        "into": "/data/rows",
+        "where": {
+          "field": "id",
+          "equals": {
+            "value": "id-1"
+          }
+        },
+        "member": "result"
+      }
+    ],
+    "mockResponses": [
+      {
+        "status": 200,
+        "body": {}
+      }
+    ],
+    "expected": {
+      "errorCode": "not_found"
+    }
+  },
+  {
+    "name": "keyed request duplicate",
+    "initialData": {
+      "rows": [
+        {
+          "id": "id-1"
+        },
+        {
+          "id": "id-1"
+        }
+      ]
+    },
+    "ids": ["id-1", "id-2"],
+    "clockMs": 1700000000000,
+    "actions": [
+      {
+        "type": "request",
+        "url": "https://example.test/result",
+        "into": "/data/rows",
+        "where": {
+          "field": "id",
+          "equals": {
+            "value": "id-1"
+          }
+        },
+        "member": "result"
+      }
+    ],
+    "mockResponses": [
+      {
+        "status": 200,
+        "body": {}
+      }
+    ],
+    "expected": {
+      "errorCode": "ambiguous_match"
+    }
+  },
+  {
+    "name": "unset lastGenerated",
+    "initialData": {
+      "rows": []
+    },
+    "ids": ["id-1", "id-2"],
+    "clockMs": 1700000000000,
+    "actions": [
+      {
+        "type": "setData",
+        "path": "/data/rows",
+        "where": {
+          "field": "id",
+          "equals": {
+            "lastGenerated": true
+          }
+        },
+        "member": "status",
+        "value": {
+          "value": "sent"
+        }
+      }
+    ],
+    "mockResponses": [],
+    "expected": {
+      "errorCode": "lastGenerated_unset"
+    }
+  },
+  {
+    "name": "keyed data missing",
+    "initialData": {
+      "rows": []
+    },
+    "ids": ["id-1", "id-2"],
+    "clockMs": 1700000000000,
+    "actions": [
+      {
+        "type": "setData",
+        "path": "/data/rows",
+        "where": {
+          "field": "id",
+          "equals": {
+            "value": "absent"
+          }
+        },
+        "value": {
+          "value": {}
+        }
+      }
+    ],
+    "mockResponses": [],
+    "expected": {
+      "errorCode": "not_found"
+    }
+  },
+  {
+    "name": "keyed data duplicate",
+    "initialData": {
+      "rows": [
+        {
+          "id": "x"
+        },
+        {
+          "id": "x"
+        }
+      ]
+    },
+    "ids": ["id-1", "id-2"],
+    "clockMs": 1700000000000,
+    "actions": [
+      {
+        "type": "setData",
+        "path": "/data/rows",
+        "where": {
+          "field": "id",
+          "equals": {
+            "value": "x"
+          }
+        },
+        "value": {
+          "value": {}
+        }
+      }
+    ],
+    "mockResponses": [],
+    "expected": {
+      "errorCode": "ambiguous_match"
+    }
+  },
+  {
+    "name": "object members resolve generated forms in sorted name order",
+    "initialData": {
+      "rows": []
+    },
+    "ids": ["id-1", "id-2"],
+    "clockMs": 1700000000000,
+    "actions": [
+      {
+        "type": "appendData",
+        "path": "/data/rows",
+        "value": {
+          "object": {
+            "ref": {
+              "lastGenerated": true
+            },
+            "id": {
+              "generate": "id"
+            },
+            "at": {
+              "now": "epochMs"
+            },
+            "status": {
+              "value": "sending"
+            }
+          }
+        }
+      },
+      {
+        "type": "setData",
+        "path": "/data/rows",
+        "where": {
+          "field": "id",
+          "equals": {
+            "lastGenerated": true
+          }
+        },
+        "member": "status",
+        "value": {
+          "value": "sent"
+        }
+      }
+    ],
+    "mockResponses": [],
+    "expected": {
+      "data": {
+        "rows": [
+          {
+            "at": 1700000000000,
+            "id": "id-1",
+            "ref": "id-1",
+            "status": "sent"
+          }
+        ]
+      }
+    }
+  }
+]

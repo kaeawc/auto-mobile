@@ -15,6 +15,8 @@ import {
 import { DisplayProfileRestoreRegistry } from "../../../src/features/utility/DisplayProfileRestore";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
+import { FakeSimulatorRenderOverlayControl } from "../../fakes/FakeSimulatorRenderOverlayControl";
+import { ALL_RENDER_OVERLAYS_OFF } from "../../../src/features/utility/displayRenderOverlays";
 import type {
   CtrlProxyAppearance,
   CtrlProxyAppearanceResult,
@@ -54,7 +56,9 @@ const iosPhysical: BootedDevice = {
 function createDisplayConfig(device: BootedDevice, dependencies: DisplayConfigDependencies) {
   return new DisplayConfig(device, {
     themeBaselines: new Map(),
+    renderOverlays: new FakeSimulatorRenderOverlayControl(),
     geometry: { registry: new DisplayProfileRestoreRegistry(), invalidate: () => {} },
+    screenControls: { islandSupport: { supportsDynamicIsland: async () => true } },
     ...dependencies,
   });
 }
@@ -73,12 +77,12 @@ const NIGHT_GET = "shell cmd uimode night";
 /** Seed the three read commands so getConfig/readValues resolve deterministically. */
 function seedReads(
   factory: FakeAdbClientFactory,
-  opts: { fontScale?: string; density?: string; night?: string } = {},
+  opts: { fontScale?: string; density?: string; night?: string; nightStderr?: string } = {},
 ): void {
   const client = factory.getFakeClient();
   client.setCommandResult(FONT_GET, opts.fontScale ?? "1.0\n");
   client.setCommandResult(DENSITY_GET, opts.density ?? "Physical density: 440\n");
-  client.setCommandResult(NIGHT_GET, opts.night ?? "Night mode: no\n");
+  client.setCommandResult(NIGHT_GET, opts.night ?? "Night mode: no\n", opts.nightStderr ?? "");
 }
 
 describe("DisplayConfig parsers", () => {
@@ -417,6 +421,81 @@ describe("DisplayConfig setConfig", () => {
     expect(commands).not.toContain("shell wm density 582");
   });
 
+  describe.each([
+    {
+      shape: "API 24: message on stderr, empty stdout",
+      reads: { night: "", nightStderr: captured("night-mode-unsupported-api24.stderr") },
+    },
+    {
+      shape: "API 25: message on stdout",
+      reads: { night: captured("night-mode-unsupported-api25") },
+    },
+  ])(
+    "Android before 8: cmd uimode night has no shell implementation (#18984), $shape",
+    ({ reads }) => {
+      test("getConfig reads font scale and density and omits theme", async () => {
+        const adbFactory = new FakeAdbClientFactory();
+        seedReads(adbFactory, reads);
+
+        const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
+
+        expect(result.success).toBe(true);
+        expect(result.current).toMatchObject({ fontScale: 1.0, density: 440 });
+        expect(result.current?.theme).toBeUndefined();
+      });
+
+      test("setting theme is refused with an actionable error and writes nothing", async () => {
+        const adbFactory = new FakeAdbClientFactory();
+        seedReads(adbFactory, reads);
+
+        const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
+          theme: "dark",
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Android before 8");
+        const commands = adbFactory
+          .getFakeClient()
+          .getCommandCalls()
+          .map((c) => c.command);
+        expect(commands.some((c) => c.startsWith("shell cmd uimode night "))).toBe(false);
+      });
+
+      test("font scale still applies", async () => {
+        const adbFactory = new FakeAdbClientFactory();
+        seedReads(adbFactory, reads);
+
+        const result = await createDisplayConfig(androidEmulator, { adbFactory }).setConfig({
+          fontScale: 1.0,
+        });
+
+        expect(result.error).toBeUndefined();
+        expect(result.success).toBe(true);
+      });
+    },
+  );
+
+  describe("night mode stays unreadable without the unsupported message (#18984)", () => {
+    test("a garbled night-mode line on a supporting device", async () => {
+      const adbFactory = new FakeAdbClientFactory();
+      seedReads(adbFactory, { night: "garbage\n" });
+
+      const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
+
+      expect(result.success).toBe(false);
+    });
+
+    test("empty stdout with unrelated stderr", async () => {
+      const adbFactory = new FakeAdbClientFactory();
+      seedReads(adbFactory, { night: "", nightStderr: "cmd: Can't find service: uimode\n" });
+
+      const result = await createDisplayConfig(androidEmulator, { adbFactory }).getConfig();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("night mode");
+    });
+  });
+
   test("sets dark theme via cmd uimode night", async () => {
     const adbFactory = new FakeAdbClientFactory();
     seedReads(adbFactory);
@@ -664,6 +743,7 @@ describe("DisplayConfig physical iOS theme through the runner (#14092)", () => {
     const config = new DisplayConfig(iosPhysical, {
       simctl,
       themeBaselines,
+      renderOverlays: new FakeSimulatorRenderOverlayControl(),
       iosRunnerAppearance: runner,
     });
     return { simctl, config };
@@ -681,6 +761,9 @@ describe("DisplayConfig physical iOS theme through the runner (#14092)", () => {
       fontScale: false,
       density: false,
       theme: true,
+      renderOverlays: false,
+      dynamicIsland: false,
+      backlight: false,
       increaseContrast: false,
       reduceMotion: false,
       boldText: false,
@@ -755,7 +838,14 @@ describe("DisplayConfig iOS Simulator theme support", () => {
     const simctl = new FakeSimctl();
     const result = await createDisplayConfig(iosSimulator, { simctl }).getConfig();
 
-    expect(result.supported).toEqual({ fontScale: true, density: false, theme: true });
+    expect(result.supported).toEqual({
+      fontScale: true,
+      density: false,
+      theme: true,
+      renderOverlays: true,
+      dynamicIsland: true,
+      backlight: true,
+    });
   });
 
   test("reads the current appearance through the SimCtlClient seam", async () => {
@@ -765,7 +855,12 @@ describe("DisplayConfig iOS Simulator theme support", () => {
     const result = await createDisplayConfig(iosSimulator, { simctl }).getConfig();
 
     expect(result.success).toBe(true);
-    expect(result.current).toEqual({ theme: "dark" });
+    // The fake answers the island default read with no output, the unset (visible) state.
+    expect(result.current).toEqual({
+      theme: "dark",
+      dynamicIsland: "visible",
+      renderOverlays: ALL_RENDER_OVERLAYS_OFF,
+    });
     // The read is issued as an argv array via the seam, not a raw simctl spawn.
     expect(simctlArgvCalls(simctl)).toContainEqual(["ui", iosSimulator.deviceId, "appearance"]);
   });

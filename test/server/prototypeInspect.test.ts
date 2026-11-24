@@ -1,3 +1,4 @@
+import type { PrototypePlatformReport } from "../../src/features/prototype/prototypePlatformReport";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
 import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -135,6 +136,43 @@ describe("prototype inspect (#10494)", () => {
     const status = await call({ action: "status" });
     expect(status.prototypes).toMatchObject([{ id: "proto", adopted: true, lastSequence: 5 }]);
     expect(client.getInspectCount()).toBe(1);
+  });
+
+  test("inspect adopts platformRuntime and status mirrors accepted completion events", async () => {
+    const platformRuntime: PrototypePlatformReport = {
+      runtime: "ctrlproxy",
+      modules: { notifications: { availability: "ready", mode: "real", inFlight: 2 } },
+    };
+    client.setInspectReply({
+      success: true,
+      prototypes: [{ ...reported(1), platformRuntime }],
+    });
+    expect((await call({ action: "inspect" })).platformRuntime).toEqual(platformRuntime);
+    client.emitPrototypeEvent(
+      event(2, "emit", "prototype_platform", {
+        payload: {
+          callId: "post",
+          call: "notifications.post",
+          outcome: "success",
+          durationMs: 1,
+          inFlight: 1,
+          mode: "real",
+        },
+      }),
+    );
+    expect((await call({ action: "status" })).platformRuntime?.modules.notifications).toEqual({
+      availability: "ready",
+      mode: "real",
+      inFlight: 1,
+    });
+    expect(client.getInspectCount()).toBe(1);
+    client.setInspectReply({
+      success: true,
+      prototypes: [{ ...reported(2), platformRuntime: { ...platformRuntime, runtime: "unknown" } }],
+    });
+    const malformed = await call({ action: "inspect" });
+    expect(malformed.prototypes).toHaveLength(1);
+    expect(malformed.platformRuntime).toBeUndefined();
   });
 
   test("inspect, status and awaitEvent preserve stack navigation snapshots", async () => {

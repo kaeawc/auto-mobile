@@ -563,14 +563,15 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
     expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
   });
 
-  test("all writable fields except location and cameraPoster can be read back", () => {
+  test("all writable fields except location, cameraPoster and keyboard can be read back", () => {
     for (const field of DEVICE_STATE_WRITABLE_FIELDS) {
-      if (field !== "location" && field !== "cameraPoster") {
+      if (field !== "location" && field !== "cameraPoster" && field !== "keyboard") {
         expect(DEVICE_STATE_READABLE_FIELDS).toContain(field);
       }
     }
     expect(DEVICE_STATE_READABLE_FIELDS).not.toContain("location");
     expect(DEVICE_STATE_READABLE_FIELDS).not.toContain("cameraPoster");
+    expect(DEVICE_STATE_READABLE_FIELDS).not.toContain("keyboard");
   });
 
   test("the writable-field list is exactly what the setDeviceState schema advertises", () => {

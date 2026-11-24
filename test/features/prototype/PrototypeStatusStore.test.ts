@@ -1,4 +1,5 @@
 import { event } from "../../helpers/prototypeTestEvent";
+import { PROTOTYPE_LARGE_BUDGET } from "../../../src/features/prototype/prototypeRuntimeBudget";
 import { describe, expect, test } from "bun:test";
 import { InMemoryPrototypeStatusStore } from "../../../src/features/prototype/PrototypeStatusStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -492,6 +493,43 @@ describe("patch spec and data hooks", () => {
     expect(store.status(scope).prototypes[0]).not.toHaveProperty("data");
     expect(store.shownSpecs.read(scope.deviceId, "panel")).toEqual({ kind: "unknown" });
   });
+  test("a large-budget show keeps reported data through a device write (#18804)", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    const data = { rows: Array.from({ length: 2001 }, (_, id) => ({ id })), flag: false };
+    const ticket = store.shownSpecs.beginShow(scope.deviceId, "panel");
+    store.shownSpecs.endShow(scope.deviceId, ticket, {
+      id: "panel",
+      spec: { data },
+      budget: PROTOTYPE_LARGE_BUDGET,
+    });
+    store.record(scope, "show", { id: "panel" }, { result: ok, details: { data } });
+    store.recordEvent(scope, {
+      ...event(1, "panel", "change", "/data/flag"),
+      payload: { op: "set", value: true, revision: 2 },
+    });
+    expect(store.status(scope).prototypes[0].data).toEqual({ ...data, flag: true });
+    expect(store.shownSpecs.read(scope.deviceId, "panel").kind).toBe("known");
+  });
+  test("a show in flight does not drop the large budget for later device writes (#18804)", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    const data = { rows: Array.from({ length: 2001 }, (_, id) => ({ id })), flag: false };
+    const ticket = store.shownSpecs.beginShow(scope.deviceId, "panel");
+    store.shownSpecs.endShow(scope.deviceId, ticket, {
+      id: "panel",
+      spec: { data },
+      budget: PROTOTYPE_LARGE_BUDGET,
+    });
+    store.record(scope, "show", { id: "panel" }, { result: ok, details: { data } });
+    store.shownSpecs.beginShow(scope.deviceId, "other");
+    const write = (revision: number) =>
+      store.recordEvent(scope, {
+        ...event(revision, "panel", "change", "/data/flag"),
+        payload: { op: "set", value: true, revision },
+      });
+    write(1);
+    write(2);
+    expect(store.status(scope).prototypes[0].data).toEqual({ ...data, flag: true });
+  });
   test.each(["dismissed", "dismiss", "all", "clearDevice", "clearSession"])(
     "%s removes tracked specs",
     (hook) => {
@@ -559,4 +597,96 @@ test("show snapshots expose initial stacks until a device snapshot supersedes th
   expect(store.status(scope).prototypes[0].stacks).toEqual({ nav: { path: ["home"], depth: 1 } });
   store.recordEvent(scope, event(1));
   expect(store.status(scope).prototypes[0]).not.toHaveProperty("stacks");
+});
+
+test("mirrors platform completion counts and modes for the reported prototype and scope", () => {
+  const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+  const scope = { deviceId: "device", sessionUuid: "owner" };
+  store.record(
+    scope,
+    "show",
+    { id: "panel" },
+    {
+      result: {
+        success: true,
+        platformRuntime: {
+          runtime: "ctrlproxy",
+          modules: { haptics: { availability: "ready", mode: "real", inFlight: 2 } },
+        },
+      },
+    },
+  );
+  const completion = {
+    ...event(1),
+    id: "panel",
+    kind: "emit" as const,
+    name: "prototype_platform",
+    payload: {
+      callId: "one",
+      call: "haptics.perform",
+      outcome: "success",
+      durationMs: 1,
+      inFlight: 1,
+      mode: "fake",
+    },
+  };
+  store.recordEvent({ ...scope, sessionUuid: "other" }, completion);
+  store.recordEvent(scope, { ...completion, id: "sibling" });
+  expect(store.status(scope).platformRuntime?.modules.haptics).toEqual({
+    availability: "ready",
+    mode: "real",
+    inFlight: 2,
+  });
+  store.recordEvent(scope, completion);
+  expect(store.status(scope).platformRuntime?.modules.haptics).toEqual({
+    availability: "ready",
+    mode: "fake",
+    inFlight: 1,
+  });
+  store.recordEvent(scope, {
+    ...completion,
+    sequence: 2,
+    payload: {
+      callId: "two",
+      call: "haptics.perform",
+      outcome: "success",
+      durationMs: 0,
+      simulated: true,
+    },
+  });
+  expect(store.status(scope).platformRuntime?.modules.haptics).toEqual({
+    availability: "ready",
+    mode: "fake",
+    inFlight: 1,
+  });
+  store.dismissed(scope, "panel");
+  expect(store.status(scope).platformRuntime).toBeUndefined();
+});
+
+test("device-generated ids and timestamps reach both host mirrors without regeneration", () => {
+  const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+  const scope = { deviceId: "generated-device" };
+  const data = { rows: [] };
+  const ticket = store.shownSpecs.beginShow(scope.deviceId);
+  store.shownSpecs.endShow(scope.deviceId, ticket, { id: "panel", spec: { data } });
+  store.record(scope, "show", { id: "panel" }, { result: ok, details: { data } });
+  const row = { id: "device-generated-uuid", at: 1700000000000, status: "sending" };
+  store.recordEvent(scope, {
+    ...event(1, "panel", "change", "/data/rows"),
+    payload: { op: "append", value: row, revision: 2 },
+  });
+  store.recordEvent(scope, {
+    ...event(2, "panel", "change", "/data/rows"),
+    payload: {
+      op: "set",
+      value: "sent",
+      where: { field: "id", equals: row.id },
+      member: "status",
+      revision: 3,
+    },
+  });
+  const expected = { rows: [{ ...row, status: "sent" }] };
+  expect(store.status(scope).prototypes[0].data).toEqual(expected);
+  const tracked = store.shownSpecs.read(scope.deviceId, "panel");
+  expect(tracked.kind === "known" && tracked.spec.data).toEqual(expected);
 });

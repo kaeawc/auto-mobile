@@ -61,6 +61,8 @@ public final class dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost {
   public final void setNextSequence(kotlin.jvm.functions.Function1<? super java.lang.String, java.lang.Long>);
   public final dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageSessionRegistry getStorageRegistry();
   public final void setStorageRegistry(dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageSessionRegistry);
+  public final dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRealtimeConfig getRealtime();
+  public final void setRealtime(dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRealtimeConfig);
   public final kotlinx.coroutines.CoroutineScope getFlushScope();
   public final void setFlushScope(kotlinx.coroutines.CoroutineScope);
   public final dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink getEventSink();
@@ -69,6 +71,8 @@ public final class dev.jasonpearson.automobile.prototype.EmbeddedPrototypeHost {
   public final void setRequestDismiss(kotlin.jvm.functions.Function1<? super kotlin.coroutines.Continuation<? super java.lang.Boolean>, ? extends java.lang.Object>);
   public final kotlin.jvm.functions.Function0<java.lang.Boolean> isCurrent();
   public final void setCurrent(kotlin.jvm.functions.Function0<java.lang.Boolean>);
+  public final kotlin.jvm.functions.Function2<dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime, kotlin.coroutines.Continuation<? super kotlin.Unit>, java.lang.Object> getInitializeRuntime();
+  public final void setInitializeRuntime(kotlin.jvm.functions.Function2<? super dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime, ? super kotlin.coroutines.Continuation<? super kotlin.Unit>, ? extends java.lang.Object>);
   public final kotlin.jvm.functions.Function1<dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime, kotlin.Unit> getOnRuntime();
   public final void setOnRuntime(kotlin.jvm.functions.Function1<? super dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime, kotlin.Unit>);
   public final kotlin.jvm.functions.Function0<kotlin.Unit> getOnReady();
@@ -275,6 +279,7 @@ public final class dev.jasonpearson.automobile.prototype.PrototypeClipboardModul
   public void close();
   public java.lang.Object call(dev.jasonpearson.automobile.prototype.PlatformCall, kotlin.coroutines.Continuation<? super dev.jasonpearson.automobile.prototype.PlatformCallResult>);
   public java.lang.Object simulate(dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation<? super java.lang.Boolean>);
+  public boolean getSupportsSimulation();
   public dev.jasonpearson.automobile.prototype.PlatformAvailability availability();
 }
 Compiled from "PrototypeLoadError.kt"
@@ -368,6 +373,7 @@ public final class dev.jasonpearson.automobile.prototype.PrototypePlatform {
 Compiled from "PrototypePlatform.kt"
 public final class dev.jasonpearson.automobile.prototype.PrototypePlatformModule$DefaultImpls {
   public static java.lang.Object simulate(dev.jasonpearson.automobile.prototype.PrototypePlatformModule, dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation<? super java.lang.Boolean>);
+  public static boolean getSupportsSimulation(dev.jasonpearson.automobile.prototype.PrototypePlatformModule);
 }
 Compiled from "PrototypePlatform.kt"
 public interface dev.jasonpearson.automobile.prototype.PrototypePlatformModule {
@@ -377,10 +383,12 @@ public interface dev.jasonpearson.automobile.prototype.PrototypePlatformModule {
   public abstract java.lang.Object call(dev.jasonpearson.automobile.prototype.PlatformCall, kotlin.coroutines.Continuation<? super dev.jasonpearson.automobile.prototype.PlatformCallResult>);
   public default java.lang.Object simulate(dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation<? super java.lang.Boolean>);
   public static java.lang.Object simulate$suspendImpl(dev.jasonpearson.automobile.prototype.PrototypePlatformModule, dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation<? super java.lang.Boolean>);
+  public default boolean getSupportsSimulation();
   public abstract kotlinx.coroutines.flow.Flow<dev.jasonpearson.automobile.prototype.PlatformEvent> getEvents();
   public abstract kotlinx.coroutines.flow.StateFlow<kotlinx.serialization.json.JsonObject> getState();
   public abstract void close();
   public static java.lang.Object access$simulate$jd(dev.jasonpearson.automobile.prototype.PrototypePlatformModule, dev.jasonpearson.automobile.prototype.PlatformEvent, kotlin.coroutines.Continuation);
+  public static boolean access$getSupportsSimulation$jd(dev.jasonpearson.automobile.prototype.PrototypePlatformModule);
 }
 Compiled from "PrototypePlatform.kt"
 public final class dev.jasonpearson.automobile.prototype.PrototypePlatformRegistry {

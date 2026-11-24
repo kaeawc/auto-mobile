@@ -162,6 +162,31 @@ Bind rows with `repeat.items: {"derived":"results"}`. Collections preserve the o
 filter before sorting and limiting, and scan at most 500 items. Non-array sources yield no rows.
 Up to four clauses combine with AND; operators are `contains`, `eq`, `neq`, `gt`, `gte`, `lt`, and `lte`.
 Clause values read state or a literal string/number. Missing fields and type mismatches do not match.
+
 Add `reduce: {"op":"count"}` or `{"op":"sum","field":"amount"}` (also `min` or `max`)
 to produce a scalar after limiting; empty reductions return zero. Scalars support `format`.
-Collections require `prototype_derive_v1`; update a renderer that refuses this capability.
+
+Use `visibleWhen: {"derived":"cartCount","gt":0}` to show checkout when a derived count is
+positive. Derived conditions compare raw values, before formatting, and update when their inputs
+change. They also work in `enabledWhen`, `errorWhen`, and `styleWhen`. Operators are `equals`,
+`notEquals`, `gt`, `lt`, `empty`, `contains`, `startsWith`, `lengthGt`, and `lengthLt`.
+Use `{"derived":"cartCount"}` in data action values and selectors, emit context, or request
+query and body values. The action reads the current raw value. An unset value becomes null in
+emit context and fails a data write or request.
+
+Use `enabledWhen: {"key":"confirm","equalsKey":"password"}` to enable a control when both state
+keys are set and their values match. Collections, derived bindings, derived conditions, and
+`equalsKey` require `prototype_derive_v1`.
+
+### Nested repeat
+
+Use `repeat: {"items":{"field":"lines"},"as":"line"}` on a container inside an outer
+repeat's template. `lines` must be an array of object rows on every outer item; empty arrays draw
+no inner rows. Inner arrays allow at most 100 items, and repeats allow two levels total;
+inner row field names starting with `outer.` are reserved. Use distinct aliases, excluding
+`route` for the inner alias.
+
+In the inner template, `{line.sku}` reads the inner row and `{order.id}` reads the outer row.
+The `{index}` token is the inner index, and `{outerIndex}` is the outer index, valid only there.
+State keys may combine both aliases and indices, and must name valid declared keys for every pair.
+Nested repeats require `prototype_nested_repeat_v1`; update a renderer that refuses this capability.

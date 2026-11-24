@@ -1,3 +1,4 @@
+import specCapabilities from "../fixtures/prototype-capabilities/spec-capabilities.json";
 import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -36,6 +37,10 @@ const chartData = { points: [{ y: 1 }, { y: 2 }] };
 // `with` lists capabilities a fixture needs besides the one under test: a device-run request also
 // needs the network capability, so the device gate is exercised with that one already advertised.
 const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: string[] }> = {
+  prototype_links_v1: {
+    minimalSpec: { ...base, requires: ["prototype_links_v1"], links: [] },
+    ops: [],
+  },
   prototype_glass_v1: fixture({ ...label, style: { surface: "glass" } }),
   prototype_scroll_edge_effect_v1: fixture({
     type: "scroll",
@@ -63,7 +68,13 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     name: "home",
     effect: { type: "bounce" },
   }),
+  prototype_remote_image_v1: fixture({
+    type: "image",
+    id: "label",
+    url: "https://example.com/a",
+  }),
   prototype_style_polish_v2: fixture({ ...label, style: { cornerStyle: "continuous" } }),
+  prototype_m3_expressive_v1: fixture({ type: "loadingIndicator", id: "label" }),
   prototype_tooltip_v1: fixture({
     type: "column",
     id: "label",
@@ -99,6 +110,21 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
   },
   prototype_semantics_v1: fixture({ ...label, semantics: { heading: true } }),
+  prototype_nested_repeat_v1: {
+    ...fixture({
+      type: "column",
+      repeat: { items: [{ lines: [{ sku: "a" }] }], as: "order" },
+      children: [
+        {
+          type: "column",
+          repeat: { items: { field: "lines" }, as: "line" },
+          children: [{ type: "text", text: "{line.sku}" }],
+        },
+      ],
+      id: "label",
+    }),
+    with: ["prototype_data_model_v1"],
+  },
   prototype_derive_v1: {
     minimalSpec: { ...base, derive: { results: { collection: { of: { data: "/rows" } } } } },
     ops: [],
@@ -366,6 +392,19 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
           where: { field: "id", equals: { value: 1 } },
           member: "title",
           value: { value: "new" },
+        },
+      ],
+    }),
+    with: ["prototype_data_actions_v1"],
+  },
+  prototype_data_actions_v3: {
+    ...fixture({
+      ...label,
+      onTap: [
+        {
+          type: "appendData",
+          path: "/data/rows",
+          value: { object: { title: { state: "name" }, done: { value: false } } },
         },
       ],
     }),
@@ -1529,3 +1568,40 @@ for (const platform of ["android", "ios"] as const) {
     );
   });
 }
+
+test.each(["android", "ios"] as const)(
+  "%s refuses remote images when the capability is absent",
+  async (platform) => {
+    advertise(
+      ...specCapabilities.filter((capability) => capability !== "prototype_remote_image_v1"),
+    );
+    const device: BootedDevice = { platform, deviceId: `remote-${platform}`, name: "Fake" };
+    const { minimalSpec, ops } = fixtures.prototype_remote_image_v1;
+    const showCount = () =>
+      platform === "android"
+        ? proxy.getPrototypeHistory().filter(({ method }) => method === "show").length
+        : agent.requests.filter(({ type }) => type === "show_prototype").length;
+    const before = showCount();
+    const refused = await show(device, minimalSpec);
+    expect(showCount()).toBe(before);
+    expect(refused.success).toBe(false);
+    expect(refused.error).toContain("does not advertise prototype_remote_image_v1");
+    expect(refused.error).toContain("bundled asset");
+    expect(refused.error).not.toContain("updated agent");
+    expect((await show(device, base)).success).toBe(true);
+    expect(await patch(device, ops)).toEqual({ success: false, error: refused.error });
+    expect(requests(device)).toEqual([]);
+  },
+);
+
+test("Android remote image capability accepts show and patch", async () => {
+  advertise(...specCapabilities);
+  agent.handshake.capabilities = agent.handshake.capabilities.filter(
+    (capability) => capability !== "prototype_remote_image_v1",
+  );
+  const device: BootedDevice = { platform: "android", deviceId: "remote-android", name: "Fake" };
+  const { minimalSpec, ops } = fixtures.prototype_remote_image_v1;
+  expect((await show(device, minimalSpec)).success).toBe(true);
+  expect((await patch(device, ops)).success).toBe(true);
+  expect(agent.requests).toEqual([]);
+});

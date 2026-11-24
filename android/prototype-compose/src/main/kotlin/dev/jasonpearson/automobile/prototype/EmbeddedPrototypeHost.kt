@@ -6,6 +6,7 @@ import androidx.compose.runtime.remember
 import dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeInteraction
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRealtimeConfig
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageSessionRegistry
 import kotlinx.coroutines.CoroutineDispatcher
@@ -29,6 +30,8 @@ class EmbeddedPrototypeHost(
   var clock: () -> Long = System::currentTimeMillis
   var nextSequence: ((String) -> Long)? = null
   var storageRegistry: PrototypeStorageSessionRegistry? = null
+  /** The transports behind the spec's `channels` (#14269); null leaves them without a module. */
+  var realtime: PrototypeRealtimeConfig? = null
   var flushScope: CoroutineScope = scope
   /**
    * Optional awaited delivery for hosts with a suspending sink; [AutoMobilePrototype]'s callback
@@ -40,6 +43,8 @@ class EmbeddedPrototypeHost(
    * Checked under the interaction lock before opening, including a queued, obsolete composition.
    */
   var isCurrent: () -> Boolean = { true }
+  /** Awaited after shown and before the first rendered frame. */
+  var initializeRuntime: suspend (PrototypeRuntime) -> Unit = {}
   var onRuntime: (PrototypeRuntime) -> Unit = {}
   /** Called only after runtime content successfully composes, never while storage/fonts load. */
   var onReady: () -> Unit = {}

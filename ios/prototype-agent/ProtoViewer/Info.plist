@@ -6,10 +6,24 @@
     <array><dict>
         <key>CFBundleTypeRole</key><string>Viewer</string>
         <key>CFBundleURLName</key><string>AutoMobile ProtoViewer</string>
-        <key>CFBundleURLSchemes</key><array><string>automobile-proto</string></array>
+        <key>CFBundleURLSchemes</key><array><string>automobile-proto</string><string>amp-demo</string></array>
     </dict></array>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Confirm your identity when a prototype asks you to authenticate.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>The prototype you are previewing asks for permission to use your camera.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>The prototype you are previewing asks for permission to use your microphone.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>The prototype you are previewing asks for access to your photo library.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>The prototype you are previewing asks for permission to add photos to your photo library.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>The prototype you are previewing asks for access to your contacts.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>The prototype you are previewing asks for full access to your calendars.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>The prototype you are previewing asks for permission to use your location while the app is open.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Used only when you allow network for imported prototypes, to reach devices on your local network.</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>

@@ -59,6 +59,21 @@ extension ElementLocator {
             // Springboard reports as foreground even when another app is on top,
             // so we always re-detect unless a non-springboard app is confirmed foreground
             if isCurrentAppInForeground, !isCurrentAppSpringboard {
+                // iPadOS Windowed Apps and Stage Manager park the app window at the screen edge
+                // on Home, and the parked app still reports .runningForeground (#18828).
+                // SpringBoard exposes its icon list only while the home screen is in front.
+                if Self.canParkForegroundApp(
+                    trackedBundleId: trackedBundleId,
+                    isPad: UIDevice.current.userInterfaceIdiom == .pad
+                ),
+                    tracked("checkHomeScreen", {
+                        catchingObjCExceptionNonThrowing({
+                            SpringBoardHomeScreenDetector.isShowing(in: springboard)
+                        }, fallback: false)
+                    })
+                {
+                    switchForegroundApp(bundleId: "com.apple.springboard")
+                }
                 tracker.didFallbackToSpringboard = false
                 return
             }
@@ -97,7 +112,7 @@ extension ElementLocator {
 
         /// Common system apps to check when detecting foreground app
         /// These are apps that might be launched by the user during testing
-        private static let commonSystemApps: [String] = [
+        static let commonSystemApps: [String] = [
             "com.apple.Preferences", // Settings
             "com.apple.mobilesafari", // Safari
             "com.apple.MobileAddressBook", // Contacts
@@ -165,6 +180,11 @@ extension ElementLocator {
             }
 
             if let snapshot = snapshot {
+                // A parked iPad app window keeps its switcher card and .runningForeground state
+                // while the home screen is in front (#18828).
+                if SpringBoardHomeScreenClassifier.isShowing(Self.springBoardIconListElements(in: snapshot)) {
+                    return nil
+                }
                 let result: String? = tracked("checkCandidates") {
                     var candidateBundleIds: [String] = []
                     collectBundleIdsFromElement(snapshot, into: &candidateBundleIds)
@@ -267,6 +287,27 @@ extension ElementLocator {
         /// meaningfully delaying detection of a genuine foreground change (which
         /// also resets the cache via `switchForegroundApp`).
         private static let systemAppSweepMissTtlNanos: UInt64 = 1_000_000_000
+
+        /// SpringBoard's home screen icon list elements, for `SpringBoardHomeScreenClassifier`.
+        static func springBoardIconListElements(
+            in snapshot: XCUIElementSnapshot
+        )
+            -> [AppSwitcherSnapshotClassifier.ElementSnapshot]
+        {
+            var elements: [AppSwitcherSnapshotClassifier.ElementSnapshot] = []
+            var pending: [XCUIElementSnapshot] = [snapshot]
+            while let element = pending.popLast() {
+                if element.identifier == SpringBoardHomeScreenClassifier.iconListIdentifier {
+                    elements.append(.init(
+                        identifier: element.identifier,
+                        frame: element.frame,
+                        value: element.value as? String
+                    ))
+                }
+                pending.append(contentsOf: element.children)
+            }
+            return elements
+        }
 
         /// Collect all potential bundle IDs from springboard element tree
         private func collectBundleIdsFromElement(

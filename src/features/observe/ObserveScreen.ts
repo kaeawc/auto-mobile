@@ -24,7 +24,7 @@ import {
 } from "./ActiveWindowAttribution";
 export { hasUsableHierarchy } from "./ActiveWindowAttribution";
 import { publishScreenshotPaths } from "./ScreenshotRetention";
-import { resolveIosObserveRotation } from "./iosObserveRotation";
+import { hasMultiplePanels, resolveIosObserveRotation } from "./iosObserveRotation";
 import { type ScreenshotPathProtection } from "./ScreenshotPathProtection";
 import { type SelectedDisplayReadPolicy } from "./SelectedDisplayRead";
 import {
@@ -295,11 +295,12 @@ export class RealObserveScreen implements ObserveScreen {
     this.idGenerator = idGenerator;
     this.screenRound = new AdbScreenRoundReader(this.adb);
 
+    const readDisplaySize = () => queryDisplaySize(this.adb, { timeoutMs: 1000 });
     const xrDisplaySize = (this.xrDisplaySize = new CachedAndroidXrDisplaySize({
       device: () => this.device,
       adb: () => this.adb,
       xrDetector: defaultAndroidXrDetector,
-      readDisplaySize: () => queryDisplaySize(this.adb, { timeoutMs: 1000 }),
+      readDisplaySize,
       hierarchyCollector: () => this.hierarchyCollector,
     }));
     const wiring = createObserveScreenWiring({
@@ -376,6 +377,8 @@ export class RealObserveScreen implements ObserveScreen {
     // Lazy getters: tests may reassign these collaborators on the instance after construction.
     this.androidCollector = new DefaultAndroidObservationCollector({
       xrDisplaySize,
+      // The `wm size` fallback for a default display with no inventory (#18982).
+      readDisplaySize,
       hierarchyCollector: () => this.hierarchyCollector,
       deviceStateCollector: () => this.deviceStateCollector,
       viewHierarchy: () => this.viewHierarchy,
@@ -584,6 +587,7 @@ export class RealObserveScreen implements ObserveScreen {
               rotation: resolveIosObserveRotation(
                 stored.viewHierarchy?.rotation,
                 stored.screenSize,
+                hasMultiplePanels(this.device),
               ),
             }
           : stored;

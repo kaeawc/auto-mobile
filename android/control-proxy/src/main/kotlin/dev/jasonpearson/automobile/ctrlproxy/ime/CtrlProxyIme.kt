@@ -427,6 +427,11 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
           finishComposing = connection::finishComposingText,
           readBefore = { connection.getTextBeforeCursor(it, 0) },
           readAfter = { connection.getTextAfterCursor(it, 0) },
+          selection =
+            ImeSelection(
+              read = { connection.getSelectedText(0) },
+              delete = { connection.commitText("", 1) },
+            ),
           deleteSurrounding = connection::deleteSurroundingText,
         )
       return if (

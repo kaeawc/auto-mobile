@@ -1,11 +1,9 @@
+import { GUIDE_INBOUND_LINKS } from "./prototypeGuideLinks";
 import { GUIDE_DISPOSABLE_APPS, GUIDE_PLATFORM_NAMESPACES } from "./prototypeGuideProseMore";
 import { GUIDE_MOTION_V3 } from "./prototypeGuideMotionV3";
+import { GUIDE_M3_EXPRESSIVE } from "./prototypeGuideM3Expressive";
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
-import {
-  MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
-  MAX_PROTOTYPE_LIST_ITEMS,
-  MAX_PROTOTYPE_SPEC_BYTES,
-} from "./prototypeSpec";
+import * as spec from "./prototypeSpec";
 export const GUIDE_GESTURES = `${GUIDE_PLATFORM_NAMESPACES}
 
 ## Gestures
@@ -192,7 +190,7 @@ are reported in \`platformNotes\`.
 
 ## Loading, empty and error states
 
-State-key \`contains\`/\`startsWith\` compare UTF-16 substrings/prefixes, case-sensitive with no Unicode normalization. Literal operands are nonempty strings up to 256 UTF-16 units; repeat placeholders always bind as text (a numeric item renders as its text), and an empty substituted operand holds for every string. \`lengthGt\`/\`lengthLt\` compare UTF-16 length strictly against literal integers 0..100000 (\`😀\` has length 2). Missing or non-string state values fail all four. They are valid only with \`key\`, wherever a condition is accepted, and require \`prototype_string_conditions_v1\`.
+String \`contains\`/\`startsWith\` compare UTF-16 substrings/prefixes, case-sensitive with no Unicode normalization. Literal operands are nonempty strings up to 256 UTF-16 units; repeat placeholders always bind as text (a numeric item renders as its text), and an empty substituted operand holds for every string. \`lengthGt\`/\`lengthLt\` compare UTF-16 length strictly against literal integers 0..100000 (\`😀\` has length 2). Missing or non-string values fail all four. They use \`key\` or \`derived\` and require \`prototype_string_conditions_v1\`.
 
 (needs \`prototype_loading_states_v1\`) \`{data: "/feed", empty: true}\` holds when the value is
 missing, \`[]\`, \`{}\` or \`""\`; \`empty: false\` is its inverse. It replaces the comparison, so
@@ -243,6 +241,8 @@ order inside the node's own bounds: \`noise\`, \`gradientMesh\`, \`shimmer\`, \`
 bounded params. Shader source is never accepted. Any effect may loop with \`animate:
 {periodMs: 400-20000}\` and start at \`phase\` 0-1; a spec has at most 64 effects and 8 animated ones
 across its expanded \`repeat\` tree, counting every \`styleWhen\` style's list too.
+
+${GUIDE_INBOUND_LINKS}
 
 ## Motion profiles and shared elements
 
@@ -324,17 +324,17 @@ support it yet.
 
 \`list {repeat:{items:{path},as,key},children:[row],axis?,header?,footer?,spacing?,contentPadding?,onEndReached?,endThreshold?,refresh?,maxItems?}\`
 is a lazy scrolling collection (needs \`prototype_lazy_list_v1\` and \`prototype_data_model_v1\`).
-The path resolves to at most ${MAX_PROTOTYPE_LIST_ITEMS} objects; \`key\` is required, projected and unique. Empty arrays
+The path resolves to at most ${spec.MAX_PROTOTYPE_LIST_ITEMS} objects; \`key\` is required, projected and unique. Empty arrays
 are valid. Axis defaults to vertical; spacing/padding are nonnegative dp. One row template and
 optional header/footer each count once toward node/image limits, while per-item binding and text
 budgets still apply. Header/footer are ordinary nodes outside the row scope. Never nest lists,
-put a list in a repeat, or put a same-axis scroll above/below a list. Rows cannot nest repeats/pagers.
+put a list in a repeat, or put a same-axis scroll above/below a list. Rows may nest one container repeat using an item field array with prototype_nested_repeat_v1; pagers remain invalid.
 Only composed rows are in \`observe\`; use \`swipeOn\` to reach more. Row keys preserve identity.
 \`onEndReached\` fires for nonempty rows within \`endThreshold\` of the end (1–50, default 3), once
 per \`(rowCount,lastRowKey)\` signature; empty/no-change pages never refire. Signature state survives
 recomposition and resets on show. \`endThreshold\` needs \`onEndReached\`. Vertical \`refresh\` uses
 scroll.refresh semantics and a declared boolean key (also needs \`prototype_refresh_v1\`).
-\`maxItems\` (1–${MAX_PROTOTYPE_LIST_ITEMS}) requires initial data to fit; appending trims oldest rows atomically before
+\`maxItems\` (1–${spec.MAX_PROTOTYPE_LIST_ITEMS}) requires initial data to fit; appending trims oldest rows atomically before
 final data limits. The smallest cap among lists sharing the exact data path wins.
 \`request.append:{from,to}\` (same lazy-list capability) extracts a response array from an object
 member at \`from\`, extends the existing \`/data/...\` array \`to\`, and writes the remaining response
@@ -354,7 +354,7 @@ until the acceptance run; benchmark qualification remains unverified.
 
 \`{type: "chart", variant, series, yRange?, xLabels?, goal?}\` draws a \`line\`, \`area\`, \`bar\` or
 \`ring\` chart (needs \`prototype_chart_v1\`). \`series\` holds 1-4 \`{path, x?, y, label, color?}\`
-entries: \`path\` is a \`/data\` pointer to an array of objects (empty is valid, at most ${MAX_PROTOTYPE_DATA_ARRAY_ITEMS} items as
+entries: \`path\` is a \`/data\` pointer to an array of objects (empty is valid, at most ${spec.MAX_PROTOTYPE_DATA_ARRAY_ITEMS} items as
 for any data array), \`y\` names each point's numeric member and \`x\` its optional label member;
 \`color\` is a hex or theme role, or a \`{light, dark}\` pair. Points are drawn in array order, so
 \`appendData\`, a \`request\` \`into\` or a \`/data\` patch re-renders the chart. \`yRange {min, max}\`
@@ -459,7 +459,7 @@ Optional \`caret\` is \`auto\` (default), \`top\`, \`bottom\`, \`start\` or \`en
 
 \`drawer\` requires \`prototype_drawer_v1\`, \`edge: "start"|"end"\`, boolean \`openWhen: {key, equals}\` and a \`child\` node. Start/end follow layout direction. The renderer fixes panel width; there is no width field. Optional \`scrim\` accepts the same color value (including mode pairs) as bottomSheet and defaults to the scrim role. Optional \`dismissOnSwipe\` defaults to true, as for bottomSheet. Both nodes accept the common node fields, including \`onTap\`, but no long-press or double-tap handlers.
 
-## Menu and select
+${GUIDE_M3_EXPRESSIVE}## Menu and select
 
 \`menu\` and \`select\` require \`prototype_menus_v1\`; the host refuses them before showing or uploading assets when the connected renderer lacks it.
 
@@ -781,10 +781,10 @@ are rejected; a missing text path renders empty.
   placeholders are not charged. Crossing the total fails at that field with \`Substituted text total limit exceeded\`.
   During state interpolation, a replacement that would exceed the per-call substitution limit stays
   as written, and later placeholders may still substitute.
-- A condition uses exactly one of \`key\`, \`data\`, \`platform\`, \`valid\`, \`all\`, \`any\`, \`not\`. A data condition has exactly
-  one comparison: \`equals\` (same scalar type and value), \`notEquals\` (its inverse, including missing
-  or non-scalar), \`gt\` or \`lt\` (numbers only, otherwise false), or \`empty\` (data only). \`equals\`/\`notEquals\` operands are
-  literals; repeat placeholders there are rejected. Key forms also accept \`contains\`, \`startsWith\`, \`lengthGt\` or \`lengthLt\` (see string conditions). \`bottomSheet.openWhen\` remains boolean state.
+- A condition uses exactly one of \`key\`, \`data\`, \`platform\`, \`derived\`, \`valid\`, \`all\`, \`any\` or \`not\`.
+  Data and derived conditions require one comparison: \`equals\` (same scalar type and value), \`notEquals\` (its inverse,
+  including missing or non-scalar), \`gt\` or \`lt\` (numbers only), or \`empty\`. Data conditions require literal equality
+  operands. Key and derived conditions also accept string comparisons. \`bottomSheet.openWhen\` uses boolean state.
 
 The host validates data and repeat paths; the device resolves bindings once per show before
 repeat expansion. All data uses require \`prototype_data_model_v1\`; an older device is refused
@@ -838,7 +838,7 @@ every limit counts the expanded tree.
 
 export const GUIDE_APPEARANCE = `## Style polish
 
-Glass: style.surface "glass" and strict style.glass {variant?:regular|clear,tint?:colour,interactive?:boolean} need prototype_glass_v1 (iOS 26+ only today; older iOS and Android refuse it). glass requires surface "glass" in the same style, including styleWhen; cornerRadius shapes it, absent means capsule. ios.glassGroup {spacing:0..200} is for column/row/box/flow/grid/list/listItem; descendant glass shared keys morph in their nearest group, must be unique there, cannot collide with visibility-pair keys, and require repeat.key templates under repeat (including the repeated node). ios.glassUnion (ASCII id, 1..64), ios.glassTransition matchedGeometry|materialize|identity need a base glass surface; ios.backgroundExtension:true is image-only. All four ios glass keys are node-only, invalid in window.ios/theme.ios. All four need only the glass gate on iOS; other ios keys still need the unadvertised platform namespace gate; Android ignores ios fields with platformNotes paths. Android rendering is deferred, with real blur required at API 31+ and no glass below API 31. scroll.edgeEffect soft|hard|none needs prototype_scroll_edge_effect_v1: iOS 26 native; older iOS shares fadeEdges (24/8 dp defaults, authored lengths win, none disables only the edge effect and its default fallback; explicit fadeEdges still apply). System accessibility settings control glass appearance; assert structure/bounds.
+Glass: style.surface "glass" and strict style.glass {variant?:regular|clear,tint?:colour,interactive?:boolean} need prototype_glass_v1 (iOS 26+, and Android; older iOS refuses it). glass requires surface "glass" in the same style, including styleWhen; cornerRadius shapes it, absent means capsule. ios.glassGroup {spacing:0..200} is for column/row/box/flow/grid/list/listItem; descendant glass shared keys morph in their nearest group, must be unique there, cannot collide with visibility-pair keys, and require repeat.key templates under repeat (including the repeated node). ios.glassUnion (ASCII id, 1..64), ios.glassTransition matchedGeometry|materialize|identity need a base glass surface; ios.backgroundExtension:true is image-only. All four ios glass keys are node-only, invalid in window.ios/theme.ios. All four need only the glass gate on iOS; other ios keys still need the unadvertised platform namespace gate; Android ignores ios fields with platformNotes paths. Android blurs earlier sibling layers of the same spec behind the node (24 dp regular, 8 dp clear; Haze) on API 31+ and draws a tonal scrim below; it cannot blur other apps, which is what window.backdrop does. scroll.edgeEffect soft|hard|none needs prototype_scroll_edge_effect_v1: iOS 26 native; older iOS shares fadeEdges (24/8 dp defaults, authored lengths win, none disables only the edge effect and its default fallback; explicit fadeEdges still apply). System accessibility settings control glass appearance; assert structure/bounds.
 
 Layered style.shadows (1-3 strict {color,radius,spread?,offset?,inner?}, radius 0-1000 dp, spread and offset axes -1000..1000; omitted spread/offset/inner mean 0/{x:0,y:0}/false), style.cornerStyle circular|continuous (default circular), style.border {width,color? ,gradient?} with exactly one of color or gradient, scroll.fadeEdges {top?,bottom?,start?,end?} (0-1000 dp, at least one), and image.filter {saturation?,tint?} (saturation 0-2, at least one) require prototype_style_polish_v2. shadows excludes elevation and shadowColor. Fades appear only where scrolling remains; start/end mirror in RTL. Colour pairs in shadows and tint, and pairs or role names in border gradient stops also require prototype_theme_modes_v1.
 
@@ -1028,9 +1028,9 @@ export const GUIDE_ERRORS = `## Common validation errors
 | \`Data depth limit exceeded\` / \`Data array limit exceeded\` / \`Data byte limit exceeded\` | Reduce data to the generated limits. |
 | \`Invalid pointer value\` | Use a nonempty RFC 6901 pointer within the pointer limit. |
 | \`Repeat path does not resolve to an array\` / \`Repeat path resolves to more than 128 items\` / \`Repeat path item <i> is not an object\` | Point to an array of objects within the repeat item limit. |
-| \`Duplicate repeat key "x" (items <i> and <j>)\` | Give every item a unique rendered identity. |
+| \`Duplicate repeat key "x" (items <i> and <j>)\` / \`Derived repeat key "x" has the same input for items <i> and <j>\` | Give every item a unique rendered identity; derive a key from a field that differs per row, not a constant or a shared value. |
 | \`Bound state key "x" is invalid (repeat item <i>)\` | A path-bound key must form a valid state key; error is at repeat.items.path. |
-| \`Requires key or data or platform\` | Supply one condition source with exactly one comparison. |
+| \`Requires key or data or platform or derived\` | Supply one condition source with exactly one comparison. |
 | \`Repeat path cell limit exceeded\` | Reduce path-bound repeats or the scalar members projected per item; see \`MAX_PROTOTYPE_REPEAT_PATH_CELLS\`. |
 | \`Substituted text total limit exceeded\` | Reduce bindable fields, replacement lengths or repeat items; see \`MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL\`. |
 | \`Repeat placeholder in a data condition operand is not supported\` | Use a literal operand; state conditions still bind repeat operands. |
@@ -1084,7 +1084,7 @@ Data actions). Any state op, including \`test\`, requires \`baseRevision\`. A de
 must refuse the whole patch with \`conflict\` if the user changed a touched state
 key since that revision, returning the current revision and those keys' values.
 
-There are at most ${MAX_PROTOTYPE_PATCH_OPS} ops, the frame is capped at ${MAX_PROTOTYPE_SPEC_BYTES / (1024 * 1024)} MiB, and the resulting whole
+There are at most ${MAX_PROTOTYPE_PATCH_OPS} ops, the frame is capped at ${spec.MAX_PROTOTYPE_SPEC_BYTES / (1024 * 1024)} MiB, and the resulting whole
 spec must satisfy every spec/data limit, including node count and depth. The
 host tracks a cloned copy of each id's device spec from its last acknowledged show,
 with components expanded and anchors resolved. It applies ops to a copy and

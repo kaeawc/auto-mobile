@@ -60,4 +60,6 @@ data class HomeDestination(
 
 @Serializable data object DemoControlShapesDestination : AppDestination
 
+@Serializable data object DemoEmbeddedPrototypeDestination : AppDestination
+
 @Serializable data object DesignSystemDemoDestination : AppDestination

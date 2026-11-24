@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { ExecuteGesture } from "../../../src/features/action/ExecuteGesture";
 import { InputKey } from "../../../src/features/action/InputKey";
+import { holdDispatchedRequest } from "../../../src/daemon/dispatchedRequestHold";
 import { PressButton } from "../../../src/features/action/PressButton";
 import {
+  heldRawInput,
   SimHidCoordinateTapClient,
   simHidScreenFromObservation,
 } from "../../../src/features/action/simHidRouting";
@@ -86,6 +88,11 @@ class ScriptedTapClient implements IosCoordinateTapClient {
 }
 
 const delivered: SimHidOutcome = { status: "delivered", elapsedMs: 1 };
+const hidStub: Omit<IosSimulatorRawInput, "button"> = {
+  tap: async () => delivered,
+  swipe: async () => delivered,
+  key: async () => delivered,
+};
 
 describe("SimHidCoordinateTapClient", () => {
   test("a running helper takes the tap and CtrlProxy is not called", async () => {
@@ -343,6 +350,78 @@ describe("iOS Simulator HID routing in actions", () => {
     expect(input.signals).toEqual([fenced, fenced]);
     expect(holds).toHaveLength(2);
     expect(marks).toBe(2);
+  });
+
+  for (const button of ["power", "home"] as const) {
+    test(`PressButton ${button}: an abort between the helper write and its ack still reports dispatched`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = new FakeIOSCtrlProxy(timer);
+      client.setHierarchyData({
+        packageName: "com.apple.springboard",
+        updatedAt: 1,
+        hierarchy: { className: "XCUIApplication" },
+      });
+      const spy = spyOnIosClientInstance(client);
+      restore = () => spy.mockRestore();
+      const caller = new AbortController();
+      let ackLine!: () => void;
+      const ack = new Promise<void>((resolve) => {
+        ackLine = resolve;
+      });
+      const input: IosSimulatorRawInput = {
+        ...hidStub,
+        button: async (_button, options) => {
+          options.onWritten?.();
+          caller.abort(new Error("caller gave up"));
+          ackLine();
+          await ack;
+          options.onDispatch?.();
+          return delivered;
+        },
+      };
+      let dispatches = 0;
+      // The aborted press itself rejects; what matters is that the daemon was told it dispatched.
+      const pressed = new PressButton(simulator, null, timer, {
+        iosRawInput: input,
+        simctl: { executeCommandArgs: async () => createExecResult("", "") },
+        holdRequest: (signal, timeoutMs, send, onDispatch) =>
+          holdDispatchedRequest({
+            timer,
+            signal,
+            timeoutMs: timeoutMs ?? 1000,
+            label: "Button press request",
+            send,
+            onDispatch,
+          }),
+      }).press(button, { signal: caller.signal, onDispatch: () => dispatches++ });
+      await pressed.catch(() => undefined);
+      expect(dispatches).toBe(1);
+    });
+  }
+
+  test("a helper that reports nothing sent still marks the hold at the write but not the caller's outcome", async () => {
+    const fenced = new AbortController().signal;
+    const calls: string[] = [];
+    const route = heldRawInput(
+      {
+        ...hidStub,
+        button: async (_button, options) => {
+          options.onWritten?.();
+          return { status: "unavailable", reason: "plan failed" } satisfies SimHidOutcome;
+        },
+      },
+      () => calls.push("caller"),
+      async (_signal, send, onDispatch) =>
+        send(fenced, () => {
+          calls.push("hold");
+          onDispatch?.();
+        }),
+    );
+    const outcome = await route?.button("lock", { mode: "preferred" });
+    expect(outcome?.status).toBe("unavailable");
+    // Written ⇒ the hold is dispatched; the unavailable outcome still lets CtrlProxy run.
+    expect(calls).toEqual(["hold", "caller"]);
   });
 
   test("PressButton home presses the HID Home button instead of launching SpringBoard", async () => {

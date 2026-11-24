@@ -17,9 +17,15 @@ import {
 export interface SimHidClient {
   /**
    * `beforeWrite` runs right before the command is written, after any wait in the queue; if it
-   * throws, nothing is written and `send` rejects with that error.
+   * throws, nothing is written and `send` rejects with that error. `onWritten` runs right after
+   * the line is written (never for a failed write), before any reply.
    */
-  send(command: SimHidCommand, timeoutMs: number, beforeWrite?: () => void): Promise<SimHidOutcome>;
+  send(
+    command: SimHidCommand,
+    timeoutMs: number,
+    beforeWrite?: () => void,
+    onWritten?: () => void,
+  ): Promise<SimHidOutcome>;
   readonly closed: boolean;
   close(): void;
 }
@@ -30,6 +36,7 @@ interface Queued {
   resolve: (outcome: SimHidOutcome) => void;
   reject: (error: unknown) => void;
   beforeWrite?: () => void;
+  onWritten?: () => void;
 }
 
 interface InFlight {
@@ -64,12 +71,13 @@ export class TransportSimHidClient implements SimHidClient {
     command: SimHidCommand,
     timeoutMs: number,
     beforeWrite?: () => void,
+    onWritten?: () => void,
   ): Promise<SimHidOutcome> {
     if (this.isClosed) {
       return Promise.resolve({ status: "unavailable", reason: "sim-hid-helper has exited" });
     }
     return new Promise<SimHidOutcome>((resolve, reject) => {
-      this.queue.push({ command, timeoutMs, resolve, reject, beforeWrite });
+      this.queue.push({ command, timeoutMs, resolve, reject, beforeWrite, onWritten });
       this.writeNext();
     });
   }
@@ -91,7 +99,7 @@ export class TransportSimHidClient implements SimHidClient {
     }
   }
 
-  private write({ command, timeoutMs, resolve, reject, beforeWrite }: Queued): void {
+  private write({ command, timeoutMs, resolve, reject, beforeWrite, onWritten }: Queued): void {
     try {
       beforeWrite?.();
     } catch (error) {
@@ -112,6 +120,14 @@ export class TransportSimHidClient implements SimHidClient {
         status: "unavailable",
         reason: `sim-hid-helper write failed: ${errorMessage(error)}`,
       });
+      return;
+    }
+    try {
+      onWritten?.();
+    } catch (error) {
+      // The line is already written; the marker failing (e.g. a fenced abort) must not turn a
+      // possibly-delivered input into an unavailable one.
+      logger.warn(`sim-hid-helper ${command.cmd} onWritten failed: ${errorMessage(error)}`);
     }
   }
 

@@ -63,7 +63,18 @@ export function heldRawInput(
   ): Promise<SimHidOutcome> =>
     hold(
       options.signal,
-      (fenced, marks) => send({ ...options, signal: fenced, onDispatch: marks }),
+      (fenced, marks) => {
+        // The write may already have pressed the button: dispatch is marked then, not only at the
+        // helper's ack an abort can pre-empt. Marked once, so the caller sees a single dispatch.
+        let marked = false;
+        const markOnce = () => {
+          if (!marked) {
+            marks();
+            marked = true;
+          }
+        };
+        return send({ ...options, signal: fenced, onDispatch: markOnce, onWritten: markOnce });
+      },
       options.onDispatch ?? onDispatch,
     );
   return {

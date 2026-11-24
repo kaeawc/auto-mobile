@@ -35,6 +35,11 @@ export interface SimHidRouteOptions {
    * queue wait. A throw (e.g. a stale display fence) aborts the command with nothing sent.
    */
   beforeWrite?: () => void;
+  /**
+   * Runs right after the command line is written to the helper, before its reply: from here the
+   * input may have reached the simulator even if the caller aborts before the ack.
+   */
+  onWritten?: () => void;
 }
 
 /** Raw-coordinate and key input for one iOS Simulator through sim-hid-helper (#19118). */
@@ -135,7 +140,7 @@ export class SessionIosSimulatorRawInput implements IosSimulatorRawInput {
   private async send(
     command: SimHidCommand,
     gestureMs: number,
-    { mode, signal, onDispatch, beforeWrite }: SimHidRouteOptions,
+    { mode, signal, onDispatch, beforeWrite, onWritten }: SimHidRouteOptions,
     touch: boolean,
   ): Promise<SimHidOutcome> {
     throwIfAborted(signal);
@@ -150,10 +155,15 @@ export class SessionIosSimulatorRawInput implements IosSimulatorRawInput {
       await this.launchSettle.wait(this.deviceId);
     }
     throwIfAborted(signal);
-    const outcome = await client.send(command, gestureMs + SIM_HID_REPLY_HEADROOM_MS, () => {
-      throwIfAborted(signal);
-      beforeWrite?.();
-    });
+    const outcome = await client.send(
+      command,
+      gestureMs + SIM_HID_REPLY_HEADROOM_MS,
+      () => {
+        throwIfAborted(signal);
+        beforeWrite?.();
+      },
+      onWritten,
+    );
     if (outcome.status !== "unavailable") {
       onDispatch?.();
     }

@@ -130,4 +130,23 @@ describe("TransportSimHidClient", () => {
     transport.failWrites = true;
     expect((await client.send({ cmd: "ping" }, 1000)).status).toBe("unavailable");
   });
+
+  test("onWritten fires after the line is written, before any reply, and not for a failed write", async () => {
+    const { transport, client } = setup();
+    const order: string[] = [];
+    const pending = client.send({ cmd: "button", button: "lock" }, 1000, undefined, () =>
+      order.push(`written:${transport.sent.length}`),
+    );
+    expect(order).toEqual(["written:1"]);
+    transport.reply(
+      JSON.stringify({ id: "a", ok: false, sent: false, error: { code: "x", message: "y" } }),
+    );
+    expect((await pending).status).toBe("unavailable");
+    transport.failWrites = true;
+    const failed = await client.send({ cmd: "button", button: "lock" }, 1000, undefined, () =>
+      order.push("written-again"),
+    );
+    expect(failed.status).toBe("unavailable");
+    expect(order).toEqual(["written:1"]);
+  });
 });

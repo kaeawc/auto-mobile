@@ -96,9 +96,11 @@ export class FakeSimHidClient implements SimHidClient {
     command: SimHidCommand,
     timeoutMs: number,
     beforeWrite?: () => void,
+    onWritten?: () => void,
   ): Promise<SimHidOutcome> {
     beforeWrite?.();
     this.commands.push({ command, timeoutMs });
+    onWritten?.();
     return this.outcome;
   }
   close(): void {

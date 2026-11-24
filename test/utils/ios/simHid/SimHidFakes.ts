@@ -63,8 +63,12 @@ export class FakeSimHidProvider implements SimHidHelperProvider {
 }
 
 export class FakeSimHidLauncher implements SimHidProcessLauncher {
-  readonly launches: Array<{ deviceId: string; transport: FakeSimHidTransport; kills: number }> =
-    [];
+  readonly launches: Array<{
+    deviceId: string;
+    transport: FakeSimHidTransport;
+    kills: number;
+    stops: number;
+  }> = [];
   failure?: Error;
   /** When set, launch() waits on this promise before resolving. */
   gate?: Promise<void>;
@@ -76,12 +80,20 @@ export class FakeSimHidLauncher implements SimHidProcessLauncher {
     if (this.failure) {
       throw this.failure;
     }
-    const record = { deviceId: request.deviceId, transport: new FakeSimHidTransport(), kills: 0 };
+    const record = {
+      deviceId: request.deviceId,
+      transport: new FakeSimHidTransport(),
+      kills: 0,
+      stops: 0,
+    };
     this.launches.push(record);
     return {
       transport: record.transport,
       kill: () => {
         record.kills++;
+      },
+      stop: () => {
+        record.stops++;
       },
     };
   }

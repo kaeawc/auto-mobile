@@ -4,6 +4,7 @@ import { logger } from "../../logger";
 import type { Timer } from "../../SystemTimer";
 import { raceWithDeadline } from "../../raceWithDeadline";
 import { TransportSimHidClient, type SimHidClient } from "./SimHidClient";
+import { SimHidCompileError } from "./SimHidCompileError";
 import type { SimHidHelperProvider } from "./SimHidHelperProvider";
 import type { SimHidProcessHandle, SimHidProcessLauncher } from "./SimHidProcessLauncher";
 
@@ -15,12 +16,12 @@ export interface SimHidSessionsOptions {
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
   /** After a failed spawn, wait this long before spawning again for that device. */
   retryAfterFailureMs?: number;
-  /** After the helper failed to build (no Xcode, compile error), wait this long for every device. */
+  /** After swiftc rejected the sources (a compile error), wait this long for every device. */
   retryAfterBuildFailureMs?: number;
 }
 
 export const SIM_HID_RETRY_AFTER_FAILURE_MS = 30_000;
-/** A build failure does not fix itself; retrying it on every input would rerun swiftc each time. */
+/** A compile error does not fix itself; retrying it on every input would rerun swiftc each time. */
 export const SIM_HID_RETRY_AFTER_BUILD_FAILURE_MS = 30 * 60_000;
 
 interface Entry {
@@ -74,10 +75,12 @@ export class SimHidSessions {
     const entry = this.entries.get(deviceId);
     this.entries.delete(deviceId);
     this.failedAt.delete(deviceId);
+    // A session that ends or restarts retries a failed build (the user may have installed Xcode).
+    this.buildFailedAt = undefined;
     try {
       entry?.client?.close();
     } finally {
-      entry?.handle?.kill();
+      entry?.handle?.stop();
     }
   }
 
@@ -113,6 +116,10 @@ export class SimHidSessions {
     return entry;
   }
 
+  private get spawnRetryMs(): number {
+    return this.options.retryAfterFailureMs ?? SIM_HID_RETRY_AFTER_FAILURE_MS;
+  }
+
   private get buildRetryMs(): number {
     return this.options.retryAfterBuildFailureMs ?? SIM_HID_RETRY_AFTER_BUILD_FAILURE_MS;
   }
@@ -126,8 +133,7 @@ export class SimHidSessions {
 
   private inSpawnCooldown(deviceId: string): boolean {
     const failedAt = this.failedAt.get(deviceId);
-    const retryAfter = this.options.retryAfterFailureMs ?? SIM_HID_RETRY_AFTER_FAILURE_MS;
-    return failedAt !== undefined && this.options.timer.now() - failedAt < retryAfter;
+    return failedAt !== undefined && this.options.timer.now() - failedAt < this.spawnRetryMs;
   }
 
   private async start(deviceId: string, entry: Entry): Promise<SimHidClient | undefined> {
@@ -135,16 +141,26 @@ export class SimHidSessions {
     try {
       build = await this.options.provider.ensure();
     } catch (error) {
-      // Logged once per cooldown: no start runs again until it passes.
+      if (this.entries.get(deviceId) !== entry) {
+        // Released while the build was pending: the failure belongs to a dead session, so it
+        // must not start any cooldown for the next acquisition.
+        return undefined;
+      }
+      // Only a compile error is stable; missing sources during an upgrade or xcrun/codesign failures are
+      // transient and retry on the short per-device cooldown. Logged once per cooldown.
+      const permanent = error instanceof SimHidCompileError;
+      const retryMs = permanent ? this.buildRetryMs : this.spawnRetryMs;
       logger.warn(
         `sim-hid-helper could not be built; iOS Simulator raw input uses CtrlProxy for the next ` +
-          `${Math.round(this.buildRetryMs / 1000)} s: ${errorMessage(error)}`,
+          `${Math.round(retryMs / 1000)} s: ${errorMessage(error)}`,
         error,
       );
-      if (this.entries.get(deviceId) === entry) {
-        this.entries.delete(deviceId);
+      this.entries.delete(deviceId);
+      if (permanent) {
+        this.buildFailedAt = this.options.timer.now();
+      } else {
+        this.failedAt.set(deviceId, this.options.timer.now());
       }
-      this.buildFailedAt = this.options.timer.now();
       return undefined;
     }
     try {
@@ -158,7 +174,7 @@ export class SimHidSessions {
       });
       if (this.entries.get(deviceId) !== entry || this.stopped) {
         handle.transport.close();
-        handle.kill();
+        handle.stop();
         return undefined;
       }
       entry.handle = handle;

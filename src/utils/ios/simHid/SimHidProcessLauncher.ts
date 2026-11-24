@@ -16,7 +16,13 @@ export interface SimHidTransport {
 
 export interface SimHidProcessHandle {
   readonly transport: SimHidTransport;
+  /** Immediate SIGKILL; for a helper that never became ready. */
   kill(): void;
+  /**
+   * Retire a running helper: close stdin so it releases held input and exits, then SIGKILL if
+   * it is still alive after the grace period.
+   */
+  stop(): void;
 }
 
 export interface SimHidProcessLauncher {
@@ -30,6 +36,8 @@ export interface SimHidProcessLauncher {
 
 /** Cold start measured 0.2–1.4 s on a loaded host (#19019); allow headroom. */
 export const SIM_HID_STARTUP_TIMEOUT_MS = 10_000;
+/** The helper exits on stdin EOF once its current command finishes; a hung one is killed. */
+export const SIM_HID_STOP_GRACE_MS = 500;
 
 /** Owns only the exact child handle it spawned, never a process-name lookup. */
 export class DefaultSimHidProcessLauncher implements SimHidProcessLauncher {
@@ -40,6 +48,7 @@ export class DefaultSimHidProcessLauncher implements SimHidProcessLauncher {
     > = new DefaultHostCommandExecutor(),
     private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
     private readonly startupTimeoutMs: number = SIM_HID_STARTUP_TIMEOUT_MS,
+    private readonly stopGraceMs: number = SIM_HID_STOP_GRACE_MS,
   ) {}
 
   async launch({
@@ -59,6 +68,20 @@ export class DefaultSimHidProcessLauncher implements SimHidProcessLauncher {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill("SIGKILL");
       }
+    };
+    let graceTimer: unknown;
+    const stop = (): void => {
+      if (child.exitCode !== null || child.signalCode !== null || graceTimer !== undefined) {
+        return;
+      }
+      try {
+        child.stdin?.end();
+      } catch (error) {
+        // The pipe may already be broken; the kill below still retires the process.
+        logger.debug(`sim-hid-helper stdin close failed: ${errorMessage(error)}`);
+      }
+      graceTimer = this.timer.setTimeout(kill, this.stopGraceMs);
+      child.once("exit", () => this.timer.clearTimeout(graceTimer as never));
     };
     try {
       if (!child.stdin || !child.stdout) {
@@ -98,6 +121,7 @@ export class DefaultSimHidProcessLauncher implements SimHidProcessLauncher {
       });
       return {
         kill,
+        stop,
         transport: {
           send: (line) => {
             if (closed) {

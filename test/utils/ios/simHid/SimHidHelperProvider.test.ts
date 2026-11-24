@@ -4,6 +4,8 @@ import {
   DefaultSimHidHelperProvider,
   SIM_HID_SOURCES,
 } from "../../../../src/utils/ios/simHid/SimHidHelperProvider";
+import { ActionableError } from "../../../../src/models/ActionableError";
+import { SimHidCompileError } from "../../../../src/utils/ios/simHid/SimHidCompileError";
 import type { HostCommandOptions } from "../../../../src/utils/HostCommandExecutor";
 import { FakeFileSystem } from "../../../fakes/FakeFileSystem";
 import { FakeHostCommandExecutor } from "../../../fakes/FakeHostCommandExecutor";
@@ -96,5 +98,38 @@ describe("DefaultSimHidHelperProvider", () => {
     const { runner, provider } = setup();
     runner.setCommandError("swiftc -O", new Error("error: no such module"));
     await expect(provider.ensure()).rejects.toThrow("build step failed");
+  });
+
+  test("only a swiftc non-zero exit with diagnostics is a compile error", async () => {
+    const { runner, provider } = setup();
+    runner.setCommandError(
+      "swiftc -O",
+      Object.assign(new Error("failed"), { code: 1, stderr: "error: cannot find type 'X'" }),
+    );
+    await expect(provider.ensure()).rejects.toBeInstanceOf(SimHidCompileError);
+
+    const transient = setup();
+    transient.runner.setCommandError(
+      "swiftc -O",
+      Object.assign(new Error("failed"), { code: 1, stderr: "" }),
+    );
+    const failure = await transient.provider.ensure().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect(failure).not.toBeInstanceOf(SimHidCompileError);
+
+    const codesign = setup();
+    codesign.runner.setCommandError(
+      "codesign",
+      Object.assign(new Error("failed"), { code: 1, stderr: "codesign: error" }),
+    );
+    const signFailure = await codesign.provider.ensure().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(signFailure).toBeInstanceOf(ActionableError);
+    expect(signFailure).not.toBeInstanceOf(SimHidCompileError);
   });
 });

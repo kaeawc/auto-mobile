@@ -157,6 +157,24 @@ test("awaitEvent receives events buffered before the first host subscription", a
   expect(ctrlCalls).toBe(0);
 });
 
+test.each([
+  { kind: "link_opened" as const, payload: { url: "amp-demo://post/41", entry: "/post/{postId}" } },
+  { kind: "link_unmatched" as const, payload: { url: "amp-demo://missing" } },
+])("awaitEvent filters inbound links by kind $kind", async ({ kind, payload }) => {
+  const waiting = call({ action: "awaitEvent", id: "panel", kind });
+  await drainUntil(() => timer.getPendingTimeoutCount() > 0, {
+    description: "inbound link event wait",
+  });
+  agent.emit({ ...event(1), kind: "emit", name: kind, payload });
+  agent.emit({ ...event(2), kind, name: null, payload });
+  expect(await waiting).toMatchObject({
+    success: true,
+    event: { sequence: 2, kind, name: null, payload },
+  });
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+  expect(ctrlCalls).toBe(0);
+});
+
 test("status after the first wait preserves the next pending app event", async () => {
   const waiting = call({ action: "awaitEvent", id: "panel" });
   await drainUntil(() => timer.getPendingTimeoutCount() > 0, {

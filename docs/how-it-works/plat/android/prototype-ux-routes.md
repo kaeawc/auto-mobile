@@ -86,6 +86,28 @@ Runtime (shared by `PrototypeRuntime` on Android and the iOS session; pure helpe
   kept paths win over storage. Restoring emits no `screen_changed`; the restored top's onEnter runs
   as the show's first entry.
 
+## Inbound link contract
+
+Root `links` accepts up to 32 ordered `{path,query?,actions}` entries with
+`requires:["prototype_links_v1"]` or `requires:{platform:["location"],capabilities:["prototype_links_v1"]}`
+when platform modules are also needed. `capabilities` accepts 1–128 non-empty strings. Paths contain literals or `{name}` captures; query declarations
+use `string`, `int`, `number` or `boolean`, optionally suffixed `?`. A declaration may instead be
+`{type:"string?",secret:true}`. Entry actions read captures and declared query values through
+`{link:"name"}`; captures must be used and route parameter types must agree. The shared matcher
+validates the table and selects the first match. A registration guard rejects unregistered
+schemes; HTTP(S) also needs an explicit host registration. Nothing registers verified HTTPS yet.
+
+Inbound links emit kind `link_opened` with payload `{url,entry}` (entry is the path pattern) or
+kind `link_unmatched` with payload `{url}` and no actions. Both have `name: null`.
+Event URLs omit secret query values.
+These are core navigation events, independent of `prototype_platform_v1` and outbound `links.open`.
+Android routes cold-start URLs before publishing the first prototype frame and warm URLs through
+`onNewIntent`. The shell registers `amp-<slug>`; the stamp writes the same schemes into its intent
+filter and runtime metadata; optional schemes must be custom schemes, excluding `http` and `https`.
+Only the stamped shell advertises inbound delivery; the shared Compose renderer and Android ProtoViewer do not.
+The shell consumes each launch intent once, skips recreation and history launches, and delivers links under
+the interaction lock. A spec without `prototype_links_v1` ignores inbound URLs.
+
 ## Stack transitions
 
 `prototype_stack_transitions_v1` gates every explicit stack `transition` and push/replace

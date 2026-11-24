@@ -1,3 +1,4 @@
+import { prototypeLinksSchema } from "./prototypeLinksSchema";
 import { buildAdaptiveSchema, adaptiveChildren, type AdaptiveSlots } from "./prototypeAdaptive";
 import { prototypeChannelsSchema } from "./prototypeChannelSchema";
 import { prototypeRootBlockFields } from "./prototypeRootBlockSchemas";
@@ -909,6 +910,7 @@ const specSchema = z
     motion: z.enum(["none", "standard", "reduced", "expressive"]).optional(),
     storage: prototypeStorageSchema.optional(),
     requires: prototypeRequiresSchema.optional(),
+    links: prototypeLinksSchema(() => actionSchema).optional(),
     platform: prototypePlatformHandlersSchema.optional(),
     channels: prototypeChannelsSchema(() => actionSchema).optional(),
     ...prototypeRootBlockFields(),
@@ -946,7 +948,6 @@ export const PROTOTYPE_ACTION_TYPES = [
   "cancelTimer",
 ] as const;
 export const PROTOTYPE_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;
-
 export function prototypeHasStack(spec: unknown): boolean {
   let found = false;
   walkPrototypeNodes(spec, (node) => {
@@ -956,7 +957,6 @@ export function prototypeHasStack(spec: unknown): boolean {
   });
   return found;
 }
-
 /** One path per authored root containing stack navigation, preserving the gate's existing shape. */
 export function prototypeStackFields(spec: unknown): string[] {
   return prototypeSpecNodeRoots(spec).flatMap(({ node, path }) =>

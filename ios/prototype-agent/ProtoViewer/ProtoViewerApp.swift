@@ -4,10 +4,13 @@ import SwiftUI
 extension PrototypePlatformRegistry {
     static let viewer = makeSystemRegistry(webView: PrototypeWebViewModule())
 
-    static var viewerReportCapabilities: [String] {
-        Set(AutoMobilePrototypeCapabilities.supported + viewer.capabilities.filter {
-            $0 == PrototypeWebViewModule.capabilityName
-        }).sorted()
+    /// One list for import checks, MCP reports and rendering: the web view module plus
+    /// delivery-derived capabilities such as `prototype_links_v1`. Hook delegates first.
+    @MainActor static var viewerReportCapabilities: [String] {
+        Set(PrototypeInboundLinkSchemes.rendererCapabilities(
+            registry: viewer.capabilities.filter { $0 == PrototypeWebViewModule.capabilityName },
+            delivery: PrototypeURLDelivery.capabilities
+        )).sorted()
     }
 }
 
@@ -20,6 +23,7 @@ struct ProtoViewerApp: App {
     private let library: Result<(PrototypeLibraryStore, PrototypeLibraryImportService, PrototypeMcpInbox), Error>
 
     init() {
+        PrototypeURLDelivery.hookExistingDelegates()
         library = Result {
             let support = try FileManager.default.url(
                 for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true

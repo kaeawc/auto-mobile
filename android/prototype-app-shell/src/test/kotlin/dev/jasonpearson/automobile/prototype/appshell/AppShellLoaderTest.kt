@@ -27,6 +27,11 @@ class AppShellLoaderTest {
         .map { it.jsonPrimitive.content }
     org.junit.Assert.assertTrue("prototype_platform_permissions_v1" in capabilities)
     org.junit.Assert.assertTrue("prototype_platform_secureStorage_v1" in capabilities)
+    org.junit.Assert.assertTrue("prototype_links_v1" in capabilities)
+    org.junit.Assert.assertFalse(
+      "prototype_links_v1" in
+        dev.jasonpearson.automobile.prototype.AutoMobilePrototype.capabilities,
+    )
     org.junit.Assert.assertFalse("prototype_platform_notifications_v1" in capabilities)
   }
 

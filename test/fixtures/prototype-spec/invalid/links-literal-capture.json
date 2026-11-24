@@ -1,0 +1,57 @@
+{
+  "spec": {
+    "id": "links",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": ["prototype_links_v1"],
+    "root": {
+      "type": "stack",
+      "id": "main",
+      "start": "feed",
+      "screens": {
+        "feed": {
+          "type": "text",
+          "text": "Feed"
+        },
+        "post": {
+          "type": "text",
+          "text": "Post {route.postId}"
+        }
+      },
+      "routes": {
+        "feed": {},
+        "post": {
+          "params": {
+            "postId": "string"
+          }
+        }
+      }
+    },
+    "links": [
+      {
+        "path": "/post/{postId}",
+        "query": {
+          "ref": "string?"
+        },
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open",
+            "context": {
+              "literal": {
+                "value": {
+                  "link": "postId"
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "expectedPath": "links[0]",
+  "expectedMessage": "Unused capture: postId"
+}

@@ -114,6 +114,7 @@ enum PrototypeAgentProtocol {
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
     /// `reset` on an agent that does not advertise it.
+    static let linksCapability = "prototype_links_v1"
     static let windowControlsCapability = "prototype_platform_window_controls_v1"
     static let hideKeyboardCapability = "prototype_hide_keyboard_v1"
     /// Advertised only through the registered `PrototypeSettingsModule`, never the static list.

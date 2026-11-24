@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "links-gate",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Links"
+    },
+    "links": [],
+    "requires": ["prototype_links_v1"]
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_links_v1"
+}

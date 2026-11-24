@@ -387,23 +387,32 @@ function placeholderUses(spec: unknown, uses: PrototypePlatformUse[]) {
   });
 }
 
+/** A requires block holding only explicit capabilities declares no platform module use. */
+function requiresUses(requires: Raw | undefined): PrototypePlatformUse[] {
+  if (!requires) {
+    return [];
+  }
+  const capabilitiesOnly =
+    Object.hasOwn(requires, "capabilities") &&
+    Object.keys(requires).every((key) => key === "capabilities");
+  const declared = Array.isArray(requires.platform) ? requires.platform : [];
+  return [
+    ...(capabilitiesOnly ? [] : [{ kind: "requires" as const, path: "requires" }]),
+    ...declared.flatMap((name, index) =>
+      typeof name === "string"
+        ? [{ kind: "declared" as const, path: `requires.platform[${index}]`, module: name }]
+        : [],
+    ),
+  ];
+}
+
 /** Every platform construct in `spec`, at the paths of `spec` itself (no component expansion). */
 export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
   const root = record(spec);
   if (!root) {
     return [];
   }
-  const uses: PrototypePlatformUse[] = [];
-  const requires = record(root.requires);
-  if (requires) {
-    uses.push({ kind: "requires", path: "requires" });
-    const declared = Array.isArray(requires.platform) ? requires.platform : [];
-    declared.forEach((name, index) => {
-      if (typeof name === "string") {
-        uses.push({ kind: "declared", path: `requires.platform[${index}]`, module: name });
-      }
-    });
-  }
+  const uses: PrototypePlatformUse[] = requiresUses(record(root.requires));
   const handlers = record(record(root.platform)?.on);
   if (record(root.platform)) {
     uses.push({ kind: "handlers", path: "platform" });
@@ -426,6 +435,16 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
       { inHandler: true, inTimer: false, inNode: false, userGesture: false },
       uses,
     );
+  }
+  if (Array.isArray(root.links)) {
+    root.links.forEach((entry, index) => {
+      scanValue(
+        record(entry)?.actions,
+        `links[${index}].actions`,
+        { inHandler: false, inTimer: false, inNode: false, userGesture: false },
+        uses,
+      );
+    });
   }
   for (const { node, path } of prototypeSpecNodeRoots(root)) {
     scanValue(

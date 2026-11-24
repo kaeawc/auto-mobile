@@ -1,0 +1,73 @@
+{
+  "spec": {
+    "id": "links",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": ["prototype_links_v1"],
+    "root": {
+      "type": "stack",
+      "id": "main",
+      "start": "feed",
+      "screens": {
+        "feed": {
+          "type": "text",
+          "text": "Feed"
+        },
+        "post": {
+          "type": "text",
+          "text": "Post {route.postId}"
+        }
+      },
+      "routes": {
+        "feed": {},
+        "post": {
+          "params": {
+            "postId": "string"
+          }
+        }
+      }
+    },
+    "links": [
+      {
+        "path": "/post/{postId}",
+        "query": {
+          "ref": "string?"
+        },
+        "actions": [
+          {
+            "type": "setStack",
+            "stack": "main",
+            "path": [
+              {
+                "screen": "feed"
+              },
+              {
+                "screen": "post",
+                "params": {
+                  "postId": {
+                    "link": "postId"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "push",
+            "stack": "main",
+            "screen": "post",
+            "params": {
+              "postId": {
+                "link": "missing"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "expectedPath": "links[0].actions[1]",
+  "expectedMessage": "Unknown link binding"
+}

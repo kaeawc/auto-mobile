@@ -40,6 +40,7 @@ class AutoMobilePrototypeCapabilitiesTest {
    */
   private val exclusions =
     setOf(
+      "prototype_links_v1", // Only the stamped app shell delivers inbound URLs.
       "prototype_scroll_edge_effect_v1", // Contract only until Android edge rendering in PR 2.
       // Realtime transport, routing and lifecycle remain owed by the runtime slices.
       "prototype_platform_realtime_v1",

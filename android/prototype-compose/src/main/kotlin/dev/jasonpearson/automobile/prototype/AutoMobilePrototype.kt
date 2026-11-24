@@ -429,6 +429,7 @@ private class EmbeddedOwner(
     runtime.updateLocales(config.locales())
     config.environment.host?.onRuntime?.invoke(runtime)
     runtime.shown()
+    config.environment.host?.initializeRuntime?.invoke(runtime)
     session =
       EmbeddedSession(
         runtime,

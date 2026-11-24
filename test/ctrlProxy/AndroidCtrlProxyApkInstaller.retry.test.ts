@@ -437,6 +437,36 @@ describe("CtrlProxy install settling and retries", () => {
     expect(host.attempts).toBe(1);
   });
 
+  test.each(["phone", "automotive"] as const)(
+    "%s upgrade stage retries the empty streamed-install failure with its own command (#19124)",
+    async (formFactor) => {
+      const { host, probe, installer } = fixture(formFactor);
+      host.outcomes = [capturedEmptyReason(), createExecResult("Success", "")];
+      await installer.executeApkInstallStage(
+        'install -r -d "/fake/a.apk"',
+        "CtrlProxy APK upgrade",
+      );
+      expect(host.stageCommands).toEqual([
+        'install -r -d "/fake/a.apk"',
+        'install -r -d "/fake/a.apk"',
+      ]);
+      expect(probe.calls).toEqual([]);
+      expect(host.timer.now()).toBe(10);
+    },
+  );
+
+  test("upgrade stage throws a failure with a reason unchanged on its first attempt", async () => {
+    const { host, installer } = fixture("phone");
+    const failure = new Error(
+      "adb: failed to install x.apk: Failure [INSTALL_FAILED_USER_RESTRICTED]",
+    );
+    host.outcomes = [failure];
+    await expect(
+      installer.executeApkInstallStage('install -r -d "/fake/a.apk"', "CtrlProxy APK upgrade"),
+    ).rejects.toBe(failure);
+    expect(host.attempts).toBe(1);
+  });
+
   test("phone cancellation during backoff prevents a second install", async () => {
     const { host, probe, installer } = fixture("phone", false);
     host.outcomes = [capturedEmptyReason()];

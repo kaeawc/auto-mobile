@@ -17,6 +17,7 @@ import {
 } from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
 import { AndroidAvdIdentityConflictError } from "./AndroidAvdIdentityConflictError";
+import { NoMatchingDeviceError } from "./NoMatchingDeviceError";
 import { type DisplayInventoryProvider } from "./DisplayInventoryProvider";
 import { assertAndroidAvdIdentityResolved } from "./androidBootIdentity";
 import { enrichBootedDevice } from "./bootedDeviceEnrichment";
@@ -367,8 +368,8 @@ export function noMatchingDeviceError(
   criteria: DeviceMatchCriteria,
   images: DeviceInfo[],
   describedCandidates: Parameters<typeof describeDisplayRequirements>[1],
-): ActionableError {
-  return new ActionableError(
+): NoMatchingDeviceError {
+  return new NoMatchingDeviceError(
     `No ${request.platform} device matching criteria found. ` +
       `${request.minOsVersion ? `minOsVersion>=${request.minOsVersion} ` : ""}` +
       `${request.maxOsVersion ? `maxOsVersion<=${request.maxOsVersion} ` : ""}` +

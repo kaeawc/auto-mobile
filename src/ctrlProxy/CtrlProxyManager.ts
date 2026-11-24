@@ -171,6 +171,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         AndroidCtrlProxyManager.consumeCompletedPrefetchedApk(destinationPath),
       clearAvailabilityCache: () => this.clearAvailabilityCache(),
       executeApkStage: (command, stage) => this.executeApkStage(command, stage),
+      executeApkInstallStage: (command, stage) =>
+        this.apkInstaller.executeApkInstallStage(command, stage),
       grantPostInstallPermissions: () => this.grantPostInstallPermissions(),
       install: (apkPath) => this.install(apkPath),
       enable: () => this.enable(),

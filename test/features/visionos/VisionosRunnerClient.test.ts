@@ -285,6 +285,22 @@ test("unadvertised command and malformed hierarchy fail closed", async () => {
   client.close();
 });
 
+test("a runner from before coordinate input refuses it without sending, naming the fix", async () => {
+  const { socket, client } = fixture();
+  socket.receive(connected);
+  for (const command of [
+    { type: "request_tap_coordinates" as const, x: 1, y: 2 },
+    { type: "request_swipe" as const, x1: 1, y1: 2, x2: 1, y2: 200, duration: 300 },
+    { type: "request_press_home" as const },
+  ]) {
+    await expect(client.request(command)).rejects.toThrow(
+      `does not support ${command.type}; it may be older than this AutoMobile`,
+    );
+  }
+  expect(socket.sent).toEqual([]);
+  client.close();
+});
+
 test("the connected handshake alone makes the runner ready, with no hierarchy request", async () => {
   const { socket, timer, client } = fixture();
   const ready = client.waitUntilConnected();

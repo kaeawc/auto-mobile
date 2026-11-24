@@ -48,6 +48,7 @@ public enum CarPlayErrorCode: String, Codable, Sendable, CaseIterable {
     case unsupportedScreenType = "unsupported-screen-type"
     case carPlayNotPowered = "carplay-not-powered"
     case hidFailed = "hid-failed"
+    case headUnitInputsDisabled = "head-unit-inputs-disabled"
     case usage
 }
 
@@ -78,19 +79,40 @@ public struct SimulatorDevice: Equatable, Sendable {
     }
 }
 
+/// Head-unit hardware a StarkConfig can declare besides the touch screen: the key names it uses.
+public enum StarkHardware: String, CaseIterable, Sendable {
+    case backButton = "hasBackButton"
+    case homeButton = "hasHomeButton"
+    case wheel = "hasWheel"
+    case wheelBump = "hasWheelBump"
+}
+
 /// The StarkConfig that backboardd reads to make TVOut a car display. 800x480 at 2x: a larger
 /// pixel size renders the CarPlay UI at 1x into the top-left corner.
 public enum StarkConfig {
     public static let width = 800.0
     public static let height = 480.0
 
-    public static func plist() throws -> Data {
-        let config: [String: Any] = [
+    /// headUnitInputs declares a back button, a home button and a knob with nudges besides the
+    /// touch screen (#19059); without it the car has a touch screen only.
+    public static func plist(headUnitInputs: Bool = false) throws -> Data {
+        var config: [String: Any] = [
             "width": Int(width), "height": Int(height), "scale": 2, "stark": true,
-            "hasTouchScreen": true, "hasTouchScreenLofi": false, "hasHomeButton": false,
-            "hasBackButton": false, "hasWheel": false, "hasWheelBump": false, "protocols": [String](),
+            "hasTouchScreen": true, "hasTouchScreenLofi": false, "protocols": [String](),
         ]
+        for hardware in StarkHardware.allCases {
+            config[hardware.rawValue] = headUnitInputs
+        }
         return try PropertyListSerialization.data(fromPropertyList: config, format: .xml, options: 0)
+    }
+
+    /// The hardware a written StarkConfig declares; none for a missing or unreadable one, such as
+    /// the `{"stark":0}` CoreSimulator writes on boot.
+    public static func declaredHardware(_ data: Data?) -> Set<StarkHardware> {
+        guard let data,
+              let config = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else { return [] }
+        return Set(StarkHardware.allCases.filter { (config[$0.rawValue] as? Bool) == true })
     }
 
     public static func path(dataPath: String) -> String {
@@ -105,6 +127,8 @@ public protocol SimulatorScreenBackend {
     func selectBootedDevice(udid: String) throws -> SimulatorDevice
     func screens() throws -> [SimulatorScreen]
     func writeFile(_ data: Data, path: String) throws
+    /// The file's contents, or nil when it does not exist.
+    func readFile(path: String) throws -> Data?
     func setCarPlayMode(screenID: UInt32, width: Double, height: Double) throws
 }
 
@@ -114,7 +138,7 @@ public struct CarPlayPowerController {
     private let backend: any SimulatorScreenBackend
     public init(backend: any SimulatorScreenBackend) { self.backend = backend }
 
-    public func run(udid: String, powerOn: Bool) throws -> CarPlayPowerState {
+    public func run(udid: String, powerOn: Bool, headUnitInputs: Bool = false) throws -> CarPlayPowerState {
         let device = try backend.selectBootedDevice(udid: udid)
         if powerOn { try Self.requireSupportedRuntime(device.runtimeVersion) }
         var screens = try backend.screens()
@@ -126,7 +150,10 @@ public struct CarPlayPowerController {
                 )
             }
             // CoreSimulator resets this file to {"stark":0} on every boot, so write it each time.
-            try backend.writeFile(StarkConfig.plist(), path: StarkConfig.path(dataPath: device.dataPath))
+            try backend.writeFile(
+                StarkConfig.plist(headUnitInputs: headUnitInputs),
+                path: StarkConfig.path(dataPath: device.dataPath)
+            )
             try backend.setCarPlayMode(screenID: screen.id, width: StarkConfig.width, height: StarkConfig.height)
             screens = try backend.screens()
             guard screens.contains(where: { $0.id == screen.id && $0.powerState == 1 }) else {

@@ -107,7 +107,16 @@ const startDeviceAndroidAutoSchema = z
 export type StartDeviceAndroidAutoOptions = z.output<typeof startDeviceAndroidAutoSchema>;
 
 /** startDevice's CarPlay display request for an iOS 26.x iPhone simulator (#18820). */
-const startDeviceCarPlaySchema = z.object({}).strict();
+const startDeviceCarPlaySchema = z
+  .object({
+    headUnitInputs: z
+      .boolean()
+      .optional()
+      .describe(
+        "Give the car a back button, a home button and a knob besides its touch screen, so pressButton with display carPlay can send them. Default false: touch only.",
+      ),
+  })
+  .strict();
 
 export type StartDeviceCarPlayOptions = z.output<typeof startDeviceCarPlaySchema>;
 
@@ -242,7 +251,7 @@ export const startDeviceParametersSchema = z.object({
   carPlay: startDeviceCarPlaySchema
     .optional()
     .describe(
-      "iOS Simulator only. Pass {} to turn on the CarPlay screen after the simulator is ready and confirm it is the car display. Needs an iOS 26.x simulator from Xcode 26.x; iOS 27 and later fail with unsupported-runtime. Request it again after every reboot.",
+      "iOS Simulator only. Pass {} to turn on the CarPlay screen after the simulator is ready and confirm it is the car display; {headUnitInputs: true} adds a back button, home button and knob. Needs an iOS 26.x simulator from Xcode 26.x; iOS 27 and later fail with unsupported-runtime. Request it again after every reboot.",
     ),
 });
 
@@ -431,7 +440,8 @@ export const getAndroidSchema = devicePreparationTimeoutSchema
       .min(1)
       .optional()
       .describe(
-        "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android). Omit both avdName and deviceId to select a device: a running phone emulator first, then a configured phone AVD (cold-booted)",
+        "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android). Omit both avdName and deviceId to select a device: with no requires, the running device the session already holds; else a running phone emulator first, then a configured phone AVD (cold-booted). " +
+          "requires narrows that phone choice; only panels above 1, posture, screenRound or vehicle.motion selects another form factor instead",
       ),
     deviceId: z
       .string()

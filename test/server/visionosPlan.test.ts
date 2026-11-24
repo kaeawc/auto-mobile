@@ -106,7 +106,7 @@ describe("visionOS replay uses the per-tool platform gate", () => {
   let restorePipeline: () => void;
   beforeEach(() => {
     handled = [];
-    for (const tool of ["launchApp", "tapOn", "observe", "swipeOn"]) {
+    for (const tool of ["launchApp", "tapOn", "observe", "pinchOn"]) {
       ToolRegistry.registerDeviceAware(
         tool,
         "Fake window-app tool",
@@ -156,11 +156,11 @@ describe("visionOS replay uses the per-tool platform gate", () => {
     );
   });
 
-  test("refuses a non-allowlisted swipeOn step before its handler runs", async () => {
+  test("refuses a non-allowlisted pinchOn step before its handler runs", async () => {
     const result = await planUtils.createDefaultPlanExecutor(new FakeTimer()).executePlan(
       {
         name: "unsupported-gesture",
-        steps: [{ tool: "swipeOn", params: { direction: "up" } }, ...plan.steps],
+        steps: [{ tool: "pinchOn", params: { direction: "in" } }, ...plan.steps],
       },
       0,
       "visionos",
@@ -170,11 +170,11 @@ describe("visionOS replay uses the per-tool platform gate", () => {
     expect(result.success).toBe(false);
     expect(result.failedStep).toMatchObject({
       stepIndex: 0,
-      tool: "swipeOn",
+      tool: "pinchOn",
       error: expect.stringContaining(
-        "swipeOn does not support visionOS yet. Target an Android or iOS device instead.",
+        "pinchOn does not support visionOS yet. Target an Android or iOS device instead.",
       ),
     });
-    expect(handled.some(({ tool }) => tool === "swipeOn" || tool === "launchApp")).toBe(false);
+    expect(handled.some(({ tool }) => tool === "pinchOn" || tool === "launchApp")).toBe(false);
   });
 });

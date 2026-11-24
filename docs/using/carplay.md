@@ -2,7 +2,8 @@
 
 AutoMobile cannot observe or record the CarPlay screen yet. What works today is tapping it at
 coordinates, and reading the templates your app shows on CarPlay, and acting on them, through the
-AutoMobile iOS SDK in a Debug build. This page covers those paths and what is not supported.
+AutoMobile iOS SDK in a Debug build. Head-unit buttons and the knob can be sent, but whether CarPlay
+reacts to them is not confirmed yet. This page covers those paths and what is not supported.
 
 ## What works today
 
@@ -15,6 +16,8 @@ AutoMobile iOS SDK in a Debug build. This page covers those paths and what is no
   the Simulator window. See [Turn on the CarPlay screen with `startDevice`](#turn-on-the-carplay-screen-with-startdevice).
 - `tapAt` with `display: "carPlay"` taps that screen. See
   [Tap the CarPlay screen](#tap-the-carplay-screen).
+- `pressButton` with `display: "carPlay"` sends back, home, Siri and knob input to that screen. Not
+  yet confirmed to act; see [Press head-unit buttons and turn the knob](#press-head-unit-buttons-and-turn-the-knob).
 - The `carPlay` device resource setting turns CarPlay vehicle connectivity off on a simulator. See
   [Configuring device resources](../how-it-works/device-resources-configuring.md).
 
@@ -58,10 +61,15 @@ Pass `carPlay: {}` to `startDevice` for an iPhone simulator:
 Once the simulator is ready and bound to your session, AutoMobile turns on its CarPlay screen and
 checks that the simulator now reports it as the car display. The response gains a `carPlay` block:
 
-| Field       | Description                                       |
-| ----------- | ------------------------------------------------- |
-| `display`   | The car display's identity, for example `Car[2]`. |
-| `displayId` | The simulator screen id of the car display.       |
+| Field            | Description                                                   |
+| ---------------- | ------------------------------------------------------------- |
+| `display`        | The car display's identity, for example `Car[2]`.             |
+| `displayId`      | The simulator screen id of the car display.                   |
+| `headUnitInputs` | `true` when you asked for head-unit inputs; absent otherwise. |
+
+By default the car has a touch screen only. Pass `"carPlay": { "headUnitInputs": true }` to also
+give it a back button, a home button and a knob, which
+[`pressButton`](#press-head-unit-buttons-and-turn-the-knob) needs.
 
 The simulator forgets the CarPlay screen whenever it boots, including after `killDevice` or when a
 released device is reset. Pass `carPlay: {}` on each `startDevice` call that needs it; asking again
@@ -106,6 +114,46 @@ Only a plain tap at `x` and `y` works there: `image`, `coordinateSpace` other th
 | `[unsupported-runtime] ...`                                         | CarPlay taps need an iOS 26.x simulator.                                                      |
 | `[usage] Tap point ... is outside ...`                              | Use a point inside the CarPlay screen's width and height.                                     |
 | `[hid-failed] ...`                                                  | The simulator refused the touch. Reboot it, request `carPlay` again and retry.                |
+
+## Press head-unit buttons and turn the knob
+
+AutoMobile has not yet confirmed that CarPlay reacts to these inputs on a simulator. Each call
+reports the input it sent, not what changed on the screen. Check the effect with
+[`GET /carplay/templates`](#read-the-templates) before relying on one.
+
+Call `startDevice` with `"carPlay": { "headUnitInputs": true }` first, then `pressButton` with
+`display: "carPlay"`:
+
+```json
+{
+  "deviceId": "<simulator UDID>",
+  "display": "carPlay",
+  "button": "rotary_rotate_cw",
+  "steps": 2
+}
+```
+
+| `button`                                                                          | Sends                                    |
+| --------------------------------------------------------------------------------- | ---------------------------------------- |
+| `back`                                                                            | The car's back button.                   |
+| `home`                                                                            | The car's home button.                   |
+| `siri`                                                                            | The car's voice button. Only works here. |
+| `rotary_select`                                                                   | A knob press.                            |
+| `rotary_nudge_up`, `rotary_nudge_down`, `rotary_nudge_left`, `rotary_nudge_right` | A knob nudge in that direction.          |
+| `rotary_rotate_cw`, `rotary_rotate_ccw`                                           | Knob turns; `steps` is 1 to 50 detents.  |
+
+`siri` does not need `headUnitInputs`; the other buttons do. Every other button, `durationMs`, and
+`steps` on anything but a turn are refused. The response has `button` and a `carPlay` block with
+`display`, `displayId`, `input` (the name sent, such as `knob-cw`) and `count`.
+
+| Error                                                               | What to do                                                                                                                  |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `[head-unit-inputs-disabled] ...`                                   | The CarPlay screen was turned on without head-unit inputs. Call `startDevice` with `"carPlay": { "headUnitInputs": true }`. |
+| `... is attached but not projecting ...` or `No CarPlay screen ...` | Call `startDevice` with `carPlay` on this simulator, then retry. No input was sent.                                         |
+| `[carplay-not-powered] ...`                                         | The CarPlay screen is off, for example after a reboot. Call `startDevice` with `carPlay` again.                             |
+| `[unsupported-runtime] ...`                                         | Head-unit inputs need an iOS 26.x simulator.                                                                                |
+| `[hid-failed] ...`                                                  | The simulator refused the input. Reboot it, request `carPlay` again and retry.                                              |
+| `pressButton siri is a CarPlay head-unit button ...`                | Pass `display: "carPlay"`. Phones, Android and tvOS do not take `siri`.                                                     |
 
 ## Register your CarPlay scene
 
@@ -194,6 +242,8 @@ trigger their handlers from outside. Malformed JSON, an unknown `action`, or `se
 | CarPlay screenshots, `observe` and `videoRecording` | No capture surface is available yet; CarPlay screen captures time out or come back black.                           |
 | CarPlay in the device list                          | Device listings do not report a CarPlay screen yet.                                                                 |
 | `tapOn`, swiping or typing on the CarPlay screen    | Only `tapAt` reaches it, at coordinates. Use `POST /carplay/action` for template actions.                           |
+| Confirmed head-unit buttons and knob                | `pressButton` sends them, but no simulator run has shown CarPlay acting on them yet.                                |
+| Long presses of head-unit buttons                   | Each button is a single press; `durationMs` is refused.                                                             |
 | Physical iPhones, cars and head units               | Only simulators are supported.                                                                                      |
 | Apple's CarPlay Simulator app                       | AutoMobile does not connect to it. Use the CarPlay window in Simulator.                                             |
 | CarPlay prototypes                                  | Prototypes draw only on the phone screen. See [CarPlay prototypes](../how-it-works/plat/ios/carplay-prototypes.md). |

@@ -198,6 +198,13 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend, CarPlayHIDBackend {
         }
     }
 
+    func readFile(path: String) throws -> Data? {
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        do { return try Data(contentsOf: URL(fileURLWithPath: path)) } catch {
+            throw CarPlayPowerError(.hidFailed, "Cannot read \(path): \(error.localizedDescription)")
+        }
+    }
+
     private func carPlayPropertyKey(_ symbol: String) throws -> NSString {
         guard let pointer = dlsym(UnsafeMutableRawPointer(bitPattern: -2), symbol) else { throw unavailable(symbol) }
         return pointer.assumingMemoryBound(to: NSString.self).pointee
@@ -308,6 +315,38 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend, CarPlayHIDBackend {
         // point by the size, so both are car-screen pixels.
         let eventType: UInt = phase == .down ? 1 : 2
         try send(mouse(&point, nil, target, eventType, CGSize(width: width, height: height), 0), "touch \(phase)")
+    }
+
+    // MARK: CarPlay head-unit inputs (#19059)
+
+    func sendUsage(_ phase: CarPlayTouchPhase, target: UInt32, page: UInt32, usage: UInt32) throws {
+        // IndigoHIDMessageForHIDArbitrary(IndigoHIDTarget, usagePage, usage, IndigoHIDButtonOp).
+        typealias Arbitrary = @convention(c) (UInt32, UInt32, UInt32, Int32) -> UnsafeMutableRawPointer?
+        let arbitrary = try unsafeBitCast(simulatorKitSymbol("IndigoHIDMessageForHIDArbitrary"), to: Arbitrary.self)
+        // IndigoHIDButtonOp: down is 1, up is 2.
+        let operation: Int32 = phase == .down ? 1 : 2
+        try send(arbitrary(target, page, usage, operation), "usage 0x\(String(usage, radix: 16)) \(phase)")
+    }
+
+    func sendScroll(target: UInt32, delta: Double) throws {
+        let iokitPath = "/System/Library/Frameworks/IOKit.framework/IOKit"
+        let createName = "IOHIDEventCreateScrollEvent"
+        guard let iokit = dlopen(iokitPath, RTLD_NOW), let createSymbol = dlsym(iokit, createName) else {
+            throw unavailable(createName)
+        }
+        // IOHIDEventCreateScrollEvent(CFAllocatorRef, AbsoluteTime, IOHIDFloat x, y, z, IOOptionBits).
+        typealias Create = @convention(c) (CFAllocator?, UInt64, Double, Double, Double, UInt32)
+            -> Unmanaged<CFTypeRef>?
+        // IndigoHIDMessageForScrollEventFromHIDEventRef(IOHIDEventRef, IndigoHIDTarget).
+        typealias Scroll = @convention(c) (CFTypeRef, UInt32) -> UnsafeMutableRawPointer?
+        let scroll = try unsafeBitCast(
+            simulatorKitSymbol("IndigoHIDMessageForScrollEventFromHIDEventRef"),
+            to: Scroll.self
+        )
+        let create = unsafeBitCast(createSymbol, to: Create.self)
+        guard let event = create(kCFAllocatorDefault, mach_absolute_time(), 0, delta, 0, 0)?.takeRetainedValue()
+        else { throw CarPlayPowerError(.hidFailed, "\(createName) returned no event.") }
+        try send(scroll(event, target), "knob rotation")
     }
 
     func hold(milliseconds: Int) {

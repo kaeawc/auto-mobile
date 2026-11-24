@@ -49,6 +49,14 @@ describe("activateCarPlayDisplay", () => {
     expect(timer.getSleepCallCount()).toBe(0);
   });
 
+  test("asks for head-unit inputs at power-on and reports them", async () => {
+    const { powerer, deps } = setup();
+    await expect(
+      activateCarPlayDisplay(udid, deps, { deadlineMs: 60_000 }, { headUnitInputs: true }),
+    ).resolves.toEqual({ display: "Car[2]", displayId: 2, headUnitInputs: true });
+    expect(powerer.powerOnOptions).toEqual([{ timeoutMs: 60_000, headUnitInputs: true }]);
+  });
+
   test("waits on the fake clock until the display takes the car tag", async () => {
     const { probe, timer, deps } = setup();
     probe.queued.push(untagged, untagged);

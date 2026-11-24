@@ -40,6 +40,7 @@ const failureSchema = z
           "unsupported-screen-type",
           "carplay-not-powered",
           "hid-failed",
+          "head-unit-inputs-disabled",
           "usage",
         ]),
         message: z.string().min(1),
@@ -63,10 +64,15 @@ export function boundedHelperTimeoutMs(defaultMs: number, options?: CarPlayHelpe
 
 const POWER_HELPER_TIMEOUT_MS = 135000;
 
+export interface CarPlayPowerOnOptions extends CarPlayHelperCallOptions {
+  /** Declare a back button, a home button and a knob besides the touch screen (#19059). */
+  headUnitInputs?: boolean;
+}
+
 export interface CarPlayScreenPowerer {
   status(udid: string): Promise<CarPlayPowerState>;
   /** Makes TVOut the CarPlay car display; repeat after every simulator boot. */
-  powerOn(udid: string, options?: CarPlayHelperCallOptions): Promise<CarPlayPowerState>;
+  powerOn(udid: string, options?: CarPlayPowerOnOptions): Promise<CarPlayPowerState>;
 }
 
 export function parseCarPlayPowerState(json: string): CarPlayPowerState {
@@ -87,20 +93,20 @@ export class DefaultCarPlayScreenPowerer implements CarPlayScreenPowerer {
   ) {}
 
   status(udid: string): Promise<CarPlayPowerState> {
-    return this.run(udid, "status");
+    return this.run([udid, "status"]);
   }
-  powerOn(udid: string, options?: CarPlayHelperCallOptions): Promise<CarPlayPowerState> {
-    return this.run(udid, "power-on", options);
+  powerOn(udid: string, options?: CarPlayPowerOnOptions): Promise<CarPlayPowerState> {
+    const flags = options?.headUnitInputs ? ["--head-unit-inputs"] : [];
+    return this.run([udid, "power-on", ...flags], options);
   }
 
   private async run(
-    udid: string,
-    action: string,
+    args: string[],
     options?: CarPlayHelperCallOptions,
   ): Promise<CarPlayPowerState> {
     const stdout = await runCarPlayPowerHelper(
       { exec: this.exec, env: this.env },
-      [udid, action],
+      args,
       boundedHelperTimeoutMs(POWER_HELPER_TIMEOUT_MS, options),
       options?.signal,
     );

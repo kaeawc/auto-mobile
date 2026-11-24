@@ -7,10 +7,13 @@ AutoMobile drives Android devices and emulators through the Android SDK and
 
 - Call `getAndroid` to acquire a device. Pass `avdName` to boot a named Android
   Virtual Device, or `deviceId` for a device that is already running. With
-  neither and no `requires`, `getAndroid` picks a phone: a running phone
-  emulator first, otherwise it cold-boots a configured phone AVD. If there is no
-  phone to pick, the error tells you to call `listDeviceImages` and pass one of
-  the names as `avdName`. See the [FAQ](../faq.md).
+  neither and no `requires`, `getAndroid` returns the running device your
+  session already holds. Otherwise it picks a phone: a running phone emulator first, else it cold-boots
+  a configured phone AVD. `requires` narrows that phone choice. Only `panels`
+  above 1, `posture`, `screenRound` or `vehicle.motion` picks another form
+  factor instead. If there is no device to pick, the error tells you to call
+  `listDeviceImages` and pass one of the names as `avdName`. See the
+  [FAQ](../faq.md).
 - Call `listDevices` to see devices, and `listDeviceImages` to see the system
   images you can boot. See [Listing device images](device-images.md).
 - A device your session holds takes calls only from that session. See

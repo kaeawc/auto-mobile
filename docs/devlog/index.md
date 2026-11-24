@@ -21,6 +21,7 @@ regenerates the table below.
 | 2026-11-24 | decision | [Action diffs summarize added and removed nodes](2026-11-24-action-diff-summaries.md) |
 | 2026-11-23 | decision | [XR headset hand and eye input over emulator gRPC](2026-11-23-xr-headset-hand-and-eye-input.md) |
 | 2026-11-23 | decision | [Apple Watch evidence tools, and no side button yet](2026-11-23-watchos-evidence-tools-and-side-button.md) |
+| 2026-11-23 | decision | [visionOS coordinate input and home press](2026-11-23-visionos-coordinate-input-home-press.md) |
 | 2026-11-23 | decision | [Arbitrary vehicle properties through car service injection](2026-11-23-vehicle-property-injection.md) |
 | 2026-11-23 | decision | [Reach Simulator render overlays through osascript](2026-11-23-simulator-render-overlays-osascript.md) |
 | 2026-11-23 | decision | [Read Simulator network activity with host tools](2026-11-23-simulator-network-activity-host-tools.md) |
@@ -34,6 +35,7 @@ regenerates the table below.
 | 2026-11-23 | decision | [Generate the devlog index and nav from the entries](2026-11-23-generated-devlog-index.md) |
 | 2026-11-23 | decision | [Driverless simulator audio capture](2026-11-23-driverless-simulator-audio-capture.md) |
 | 2026-11-23 | decision | [Docs readability in the pre-push shell lane](2026-11-23-docs-readability-prepush.md) |
+| 2026-11-23 | decision | [CarPlay head-unit inputs on the simulator](2026-11-23-carplay-head-unit-inputs.md) |
 | 2026-11-21 | decision | [Prototype media runtime placement spike](2026-11-21-prototype-media-runtime-placement-spike.md) |
 | 2026-11-21 | concept | [iOS Simulator audio routing open questions](2026-11-21-ios-simulator-audio-routing-open-questions.md) |
 | 2026-11-20 | decision | [Fixture capture mode](2026-11-20-fixture-capture-mode.md) |

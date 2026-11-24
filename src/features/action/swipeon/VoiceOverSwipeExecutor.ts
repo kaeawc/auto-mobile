@@ -255,12 +255,19 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
   }
 }
 
-/** Watch gestures never construct an iOS client; its dedicated action path dispatches them. */
+/** Watch and Vision Pro gestures never construct an iOS client; their own runner paths dispatch them. */
 export function createDefaultVoiceOverSwipeRunner(
   options: Omit<VoiceOverSwipeExecutorDependencies, "iosClient">,
 ): VoiceOverSwipeRunner {
   if (options.device.platform === "watchos") {
     return { executeSwipeGesture: async () => unsupportedWatchAction("VoiceOver swipe") };
+  }
+  if (options.device.platform === "visionos") {
+    return {
+      executeSwipeGesture: async () => {
+        throw new ActionableError("VoiceOver swipe is not supported on visionOS.");
+      },
+    };
   }
   return deviceIosSdkBridgeSwipeRunner(
     options.device,

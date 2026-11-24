@@ -14,7 +14,11 @@ export type VisionosCommand =
       label?: string;
       elementType?: number;
     }
-  | { type: "request_append_text"; text: string };
+  | { type: "request_append_text"; text: string }
+  /** Window points, as observe reports bounds. */
+  | { type: "request_tap_coordinates"; x: number; y: number }
+  | { type: "request_swipe"; x1: number; y1: number; x2: number; y2: number; duration: number }
+  | { type: "request_press_home" };
 
 /** Default budget for commands other than hierarchy, and for the connected handshake. */
 export const VISIONOS_REQUEST_TIMEOUT_MS = 5000;
@@ -249,7 +253,7 @@ export class WebSocketVisionosRunnerClient implements VisionosRunnerClient {
           }
           if (!this.supported.has(command.type)) {
             throw new VisionosRunnerError(
-              `The visionos runner does not support ${command.type}.`,
+              `The visionos runner does not support ${command.type}; it may be older than this AutoMobile. Use the runner from the same release, or rebuild the local runner.`,
               "unsupported_on_visionos",
             );
           }

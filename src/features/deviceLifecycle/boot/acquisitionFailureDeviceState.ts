@@ -44,9 +44,21 @@ export function acquisitionNextStep(operationName: string, androidAvdName?: stri
 const annotatedFailures = new WeakSet<Error>();
 
 /**
- * Appends the device state and next step to a failed acquisition's message, in place, so the
- * error keeps its class (typed refusals and retry classification read it). Annotates once: an
- * error object rethrown through a second preparation is not described twice.
+ * The stack of `failure` re-headed with `message`: the frames stay those of the original throw,
+ * so the trace points where the failure happened while its first line matches what the caller
+ * reads.
+ */
+function restackedWith(failure: Error, message: string): string {
+  const frames = (failure.stack ?? "").split("\n").filter((line) => /^\s+at /.test(line));
+  return [`${failure.name}: ${message}`, ...frames].join("\n");
+}
+
+/**
+ * A copy of a failed acquisition that appends the device state and next step to its message
+ * (#19153). The copy keeps the failure's class and fields, because typed refusals and retry
+ * classification read them, and carries the original as `cause`; the original error object, which
+ * other holders may share, is left unchanged. Annotates once: a copy rethrown through a second
+ * preparation is not described twice.
  */
 export function annotateAcquisitionFailure<T>(
   failure: T,
@@ -56,10 +68,24 @@ export function annotateAcquisitionFailure<T>(
   if (!(failure instanceof Error) || annotatedFailures.has(failure)) {
     return failure;
   }
-  annotatedFailures.add(failure);
   const separator = /[.!?]$/.test(failure.message.trimEnd()) ? " " : ". ";
-  failure.message =
+  const message =
     `${failure.message.trimEnd()}${separator}deviceLeft: ${deviceLeft} ` +
     `(${DEVICE_LEFT_DETAIL[deviceLeft]}). Next step: ${nextStep}.`;
-  return failure;
+  const annotated: Error = Object.create(Object.getPrototypeOf(failure) as object | null);
+  Object.defineProperties(annotated, Object.getOwnPropertyDescriptors(failure));
+  for (const [key, value] of [
+    ["message", message],
+    ["cause", failure],
+    ["stack", restackedWith(failure, message)],
+  ] as const) {
+    Object.defineProperty(annotated, key, {
+      value,
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    });
+  }
+  annotatedFailures.add(annotated);
+  return annotated as T;
 }

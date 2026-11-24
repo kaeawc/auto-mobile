@@ -35,9 +35,15 @@ import {
   headUnitTapAtHandler,
   headUnitTapOnHandler,
 } from "./interactionTools/headUnitHandlers";
-import { CARPLAY_DISPLAY, carPlayTapAtHandler } from "./interactionTools/carPlayHandlers";
+import {
+  CARPLAY_DISPLAY,
+  carPlayPressButtonHandler,
+  carPlayTapAtHandler,
+  refuseCarPlayOnlyButton,
+} from "./interactionTools/carPlayHandlers";
 import { HEAD_UNIT_DISPLAY } from "../features/androidAuto/HeadUnitInteraction";
 import { withTvosHomeScreen } from "./tvosHomeScreen";
+import { withVisionosHomeScreen } from "./visionosHomeScreen";
 import { withTvosOpenLink } from "./tvosOpenLink";
 import {
   pressButtonHandler,
@@ -158,7 +164,7 @@ const NAV_PLAN_SKELETON = { ...NAV, ...PLAN_SKELETON } as const;
 export const pressButtonTool = defineDeviceTool({
   name: "pressButton",
   description:
-    "Press a device or navigation button. On tvOS, use up/down/left/right to navigate focus, select, menu, home or playPause; durationMs long-presses any remote button (100-10000 ms); steps are unsupported. On Android (TV remotes), up/down/left/right/select send D-pad keys and playPause, fastForward, rewind, next and previous send media keys; select with durationMs is a long press of D-pad center (API 35+). On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. Android Automotive only: rotary_rotate_cw / rotary_rotate_ccw (steps detents), rotary_nudge_up/down/left/right and rotary_select drive a rotary controller; other devices refuse them. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
+    'Press a device or navigation button. On tvOS, use up/down/left/right to navigate focus, select, menu, home or playPause; durationMs long-presses any remote button (100-10000 ms); steps are unsupported. On Android (TV remotes), up/down/left/right/select send D-pad keys and playPause, fastForward, rewind, next and previous send media keys; select with durationMs is a long press of D-pad center (API 35+). On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. Android Automotive only: rotary_rotate_cw / rotary_rotate_ccw (steps detents), rotary_nudge_up/down/left/right and rotary_select drive a rotary controller; other devices refuse them. display "carPlay" (iOS 26.x simulator, after startDevice carPlay with headUnitInputs) sends back, home, siri and the rotary_* knob inputs to the CarPlay head unit; siri works only there. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.',
   input: pressButtonInput,
   options: {
     outputSchema: pressButtonResultSchema,
@@ -311,6 +317,49 @@ function registerGestureTools(deps: InteractionToolDependencies): void {
   });
 }
 
+/** Register the point and path tools (dragPath, hoverAt, hitTest), in that order. */
+function registerPointerTools(deps: InteractionToolDependencies): void {
+  ToolRegistry.registerDeviceAware(
+    "dragPath",
+    "Drag a finger (or, with pointer, a stylus on Android 12+) along a polyline with segment timing, an initial hold and a release hold.",
+    dragPathSchema,
+    {
+      handler: dragPathHandler,
+      defaultEnabled: false,
+      supportsProgress: true,
+      ...PLAN_SKELETON,
+      ...ANSWERS_SYSTEM_ALERTS,
+    },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "hoverAt",
+    "Hover a stylus or mouse over a path with no contact: hover enter, move, exit (Android; needs hover_input_v1 or, for a stylus, a root adb shell with a writable /dev/uinput).",
+    hoverAtSchema,
+    {
+      handler: hoverAtHandler,
+      defaultEnabled: false,
+      supportsProgress: true,
+      ...PLAN_SKELETON,
+      ...ANSWERS_SYSTEM_ALERTS,
+    },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "hitTest",
+    "Preview hierarchy-bounds candidates at a platform-native screen point; no input is dispatched and the actual event recipient is unknown.",
+    hitTestSchema,
+    {
+      handler: (device, args, progress, signal) =>
+        hitTestHandler(device, args, { progress, signal, deps }),
+      // Dispatches no input: a read (#10965). On a held device it reads through the observer
+      // capture (`readHitTestObservation`), never the holder's session pipeline (#10828).
+      defaultEnabled: false,
+      deviceReadOnly: true,
+    },
+  );
+}
+
 /** Headless prototype mode (#18360) taps the virtual device's prototype; no device resolves. */
 function headlessTapOnRouting(deps: InteractionToolDependencies) {
   const headless = deps.headlessPrototypeInput ?? {};
@@ -352,6 +401,36 @@ function routeTapAt(
   return tapAtHandler(device, args, options);
 }
 
+/**
+ * pressButton display "headUnit" (#17842) acts on the Android Auto head unit and "carPlay"
+ * (#19059) on the iOS simulator's CarPlay head unit; every other call is the phone press, which
+ * refuses CarPlay-only buttons.
+ */
+async function routePressButton(
+  device: Parameters<typeof pressButtonHandler>[0],
+  args: Parameters<typeof pressButtonHandler>[1],
+  options: InteractionHandlerOptions & { deps: InteractionToolDependencies },
+) {
+  if (args.display === HEAD_UNIT_DISPLAY) {
+    return headUnitPressButtonHandler(
+      device,
+      args,
+      options.deps.headUnitInteractionFactory,
+      options.signal,
+    );
+  }
+  if (args.display === CARPLAY_DISPLAY) {
+    return carPlayPressButtonHandler(
+      device,
+      args,
+      options.deps.carPlayInputFactory,
+      options.signal,
+    );
+  }
+  refuseCarPlayOnlyButton(args);
+  return pressButtonHandler(device, args, options);
+}
+
 export function registerInteractionTools(deps: InteractionToolDependencies = {}) {
   // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
   // are defined at module scope (each with an
@@ -386,11 +465,8 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     selectAllTextHandler(device, args, { progress, signal, deps }),
   );
 
-  // display "headUnit" (#17842) acts on the Android Auto head unit; every other call is unchanged.
   pressButtonTool.register(ToolRegistry, (device, args, progress, signal) =>
-    args.display === HEAD_UNIT_DISPLAY
-      ? headUnitPressButtonHandler(device, args, deps.headUnitInteractionFactory, signal)
-      : pressButtonHandler(device, args, { progress, signal, deps }),
+    routePressButton(device, args, { progress, signal, deps }),
   );
 
   ToolRegistry.registerDeviceAware(
@@ -465,45 +541,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     },
   );
 
-  ToolRegistry.registerDeviceAware(
-    "dragPath",
-    "Drag a finger (or, with pointer, a stylus on Android 12+) along a polyline with segment timing, an initial hold and a release hold.",
-    dragPathSchema,
-    {
-      handler: dragPathHandler,
-      defaultEnabled: false,
-      supportsProgress: true,
-      ...PLAN_SKELETON,
-      ...ANSWERS_SYSTEM_ALERTS,
-    },
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "hoverAt",
-    "Hover a stylus or mouse over a path with no contact: hover enter, move, exit (Android; needs hover_input_v1 or, for a stylus, a root adb shell with a writable /dev/uinput).",
-    hoverAtSchema,
-    {
-      handler: hoverAtHandler,
-      defaultEnabled: false,
-      supportsProgress: true,
-      ...PLAN_SKELETON,
-      ...ANSWERS_SYSTEM_ALERTS,
-    },
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "hitTest",
-    "Preview hierarchy-bounds candidates at a platform-native screen point; no input is dispatched and the actual event recipient is unknown.",
-    hitTestSchema,
-    {
-      handler: (device, args, progress, signal) =>
-        hitTestHandler(device, args, { progress, signal, deps }),
-      // Dispatches no input: a read (#10965). On a held device it reads through the observer
-      // capture (`readHitTestObservation`), never the holder's session pipeline (#10828).
-      defaultEnabled: false,
-      deviceReadOnly: true,
-    },
-  );
+  registerPointerTools(deps);
 
   registerGestureTools(deps);
 
@@ -517,7 +555,10 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
   recentAppsTool.register(ToolRegistry, createRecentAppsHandler(deps));
   registerShareSheetTool(deps.iosShareSheet);
 
-  homeScreenTool.register(ToolRegistry, withTvosHomeScreen(homeScreenHandler));
+  homeScreenTool.register(
+    ToolRegistry,
+    withTvosHomeScreen(withVisionosHomeScreen(homeScreenHandler)),
+  );
 
   // Register the new rotate tool
   rotateTool.register(ToolRegistry, (device, args, progress, signal) =>

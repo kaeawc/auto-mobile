@@ -51,6 +51,11 @@ private final class FakeScreenBackend: SimulatorScreenBackend {
         written[path] = data
     }
 
+    func readFile(path: String) throws -> Data? {
+        try record("read")
+        return written[path]
+    }
+
     func setCarPlayMode(screenID: UInt32, width: Double, height: Double) throws {
         try record("mode:\(screenID):\(Int(width))x\(Int(height))")
     }
@@ -79,6 +84,28 @@ final class CarPlayPowerTests: XCTestCase {
             XCTAssertEqual(config[key] as? Bool, false, key)
         }
         XCTAssertEqual((config["protocols"] as? [Any])?.count, 0)
+    }
+
+    func testPowerOnWithHeadUnitInputsDeclaresTheButtonsAndKnob() throws {
+        let backend = FakeScreenBackend()
+        _ = try CarPlayPowerController(backend: backend).run(udid: "device", powerOn: true, headUnitInputs: true)
+        let plist = try XCTUnwrap(backend.written[StarkConfig.path(dataPath: "/sim/data")])
+        let config = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: plist, format: nil) as? [String: Any]
+        )
+        for key in ["hasHomeButton", "hasBackButton", "hasWheel", "hasWheelBump", "hasTouchScreen", "stark"] {
+            XCTAssertEqual(config[key] as? Bool, true, key)
+        }
+        XCTAssertEqual(config["hasTouchScreenLofi"] as? Bool, false)
+        XCTAssertEqual(StarkConfig.declaredHardware(plist), Set(StarkHardware.allCases))
+    }
+
+    func testDeclaredHardwareIsEmptyForTouchOnlyBootAndMissingConfigs() throws {
+        try XCTAssertEqual(StarkConfig.declaredHardware(StarkConfig.plist()), [])
+        let bootReset = try PropertyListSerialization.data(fromPropertyList: ["stark": 0], format: .xml, options: 0)
+        XCTAssertEqual(StarkConfig.declaredHardware(bootReset), [])
+        XCTAssertEqual(StarkConfig.declaredHardware(Data("not a plist".utf8)), [])
+        XCTAssertEqual(StarkConfig.declaredHardware(nil), [])
     }
 
     func testRefusesIOS27RuntimesBeforeTouchingScreens() {
@@ -195,6 +222,14 @@ private final class FakeHIDBackend: CarPlayHIDBackend {
         try record("\(phase):\(target):\(Int(x)),\(Int(y)):\(Int(width))x\(Int(height))")
     }
 
+    func sendUsage(_ phase: CarPlayTouchPhase, target: UInt32, page: UInt32, usage: UInt32) throws {
+        try record("usage-\(phase):\(target):0x\(String(page, radix: 16)):0x\(String(usage, radix: 16))")
+    }
+
+    func sendScroll(target: UInt32, delta: Double) throws {
+        try record("scroll:\(target):\(Int(delta))")
+    }
+
     func hold(milliseconds: Int) {
         calls.append("hold:\(milliseconds)")
     }
@@ -272,6 +307,137 @@ final class CarPlayTapTests: XCTestCase {
             hid.failure = failure
             hid.failureStep = step
             XCTAssertThrowsError(try controller(poweredScreens(), hid).tap(udid: "d", x: 10, y: 10)) {
+                XCTAssertEqual($0 as? CarPlayPowerError, failure)
+            }
+            XCTAssertEqual(hid.calls.last, step)
+        }
+    }
+}
+
+final class CarPlayInputTests: XCTestCase {
+    private func poweredScreens(headUnitInputs: Bool = true) throws -> FakeScreenBackend {
+        let screens = FakeScreenBackend()
+        screens.before = [FakeScreenBackend.lcd, FakeScreenBackend.tvOut(power: 1)]
+        screens.written[StarkConfig.path(dataPath: "/sim/data")] = try StarkConfig.plist(headUnitInputs: headUnitInputs)
+        return screens
+    }
+
+    func testEachInputsMessageAndHardware() {
+        let expected: [CarPlayInput: (CarPlayInputMessage, StarkHardware?)] = [
+            .back: (.usage(page: 0x0C, usage: 0x224), .backButton),
+            .home: (.usage(page: 0x0C, usage: 0x223), .homeButton),
+            .siri: (.usage(page: 0x0C, usage: 0xCF), nil),
+            .knobSelect: (.usage(page: 0x0C, usage: 0x41), .wheel),
+            .knobUp: (.usage(page: 0x0C, usage: 0x42), .wheelBump),
+            .knobDown: (.usage(page: 0x0C, usage: 0x43), .wheelBump),
+            .knobLeft: (.usage(page: 0x0C, usage: 0x44), .wheelBump),
+            .knobRight: (.usage(page: 0x0C, usage: 0x45), .wheelBump),
+            .knobClockwise: (.scroll(delta: -1), .wheel),
+            .knobCounterclockwise: (.scroll(delta: 1), .wheel),
+        ]
+        XCTAssertEqual(Set(expected.keys), Set(CarPlayInput.allCases))
+        for (input, (message, hardware)) in expected {
+            XCTAssertEqual(input.message, message, input.rawValue)
+            XCTAssertEqual(input.hardware, hardware, input.rawValue)
+        }
+        XCTAssertEqual(
+            CarPlayInput.allCases.map(\.rawValue),
+            [
+                "back", "home", "siri", "knob-select", "knob-up", "knob-down", "knob-left", "knob-right", "knob-cw",
+                "knob-ccw",
+            ]
+        )
+    }
+
+    func testBackPressesAndReleasesTheUsageOnTheCarPlayService() throws {
+        let backend = try poweredScreens()
+        let hid = FakeHIDBackend()
+        let result = try CarPlayInputController(screens: backend, hid: hid).send(udid: "d", input: .back)
+        XCTAssertEqual(backend.calls, ["select:d", "enumerate", "read"])
+        XCTAssertEqual(hid.calls, ["create", "usage-down:1:0xc:0x224", "hold:80", "usage-up:1:0xc:0x224"])
+        XCTAssertEqual(result.sent, CarPlayInputSent(
+            input: "back", count: 1, screenID: 2, screenType: 1, target: 1, usagePage: 12, usage: 0x224,
+            scrollDelta: nil
+        ))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(result)) as? [String: Any])
+        let sent = try XCTUnwrap(json["sent"] as? [String: Any])
+        XCTAssertEqual(Set(sent.keys), ["input", "count", "screenID", "screenType", "target", "usagePage", "usage"])
+    }
+
+    func testKnobRotationSendsOneScrollPerDetent() throws {
+        let hid = FakeHIDBackend()
+        let result = try CarPlayInputController(screens: poweredScreens(), hid: hid)
+            .send(udid: "d", input: .knobClockwise, count: 3)
+        XCTAssertEqual(hid.calls, ["create", "scroll:1:-1", "hold:50", "scroll:1:-1", "hold:50", "scroll:1:-1"])
+        XCTAssertEqual(result.sent.scrollDelta, -1)
+        XCTAssertNil(result.sent.usage)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(result)) as? [String: Any])
+        XCTAssertEqual(
+            try Set(XCTUnwrap(json["sent"] as? [String: Any]).keys),
+            ["input", "count", "screenID", "screenType", "target", "scrollDelta"]
+        )
+    }
+
+    func testSiriNeedsNoStarkConfigHardware() throws {
+        let backend = try poweredScreens(headUnitInputs: false)
+        let hid = FakeHIDBackend()
+        _ = try CarPlayInputController(screens: backend, hid: hid).send(udid: "d", input: .siri)
+        XCTAssertEqual(backend.calls, ["select:d", "enumerate"])
+        XCTAssertEqual(hid.calls, ["create", "usage-down:1:0xc:0xcf", "hold:80", "usage-up:1:0xc:0xcf"])
+    }
+
+    private func assertRefused(
+        _ name: String,
+        _ code: CarPlayErrorCode,
+        input: CarPlayInput = .knobSelect,
+        count: Int = 1,
+        screens: FakeScreenBackend
+    ) {
+        let hid = FakeHIDBackend()
+        XCTAssertThrowsError(
+            try CarPlayInputController(screens: screens, hid: hid).send(udid: "d", input: input, count: count),
+            name
+        ) {
+            XCTAssertEqual(($0 as? CarPlayPowerError)?.code, code, name)
+        }
+        XCTAssertEqual(hid.calls, [], name)
+    }
+
+    func testRefusesWithoutSendingAnything() throws {
+        for input in CarPlayInput.allCases where input.hardware != nil {
+            try assertRefused(
+                "touch-only \(input)", .headUnitInputsDisabled, input: input,
+                screens: poweredScreens(headUnitInputs: false)
+            )
+        }
+        let unpowered = try poweredScreens()
+        unpowered.written = [:]
+        assertRefused("no StarkConfig", .headUnitInputsDisabled, screens: unpowered)
+        let ios27 = try poweredScreens()
+        ios27.device = SimulatorDevice(runtimeVersion: "27.0", dataPath: "/sim/data")
+        assertRefused("iOS 27", .unsupportedRuntime, screens: ios27)
+        let off = try poweredScreens()
+        off.before = [FakeScreenBackend.tvOut(power: 0)]
+        assertRefused("powered off", .carPlayNotPowered, screens: off)
+        let counts: [(CarPlayInput, Int)] = [
+            (.back, 2), (.knobSelect, 0), (.knobClockwise, 0), (.knobCounterclockwise, 51),
+        ]
+        for (input, count) in counts {
+            let backend = try poweredScreens()
+            assertRefused("\(input) x\(count)", .usage, input: input, count: count, screens: backend)
+            XCTAssertEqual(backend.calls, [], "count is checked before the simulator is touched")
+        }
+    }
+
+    func testStopsAtTheFailedHIDStep() throws {
+        for step in ["create", "usage-down:1:0xc:0x41", "usage-up:1:0xc:0x41"] {
+            let hid = FakeHIDBackend()
+            let failure = CarPlayPowerError(.hidFailed, "simulator refused")
+            hid.failure = failure
+            hid.failureStep = step
+            XCTAssertThrowsError(
+                try CarPlayInputController(screens: poweredScreens(), hid: hid).send(udid: "d", input: .knobSelect)
+            ) {
                 XCTAssertEqual($0 as? CarPlayPowerError, failure)
             }
             XCTAssertEqual(hid.calls.last, step)

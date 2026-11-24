@@ -527,6 +527,7 @@ nav:
       - "2026-11-24: Action diffs summarize added and removed nodes": devlog/2026-11-24-action-diff-summaries.md
       - "2026-11-23: XR headset hand and eye input over emulator gRPC": devlog/2026-11-23-xr-headset-hand-and-eye-input.md
       - "2026-11-23: Apple Watch evidence tools, and no side button yet": devlog/2026-11-23-watchos-evidence-tools-and-side-button.md
+      - "2026-11-23: visionOS coordinate input and home press": devlog/2026-11-23-visionos-coordinate-input-home-press.md
       - "2026-11-23: Arbitrary vehicle properties through car service injection": devlog/2026-11-23-vehicle-property-injection.md
       - "2026-11-23: Reach Simulator render overlays through osascript": devlog/2026-11-23-simulator-render-overlays-osascript.md
       - "2026-11-23: Read Simulator network activity with host tools": devlog/2026-11-23-simulator-network-activity-host-tools.md
@@ -540,6 +541,7 @@ nav:
       - "2026-11-23: Generate the devlog index and nav from the entries": devlog/2026-11-23-generated-devlog-index.md
       - "2026-11-23: Driverless simulator audio capture": devlog/2026-11-23-driverless-simulator-audio-capture.md
       - "2026-11-23: Docs readability in the pre-push shell lane": devlog/2026-11-23-docs-readability-prepush.md
+      - "2026-11-23: CarPlay head-unit inputs on the simulator": devlog/2026-11-23-carplay-head-unit-inputs.md
       - "2026-11-21: Prototype media runtime placement spike": devlog/2026-11-21-prototype-media-runtime-placement-spike.md
       - "2026-11-21: iOS Simulator audio routing open questions": devlog/2026-11-21-ios-simulator-audio-routing-open-questions.md
       - "2026-11-20: Fixture capture mode": devlog/2026-11-20-fixture-capture-mode.md

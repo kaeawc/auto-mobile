@@ -38,6 +38,7 @@ import {
 import { CARPLAY_DISPLAY, carPlayTapAtHandler } from "./interactionTools/carPlayHandlers";
 import { HEAD_UNIT_DISPLAY } from "../features/androidAuto/HeadUnitInteraction";
 import { withTvosHomeScreen } from "./tvosHomeScreen";
+import { withVisionosHomeScreen } from "./visionosHomeScreen";
 import { withTvosOpenLink } from "./tvosOpenLink";
 import {
   pressButtonHandler,
@@ -311,6 +312,49 @@ function registerGestureTools(deps: InteractionToolDependencies): void {
   });
 }
 
+/** Register the point and path tools (dragPath, hoverAt, hitTest), in that order. */
+function registerPointerTools(deps: InteractionToolDependencies): void {
+  ToolRegistry.registerDeviceAware(
+    "dragPath",
+    "Drag a finger (or, with pointer, a stylus on Android 12+) along a polyline with segment timing, an initial hold and a release hold.",
+    dragPathSchema,
+    {
+      handler: dragPathHandler,
+      defaultEnabled: false,
+      supportsProgress: true,
+      ...PLAN_SKELETON,
+      ...ANSWERS_SYSTEM_ALERTS,
+    },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "hoverAt",
+    "Hover a stylus or mouse over a path with no contact: hover enter, move, exit (Android; needs hover_input_v1 or, for a stylus, a root adb shell with a writable /dev/uinput).",
+    hoverAtSchema,
+    {
+      handler: hoverAtHandler,
+      defaultEnabled: false,
+      supportsProgress: true,
+      ...PLAN_SKELETON,
+      ...ANSWERS_SYSTEM_ALERTS,
+    },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "hitTest",
+    "Preview hierarchy-bounds candidates at a platform-native screen point; no input is dispatched and the actual event recipient is unknown.",
+    hitTestSchema,
+    {
+      handler: (device, args, progress, signal) =>
+        hitTestHandler(device, args, { progress, signal, deps }),
+      // Dispatches no input: a read (#10965). On a held device it reads through the observer
+      // capture (`readHitTestObservation`), never the holder's session pipeline (#10828).
+      defaultEnabled: false,
+      deviceReadOnly: true,
+    },
+  );
+}
+
 /** Headless prototype mode (#18360) taps the virtual device's prototype; no device resolves. */
 function headlessTapOnRouting(deps: InteractionToolDependencies) {
   const headless = deps.headlessPrototypeInput ?? {};
@@ -465,45 +509,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     },
   );
 
-  ToolRegistry.registerDeviceAware(
-    "dragPath",
-    "Drag a finger (or, with pointer, a stylus on Android 12+) along a polyline with segment timing, an initial hold and a release hold.",
-    dragPathSchema,
-    {
-      handler: dragPathHandler,
-      defaultEnabled: false,
-      supportsProgress: true,
-      ...PLAN_SKELETON,
-      ...ANSWERS_SYSTEM_ALERTS,
-    },
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "hoverAt",
-    "Hover a stylus or mouse over a path with no contact: hover enter, move, exit (Android; needs hover_input_v1 or, for a stylus, a root adb shell with a writable /dev/uinput).",
-    hoverAtSchema,
-    {
-      handler: hoverAtHandler,
-      defaultEnabled: false,
-      supportsProgress: true,
-      ...PLAN_SKELETON,
-      ...ANSWERS_SYSTEM_ALERTS,
-    },
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "hitTest",
-    "Preview hierarchy-bounds candidates at a platform-native screen point; no input is dispatched and the actual event recipient is unknown.",
-    hitTestSchema,
-    {
-      handler: (device, args, progress, signal) =>
-        hitTestHandler(device, args, { progress, signal, deps }),
-      // Dispatches no input: a read (#10965). On a held device it reads through the observer
-      // capture (`readHitTestObservation`), never the holder's session pipeline (#10828).
-      defaultEnabled: false,
-      deviceReadOnly: true,
-    },
-  );
+  registerPointerTools(deps);
 
   registerGestureTools(deps);
 
@@ -517,7 +523,10 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
   recentAppsTool.register(ToolRegistry, createRecentAppsHandler(deps));
   registerShareSheetTool(deps.iosShareSheet);
 
-  homeScreenTool.register(ToolRegistry, withTvosHomeScreen(homeScreenHandler));
+  homeScreenTool.register(
+    ToolRegistry,
+    withTvosHomeScreen(withVisionosHomeScreen(homeScreenHandler)),
+  );
 
   // Register the new rotate tool
   rotateTool.register(ToolRegistry, (device, args, progress, signal) =>

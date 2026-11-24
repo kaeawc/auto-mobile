@@ -10,6 +10,7 @@ import { RecompositionTracker } from "../../features/performance/RecompositionTr
 import { isSessionlessDeviceRead } from "../../features/toolSelection/toolSelectionContext";
 import { isTruthyFlag } from "../../features/utility/elementProperties";
 import { watchTapAt } from "../../features/watch/WatchActions";
+import { visionosTapAt } from "../../features/visionos/VisionosGestures";
 import {
   ActionableError,
   BootedDevice,
@@ -160,6 +161,12 @@ export const defaultTapAtElementFactory: NonNullable<
     return {
       execute: (options, progressOrCall?: ProgressCallback | ActionCall, signal?: AbortSignal) =>
         watchTapAt(device.deviceId, options, resolveActionCall(progressOrCall, signal).signal),
+    };
+  }
+  if (device.platform === "visionos") {
+    return {
+      execute: (options, progressOrCall?: ProgressCallback | ActionCall, signal?: AbortSignal) =>
+        visionosTapAt(device.deviceId, options, resolveActionCall(progressOrCall, signal).signal),
     };
   }
   return new TapAtCoordinate(device);

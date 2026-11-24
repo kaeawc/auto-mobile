@@ -44,6 +44,31 @@ final class VisionCommandRouterSmokeTests: XCTestCase {
         XCTAssertEqual(typed.type, "append_text_result")
         XCTAssertEqual(typed.success, true)
         XCTAssertEqual(app.textFields["field"].value as? String, "hello")
+
+        // Coordinates are the hierarchy's window points: tapping B11's reported centre selects it.
+        let button = try XCTUnwrap(focused.data?.hierarchy?.node?.first { $0.resourceId == "B11" }?.bounds)
+        let tappedAt = try reply(
+            "{\"type\":\"request_tap_coordinates\",\"x\":\(button.centerX),\"y\":\(button.centerY)}",
+            router: router
+        )
+        XCTAssertEqual(tappedAt.type, "tap_coordinates_result")
+        XCTAssertEqual(tappedAt.success, true)
+        XCTAssertEqual(app.staticTexts["last"].label, "last: B11")
+        let swiped = try reply(
+            "{\"type\":\"request_swipe\",\"x1\":\(button.centerX),\"y1\":\(button.bottom),"
+                + "\"x2\":\(button.centerX),\"y2\":\(button.top),\"duration\":300}",
+            router: router
+        )
+        XCTAssertEqual(swiped.type, "swipe_result")
+        XCTAssertEqual(swiped.success, true)
+        let badSwipe = try reply(
+            #"{"type":"request_swipe","x1":10,"y1":10,"x2":10,"y2":10,"duration":300}"#, router: router
+        )
+        XCTAssertEqual(badSwipe.type, "error")
+        let home = try reply(#"{"type":"request_press_home"}"#, router: router)
+        XCTAssertEqual(home.type, "press_home_result")
+        XCTAssertEqual(home.success, true)
+
         let refused = try reply(#"{"type":"request_screenshot"}"#, router: router)
         XCTAssertEqual(refused.type, "error")
         XCTAssertEqual(refused.success, false)

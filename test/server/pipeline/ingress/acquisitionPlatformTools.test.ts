@@ -51,18 +51,15 @@ const PLAIN = new Set([
   "setActiveDevice",
 ]);
 
-// Each refused the same session with "<tool> does not support visionOS yet" in the issue.
+// Each refused the same session with "<tool> does not support visionOS yet" in the issue. homeScreen,
+// pressButton, swipeOn and tapAt have since gained runner commands (#19055).
 const REFUSED_ON_VISIONOS = [
   "appLifecycle",
   "crashApp",
-  "homeScreen",
   "keyboard",
-  "pressButton",
   "putAppFile",
   "recentApps",
-  "swipeOn",
   "tapAny",
-  "tapAt",
   "wakeAndUnlock",
 ];
 

@@ -45,16 +45,50 @@ export function isSystemUiStatusBarId(resourceId: unknown): boolean {
 const SYSTEMUI_SIGNAL_ROW_ID_PATTERN =
   /^com\.android\.systemui:id\/(mobile_[a-zA-Z_]*|signal_cluster[a-zA-Z_]*)$/;
 
+/** Attributes that make a node something a user acts on, so its subtree is never chrome. */
+const AFFORDANCE_ATTRIBUTES = ["clickable", "long-clickable", "checkable", "scrollable"] as const;
+
+/** The subset of a hierarchy node the status-bar skip reads. */
+export interface StatusBarDiffNode {
+  readonly [attribute: string]: unknown;
+  readonly node?: unknown;
+}
+
+function hasAffordance(node: StatusBarDiffNode): boolean {
+  return AFFORDANCE_ATTRIBUTES.some(
+    (attribute) => node[attribute] === true || node[attribute] === "true",
+  );
+}
+
+function childNodes(node: StatusBarDiffNode): StatusBarDiffNode[] {
+  const children = Array.isArray(node.node) ? node.node : [node.node];
+  return children.filter(
+    (child): child is StatusBarDiffNode => typeof child === "object" && child !== null,
+  );
+}
+
+function subtreeHasAffordance(node: StatusBarDiffNode): boolean {
+  return hasAffordance(node) || childNodes(node).some(subtreeHasAffordance);
+}
+
 /**
  * Whether a node and its subtree are status-bar chrome that screen-change detection leaves out
- * (`flattenForDiff`'s `skipStatusBar`): a known status-bar root, an allowlisted status-bar id, or
- * a cell-signal row, so chrome found outside a known root is skipped too (#19123).
+ * (`flattenForDiff`'s `skipStatusBar`). A known status-bar root always is. An allowlisted
+ * status-bar id or a cell-signal row found elsewhere (#19123) is only when nothing in its subtree
+ * is clickable, long-clickable, checkable or scrollable: SystemUI dialogs reuse `wifi_*` and
+ * `mobile_*` ids for toggle rows whose state change must still count (#19155).
  */
-export function isStatusBarDiffSubtreeId(resourceId: unknown): boolean {
+export function isStatusBarDiffSubtree(node: StatusBarDiffNode): boolean {
+  const resourceId = node["resource-id"];
+  if (typeof resourceId !== "string") {
+    return false;
+  }
+  if (STATUS_BAR_ROOT_IDS.has(resourceId)) {
+    return true;
+  }
   return (
-    typeof resourceId === "string" &&
-    (STATUS_BAR_ROOT_IDS.has(resourceId) ||
-      SYSTEMUI_STATUS_BAR_ID_PATTERN.test(resourceId) ||
-      SYSTEMUI_SIGNAL_ROW_ID_PATTERN.test(resourceId))
+    (SYSTEMUI_STATUS_BAR_ID_PATTERN.test(resourceId) ||
+      SYSTEMUI_SIGNAL_ROW_ID_PATTERN.test(resourceId)) &&
+    !subtreeHasAffordance(node)
   );
 }

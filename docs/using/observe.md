@@ -33,15 +33,16 @@ With no `evictedBecause`, the id is unknown. In every case, call `observe` again
 ## Waiting for a stable screen
 
 `observe({waitFor: {for: "stable"}})` returns once two reads in a row show the same screen, or
-when its timeout (default 2500 ms) runs out. Status-bar changes such as the clock, battery or
-signal strength are ignored.
+when its timeout (default 2500 ms) runs out. On Android, status-bar changes such as the clock,
+battery or signal strength are ignored.
 
 When the timeout runs out, the result is not an error. It is the last observation, which you can
 act on, with:
 
 - `awaitTimeout: true`, `timedOut: true` and `settled: false`
 - `unsettledBy`: up to 3 entries, `{elementId, label, field}`, naming what was still changing.
-  `field` is the attribute that changed, or `added` or `removed`.
+  `field` is the attribute that changed, or `added` or `removed`. An entry with only `field`
+  names a changed top-level field, such as `rotation`, rather than an element.
 
 If `unsettledBy` names content you need, such as a sheet still sliding in or a list still
 loading, wait again. If it names something you do not need, act on the screen.

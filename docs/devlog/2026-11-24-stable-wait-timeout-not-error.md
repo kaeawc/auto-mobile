@@ -2,8 +2,8 @@
 
 - Kind: decision
 - Date: 2026-11-24
-- Source: #19123, #19149, carving out of #16889
-- Shaped: [Interaction loop](../how-it-works/mcp/interaction-loop.md)
+- Source: #19123, #19149, #19155, carving out of #16889
+- Shaped: [Interaction loop](../how-it-works/mcp/interaction-loop.md), [Settle comparison](../how-it-works/mcp/interaction-loop-settle.md)
 
 ## Context
 
@@ -30,9 +30,13 @@ element is not there, so #16889 still applies to it. The carve-out covers only a
 that runs out of budget on an awake screen with a readable hierarchy. A screen-off fast-fail,
 stale Asleep frames and an unavailable capture stay errors.
 
-With it, the settle comparison now leaves out the SystemUI status bar: root subtrees, the shared
-status-bar allowlist and the `mobile_*` / `signal_cluster*` cell-signal rows. A settle or `stable`
-wait that ends unsettled reports up to 3 `unsettledBy` entries from the last same-screen diff.
+With it, the settle comparison now leaves out the SystemUI status bar. A known status-bar root
+is always left out with its subtree. A node matching the shared status-bar allowlist or the
+`mobile_*` / `signal_cluster*` cell-signal rows is left out only when nothing in its subtree is
+clickable, long-clickable, checkable or scrollable. SystemUI dialogs reuse those ids for toggle
+rows, such as the Internet dialog's `mobile_toggle`, whose state must still count (#19155). A
+settle or `stable` wait that ends unsettled reports up to 3 `unsettledBy` entries from the last
+same-screen diff.
 
 ## Consequences
 

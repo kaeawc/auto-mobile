@@ -578,8 +578,9 @@ export class EmulatorAudioService {
     if (!endpoint) {
       throw unsupported(
         code,
-        `Emulator ${deviceId} does not advertise a gRPC endpoint. Use an emulator build with gRPC ` +
-          "enabled (the default on recent builds) running on this host.",
+        `Emulator ${deviceId} does not advertise a gRPC endpoint, so it exposes no gRPC server ` +
+          "for audio. Run it on this host with gRPC enabled (the default on recent builds; do not " +
+          "pass -no-grpc).",
       );
     }
     return endpoint;

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeGuestAudioCapture } from "../../fakes/FakeGuestAudioCapture";
@@ -10,7 +11,10 @@ import {
 } from "../../../src/features/audio/EmulatorAudioService";
 import { FakeEmulatorAudioSession as FakeSession } from "../../fakes/FakeEmulatorAudioSession";
 import { EmulatorAudioError } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError";
-import type { EmulatorGrpcEndpoint } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
+import {
+  FileEmulatorGrpcDiscovery,
+  type EmulatorGrpcEndpoint,
+} from "../../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
 import { encodeWav, sineTone } from "../../../src/utils/audio/pcm";
 import { FakeEmulatorOutputTail } from "../../fakes/FakeEmulatorOutputTail";
 import { EmulatorOutputTailRegistry } from "../../../src/utils/android-cmdline-tools/EmulatorOutputTail";
@@ -490,6 +494,46 @@ describe("EmulatorAudioService injection", () => {
     await expect(service.capture("emulator-5556", { durationMs: 100 })).rejects.toMatchObject({
       code: "audio_capture_unsupported",
     });
+  });
+});
+
+describe("EmulatorAudioService on an emulator without gRPC keys (#19134)", () => {
+  // emulator-5554 advertises gRPC on 8554; emulator-5556 (e.g. started with -no-grpc) does not.
+  const runningDir = "/home/ci/.android/avd/running";
+  const files: Record<string, string> = {
+    [path.join(runningDir, "pid_10.ini")]: "port.serial=5554\ngrpc.port=8554\n",
+    [path.join(runningDir, "pid_20.ini")]: "port.serial=5556\nport.adb=5557\n",
+  };
+  const discovery = new FileEmulatorGrpcDiscovery(
+    {
+      readdir: async () => ["pid_10.ini", "pid_20.ini"],
+      readFile: async (file: string) => files[file] ?? "",
+    },
+    [runningDir],
+    () => true,
+  );
+
+  test("injectAudioInput and captureAudio fail with the no-gRPC error and open no session", async () => {
+    const opened: EmulatorGrpcEndpoint[] = [];
+    const service = new EmulatorAudioService({
+      guestCapture: new FakeGuestAudioCapture(),
+      outputTail: new FakeEmulatorOutputTail(),
+      discovery,
+      createSession: (endpoint) => {
+        opened.push(endpoint);
+        return new FakeSession(endpoint);
+      },
+      readFile: async () => new Uint8Array(),
+      ids: new CountingIdGenerator("inj"),
+    });
+    const noGrpc = /emulator-5556 does not advertise a gRPC endpoint.*-no-grpc/;
+    const injection = service.startInjection("emulator-5556", { source: { kind: "tone" } });
+    await expect(injection).rejects.toMatchObject({ code: "audio_injection_unsupported" });
+    await expect(injection).rejects.toThrow(noGrpc);
+    const capture = service.capture("emulator-5556", { durationMs: 100 });
+    await expect(capture).rejects.toMatchObject({ code: "audio_capture_unsupported" });
+    await expect(capture).rejects.toThrow(noGrpc);
+    expect(opened).toEqual([]);
   });
 });
 

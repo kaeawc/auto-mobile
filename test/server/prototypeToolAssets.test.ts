@@ -26,7 +26,7 @@ describe("prototype tool assets", () => {
   let reader: FakePrototypeAssetFileReader;
   let observationReads: string[];
   let teardown: (() => void) | undefined;
-  function setUp(): void {
+  function registerTools(): void {
     const restore = preserveToolRegistry();
     const timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
@@ -56,7 +56,7 @@ describe("prototype tool assets", () => {
   // the reset after the one before it.
   const warmed = warmedTests(() => {
     tearDown();
-    setUp();
+    registerTools();
   });
   afterAll(tearDown);
 

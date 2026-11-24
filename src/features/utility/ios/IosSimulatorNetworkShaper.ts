@@ -23,6 +23,13 @@ import {
   DefaultIosNetworkShaperDylibProvider,
   type IosNetworkShaperDylibProvider,
 } from "./IosNetworkShaperDylibProvider";
+import {
+  simulatorBootHooks,
+  type SimulatorBootHooks,
+} from "../../../utils/ios-cmdline-tools/simulatorBootHooks";
+import { iosCameraPosterActivationStore } from "./IosCameraPosterActivationStore";
+import { iosCameraPosterGateProvider } from "./IosCameraPosterDylibProvider";
+import { parseDyldInsertLibraries } from "./SimulatorBootEnvironment";
 
 /**
  * A simulator-wide shaping profile. Zero means "no limit" for every numeric field;
@@ -101,6 +108,15 @@ export interface IosSimulatorNetworkShaperDependencies {
   /** The pid recorded as a profile's owner; defaults to this process. */
   ownerPid?: number;
   isProcessRunning?: (pid: number) => boolean;
+  /**
+   * Libraries the shaped boot inserts after the shaper; none by default. launchd_sim keeps a
+   * boot-time `DYLD_INSERT_LIBRARIES` over a launch's or a `launchctl setenv`, so the production
+   * shaper adds the launch gate, through which the prototype agent and the camera poster still
+   * load (#19165). An injection check requires them too.
+   */
+  companionLibraries?: () => Promise<string[]>;
+  /** Told after a shaped boot, so features that live in launchd's environment re-apply. */
+  bootHooks?: Pick<SimulatorBootHooks, "notifyBooted">;
 }
 
 export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShaper {
@@ -165,10 +181,11 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
     try {
       // A concurrent apply joins this flight instead of rebooting the simulator a second time.
       const rebooted = await this.injections.run(udid.toUpperCase(), async () => {
-        if (await this.isInjected(udid, dylib, profilePath)) {
+        const libraries = await this.bootLibraries(dylib);
+        if (await this.isInjected(udid, libraries, profilePath)) {
           return false;
         }
-        await this.rebootShaped(udid, dylib, profilePath);
+        await this.rebootShaped(udid, libraries, profilePath);
         return true;
       });
       this.finishApply(profilePath);
@@ -403,6 +420,12 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
     return this.deps.dylibProvider ?? defaultIosNetworkShaperDylibProvider;
   }
 
+  /** The shaper first, then its companions, with no duplicate entries. */
+  private async bootLibraries(shaper: string): Promise<string[]> {
+    const companions = (await this.deps.companionLibraries?.()) ?? [];
+    return [...new Set([shaper, ...companions])];
+  }
+
   private async writeAtomically(path: string, content: string): Promise<void> {
     await this.fs.ensureDir(join(path, ".."));
     const partial = `${path}.${(this.deps.idGenerator ?? defaultIdGenerator).next()}.tmp`;
@@ -411,13 +434,18 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
     await this.fs.rename(partial, path);
   }
 
-  private async isInjected(udid: string, dylib: string, profilePath: string): Promise<boolean> {
+  /** launchd_sim carries this profile and every boot library (a shaper-only boot lacks the gate). */
+  private async isInjected(
+    udid: string,
+    libraries: readonly string[],
+    profilePath: string,
+  ): Promise<boolean> {
     const env = await this.launchdEnvironment(udid);
-    return (
-      env !== undefined &&
-      env.includes(`DYLD_INSERT_LIBRARIES=${dylib}`) &&
-      env.includes(`${IOS_NETWORK_SHAPER_PROFILE_ENV}=${profilePath}`)
-    );
+    if (env === undefined || !env.includes(`${IOS_NETWORK_SHAPER_PROFILE_ENV}=${profilePath}`)) {
+      return false;
+    }
+    const inserted = parseDyldInsertLibraries(env).split(":");
+    return libraries.every((library) => inserted.includes(library));
   }
 
   /** The booted simulator's launchd_sim environment, or undefined when it is not running. */
@@ -444,21 +472,27 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
     }
   }
 
-  private async rebootShaped(udid: string, dylib: string, profilePath: string): Promise<void> {
+  private async rebootShaped(
+    udid: string,
+    libraries: readonly string[],
+    profilePath: string,
+  ): Promise<void> {
     const lifecycle = this.deps.lifecycle ?? ctrlProxyClientLifecycle;
     // Fence the CtrlProxy client so the runner's exit does not start a reconnect mid-reboot.
     await lifecycle.retireForShutdown("ios", udid);
     try {
-      await this.shutdownAndBootShaped(udid, dylib, profilePath);
+      await this.shutdownAndBootShaped(udid, libraries, profilePath);
     } finally {
       // The next CtrlProxy call reconnects to the freshly booted simulator.
       lifecycle.resumeAfterDeviceStart("ios", udid);
     }
+    // The boot reset launchd's environment: a device-wide camera poster re-applies through this.
+    (this.deps.bootHooks ?? simulatorBootHooks).notifyBooted(udid);
   }
 
   private async shutdownAndBootShaped(
     udid: string,
-    dylib: string,
+    libraries: readonly string[],
     profilePath: string,
   ): Promise<void> {
     try {
@@ -471,11 +505,11 @@ export class DefaultIosSimulatorNetworkShaper implements IosSimulatorNetworkShap
     }
     await this.simctl(["boot", udid], {
       ...this.env,
-      SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: dylib,
+      SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: libraries.join(":"),
       [`SIMCTL_CHILD_${IOS_NETWORK_SHAPER_PROFILE_ENV}`]: profilePath,
     });
     await this.simctl(["bootstatus", udid], undefined, BOOT_TIMEOUT_MS);
-    if (!(await this.isInjected(udid, dylib, profilePath))) {
+    if (!(await this.isInjected(udid, libraries, profilePath))) {
       throw new ActionableError(
         `The iOS Simulator ${udid} booted, but its launchd does not carry the network shaper; shaping was not applied.`,
       );
@@ -554,5 +588,22 @@ export function findLaunchdSimPid(
 export const defaultIosNetworkShaperDylibProvider: IosNetworkShaperDylibProvider =
   new DefaultIosNetworkShaperDylibProvider();
 
+/**
+ * The camera poster's gate, at the stable path its device-wide activation also uses. It is inert
+ * unless a launch names libraries for it or a poster is configured. A failed build boots the
+ * shaper alone: shaping still works, and the error is logged.
+ */
+export async function launchGateCompanionLibraries(): Promise<string[]> {
+  try {
+    return [iosCameraPosterActivationStore.installGate(await iosCameraPosterGateProvider.ensure())];
+  } catch (error) {
+    logger.warn(
+      `[NetworkShaper] launch gate unavailable; prototype and camera poster injection will not load on the shaped simulator: ${errorMessage(error)}`,
+      error,
+    );
+    return [];
+  }
+}
+
 export const defaultIosSimulatorNetworkShaper: IosSimulatorNetworkShaper =
-  new DefaultIosSimulatorNetworkShaper();
+  new DefaultIosSimulatorNetworkShaper({ companionLibraries: launchGateCompanionLibraries });

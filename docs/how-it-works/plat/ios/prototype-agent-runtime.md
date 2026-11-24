@@ -9,7 +9,10 @@ A fullscreen root defaults each omitted `width` or `height` to `fill`; explicit 
 1. `ios/prototype-agent/` builds a simulator-only dylib, ad-hoc signed (no Developer ID,
    notarization or provisioning, since it only loads into simulator processes).
 2. The app is launched with `simctl launch` and `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES` pointing at the
-   dylib (`simctl` strips the `SIMCTL_CHILD_` prefix), so dyld loads it before `main()`.
+   dylib (`simctl` strips the `SIMCTL_CHILD_` prefix), so dyld loads it before `main()`. The same
+   path goes in `SIMCTL_CHILD_AM_INSERT_LIBRARIES`: on a simulator the network shaper booted,
+   launchd keeps the boot's `DYLD_INSERT_LIBRARIES`, and the camera poster's launch gate loads the
+   agent instead ([Launch gate](simulator-camera-poster.md#launch-gate)).
 3. The agent adds a SwiftUI `UIWindow` at level `.alert + 1`, above the app's windows, rendering the
    shared spec.
 4. The window's `hitTest` returns `nil` outside the prototype content, so touches pass through;

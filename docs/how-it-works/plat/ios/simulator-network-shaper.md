@@ -22,14 +22,19 @@ auto-mobile-simulator `sim-netshape` crate. Background:
   boot, so the first process sees the profile. A failed write or reboot puts back the previous
   profile and owner, or removes them when there were none. Then it checks
   whether the simulator's `launchd_sim` carries the shaper. It reads that process's environment
-  with `ps -E` and looks for `DYLD_INSERT_LIBRARIES=<this build>` and
-  `SIM_RS_NETSHAPE=<this profile>`.
+  with `ps -E` and looks for `SIM_RS_NETSHAPE=<this profile>` and a `DYLD_INSERT_LIBRARIES` that
+  holds this shaper build and the camera poster gate.
 - When it does not, it runs `simctl shutdown` and then `simctl boot` with
-  `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES` and `SIMCTL_CHILD_SIM_RS_NETSHAPE`. It waits with
+  `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=<shaper>:<gate>` and `SIMCTL_CHILD_SIM_RS_NETSHAPE`. It waits with
   `simctl bootstatus` and checks the environment again. simctl passes `SIMCTL_CHILD_*` into launchd's environment, so
   processes in the device load the shaper, including WebKit's networking extension. A boot
-  that does not carry it fails the call.
-- A new shaper build has a new path, so the next apply reboots once more.
+  that does not carry it fails the call. The boot then notifies `simulatorBootHooks`, so a
+  device-wide camera poster is applied again.
+- launchd_sim keeps this boot-time `DYLD_INSERT_LIBRARIES` over the one a `simctl launch` passes,
+  so libraries a launch inserts load through the gate instead
+  ([Launch gate](simulator-camera-poster.md#launch-gate)). If the gate cannot be built, the
+  simulator boots with the shaper alone and the failure is logged.
+- A new shaper build has a new path, so the next apply reboots once more. The gate always installs to one stable path, so a new gate build needs no reboot.
 - The injection check and reboot run in a per-UDID `SingleFlight`, so concurrent applies share one
   reboot. The reboot retires the CtrlProxy client first and re-admits it after boot
   (`ctrlProxyClientLifecycle`), as other simulator stops do.

@@ -133,11 +133,27 @@ test("a boot-time DYLD_INSERT_LIBRARIES blocks activation before launchd is touc
   expect(h.store.read(udid)).toBeUndefined();
 });
 
-test("a boot-time gate alone does not block activation", async () => {
+test("a boot-time gate alone does not block activation and needs no DYLD setenv", async () => {
   const h = setup();
   h.boot.value = stableGate;
   await h.deviceWide.activate(udid);
-  expect(h.simctl.env.get("DYLD_INSERT_LIBRARIES")).toBe(stableGate);
+  expect(h.simctl.env.get("AM_CAMERA_POSTER_DYLIB")).toBe("/camera/libAMCameraPoster.dylib");
+  expect(h.simctl.env.has("DYLD_INSERT_LIBRARIES")).toBe(false);
+});
+
+test("a shaped boot that carries the gate takes the poster through its variables only", async () => {
+  const h = setup();
+  h.boot.value = `/shaper/libShaper.dylib:${stableGate}`;
+  await h.deviceWide.activate(udid);
+  expect(h.simctl.calls).toEqual([
+    launchctl("getenv", "DYLD_INSERT_LIBRARIES"),
+    launchctl("setenv", "AM_CAMERA_POSTER_DYLIB", "/camera/libAMCameraPoster.dylib"),
+    launchctl("setenv", "AM_CAMERA_POSTER_CONFIG", `/data/devices/${udid}.json`),
+  ]);
+  expect(h.store.read(udid)).toEqual({ gate: stableGate, launchctlBefore: "" });
+  await h.deviceWide.deactivate(udid);
+  expect(h.simctl.env.has("AM_CAMERA_POSTER_DYLIB")).toBe(false);
+  expect(h.store.read(udid)).toBeUndefined();
 });
 
 test("after a boot the recorded poster is applied again", async () => {

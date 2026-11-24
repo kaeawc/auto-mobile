@@ -8,7 +8,9 @@ import {
   prototypeAgentKey,
   PrototypeAgentRegistry,
   RetryingPrototypeAgentConnector,
+  SIMCTL_CHILD_AM_INSERT_LIBRARIES,
   SIMCTL_CHILD_DYLD_INSERT_LIBRARIES,
+  withLaunchInsertedLibrary,
   type PrototypeAgentConnect,
 } from "../../../../src/features/prototype/ios/prototypeAgentInjection";
 import { PROTOTYPE_AGENT_PROTOCOL_VERSION } from "../../../../src/features/prototype/ios/prototypeAgentClient";
@@ -102,6 +104,32 @@ describe("buildPrototypeAgentLaunchEnvironment", () => {
       SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_PORT: "8770",
       SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_TOKEN: "token-1",
       SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: `/a/libA.dylib:${DYLIB}`,
+      SIMCTL_CHILD_AM_INSERT_LIBRARIES: DYLIB,
+    });
+  });
+});
+
+describe("withLaunchInsertedLibrary", () => {
+  // launchd_sim keeps a boot-time DYLD_INSERT_LIBRARIES (the network shaper's) over the launch's,
+  // so the agent must also reach the launch gate the shaped boot inserts (#19165).
+  test("names the library for the launch gate as well as for dyld", () => {
+    expect(withLaunchInsertedLibrary(undefined, {}, DYLIB)).toEqual({
+      SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: DYLIB,
+      SIMCTL_CHILD_AM_INSERT_LIBRARIES: DYLIB,
+    });
+  });
+
+  test("keeps each list's entries from the environment before the host's, without duplicates", () => {
+    expect(
+      withLaunchInsertedLibrary(
+        { [SIMCTL_CHILD_AM_INSERT_LIBRARIES]: `/p/libPoster.dylib:${DYLIB}`, KEEP: "1" },
+        { [SIMCTL_CHILD_AM_INSERT_LIBRARIES]: "/host/ignored.dylib" },
+        DYLIB,
+      ),
+    ).toEqual({
+      KEEP: "1",
+      SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: DYLIB,
+      SIMCTL_CHILD_AM_INSERT_LIBRARIES: `/p/libPoster.dylib:${DYLIB}`,
     });
   });
 });
@@ -148,6 +176,7 @@ describe("PrototypeAgentInjector", () => {
       SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_PORT: "8770",
       SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_TOKEN: "token-1",
       SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: `/a/libA.dylib:${DYLIB}`,
+      SIMCTL_CHILD_AM_INSERT_LIBRARIES: DYLIB,
     });
   });
 

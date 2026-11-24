@@ -95,6 +95,7 @@ test.each(["image", "qr"] as const)(
     expect(h.calls[0]?.coldBoot).toBe(true);
     expect(h.calls[0]?.launchEnvironment).toEqual({
       SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: `/existing.dylib:${h.provider.path}`,
+      SIMCTL_CHILD_AM_INSERT_LIBRARIES: h.provider.path,
       ...(kind === "image"
         ? { SIMCTL_CHILD_AM_CAMERA_POSTER_PATH: "/image.png", SIMCTL_CHILD_AM_CAMERA_POSTER_QR: "" }
         : { SIMCTL_CHILD_AM_CAMERA_POSTER_PATH: "", SIMCTL_CHILD_AM_CAMERA_POSTER_QR: "hello" }),
@@ -112,6 +113,7 @@ test("poster composes with prototype env without losing its library, port or tok
   expect(h.calls[0]?.coldBoot).toBe(true);
   expect(h.calls[0]?.launchEnvironment).toEqual({
     SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: `/existing.dylib:${h.prototypeProvider.resolved.path}:${h.provider.path}`,
+    SIMCTL_CHILD_AM_INSERT_LIBRARIES: `${h.prototypeProvider.resolved.path}:${h.provider.path}`,
     SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_PORT: "8770",
     SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_TOKEN: "fake-1",
     SIMCTL_CHILD_AM_CAMERA_POSTER_PATH: "/image.png",

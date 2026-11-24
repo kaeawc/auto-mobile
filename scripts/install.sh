@@ -294,9 +294,10 @@ read_required_compile_sdk() {
 }
 
 # Verify the Gradle-required SDK platform (the android.jar) is actually
-# installed under ${android_home}/platforms/android-<compileSdk>. Mirrors the
-# build's fallback (android/video-server/build.gradle.kts), which accepts both
-# the `android-<sdk>` and `android-<sdk>.0` directory layouts.
+# installed under ${android_home}/platforms/android-<compileSdk>, accepting both
+# the `android-<sdk>` and `android-<sdk>.0` directory layouts. A minor compileSdk
+# (37.1) needs its own platform: AGP modules compile against it, even though
+# android/video-server can fall back to the major platform's android.jar.
 # Returns 0 when present, non-zero otherwise.
 android_platform_installed() {
     local android_home="$1"

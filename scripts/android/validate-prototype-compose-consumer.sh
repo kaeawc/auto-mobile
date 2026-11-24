@@ -159,8 +159,10 @@ write_consumer_project() {
   for value in "$agp" "$kotlin" "$activity" "$compile_sdk" "$min_sdk" "$target_sdk"; do
     [ -n "$value" ] || usage_error "could not read consumer versions from ${catalog}"
   done
-  compile_sdk_block="$(compile_sdk_dsl "$compile_sdk")" ||
+  # Validate before the substitution so a bad value reports a usage error instead of a bare set -e exit.
+  [[ "$compile_sdk" =~ ^[0-9]+(\.[0-9]+)?$ ]] ||
     usage_error "build-android-compileSdk must be <major> or <major>.<minor>, got '${compile_sdk}'"
+  compile_sdk_block="$(compile_sdk_dsl "$compile_sdk")"
 
   local source_dir="${consumer_dir}/src/main/kotlin/dev/jasonpearson/automobile/prototypeconsumer"
   mkdir -p "$source_dir"

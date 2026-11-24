@@ -50,9 +50,14 @@ function authFrom(ini: Record<string, string>): EmulatorGrpcAuth {
   return { kind: "none" };
 }
 
+/** A whole decimal port; `8554junk` or `8554.5` is not one, so it never resolves to 8554. */
 function parsePort(value: string | undefined): number | undefined {
-  const port = Number.parseInt(value ?? "", 10);
-  return Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
+  const text = value?.trim() ?? "";
+  if (!/^\d+$/.test(text)) {
+    return undefined;
+  }
+  const port = Number(text);
+  return port > 0 && port < 65536 ? port : undefined;
 }
 
 function advertisedAddress(ini: Record<string, string>): string | undefined {

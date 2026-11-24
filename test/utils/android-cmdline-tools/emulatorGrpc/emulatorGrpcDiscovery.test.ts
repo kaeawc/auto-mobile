@@ -49,9 +49,11 @@ describe("endpointFromDescription", () => {
   test("a description with no grpc keys is not a gRPC endpoint and never guesses 8554", () => {
     const ini = parseDiscoveryIni("port.serial=5556\nport.adb=5557\navd.name=sim_rs\n");
     expect(endpointFromDescription(7, "f", ini)).toBeUndefined();
-    expect(
-      endpointFromDescription(7, "f", { "port.serial": "5556", "grpc.port": "not-a-port" }),
-    ).toBeUndefined();
+    for (const port of ["not-a-port", "8554junk", "8554.5", "0", "65536", "-1"]) {
+      expect(endpointFromDescription(7, "f", { "port.serial": "5556", "grpc.port": port })).toBe(
+        undefined,
+      );
+    }
   });
 
   test("a description without a console port is not an endpoint", () => {

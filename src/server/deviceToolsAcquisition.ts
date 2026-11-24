@@ -513,12 +513,16 @@ function preparationFailure(
   platform: StartDeviceArgs["platform"],
   budgets: DevicePreparationBudgets,
   deviceLeft: AcquisitionDeviceLeft | undefined,
+  signal: AbortSignal | undefined,
 ): Error {
   const failure =
     error instanceof ActionableError || error instanceof TerminalSessionError
       ? error
       : toActionableError(error, `Failed to start ${platform} device`);
-  return deviceLeft === undefined
+  // A cancellation reason stays the very object its signal carries: callers recognize a
+  // cancellation by identity with `signal.reason`, and an annotated copy would hide it.
+  const isCancellationReason = signal?.aborted === true && failure === signal.reason;
+  return deviceLeft === undefined || isCancellationReason
     ? failure
     : annotateAcquisitionFailure(
         failure,
@@ -633,7 +637,7 @@ async function prepareDevice(
     if (!lifecycleReservations) {
       signal?.throwIfAborted();
     }
-    throw preparationFailure(error, args.platform, budgets, deviceLeft);
+    throw preparationFailure(error, args.platform, budgets, deviceLeft, coordinatedSignal);
   } finally {
     const cleanup = async () => {
       const releaseReadiness = async () => {

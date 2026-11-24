@@ -48958,6 +48958,79 @@
                   "type": "string",
                   "enum": ["on", "off", "unset"],
                   "description": "Vehicle night-mode signal on an Android Automotive emulator: 'on' or 'off' sets the signal; unset or reset returns day/night to automatic sensor control without preserving a prior manual override. On a phone projecting to a Desktop Head Unit: 'on' sends night, 'off' and reset send day."
+                },
+                "property": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "unset"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483647
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "GEAR_SELECTION",
+                                "PERF_VEHICLE_SPEED",
+                                "PARKING_BRAKE_ON",
+                                "IGNITION_STATE",
+                                "FUEL_LEVEL",
+                                "EV_BATTERY_LEVEL",
+                                "HVAC_TEMPERATURE_SET",
+                                "TURN_SIGNAL_STATE",
+                                "NIGHT_MODE"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^(?:0[xX][0-9A-Fa-f]{1,8}|\\d{1,10})$"
+                            }
+                          ]
+                        },
+                        "areaId": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483647
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^(?:0[xX][0-9A-Fa-f]{1,8}|\\d{1,10})$"
+                            }
+                          ]
+                        },
+                        "value": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "number"
+                              },
+                              "minItems": 1
+                            }
+                          ]
+                        }
+                      },
+                      "required": ["id", "value"],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Inject one vehicle HAL property on an Android Automotive emulator ({ id, areaId?, value }) and read it back with `get-property-value`; the change's vehicleProperty reports value and readBack. id: a listed VehicleProperty name, or a decimal or 0x hex id. areaId: needed for a zoned property (e.g. 0x1, row 1 left seat). value: true/false, a number, or an array for a vector type. The event reaches car service and apps but not the VHAL store, so readBack can show the VHAL's own value. Reset re-injects the value read before the first change. Non-user builds only. Or unset."
                 }
               },
               "additionalProperties": false,

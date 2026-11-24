@@ -11,7 +11,19 @@ import { runOutsideRequestContext } from "../../utils/AbortContext";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { DeviceConditionInjector } from "./DeviceConditionController";
-import type { DeviceConditionKey } from "./DeviceConditionTypes";
+import {
+  DEVICE_CONDITION_APPLY,
+  vehiclePropertyParamsSchema,
+  type DeviceConditionKey,
+} from "./DeviceConditionTypes";
+import {
+  encodeVehiclePropertyValue,
+  parseVehiclePropertyReadback,
+  resolveVehiclePropertyTarget,
+  sameVehiclePropertyValue,
+  vehiclePropertyLabel,
+  type VehiclePropertyTarget,
+} from "./vehicleProperties";
 import { OwedResetError } from "./OwedResetError";
 import { createSerializer, rejectValue, shell, unsupported } from "./injectorSupport";
 import { existingDesktopHeadUnitConsole } from "../androidAuto/AndroidAutoProjectionService";
@@ -26,14 +38,19 @@ import {
 } from "../../utils/android-cmdline-tools/deviceTraits";
 
 /**
- * Vehicle-state injectors for `deviceCondition.vehicle`: Automotive emulator motion and night mode.
- * Motion uses gear/brake events and renewable continuous speed events; reset lets the last speed
- * burst lapse before restoring the original properties. Night mode uses the car service's policy
- * override and resets to sensor control. Both verify the effective service state before success.
+ * Vehicle-state injectors for `deviceCondition.vehicle`: Automotive emulator motion, night mode and
+ * arbitrary properties. Motion uses gear/brake events and renewable continuous speed events; reset
+ * lets the last speed burst lapse before restoring the original properties. Night mode uses the car
+ * service's policy override and resets to sensor control. Both verify the effective service state
+ * before success. Property injects one VHAL event and reports what `get-property-value` reads back.
  */
 
 /** Keys this module owns, under the `vehicle.` prefix of the deviceCondition surface. */
-export const VEHICLE_STATE_KEYS = ["vehicle.motion", "vehicle.nightMode"] as const;
+export const VEHICLE_STATE_KEYS = [
+  "vehicle.motion",
+  "vehicle.nightMode",
+  "vehicle.property",
+] as const;
 type VehicleStateKey = (typeof VEHICLE_STATE_KEYS)[number];
 
 /** VHAL property ids (VehicleProperty.aidl); every one is a global property, area 0. */
@@ -85,8 +102,12 @@ async function unsupportedReason(
   adb: AdbExecutor,
   device: BootedDevice,
   traits: DeviceTraits,
+  key: VehicleStateKey,
 ): Promise<string | undefined> {
   const read = await traits.read(adb, device.deviceId);
+  if (read.formFactor !== "automotive" && key === "vehicle.property") {
+    return "vehicle.property needs an Android Automotive emulator; a phone, or a phone projecting to a Desktop Head Unit, has no VHAL to inject into";
+  }
   if (read.formFactor !== "automotive") {
     return "vehicle state needs an Android Automotive emulator or a phone projecting to a Desktop Head Unit this daemon started, and this device is neither";
   }
@@ -101,8 +122,10 @@ async function carServiceShell(
   adb: AdbExecutor,
   args: readonly string[],
   signal?: AbortSignal,
+  feature: VehicleStateKey = args.includes("day-night-mode")
+    ? "vehicle.nightMode"
+    : "vehicle.motion",
 ): Promise<string> {
-  const feature = args.includes("day-night-mode") ? "vehicle.nightMode" : "vehicle.motion";
   const reason =
     `this AAOS image is a user build; ${feature} needs a userdebug/eng image ` +
     "such as `android-automotive` API 34 ext9";
@@ -487,6 +510,135 @@ function createMotionInjector(adb: AdbExecutor, timer: Timer): DeviceConditionIn
   };
 }
 
+/** Reads and injects one property in one area, encoded for its VehiclePropertyType. */
+function createTargetAccess(adb: AdbExecutor) {
+  return {
+    async read(target: VehiclePropertyTarget, signal?: AbortSignal): Promise<string> {
+      const out = await carServiceShell(
+        adb,
+        ["cmd", "car_service", "get-property-value", target.hexId, String(target.areaId)],
+        signal,
+        "vehicle.property",
+      );
+      const value = parseVehiclePropertyReadback(target, out);
+      if (value === undefined) {
+        unsupported(
+          `could not read vehicle property ${vehiclePropertyLabel(target)}: ${out.split("\n")[0]}`,
+        );
+      }
+      return value;
+    },
+    async write(target: VehiclePropertyTarget, data: string, signal?: AbortSignal): Promise<void> {
+      const out = await carServiceShell(
+        adb,
+        ["cmd", "car_service", "inject-vhal-event", target.hexId, String(target.areaId), data],
+        signal,
+        "vehicle.property",
+      );
+      // A bad id, area or value prints a message and the usage text instead of failing the shell.
+      if (COMMAND_FAILURE.test(out) || /invalid|inconsistent|usage:/i.test(out)) {
+        unsupported(`\`inject-vhal-event ${target.hexId}\` failed: ${out.split("\n")[0]}`);
+      }
+    },
+  };
+}
+
+/** A validated `vehicle.property` request: the resolved target and its encoded value. */
+function propertyRequest(value: string, params: Record<string, unknown> | undefined) {
+  const parsed = vehiclePropertyParamsSchema().safeParse(params);
+  if (value !== DEVICE_CONDITION_APPLY || !parsed.success) {
+    throw new ActionableError(
+      `Invalid vehicle.property value: expected { id, areaId?, value }${parsed.success ? "" : ` (${parsed.error.issues.map((issue) => `${issue.path.join(".") || "value"}: ${issue.message}`).join("; ")})`}.`,
+    );
+  }
+  const target = resolveVehiclePropertyTarget(parsed.data.id, parsed.data.areaId);
+  return { target, data: encodeVehiclePropertyValue(target, parsed.data.value) };
+}
+
+/**
+ * `vehicle.property`: injects one VHAL event and reads the property back. The event reaches car
+ * service listeners (and so apps) without writing the VHAL store `get-property-value` reads, so the
+ * read-back can still show the VHAL's own value; the result reports both. Reset re-injects each
+ * property's value read before its first change, newest first.
+ */
+function createPropertyInjector(
+  adb: AdbExecutor,
+  ensureSupported: () => Promise<void>,
+): DeviceConditionInjector {
+  const access = createTargetAccess(adb);
+  const serial = createSerializer();
+  /** Value read before the first change, per property and area, until reset re-injects it. */
+  const baselines = new Map<string, { target: VehiclePropertyTarget; value: string }>();
+  /** What each restored property should read; kept after reset so restore can be verified. */
+  const expected = new Map<string, { target: VehiclePropertyTarget; value: string }>();
+  const restore = (signal?: AbortSignal): Promise<void> =>
+    serial(async () => {
+      for (const [slot, baseline] of [...baselines].reverse()) {
+        await access.write(baseline.target, baseline.value, signal);
+        baselines.delete(slot);
+      }
+    });
+  return {
+    key: "vehicle.property",
+    async apply(value, signal, params) {
+      const { target, data } = propertyRequest(value, params);
+      await ensureSupported();
+      return serial(async () => {
+        const slot = `${target.id}:${target.areaId}`;
+        const fresh = !baselines.has(slot);
+        if (fresh) {
+          const before = await access.read(target, signal);
+          baselines.set(slot, { target, value: before });
+          expected.set(slot, { target, value: before });
+        }
+        try {
+          await access.write(target, data, signal);
+        } catch (error) {
+          if (fresh) {
+            baselines.delete(slot);
+            expected.delete(slot);
+          }
+          throw toActionableError(
+            error,
+            `Could not set vehicle property ${vehiclePropertyLabel(target)}`,
+          );
+        }
+        let readBack: string;
+        try {
+          readBack = await access.read(target, signal);
+        } catch (error) {
+          throw new OwedResetError(errorMessage(error), restore, { cause: error });
+        }
+        const matches = sameVehiclePropertyValue(readBack, data);
+        return {
+          status: "applied",
+          detail:
+            `vehicle property ${vehiclePropertyLabel(target)} injected ${data}; get-property-value reads ${readBack}` +
+            (matches ? "" : " (inject-vhal-event does not write the VHAL store)"),
+          vehicleProperty: {
+            id: target.hexId,
+            ...(target.name ? { name: target.name } : {}),
+            areaId: target.areaId,
+            type: target.type,
+            value: data,
+            readBack,
+            matches,
+          },
+          reset: restore,
+        };
+      });
+    },
+    async isClean(signal) {
+      for (const { target, value } of expected.values()) {
+        if (!sameVehiclePropertyValue(await access.read(target, signal), value)) {
+          return false;
+        }
+      }
+      return true;
+    },
+  };
+}
+
 /** No head unit lookup: vehicle state goes to the automotive emulator only. */
 const NO_HEAD_UNIT: HeadUnitConsoleLookup = () => undefined;
 
@@ -504,6 +656,14 @@ export function createVehicleStateInjector(
     headUnit = NO_HEAD_UNIT,
   }: { traits?: DeviceTraits; timer?: Timer; headUnit?: HeadUnitConsoleLookup } = {},
 ): DeviceConditionInjector {
+  if (key === "vehicle.property") {
+    return createPropertyInjector(adb, async () => {
+      const reason = await unsupportedReason(adb, device, traits, key);
+      if (reason !== undefined) {
+        unsupported(reason);
+      }
+    });
+  }
   const injector =
     key === "vehicle.motion" ? createMotionInjector(adb, timer) : createNightModeInjector(adb);
   const headUnitInjector = createHeadUnitVehicleInjector(key, device.deviceId, headUnit);
@@ -520,7 +680,7 @@ export function createVehicleStateInjector(
       if (runningHeadUnit(headUnit, device.deviceId)) {
         return headUnitInjector.apply(value, signal);
       }
-      const reason = await unsupportedReason(adb, device, traits);
+      const reason = await unsupportedReason(adb, device, traits, key);
       if (reason !== undefined) {
         unsupported(reason);
       }

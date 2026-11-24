@@ -72,6 +72,9 @@ Car-service commands: `inject-vhal-event`, `emulate-driving-state` and `get-prop
 non-`user` build; `enable-uxr` is refused from `adb shell` on every build (system signature); restriction
 state is read from `dumpsys car_service --services CarUxRestrictionsManagerService` and
 `CarDrivingStateService`, which work on both builds. Cluster and passenger displays are unchecked.
+`vehicle.property` injects with `inject-vhal-event`, which reaches car service listeners but not the
+vehicle HAL, so its `get-property-value` read-back can differ from the injected value
+([decision](../../../devlog/2026-11-23-vehicle-property-injection.md)).
 
 ### Automotive fixture app
 

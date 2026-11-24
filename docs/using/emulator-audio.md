@@ -24,23 +24,26 @@ to 8653. It holds that port while the emulator runs, so you need no extra launch
 
 ## iOS Simulators
 
-A simulator records from the Mac's default input device and plays to its default output device,
-so audio goes through loopback devices on the Mac. The result's `route` is `host-loopback`.
+`captureAudio` records only the target simulator, with no driver: other simulators and Mac apps
+are not heard. That holds only when the result's `route` is `process-tap`. If the captures are silent while the app plays,
+give the app that runs AutoMobile **System Audio Recording** permission (System Settings > Privacy
+and Security > Screen and System Audio Recording).
 
-Set up the Mac once:
+`injectAudioInput` goes through a loopback device on the Mac, shared by every simulator. Set up the
+Mac once:
 
 1. Install a loopback audio driver such as BlackHole 2ch.
-2. Make the loopback device the default input (for `injectAudioInput`) and the default output
-   (for `captureAudio`).
-3. Set `AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER` to the path of an `audio-loopback-helper`
-   executable.
-4. Give the process that runs AutoMobile Microphone permission, which `captureAudio` needs to read
-   the loopback device.
+2. Make the loopback device the default input.
+3. Give the process that runs AutoMobile Microphone permission.
 
-Every simulator on the Mac shares these devices:
+`AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER` overrides the `audio-loopback-helper` executable both tools
+use. A helper without process-tap support makes `captureAudio` read the Mac's default output instead
+(`route: host-loopback`). So does a failed lookup of the simulator's process. That output must then
+be a loopback device, and it hears every simulator. Check `route` before you trust the isolation.
+
+Injection limits:
 
 - Only one simulator injection runs at a time per Mac; a second gets `audio_injection_busy`.
-- A capture hears every simulator on the Mac. Run audio tests on one simulator at a time.
 - With one loopback device as both default input and output, a simulator's own playback also
   reaches its microphone.
 
@@ -117,7 +120,7 @@ recording is read later. A device that plays nothing gets a silent track.
 
 - It needs FFmpeg on the host; without it the start is refused.
 - On Android it supports recordings up to 180 s (one segment).
-- On an iOS Simulator it records the Mac's default output, so it hears every simulator on the Mac.
+- On an iOS Simulator it records only that simulator, the same way as `captureAudio`.
 
 ## Errors
 
@@ -127,7 +130,7 @@ Errors start with a code in brackets:
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `audio_injection_busy`                | Another injection is starting or already feeds this emulator's microphone, or, for a simulator, any simulator's on the same Mac. Stop it first.                                                                                                                                                                     |
 | `audio_injection_unsupported`         | No route. An emulator is not local or its build has no gRPC audio: use a recent emulator on the same host. A simulator's Mac has no loopback default input or no helper configured: follow the setup above.                                                                                                         |
-| `audio_capture_unsupported`           | The same, for capture; a simulator needs a loopback default output.                                                                                                                                                                                                                                                 |
+| `audio_capture_unsupported`           | The same, for capture; the simulator is not booted, or, with a helper lacking process taps, the Mac has no loopback default output.                                                                                                                                                                                 |
 | `audio_grpc_auth_rejected`            | The emulator refused AutoMobile's gRPC credentials. Relaunch it with `-grpc-use-token`, or with `-grpc <port>` and no JWT, then retry.                                                                                                                                                                              |
 | `audio_grpc_failed`                   | Any other emulator error; the message carries its detail.                                                                                                                                                                                                                                                           |
 | `audio_loopback_failed`               | The Mac's audio system refused the loopback device, for example without Microphone permission; the message carries the detail.                                                                                                                                                                                      |

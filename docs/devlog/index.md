@@ -25,6 +25,7 @@ regenerates the table below.
 | 2026-11-23 | decision | [No consumer keep rule for prototype icons](2026-11-23-prototype-icon-keep-rule.md) |
 | 2026-11-23 | decision | [iOS Simulator network shaping through a boot-injected socket shaper](2026-11-23-ios-simulator-boot-injected-network-shaper.md) |
 | 2026-11-23 | decision | [Generate the devlog index and nav from the entries](2026-11-23-generated-devlog-index.md) |
+| 2026-11-23 | decision | [Driverless simulator audio capture](2026-11-23-driverless-simulator-audio-capture.md) |
 | 2026-11-23 | decision | [Docs readability in the pre-push shell lane](2026-11-23-docs-readability-prepush.md) |
 | 2026-11-21 | decision | [Prototype media runtime placement spike](2026-11-21-prototype-media-runtime-placement-spike.md) |
 | 2026-11-21 | concept | [iOS Simulator audio routing open questions](2026-11-21-ios-simulator-audio-routing-open-questions.md) |

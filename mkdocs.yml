@@ -530,6 +530,7 @@ nav:
       - "2026-11-23: No consumer keep rule for prototype icons": devlog/2026-11-23-prototype-icon-keep-rule.md
       - "2026-11-23: iOS Simulator network shaping through a boot-injected socket shaper": devlog/2026-11-23-ios-simulator-boot-injected-network-shaper.md
       - "2026-11-23: Generate the devlog index and nav from the entries": devlog/2026-11-23-generated-devlog-index.md
+      - "2026-11-23: Driverless simulator audio capture": devlog/2026-11-23-driverless-simulator-audio-capture.md
       - "2026-11-23: Docs readability in the pre-push shell lane": devlog/2026-11-23-docs-readability-prepush.md
       - "2026-11-21: Prototype media runtime placement spike": devlog/2026-11-21-prototype-media-runtime-placement-spike.md
       - "2026-11-21: iOS Simulator audio routing open questions": devlog/2026-11-21-ios-simulator-audio-routing-open-questions.md

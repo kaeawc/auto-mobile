@@ -3,8 +3,9 @@ import Foundation
 
 enum LoopbackMain {
     static let usage = "Usage: audio-loopback-helper play [--sample-rate N] | "
-        + "capture (--duration-ms N | --until-stopped) [--sample-rate N]. PCM is 16-bit little-endian mono; "
-        + "--until-stopped records until stdin closes."
+        + "capture (--duration-ms N | --until-stopped) [--sample-rate N] | "
+        + "tap --launchd-pid N (--duration-ms N | --until-stopped) [--sample-rate N] [--mute]. "
+        + "PCM is 16-bit little-endian mono; --until-stopped records until stdin closes."
 
     /// Runs one command and never returns: the process exits when the command ends.
     static func run(_ arguments: [String]) -> Never {
@@ -29,6 +30,18 @@ enum LoopbackMain {
             case let .capture(sampleRate, durationMs):
                 let recorder = LoopbackRecorder(sampleRate: sampleRate, durationMs: durationMs, finished: exitProcess)
                 try recorder.start(on: CoreAudioDevices.captureSource())
+                withExtendedLifetime(recorder) {
+                    dispatchMain()
+                }
+            case let .tap(launchdPid, sampleRate, durationMs, mute):
+                let recorder = TapRecorder(
+                    launchdPid: launchdPid,
+                    sampleRate: sampleRate,
+                    durationMs: durationMs,
+                    mute: mute,
+                    finished: exitProcess
+                )
+                try recorder.start()
                 withExtendedLifetime(recorder) {
                     dispatchMain()
                 }

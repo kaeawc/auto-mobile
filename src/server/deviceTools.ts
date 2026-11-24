@@ -117,7 +117,7 @@ export function registerDeviceTools() {
   // provisionDevice does the same inside its handler, where its typed cancellation is built.
   ToolRegistry.register(
     "getAndroid",
-    "Find or recover an Android AVD and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
+    "Find or recover an Android AVD and prepare it for automation. With no avdName or deviceId it selects a running phone emulator, else cold-boots a configured phone AVD; when there is none, call listDeviceImages and pass avdName. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     getAndroidSchema,
     {
       handler: (args, progress, signal) =>

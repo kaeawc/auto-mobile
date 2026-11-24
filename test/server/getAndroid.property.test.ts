@@ -44,9 +44,9 @@ const nonEmptyIdentifier = fc.constantFrom<string>(
 const platform = fc.constantFrom<AndroidOrIosPlatform>("android", "ios");
 
 // ---------------------------------------------------------------------------
-// getAndroidSchema — the tool call's input contract. It composes both
-// underlying refinements: the avdName/deviceId presence rule and the
-// boot+automation timeout-budget rule (validateDevicePreparationTimeout).
+// getAndroidSchema — the tool call's input contract: the field constraints and
+// the boot+automation timeout-budget rule (validateDevicePreparationTimeout).
+// No identifier is required (#19124).
 // ---------------------------------------------------------------------------
 describe("getAndroidSchema (property-based)", () => {
   // Mixes boundary constants (positivity, per-field min/max, the shared budget
@@ -81,7 +81,7 @@ describe("getAndroidSchema (property-based)", () => {
   };
 
   // Independent oracle for whether the schema should accept the input, derived
-  // from the field constraints and the two superRefine rules — never from the
+  // from the field constraints and the budget superRefine rule — never from the
   // schema itself.
   const shouldParse = (input: SchemaInput): boolean => {
     // avdName/deviceId carry `.min(1)`: a present-but-empty string is rejected.
@@ -91,10 +91,7 @@ describe("getAndroidSchema (property-based)", () => {
     if (input.deviceId !== undefined && input.deviceId.length < 1) {
       return false;
     }
-    // At least one identifier must be provided.
-    if (input.avdName === undefined && input.deviceId === undefined) {
-      return false;
-    }
+    // Neither identifier is required: a bare call selects a device (#19124).
     // bootTimeoutMs: positive integer, at most the ceiling.
     if (input.bootTimeoutMs !== undefined) {
       if (!Number.isInteger(input.bootTimeoutMs)) {
@@ -133,13 +130,15 @@ describe("getAndroidSchema (property-based)", () => {
     );
   });
 
-  test("rejects when neither avdName nor deviceId is present, for any valid budget", () => {
+  // Every advertised property is optional, so a client reading the schema may call getAndroid
+  // with no identifier; the schema must not refuse what it does not mark required (#19124).
+  test("accepts a call naming neither avdName nor deviceId, for any valid budget", () => {
     fc.assert(
       fc.property(
         fc.integer({ min: 1, max: 100_000 }),
         fc.integer({ min: MIN_RUNNER_READINESS_TIMEOUT_MS, max: 100_000 }),
         (bootTimeoutMs, automationReadyTimeoutMs) => {
-          return !getAndroidSchema.safeParse({ bootTimeoutMs, automationReadyTimeoutMs }).success;
+          return getAndroidSchema.safeParse({ bootTimeoutMs, automationReadyTimeoutMs }).success;
         },
       ),
       RUN_OPTIONS,

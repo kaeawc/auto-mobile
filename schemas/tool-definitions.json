@@ -10202,7 +10202,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Find or recover an Android AVD and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
+    "description": "Find or recover an Android AVD and prepare it for automation. With no avdName or deviceId it selects a running phone emulator, else cold-boots a configured phone AVD; when there is none, call listDeviceImages and pass avdName. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -10266,7 +10266,7 @@
           "additionalProperties": false
         },
         "avdName": {
-          "description": "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android)",
+          "description": "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android). Omit both avdName and deviceId to select a device: a running phone emulator first, then a configured phone AVD (cold-booted)",
           "type": "string",
           "minLength": 1
         },

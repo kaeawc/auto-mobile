@@ -24,6 +24,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
+import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -814,8 +815,40 @@ describe("platform device preparation tools", () => {
     expect(() => getAppleSchema.parse({ udid: "UDID-A", deviceId: "UDID-A" })).not.toThrow();
   });
 
-  test("getAndroid rejects a call with neither avdName nor deviceId, naming the source (#5870)", () => {
-    expect(() => getAndroidSchema.parse({})).toThrow(/avdName.*deviceId|deviceId.*avdName/i);
+  test("getAndroid with neither avdName nor deviceId selects a running phone (#19124)", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9",
+      deviceId: "emulator-5554",
+    };
+    const criteria: DeviceMatchCriteria[] = [];
+    matcher = new (class extends FakeDeviceMatcher {
+      override matchBootedDevice(
+        ...matchArgs: Parameters<FakeDeviceMatcher["matchBootedDevice"]>
+      ): BootedDevice | null {
+        criteria.push(matchArgs[0]);
+        return super.matchBootedDevice(...matchArgs);
+      }
+    })();
+    matcher.setBootedResult(emulator);
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    const result = await callTool("getAndroid", {});
+
+    expect(result).toMatchObject({ runtime: { deviceId: emulator.deviceId } });
+    expect(criteria).toEqual([
+      expect.objectContaining({ platform: "android", formFactor: "phone" }),
+    ]);
+    expect(deviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("getAndroid with no identifier and nothing to select names listDeviceImages and avdName (#19124)", async () => {
+    const failure = await callTool("getAndroid", {}).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as ActionableError).message).toContain("listDeviceImages");
+    expect((failure as ActionableError).message).toContain("avdName");
+    expect(deviceUtils.wasMethodCalled("startDevice")).toBe(false);
   });
 
   test("getApple rejects a call with neither udid nor deviceId (#5870)", () => {

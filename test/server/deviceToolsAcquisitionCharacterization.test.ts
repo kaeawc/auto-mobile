@@ -8,6 +8,8 @@ import {
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { DeviceTransportOfflineError } from "../../src/models/DeviceTransportOfflineError";
 import { asMcpConnection } from "../helpers/mcpConnection";
 import { currentAutolockMcpSessionId } from "../../src/features/toolSelection/toolSelectionContext";
 
@@ -187,4 +189,122 @@ test("getApple ignores the Android CtrlProxy APK override", async () => {
     "reached preparation",
   );
   expect(events).toContain("prepare");
+});
+
+test("bare getAndroid selects a phone through the selector lease (#19124)", async () => {
+  const handlers = createAcquisitionHandlers({
+    bootAndPrepareDevice: async (args, budgets) => {
+      events.push("prepare");
+      expect(args).toMatchObject({
+        platform: "android",
+        formFactor: "phone",
+        preferRunning: true,
+        createIfMissing: false,
+      });
+      expect(args.name).toBeUndefined();
+      expect(args.deviceId).toBeUndefined();
+      expect(budgets.stableTarget).toBeUndefined();
+      expect(budgets.androidAvdName).toBeUndefined();
+      throw new ActionableError("reached preparation");
+    },
+  });
+  await expect(handlers.getAndroidHandler({})).rejects.toThrow("reached preparation");
+  expect(events).toEqual(["reserve:selector", "prepare", "release"]);
+});
+
+test("bare getAndroid with requirements selects by them, not by a phone form factor (#19124)", async () => {
+  const handlers = createAcquisitionHandlers({
+    bootAndPrepareDevice: async (args) => {
+      expect(args.formFactor).toBeUndefined();
+      expect(args.requires).toEqual({ playStore: true });
+      throw new ActionableError("reached preparation");
+    },
+  });
+  await expect(handlers.getAndroidHandler({ requires: { playStore: true } })).rejects.toThrow(
+    "reached preparation",
+  );
+});
+
+const coldBootedPixel = {
+  platform: "android" as const,
+  name: "Pixel_A",
+  deviceId: "emulator-5554",
+};
+
+test("a failed acquisition that shut down its cold boot says so and names the retry (#19124)", async () => {
+  const timer = new FakeTimer();
+  setDeviceToolsDependencies({ timer });
+  const child = new FakeChildProcess(timer);
+  const failure = new ActionableError(
+    "CtrlProxy APK upgrade failed with an unrecognized adb failure; the installed CtrlProxy was left in place",
+  );
+  const handlers = createAcquisitionHandlers({
+    bootAndPrepareDevice: async (_args, _budgets, _deps, { options: context }) => {
+      context.state.boot = {
+        device: coldBootedPixel,
+        source: "cold-boot",
+        provisioned: false,
+        processHandle: child,
+      };
+      throw failure;
+    },
+  });
+  const rejected = await handlers
+    .getAndroidHandler({ avdName: "Pixel_A" })
+    .catch((error: unknown) => error);
+  expect(rejected).toBe(failure);
+  expect(failure.message).toContain("left in place. deviceLeft: shutdown");
+  expect(failure.message).toContain(
+    'Next step: retry getAndroid with the same avdName ("Pixel_A").',
+  );
+  expect(child.killed).toBe(true);
+});
+
+test("a retryable failure that keeps its cold boot running reports it still booted (#19124)", async () => {
+  const timer = new FakeTimer();
+  setDeviceToolsDependencies({ timer });
+  const child = new FakeChildProcess(timer);
+  const failure = new DeviceTransportOfflineError("emulator-5554", undefined);
+  const original = failure.message;
+  const handlers = createAcquisitionHandlers({
+    bootAndPrepareDevice: async (_args, _budgets, _deps, { options: context }) => {
+      context.state.boot = {
+        device: coldBootedPixel,
+        source: "cold-boot",
+        provisioned: false,
+        processHandle: child,
+      };
+      throw failure;
+    },
+  });
+  await expect(handlers.getAndroidHandler({})).rejects.toBe(failure);
+  expect(failure.message).toBe(
+    `${original} deviceLeft: booted (the device is still running). ` +
+      "Next step: retry getAndroid with the same arguments.",
+  );
+  expect(child.killed).toBe(false);
+});
+
+test("a failure on a device that was already running keeps its message (#19124)", async () => {
+  const failure = new ActionableError("readiness failed.");
+  const handlers = createAcquisitionHandlers({
+    bootAndPrepareDevice: async (_args, _budgets, _deps, { options: context }) => {
+      context.state.boot = { device: coldBootedPixel, source: "booted", provisioned: false };
+      throw failure;
+    },
+  });
+  deviceUtils.setBootedDevices("android", [coldBootedPixel]);
+  await expect(handlers.getAndroidHandler({ deviceId: "emulator-5554" })).rejects.toBe(failure);
+  expect(failure.message).toBe("readiness failed.");
+});
+
+test("a failure before any device was booted keeps its message (#19124)", async () => {
+  const failure = new ActionableError("no boot yet");
+  const handlers = createAcquisitionHandlers({
+    bootAndPrepareDevice: async () => {
+      throw failure;
+    },
+  });
+  await expect(handlers.getAndroidHandler({ avdName: "Pixel_A" })).rejects.toBe(failure);
+  expect(failure.message).toBe("no boot yet");
 });

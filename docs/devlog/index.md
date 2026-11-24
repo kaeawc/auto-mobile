@@ -20,6 +20,7 @@ regenerates the table below.
 | 2026-11-23 | decision | [Read Simulator network activity with host tools](2026-11-23-simulator-network-activity-host-tools.md) |
 | 2026-11-23 | decision | [Keyboard control through CoreSimulator](2026-11-23-simulator-keyboard-coresimulator.md) |
 | 2026-11-23 | decision | [Simulator Dynamic Island and backlight through defaults and JXA](2026-11-23-simulator-island-and-backlight.md) |
+| 2026-11-23 | decision | [iOS Simulator raw input through a SimulatorKit HID helper, on by default](2026-11-23-simulator-hid-input-default-on.md) |
 | 2026-11-23 | decision | [Capture Simulator video from the device framebuffer](2026-11-23-simulator-framebuffer-capture.md) |
 | 2026-11-23 | decision | [Device-wide camera poster through the launchd environment](2026-11-23-simulator-camera-poster-device-wide.md) |
 | 2026-11-23 | decision | [No consumer keep rule for prototype icons](2026-11-23-prototype-icon-keep-rule.md) |

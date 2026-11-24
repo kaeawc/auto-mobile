@@ -27,6 +27,31 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { ActionCall } from "./ActionCall";
+import type {
+  IosSimulatorRawInput,
+  SimHidRouteMode,
+} from "../../utils/ios/simHid/IosSimulatorRawInput";
+import type { SimHidScreenSize } from "../../utils/ios/simHid/SimHidProtocol";
+import {
+  isCtrlProxyUnreachable,
+  logSimHidUnavailable,
+  routeSimulatorRawInput,
+  SIM_HID_TAP_ROUTE,
+} from "./simHidRouting";
+
+/** Observes the CtrlProxy swipe transport for the HID fallback decision. */
+interface SwipeTransportProbe {
+  onDispatch(): void;
+  onReply(
+    result: { success: boolean; dispatched?: boolean; acknowledged?: boolean },
+    dispatched: boolean,
+  ): void;
+}
+
+const NO_SWIPE_PROBE: SwipeTransportProbe = {
+  onDispatch: () => {},
+  onReply: () => {},
+};
 
 export interface FencedGestureOptions extends GestureOptions {
   /** Internal opt-in for the iOS lock-screen synthesized swipe. */
@@ -39,6 +64,11 @@ export interface FencedGestureOptions extends GestureOptions {
   onSearchFallback?: () => void;
   searchDragState?: AndroidSearchDragState;
   displayFence?: DisplayFence;
+  /**
+   * iOS Simulator only: send the swipe through the SimulatorKit HID helper first, and through it
+   * again when CtrlProxy cannot be reached (#19118). `screen` is the observed screen in points.
+   */
+  simulatorHid?: { input: IosSimulatorRawInput; screen?: SimHidScreenSize };
 }
 
 /** The call's performance tracker, or a no-op one when the caller did not thread one. */
@@ -344,7 +374,65 @@ export class ExecuteGesture extends BaseVisualChange {
     options: FencedGestureOptions = {},
     call: ActionCall = {},
   ): Promise<SwipeResult> {
-    return await this.executeXCTestSwipe(line, options, call);
+    if (!options.simulatorHid) {
+      return await this.executeXCTestSwipe(line, options, call);
+    }
+    let unreachable = false;
+    return await routeSimulatorRawInput<SwipeResult>({
+      label: "swipe",
+      signal: call.signal,
+      hid: (mode) => this.simulatorHidSwipe(line, options, call, mode),
+      ctrlProxy: (markDispatched) =>
+        this.executeXCTestSwipe(line, options, call, {
+          onDispatch: markDispatched,
+          onReply: (result, dispatched) => {
+            unreachable = isCtrlProxyUnreachable(result, dispatched);
+          },
+        }),
+      unreachable: () => unreachable,
+      isDefiniteError: (error) => error instanceof StaleDisplayError,
+    });
+  }
+
+  /** One swipe through the HID helper, or undefined when it sent nothing. */
+  private async simulatorHidSwipe(
+    line: SwipeLine,
+    options: FencedGestureOptions,
+    call: ActionCall,
+    mode: SimHidRouteMode,
+  ): Promise<SwipeResult | undefined> {
+    const hid = options.simulatorHid;
+    if (!hid || options.lockScreen === true) {
+      return undefined;
+    }
+    const { x1, y1, x2, y2 } = line;
+    const duration = options.duration || 300;
+    options.displayFence?.assertCurrent();
+    const outcome = await hid.input.swipe(
+      { from: { x: x1, y: y1 }, to: { x: x2, y: y2 }, durationMs: duration, screen: hid.screen },
+      // The fence is re-checked at the write: the launch settle and the helper queue can wait.
+      { mode, signal: call.signal, beforeWrite: () => options.displayFence?.assertCurrent() },
+    );
+    switch (outcome.status) {
+      case "delivered":
+        logger.info(`[SWIPE] sim-hid-helper swipe delivered in ${outcome.elapsedMs ?? "?"}ms`);
+        return { success: true, x1, y1, x2, y2, duration, dispatchRoute: SIM_HID_TAP_ROUTE };
+      case "indeterminate":
+        logger.warn(`[SWIPE] sim-hid-helper swipe outcome indeterminate: ${outcome.reason}`);
+        return {
+          success: false,
+          outcomeIndeterminate: true,
+          x1,
+          y1,
+          x2,
+          y2,
+          duration,
+          error: `Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (${outcome.reason}). The swipe may have been applied. Do not retry automatically.`,
+        };
+      case "unavailable":
+        logSimHidUnavailable("swipe", mode, outcome.reason);
+        return undefined;
+    }
   }
 
   /**
@@ -359,6 +447,7 @@ export class ExecuteGesture extends BaseVisualChange {
     line: SwipeLine,
     options: FencedGestureOptions = {},
     call: ActionCall = {},
+    probe: SwipeTransportProbe = NO_SWIPE_PROBE,
   ): Promise<SwipeResult> {
     const { x1, y1, x2, y2 } = line;
     const duration = options.duration || 300;
@@ -397,6 +486,7 @@ export class ExecuteGesture extends BaseVisualChange {
           signal,
           onDispatch: () => {
             dispatched = true;
+            probe.onDispatch();
           },
         });
       });
@@ -416,6 +506,7 @@ export class ExecuteGesture extends BaseVisualChange {
       return indeterminateResult(result.error ?? "unknown error");
     }
     throwIfAborted(signal);
+    probe.onReply(result, dispatched);
 
     if (result.success) {
       logger.info(

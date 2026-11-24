@@ -143,6 +143,10 @@ describe("wireSessionLifecycle", () => {
       "onDeviceOwnershipChange",
       "onSessionRelease",
       "onSessionDeviceUnbound",
+      // The sim-hid-helper lifecycle follows AXBridge (#19118).
+      "onSessionCreated",
+      "onSessionRelease",
+      "onSessionDeviceUnbound",
       "onDeviceOwnershipChange",
       "setManagedExecutionRecoveryListener",
       "setLateRehydrationListener",

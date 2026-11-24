@@ -11,6 +11,8 @@ import { createGrpcAuthorizer } from "../../utils/android-cmdline-tools/emulator
 import { FileEmulatorGrpcDiscovery } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
 import { Http2GrpcTransport } from "../../utils/android-cmdline-tools/emulatorGrpc/grpcTransport";
 import { DefaultFileSystem } from "../../utils/filesystem/DefaultFileSystem";
+import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
+import { findLaunchdSimPid } from "../../utils/ios-cmdline-tools/launchdSimPid";
 import { defaultIdGenerator } from "../../utils/IdGenerator";
 import { audioSourceTooLarge, EmulatorAudioService } from "./EmulatorAudioService";
 import { AdbGuestAudioCapture } from "./GuestAudioCapture";
@@ -96,9 +98,13 @@ export function createEmulatorAudioService(): EmulatorAudioService {
         new Http2GrpcTransport(endpoint.address),
         createGrpcAuthorizer(endpoint.auth, fs),
       ),
-    createHostLoopbackSession: () =>
+    createHostLoopbackSession: (deviceId) =>
       new HostLoopbackAudioSession(
-        { helperPath: () => audioLoopbackHelperPath(), launchHelper: spawnLoopbackHelper },
+        {
+          helperPath: () => audioLoopbackHelperPath(),
+          launchHelper: spawnLoopbackHelper,
+          launchdPid: () => findLaunchdSimPid(deviceId, new DefaultHostCommandExecutor()),
+        },
         ENV.IOS_AUDIO_LOOPBACK_HELPER.name,
       ),
     readFile: readRegularFileCapped,

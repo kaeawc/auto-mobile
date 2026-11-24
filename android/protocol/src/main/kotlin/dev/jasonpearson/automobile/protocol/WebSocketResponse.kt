@@ -1157,6 +1157,10 @@ enum class PrototypeEventKind {
   @SerialName("page_changed") PAGE_CHANGED,
   /** A stack changed top or depth: `name` is its id, payload is `{screen, depth}`. */
   @SerialName("screen_changed") SCREEN_CHANGED,
+  /** An inbound link matched: `name` is null, payload is `{url, entry}`. */
+  @SerialName("link_opened") LINK_OPENED,
+  /** An inbound link did not match: `name` is null, payload is `{url}`. */
+  @SerialName("link_unmatched") LINK_UNMATCHED,
   @SerialName("dismissed") DISMISSED,
   /**
    * The resolved light or dark mode of a shown prototype changed (`prototype_appearance_v1`). The

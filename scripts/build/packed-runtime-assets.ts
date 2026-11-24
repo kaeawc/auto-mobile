@@ -18,6 +18,13 @@ export const REQUIRED_PACKED_RUNTIME_ASSETS: readonly string[] = [
   "ios/NetworkShaper/libdns_services.tbd",
   // The vendored shaper source's MIT notice ships with it.
   "ios/NetworkShaper/LICENSE",
+  // The iOS Simulator HID helper is compiled on demand from these (#19118).
+  "ios/sim-hid/Sources/SimHidCore/SimHidCommand.swift",
+  "ios/sim-hid/Sources/SimHidCore/SimHidKeyboard.swift",
+  "ios/sim-hid/Sources/SimHidCore/SimHidPlanner.swift",
+  "ios/sim-hid/Sources/SimHidCore/SimHidServer.swift",
+  "ios/sim-hid/Sources/SimHidHelper/SimulatorKitHIDBackend.swift",
+  "ios/sim-hid/Sources/SimHidHelper/main.swift",
 ];
 
 /**

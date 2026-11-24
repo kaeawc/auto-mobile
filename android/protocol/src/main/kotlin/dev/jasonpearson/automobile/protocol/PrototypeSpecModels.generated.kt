@@ -2237,12 +2237,16 @@ data class PrototypePlatformHandlers(
   val on: Map<String, List<PrototypeAction>>,
 )
 
-/** The root `requires` block (#14294): platform modules, permissions and background needs. */
+/**
+ * The root `requires` block (#14294): platform modules, permissions, background needs and explicit
+ * capabilities.
+ */
 @Serializable
 data class PrototypeRequires(
   val platform: List<String>? = null,
   val permissions: List<PrototypePermissionRequirement>? = null,
   val background: List<String>? = null,
+  val capabilities: List<String> = emptyList(),
 )
 
 /** One declared permission: a canonical [name] and the [purpose] shown to the user. */

@@ -1,3 +1,4 @@
+import { prototypeDeclaredCapabilities } from "./prototypeDeclaredCapabilities";
 import { prototypeDerivedInputs } from "./prototypeDerive";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeMapMarkerAssetsError } from "./prototypeMap";
@@ -936,10 +937,12 @@ function unsupportedCapabilitiesError(
   spec: unknown,
   options: PrototypeStrictOptions,
 ): PrototypeValidationError | undefined {
-  if (options.supportedCapabilities !== undefined && options.requiredCapabilities !== undefined) {
-    const missing = options
-      .requiredCapabilities(spec)
-      .filter((name) => !options.supportedCapabilities?.includes(name));
+  if (options.supportedCapabilities !== undefined) {
+    const required = new Set([
+      ...(options.requiredCapabilities?.(spec) ?? []),
+      ...prototypeDeclaredCapabilities(object(spec)?.requires),
+    ]);
+    const missing = [...required].filter((name) => !options.supportedCapabilities?.includes(name));
     if (missing.length) {
       return { path: "$", message: `Unsupported capabilities: ${missing.join(", ")}` };
     }

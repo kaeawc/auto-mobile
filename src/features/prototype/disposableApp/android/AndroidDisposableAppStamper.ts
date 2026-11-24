@@ -36,6 +36,8 @@ export const ANDROID_ICON_BACKGROUND_COLOR = "prototype_icon_background";
 export interface AndroidDisposableAppStampInput {
   template: AndroidDisposableAppTemplate;
   appId: string;
+  slug: string;
+  extraLinkSchemes?: readonly string[];
   label: string;
   icon?: DisposableAppIcon;
   permissions: readonly string[];
@@ -104,7 +106,9 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
       const signer = await android.signer.signerSha256();
       const key = hash(
         stableStringify({
-          format: 1,
+          format: 2,
+          slug: android.slug,
+          extraLinkSchemes: android.extraLinkSchemes,
           apk: android.template.apkSha256,
           templatePackage: android.template.templatePackage,
           manifest: android.template.manifestXml,
@@ -151,6 +155,7 @@ export class AndroidDisposableAppStamper implements DisposableAppStamper {
     return {
       template: await this.provider.resolve(input.template.name),
       appId: input.appId,
+      slug: input.slug,
       attachToken: input.attachToken,
       allowPhysicalDeviceAttach: input.allowPhysicalDeviceAttach,
       label: input.label,

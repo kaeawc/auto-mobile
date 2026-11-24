@@ -12,7 +12,9 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.MemorySecureStore
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureStorageModule
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.json.*
 import org.junit.After
 import org.junit.Assert.*
@@ -32,6 +34,40 @@ class AutoMobilePrototypeTest {
   }
 
   @After fun close() = host.close()
+
+  @OptIn(dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi::class)
+  @Test
+  fun `cold link initialization holds the same interaction lock as taps before first frame`() {
+    val interactions = Mutex()
+    val embedded = EmbeddedPrototypeHost(host.scope.backgroundScope, interactions, host.dispatcher)
+    val finish = CompletableDeferred<Unit>()
+    var initialized = false
+    embedded.initializeRuntime = { runtime ->
+      assertTrue(interactions.isLocked)
+      assertFalse(interactions.tryLock())
+      runtime.registeredLinkSchemes = listOf("amp-demo")
+      runtime.openLink("amp-demo://post/41")
+      initialized = true
+      finish.await()
+    }
+    compose.setContent {
+      host.Content {
+        ProvideEmbeddedPrototypeHost(embedded) {
+          AutoMobilePrototype(
+            embeddedSpec(
+              """{"type":"text","testTag":"first","text":"Post {postId}"}""",
+              """"requires":["prototype_links_v1"],"state":{"postId":""},"links":[{"path":"/post/{postId}","actions":[{"type":"setState","key":"postId","value":{"link":"postId"}}]}],""",
+            ),
+          )
+        }
+      }
+    }
+    compose.runOnIdle { assertTrue(initialized) }
+    compose.onNodeWithTag("first").assertDoesNotExist()
+    compose.runOnIdle { finish.complete(Unit) }
+    compose.onNodeWithTag("first").assertIsDisplayed()
+    compose.onNodeWithText("Post 41").assertIsDisplayed()
+  }
 
   @Test
   fun `invalid spec draws only error content with canonical validator path`() {

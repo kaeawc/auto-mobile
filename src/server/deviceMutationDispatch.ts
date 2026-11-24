@@ -3,6 +3,7 @@ import { markInternalToolCall } from "../daemon/internalToolCall";
 import type { DeviceMutationRecording } from "./deviceMutationRecording";
 import type { ProgressCallback, RegisteredTool } from "./toolRegistryTypes";
 import { journaledDeviceHandler, sessionDisplayPinnedHandler } from "./pipeline/deviceCallDispatch";
+import { assertDeviceInToolPlatforms } from "./toolPlatformRestriction";
 
 export function invokeRecordedInternalTool(
   tool: RegisteredTool,
@@ -20,6 +21,9 @@ export function invokeRecordedInternalTool(
 ): Promise<unknown> {
   const markedArgs = markInternalToolCall(args);
   if (targetDevice && tool.deviceAwareHandler) {
+    // A step pinned to its device (criticalSection) skips the resolved dispatch, so the typed
+    // platform restriction is enforced here too (#18721).
+    assertDeviceInToolPlatforms(tool.name, tool.platforms, targetDevice);
     const pinnedHandler = sessionDisplayPinnedHandler({
       name: tool.name,
       schema: tool.schema,

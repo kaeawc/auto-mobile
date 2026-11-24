@@ -1,0 +1,335 @@
+{
+  "spec": {
+    "id": "links",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": ["prototype_links_v1"],
+    "root": {
+      "type": "stack",
+      "id": "main",
+      "start": "feed",
+      "screens": {
+        "feed": {
+          "type": "text",
+          "text": "Feed"
+        },
+        "post": {
+          "type": "text",
+          "text": "Post {route.postId}"
+        }
+      },
+      "routes": {
+        "feed": {},
+        "post": {
+          "params": {
+            "postId": "string"
+          }
+        }
+      }
+    },
+    "links": [
+      {
+        "path": "/p0",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p1",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p2",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p3",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p4",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p5",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p6",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p7",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p8",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p9",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p10",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p11",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p12",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p13",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p14",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p15",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p16",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p17",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p18",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p19",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p20",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p21",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p22",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p23",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p24",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p25",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p26",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p27",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p28",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p29",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p30",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p31",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "path": "/p32",
+        "actions": [
+          {
+            "type": "emit",
+            "name": "open"
+          }
+        ]
+      }
+    ]
+  },
+  "expectedPath": "links",
+  "expectedMessage": "Array length out of range"
+}

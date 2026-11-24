@@ -1,7 +1,7 @@
 import { z } from "zod/v4";
 import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { defineDeviceTool } from "./defineTool";
-import { ActionableError, type BootedDevice } from "../models";
+import type { BootedDevice } from "../models";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import {
   defaultAdbClientFactory,
@@ -162,11 +162,6 @@ export const createRotaryScrollHandler =
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
-    if (device.platform !== "android") {
-      throw new ActionableError(
-        "rotaryScroll is Android-only: it drives a Wear OS crown over adb.",
-      );
-    }
     const warning = watchWarning(await checkWatch(device));
     const result = await makeScroller(device).scroll({ delta: args.delta, signal });
     return withIsErrorOnFailure(
@@ -182,6 +177,7 @@ const rotaryScrollTool = defineDeviceTool({
   input: rotaryScrollInput,
   handler: createRotaryScrollHandler(),
   options: {
+    platforms: ["android"],
     ...PLAN_RELEVANT,
     defaultEnabled: false,
     outputSchema: rotaryScrollResultSchema,

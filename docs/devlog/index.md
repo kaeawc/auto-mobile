@@ -21,15 +21,18 @@ regenerates the table below.
 | 2026-11-23 | decision | [Read Simulator network activity with host tools](2026-11-23-simulator-network-activity-host-tools.md) |
 | 2026-11-23 | decision | [Keyboard control through CoreSimulator](2026-11-23-simulator-keyboard-coresimulator.md) |
 | 2026-11-23 | decision | [Simulator Dynamic Island and backlight through defaults and JXA](2026-11-23-simulator-island-and-backlight.md) |
+| 2026-11-23 | decision | [iOS Simulator raw input through a SimulatorKit HID helper, on by default](2026-11-23-simulator-hid-input-default-on.md) |
 | 2026-11-23 | decision | [Capture Simulator video from the device framebuffer](2026-11-23-simulator-framebuffer-capture.md) |
 | 2026-11-23 | decision | [Device-wide camera poster through the launchd environment](2026-11-23-simulator-camera-poster-device-wide.md) |
 | 2026-11-23 | decision | [No consumer keep rule for prototype icons](2026-11-23-prototype-icon-keep-rule.md) |
 | 2026-11-23 | decision | [iOS Simulator network shaping through a boot-injected socket shaper](2026-11-23-ios-simulator-boot-injected-network-shaper.md) |
 | 2026-11-23 | decision | [Generate the devlog index and nav from the entries](2026-11-23-generated-devlog-index.md) |
+| 2026-11-23 | decision | [Driverless simulator audio capture](2026-11-23-driverless-simulator-audio-capture.md) |
 | 2026-11-23 | decision | [Docs readability in the pre-push shell lane](2026-11-23-docs-readability-prepush.md) |
 | 2026-11-21 | decision | [Prototype media runtime placement spike](2026-11-21-prototype-media-runtime-placement-spike.md) |
 | 2026-11-21 | concept | [iOS Simulator audio routing open questions](2026-11-21-ios-simulator-audio-routing-open-questions.md) |
 | 2026-11-20 | decision | [Fixture capture mode](2026-11-20-fixture-capture-mode.md) |
+| 2026-11-19 | decision | [Typed platform restriction for device-aware tools](2026-11-19-typed-tool-platform-restriction.md) |
 | 2026-11-19 | decision | [Committed page bundle and one export budget](2026-11-19-prototype-web-page-bundle.md) |
 | 2026-11-19 | decision | [Per-runtime prototype budgets](2026-11-19-prototype-runtime-budgets.md) |
 | 2026-11-19 | decision | [Material 3 Expressive components drawn from stable primitives](2026-11-19-m3-expressive-stable-primitives.md) |

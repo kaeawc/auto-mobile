@@ -40,7 +40,7 @@ export const DAEMON_ENV = {
     kind: "number",
     default: "900000",
     min: 0,
-    doc: "Idle timeout in ms for an orphaned private daemon; 0 disables the watchdog.",
+    doc: "Idle timeout in ms for an orphaned private daemon; 0 disables only the idle check.",
   },
   PORT_RANGE_START: {
     name: "AUTOMOBILE_PORT_RANGE_START",

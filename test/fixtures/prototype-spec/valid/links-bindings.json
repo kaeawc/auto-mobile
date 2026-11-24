@@ -1,0 +1,49 @@
+{
+  "id": "link-bindings",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": ["prototype_links_v1"],
+  "state": {
+    "postId": ""
+  },
+  "data": {
+    "id": ""
+  },
+  "root": {
+    "type": "text",
+    "text": "Link"
+  },
+  "links": [
+    {
+      "path": "/post/{postId}",
+      "actions": [
+        {
+          "type": "setState",
+          "key": "postId",
+          "value": {
+            "link": "postId"
+          }
+        },
+        {
+          "type": "emit",
+          "name": "received",
+          "context": {
+            "id": {
+              "link": "postId"
+            }
+          }
+        },
+        {
+          "type": "setData",
+          "path": "/data/id",
+          "value": {
+            "link": "postId"
+          }
+        }
+      ]
+    }
+  ]
+}

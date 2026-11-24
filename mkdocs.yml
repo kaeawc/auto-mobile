@@ -526,15 +526,18 @@ nav:
       - "2026-11-23: Read Simulator network activity with host tools": devlog/2026-11-23-simulator-network-activity-host-tools.md
       - "2026-11-23: Keyboard control through CoreSimulator": devlog/2026-11-23-simulator-keyboard-coresimulator.md
       - "2026-11-23: Simulator Dynamic Island and backlight through defaults and JXA": devlog/2026-11-23-simulator-island-and-backlight.md
+      - "2026-11-23: iOS Simulator raw input through a SimulatorKit HID helper, on by default": devlog/2026-11-23-simulator-hid-input-default-on.md
       - "2026-11-23: Capture Simulator video from the device framebuffer": devlog/2026-11-23-simulator-framebuffer-capture.md
       - "2026-11-23: Device-wide camera poster through the launchd environment": devlog/2026-11-23-simulator-camera-poster-device-wide.md
       - "2026-11-23: No consumer keep rule for prototype icons": devlog/2026-11-23-prototype-icon-keep-rule.md
       - "2026-11-23: iOS Simulator network shaping through a boot-injected socket shaper": devlog/2026-11-23-ios-simulator-boot-injected-network-shaper.md
       - "2026-11-23: Generate the devlog index and nav from the entries": devlog/2026-11-23-generated-devlog-index.md
+      - "2026-11-23: Driverless simulator audio capture": devlog/2026-11-23-driverless-simulator-audio-capture.md
       - "2026-11-23: Docs readability in the pre-push shell lane": devlog/2026-11-23-docs-readability-prepush.md
       - "2026-11-21: Prototype media runtime placement spike": devlog/2026-11-21-prototype-media-runtime-placement-spike.md
       - "2026-11-21: iOS Simulator audio routing open questions": devlog/2026-11-21-ios-simulator-audio-routing-open-questions.md
       - "2026-11-20: Fixture capture mode": devlog/2026-11-20-fixture-capture-mode.md
+      - "2026-11-19: Typed platform restriction for device-aware tools": devlog/2026-11-19-typed-tool-platform-restriction.md
       - "2026-11-19: Committed page bundle and one export budget": devlog/2026-11-19-prototype-web-page-bundle.md
       - "2026-11-19: Per-runtime prototype budgets": devlog/2026-11-19-prototype-runtime-budgets.md
       - "2026-11-19: Material 3 Expressive components drawn from stable primitives": devlog/2026-11-19-m3-expressive-stable-primitives.md

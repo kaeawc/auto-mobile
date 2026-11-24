@@ -352,7 +352,7 @@ function writtenData(
 
 type PrototypeRuntimeFlatValue = Exclude<
   PrototypeDataActionValue,
-  { item: string } | { index: true }
+  { item: string } | { index: true } | { link: string }
 >;
 
 /**

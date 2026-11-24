@@ -34,6 +34,7 @@ export const prototypeReadBindingSchema = z.union([
 const prototypeExistingDataValueSchema = z.union([
   ...prototypeReadBindingSchema.options,
   z.object({ value: prototypeJsonSchema }).strict(),
+  z.object({ link: keySchema }).strict(),
 ]);
 /** Every value binding except `{derived}`: generated, read and the `{value}` literal forms. */
 export const prototypeValueBindingSchema = z.union([
@@ -181,6 +182,7 @@ export const setStateValueSchema = z.union([
   z.number().finite(),
   z.boolean(),
   prototypeMatchBindingSchema,
+  z.object({ link: keySchema }).strict(),
   z.object({ event: z.union([z.literal(""), pointerSchema]) }).strict(),
   z.object({ platform: pointerSchema }).strict(),
 ]);

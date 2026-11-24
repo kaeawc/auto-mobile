@@ -32,6 +32,8 @@ export interface ToolRequirementSource {
   name: string;
   /** Device-aware: dispatched through the registry's platform gate. */
   requiresDevice?: boolean;
+  /** The tool's typed platform restriction (#18721), enforced at the same dispatch. */
+  platforms?: readonly Platform[];
   embeddedSdkOnly?: boolean;
   debugOnly?: boolean;
   /** Feature flags whose refusal the tool's handler returns (`featureFlagDisabledMessage`). */
@@ -56,17 +58,19 @@ function schemaPlatformVocabulary(inputSchema: Record<string, unknown>): Set<str
 /**
  * The platforms a device-aware tool can drive: those the registry's platform gate admits
  * (`assertToolSupportsDevicePlatform`: Android and iOS always, other Apple platforms by opting in
- * to `APPLE_PLATFORM_SUPPORTED_TOOLS`), narrowed to the input schema's `platform` vocabulary.
+ * to `APPLE_PLATFORM_SUPPORTED_TOOLS`), narrowed to the tool's typed `platforms` restriction
+ * (`assertDeviceInToolPlatforms`) and the input schema's `platform` vocabulary.
  */
 function devicePlatforms(
-  name: string,
+  tool: ToolRequirementSource,
   inputSchema: Record<string, unknown>,
   supportedTools: PlatformTable,
 ): Platform[] {
   const vocabulary = schemaPlatformVocabulary(inputSchema);
   return PLATFORM_ORDER.filter(
     (platform) =>
-      (isAndroidOrIosPlatform(platform) || supportedTools[platform].has(name)) &&
+      (isAndroidOrIosPlatform(platform) || supportedTools[platform].has(tool.name)) &&
+      (tool.platforms === undefined || tool.platforms.includes(platform)) &&
       (vocabulary === undefined || vocabulary.has(platform)),
   );
 }
@@ -88,7 +92,7 @@ export function deriveToolRequirements(
     requirements.push(`featureFlag:${flag}`);
   }
   if (tool.requiresDevice) {
-    for (const platform of devicePlatforms(tool.name, inputSchema, supportedTools)) {
+    for (const platform of devicePlatforms(tool, inputSchema, supportedTools)) {
       requirements.push(`platform:${platform}`);
     }
   }

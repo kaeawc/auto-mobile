@@ -22,6 +22,7 @@ import type { Environment } from "../daemon/poolConfig";
 
 import { type Timer } from "../utils/SystemTimer";
 import type { FeatureFlagKey } from "../models/FeatureFlagDefinitions";
+import type { ToolPlatforms } from "./toolPlatformRestriction";
 
 import type { SessionToolSelectionService } from "../features/toolSelection/SessionToolSelectionService";
 import type { RequestDeadline } from "../features/toolSelection/toolSelectionContext";
@@ -369,6 +370,12 @@ export interface DeviceAwareToolOptions<T = Record<string, unknown>>
   sessionlessDeviceRead?: SessionlessDeviceRead;
   deviceReadiness?: DeviceReadinessLevel | ((args: T) => DeviceReadinessLevel);
   nonDeviceHandler?: ToolHandler<T>;
+  /**
+   * The only platforms the handler can drive (#18721). The registry refuses any other device
+   * before the handler runs, and `requires` lists only these platforms. Omit when every platform
+   * the platform gate admits works for some call.
+   */
+  platforms?: ToolPlatforms;
   embeddedSdkOnly?: boolean;
   /** Tool-specific guidance appended to the embedded-SDK gate reason (#17528). */
   embeddedSdkGateHint?: string;
@@ -418,6 +425,8 @@ export interface RegisteredTool extends ToolTraits {
   /** See {@link ToolRegistrationOptions.featureFlags}. */
   featureFlags?: readonly FeatureFlagKey[];
   hidden?: boolean;
+  /** See {@link DeviceAwareToolOptions.platforms}. */
+  platforms?: ToolPlatforms;
   embeddedSdkOnly?: boolean;
   /** Tool-specific guidance appended to the embedded-SDK gate reason (#17528). */
   embeddedSdkGateHint?: string;
@@ -445,6 +454,25 @@ export function availabilityGateMetadata(
   return {
     debugOnly: options.debugOnly ?? false,
     ...(options.featureFlags?.length ? { featureFlags: options.featureFlags } : {}),
+  };
+}
+
+/** The device-aware registration path's platform, embedded-SDK and plan gate fields. */
+export function deviceAwareGateMetadata(
+  options: Pick<
+    DeviceAwareToolOptions,
+    "platforms" | "embeddedSdkOnly" | "embeddedSdkGateHint" | "planExecutable" | "planOnly"
+  >,
+): Pick<
+  RegisteredTool,
+  "platforms" | "embeddedSdkOnly" | "embeddedSdkGateHint" | "planExecutable" | "planOnly"
+> {
+  return {
+    ...(options.platforms ? { platforms: options.platforms } : {}),
+    embeddedSdkOnly: options.embeddedSdkOnly ?? false,
+    ...(options.embeddedSdkGateHint ? { embeddedSdkGateHint: options.embeddedSdkGateHint } : {}),
+    planExecutable: options.planExecutable ?? false,
+    planOnly: options.planOnly ?? false,
   };
 }
 

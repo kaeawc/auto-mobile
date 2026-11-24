@@ -358,7 +358,10 @@ export type ResolvedPrototypeRequestResult =
       error: { code: "invalid_request" | "invalid_url" | "lastGenerated_unset"; message: string };
     };
 
-type RuntimeBinding = Exclude<PrototypeDataActionValue, { item: string } | { index: true }>;
+type RuntimeBinding = Exclude<
+  PrototypeDataActionValue,
+  { item: string } | { index: true } | { link: string }
+>;
 const isBinding = (value: unknown): value is RuntimeBinding =>
   typeof value === "object" && value !== null;
 

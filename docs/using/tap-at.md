@@ -10,8 +10,14 @@ uses 0–100. Alternatively, pass `image` with a screenshot-relative point and i
 image metadata.
 
 On iOS, a successful tap with a post-tap observation includes `effect: { screenChanged, basis }`, comparing observations for evidence of a screen change.
-On iOS, `dispatchRoute` is the runner-reported route, such as `xcuiCoordinate` or `displayTargetedRecord`. It is omitted when unreported.
+On iOS, `dispatchRoute` names the route that took the tap. The runner reports routes such as `xcuiCoordinate` or `displayTargetedRecord`. It is omitted when unreported.
 The `tapOn` tool reports the same optional `dispatchRoute` for iOS coordinate taps, double taps and long presses. It is omitted for taps performed by VoiceOver activation or the SDK bridge.
+
+On an iOS Simulator held upright in portrait, taps and long presses go to the simulator's own touch input, and `dispatchRoute` is `simulatorHid`. They skip the runner's idle wait and its stale-frame check. A tap within 3 seconds of a launch waits for the rest of those 3 seconds.
+
+Double taps, taps on a named display, landscape and upside-down screens use the runner. The runner also takes taps while the input helper starts or is unavailable. These runner taps keep the idle wait and the stale-frame check. If the runner cannot be reached, the tap waits for the helper to start and uses it.
+
+If Xcode cannot compile the helper, input uses the runner and the build is not retried for 30 minutes. Other build failures, such as a failed `codesign` or `xcrun` call, retry after 30 seconds. Ending the device session also clears the wait. Set `AUTOMOBILE_DISABLE_IOS_SIM_HID=1` to always use the runner.
 
 On visionOS, `tapAt` takes one tap at absolute window points; see [Apple Vision Pro simulator](visionos-simulator.md#tap-swipe-and-press-home).
 

@@ -5,7 +5,7 @@ import type { IosLockStateInvalidator } from "../observe/ios/CachedIosLockStateP
 import type { DispatchedRequestHold } from "../../daemon/dispatchedRequestHold";
 import type { IOSDispatchResult } from "../observe/ios/CtrlProxyDispatch";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
-import { ActionableError, unsupportedPlatformError } from "../../models/ActionableError";
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import { typedRefusalFields } from "../../models/typedRefusalFields";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -21,6 +21,9 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { resolveIosHomeBackend } from "../../utils/ios-cmdline-tools/IosHomeBackend";
 import { isNavigationPressButton, resolveAndroidKeyCode } from "./pressButtonPolicy";
+import { indeterminatePressResult, rejectStepsOnPlainButton } from "./pressButtonResults";
+import type { IosSimulatorRawInput } from "../../utils/ios/simHid/IosSimulatorRawInput";
+import { heldRawInput, resolveIosRawInput, routeSimulatorPowerPress } from "./simHidRouting";
 import { holdDurationOf, prepareAndroidKeyevent, rejectUnsupportedHold } from "./androidKeyHold";
 import {
   acceptIosHomeAlreadyOnSpringboard,
@@ -77,18 +80,6 @@ export interface PressButtonCtrlProxyOverrides {
   templateBackTapClient?: TemplateHostBackTapClient;
 }
 
-/** `steps` only counts rotary detents; passing it with another button is a mistake worth refusing. */
-function rejectStepsOnPlainButton(button: string, call: unknown): undefined {
-  const steps =
-    typeof call === "object" && call !== null ? (call as PressButtonCall).steps : undefined;
-  if (steps !== undefined) {
-    throw new ActionableError(
-      `steps applies to rotary_rotate_cw and rotary_rotate_ccw only, not ${button}.`,
-    );
-  }
-  return undefined;
-}
-
 /** `ActionCall` for pressButton: also carries the rotary step count (#14920) and hold duration (#16734). */
 export interface PressButtonCall extends ActionCall {
   steps?: number;
@@ -98,28 +89,14 @@ export interface PressButtonCall extends ActionCall {
   display?: string;
 }
 
-/** A dispatched press whose outcome was never confirmed: replaying it could apply it twice. */
-function indeterminatePressResult(
-  button: string,
-  keyCode: number,
-  reason: string | undefined,
-): PressButtonResult {
-  return {
-    success: false,
-    button,
-    keyCode,
-    code: "indeterminate_outcome",
-    retryable: false,
-    error: `Button press outcome is indeterminate: the request was dispatched but no result was confirmed (${reason ?? "unknown error"}). The press may have been applied. Do not retry automatically. Observe before retrying.`,
-  };
-}
-
 /** Display-fence collaborators, CtrlProxy overrides and the iOS/dispatch seams; all optional. */
 export type PressButtonCollaborators = DisplayFenceDependencies &
   PressButtonCtrlProxyOverrides & {
     simctl?: Pick<SimCtl, "executeCommandArgs">;
     holdRequest?: DispatchedRequestHold;
     displayResolver?: PressButtonDisplayResolver;
+    /** The iOS Simulator HID route for power and home (#19118); `null` disables it. */
+    iosRawInput?: IosSimulatorRawInput | null;
   };
 
 /** Per-press dispatch inputs threaded through the platform helpers (#11835). */
@@ -144,6 +121,7 @@ export class PressButton extends BaseVisualChange {
   private readonly systemActionClient?: PressButtonCtrlProxyOverrides["systemActionClient"];
   private readonly deviceTraits?: DeviceTraits;
   private readonly templateBackTapClient?: TemplateHostBackTapClient;
+  private readonly iosRawInput?: IosSimulatorRawInput;
   private readonly simctl: Pick<SimCtl, "executeCommandArgs">;
   private readonly holdRequest?: DispatchedRequestHold;
   private readonly displayResolver?: PressButtonDisplayResolver;
@@ -165,6 +143,7 @@ export class PressButton extends BaseVisualChange {
     this.systemActionClient = collaborators.systemActionClient;
     this.deviceTraits = collaborators.deviceTraits;
     this.templateBackTapClient = collaborators.templateBackTapClient;
+    this.iosRawInput = resolveIosRawInput(device, collaborators.iosRawInput);
   }
 
   private iosLockStateInvalidator?: IosLockStateInvalidator;
@@ -220,6 +199,13 @@ export class PressButton extends BaseVisualChange {
     }
     const request = send(signal, () => onDispatch?.());
     return liveWait ? awaitWhileRequestIsLive(request, signal) : request;
+  }
+
+  /** The HID route under the runner's request hold (#19118); see {@link heldRawInput}. */
+  private heldIosRawInput(timeoutMs?: number, onDispatch?: () => void) {
+    return heldRawInput(this.iosRawInput, onDispatch, (signal, send, marks) =>
+      this.awaitDispatchedRequest(signal, timeoutMs, send, { onDispatch: marks }),
+    );
   }
 
   async execute(button: string, call?: PressButtonCall): Promise<PressButtonResult>;
@@ -852,19 +838,27 @@ export class PressButton extends BaseVisualChange {
       PressButton.IOS_HARDWARE_BUTTONS.has(normalizedButton)
     ) {
       const client = IOSCtrlProxyClient.getInstance(this.device);
-      const result = PressButton.IOS_NAVIGATION_BUTTONS.has(normalizedButton)
-        ? await this.executeiOSNavigationButton(client, normalizedButton, dispatch)
-        : await this.awaitDispatchedRequest(
-            signal,
-            timeoutMs,
-            (fenced, dispatch) =>
-              client.requestPressButton(normalizedButton, timeoutMs, undefined, {
-                frameContext,
-                signal: fenced,
-                onDispatch: dispatch,
-              }),
-            { onDispatch },
-          );
+      const pressRunner = (onRunnerDispatch = onDispatch) =>
+        PressButton.IOS_NAVIGATION_BUTTONS.has(normalizedButton)
+          ? this.executeiOSNavigationButton(client, normalizedButton, {
+              ...dispatch,
+              onDispatch: onRunnerDispatch,
+            })
+          : this.awaitDispatchedRequest(
+              signal,
+              timeoutMs,
+              (fenced, dispatch) =>
+                client.requestPressButton(normalizedButton, timeoutMs, undefined, {
+                  frameContext,
+                  signal: fenced,
+                  onDispatch: dispatch,
+                }),
+              { onDispatch: onRunnerDispatch },
+            );
+      const heldInput = normalizedButton === "power" ? this.heldIosRawInput(timeoutMs) : undefined;
+      const result = heldInput
+        ? await routeSimulatorPowerPress(heldInput, dispatch, pressRunner)
+        : await pressRunner();
       this.assertHeldRequestLive(signal);
       onRecentAppsRoute?.((result as { recentAppsRoute?: string }).recentAppsRoute);
       return result.success
@@ -903,6 +897,7 @@ export class PressButton extends BaseVisualChange {
                 adb: null,
                 timer: this.timer,
                 simctl: this.simctl,
+                collaborators: { iosRawInput: this.iosRawInput ?? null },
               }).executeIosHomeNavigation({
                 frameContext,
                 timeoutMs,
@@ -936,6 +931,7 @@ export class PressButton extends BaseVisualChange {
               adb: null,
               timer: this.timer,
               simctl,
+              collaborators: { iosRawInput: this.heldIosRawInput(timeoutMs, onDispatch) ?? null },
             }).executeIosHomeNavigation({
               frameContext,
               timeoutMs,

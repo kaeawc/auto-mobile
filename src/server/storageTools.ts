@@ -572,11 +572,6 @@ async function listDataStoresHandler(
   args: ListDataStoresArgs,
   deps: StorageToolsDependencies,
 ) {
-  if (device.platform !== "android") {
-    throw new ActionableError(
-      `listDataStores is Android-only; DataStore is not available on ${device.platform}.`,
-    );
-  }
   try {
     const client = deps.androidClientFactory(device);
     const stores = await client.listDataStores(args.appId, args.adapterName);
@@ -603,11 +598,6 @@ async function getDataStoreHandler(
   args: GetDataStoreArgs,
   deps: StorageToolsDependencies,
 ) {
-  if (device.platform !== "android") {
-    throw new ActionableError(
-      `getDataStore is Android-only; DataStore is not available on ${device.platform}.`,
-    );
-  }
   try {
     const client = deps.androidClientFactory(device);
     const entries = await client.getDataStore(args.appId, args.adapterName, args.name);
@@ -665,6 +655,7 @@ export function registerStorageTools(overrides: Partial<StorageToolsDependencies
     "List app Jetpack DataStore instances (Android, requires AutoMobile SDK adapter).",
     listDataStoresSchema,
     {
+      platforms: ["android"],
       handler: (device, args) => listDataStoresHandler(device, args, deps),
       defaultEnabled: false,
       outputSchema: listDataStoresResultSchema,
@@ -679,6 +670,7 @@ export function registerStorageTools(overrides: Partial<StorageToolsDependencies
     "Read entries from an app Jetpack DataStore instance (Android, requires AutoMobile SDK adapter).",
     getDataStoreSchema,
     {
+      platforms: ["android"],
       handler: (device, args) => getDataStoreHandler(device, args, deps),
       defaultEnabled: false,
       outputSchema: getDataStoreResultSchema,

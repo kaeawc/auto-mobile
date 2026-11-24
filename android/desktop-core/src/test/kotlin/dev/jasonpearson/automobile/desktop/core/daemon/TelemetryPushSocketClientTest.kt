@@ -271,8 +271,8 @@ class TelemetryPushSocketClientTest {
   /**
    * A socket whose read blocks until it is interrupted or, when [closeReleasesRead] is true, until
    * it is closed. disconnect() interrupts the reader and closes the socket back to back, so a test
-   * that must observe the interrupt passes `closeReleasesRead = false`: otherwise a close that lands
-   * before the reader parks lets CountDownLatch.await() acquire the released latch and return
+   * that must observe the interrupt passes `closeReleasesRead = false`: otherwise a close that
+   * lands before the reader parks lets CountDownLatch.await() acquire the released latch and return
    * normally without ever throwing InterruptedException (#19101).
    */
   private class SilentFakeSocket(

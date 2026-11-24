@@ -118,6 +118,11 @@ updates:
       - "dependencies"
     commit-message:
       prefix: "chore(deps)"
+    # Owner decision 2026-11-24: stay on setup-gradle v5. v6 moves its caching into a
+    # closed-source component under the Gradle Terms of Use.
+    ignore:
+      - dependency-name: "gradle/actions*"
+        update-types: ["version-update:semver-major"]
     groups:
       github-actions:
         patterns:

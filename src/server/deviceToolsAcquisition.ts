@@ -779,17 +779,25 @@ function getAndroidTarget(
   };
 }
 
-/** The booted device a bare, requirement-free getAndroid hands back to its session (#19153). */
+/**
+ * The booted device a bare, requirement-free getAndroid hands back to its session (#19153).
+ * The lookup observes the request signal, so a cancelled call does not wait for discovery (#19156).
+ */
 async function getAndroidSessionDevice(
   args: GetAndroidParsedArgs,
   requesterSessionUuid: string | undefined,
+  signal: AbortSignal,
 ): Promise<string | undefined> {
   if (args.avdName || args.deviceId || hasDefinedRequirement(args.requires)) {
     return undefined;
   }
   const deps = getDeviceToolsDependencies();
-  return await sessionHeldAndroidDevice(requesterSessionUuid, deps.daemonState, () =>
-    deps.deviceManagerFactory().getBootedDevices("android"),
+  return await raceWithDeadline(
+    () =>
+      sessionHeldAndroidDevice(requesterSessionUuid, deps.daemonState, () =>
+        deps.deviceManagerFactory().getBootedDevices("android"),
+      ),
+    { timer: deps.timer, signal, label: "getAndroid session-device lookup" },
   );
 }
 
@@ -816,7 +824,11 @@ async function getAndroidHandler(
     {
       operationName: "getAndroid",
       operation: async (deadlineMs, requestSignal, stage) => {
-        const sessionDeviceId = await getAndroidSessionDevice(args, requester.sessionUuid);
+        const sessionDeviceId = await getAndroidSessionDevice(
+          args,
+          requester.sessionUuid,
+          requestSignal,
+        );
         return await prepareSelectedAndroidDevice(namesNoDevice, () =>
           prepareDevice(
             getAndroidTarget(args, requester, sessionDeviceId),

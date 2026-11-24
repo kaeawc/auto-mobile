@@ -4,7 +4,7 @@ import type { ViewHierarchyNode } from "../../../../models/ViewHierarchyResult";
 import { projectSkeletonElement } from "../SkeletonProjection";
 import { SearchableHierarchy, type SearchableEntry } from "../../../utility/SearchableNode";
 import { GENERATED_VIEW_ID_PATTERN } from "../../android/StableNodeIdentity";
-import { boundsKey, flattenForDiff, isIosObservation, groupByKey } from "./hierarchy";
+import { boundsKey, flattenForDiff, isIosObservation, groupByKey, toNodeArray } from "./hierarchy";
 import {
   type ObserveDiffSelector,
   type ObserveDiffNode,
@@ -12,6 +12,7 @@ import {
   type ObserveDiffNodeSummary,
   type ObserveDiffRelayout,
   MAX_DIFF_SUMMARY_LABELS,
+  MAX_DIFF_SUMMARY_LABEL_LENGTH,
   type ObserveDiff,
   type DiffObserveConfig,
   type FlatObserveNode,
@@ -26,6 +27,7 @@ import {
   selectorGroupKey,
 } from "./diffSelectors";
 import { diffAttributes, appendFieldChanges } from "./diffComparison";
+import { truncateBodyText } from "../../../../utils/truncateBodyText";
 
 /**
  * A node's *stable content* identity key (issue #3053): `resource-id / view-id /
@@ -57,6 +59,50 @@ function contentIdentityKey(attrs: Record<string, unknown>): string | null {
 /** Attributes whose flip a client reads as "this control was toggled". */
 const DIFF_STATE_ATTRS: readonly string[] = ["checked", "selected", "state-description"];
 
+function hasOwnLabel(attributes: Record<string, unknown>): boolean {
+  return String(attributes["text"] ?? "") !== "" || String(attributes["content-desc"] ?? "") !== "";
+}
+
+/** Ancestors searched for a label-less control's row title. */
+const ROW_TITLE_MAX_ANCESTORS = 3;
+
+/** Labels in `node`'s subtree, skipping the `exclude` subtree. */
+function subtreeLabels(
+  node: ViewHierarchyNode,
+  exclude: ViewHierarchyNode,
+  labels: string[],
+): string[] {
+  if (node === exclude) {
+    return labels;
+  }
+  const attributes: Record<string, unknown> = node;
+  for (const field of ["text", "content-desc"]) {
+    const value = String(attributes[field] ?? "");
+    if (value !== "") {
+      labels.push(value);
+    }
+  }
+  toNodeArray(node.node).forEach((child) => subtreeLabels(child, exclude, labels));
+  return labels;
+}
+
+/**
+ * The title of the row a label-less control sits in: the labels of the nearest
+ * ancestor (within {@link ROW_TITLE_MAX_ANCESTORS}) whose subtree holds any
+ * outside the control itself. Empty when no such ancestor has a label.
+ */
+function rowTitle(node: DiffRepairNode): string {
+  let ancestor = node.parent;
+  for (let depth = 0; ancestor && node.source && depth < ROW_TITLE_MAX_ANCESTORS; depth++) {
+    const labels = subtreeLabels(ancestor.source, node.source, []);
+    if (labels.length > 0) {
+      return labels.join("\0");
+    }
+    ancestor = ancestor.parent;
+  }
+  return "";
+}
+
 /**
  * A control that carries no label of its own (no text, no content-desc) is
  * identified only by a resource id that sibling rows share (`switchWidget`), so
@@ -65,19 +111,23 @@ const DIFF_STATE_ATTRS: readonly string[] = ["checked", "selected", "state-descr
  * pair as one switch whose state flipped asserts a toggle that never happened
  * (#11638); leave it as removed + added instead.
  *
- * A pair that has not moved is the exception (#19122): a list relayout that
- * resizes an ancestor re-keys every row under it, and the one control with that
- * id left in exactly the same place is the same control, so its flip is real.
- * The caller already requires the id to be unique on both sides.
+ * A pair that has not moved and sits in a row with the same title is the
+ * exception (#19122): a list relayout that resizes an ancestor re-keys every row
+ * under it, and the one control with that id left in exactly the same place in
+ * the same row is the same control, so its flip is real. Two sub-screens can
+ * each place one switch at the same bounds, so the title must match too
+ * (#19145). The caller already requires the id to be unique on both sides.
  */
 function isUnlabelledStateFlip(
-  attributes: Record<string, unknown>,
+  removedNode: DiffRepairNode,
+  addedNode: DiffRepairNode,
   attrChanges: Record<string, unknown>,
 ): boolean {
-  const labelled =
-    String(attributes["text"] ?? "") !== "" || String(attributes["content-desc"] ?? "") !== "";
-  const samePlace = !("bounds" in attrChanges) && boundsKey(attributes.bounds) !== "";
-  return !labelled && !samePlace && DIFF_STATE_ATTRS.some((attr) => attr in attrChanges);
+  if (hasOwnLabel(addedNode.attributes) || !DIFF_STATE_ATTRS.some((attr) => attr in attrChanges)) {
+    return false;
+  }
+  const samePlace = !("bounds" in attrChanges) && boundsKey(addedNode.attributes.bounds) !== "";
+  return !samePlace || rowTitle(removedNode) !== rowTitle(addedNode);
 }
 
 /** Index leftover diff nodes by their content-identity key, dropping keyless nodes. */
@@ -130,7 +180,7 @@ function repairByContentIdentity(
     const addedNode = added[addedIndices[0]];
     const removedNode = removed[removedIndices[0]];
     const attrChanges = diffAttributes(removedNode.attributes, addedNode.attributes);
-    if (isUnlabelledStateFlip(addedNode.attributes, attrChanges)) {
+    if (isUnlabelledStateFlip(removedNode, addedNode, attrChanges)) {
       continue;
     }
     consumedAdded.add(addedIndices[0]);
@@ -501,10 +551,19 @@ function diffNodeSummaryLabel(attributes: Record<string, unknown>): string | und
   );
 }
 
+/** `label` cut to {@link MAX_DIFF_SUMMARY_LABEL_LENGTH}, ending in an ellipsis when cut. */
+function capSummaryLabel(label: string): string {
+  if (label.length <= MAX_DIFF_SUMMARY_LABEL_LENGTH) {
+    return label;
+  }
+  return `${truncateBodyText(label, MAX_DIFF_SUMMARY_LABEL_LENGTH - 1) ?? ""}…`;
+}
+
 /**
  * What an `added` or `removed` list held, for the wire diff that drops the list
  * itself (#11637 item 2, #19122): its count and up to
- * {@link MAX_DIFF_SUMMARY_LABELS} distinct labels. `undefined` for an empty list.
+ * {@link MAX_DIFF_SUMMARY_LABELS} distinct labels, each capped to
+ * {@link MAX_DIFF_SUMMARY_LABEL_LENGTH}. `undefined` for an empty list.
  */
 export function summarizeDiffNodes(
   nodes: readonly ObserveDiffNode[],
@@ -516,7 +575,8 @@ export function summarizeDiffNodes(
     ...new Set(
       nodes
         .map((node) => diffNodeSummaryLabel(node.attributes))
-        .filter((label): label is string => label !== undefined),
+        .filter((label): label is string => label !== undefined)
+        .map(capSummaryLabel),
     ),
   ].slice(0, MAX_DIFF_SUMMARY_LABELS);
   return { count: nodes.length, ...(labels.length > 0 ? { labels } : {}) };
@@ -654,6 +714,8 @@ function collectPositionalNodeDiffs({
         key: nextNodes[i].key,
         attributes: nextNodes[i].attributes,
         ancestorClasses: nextNodes[i].ancestorClasses,
+        source: nextNodes[i].source,
+        ...(nextNodes[i].parent ? { parent: nextNodes[i].parent } : {}),
       });
     }
     for (let i = paired; i < baseNodes.length; i++) {
@@ -662,6 +724,8 @@ function collectPositionalNodeDiffs({
         key: baseNodes[i].key,
         attributes: baseNodes[i].attributes,
         ancestorClasses: baseNodes[i].ancestorClasses,
+        source: baseNodes[i].source,
+        ...(baseNodes[i].parent ? { parent: baseNodes[i].parent } : {}),
       });
     }
   }

@@ -75,7 +75,8 @@ class SimulatorHost extends FakeHostCommandExecutor {
       const inserted = options?.env?.SIMCTL_CHILD_DYLD_INSERT_LIBRARIES ?? "";
       this.shaped =
         this.bootInjects &&
-        inserted.split(":")[0] === DYLIB &&
+        // A prefix check, not split(":"): on Windows the fixture paths carry a drive letter.
+        (inserted === DYLIB || inserted.startsWith(`${DYLIB}:`)) &&
         options?.env?.SIMCTL_CHILD_SIM_RS_NETSHAPE === PROFILE;
       this.inserted = inserted;
     }

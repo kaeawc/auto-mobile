@@ -32,6 +32,30 @@ private final class Completion: @unchecked Sendable {
     }
 }
 
+/// A stop flag that wakes any wait in progress. NSCondition guards `stopped`.
+private final class Interruption: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var stopped = false
+
+    func interrupt() {
+        condition.lock()
+        defer { condition.unlock() }
+        stopped = true
+        condition.broadcast()
+    }
+
+    /// Waits up to `milliseconds`; false when interrupted before or during the wait.
+    func wait(milliseconds: Double) -> Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        let deadline = Date(timeIntervalSinceNow: milliseconds / 1000)
+        while !stopped {
+            if !condition.wait(until: deadline) { return !stopped }
+        }
+        return false
+    }
+}
+
 /// Host-side HID input through SimulatorKit's SimDeviceLegacyHIDClient (#19019). Needs no XCTest
 /// runner in the guest; the same client Simulator.app and carplay-power-helper use.
 final class SimulatorKitHIDBackend: SimHidSender {
@@ -56,6 +80,7 @@ final class SimulatorKitHIDBackend: SimHidSender {
     private let button: Button
     private let key: Key
     private let queue = DispatchQueue(label: "auto-mobile.sim-hid.completion")
+    private let interruption = Interruption()
 
     init(udid: String) throws {
         let developerDir = try Self.developerDirectory()
@@ -90,13 +115,17 @@ final class SimulatorKitHIDBackend: SimHidSender {
         case let .key(usage, down):
             try deliver(key(usage, down ? 1 : 2), "key")
         case let .wait(ms):
-            sleep(milliseconds: ms)
+            _ = sleep(milliseconds: ms)
         }
     }
 
-    func sleep(milliseconds: Double) {
-        guard milliseconds > 0 else { return }
-        usleep(UInt32(min(milliseconds, SimHidRequestParser.maxDurationMs) * 1000))
+    func sleep(milliseconds: Double) -> Bool {
+        interruption.wait(milliseconds: min(max(milliseconds, 0), SimHidRequestParser.maxDurationMs))
+    }
+
+    /// Ends the current and every later wait, so a command in progress releases its input (#19163).
+    func interrupt() {
+        interruption.interrupt()
     }
 
     func nowMs() -> Double {

@@ -5,13 +5,31 @@ import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { ActionableError } from "../../models";
-import { PressButton } from "./PressButton";
+import { PressButton, type PressButtonCollaborators } from "./PressButton";
 import type { SwipeOnDependencies } from "./swipeon/types";
 import { SwipeOn } from "./swipeon/SwipeOn";
 import type { IosScreenUnlocker, IosUnlockOptions } from "./WakeAndUnlock";
 import { isRunnerDeadlineCompletedLate } from "../observe/ios/runnerErrorCodes";
 
 const PRE_SWIPE_LOCK_PROBE_MAX_MS = 1_500;
+
+type HomePress = Pick<PressButton, "press">;
+
+/**
+ * The wake press. On a simulator it skips the HID helper (#19164): a hardware Home press on a
+ * display the lock button turned off only wakes it to the lock screen, while the SpringBoard
+ * launch HomeScreen falls back to dismisses a passcode-less lock screen in one step.
+ */
+export function iosUnlockHomePress(
+  device: BootedDevice,
+  createPress: (device: BootedDevice, collaborators: PressButtonCollaborators) => HomePress = (
+    d,
+    collaborators,
+  ) => new PressButton(d, null, defaultTimer, collaborators),
+): IosUnlockActions["pressHome"] {
+  return (timeoutMs, signal) =>
+    createPress(device, { iosRawInput: null }).press("home", { timeoutMs, signal });
+}
 
 export interface IosUnlockActions {
   pressHome(timeoutMs: number, signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;
@@ -49,8 +67,7 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
     this.actions = actions ?? {
       // press() skips execute()'s observedInteraction, but simulator Home still
       // verifies foreground through a runner hierarchy read.
-      pressHome: (timeoutMs, signal) =>
-        new PressButton(device).press("home", { timeoutMs, signal }),
+      pressHome: iosUnlockHomePress(device),
       swipeUp: (timeoutMs, options) => {
         const deadline = this.timer.now() + timeoutMs;
         return createSwipe(device, {

@@ -36,8 +36,12 @@ export interface SimHidProcessLauncher {
 
 /** Cold start measured 0.2–1.4 s on a loaded host (#19019); allow headroom. */
 export const SIM_HID_STARTUP_TIMEOUT_MS = 10_000;
-/** The helper exits on stdin EOF once its current command finishes; a hung one is killed. */
-export const SIM_HID_STOP_GRACE_MS = 500;
+/**
+ * The helper exits on stdin EOF after releasing held input; each release can wait up to 5 s for
+ * SimulatorKit, so the grace covers that ceiling before a hung helper is killed (#19163). Stop is
+ * fire-and-forget, so the grace never delays a request.
+ */
+export const SIM_HID_STOP_GRACE_MS = 6_000;
 
 /** Owns only the exact child handle it spawned, never a process-name lookup. */
 export class DefaultSimHidProcessLauncher implements SimHidProcessLauncher {

@@ -3,6 +3,7 @@ import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   IosLockScreenUnlocker,
+  iosUnlockHomePress,
   type IosUnlockActions,
 } from "../../../src/features/action/IosLockScreenUnlocker";
 import type { BootedDevice } from "../../../src/models";
@@ -511,5 +512,26 @@ describe("two-stage swipe budgets", () => {
       readUnlocked: async () => false,
     });
     expect(flags).toEqual([true, undefined]);
+  });
+});
+
+describe("iosUnlockHomePress", () => {
+  test("presses Home without the simulator HID route (#19164)", async () => {
+    const created: unknown[] = [];
+    const presses: Array<{ button: string; options: unknown }> = [];
+    const signal = new AbortController().signal;
+    const pressHome = iosUnlockHomePress(device, (pressDevice, collaborators) => {
+      created.push({ pressDevice, collaborators });
+      return {
+        press: async (button, options) => {
+          presses.push({ button, options });
+          return { success: true, button, keyCode: -1 };
+        },
+      };
+    });
+
+    expect((await pressHome(1_500, signal)).success).toBe(true);
+    expect(created).toEqual([{ pressDevice: device, collaborators: { iosRawInput: null } }]);
+    expect(presses).toEqual([{ button: "home", options: { timeoutMs: 1_500, signal } }]);
   });
 });

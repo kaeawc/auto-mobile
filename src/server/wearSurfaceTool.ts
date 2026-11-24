@@ -435,11 +435,6 @@ export const createWearSurfaceHandler =
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
-    if (device.platform !== "android") {
-      throw new ActionableError(
-        "wearSurface is Android-only: it drives the Wear OS tile carousel, watch faces and complications over adb.",
-      );
-    }
     const call = surfaceCall(args);
     await requireWatch(device, readFormFactor, WEAR_SURFACE_REFUSAL);
     const factories = { makeSurface, makeWatchFace, makeWatchFaceSurface };
@@ -454,6 +449,7 @@ const wearSurfaceTool = defineDeviceTool({
   input: wearSurfaceInput,
   handler: createWearSurfaceHandler(),
   options: {
+    platforms: ["android"],
     ...PLAN_RELEVANT,
     defaultEnabled: false,
     outputSchema: wearSurfaceResultSchema,

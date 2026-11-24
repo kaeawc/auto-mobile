@@ -31,6 +31,7 @@ regenerates the table below.
 | 2026-11-21 | decision | [Prototype media runtime placement spike](2026-11-21-prototype-media-runtime-placement-spike.md) |
 | 2026-11-21 | concept | [iOS Simulator audio routing open questions](2026-11-21-ios-simulator-audio-routing-open-questions.md) |
 | 2026-11-20 | decision | [Fixture capture mode](2026-11-20-fixture-capture-mode.md) |
+| 2026-11-19 | decision | [Typed platform restriction for device-aware tools](2026-11-19-typed-tool-platform-restriction.md) |
 | 2026-11-19 | decision | [Committed page bundle and one export budget](2026-11-19-prototype-web-page-bundle.md) |
 | 2026-11-19 | decision | [Per-runtime prototype budgets](2026-11-19-prototype-runtime-budgets.md) |
 | 2026-11-19 | decision | [Material 3 Expressive components drawn from stable primitives](2026-11-19-m3-expressive-stable-primitives.md) |

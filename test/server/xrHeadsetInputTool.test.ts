@@ -91,23 +91,6 @@ describe("xrHeadsetInput tool", () => {
     });
   }
 
-  test("refuses iOS before reading traits", async () => {
-    let checked = false;
-    const handler = createXrHeadsetInputHandler(
-      async () => {
-        throw new Error("unreachable");
-      },
-      async () => {
-        checked = true;
-        return true;
-      },
-    );
-    await expect(
-      handler({ ...headset, platform: "ios" }, { pointer: "hand", action: "point", x: 0, y: 0 }),
-    ).rejects.toThrow(/Android-only/);
-    expect(checked).toBe(false);
-  });
-
   test("validates pointers, actions and bounded integer coordinates", () => {
     const ok = { pointer: "hand", action: "select", x: 0, y: 16_384 };
     expect(xrHeadsetInputSchema.safeParse(ok).success).toBe(true);

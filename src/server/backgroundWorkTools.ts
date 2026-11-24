@@ -163,14 +163,6 @@ export function createBackgroundWorkHandler(
       appId: args.appId,
       action: backgroundWorkActionName(args.action),
     };
-    if (device.platform !== "android") {
-      return createStructuredToolResponse({
-        message: "backgroundWork is Android-only: iOS has no JobScheduler, WorkManager or alarms.",
-        success: false,
-        status: "unsupported" as const,
-        ...identity,
-      });
-    }
     signal?.throwIfAborted();
     const outcome = await perform(new BackgroundWork(adbFor(device), dependencies), args, signal);
     if (!outcome.ok) {
@@ -204,6 +196,7 @@ const backgroundWorkTool = defineDeviceTool({
     'Android: read and trigger an app\'s background work without waiting hours. action "list" shows JobScheduler jobs (constraints, next run, WorkManager worker class); {runJob:{jobId|worker,force}} runs one now (cmd jobscheduler run); {workManagerDiagnostics:true} maps WorkManager jobs to worker classes; {listAlarms:true} shows pending alarms. Alarms cannot be fired without moving the clock: use setDeviceState clock.',
   input: backgroundWorkInput,
   options: {
+    platforms: ["android"],
     // A plan step: a triggered job changes app state the following steps rely on.
     ...PLAN_RELEVANT,
     defaultEnabled: false,

@@ -52,6 +52,7 @@ export function createPerformanceAuditTool(
       return withIsErrorOnFailure(createStructuredToolResponse(result), result.success);
     },
     options: {
+      platforms: ["android"],
       ...PLAN_RELEVANT,
       defaultEnabled: false,
       outputSchema: performanceAuditResultSchema,

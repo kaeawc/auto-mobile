@@ -11,7 +11,6 @@ import type {
 import { toolJson } from "../helpers/toolResponse";
 
 const android: BootedDevice = { name: "Pixel", deviceId: "emulator-5554", platform: "android" };
-const ios: BootedDevice = { name: "iPhone", deviceId: "sim-1", platform: "ios" };
 const APP = "dev.jasonpearson.automobile.playground";
 const BOUNDS = { left: 120, top: 300, right: 960, bottom: 1500 };
 const RECEIPT = {
@@ -147,10 +146,5 @@ describe("windowMode handler", () => {
     await expect(
       handler(android, { appId: APP, mode: "fullscreen", restore: { mode: "fullscreen" } }),
     ).rejects.toThrow(ActionableError);
-  });
-
-  test("is Android-only", async () => {
-    const { handler } = setup();
-    await expect(handler(ios, { appId: APP, mode: "fullscreen" })).rejects.toThrow("Android-only");
   });
 });

@@ -86,10 +86,4 @@ describe("setAppLinks tool (#14110)", () => {
     );
     expect(result.restore?.onSessionRelease).toBe(false);
   });
-
-  test("iOS is refused", async () => {
-    await expect(
-      handler({ ...emulator, platform: "ios" }, { appId: PKG, action: "approve" }),
-    ).rejects.toThrow("Android 12+ only");
-  });
 });

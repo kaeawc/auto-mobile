@@ -1,4 +1,5 @@
 import { registerAXBridgeSessionLifecycle } from "./axBridgeSessionLifecycle";
+import { registerSimHidSessionLifecycle } from "./simHidSessionLifecycle";
 import { lazySessionReleasePool } from "./releaseSessionAndDevice";
 import { logger } from "../utils/logger";
 import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
@@ -168,6 +169,7 @@ function registerFeatureSessionLifecycle(
     markDeviceNeedsRecorderRecovery: createRecorderTeardownRecoveryMarker(sessionManager),
   });
   registerAXBridgeSessionLifecycle(sessionManager);
+  registerSimHidSessionLifecycle(sessionManager);
 }
 
 /**

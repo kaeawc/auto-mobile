@@ -66,6 +66,7 @@ MACOS_PACKAGES=(
     "network-filter"
     "audio-loopback"
     "carplay-power"
+    "sim-hid"
 )
 
 # iOS + macOS packages (have both platform support)

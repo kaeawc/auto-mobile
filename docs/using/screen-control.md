@@ -98,6 +98,8 @@ In the table, `?` marks optional parameters.
 
 `app_switch` is an alias of `recent`. Button availability can also depend on the
 device and its runner; iOS has no menu hardware button.
+On an iOS Simulator, `home` and `power` press the simulator's hardware buttons
+directly, without the runner. `home` still checks that the home screen shows.
 
 `duration` for taps is an optional integer number of milliseconds.
 `durationMs` for swipes is an optional integer between 1 and 60000 milliseconds;

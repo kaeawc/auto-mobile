@@ -39,6 +39,12 @@ A letter with modifiers is a keyboard shortcut:
 - **Android:** a letter without modifiers is a key event. A chord needs Android
   API 31 or later; older devices return an error naming the API level.
 
-On iOS, every other key command needs a focused text field: a letter without
-modifiers, and `enter`, `tab`, `escape`, `backspace`, `delete` or an arrow with
-or without modifiers.
+On an iOS device, every other key command needs a focused text field: a letter
+without modifiers, and `enter`, `tab`, `escape`, `backspace`, `delete` or an
+arrow.
+
+On an iOS simulator, key commands go to the simulator's hardware keyboard
+directly, so success means the simulator took the key. A key with no focused
+field does nothing; observe to check it landed. `meta+h` and the
+`next`/`done`/`search`-style keys still use the runner, and so does `type` text.
+Set `AUTOMOBILE_DISABLE_IOS_SIM_HID=1` to send every key through the runner.

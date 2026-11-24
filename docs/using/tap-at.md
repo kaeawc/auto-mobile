@@ -13,6 +13,8 @@ On iOS, a successful tap with a post-tap observation includes `effect: { screenC
 On iOS, `dispatchRoute` is the runner-reported route, such as `xcuiCoordinate` or `displayTargetedRecord`. It is omitted when unreported.
 The `tapOn` tool reports the same optional `dispatchRoute` for iOS coordinate taps, double taps and long presses. It is omitted for taps performed by VoiceOver activation or the SDK bridge.
 
+On an iOS Simulator held upright in portrait, taps and long presses go to the simulator's own touch input, and `dispatchRoute` is `simulatorHid`. They skip the runner's idle wait and its stale-frame check. A tap within 3 seconds of a launch waits for the rest of those 3 seconds. Double taps, landscape and upside-down screens use the runner. The runner also takes taps while the input helper starts. Set `AUTOMOBILE_DISABLE_IOS_SIM_HID=1` to always use the runner.
+
 ## Android XR
 
 On an Android XR headset in home space, coordinates are screenshot pixels.

@@ -1,4 +1,5 @@
 import { daemonAXBridgeSessions } from "./axBridgeSessionLifecycle";
+import { daemonSimHidSessions } from "../utils/ios/simHid/IosSimulatorRawInput";
 import { stopVisionosRunners } from "../features/visionos/VisionosRunnerLifecycle";
 import { defaultBlePeripheralManager } from "../features/blePeripheral/defaultBlePeripheralManager";
 import { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/AndroidInventoryInvalidation";
@@ -30,6 +31,7 @@ const CHILD_PROCESS_CLEANUP_TIMEOUT_MS = 1_500;
  */
 export interface DaemonChildProcessCleanupDependencies {
   stopAXBridgeSessions?(): void;
+  stopSimHidSessions?(): void;
   stopBlePeripherals?(): Promise<void>;
   shutdownInventoryReads?(): void;
   stopAcceptingVideoRecordingStarts(): Promise<void>;
@@ -48,6 +50,7 @@ export interface DaemonChildProcessCleanupDependencies {
 
 const defaultDependencies: DaemonChildProcessCleanupDependencies = {
   stopAXBridgeSessions: () => daemonAXBridgeSessions.shutdown(),
+  stopSimHidSessions: () => daemonSimHidSessions.shutdown(),
   stopBlePeripherals: () => defaultBlePeripheralManager.shutdown(),
   shutdownInventoryReads: () => {
     invalidateAndroidInventoryProvenanceAndCatalog();
@@ -66,6 +69,7 @@ const defaultDependencies: DaemonChildProcessCleanupDependencies = {
 
 function stopSessionChildren(dependencies: DaemonChildProcessCleanupDependencies): void {
   dependencies.stopAXBridgeSessions?.();
+  dependencies.stopSimHidSessions?.();
   dependencies.shutdownInventoryReads?.();
   dependencies.stopWatchRunners();
   dependencies.stopTvosRunners?.();

@@ -525,6 +525,7 @@ nav:
       - "2026-11-23: Read Simulator network activity with host tools": devlog/2026-11-23-simulator-network-activity-host-tools.md
       - "2026-11-23: Keyboard control through CoreSimulator": devlog/2026-11-23-simulator-keyboard-coresimulator.md
       - "2026-11-23: Simulator Dynamic Island and backlight through defaults and JXA": devlog/2026-11-23-simulator-island-and-backlight.md
+      - "2026-11-23: iOS Simulator raw input through a SimulatorKit HID helper, on by default": devlog/2026-11-23-simulator-hid-input-default-on.md
       - "2026-11-23: Capture Simulator video from the device framebuffer": devlog/2026-11-23-simulator-framebuffer-capture.md
       - "2026-11-23: Device-wide camera poster through the launchd environment": devlog/2026-11-23-simulator-camera-poster-device-wide.md
       - "2026-11-23: No consumer keep rule for prototype icons": devlog/2026-11-23-prototype-icon-keep-rule.md

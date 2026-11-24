@@ -321,7 +321,8 @@ export interface CtrlProxyTapDiagnostics {
     | "appRelativeObserved"
     | "displayTargeted"
     | "displayTargetedObserved";
-  route?: "xcuiCoordinate" | "displayTargetedRecord";
+  /** `simulatorHid`: the host SimulatorKit HID helper delivered it, not the runner (#19118). */
+  route?: "xcuiCoordinate" | "displayTargetedRecord" | "simulatorHid";
   targetDisplayId?: number;
   targetDisplayReason?: string;
   deviceIdiom?: string;

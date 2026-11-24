@@ -306,6 +306,37 @@ for (const sessionDeviceBooted of [true, false]) {
   });
 }
 
+test("a cancellation during the bare getAndroid session-device lookup returns promptly (#19156)", async () => {
+  const timer = new FakeTimer();
+  const sessions = await sessionHolding(timer, "emulator-5556");
+  const lookupStarted = Promise.withResolvers<void>();
+  // Discovery never settles, so only the request signal can end the wait.
+  deviceUtils.getBootedDevices = async () => {
+    lookupStarted.resolve();
+    return await new Promise<never>(() => {});
+  };
+  let prepared = false;
+  const handlers = createAcquisitionHandlers({
+    bootAndPrepareDevice: async () => {
+      prepared = true;
+      throw new ActionableError("reached preparation");
+    },
+  });
+  const controller = new AbortController();
+  const reason = new ActionableError("caller cancelled");
+  try {
+    const rejected = runWithToolSelectionContext({ routingSessionUuid: "session-a" }, () =>
+      handlers.getAndroidHandler({}, undefined, controller.signal),
+    ).catch((error: unknown) => error);
+    await lookupStarted.promise;
+    controller.abort(reason);
+    expect(await rejected).toBe(reason);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+  expect(prepared).toBe(false);
+});
+
 const coldBootedPixel = {
   platform: "android" as const,
   name: "Pixel_A",

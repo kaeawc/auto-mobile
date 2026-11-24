@@ -4,6 +4,7 @@ import {
   PrivateDaemonOrphanWatchdog,
   HARNESS_PRIVATE_DAEMON_ENV,
   DAEMON_LAUNCHER_PID_ENV,
+  isControlSocketRemoved,
   isHarnessPrivateDaemon,
   resolveLauncherPid,
   resolvePrivateDaemonOrphanIdleMs,
@@ -22,6 +23,10 @@ class FakeOrphanPort implements PrivateDaemonOrphanPort {
   clients = 0;
   sessions = 0;
   shutdowns: string[] = [];
+  socketRemoved = false;
+  controlSocketRemoved(): boolean {
+    return this.socketRemoved;
+  }
   parentPid(): number {
     return this.ppid;
   }
@@ -271,5 +276,79 @@ describe("resolveLauncherPid (#11041)", () => {
 
   test.each(["", "abc", "0", "1", "-5", "12.5"])("ignores invalid launcher pid %p", (value) => {
     expect(resolveLauncherPid(4242, { [DAEMON_LAUNCHER_PID_ENV]: value })).toBe(4242);
+  });
+});
+
+describe("PrivateDaemonOrphanWatchdog control-socket removal (#19132)", () => {
+  // A launcher that deleted its socket dir but kept AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS=0
+  // left the daemon unreachable and holding a port forever.
+  test("shuts down an idle-check-disabled daemon whose control socket was removed", () => {
+    const timer = new FakeTimer();
+    const port = new FakeOrphanPort();
+    port.ppid = port.launcher;
+    const watchdog = new PrivateDaemonOrphanWatchdog(port, 0, timer);
+    watchdog.start();
+    timer.advanceTime(30_000);
+    expect(port.shutdowns).toEqual([]);
+    port.socketRemoved = true;
+    timer.advanceTime(30_000);
+    expect(port.shutdowns).toEqual([]);
+    timer.advanceTime(30_000);
+    expect(port.shutdowns).toEqual([
+      "private daemon's control socket was removed and it has no clients",
+    ]);
+    timer.advanceTime(60_000);
+    expect(port.shutdowns).toHaveLength(1);
+  });
+
+  test("an open client or a restored socket resets the removal count", () => {
+    const port = new FakeOrphanPort();
+    port.ppid = port.launcher;
+    const watchdog = new PrivateDaemonOrphanWatchdog(port, IDLE_MS, new FakeTimer());
+    port.socketRemoved = true;
+    expect(watchdog.check()).toBe(false);
+    port.clients = 1;
+    expect(watchdog.check()).toBe(false);
+    port.clients = 0;
+    expect(watchdog.check()).toBe(false);
+    port.socketRemoved = false;
+    expect(watchdog.check()).toBe(false);
+    port.socketRemoved = true;
+    expect(watchdog.check()).toBe(false);
+    expect(watchdog.check()).toBe(true);
+    expect(port.shutdowns).toHaveLength(1);
+  });
+
+  test("the launcher env shape behind #19132 arms the watchdog", () => {
+    expect(
+      isHarnessPrivateDaemon("/tmp/srs-am.iERu/d.sock", "/tmp/auto-mobile-daemon-501.sock", {
+        AUTOMOBILE_DAEMON_SOCKET_PATH: "/tmp/srs-am.iERu/d.sock",
+        AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/srs-am.iERu",
+        AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: "0",
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("isControlSocketRemoved (#19132)", () => {
+  const fsWith = (exists: boolean) => ({
+    exists: () => exists,
+    stat: () => ({ dev: 1n, ino: 2n }),
+  });
+
+  test("is false while the server is not listening, even though the path is gone", () => {
+    expect(isControlSocketRemoved({ isListening: () => false }, "/s.sock", fsWith(false))).toBe(
+      false,
+    );
+    expect(isControlSocketRemoved(null, "/s.sock", fsWith(false))).toBe(false);
+  });
+
+  test("is true only when listening and the path is gone", () => {
+    expect(isControlSocketRemoved({ isListening: () => true }, "/s.sock", fsWith(false))).toBe(
+      true,
+    );
+    expect(isControlSocketRemoved({ isListening: () => true }, "/s.sock", fsWith(true))).toBe(
+      false,
+    );
   });
 });

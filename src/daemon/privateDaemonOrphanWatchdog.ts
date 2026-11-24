@@ -4,6 +4,7 @@ import { logger } from "../utils/logger";
 import { parseStrictPositiveInteger } from "../utils/envNumbers";
 import type { LockOwnerGenerationProbe } from "../utils/fileLock";
 import { defaultLockOwnerGenerationProbe } from "./lockOwnerGeneration";
+import { classifySocketPath, type SocketPathFs } from "./socketFileIdentity";
 
 /** What the watchdog observes about this daemon process. */
 export interface PrivateDaemonOrphanPort {
@@ -28,15 +29,34 @@ export interface PrivateDaemonOrphanPort {
   clientActivityCount(): number;
   /** Live device sessions. */
   liveSessionCount(): number;
+  /**
+   * True when the control socket server is listening but its socket path is gone, so no
+   * client can reach this daemon through it any more (a launcher removed its socket dir).
+   */
+  controlSocketRemoved(): boolean;
   /** Begin graceful shutdown. */
   shutdown(reason: string): void;
 }
 
 export const DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS = 15 * 60_000;
 const CHECK_INTERVAL_MS = 30_000;
+/** Consecutive checks the control socket must stay removed before shutdown (#19132). */
+export const SOCKET_REMOVED_CHECKS_BEFORE_SHUTDOWN = 2;
 const INIT_PID = 1;
 
-/** Idle timeout for an orphaned private daemon; 0 disables the watchdog. */
+/**
+ * True when the control socket server is listening but its path is gone. Not while it is not
+ * listening: a recovery rebind briefly removes the path itself.
+ */
+export function isControlSocketRemoved(
+  server: { isListening(): boolean } | null | undefined,
+  socketPath: string,
+  fs?: SocketPathFs,
+): boolean {
+  return (server?.isListening() ?? false) && classifySocketPath(null, socketPath, fs) === "gone";
+}
+
+/** Idle timeout for an orphaned private daemon; 0 disables only the idle check. */
 export function resolvePrivateDaemonOrphanIdleMs(env: NodeJS.ProcessEnv = process.env): number {
   return (
     readEnvNumber(ENV.PRIVATE_DAEMON_ORPHAN_IDLE_MS, env) ?? DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS
@@ -102,7 +122,11 @@ function firstNonBlank(env: NodeJS.ProcessEnv, keys: string[]): string {
 /**
  * Shuts down a private daemon whose launching parent has exited and that has
  * had no clients and no sessions for `idleMs` (issue #10497), so a test daemon
- * cannot hold devices for hours after its test ends.
+ * cannot hold devices for hours after its test ends. Independently of `idleMs`,
+ * it also shuts down a private daemon whose control socket was removed while it
+ * was listening and that has no open clients (#19132): a launcher that deleted
+ * the socket directory without stopping the daemon left it unreachable, holding
+ * a daemon port until the host ran out of them.
  */
 export class PrivateDaemonOrphanWatchdog {
   private orphanIdleSince: number | null = null;
@@ -110,6 +134,7 @@ export class PrivateDaemonOrphanWatchdog {
   private handle: NodeJS.Timeout | null = null;
   private shutdownRequested = false;
   private launcherToken: string | undefined;
+  private socketRemovedChecks = 0;
 
   private readonly port: PrivateDaemonOrphanPort;
   private readonly idleMs: number;
@@ -119,7 +144,7 @@ export class PrivateDaemonOrphanWatchdog {
 
   /**
    * @param port - Process and client-count probes plus the shutdown action
-   * @param idleMs - Orphaned idle time before shutdown; zero disables the watchdog
+   * @param idleMs - Orphaned idle time before shutdown; zero disables only the idle check
    * @param timer - Clock for the idle window and check interval
    * @param options.checkIntervalMs - Check cadence (defaults to the smaller of 30 s and `idleMs`)
    * @param options.launcherGeneration - Launcher generation probe
@@ -129,7 +154,7 @@ export class PrivateDaemonOrphanWatchdog {
     idleMs: number,
     timer: Timer = defaultTimer,
     {
-      checkIntervalMs = Math.min(CHECK_INTERVAL_MS, idleMs),
+      checkIntervalMs = idleMs > 0 ? Math.min(CHECK_INTERVAL_MS, idleMs) : CHECK_INTERVAL_MS,
       launcherGeneration = defaultLockOwnerGenerationProbe,
     }: { checkIntervalMs?: number; launcherGeneration?: LockOwnerGenerationProbe } = {},
   ) {
@@ -141,12 +166,13 @@ export class PrivateDaemonOrphanWatchdog {
   }
 
   start(): void {
-    if (this.handle || this.idleMs <= 0) {
+    if (this.handle) {
       return;
     }
-    this.launcherToken = this.port.launcherIsExplicit()
-      ? this.launcherGeneration.current(this.port.launcherPid())
-      : undefined;
+    this.launcherToken =
+      this.idleMs > 0 && this.port.launcherIsExplicit()
+        ? this.launcherGeneration.current(this.port.launcherPid())
+        : undefined;
     this.handle = this.timer.setInterval(() => this.check(), this.checkIntervalMs);
     const handle = this.handle as { unref?: () => void };
     if (typeof handle.unref === "function") {
@@ -185,6 +211,20 @@ export class PrivateDaemonOrphanWatchdog {
     if (this.shutdownRequested) {
       return false;
     }
+    return this.checkSocketRemoved() || (this.idleMs > 0 && this.checkOrphanedIdle());
+  }
+
+  private checkSocketRemoved(): boolean {
+    const removed = this.port.controlSocketRemoved() && this.port.clientCount() === 0;
+    this.socketRemovedChecks = removed ? this.socketRemovedChecks + 1 : 0;
+    if (this.socketRemovedChecks < SOCKET_REMOVED_CHECKS_BEFORE_SHUTDOWN) {
+      return false;
+    }
+    this.requestShutdown("private daemon's control socket was removed and it has no clients");
+    return true;
+  }
+
+  private checkOrphanedIdle(): boolean {
     const activityCount = this.port.clientActivityCount();
     const clientSinceLastCheck =
       this.lastClientActivityCount !== null && activityCount !== this.lastClientActivityCount;
@@ -203,13 +243,17 @@ export class PrivateDaemonOrphanWatchdog {
     if (now - this.orphanIdleSince < this.idleMs) {
       return false;
     }
+    this.requestShutdown(
+      `private daemon's parent exited and it has had no clients or sessions for ` +
+        `${Math.round((now - this.orphanIdleSince) / 1000)}s`,
+    );
+    return true;
+  }
+
+  private requestShutdown(reason: string): void {
     this.shutdownRequested = true;
     this.stop();
-    const reason =
-      `private daemon's parent exited and it has had no clients or sessions for ` +
-      `${Math.round((now - this.orphanIdleSince) / 1000)}s`;
     logger.warn(`[Daemon] Shutting down orphaned private daemon: ${reason}`);
     this.port.shutdown(reason);
-    return true;
   }
 }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { SimHidCompileError } from "../../../../src/utils/ios/simHid/SimHidCompileError";
 import { SimHidSessions } from "../../../../src/utils/ios/simHid/SimHidSessions";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -41,7 +42,7 @@ describe("SimHidSessions", () => {
     expect(sessions.ready(SIM)).toBeUndefined();
     await sessions.acquire(SIM, 1000);
     expect(launcher.launches).toHaveLength(2);
-    expect(launcher.launches[0]!.kills).toBe(1);
+    expect(launcher.launches[0]!.stops).toBe(1);
   });
 
   test("a command timeout kills the helper and the next acquire starts a fresh one", async () => {
@@ -50,7 +51,7 @@ describe("SimHidSessions", () => {
     const pending = first!.send({ cmd: "button", button: "home" }, 500);
     timer.advanceTime(500);
     expect((await pending).status).toBe("indeterminate");
-    expect(launcher.launches[0]!.kills).toBe(1);
+    expect(launcher.launches[0]!.stops).toBe(1);
     const second = await sessions.acquire(SIM, 1000);
     expect(second).toBeDefined();
     expect(second).not.toBe(first);
@@ -71,13 +72,38 @@ describe("SimHidSessions", () => {
 
   test("a failed build waits the long build cooldown for every simulator", async () => {
     const { provider, sessions, timer } = setup();
-    provider.failure = new Error("swiftc: error: cannot find type");
+    provider.failure = new SimHidCompileError("swiftc: error: cannot find type");
     expect(await sessions.acquire(SIM, 1000)).toBeUndefined();
     timer.advanceTime(1000);
     expect(await sessions.acquire(SIM, 1000)).toBeUndefined();
     expect(await sessions.acquire(OTHER_SIM, 1000)).toBeUndefined();
     expect(provider.calls).toBe(1);
     timer.advanceTime(60_000 - 1000);
+    provider.failure = undefined;
+    expect(await sessions.acquire(SIM, 1000)).toBeDefined();
+    expect(provider.calls).toBe(2);
+  });
+
+  test("a transient build failure only waits the short per-device cooldown", async () => {
+    const { provider, sessions, timer } = setup();
+    provider.failure = new Error("ENOSPC: no space left on device");
+    expect(await sessions.acquire(SIM, 1000)).toBeUndefined();
+    expect(await sessions.acquire(SIM, 1000)).toBeUndefined();
+    expect(provider.calls).toBe(1);
+    timer.advanceTime(1000);
+    provider.failure = undefined;
+    expect(await sessions.acquire(SIM, 1000)).toBeDefined();
+    expect(provider.calls).toBe(2);
+  });
+
+  test("releasing a session clears the long compile-error cooldown", async () => {
+    const { provider, sessions, timer } = setup();
+    provider.failure = new SimHidCompileError("swiftc: error: no such module");
+    expect(await sessions.acquire(SIM, 1000)).toBeUndefined();
+    timer.advanceTime(1000);
+    expect(await sessions.acquire(SIM, 1000)).toBeUndefined();
+    expect(provider.calls).toBe(1);
+    sessions.release(SIM);
     provider.failure = undefined;
     expect(await sessions.acquire(SIM, 1000)).toBeDefined();
     expect(provider.calls).toBe(2);
@@ -112,11 +138,11 @@ describe("SimHidSessions", () => {
     sessions.release(SIM);
     open();
     expect(await starting).toBeUndefined();
-    expect(launcher.launches[0]!.kills).toBe(1);
+    expect(launcher.launches[0]!.stops).toBe(1);
     launcher.gate = undefined;
     await sessions.acquire("other", 1000);
     sessions.shutdown();
-    expect(launcher.launches[1]!.kills).toBe(1);
+    expect(launcher.launches[1]!.stops).toBe(1);
     expect(sessions.ready("other")).toBeUndefined();
   });
 

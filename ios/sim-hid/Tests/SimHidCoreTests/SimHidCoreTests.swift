@@ -262,6 +262,20 @@ final class SimHidServerTests: XCTestCase {
         XCTAssertEqual(sender.attempts.count, 4)
     }
 
+    func testNoMessageMidSwipeStillSendsTouchUp() {
+        let sender = FakeSender()
+        sender.notSentAttempt = 2
+        let ack = SimHidServer(sender: sender).handle(
+            line: #"{"id":"12","cmd":"swipe","x":0,"y":0,"toX":10,"toY":0,"durationMs":34,"width":10,"height":10}"#
+        )
+        XCTAssertFalse(ack.ok)
+        XCTAssertTrue(ack.sent)
+        guard case let .touch(_, _, phase) = sender.attempts.last! else {
+            return XCTFail("expected a touch release")
+        }
+        XCTAssertEqual(phase, .up)
+    }
+
     func testFailedButtonReleasesTheButton() {
         let sender = FakeSender()
         sender.notSentAttempt = 1

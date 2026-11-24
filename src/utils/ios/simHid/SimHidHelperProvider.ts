@@ -3,8 +3,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AMBIENT_ENV, readEnvTrimmed } from "../../../config/env";
 import { ActionableError, toActionableError } from "../../../models/ActionableError";
+import { SimHidCompileError } from "./SimHidCompileError";
 import { SingleFlight } from "../../cache/SingleFlight";
-import { formatCommandError } from "../../CommandError";
+import { commandFailureDetails, formatCommandError } from "../../CommandError";
 import { DefaultFileSystem, type FileSystem } from "../../filesystem/DefaultFileSystem";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../../HostCommandExecutor";
 import { defaultIdGenerator, type IdGenerator } from "../../IdGenerator";
@@ -140,17 +141,22 @@ export class DefaultSimHidHelperProvider implements SimHidHelperProvider {
     await this.fs.ensureDir(directory);
     const partial = `${output}.${(this.deps.idGenerator ?? defaultIdGenerator).next()}.tmp`;
     try {
-      await this.run(env, "xcrun", [
-        "swiftc",
-        "-O",
-        "-swift-version",
-        "6",
-        "-module-name",
-        "SimHidHelper",
-        ...sources,
-        "-o",
-        partial,
-      ]);
+      await this.run(
+        env,
+        "xcrun",
+        [
+          "swiftc",
+          "-O",
+          "-swift-version",
+          "6",
+          "-module-name",
+          "SimHidHelper",
+          ...sources,
+          "-o",
+          partial,
+        ],
+        true,
+      );
       await this.run(env, "codesign", ["-f", "-s", "-", partial]);
       await this.fs.rename(partial, output);
       return { path: output, env };
@@ -166,11 +172,18 @@ export class DefaultSimHidHelperProvider implements SimHidHelperProvider {
     }
   }
 
-  private async run(env: NodeJS.ProcessEnv, command: string, args: string[]): Promise<string> {
+  private async run(
+    env: NodeJS.ProcessEnv,
+    command: string,
+    args: string[],
+    compile = false,
+  ): Promise<string> {
     try {
       return (await this.runner.executeCommand(command, args, { env })).stdout;
     } catch (error) {
-      throw new ActionableError(
+      const { exitCode, stderr } = commandFailureDetails(error);
+      const compileFailed = compile && exitCode !== undefined && exitCode !== 0 && stderr.trim();
+      throw new (compileFailed ? SimHidCompileError : ActionableError)(
         `iOS Simulator HID helper build step failed. ${XCODE_HINT}. ${formatCommandError(error, { command, args })}`,
         { cause: error },
       );

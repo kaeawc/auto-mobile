@@ -12,6 +12,7 @@ import {
   sanitizeObserveResult,
   projectSanitizedObserveSkeleton,
   diffObserveResult,
+  summarizeDiffNodes,
   SKELETON_DIFF_SCALAR_FIELDS,
   isSameObservationScreen,
   hasMaterialLayoutWarningChange,
@@ -623,7 +624,8 @@ function hasScreenChangedEffect(payload: Record<string, unknown>): boolean {
  * (#6221/#6242), which already lists every actionable node on the current
  * screen, so the added/removed node lists repeat it. Call after the emptiness /
  * replacement checks read them; `changed` stays because the skeleton cannot say
- * what moved from what.
+ * what moved from what. A count and a few labels stay in their place (#19122),
+ * so a client can tell what appeared or went away without comparing skeletons.
  */
 function dropDiffNodeLists(
   diff: ReturnType<typeof diffObserveResult>,
@@ -631,7 +633,13 @@ function dropDiffNodeLists(
   const wireDiff: Partial<typeof diff> = { ...diff };
   delete wireDiff.added;
   delete wireDiff.removed;
-  return wireDiff;
+  const addedSummary = summarizeDiffNodes(diff.added);
+  const removedSummary = summarizeDiffNodes(diff.removed);
+  return {
+    ...wireDiff,
+    ...(addedSummary ? { addedSummary } : {}),
+    ...(removedSummary ? { removedSummary } : {}),
+  };
 }
 
 /**
@@ -694,10 +702,23 @@ const MIN_REPLACED_ACTIONABLE_NODES = 3;
  * an identity, so navigating between them would otherwise be emitted as a diff
  * of unrelated rows. At least half of the current actionable skeleton having
  * been both added and removed means the client needs the new screen, not a delta.
+ *
+ * Closing a dialog or sheet removes only its few controls and reveals many rows
+ * (#19122), so it never meets that bar: at least half of the current skeleton
+ * having been added, with anything removed, is a replacement too. A pure
+ * expansion (nothing removed) stays a diff.
  */
 function replacedMostActionableNodes(diff: ReturnType<typeof diffObserveResult>): boolean {
+  const skeletonSize = diff.skeleton?.length ?? 0;
   const replaced = Math.min(diff.added.length, diff.removed.length);
-  return replaced >= MIN_REPLACED_ACTIONABLE_NODES && replaced * 2 >= (diff.skeleton?.length ?? 0);
+  if (replaced >= MIN_REPLACED_ACTIONABLE_NODES && replaced * 2 >= skeletonSize) {
+    return true;
+  }
+  return (
+    diff.added.length >= MIN_REPLACED_ACTIONABLE_NODES &&
+    diff.removed.length > 0 &&
+    diff.added.length * 2 >= skeletonSize
+  );
 }
 
 function observationScreenIdentity(observation: ObserveResult): ObservationDiffScreenIdentity {

@@ -2865,6 +2865,82 @@ describe("finalizeToolResponse", () => {
       expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
     });
 
+    // #19122: closing a dialog removes its few buttons and reveals many new rows;
+    // min(added, removed) never reaches the replacement threshold.
+    describe("many added rows (#19122)", () => {
+      const screenWithRows = (rows: string[]): ObserveResult => {
+        const clickable = rows.map((row, index) => ({
+          bounds: { left: 0, top: index * 50, right: 100, bottom: index * 50 + 40 },
+          "resource-id": `com.example:id/${row}`,
+          text: row,
+          clickable: "true",
+        }));
+        return {
+          ...sameScreenObserve(),
+          elements: { clickable, scrollable: [], text: [], media: [] },
+          viewHierarchy: {
+            packageName: "com.example",
+            hierarchy: {
+              node: {
+                "resource-id": "com.example:id/root",
+                bounds: { left: 0, top: 0, right: 100, bottom: 2000 },
+                node: clickable.map((row) => ({ ...row, actions: ["click"] })),
+              },
+            },
+          },
+        } as ObserveResult;
+      };
+      const alarmRows = Array.from({ length: 30 }, (_, index) => `alarm${index}`);
+      const tapAfter = (before: string[], after: string[]) => {
+        const { store } = makeStore();
+        finalizeToolResponse(createStructuredToolResponse(screenWithRows(before)), {
+          name: "observe",
+          sessionUuid: "s1",
+          baselineStore: store,
+        });
+        return finalizeToolResponse(
+          createStructuredToolResponse({ success: true, observation: screenWithRows(after) }),
+          {
+            name: "tapOn",
+            defaultsToSkeletonObservation: true,
+            sessionUuid: "s1",
+            baselineStore: store,
+          },
+        );
+      };
+
+      test("a closed dialog (2 removed, 30 added) is a full observation", () => {
+        const finalized = tapAfter(["ok", "cancel"], alarmRows);
+
+        expect(
+          observationSummarySchema.parse(structuredPayload(finalized).observation).isDiff,
+        ).toBeUndefined();
+        expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
+      });
+
+      test("a pure expansion (nothing removed) stays a diff and summarizes what appeared", () => {
+        const finalized = tapAfter(["alarm0"], alarmRows);
+
+        const diff = observeDiffSchema.parse(structuredPayload(finalized).observation);
+        expect(diff.isDiff).toBe(true);
+        expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
+        expect(diff.added).toBeUndefined();
+        expect(diff.addedSummary).toEqual({
+          count: 29,
+          labels: ["alarm1", "alarm2", "alarm3", "alarm4", "alarm5"],
+        });
+        expect(diff.removedSummary).toBeUndefined();
+      });
+
+      test("a single replaced row is summarized on both sides", () => {
+        const finalized = tapAfter(["a1", "a2", "a3", "a4"], ["a1", "a2", "a3", "b4"]);
+
+        const diff = observeDiffSchema.parse(structuredPayload(finalized).observation);
+        expect(diff.addedSummary).toEqual({ count: 1, labels: ["b4"] });
+        expect(diff.removedSummary).toEqual({ count: 1, labels: ["a4"] });
+      });
+    });
+
     test("falls back to full when the screen (app/activity/package) changed", () => {
       const { store } = makeStore();
       finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {

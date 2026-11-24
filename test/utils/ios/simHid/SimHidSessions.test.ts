@@ -109,6 +109,25 @@ describe("SimHidSessions", () => {
     expect(provider.calls).toBe(2);
   });
 
+  test("releasing during a pending build that then fails leaves no cooldown", async () => {
+    const { provider, sessions } = setup();
+    let rejectBuild: (error: Error) => void = () => {};
+    provider.ensure = () => {
+      provider.calls++;
+      return new Promise((_resolve, reject) => {
+        rejectBuild = reject;
+      });
+    };
+    const pending = sessions.acquire(SIM, 1000);
+    sessions.release(SIM);
+    rejectBuild(new SimHidCompileError("swiftc: error: cannot find type"));
+    expect(await pending).toBeUndefined();
+
+    provider.ensure = FakeSimHidProvider.prototype.ensure.bind(provider);
+    expect(await sessions.acquire(SIM, 1000)).toBeDefined();
+    expect(await sessions.acquire(OTHER_SIM, 1000)).toBeDefined();
+  });
+
   test("acquire() gives up after its wait while the start continues", async () => {
     const { launcher, sessions, timer } = setup();
     let open: () => void = () => {};

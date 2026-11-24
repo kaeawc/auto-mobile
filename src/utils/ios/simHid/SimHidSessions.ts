@@ -141,6 +141,11 @@ export class SimHidSessions {
     try {
       build = await this.options.provider.ensure();
     } catch (error) {
+      if (this.entries.get(deviceId) !== entry) {
+        // Released while the build was pending: the failure belongs to a dead session, so it
+        // must not start any cooldown for the next acquisition.
+        return undefined;
+      }
       // Only a compile error is stable; missing sources during an upgrade or xcrun/codesign failures are
       // transient and retry on the short per-device cooldown. Logged once per cooldown.
       const permanent = error instanceof SimHidCompileError;
@@ -150,9 +155,7 @@ export class SimHidSessions {
           `${Math.round(retryMs / 1000)} s: ${errorMessage(error)}`,
         error,
       );
-      if (this.entries.get(deviceId) === entry) {
-        this.entries.delete(deviceId);
-      }
+      this.entries.delete(deviceId);
       if (permanent) {
         this.buildFailedAt = this.options.timer.now();
       } else {

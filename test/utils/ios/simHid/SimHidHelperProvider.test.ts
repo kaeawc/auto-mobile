@@ -4,6 +4,7 @@ import {
   DefaultSimHidHelperProvider,
   SIM_HID_SOURCES,
 } from "../../../../src/utils/ios/simHid/SimHidHelperProvider";
+import { ActionableError } from "../../../../src/models/ActionableError";
 import { SimHidCompileError } from "../../../../src/utils/ios/simHid/SimHidCompileError";
 import type { HostCommandOptions } from "../../../../src/utils/HostCommandExecutor";
 import { FakeFileSystem } from "../../../fakes/FakeFileSystem";
@@ -112,7 +113,11 @@ describe("DefaultSimHidHelperProvider", () => {
       "swiftc -O",
       Object.assign(new Error("failed"), { code: 1, stderr: "" }),
     );
-    const failure = await transient.provider.ensure().catch((error: unknown) => error);
+    const failure = await transient.provider.ensure().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(ActionableError);
     expect(failure).not.toBeInstanceOf(SimHidCompileError);
 
     const codesign = setup();
@@ -120,7 +125,11 @@ describe("DefaultSimHidHelperProvider", () => {
       "codesign",
       Object.assign(new Error("failed"), { code: 1, stderr: "codesign: error" }),
     );
-    const signFailure = await codesign.provider.ensure().catch((error: unknown) => error);
+    const signFailure = await codesign.provider.ensure().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(signFailure).toBeInstanceOf(ActionableError);
     expect(signFailure).not.toBeInstanceOf(SimHidCompileError);
   });
 });

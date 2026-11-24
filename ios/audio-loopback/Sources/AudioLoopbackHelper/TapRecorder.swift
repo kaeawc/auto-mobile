@@ -46,6 +46,8 @@ final class TapRecorder: @unchecked Sendable {
     private var ticker: DispatchSourceTimer?
     private var listener: AudioObjectPropertyListenerBlock?
     private var done = false
+    /// No duration: the capture runs until stdin closes.
+    private let openEnded: Bool
 
     init(
         launchdPid: Int32,
@@ -59,9 +61,7 @@ final class TapRecorder: @unchecked Sendable {
         self.mute = mute
         self.finished = finished
         remainingFrames = durationMs.map { $0 * sampleRate / 1000 } ?? Int.max
-        if durationMs == nil {
-            stopWhenStdinCloses()
-        }
+        openEnded = durationMs == nil
     }
 
     func start() throws {
@@ -74,6 +74,11 @@ final class TapRecorder: @unchecked Sendable {
             try rebuild(clients: SimulatorAudioClients.current(launchdPid: launchdPid))
             watchClients()
             startTicker()
+            // Installed only after startNanos is set: an immediate EOF flushes the quiet tail from
+            // the capture start, not from host uptime.
+            if openEnded {
+                stopWhenStdinCloses()
+            }
             LoopbackMain.report(LoopbackMarker.ready(
                 deviceName: "process tap of launchd_sim \(launchdPid) (\(active?.clients.count ?? 0) clients, "
                     + "System Audio Recording \(permission))"

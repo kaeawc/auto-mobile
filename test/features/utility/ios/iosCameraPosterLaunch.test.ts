@@ -35,6 +35,8 @@ test.each([
     );
     expect(await prepareCameraPosterLaunch(device, { registry, provider, hostEnv: {} })).toEqual({
       SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: "/camera/libAMCameraPoster.dylib",
+      // The launch gate a shaped boot inserts loads it when launchd keeps the boot's list (#19165).
+      SIMCTL_CHILD_AM_INSERT_LIBRARIES: "/camera/libAMCameraPoster.dylib",
       ...(kind === "image"
         ? {
             SIMCTL_CHILD_AM_CAMERA_POSTER_PATH: "/fixture/poster.png",
@@ -110,4 +112,25 @@ test("Apple system apps launch without the poster and never build the dylib", as
   expect(await prepareCameraPosterLaunch(device, deps, undefined, "com.example.app")).toBeDefined();
   registry.clear(device.deviceId);
   expect(cameraPosterLaunchSkip(device, registry, "com.apple.Preferences")).toBeUndefined();
+});
+
+test("a prototype launch keeps the agent first in both inserted-library lists", async () => {
+  const registry = new FakeIosCameraPosterRegistry();
+  const provider = new FakeIosCameraPosterDylibProvider();
+  const device = {
+    platform: "ios",
+    deviceId: "11111111-2222-3333-4444-555555555555",
+    name: "Fixture",
+  } as const;
+  registry.set(device.deviceId, { kind: "image", path: "/poster.png" });
+  const env = await prepareCameraPosterLaunch(
+    device,
+    { registry, provider, hostEnv: {} },
+    {
+      SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: "/agent/Agent.dylib",
+      SIMCTL_CHILD_AM_INSERT_LIBRARIES: "/agent/Agent.dylib",
+    },
+  );
+  expect(env?.SIMCTL_CHILD_DYLD_INSERT_LIBRARIES).toBe(`/agent/Agent.dylib:${provider.path}`);
+  expect(env?.SIMCTL_CHILD_AM_INSERT_LIBRARIES).toBe(`/agent/Agent.dylib:${provider.path}`);
 });

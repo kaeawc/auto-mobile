@@ -136,6 +136,7 @@ describe("launchApp prototype:true (#10567)", () => {
           SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_PORT: "8770",
           SIMCTL_CHILD_AUTOMOBILE_PROTOTYPE_TOKEN: "token-1",
           SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: h.dylibResolver.resolved.path,
+          SIMCTL_CHILD_AM_INSERT_LIBRARIES: h.dylibResolver.resolved.path,
         },
       },
     ]);

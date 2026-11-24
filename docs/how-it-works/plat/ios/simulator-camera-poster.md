@@ -65,8 +65,18 @@ undoes a stale record.
 
 A simulator booted with `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES` holds that value in launchd_sim's
 own environment. `launchctl getenv` does not show it, and launchd keeps it over a later
-`launchctl setenv` (verified on iOS 27.2). Activation reads it with `ps -E` on launchd_sim
-(`SimulatorBootEnvironment`). When it names any library other than the gate, activation fails.
+`launchctl setenv` or `unsetenv` (verified on iOS 27.2). Activation reads it with `ps -E` on launchd_sim
+(`SimulatorBootEnvironment`). When it holds the gate (the network shaper's boot), activation sets
+only the two poster variables. When it names other libraries without the gate, activation fails.
+
+### Launch gate
+
+launchd_sim also keeps a boot-time `DYLD_INSERT_LIBRARIES` over the one `simctl launch` passes;
+other launch variables still reach the app. So every launch that inserts a library (the per-launch
+poster, `launchApp prototype: true`) also names it in `SIMCTL_CHILD_AM_INSERT_LIBRARIES`. In a
+user-installed app the gate loads each entry of `AM_INSERT_LIBRARIES` with `dlopen`, before the
+poster checks. A library dyld already inserted is not loaded twice. The network shaper boots
+with the gate, so the shaper, the poster and the prototype agent load into the same app.
 
 `setDeviceState` and `startDevice` report `deviceWide: true` when activation succeeded. A
 failure is logged, the poster stays recorded for `launchApp`, and the result carries
@@ -122,8 +132,9 @@ and `deviceWide` when set, and `relaunchRequired: true`. It never relaunches an 
 takes a new process environment only on relaunch. With a registered poster, `launchApp`
 forces a cold launch and returns `cameraPosterApplied: true`; after clearing, use
 `launchApp coldBoot: true` to remove injection from a running app. Existing DYLD entries and
-`prototype: true` injection compose: both libraries remain in the colon-separated list and the
-prototype port/token environment survives. Without a registered poster, launch is unchanged.
+`prototype: true` injection compose: both libraries remain in each colon-separated list
+(`DYLD_INSERT_LIBRARIES` and the gate's `AM_INSERT_LIBRARIES`) and the prototype port/token
+environment survives. Without a registered poster, launch is unchanged.
 
 Like `prototype: true`, injection skips `com.apple.*` bundles, because SpringBoard and system apps
 cannot take injection. The launch is unchanged and reports `cameraPosterApplied: false` rather than
@@ -192,3 +203,4 @@ not cover live preview, `AVCapturePhotoOutput` or QR scanning.
 
 - [Build the camera poster dylib on demand](../../../devlog/2026-11-11-simulator-camera-poster-on-demand-build.md)
 - [Device-wide camera poster through the launchd environment](../../../devlog/2026-11-23-simulator-camera-poster-device-wide.md)
+- [Launch-time libraries load through a gate on a shaped simulator](../../../devlog/2026-11-24-simulator-launch-gate.md)

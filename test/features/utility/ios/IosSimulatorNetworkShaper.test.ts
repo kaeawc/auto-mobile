@@ -41,6 +41,8 @@ class SimulatorHost extends FakeHostCommandExecutor {
   booted = true;
   shaped = false;
   bootInjects = true;
+  /** The boot's DYLD_INSERT_LIBRARIES; launchd_sim reports it while shaped. */
+  inserted = DYLIB;
   override async executeCommand(
     command: string,
     args: string[] = [],
@@ -54,7 +56,15 @@ class SimulatorHost extends FakeHostCommandExecutor {
       };
     }
     if (command === "ps" && args[0] === "-E") {
-      return { ...result, stdout: this.shaped ? SHAPED_ENV : `${LAUNCHD} HOME=/home` };
+      return {
+        ...result,
+        stdout: this.shaped
+          ? SHAPED_ENV.replace(
+              `DYLD_INSERT_LIBRARIES=${DYLIB}`,
+              `DYLD_INSERT_LIBRARIES=${this.inserted}`,
+            )
+          : `${LAUNCHD} HOME=/home`,
+      };
     }
     if (args[1] === "shutdown") {
       this.booted = false;
@@ -62,17 +72,21 @@ class SimulatorHost extends FakeHostCommandExecutor {
     }
     if (args[1] === "boot") {
       this.booted = true;
+      const inserted = options?.env?.SIMCTL_CHILD_DYLD_INSERT_LIBRARIES ?? "";
       this.shaped =
         this.bootInjects &&
-        options?.env?.SIMCTL_CHILD_DYLD_INSERT_LIBRARIES === DYLIB &&
-        options.env.SIMCTL_CHILD_SIM_RS_NETSHAPE === PROFILE;
+        // A prefix check, not split(":"): on Windows the fixture paths carry a drive letter.
+        (inserted === DYLIB || inserted.startsWith(`${DYLIB}:`)) &&
+        options?.env?.SIMCTL_CHILD_SIM_RS_NETSHAPE === PROFILE;
+      this.inserted = inserted;
     }
     return result;
   }
 }
 
-function setup() {
+function setup(options: { companions?: string[] } = {}) {
   const fs = new FakeFileSystem();
+  const booted: string[] = [];
   const runner = new SimulatorHost();
   const lifecycleEvents: string[] = [];
   const livePids = new Set([4242]);
@@ -94,8 +108,10 @@ function setup() {
     profileDirectory: () => resolve("/data/ios-network-shaper"),
     ownerPid: 4242,
     isProcessRunning: (pid) => livePids.has(pid),
+    bootHooks: { notifyBooted: (udid) => booted.push(udid) },
+    ...(options.companions ? { companionLibraries: async () => options.companions! } : {}),
   });
-  return { fs, runner, shaper, lifecycleEvents, livePids };
+  return { fs, runner, shaper, lifecycleEvents, livePids, booted };
 }
 
 function simctlCalls(runner: FakeHostCommandExecutor) {
@@ -398,4 +414,32 @@ test("the sweep keeps an owner a live daemon wrote between the sweep's claim and
   expect(await h.fs.readFile(OWNER)).toBe("777\n");
   const dir = join(resolve("/data/ios-network-shaper"), "profiles");
   expect((await h.fs.readdir(dir)).filter((name) => name.includes(".sweep"))).toEqual([]);
+});
+
+const GATE = resolve("/data/ios-camera-poster-active/libAMCameraPosterGate.dylib");
+
+// launchd_sim keeps the boot's DYLD_INSERT_LIBRARIES over every launch's (#19165): the launch gate
+// must be in the boot list, or launchApp prototype:true and the camera poster cannot load.
+test("a shaped boot inserts its companion libraries after the shaper", async () => {
+  const h = setup({ companions: [GATE] });
+  expect(await h.shaper.apply(UDID, THREE_G)).toEqual({ rebooted: true });
+  const boot = simctlCalls(h.runner).find(({ args }) => args[1] === "boot");
+  expect(boot?.dyld).toBe(`${DYLIB}:${GATE}`);
+});
+
+test("a simulator shaped without the gate is rebooted once to add it, then shapes live", async () => {
+  const h = setup({ companions: [GATE] });
+  h.runner.shaped = true; // An earlier build booted the shaper alone.
+  expect(await h.shaper.apply(UDID, THREE_G)).toEqual({ rebooted: true });
+  expect(await h.shaper.apply(UDID, { ...THREE_G, offline: true })).toEqual({ rebooted: false });
+  expect(simctlCalls(h.runner).filter(({ args }) => args[1] === "boot")).toHaveLength(1);
+});
+
+test("a shaped reboot tells the boot hooks, so launchd-environment features re-apply", async () => {
+  const h = setup({ companions: [GATE] });
+  await h.shaper.apply(UDID, THREE_G);
+  expect(h.booted).toEqual([UDID]);
+  h.booted.length = 0;
+  await h.shaper.apply(UDID, THREE_G);
+  expect(h.booted).toEqual([]);
 });

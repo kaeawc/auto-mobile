@@ -4,6 +4,11 @@
 // extensions) that already loaded AVFoundation and a poster source is configured. Only then does
 // it load the poster library that AM_CAMERA_POSTER_DYLIB names. System apps and daemons
 // (SpringBoard, Camera, anything under the runtime root) never load the poster.
+//
+// The network shaper's boot also inserts this gate (#19165). launchd_sim keeps a boot-time
+// DYLD_INSERT_LIBRARIES over the one `simctl launch` passes, so a launch that inserts a library
+// (the prototype agent, a per-launch poster) also names it in AM_INSERT_LIBRARIES, and the gate
+// loads each entry into that user-installed app process.
 #include <dlfcn.h>
 #include <limits.h>
 #include <mach-o/dyld.h>
@@ -37,8 +42,25 @@ static int AMHasPosterSource(void) {
     return config && *config && access(config, R_OK) == 0;
 }
 
+// Colon-separated, like DYLD_INSERT_LIBRARIES. A library dyld already inserted is not loaded again.
+static void AMLoadLaunchLibraries(void) {
+    const char *list = getenv("AM_INSERT_LIBRARIES");
+    if (!list || !*list) return;
+    char *copy = strdup(list);
+    if (!copy) return;
+    char *state = NULL;
+    for (char *entry = strtok_r(copy, ":", &state); entry; entry = strtok_r(NULL, ":", &state)) {
+        if (!dlopen(entry, RTLD_NOW | RTLD_GLOBAL)) {
+            fprintf(stderr, "[AMCameraPoster] gate could not load %s: %s\n", entry, dlerror());
+        }
+    }
+    free(copy);
+}
+
 __attribute__((constructor)) static void AMGate(void) {
-    if (!AMIsUserAppProcess() || !AMHasAVFoundation() || !AMHasPosterSource()) return;
+    if (!AMIsUserAppProcess()) return;
+    AMLoadLaunchLibraries();
+    if (!AMHasAVFoundation() || !AMHasPosterSource()) return;
     const char *library = getenv("AM_CAMERA_POSTER_DYLIB");
     if (!library || !*library) return;
     if (!dlopen(library, RTLD_NOW | RTLD_GLOBAL)) {

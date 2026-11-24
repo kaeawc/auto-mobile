@@ -16,6 +16,7 @@ regenerates the table below.
 | Date | Kind | Entry |
 | --- | --- | --- |
 | 2026-11-24 | decision | [Stable wait timeout is a result, not an error](2026-11-24-stable-wait-timeout-not-error.md) |
+| 2026-11-24 | decision | [Launch-time libraries load through a gate on a shaped simulator](2026-11-24-simulator-launch-gate.md) |
 | 2026-11-24 | decision | [`getAndroid` without an identifier selects a phone](2026-11-24-getandroid-bare-call-selects-phone.md) |
 | 2026-11-24 | decision | [compileSdk carries a minor API level](2026-11-24-compile-sdk-minor-level.md) |
 | 2026-11-24 | decision | [Action diffs summarize added and removed nodes](2026-11-24-action-diff-summaries.md) |

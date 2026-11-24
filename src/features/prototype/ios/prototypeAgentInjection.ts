@@ -29,6 +29,12 @@ export {
 } from "./PrototypeAgentRegistry";
 
 export const SIMCTL_CHILD_DYLD_INSERT_LIBRARIES = "SIMCTL_CHILD_DYLD_INSERT_LIBRARIES";
+/**
+ * The libraries the launch gate loads (#19165). launchd_sim keeps a boot-time
+ * `DYLD_INSERT_LIBRARIES` (the network shaper's) over the one `simctl launch` passes; the shaped
+ * boot also inserts the gate, which loads every entry of this variable into the launched app.
+ */
+export const SIMCTL_CHILD_AM_INSERT_LIBRARIES = "SIMCTL_CHILD_AM_INSERT_LIBRARIES";
 /** dyld separates `DYLD_INSERT_LIBRARIES` entries with a colon. */
 const DYLD_PATH_SEPARATOR = ":";
 const SYSTEM_BUNDLE_PREFIX = "com.apple.";
@@ -61,22 +67,34 @@ export function mergeDyldInsertLibraries(existing: string | undefined, dylibPath
 }
 
 /**
- * The `simctl launch` environment: the agent's port and token plus `DYLD_INSERT_LIBRARIES`,
- * keeping any libraries the host already passes to simulator apps through
- * `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES`.
+ * Adds a library to a `simctl launch` environment, in `DYLD_INSERT_LIBRARIES` and in the launch
+ * gate's `AM_INSERT_LIBRARIES`, so it loads whether or not the simulator booted with its own
+ * `DYLD_INSERT_LIBRARIES`. Each list keeps the entries the environment already has, else the host's.
+ */
+export function withLaunchInsertedLibrary(
+  environment: Record<string, string> | undefined,
+  hostEnv: NodeJS.ProcessEnv,
+  dylibPath: string,
+): Record<string, string> {
+  const merged = (name: string) =>
+    mergeDyldInsertLibraries(environment?.[name] ?? hostEnv[name], dylibPath);
+  return {
+    ...environment,
+    [SIMCTL_CHILD_DYLD_INSERT_LIBRARIES]: merged(SIMCTL_CHILD_DYLD_INSERT_LIBRARIES),
+    [SIMCTL_CHILD_AM_INSERT_LIBRARIES]: merged(SIMCTL_CHILD_AM_INSERT_LIBRARIES),
+  };
+}
+
+/**
+ * The `simctl launch` environment: the agent's port and token plus the agent library, keeping
+ * any libraries the host already passes to simulator apps through `SIMCTL_CHILD_*`.
  */
 export function buildPrototypeAgentLaunchEnvironment(
   dylibPath: string,
   simctlEnvironment: Record<string, string>,
   hostEnv: NodeJS.ProcessEnv,
 ): Record<string, string> {
-  return {
-    ...simctlEnvironment,
-    [SIMCTL_CHILD_DYLD_INSERT_LIBRARIES]: mergeDyldInsertLibraries(
-      hostEnv[SIMCTL_CHILD_DYLD_INSERT_LIBRARIES],
-      dylibPath,
-    ),
-  };
+  return withLaunchInsertedLibrary(simctlEnvironment, hostEnv, dylibPath);
 }
 
 /** Rejects targets the agent cannot be injected into, before anything is relaunched. */

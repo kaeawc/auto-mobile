@@ -98,8 +98,12 @@ export class IosCameraPosterDeviceWide {
     const gate = this.store.installGate(await this.gateProvider.ensure());
     // launchd_sim gives a variable it inherited at boot precedence over `launchctl setenv`, and
     // `launchctl getenv` does not show it: a boot-time DYLD_INSERT_LIBRARIES cannot be extended.
-    const bootValue = withoutGate(await this.bootEnvironment.dyldInsertLibraries(udid, signal));
-    if (bootValue) {
+    // The network shaper's boot inserts the gate itself (#19165), so only the poster variables
+    // are needed then.
+    const boot = await this.bootEnvironment.dyldInsertLibraries(udid, signal);
+    const bootGate = entries(boot).find((entry) => isGate(entry, gate));
+    const bootValue = withoutGate(boot);
+    if (bootValue && !bootGate) {
       throw new ActionableError(
         `The simulator was booted with DYLD_INSERT_LIBRARIES=${bootValue}, which launchd keeps over launchctl setenv, so the camera poster cannot be inserted device-wide.`,
       );
@@ -114,7 +118,10 @@ export class IosCameraPosterDeviceWide {
     await this.setenv(udid, POSTER_VARIABLES[0], poster, signal);
     await this.setenv(udid, POSTER_VARIABLES[1], this.config.path(udid), signal);
     // Recorded before the gate goes in, so an interrupted activation is still undone later.
-    this.store.write(udid, { gate, launchctlBefore });
+    this.store.write(udid, { gate: bootGate ?? gate, launchctlBefore });
+    if (bootGate) {
+      return;
+    }
     // Last, so no process loads the gate before it can find the poster library.
     await this.setenv(udid, DYLD, mergeDyldInsertLibraries(withoutGate(current), gate), signal);
   }

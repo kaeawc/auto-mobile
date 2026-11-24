@@ -576,6 +576,24 @@ EOF
   grep -Fqx -- '--only mkdocs-nav,docs-github-markdown,docs-banned-phrases,docs-readability' "${FAST_LOG}"
 }
 
+@test "changed devlog entry selects devlog-index" {
+  commit_change "docs/devlog/2026-01-01-entry.md" "# Entry"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only mkdocs-nav,docs-github-markdown,devlog-index,docs-banned-phrases,docs-readability' "${FAST_LOG}"
+}
+
+@test "changed devlog generator selects devlog-index" {
+  commit_change "scripts/docs/generate-devlog-index.ts" "// fixture"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fq -- 'devlog-index' "${FAST_LOG}"
+}
+
 @test "changed docs Markdown passes the merge-base ref to docs-readability" {
   commit_change "docs/using/page.md" "# Page"
 

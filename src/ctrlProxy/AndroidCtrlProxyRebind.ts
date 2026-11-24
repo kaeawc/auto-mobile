@@ -128,7 +128,11 @@ export class AndroidCtrlProxyRebind {
       throw new ActionableError(output);
     }
     // `dumpsys accessibility` lists every user's state in id order; read the setup user's, not user 0's.
-    const diagnostic = AndroidCtrlProxyRebind.userStateBlock(output, await this.host.setupUser());
+    const user = await this.host.setupUser();
+    const diagnostic = AndroidCtrlProxyRebind.userStateBlock(output, user);
+    if (!AndroidCtrlProxyRebind.LABELLED_SECTIONS.test(diagnostic)) {
+      return this.legacyAccessibilityServiceState(diagnostic, user);
+    }
 
     const boundServices = AndroidCtrlProxyRebind.accessibilityServiceSection(
       diagnostic,
@@ -164,6 +168,37 @@ export class AndroidCtrlProxyRebind {
             ? "bound"
             : "unbound";
     logger.debug(`[CTRL_PROXY] Accessibility service binding status: ${state}`);
+    return state;
+  }
+
+  // API 28+ dumps print labelled "Enabled services" / "Bound services" sections.
+  private static readonly LABELLED_SECTIONS = /^[\t ]*Enabled services:/m;
+
+  /**
+   * API 27 and older print only `services:{...}` (the bound services) in each user
+   * state, with no enabled, binding or crashed sections (#18981). Read enablement
+   * from the secure setting instead. A configured service that is not bound yet is
+   * reported as binding: the framework is starting it, and a slow cold start takes
+   * tens of seconds before it binds. The binding grace and the post-rebind wait
+   * bound that, so a service that never binds is still rebound.
+   */
+  private async legacyAccessibilityServiceState(
+    diagnostic: string,
+    user: number | undefined,
+  ): Promise<AccessibilityServiceState> {
+    const isBound = AndroidCtrlProxyRebind.isCtrlProxyBound(
+      AndroidCtrlProxyRebind.accessibilityServiceSection(diagnostic, "services"),
+    );
+    const result = await this.host.adb.executeCommand(
+      settingsCommand(user, "get secure enabled_accessibility_services"),
+    );
+    const isEnabled = AndroidCtrlProxyRebind.accessibilityServices(result.stdout).includes(
+      CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT,
+    );
+    const isBinding = isEnabled && !isBound;
+    this.recordBindingObservation(isBinding);
+    const state: AccessibilityServiceState = !isEnabled ? "absent" : isBound ? "bound" : "binding";
+    logger.debug(`[CTRL_PROXY] Accessibility service binding status (legacy dumpsys): ${state}`);
     return state;
   }
 

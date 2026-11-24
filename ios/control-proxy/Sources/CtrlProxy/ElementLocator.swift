@@ -20,14 +20,80 @@ import Foundation
     }
 #endif
 
+/// Where the observed iPad app window sat: the app's frame and, when that frame is inset from
+/// the screen, its window's frame in screen space.
+struct ObservedWindowPlacement: Equatable {
+    let appFrame: CGRect
+    let windowFrame: CGRect?
+
+    func matches(_ other: Self) -> Bool {
+        func close(_ lhs: CGRect?, _ rhs: CGRect?) -> Bool {
+            guard let lhs, let rhs else { return lhs == nil && rhs == nil }
+            return abs(lhs.minX - rhs.minX) < 0.5 && abs(lhs.minY - rhs.minY) < 0.5 &&
+                abs(lhs.width - rhs.width) < 0.5 && abs(lhs.height - rhs.height) < 0.5
+        }
+        return close(appFrame, other.appFrame) && close(windowFrame, other.windowFrame)
+    }
+}
+
 /// A completed observation is reusable only for its app and rotation-change epoch.
 struct ObservedGestureGeometry {
-    let geometry: GestureCoordinateGeometry
+    var geometry: GestureCoordinateGeometry
     let bundleId: String?
     let generation: UInt64
+    /// The iPad window placement the geometry was derived from; nil off iPad.
+    var placement: ObservedWindowPlacement? = nil
+    /// A gesture already ran on this geometry, and may have moved, retiled or maximized the
+    /// window, so the next gesture re-reads the placement first (#19050).
+    var usedByGesture = false
 
     func current(bundleId: String?, generation: UInt64) -> GestureCoordinateGeometry? {
         self.bundleId == bundleId && self.generation == generation ? geometry : nil
+    }
+
+    /// The geometry for the window found at `live` (#19050). An unchanged placement keeps the
+    /// cache. A moved, retiled or full-screen window gets its new app size, window translation
+    /// and inset flag, so its gestures route as an observation of it would.
+    func refreshed(to live: ObservedWindowPlacement) -> Self {
+        guard let placement, !placement.matches(live), !geometry.pinnedToObservation else { return self }
+        let app = GestureSize(width: Double(live.appFrame.width), height: Double(live.appFrame.height))
+        let inset = hasMultiPanelMismatch(app: app, screen: geometry.screen)
+        let translation = inset ? live.windowFrame.flatMap { window in
+            windowedAppTranslation(
+                appOrigin: GesturePoint(x: Double(live.appFrame.minX), y: Double(live.appFrame.minY)),
+                appSize: app,
+                windowOrigin: GesturePoint(x: Double(window.minX), y: Double(window.minY)),
+                windowSize: GestureSize(width: Double(window.width), height: Double(window.height))
+            )
+        } : nil
+        var next = self
+        next.geometry = GestureCoordinateGeometry(
+            app: app, screen: geometry.screen, observation: geometry.observation, rotation: geometry.rotation,
+            appOrigin: geometry.appOrigin, screenOrigin: geometry.screenOrigin, windowTranslation: translation,
+            applicationDisplayId: geometry.applicationDisplayId, insetWindow: inset
+        )
+        next.placement = live
+        return next
+    }
+
+    /// The cache a gesture command routes on (#19050). The first command after an observation
+    /// uses it as observed. A later one re-reads the window placement only when the cached
+    /// geometry keeps the `XCUICoordinate` path, which queries the same app live anyway, so the
+    /// re-read adds no new stall. A command the cache already routes synthesized never queries
+    /// the app: its points are screen points wherever the window has moved, and a live query to
+    /// an app the previous gesture backgrounded can block the runner for ~90 s (#10624, #10858).
+    func routed(
+        synthesizes: (GestureCoordinateGeometry) -> Bool,
+        livePlacement: (GestureSize) -> ObservedWindowPlacement?
+    )
+        -> Self
+    {
+        var next = self
+        if usedByGesture, placement != nil, !synthesizes(geometry), let live = livePlacement(geometry.screen) {
+            next = refreshed(to: live)
+        }
+        next.usedByGesture = true
+        return next
     }
 }
 
@@ -73,6 +139,45 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         /// Reuse the last completed observation without XCUI reads on the legacy gesture path.
         var observedGestureGeometry: GestureCoordinateGeometry? {
             layout.gesture?.current(bundleId: foregroundBundleId, generation: DeviceRotation.changeGeneration)
+        }
+
+        /// The geometry a gesture command routes on, read once per command (#19050; see
+        /// `ObservedGestureGeometry.routed`). `synthesizes` says whether a geometry takes the
+        /// synthesized route for this command's target.
+        func routedGestureGeometry(
+            synthesizes: (GestureCoordinateGeometry) -> Bool
+        )
+            -> GestureCoordinateGeometry?
+        {
+            guard observedGestureGeometry != nil, let cached = layout.gesture else { return nil }
+            let next = cached.routed(synthesizes: synthesizes) { liveWindowPlacement(screen: $0) }
+            if next.placement != cached.placement {
+                logger.info(
+                    "gesture geometry refreshed: window moved inset=\(next.geometry.insetWindow, privacy: .public)"
+                )
+            }
+            layout.gesture = next
+            return next.geometry
+        }
+
+        private func liveWindowPlacement(screen: GestureSize) -> ObservedWindowPlacement? {
+            guard let bundleId = foregroundBundleId else { return nil }
+            do {
+                return try catchingObjCException {
+                    let app = XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId)
+                    let appFrame = app.frame
+                    let inset = hasMultiPanelMismatch(
+                        app: GestureSize(width: Double(appFrame.width), height: Double(appFrame.height)),
+                        screen: screen
+                    )
+                    return ObservedWindowPlacement(
+                        appFrame: appFrame, windowFrame: inset ? app.windows.firstMatch.frame : nil
+                    )
+                }
+            } catch {
+                logger.warning("app window placement unavailable; gestures use the observed one: \(error)")
+                return nil
+            }
         }
 
         public func refreshGeometry() throws -> RefreshGeometryResponse.Geometry? {
@@ -351,13 +456,17 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
             // An inset iPadOS window is captured relative to itself, except its keyboard, which
             // XCTest reports in screen space. Observe reports both in screen space (#18830).
+            var observedWindowFrame: CGRect?
             let windowTranslation = panel != nil ? nil : tracked("windowTranslation") {
                 Self.windowScreenTranslation(
                     appFrame: snapshot.frame,
                     screenFrame: CGRect(
                         x: 0, y: 0, width: screenMetrics.fallbackWidth, height: screenMetrics.fallbackHeight
                     ),
-                    windowFrame: { self.observedAppWindowFrame() }
+                    windowFrame: {
+                        observedWindowFrame = self.observedAppWindowFrame()
+                        return observedWindowFrame
+                    }
                 )
             }
             // An iPad window tiled at the screen origin needs no translation but is still inset,
@@ -603,13 +712,23 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 rotation: GestureCoordinateGeometry.observationRotation(
                     hierarchyRotation, size: observationSize, app: appSize
                 ),
+                // An inset window's observed points are screen points (#18830), which lets
+                // its gestures take the synthesized route (#18960).
+                windowTranslation: windowTranslation.map { GesturePoint(x: Double($0.x), y: Double($0.y)) },
                 // Live SpringBoard reads see only the cover's frame; keep the observed panel.
-                pinnedToObservation: innerPanelFrame != nil
+                pinnedToObservation: innerPanelFrame != nil,
+                // A tile at the screen origin has no translation but is still inset (#19050).
+                insetWindow: insetScreenFrame != nil
             )
             layout.gesture = ObservedGestureGeometry(
                 geometry: geometry,
                 bundleId: bundleId,
-                generation: beforeHierarchyCapture.generation
+                generation: beforeHierarchyCapture.generation,
+                // Only an iPad app window can move under a later gesture (#19050).
+                placement: panel == nil && bundleId != "com.apple.springboard"
+                    && UIDevice.current.userInterfaceIdiom == .pad
+                    ? ObservedWindowPlacement(appFrame: snapshot.frame, windowFrame: observedWindowFrame)
+                    : nil
             )
 
             return ViewHierarchy(
@@ -634,6 +753,10 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         public init() {}
 
         var observedGestureGeometry: GestureCoordinateGeometry? { nil }
+        func routedGestureGeometry(
+            synthesizes _: (GestureCoordinateGeometry) -> Bool
+        )
+            -> GestureCoordinateGeometry? { nil }
 
         public func refreshGeometry() throws -> RefreshGeometryResponse.Geometry? {
             _ = try getViewHierarchy()

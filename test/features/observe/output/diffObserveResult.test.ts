@@ -1107,6 +1107,104 @@ describe("diffObserveResult", () => {
     ).toHaveLength(2);
   });
 
+  // #19122: a list relayout changes an ancestor's bounds, which re-keys the whole
+  // subtree. The label-less switch that stayed in place must still read as flipped.
+  test("reports a label-less switch's checked flip when a list relayout re-keys its ancestors (#19122)", () => {
+    const screen = (checked: boolean) =>
+      obs({
+        "resource-id": "root",
+        bounds: { left: 0, top: 0, right: 100, bottom: 400 },
+        node: [
+          {
+            "resource-id": "recycler_view",
+            bounds: { left: 0, top: 0, right: 100, bottom: checked ? 300 : 100 },
+            node: [
+              {
+                bounds: { left: 0, top: 0, right: 100, bottom: 40 },
+                clickable: true,
+                actions: ["click"],
+                node: [
+                  {
+                    "resource-id": "android:id/title",
+                    text: "Wi-Fi",
+                    bounds: { left: 0, top: 0, right: 60, bottom: 40 },
+                  },
+                  {
+                    "resource-id": "switchWidget",
+                    checked,
+                    checkable: true,
+                    bounds: { left: 70, top: 0, right: 100, bottom: 40 },
+                  },
+                ],
+              },
+              ...(checked
+                ? [
+                    {
+                      "resource-id": "android:id/title",
+                      text: "AndroidWifi",
+                      clickable: true,
+                      actions: ["click"],
+                      bounds: { left: 0, top: 50, right: 100, bottom: 90 },
+                    },
+                  ]
+                : []),
+            ],
+          },
+        ],
+      });
+
+    for (const projectAddedRemoved of [false, true]) {
+      const diff = diffObserveResult(screen(true), screen(false), { projectAddedRemoved });
+      const flips = diff.changed.filter((entry) => "checked" in entry.changes);
+      expect(flips).toHaveLength(1);
+      expect(flips[0].changes.checked).toEqual({ from: true, to: false });
+      expect(flips[0].selector?.elementId).toBe("switchWidget");
+    }
+  });
+
+  // #19122: window roots carry no id or text and fill the screen, so a closing
+  // sheet's root must not pair with the app window root underneath it.
+  test("a closed sheet window is removed, not paired with the app window as a windowId change (#19122)", () => {
+    const fullScreen = { left: 0, top: 0, right: 1080, bottom: 1920 };
+    const appWindow = {
+      windowId: 29,
+      bounds: fullScreen,
+      node: [
+        {
+          "resource-id": "com.android.contacts:id/list",
+          bounds: { left: 0, top: 100, right: 1080, bottom: 1800 },
+          node: [
+            {
+              text: "Alice",
+              clickable: true,
+              actions: ["click"],
+              bounds: { left: 0, top: 100, right: 1080, bottom: 200 },
+            },
+          ],
+        },
+      ],
+    };
+    const sheetWindow = {
+      windowId: 30,
+      bounds: fullScreen,
+      node: [
+        {
+          text: "Device only",
+          clickable: true,
+          actions: ["click"],
+          bounds: { left: 0, top: 1500, right: 1080, bottom: 1600 },
+        },
+      ],
+    };
+
+    const diff = diffObserveResult(obs([sheetWindow, appWindow]), obs([appWindow]));
+
+    expect(diff.changed.filter((entry) => "windowId" in entry.changes)).toEqual([]);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed.map((node) => node.attributes.text)).toContain("Device only");
+    expect(diff.removed.map((node) => node.attributes.text)).not.toContain("Alice");
+  });
+
   test("still re-pairs a labelled node whose state changed while it moved", () => {
     const item = (top: number, checked: boolean) => ({
       "resource-id": "root",

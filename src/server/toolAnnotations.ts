@@ -109,6 +109,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   ambient: entry("Change Ambient Power State", destructiveDevice),
   wearSurface: entry("Manage Wear OS Tiles, Watch Faces and Complications", destructiveDevice),
   glassesInput: entry("Glasses Focus Input", destructiveDevice),
+  xrHeadsetInput: entry("XR Headset Hand and Eye Input", destructiveDevice),
   rotaryScroll: entry("Scroll Rotary Input", destructiveDevice),
   rotateCrown: entry("Rotate Digital Crown", destructiveDevice),
   recordDeviceGestures: entry("Record Gestures", controlDevice),
@@ -159,6 +160,8 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   appLifecycle: entry("Control App Lifecycle", destructiveDevice),
   changeLocalization: entry("Change Locale", destructiveDevice),
   clipboard: entry("Control Clipboard", destructiveDevice),
+  // Selecting the Copy action overwrites the clipboard, like clipboard.
+  shareSheet: entry("Control Share Sheet", destructiveDevice),
   siri: entry("Activate Siri", destructiveDevice),
   crashApp: entry("Crash App", destructiveDevice),
   criticalSection: entry("Run Critical Section", destructiveDevice),

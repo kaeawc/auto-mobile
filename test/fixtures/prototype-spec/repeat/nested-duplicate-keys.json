@@ -1,0 +1,574 @@
+[
+  {
+    "name": "eager nested repeat rejects a duplicate literal inner key",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "column",
+        "repeat": {
+          "items": {
+            "path": "/orders"
+          },
+          "as": "order",
+          "key": "id"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line",
+              "key": "sku"
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{line.sku}"
+              }
+            ]
+          }
+        ]
+      },
+      "data": {
+        "orders": [
+          {
+            "id": "A",
+            "lines": [
+              {
+                "sku": "PEN"
+              },
+              {
+                "sku": "PEN"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "error": {
+      "path": "root.children[0].repeat.key",
+      "message": "Duplicate repeat key \"PEN\" (items 0 and 1)"
+    }
+  },
+  {
+    "name": "lazy list rejects a duplicate literal inner key",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "list",
+        "repeat": {
+          "items": {
+            "path": "/orders"
+          },
+          "as": "order",
+          "key": "id"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line",
+              "key": "sku"
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{line.sku}"
+              }
+            ]
+          }
+        ]
+      },
+      "data": {
+        "orders": [
+          {
+            "id": "A",
+            "lines": [
+              {
+                "sku": "PEN"
+              },
+              {
+                "sku": "PEN"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "error": {
+      "path": "root.children[0].repeat.key",
+      "message": "Duplicate repeat key \"PEN\" (items 0 and 1)"
+    }
+  },
+  {
+    "name": "eager nested repeat rejects a constant derived inner key",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "column",
+        "repeat": {
+          "items": {
+            "path": "/orders"
+          },
+          "as": "order",
+          "key": "id"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line",
+              "key": "shown",
+              "derive": {
+                "shown": {
+                  "of": {
+                    "value": 1
+                  },
+                  "format": {
+                    "number": {}
+                  }
+                }
+              }
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{line.sku} {line.shown}"
+              }
+            ]
+          }
+        ]
+      },
+      "data": {
+        "orders": [
+          {
+            "id": "A",
+            "lines": [
+              {
+                "sku": "PEN"
+              }
+            ]
+          },
+          {
+            "id": "B",
+            "lines": []
+          },
+          {
+            "id": "C",
+            "lines": [
+              {
+                "sku": "PAD"
+              },
+              {
+                "sku": "INK"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "error": {
+      "path": "root.children[0].repeat.key",
+      "message": "Derived repeat key \"shown\" has the same input for items 0 and 1"
+    }
+  },
+  {
+    "name": "lazy list rejects a constant derived inner key in a later row",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "list",
+        "repeat": {
+          "items": {
+            "path": "/orders"
+          },
+          "as": "order",
+          "key": "id"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line",
+              "key": "shown",
+              "derive": {
+                "shown": {
+                  "of": {
+                    "value": 1
+                  },
+                  "format": {
+                    "number": {}
+                  }
+                }
+              }
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{line.sku} {line.shown}"
+              }
+            ]
+          }
+        ]
+      },
+      "data": {
+        "orders": [
+          {
+            "id": "A",
+            "lines": [
+              {
+                "sku": "PEN"
+              }
+            ]
+          },
+          {
+            "id": "B",
+            "lines": []
+          },
+          {
+            "id": "C",
+            "lines": [
+              {
+                "sku": "PAD"
+              },
+              {
+                "sku": "INK"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "error": {
+      "path": "root.children[0].repeat.key",
+      "message": "Derived repeat key \"shown\" has the same input for items 0 and 1"
+    }
+  },
+  {
+    "name": "lazy list rejects a derived inner key over equal item values",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "list",
+        "repeat": {
+          "items": {
+            "path": "/orders"
+          },
+          "as": "order",
+          "key": "id"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line",
+              "key": "label",
+              "derive": {
+                "label": {
+                  "of": {
+                    "item": "qty"
+                  },
+                  "format": {
+                    "number": {}
+                  }
+                }
+              }
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{line.sku} {line.label}"
+              }
+            ]
+          }
+        ]
+      },
+      "data": {
+        "orders": [
+          {
+            "id": "A",
+            "lines": [
+              {
+                "sku": "PEN",
+                "qty": 2
+              },
+              {
+                "sku": "INK",
+                "qty": 3
+              }
+            ]
+          },
+          {
+            "id": "B",
+            "lines": [
+              {
+                "sku": "PAD",
+                "qty": 4
+              },
+              {
+                "sku": "CAP",
+                "qty": 4
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "error": {
+      "path": "root.children[0].repeat.key",
+      "message": "Derived repeat key \"label\" has the same input for items 0 and 1"
+    }
+  },
+  {
+    "name": "lazy list accepts a derived inner key over distinct item values",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "list",
+        "repeat": {
+          "items": {
+            "path": "/orders"
+          },
+          "as": "order",
+          "key": "id"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line",
+              "key": "label",
+              "derive": {
+                "label": {
+                  "of": {
+                    "item": "qty"
+                  },
+                  "format": {
+                    "number": {}
+                  }
+                }
+              }
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{line.sku} {line.label}"
+              }
+            ]
+          }
+        ]
+      },
+      "data": {
+        "orders": [
+          {
+            "id": "A",
+            "lines": [
+              {
+                "sku": "PEN",
+                "qty": 2
+              },
+              {
+                "sku": "INK",
+                "qty": 3
+              }
+            ]
+          },
+          {
+            "id": "B",
+            "lines": [
+              {
+                "sku": "PAD",
+                "qty": 4
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "error": null
+  },
+  {
+    "name": "lazy list accepts a constant derived inner key with one row per order",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "list",
+        "repeat": {
+          "items": {
+            "path": "/orders"
+          },
+          "as": "order",
+          "key": "id"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line",
+              "key": "shown",
+              "derive": {
+                "shown": {
+                  "of": {
+                    "value": 1
+                  },
+                  "format": {
+                    "number": {}
+                  }
+                }
+              }
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{line.sku} {line.shown}"
+              }
+            ]
+          }
+        ]
+      },
+      "data": {
+        "orders": [
+          {
+            "id": "A",
+            "lines": [
+              {
+                "sku": "PEN"
+              }
+            ]
+          },
+          {
+            "id": "B",
+            "lines": [
+              {
+                "sku": "PEN"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "error": null
+  },
+  {
+    "name": "lazy list accepts a derived inner key over 0 and -0",
+    "spec": {
+      "id": "nested",
+      "window": {
+        "placement": {
+          "type": "fullscreen"
+        }
+      },
+      "root": {
+        "type": "list",
+        "repeat": {
+          "items": {
+            "path": "/orders"
+          },
+          "as": "order",
+          "key": "id"
+        },
+        "children": [
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "field": "lines"
+              },
+              "as": "line",
+              "key": "label",
+              "derive": {
+                "label": {
+                  "of": {
+                    "item": "qty"
+                  },
+                  "format": {
+                    "number": {}
+                  }
+                }
+              }
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{line.sku} {line.label}"
+              }
+            ]
+          }
+        ]
+      },
+      "data": {
+        "orders": [
+          {
+            "id": "A",
+            "lines": [
+              {
+                "sku": "PEN",
+                "qty": 0
+              },
+              {
+                "sku": "INK",
+                "qty": -0.0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "error": null
+  }
+]

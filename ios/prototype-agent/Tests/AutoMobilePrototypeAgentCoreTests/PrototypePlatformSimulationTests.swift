@@ -21,12 +21,23 @@ private final class SimulationModule: PrototypePlatformModule {
     var supportsSimulation = true
     var accepts = true
     var mutations = 0
+    var availabilityChecks = 0
+    var calls = 0
+    private let echo = PrototypeTestPlatformModule()
     var state: [String: JSONValue] = [:]
     let events: AsyncStream<PlatformEvent>
     let continuation: AsyncStream<PlatformEvent>.Continuation
     init() { (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(16)) }
-    func availability() -> PlatformAvailability { .ready }
-    func call(_: PlatformCall) async -> PlatformCallResult { .failure(.unsupported, "unused") }
+    func availability() -> PlatformAvailability {
+        availabilityChecks += 1
+        return .ready
+    }
+
+    func call(_ call: PlatformCall) async -> PlatformCallResult {
+        calls += 1
+        return await echo.call(call)
+    }
+
     func simulate(_ event: PlatformEvent) -> Bool {
         guard accepts else { return false }
         mutations += 1
@@ -59,12 +70,12 @@ final class PrototypePlatformSimulationTests: XCTestCase {
         let hint: String
     }
 
-    private func fixture() throws -> [String: JSONValue] {
+    private func fixture<Value: Decodable>(_ name: String, as _: Value.Type) throws -> Value {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("test/fixtures/prototype-spec/platform-simulation/test-tick.json")
-        return try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf: url))
+            .appendingPathComponent("test/fixtures/prototype-spec/platform-simulation/\(name).json")
+        return try JSONDecoder().decode(Value.self, from: Data(contentsOf: url))
     }
 
     private func session(declared: Bool = true) throws -> PrototypeSession {
@@ -83,7 +94,7 @@ final class PrototypePlatformSimulationTests: XCTestCase {
 
     @MainActor
     func testSharedFixtureUsesRealDeliveryAndStatePath() async throws {
-        let fixture = try fixture()
+        let fixture = try fixture("test-tick", as: [String: JSONValue].self)
         let data = try XCTUnwrap(fixture["data"])
         let eventName = try XCTUnwrap(fixture["event"]?.stringValue)
         let module = SimulationModule()
@@ -241,25 +252,24 @@ final class PrototypePlatformSimulationTests: XCTestCase {
 
     @MainActor
     func testRegistryOptInAndLaunchHooks() {
-        let capability = PrototypeAgentProtocol.platformSimulationCapability
-        let request = PrototypeAgentProtocol.simulatePlatformRequest
-        XCTAssertFalse(PrototypeAgentProtocol.capabilities.contains(capability))
-        XCTAssertFalse(PrototypeAgentProtocol.capabilities.contains(request))
+        let simulationCommands = [
+            PrototypeAgentProtocol.platformSimulationCapability, PrototypeAgentProtocol.simulatePlatformRequest,
+            PrototypeAgentProtocol.platformOutcomesCapability, PrototypeAgentProtocol.queueCallOutcomeRequest,
+        ]
+        XCTAssertTrue(Set(PrototypeAgentProtocol.capabilities).isDisjoint(with: simulationCommands))
         let production = PrototypePlatformRegistry(modules: [NoSimulationModule()])
         XCTAssertFalse(production.supportsSimulation)
-        XCTAssertFalse(production.capabilities.contains(capability))
-        XCTAssertFalse(production.capabilities.contains(request))
+        XCTAssertTrue(Set(production.capabilities).isDisjoint(with: simulationCommands))
         let base = PrototypePlatformRegistry()
         for environment in [[:], [PrototypeTestHooks.environmentKey: "0"]] {
             let registry = base.withTestHooks(environment: environment)
             XCTAssertNil(registry.modules["test"])
-            XCTAssertFalse(registry.capabilities.contains(capability))
-            XCTAssertFalse(registry.capabilities.contains(request))
+            XCTAssertTrue(Set(registry.capabilities).isDisjoint(with: simulationCommands))
         }
         let enabled = base.withTestHooks(environment: [PrototypeTestHooks.environmentKey: "1"])
         XCTAssertTrue(enabled.modules["test"] is PrototypeTestPlatformModule)
         XCTAssertTrue(enabled.supportsSimulation)
-        for supported in [capability, request] {
+        for supported in simulationCommands {
             XCTAssertTrue(enabled.capabilities.contains(supported))
             XCTAssertTrue(
                 PrototypeAgentProtocol.advertisedCapabilities(registryCapabilities: enabled.capabilities)
@@ -293,5 +303,129 @@ final class PrototypePlatformSimulationTests: XCTestCase {
             events.first?.payload,
             .object(["event": .string("test.tick"), "data": .null, "truncated": .bool(true), "simulated": .bool(true)])
         )
+    }
+}
+
+extension PrototypePlatformSimulationTests {
+    @MainActor
+    private func echo(
+        _ driver: PrototypePlatformDriver,
+        call: String = "test.echo",
+        args: [String: JSONValue] = ["message": .string("real")]
+    )
+        async -> PlatformCallResult?
+    {
+        var result: PlatformCallResult?
+        driver.onComplete = { _, value, _ in result = value }
+        driver.perform([.start(.init(call: .init(callId: "echo", call: call, args: args), timeoutMs: 100))])
+        await driver.settled()
+        return result
+    }
+
+    @MainActor
+    func testSharedCallOutcomeFixtureBypassesAvailabilityAndUsesOrdinaryCompletion() async throws {
+        let steps = try fixture("test-echo-outcomes", as: [[String: JSONValue]].self)
+        let module = SimulationModule()
+        let clock = ManualRequestClock()
+        let driver = PrototypePlatformDriver(registry: PrototypePlatformRegistry(modules: [module]), clock: clock)
+        let shown = try session()
+        var revisions = 0
+        driver.onState = { _ in revisions += 1 }
+        var completions = 0
+        for step in steps {
+            if let outcome = step["queue"] {
+                XCTAssertNil(driver.queueCallOutcome(id: "p", call: "test.echo", outcome: outcome, session: shown))
+                continue
+            }
+            let call = try XCTUnwrap(step["call"]?.stringValue)
+            let args = try XCTUnwrap(step["args"]?.objectFields)
+            let expected = try XCTUnwrap(step["expected"]?.objectFields)
+            let result = await echo(driver, call: call, args: args)
+            completions += 1
+            if let value = expected["result"] {
+                XCTAssertEqual(result, .success(value))
+            } else {
+                let error = try XCTUnwrap(expected["error"]?.objectFields)
+                let code = try XCTUnwrap(PlatformErrorCode(rawValue: error["code"]?.stringValue ?? ""))
+                XCTAssertEqual(result, try .failure(code, XCTUnwrap(error["message"]?.stringValue)))
+            }
+            let realCalls = expected["result"] == .string("real") ? 1 : 0
+            XCTAssertEqual(module.availabilityChecks, realCalls)
+            XCTAssertEqual(module.calls, realCalls)
+            XCTAssertEqual(revisions, completions)
+            XCTAssertTrue(clock.live.isEmpty)
+        }
+    }
+
+    @MainActor
+    func testInvalidArgsAndOtherCallsLeaveQueueUntouchedAndResetClearsIt() async throws {
+        let module = SimulationModule()
+        let driver = PrototypePlatformDriver(
+            registry: PrototypePlatformRegistry(modules: [module]), clock: ManualRequestClock()
+        )
+        let shown = try session()
+        let outcome = JSONValue.object(["result": .null])
+        for call in ["test.protected", "test.echo"] {
+            XCTAssertNil(driver.queueCallOutcome(id: "p", call: call, outcome: outcome, session: shown))
+        }
+        let invalid = await echo(driver, args: ["message": .string("real"), "bogus": .number(1)])
+        XCTAssertEqual(invalid, .failure(.invalidArgs, "Unknown argument: bogus"))
+        let scripted = await echo(driver)
+        XCTAssertEqual(scripted, .success(.null))
+        XCTAssertEqual(module.calls, 0)
+        let fallback = await echo(driver)
+        XCTAssertEqual(fallback, .success(.string("real")))
+        XCTAssertEqual(module.calls, 1)
+        XCTAssertNil(driver.queueCallOutcome(id: "p", call: "test.echo", outcome: outcome, session: shown))
+        driver.clearOutcomes()
+        let afterReset = await echo(driver)
+        XCTAssertEqual(afterReset, .success(.string("real")))
+        XCTAssertEqual(module.calls, 2)
+    }
+
+    @MainActor
+    func testCallOutcomeRefusalsPrecedeMutationAndQueueCapIsPerCall() async throws {
+        let driver = PrototypePlatformDriver(
+            registry: PrototypePlatformRegistry(modules: [SimulationModule()]), clock: ManualRequestClock()
+        )
+        let shown = try session()
+        var inactive = shown
+        _ = inactive.dismiss(reason: .agent)
+        let outcome = JSONValue.object(["result": .null])
+        let cases: [(String, String, PrototypeSession, String)] = try [
+            ("other", "test.echo", shown, "inactive"),
+            ("p", "test.echo", inactive, "inactive"),
+            ("p", "test.missing", shown, "Unknown platform call"),
+            ("p", "test.echo", session(declared: false), "requires.platform"),
+        ]
+        for (id, call, session, hint) in cases {
+            let error = driver.queueCallOutcome(id: id, call: call, outcome: outcome, session: session)
+            XCTAssertTrue(error?.contains(hint) == true, error ?? "accepted")
+        }
+        for (registry, hint) in [
+            (PrototypePlatformRegistry.empty, "No module registered"),
+            (PrototypePlatformRegistry(modules: [NoSimulationModule()]), "does not support simulation"),
+        ] {
+            let other = PrototypePlatformDriver(registry: registry, clock: ManualRequestClock())
+            let error = other.queueCallOutcome(id: "p", call: "test.echo", outcome: outcome, session: shown)
+            XCTAssertTrue(error?.contains(hint) == true, error ?? "accepted")
+        }
+        for invalid in [
+            JSONValue.object([:]),
+            .object(["result": .string(String(repeating: "😀", count: 1024))]),
+            .object(["error": .object(["code": .string("unknown")])]),
+        ] {
+            XCTAssertNotNil(driver.queueCallOutcome(id: "p", call: "test.echo", outcome: invalid, session: shown))
+        }
+        for _ in 0 ..< 16 {
+            XCTAssertNil(driver.queueCallOutcome(id: "p", call: "test.echo", outcome: outcome, session: shown))
+        }
+        XCTAssertTrue(driver.queueCallOutcome(
+            id: "p", call: "test.echo", outcome: outcome, session: shown
+        )?.contains("At most 16") == true)
+        XCTAssertNil(driver.queueCallOutcome(id: "p", call: "test.protected", outcome: outcome, session: shown))
+        let consumed = await echo(driver)
+        XCTAssertEqual(consumed, .success(.null))
+        XCTAssertNil(driver.queueCallOutcome(id: "p", call: "test.echo", outcome: outcome, session: shown))
     }
 }

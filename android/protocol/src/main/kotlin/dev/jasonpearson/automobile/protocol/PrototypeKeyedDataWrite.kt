@@ -16,6 +16,7 @@ internal object PrototypeKeyedDataWrite {
     data: JsonObject,
     pointer: String,
     write: PrototypeDataWrite,
+    budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
   ): PrototypeDataWriteResult {
     val where = selector(write)
     val member = (write as? PrototypeDataWrite.Set)?.member
@@ -44,7 +45,7 @@ internal object PrototypeKeyedDataWrite {
         "More than one element matches where",
       )
     val changed = replacement(target, matches.single(), write)
-    return PrototypeDataWriter.apply(data, PrototypeDataWrite.Set(write.path, changed))
+    return PrototypeDataWriter.apply(data, PrototypeDataWrite.Set(write.path, changed), budget)
   }
 
   private fun selector(write: PrototypeDataWrite): PrototypeDataMatch? =

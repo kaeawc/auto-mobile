@@ -15,9 +15,12 @@ xcrun --sdk iphonesimulator clang -arch arm64 -dynamiclib -fobjc-arc \
   -framework ImageIO -framework UniformTypeIdentifiers \
   -mios-simulator-version-min=17.0 \
   "$script_dir/Injection/CameraPosterInjection.m" -o "$out/libAMCameraPoster.dylib"
+xcrun --sdk iphonesimulator clang -arch arm64 -dynamiclib -mios-simulator-version-min=17.0 \
+  "$script_dir/Injection/CameraPosterGate.c" -o "$out/libAMCameraPosterGate.dylib"
 xcrun --sdk iphonesimulator swiftc -target arm64-apple-ios17.0-simulator \
   -parse-as-library "$script_dir"/Fixture/Sources/*.swift \
   -o "$out/CameraFixture.app/CameraFixture"
 cp -- "$script_dir/Fixture/Info.plist" "$out/CameraFixture.app/Info.plist"
 codesign -f -s - "$out/libAMCameraPoster.dylib"
+codesign -f -s - "$out/libAMCameraPosterGate.dylib"
 codesign -f -s - "$out/CameraFixture.app"

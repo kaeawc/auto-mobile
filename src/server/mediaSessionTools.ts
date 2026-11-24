@@ -183,11 +183,6 @@ export const createMediaSessionHandler =
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
-    if (device.platform !== "android") {
-      throw new ActionableError(
-        "mediaSession is Android-only: it reads dumpsys media_session and drives cmd media_session.",
-      );
-    }
     if (args.waitFor && args.action !== "get") {
       throw new ActionableError('waitFor is only valid with action "get".');
     }
@@ -217,6 +212,7 @@ const mediaSessionTool = defineDeviceTool({
   input: mediaSessionInput,
   handler: createMediaSessionHandler(),
   options: {
+    platforms: ["android"],
     ...PLAN_RELEVANT,
     defaultEnabled: false,
     // Every action is plain adb (dumpsys / cmd media_session): no CtrlProxy or runner setup.

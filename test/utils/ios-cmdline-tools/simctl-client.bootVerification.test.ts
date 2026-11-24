@@ -10,6 +10,7 @@ import {
 import { createExecResult } from "../../../src/utils/execResult";
 import type { SimctlExecOptions } from "../../../src/utils/ios-cmdline-tools/SimCtlSupport";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { simulatorBootHooks } from "../../../src/utils/ios-cmdline-tools/simulatorBootHooks";
 import { resetSimCtlSharedStateForTesting } from "../../../src/utils/ios-cmdline-tools/SimCtlSharedState";
 import { ActionableError, toActionableError } from "../../../src/models";
 import { RunnerReadinessError } from "../../../src/ctrlProxy/RunnerReadinessError";
@@ -347,6 +348,21 @@ async function waitForCondition(
 
 describe("SimCtlClient boot self-verification", () => {
   beforeEach(resetSimctlState);
+
+  test("a verified boot tells the boot hooks, so launchd-environment state can be re-applied", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+    harness.timer.enableAutoAdvance();
+    harness.setStates(["Booted"]);
+    const booted: string[] = [];
+    const stop = simulatorBootHooks.onBooted((udid) => void booted.push(udid));
+    try {
+      await harness.simctl.bootSimulator(UDID);
+      await Promise.resolve();
+      expect(booted).toEqual([UDID]);
+    } finally {
+      stop();
+    }
+  });
 
   test.each([
     new ActionableError("boot failed"),

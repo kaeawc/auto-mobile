@@ -5,7 +5,6 @@ import { runSessionAppLinksMutation, type SessionAppLinksHost } from "./sessionA
 import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import type { BootedDevice } from "../models";
-import { ActionableError } from "../models/ActionableError";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema, withAppIdAliases } from "../utils/schemaHelpers";
@@ -95,11 +94,6 @@ export const createSetAppLinksHandler =
     _progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
-    if (device.platform !== "android") {
-      throw new ActionableError(
-        "setAppLinks supports Android 12+ only; iOS universal links have no shell verification control.",
-      );
-    }
     const sessionManager = args.sessionUuid
       ? (deps.sessionManager ?? (() => defaultDaemonContext.sessionManager()))()
       : undefined;
@@ -144,6 +138,7 @@ const SET_APP_LINKS_DESCRIPTION =
 export function registerAppLinkTools(deps: SetAppLinksToolDependencies = {}): void {
   ToolRegistry.registerDeviceAware("setAppLinks", SET_APP_LINKS_DESCRIPTION, setAppLinksSchema, {
     handler: createSetAppLinksHandler(deps),
+    platforms: ["android"],
     ...PLAN_RELEVANT,
     defaultEnabled: false,
     outputSchema: setAppLinksResultSchema,

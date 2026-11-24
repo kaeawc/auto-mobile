@@ -84,6 +84,8 @@ public enum JSONValue: Codable, Equatable, Sendable {
 
 struct PrototypeSpec: Decodable {
     let id: String
+    let links: [JSONValue]
+    let requiredCapabilities: [String]
     let window: WindowSpec
     let state: [String: JSONValue]?
     let data: [String: JSONValue]?
@@ -121,7 +123,7 @@ struct PrototypeSpec: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case id, window, state, data, theme, motion, root, storage, requires, platform, strings, derive, channels, auth
-        case commerce, location, media, notifications, sensors
+        case commerce, location, media, notifications, sensors, links
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -144,13 +146,17 @@ struct PrototypeSpec: Decodable {
         }
         try PrototypeLazyList.validateLimits(root: container.decode(JSONValue.self, forKey: .root), data: data)
         if let data { try PrototypeLimits.guardData(data) }
-        derive = container.contains(.derive)
-            ? try PrototypeDerivedCollections.entries(container.decode(JSONValue.self, forKey: .derive)) : nil
+        let rawDerive = container.contains(.derive) ? try container.decode(JSONValue.self, forKey: .derive) : nil
+        derive = try rawDerive.map { try PrototypeDerivedCollections.entries($0) }
         channels = try container.decodeIfPresent(JSONValue.self, forKey: .channels)
         media = try container.decodeIfPresent(JSONValue.self, forKey: .media)
         locationBlock = try container.decodeIfPresent(JSONValue.self, forKey: .location)
         sensorsBlock = try container.decodeIfPresent(JSONValue.self, forKey: .sensors)
         notificationsBlock = try container.decodeIfPresent(JSONValue.self, forKey: .notifications)
+        links = try container.decodeIfPresent([JSONValue].self, forKey: .links) ?? []
+        requiredCapabilities = try PrototypePlatformValidator.capabilities(
+            container.decodeIfPresent(JSONValue.self, forKey: .requires)
+        )
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         // The host validator owns the strict shape; a malformed block means "no storage" here.
@@ -187,6 +193,7 @@ struct PrototypeSpec: Decodable {
             sensors: container.decodeIfPresent(JSONValue.self, forKey: .sensors),
             notifications: notificationsBlock,
             media: media,
+            derive: rawDerive,
             root: raw,
             state: menuState ?? [:]
         )
@@ -291,6 +298,8 @@ struct PrototypeSpec: Decodable {
         authoredRoot: JSONValue? = nil, state: [String: JSONValue]? = nil,
         derivedValues: [String: JSONValue]? = nil
     ) {
+        links = spec.links
+        requiredCapabilities = spec.requiredCapabilities
         channels = spec.channels
         media = spec.media
         locationBlock = spec.locationBlock
@@ -759,6 +768,7 @@ struct PrototypeRoute: Decodable, Sendable {
 /// object, recursive through `all`/`any`/`not`. Mirrors Android's `PrototypeCondition.holds`.
 indirect enum Condition: Decodable, Equatable {
     case equals(key: String, value: JSONValue)
+    case equalsKey(key: String, other: String)
     case notEquals(key: String, value: JSONValue)
     case contains(key: String, value: JSONValue)
     case startsWith(key: String, value: JSONValue)
@@ -772,7 +782,7 @@ indirect enum Condition: Decodable, Equatable {
     case valid([String], PrototypeValidityContext)
 
     private enum CodingKeys: String, CodingKey {
-        case key, equals, notEquals, contains, startsWith, lengthGt, lengthLt, all, any, not, valid
+        case key, equals, equalsKey, notEquals, contains, startsWith, lengthGt, lengthLt, all, any, not, valid
         case derived = "_derivedValue"
         case greaterThan = "gt"
         case lessThan = "lt"
@@ -800,6 +810,8 @@ indirect enum Condition: Decodable, Equatable {
             let key = isDerived ? "" : try container.decode(String.self, forKey: .key)
             if let value = try container.decodeIfPresent(JSONValue.self, forKey: .equals) {
                 self = .equals(key: key, value: value)
+            } else if let other = try container.decodeIfPresent(String.self, forKey: .equalsKey) {
+                self = .equalsKey(key: key, other: other)
             } else if let value = try container.decodeIfPresent(JSONValue.self, forKey: .notEquals) {
                 self = .notEquals(key: key, value: value)
             } else if let value = try container.decodeIfPresent(JSONValue.self, forKey: .contains) {
@@ -818,7 +830,7 @@ indirect enum Condition: Decodable, Equatable {
                 throw DecodingError.dataCorruptedError(
                     forKey: .key,
                     in: container,
-                    debugDescription: "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt is required"
+                    debugDescription: "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt, equalsKey is required"
                 )
             }
             if let derived {
@@ -839,6 +851,7 @@ indirect enum Condition: Decodable, Equatable {
     func holds(_ state: [String: JSONValue]) -> Bool {
         switch self {
         case let .equals(key, value): state[key] == value
+        case let .equalsKey(key, other): state[key] != nil && PrototypeSession.scalarIdentical(state[key], state[other])
         case let .notEquals(key, value): state[key] != value
         case let .contains(key, value): state[key]?.stringValue.map { text in
                 guard let value = value.stringValue else { return false }
@@ -1004,6 +1017,10 @@ final class PrototypeNode: Decodable {
     let navigationStateKey: String?
     let titleKey: String?
     let canGoBackKey: String?
+    let webViewURL: String?
+    let webViewOrigins: [String]
+    let webViewOnNavigate: [JSONValue]
+    let webViewOnBlockedNavigation: [JSONValue]
     /// Internal identity stamped after authored-spec validation.
     let repeatKey: String?
     let repeatIdentity: String?
@@ -1095,7 +1112,7 @@ final class PrototypeNode: Decodable {
         case refresh, header, footer, spacing, contentPadding, onEndReached, endThreshold, maxItems
         case listRepeat = "repeat"
         case reverse, stickToEnd, atEndKey, onStartReached
-        case navigationStateKey, titleKey, canGoBackKey
+        case navigationStateKey, titleKey, canGoBackKey, allowedOrigins, onNavigate, onBlockedNavigation
         case repeatKey = "_repeatKey"
         case repeatIdentity = "_repeatIdentity"
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
@@ -1179,6 +1196,12 @@ final class PrototypeNode: Decodable {
         navigationStateKey = try container.decodeIfPresent(String.self, forKey: .navigationStateKey)
         titleKey = try container.decodeIfPresent(String.self, forKey: .titleKey)
         canGoBackKey = try container.decodeIfPresent(String.self, forKey: .canGoBackKey)
+        webViewURL = type == "webView" ? try container.decodeIfPresent(String.self, forKey: .url) : nil
+        webViewOrigins = type == "webView" ? try container.decode([String].self, forKey: .allowedOrigins) : []
+        webViewOnNavigate = type == "webView"
+            ? try container.decodeIfPresent([JSONValue].self, forKey: .onNavigate) ?? [] : []
+        webViewOnBlockedNavigation = type == "webView"
+            ? try container.decodeIfPresent([JSONValue].self, forKey: .onBlockedNavigation) ?? [] : []
         onStartReached = try container.decodeIfPresent([PrototypeAction].self, forKey: .onStartReached)
         repeatKey = try container.decodeIfPresent(String.self, forKey: .repeatKey)
         repeatIdentity = try container.decodeIfPresent(String.self, forKey: .repeatIdentity)

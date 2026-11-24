@@ -1,6 +1,7 @@
 import { BootedDevice, LaunchAppResult } from "../../models";
 import { DeviceWindowCacheInvalidator } from "./TerminateApp";
 import { logger } from "../../utils/logger";
+import { simHidLaunchSettle } from "../../utils/ios/simHid/SimHidLaunchSettle";
 import { resolveIosColdAppCheckKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import {
   resolveIosLaunchBackend,
@@ -167,6 +168,8 @@ export class IosLaunchProcess {
     }
 
     if (simulator) {
+      // HID touches skip XCTest's idle wait, so they hold off while this app launches (#19118).
+      simHidLaunchSettle.noteLaunch(this.deps.device.deviceId);
       // A resident CtrlProxy runner may still be tracking SpringBoard from
       // daemon startup. simctl foregrounds the app but cannot replace the
       // runner's XCUIApplication target, so synchronize that target through

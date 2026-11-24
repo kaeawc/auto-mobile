@@ -34,6 +34,7 @@ import {
   hasResidueBaseline,
   IOS_RESIDUE_KINDS,
 } from "../../../src/daemon/sessionBroker/mutations/iosResidue";
+import { FakeSimulatorKeyboardBridge } from "../../fakes/FakeSimulatorKeyboardBridge";
 
 const GLOBALS = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -189,6 +190,7 @@ function harness(residueOverride?: IosResidueInspector) {
       residue: residueOverride ?? residue,
 
       storeKit: { clear: async () => {} },
+      keyboard: new FakeSimulatorKeyboardBridge(),
       trustStore: {
         readUserTrustedCertificates: async (deviceId, signal) => {
           state.trustStoreReads.push({ deviceId, signal });

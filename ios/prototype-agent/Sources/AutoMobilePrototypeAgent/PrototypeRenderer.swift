@@ -516,6 +516,12 @@
                 PrototypeAdaptiveView(node: node, model: model)
             case "map":
                 PrototypeMapView(node: node, model: model)
+            case "webView":
+                if let module = model.platformRegistry.modules["webview"] as? PrototypeWebViewModule {
+                    PrototypeWebViewView(node: node, url: interpolated(node.webViewURL), module: module, model: model)
+                        .id([node.id ?? ""] + node.webViewOrigins)
+                        .frame(minHeight: 0, idealHeight: 360)
+                }
             case "chart":
                 PrototypeChartView(node: node, model: model)
             case "timePicker":
@@ -796,7 +802,11 @@
         }
 
         @ViewBuilder private var imageView: some View {
-            if let id = palette.asset(node.asset), let image = model.assets[id] {
+            if node.url != nil, node.via == "host" {
+                EmptyView()
+            } else if let url = node.url {
+                PrototypeRemoteImageView(node: node, model: model, url: interpolated(url))
+            } else if let id = palette.asset(node.asset), let image = model.assets[id] {
                 let resizable = Image(uiImage: image).resizable()
                 switch node.contentScale {
                 case "crop": resizable.aspectRatio(contentMode: .fill).clipped()

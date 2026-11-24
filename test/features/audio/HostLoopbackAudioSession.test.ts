@@ -13,6 +13,7 @@ const ENV_NAME = "AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER";
 function setup(
   script: (helper: FakeLoopbackHelperProcess) => void = (helper) => helper.ready(),
   helperPath: string | null = "/opt/audio-loopback-helper",
+  launchdPid?: () => Promise<number | undefined>,
 ) {
   const timer = new FakeTimer();
   const helpers: FakeLoopbackHelperProcess[] = [];
@@ -26,6 +27,7 @@ function setup(
         queueMicrotask(() => script(helper));
         return helper;
       },
+      launchdPid,
       timer,
     },
     ENV_NAME,
@@ -167,6 +169,15 @@ describe("HostLoopbackAudioSession injection", () => {
     const error = await session.injectAudio(sineTone({ durationMs: 10 })).catch((caught) => caught);
     expect(error).toMatchObject({ code: "audio_injection_unsupported" });
     expect(String(error.message)).toContain("MacBook Pro Microphone");
+  });
+
+  test("a stderr report delivered after the exit event still classifies the failure", async () => {
+    const { session } = setup((helper) => {
+      helper.exitThenReport(2, "no_loopback_input", "The default input is not a loopback device.");
+    });
+    const error = await session.injectAudio(sineTone({ durationMs: 10 })).catch((caught) => caught);
+    expect(error).toMatchObject({ code: "audio_injection_unsupported" });
+    expect(String(error.message)).toContain("not a loopback device");
   });
 
   test("a helper that fails mid-playback rejects done with audio_loopback_failed", async () => {
@@ -372,5 +383,85 @@ describe("HostLoopbackAudioSession capture", () => {
     await expect(session.captureAudio({ durationMs: 10 })).rejects.toMatchObject({
       code: "audio_capture_unsupported",
     });
+  });
+});
+
+describe("HostLoopbackAudioSession process-tap capture", () => {
+  const tenMsOfPcm = Buffer.from(new Int16Array(480).fill(500).buffer);
+  const capturing = (helper: FakeLoopbackHelperProcess) => {
+    helper.ready("process tap of launchd_sim 4242");
+    helper.stdout.write(tenMsOfPcm);
+    helper.exit(0);
+  };
+
+  test("taps the simulator's launchd_sim descendants when its PID is known", async () => {
+    const { session, helpers } = setup(capturing, undefined, async () => 4242);
+    const result = await session.captureAudio({ durationMs: 10 });
+    expect(helpers.map((helper) => helper.args)).toEqual([
+      ["tap", "--launchd-pid", "4242", "--duration-ms", "10", "--sample-rate", "48000"],
+    ]);
+    expect(result.route).toBe("process-tap");
+    expect(result.pcm.samples.length).toBe(480);
+  });
+
+  test("an open-ended capture taps the simulator too", async () => {
+    const { session, helpers } = setup(undefined, undefined, async () => 4242);
+    const stream = await session.streamCapture(() => {});
+    expect(helpers[0].args).toEqual([
+      "tap",
+      "--launchd-pid",
+      "4242",
+      "--until-stopped",
+      "--sample-rate",
+      "48000",
+    ]);
+    const stopping = stream.stop();
+    helpers[0].exit(0);
+    await expect(stopping).resolves.toBeUndefined();
+  });
+
+  test("a helper without tap support falls back to the loopback output", async () => {
+    const { session, helpers } = setup(
+      (helper) => {
+        if (helper.args[0] === "tap") {
+          helper.report("usage", 'unknownCommand("tap")');
+          helper.exit(2);
+          return;
+        }
+        capturing(helper);
+      },
+      undefined,
+      async () => 4242,
+    );
+    const result = await session.captureAudio({ durationMs: 10 });
+    expect(helpers.map((helper) => helper.args[0])).toEqual(["tap", "capture"]);
+    expect(result.route).toBe("host-loopback");
+  });
+
+  test("a simulator that is not running is unsupported, without a loopback fallback", async () => {
+    const { session, helpers } = setup(
+      (helper) => {
+        helper.report(
+          "no_simulator",
+          "No process 4242 is running, so the simulator is not booted.",
+        );
+        helper.exit(2);
+      },
+      undefined,
+      async () => 4242,
+    );
+    const error = await session.captureAudio({ durationMs: 10 }).catch((caught) => caught);
+    expect(error).toMatchObject({ code: "audio_capture_unsupported" });
+    expect(String(error.message)).toContain("not booted");
+    expect(helpers).toHaveLength(1);
+  });
+
+  test("an unknown or failed launchd_sim lookup captures from the loopback output", async () => {
+    for (const lookup of [async () => undefined, () => Promise.reject(new Error("pgrep failed"))]) {
+      const { session, helpers } = setup(capturing, undefined, lookup);
+      const result = await session.captureAudio({ durationMs: 10 });
+      expect(helpers.map((helper) => helper.args[0])).toEqual(["capture"]);
+      expect(result.route).toBe("host-loopback");
+    }
   });
 });

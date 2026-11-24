@@ -1,0 +1,11 @@
+[
+  { "queue": { "result": "scripted" } },
+  { "queue": { "error": { "code": "unavailable", "message": "Try again" } } },
+  { "call": "test.echo", "args": { "message": "real" }, "expected": { "result": "scripted" } },
+  {
+    "call": "test.echo",
+    "args": { "message": "real" },
+    "expected": { "error": { "code": "unavailable", "message": "Try again" } }
+  },
+  { "call": "test.echo", "args": { "message": "real" }, "expected": { "result": "real" } }
+]

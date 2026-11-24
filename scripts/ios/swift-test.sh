@@ -86,6 +86,7 @@ TESTABLE_PACKAGES=(
     "network-filter"
     "audio-loopback"
     "carplay-power"
+    "sim-hid"
 )
 
 # Total tests executed in a `swift test` transcript.

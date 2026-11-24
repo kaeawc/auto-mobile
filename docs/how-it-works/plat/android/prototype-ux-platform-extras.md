@@ -75,7 +75,7 @@ or the complete patch result. Shared `derive/formatters.json` cases define parit
 U+202F and U+00A0 to plain space before comparisons. Exact cases pin supported
 English output; structural cases allow documented CLDR differences in foreign
 currency symbols, narrow relative abbreviations, zero-relative wording and
-non-English data. The fixture note records the divergence policy and unit thresholds.
+non-English data.
 
 ## Platform namespaces (#15257)
 
@@ -161,9 +161,8 @@ but still refuses the motion v2/v3 features it lacks.
 
 ## Disposable apps
 
-A disposable app installs one spec as its own app, with its own package, label, icon, permissions
-and foreground-service types.
-The Android stamper packages a spec into a signed APK. The `prototype` actions `installApp`,
+A disposable app installs one spec as its own app with its own package, label, icon, permissions
+and foreground-service types; Android stamps it into a signed APK. The `prototype` actions `installApp`,
 `listApps` and `uninstallApp` (`{appId}`, `{all: true}` or `{expired: true}`) run on the daemon's
 `DisposableAppManager`, built on first use. iOS runs them on
 [simulators only](../ios/prototype-agent-saved.md#disposable-apps), and the headless virtual
@@ -202,20 +201,19 @@ only that app's cursors.
 
 The app stores up to 200 unacknowledged events and replays them on the next hello. The host
 de-duplicates replays by sequence within the connection and coordinator. The app drops the oldest
-event on overflow and reports cumulative `droppedEvents` in hello and status. Sequence gaps show
-missing events. A separate writer uses a 256-frame queue and five-second write deadline. Queue
+event on overflow and reports cumulative `droppedEvents` in hello and status.
+A separate writer uses a 256-frame queue and five-second write deadline. Queue
 overflow or blocked writes close the peer, and events and requests continue with replay retained.
 
 - **Identity.** The package is `dev.jasonpearson.automobile.app.<slug>_<sha256(slug) 8 hex>`.
-  Slug hyphens become underscores, as Android package segments allow only
-  `[A-Za-z0-9_]`. A slug is lowercase hyphen-separated words of at most 48 characters that start
+  Slug hyphens become underscores. A slug is lowercase hyphen-separated words of at most 48 characters that start
   with a letter. The prefix is never agent-chosen, so a disposable app cannot replace a real one.
 - **Permissions** come only from the spec's root `requires`. `INTERNET` is always declared.
   Each canonical permission maps to its manifest permissions (`location` maps to fine and coarse;
   `photosAdd` maps to none). Each `requires.background` kind adds `FOREGROUND_SERVICE` and its
   `FOREGROUND_SERVICE_<TYPE>` permission; `remoteNotification` adds none. A `requires.platform`
   module whose runtime needs an install-time permission adds it (`biometric` adds `USE_BIOMETRIC`);
-  it is never granted or denied, so it is not part of the permission mode. The permission mode is
+  it is never granted or denied. The permission mode is
   `prompt` (default), `grantDeclared`, or `{grant, deny}`, which may name only declared
   permissions and must not name one in both lists.
 - **Template.** The host picks the smallest flavor whose capabilities cover
@@ -232,18 +230,16 @@ overflow or blocked writes close the peer, and events and requests continue with
   a slug updates the app in place and keeps its storage unless `reset` is set. The expiry sweep and
   uninstall refuse ids outside the prefix. They also refuse installed packages whose signer differs
   from the host's disposable-app key: one requested id is refused with an error, and in a bulk
-  removal the package is reported under `skipped`. When the session broker acquires an Android
-  device, it sweeps expired apps within the preparation deadline. The acquisition result reports
-  the removed app IDs, and each removal is logged at `warn`. A record whose app is already gone
-  from the device is still cleared. Doctor reports expired apps that are still installed or
+  removal the package is reported under `skipped`. Acquiring an Android device sweeps expired
+  apps within the preparation deadline, reporting and logging each removal at `warn`. A record whose app is already gone
+  from the device is still cleared. Doctor reports expired apps still installed or
   registered on each connected Android device.
 - **Device commands.** The Android installer runs `adb install -r` (then `pm clear` for `reset`),
   `pm grant` per granted manifest permission, and `pm revoke` plus the `user-set user-fixed` flags
   per denied one, so a denial reads as blocked with no dialog. It refuses, before any write, a grant and
   deny sharing a manifest permission (`microphone` and `speech`). `adb install` and
-  `adb uninstall` must print `Success`. The installed signer comes from the package signing
-  inspection; a signer set that cannot be read never matches the host key, and an unknown
-  presence fails the removal instead of guessing.
+  `adb uninstall` must print `Success`. An unreadable installed signer set never matches the host
+  key, and an unknown presence fails the removal.
 
 ### Template packaging and stamping
 
@@ -255,17 +251,20 @@ and checks its checksum; there is no released download yet.
 Stamping keeps the compiled code and resource table and changes the package, provider authorities, literal label, exact permission set (always including
 INTERNET), and explicitly enabled components in structured XML. App-owned resource
 references retain the template resource namespace with private-resource access.
-`aapt2 link` resolves those names back to binary resource ids, avoiding unsafe
-binary-manifest string replacement. The spec and assets are baked under
-`assets/prototype/` at stamp time.
+`aapt2 link` resolves those names to binary resource ids. The spec and assets are baked under
+`assets/prototype/` at stamp time. Each asset id is a ZIP entry name. `installApp` refuses an id
+that is not dot-separated letters, digits, `_` and `-` before reading any file.
 
 The adaptive icon and Android 12+ splash share
 `prototype_icon_background`. The host patches it in every configuration using
 `icon.backgroundColor`, the spec's authored `theme.colors.background` (with the
 selected mode's override, using light for system mode), or the template default.
-An `icon.asset` names a PNG or JPEG supplied with the install call. A colour-only
-icon uses a contrasting label monogram. The host places the artwork in the
-adaptive icon safe zone and uses its alpha as the themed icon silhouette. A missing drawable resource fails the stamp.
+
+An `icon.asset` names a PNG or JPEG supplied with the install call; one whose header
+declares more than 4096×4096 pixels is refused before decoding. A colour-only icon uses a
+contrasting label monogram. The host scales the artwork so its diagonal fits the 66 dp circular
+safe zone and uses its alpha as the themed icon silhouette. A missing drawable resource fails
+the stamp.
 
 Template signatures are removed before assembly. The resource table stays stored;
 zipalign aligns it before apksigner signs with v2/v3 using a persistent host-owned

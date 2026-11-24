@@ -32,6 +32,11 @@ import {
   type RotationSettingKey,
 } from "./RotationSupport";
 
+export type SettingReadOutcome =
+  | { status: "value"; value: string }
+  | { status: "unset" }
+  | { status: "unreadable" };
+
 export class RotationSettingsStore {
   constructor(private readonly ctx: () => RotationContext) {}
 
@@ -48,6 +53,19 @@ export class RotationSettingsStore {
     key: string,
     signal?: AbortSignal,
   ): Promise<string | null> {
+    const outcome = await this.readSettingOutcome(namespace, key, signal);
+    return outcome.status === "value" ? outcome.value : null;
+  }
+
+  /**
+   * Like {@link readSetting}, but tells an absent key (`settings get` prints `null`; fresh API
+   * 24/27 images never write `user_rotation`) apart from a read that failed (#19063).
+   */
+  async readSettingOutcome(
+    namespace: SettingsNamespace,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<SettingReadOutcome> {
     throwIfAborted(signal);
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.ctx().device);
@@ -56,7 +74,9 @@ export class RotationSettingsStore {
         signal,
       );
       if (a11yResult.success) {
-        return a11yResult.found ? (a11yResult.value ?? null) : null;
+        return a11yResult.found && a11yResult.value !== null && a11yResult.value !== undefined
+          ? { status: "value", value: a11yResult.value }
+          : { status: "unset" };
       }
     } catch (error) {
       throwIfAborted(signal);
@@ -69,11 +89,11 @@ export class RotationSettingsStore {
         signal,
       );
       const out = result.stdout.trim();
-      return !out || out === "null" ? null : out;
+      return !out || out === "null" ? { status: "unset" } : { status: "value", value: out };
     } catch (error) {
       throwIfAborted(signal);
       logger.warn(`Failed to read ${namespace} setting ${key}: ${error}`);
-      return null;
+      return { status: "unreadable" };
     }
   }
 
@@ -305,12 +325,19 @@ export class RotationSettingsStore {
         );
   }
 
+  /**
+   * The current `user_rotation`; an unset key is Android's default 0 (portrait), and `null`
+   * means the read itself failed or returned a non-integer.
+   */
   async readUserRotation(signal?: AbortSignal): Promise<number | null> {
-    const raw = await this.readSystemSetting("user_rotation", signal);
-    if (raw === null || raw.trim() === "") {
+    const outcome = await this.readSettingOutcome("system", "user_rotation", signal);
+    if (outcome.status === "unset") {
+      return 0;
+    }
+    if (outcome.status === "unreadable" || outcome.value.trim() === "") {
       return null;
     }
-    const value = Number(raw);
+    const value = Number(outcome.value);
     return Number.isSafeInteger(value) ? value : null;
   }
 

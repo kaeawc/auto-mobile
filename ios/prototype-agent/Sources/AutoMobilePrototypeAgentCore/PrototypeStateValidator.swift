@@ -339,7 +339,8 @@ extension Condition {
     /// The state key of a scalar, numeric or string comparison; grouping forms have none.
     var key: String? {
         switch self {
-        case let .equals(key, _), let .notEquals(key, _), let .greaterThan(key, _), let .lessThan(key, _),
+        case let .equals(key, _), let .equalsKey(key, _), let .notEquals(key, _), let .greaterThan(key, _),
+             let .lessThan(key, _),
              let .contains(key, _), let .startsWith(key, _), let .lengthGt(key, _), let .lengthLt(key, _): key
         case .all, .any, .not, .valid: nil
         }

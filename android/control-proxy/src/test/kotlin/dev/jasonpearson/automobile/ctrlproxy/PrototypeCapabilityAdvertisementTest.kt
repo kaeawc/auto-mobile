@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeRuntimePlatform
+import dev.jasonpearson.automobile.protocol.PrototypeRuntimeBudget
 import dev.jasonpearson.automobile.prototype.AutoMobilePrototype
 import dev.jasonpearson.automobile.prototype.PlatformAvailability
 import dev.jasonpearson.automobile.prototype.PrototypePlatform
@@ -32,6 +33,8 @@ class PrototypeCapabilityAdvertisementTest {
     assertTrue("prototype_remote_image_v1" in commands)
     assertTrue("simulate_prototype_platform" in commands)
     assertTrue("prototype_platform_simulation_v1" in commands)
+    assertTrue("prototype_platform_outcomes_v1" in commands)
+    assertTrue("queue_prototype_call_outcome" in commands)
   }
 
   @Test
@@ -39,8 +42,12 @@ class PrototypeCapabilityAdvertisementTest {
     val commands =
       WebSocketServer(port = 0, scope = scope, options = WebSocketServerOptions(sdkInt = { 36 }))
         .supportedCommands()
-    val missing = AutoMobilePrototype.capabilities - commands.toSet()
+    // The overlay keeps the base runtime budget; only activity-hosted renderers raise it (#18804).
+    val large = PrototypeRuntimeBudget.LARGE_BUDGET_CAPABILITY
+    val missing = AutoMobilePrototype.capabilities - large - commands.toSet()
     assertTrue("CtrlProxy is missing renderer capabilities: $missing", missing.isEmpty())
+    assertTrue(large in AutoMobilePrototype.capabilities)
+    assertFalse(large in commands)
   }
 
   @Test

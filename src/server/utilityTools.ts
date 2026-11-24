@@ -1,4 +1,5 @@
 import type { DevicectlDisplayInfoSource } from "../utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import type { IosSimulatorNetworkShaper } from "../features/utility/ios/IosSimulatorNetworkShaper";
 import { PLAN_RELEVANT, SELECTS_ACTIVE_DEVICE } from "./toolRegistryTypes";
 import { ctrlProxyClientLifecycle } from "../features/observe/ctrlProxyClientLifecycle";
 import type { NetworkFilterBridge } from "../features/networkFilter/NetworkFilterBridge";
@@ -19,6 +20,7 @@ import {
   runSessionLocationMutation,
 } from "./sessionLocation";
 import { z } from "zod/v4";
+import { keyboardStateInputSchema } from "../features/utility/device-state/KeyboardState";
 import {
   changeLocalizationResultSchema,
   setActiveDeviceResultSchema,
@@ -36,6 +38,7 @@ import {
   networkConditionProfileSchema,
   DEVICE_STATE_READABLE_FIELDS,
   MAX_NETWORK_CONDITION_TTL_SECONDS,
+  MAX_NETWORK_BANDWIDTH_KBPS,
   networkConditionInputDegrades,
   networkConditionInputError,
   classifyNetworkConditionRequest,
@@ -269,8 +272,9 @@ const NETWORK_CONDITION_TTL_UNENFORCEABLE_ERROR =
 /**
  * How a networkCondition mutation is owned by the session — the single decision
  * shared by the restore-slot registration and the TTL-enforceability check:
- * - `true`: a degrade on an Android emulator registers a device-wide restore
- *   slot (issue #6012).
+ * - `true`: a degrade on an Android emulator (issue #6012), or a device-wide
+ *   degrade on an iOS Simulator through the socket shaper (#19045), registers a
+ *   device-wide restore slot.
  * - an iOS plan: `offline` or a reset for an explicitly named app on an iOS
  *   Simulator (#10264). The plan carries the immutable target (simulator UDID
  *   and bundle id); the session adds owner generation and rule revision.
@@ -286,6 +290,11 @@ function shouldRegisterNetworkRestore(
     return false;
   }
   if (device.platform === "ios") {
+    // Device-wide iOS Simulator shaping (#19045) restores to `none` like an emulator.
+    if (!input.appId && isIosSimulatorDevice(device)) {
+      const kind = classifyNetworkConditionRequest(input);
+      return kind === "degrade" || kind === "loss-only";
+    }
     return iosAppNetworkRulePlan(device, input);
   }
   return (
@@ -337,7 +346,7 @@ const networkConditionInputSchema = z
         "Device-wide network profile. Documented values: none=unshaped, offline=no data, " +
           "veryBad≈GSM (550ms/14kbps), 2g≈EDGE (400ms/237kbps), 3g≈UMTS (200ms/1920kbps), " +
           "4g≈LTE. Degraded profiles are best-effort cellular shaping, reported `partial`, on " +
-          "Android emulators. iOS Simulator accepts only offline and none, for one app named by appId.",
+          "Android emulators. On iOS Simulator every profile shapes the whole simulator; with appId only offline and none apply, to that one app.",
       ),
     appId: z
       .string()
@@ -346,9 +355,9 @@ const networkConditionInputSchema = z
       .regex(/^[A-Za-z0-9._-]+$/)
       .optional()
       .describe(
-        "iOS Simulator only, and required there: bundle id of the one app to take offline " +
-          "(profile=offline) or restore (profile=none). Its new connections are refused through " +
-          "AutoMobile's network filter; open connections continue. Needs a session.",
+        "iOS Simulator only: bundle id of the one app to take offline (profile=offline) or " +
+          "restore (profile=none) through AutoMobile's network filter; open connections continue. " +
+          "Needs a session. Omit it to shape the whole simulator.",
       ),
     cancel: z.boolean().optional().describe("Reset to normal connectivity (same as profile=none)."),
     reset: z.boolean().optional().describe("Alias of cancel."),
@@ -356,15 +365,24 @@ const networkConditionInputSchema = z
     downloadKbps: z
       .number()
       .min(0)
+      .max(MAX_NETWORK_BANDWIDTH_KBPS)
       .optional()
       .describe("Override download cap in kbps (0=unlimited)."),
-    uploadKbps: z.number().min(0).optional().describe("Override upload cap in kbps (0=unlimited)."),
+    uploadKbps: z
+      .number()
+      .min(0)
+      .max(MAX_NETWORK_BANDWIDTH_KBPS)
+      .optional()
+      .describe("Override upload cap in kbps (0=unlimited)."),
     packetLossPercent: z
       .number()
       .min(0)
       .max(100)
       .optional()
-      .describe("Documented target packet loss; the emulator console cannot enforce partial loss."),
+      .describe(
+        "Packet loss. The Android emulator console cannot enforce partial loss; the iOS Simulator " +
+          "shaper times out this percent of new connections.",
+      ),
     expiresInSeconds: z
       .number()
       .min(0)
@@ -399,7 +417,7 @@ export const getDeviceStateSchema = addDeviceTargetingToSchema(
         .optional()
         .describe(
           "State fields to read; supports doNotDisturb, connectivity, biometrics, " +
-            "networkCondition, clock, sensors (Android emulator only), screenLock, and power (Android: battery, saver, Doze, data saver, thermal status, tracked app standby buckets). Defaults to doNotDisturb + connectivity, so a bare call answers " +
+            "networkCondition, clock, sensors (Android emulator only), screenLock, power (Android: battery, saver, Doze, data saver, thermal status, tracked app standby buckets), and networkActivity (iOS Simulator: each process's open sockets and bytes, with appId). Defaults to doNotDisturb + connectivity, so a bare call answers " +
             "whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
         ),
     })
@@ -470,6 +488,11 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
           ),
         screenLock: screenLockInputSchema.optional().describe(SCREEN_LOCK_INPUT_DESCRIPTION),
         power: powerInputSchema.optional().describe(POWER_INPUT_DESCRIPTION),
+        keyboard: keyboardStateInputSchema
+          .optional()
+          .describe(
+            "iOS Simulator hardware keyboard (connect or disconnect, with its layout) and keyboard language. A session restores the hardware keyboard to connected and the previous keyboard and language lists on reset.",
+          ),
         deviceCondition: z.unknown().optional().describe(DEVICE_CONDITION_FIELD_DESCRIPTION),
       })
       .strict(),
@@ -484,7 +507,8 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
       values.cameraPoster !== undefined ||
       values.deviceCondition !== undefined ||
       values.screenLock !== undefined ||
-      values.power !== undefined,
+      values.power !== undefined ||
+      values.keyboard !== undefined,
     {
       message: "At least one device state field must be provided",
     },
@@ -739,9 +763,11 @@ function createSessionDeviceState(
   {
     networkFilterBridge,
     iosRunnerLocation,
+    iosNetworkShaper,
   }: {
     networkFilterBridge?: NetworkFilterBridge;
     iosRunnerLocation?: IosRunnerLocationResolver;
+    iosNetworkShaper?: IosSimulatorNetworkShaper;
   } = {},
 ): {
   deviceState: DeviceState;
@@ -755,6 +781,7 @@ function createSessionDeviceState(
       : undefined;
   const deviceState = new DeviceState(device, {
     networkFilterBridge,
+    iosNetworkShaper,
     iosAppNetworkRule: () => iosAppNetworkRule,
     clockMutation: (mutation) =>
       runSessionClockMutation(sessionManager, sessionUuid, device.deviceId, mutation),
@@ -786,9 +813,17 @@ function createSessionDeviceState(
 }
 
 const createGetDeviceStateHandler =
-  (networkFilterBridge?: NetworkFilterBridge, iosDisplayInfoSource?: DevicectlDisplayInfoSource) =>
+  (
+    networkFilterBridge?: NetworkFilterBridge,
+    iosDisplayInfoSource?: DevicectlDisplayInfoSource,
+    iosNetworkShaper?: IosSimulatorNetworkShaper,
+  ) =>
   async (device: BootedDevice, args: GetDeviceStateArgs) => {
-    const deviceState = new DeviceState(device, { networkFilterBridge, iosDisplayInfoSource });
+    const deviceState = new DeviceState(device, {
+      networkFilterBridge,
+      iosDisplayInfoSource,
+      iosNetworkShaper,
+    });
     const result = await deviceState.getState(args.include);
 
     return createStructuredToolResponse({
@@ -812,6 +847,24 @@ interface RegisterUtilityToolsOptions extends SetActiveDeviceSeams {
   iosRunnerLocation?: IosRunnerLocationResolver;
   /** `devicectl device info displays` reader for an iPhone Duo's live posture; defaults to the host's. */
   iosDisplayInfoSource?: DevicectlDisplayInfoSource;
+  /** Device-wide iOS Simulator network shaper (#19045); defaults to the boot-injected one. */
+  iosNetworkShaper?: IosSimulatorNetworkShaper;
+}
+
+/** The device-state fields setDeviceState applies, taken from the tool arguments. */
+function toSetDeviceStateInput(args: SetDeviceStateArgs): SetDeviceStateInput {
+  return {
+    doNotDisturb: args.doNotDisturb,
+    biometrics: args.biometrics,
+    connectivity: args.connectivity,
+    networkCondition: args.networkCondition,
+    location: args.location,
+    clock: args.clock,
+    cameraPoster: args.cameraPoster,
+    screenLock: args.screenLock,
+    power: args.power,
+    keyboard: args.keyboard,
+  };
 }
 
 export function registerUtilityTools(options: RegisterUtilityToolsOptions = {}) {
@@ -880,17 +933,7 @@ export function registerUtilityTools(options: RegisterUtilityToolsOptions = {}) 
         : deviceState.setState(input);
 
     const capture = await captureBiometricEnrollment(device, args, deviceState);
-    const stateInput: SetDeviceStateInput = {
-      doNotDisturb: args.doNotDisturb,
-      biometrics: args.biometrics,
-      connectivity: args.connectivity,
-      networkCondition: args.networkCondition,
-      location: args.location,
-      clock: args.clock,
-      cameraPoster: args.cameraPoster,
-      screenLock: args.screenLock,
-      power: args.power,
-    };
+    const stateInput = toSetDeviceStateInput(args);
     const applyLocationTracked = (input: SetDeviceStateInput): Promise<DeviceStateResult> =>
       input.location && !capture.sessionManager
         ? runSessionLocationMutation({
@@ -959,13 +1002,14 @@ export function registerUtilityTools(options: RegisterUtilityToolsOptions = {}) 
 
   ToolRegistry.registerDeviceAware(
     "getDeviceState",
-    "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, network condition (device-wide on Android; on an iOS Simulator the per-app offline rules the network filter enforces, with revision and lease), and Android emulator virtual sensor values (sensors: acceleration, gyroscope, magnetic-field, orientation, temperature, proximity, light, pressure, humidity via `emu sensor get`, with unavailable listing sensors the AVD refuses; change them with setSensor). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. screenLock (Android) reports the lock credential type (none, pin, password, pattern, or unknown) and whether it is secure, never the credential. On a multi-panel device, displays lists the panels and supported postures; on an Android foldable displays.current adds the live posture (from the committed device_state) and activePanel (key and role of the panel behind the default display), so a setPosture or fold shows up in the next read. displays.current.postureSource says where posture came from: device_state (Android committed posture), inferred_from_active_panel, or requested_hinge_angle, and is omitted when the Android posture read fails (posture unknown). On iPhone Duo, displays.current reports the active panel read live through devicectl: cover is closed; inner is half_opened (postureSource requested_hinge_angle) when the last angle setPosture applied lies strictly between 0 and 180 degrees, otherwise opened (inferred_from_active_panel). A named setPosture posture also sets that angle (closed 0, half_opened 130, opened 180). The hinge is never read; requestedHingeAngle echoes the last request. It is omitted when the active panel cannot be determined." +
+    "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, network condition (device-wide on Android; on an iOS Simulator the device-wide socket shaper's profile once AutoMobile shaped it, otherwise the per-app offline rules the network filter enforces, with revision and lease), iOS Simulator network activity (networkActivity: every simulator process with internet sockets or traffic, its pid, name, appId when the executable is inside an installed app's bundle, its sockets as protocol, local, remote and TCP state, and bytesIn/bytesOut counted on the sockets open at read time, so connections that already closed are not in the totals; read from host ps, lsof and nettop with no network extension), and Android emulator virtual sensor values (sensors: acceleration, gyroscope, magnetic-field, orientation, temperature, proximity, light, pressure, humidity via `emu sensor get`, with unavailable listing sensors the AVD refuses; change them with setSensor). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. screenLock (Android) reports the lock credential type (none, pin, password, pattern, or unknown) and whether it is secure, never the credential. On a multi-panel device, displays lists the panels and supported postures; on an Android foldable displays.current adds the live posture (from the committed device_state) and activePanel (key and role of the panel behind the default display), so a setPosture or fold shows up in the next read. displays.current.postureSource says where posture came from: device_state (Android committed posture), inferred_from_active_panel, or requested_hinge_angle, and is omitted when the Android posture read fails (posture unknown). On iPhone Duo, displays.current reports the active panel read live through devicectl: cover is closed; inner is half_opened (postureSource requested_hinge_angle) when the last angle setPosture applied lies strictly between 0 and 180 degrees, otherwise opened (inferred_from_active_panel). A named setPosture posture also sets that angle (closed 0, half_opened 130, opened 180). The hinge is never read; requestedHingeAngle echoes the last request. It is omitted when the active panel cannot be determined." +
       " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     getDeviceStateSchema,
     {
       handler: createGetDeviceStateHandler(
         options.networkFilterBridge,
         options.iosDisplayInfoSource,
+        options.iosNetworkShaper,
       ),
       defaultEnabled: false,
       outputSchema: getDeviceStateResultSchema,
@@ -976,7 +1020,7 @@ export function registerUtilityTools(options: RegisterUtilityToolsOptions = {}) 
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
-    "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator, iOS Simulator, or physical iOS device (through the CtrlProxy runner), iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS clears it (`simctl location clear` on a Simulator, the runner on a physical device); failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. cameraPoster sets or clears a virtual-scene back-camera poster (image path or generated QR, wall or table surface) on a running Android emulator through the emulator console, without a restart; it persists until cleared or the AVD is cold-booted, physical iOS and physical Android return unsupported. On iOS Simulator it records the poster for the next launchApp cold launch of each app, returns relaunchRequired: true, and ignores surface; running apps must be relaunched, a console refusal (for example an AVD whose back camera is not virtualscene) is returned as an error, and the default camera pose may not face the poster. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind. On an iOS Simulator networkCondition is per-app only: profile offline or none with appId, within a session, refuses the app's new connections through the opt-in network-extension filter under a renewed 15s lease; release, rebind, expiry or a missed renewal removes it, and other sessions cannot clear it. screenLock (Android) sets a PIN, password, or pattern with locksettings, or clears one (type none plus currentCredential); a session's own credential is cleared on its release (a failed clear is reported in the release result as screenLockRestore), an existing credential the session did not set is refused with errorCode lock_credential_preexisting, and the result reports only the type and outcome (for example set: true). The credential is redacted from logs, telemetry, and recorded plans; it is in the device's process list while locksettings runs. power (Android) fakes battery level/charger, battery saver, light or deep Doze (the tool unplugs the battery and turns the screen off first and reports those preconditions), app standby buckets and inactive state, Data Saver and thermal status, and returns a restoreReceipt of the values it replaced; a session restores them on release in reverse order and reports failures as powerRestore in the release result. Battery, Doze and thermal faking is refused on physical devices (power_physical_device_refused)." +
+    "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator, iOS Simulator, or physical iOS device (through the CtrlProxy runner), iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS clears it (`simctl location clear` on a Simulator, the runner on a physical device); failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. cameraPoster sets or clears a virtual-scene back-camera poster (image path or generated QR, wall or table surface) on a running Android emulator through the emulator console, without a restart; it persists until cleared or the AVD is cold-booted, physical iOS and physical Android return unsupported. On iOS Simulator it records the poster for the next launchApp cold launch of each app, returns relaunchRequired: true, and ignores surface; running apps must be relaunched, a console refusal (for example an AVD whose back camera is not virtualscene) is returned as an error, and the default camera pose may not face the poster. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind. On an iOS Simulator networkCondition without appId shapes the whole simulator (every profile and override, including packetLossPercent) through a socket shaper the simulator boots with: a degrade reboots the simulator whenever its current boot lacks the shaper (rebooted: true; relaunch the app), later changes apply live, and it needs no extension, root or MDM. With appId, profile offline or none within a session refuses that one app's new connections through the opt-in network-extension filter under a renewed 15s lease; release, rebind, expiry or a missed renewal removes it, and other sessions cannot clear it. screenLock (Android) sets a PIN, password, or pattern with locksettings, or clears one (type none plus currentCredential); a session's own credential is cleared on its release (a failed clear is reported in the release result as screenLockRestore), an existing credential the session did not set is refused with errorCode lock_credential_preexisting, and the result reports only the type and outcome (for example set: true). The credential is redacted from logs, telemetry, and recorded plans; it is in the device's process list while locksettings runs. power (Android) fakes battery level/charger, battery saver, light or deep Doze (the tool unplugs the battery and turns the screen off first and reports those preconditions), app standby buckets and inactive state, Data Saver and thermal status, and returns a restoreReceipt of the values it replaced; a session restores them on release in reverse order and reports failures as powerRestore in the release result. Battery, Doze and thermal faking is refused on physical devices (power_physical_device_refused)." +
       " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     setDeviceStateSchema,
     {

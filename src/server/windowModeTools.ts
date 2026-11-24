@@ -136,11 +136,6 @@ function payload(result: WindowModeResult) {
 export const createWindowModeHandler =
   (makeController: WindowModeControllerFactory = defaultWindowModeControllerFactory) =>
   async (device: BootedDevice, args: WindowModeArgs, _progress?: unknown, signal?: AbortSignal) => {
-    if (device.platform !== "android") {
-      throw new ActionableError(
-        "windowMode is Android-only: it drives Android task windowing through adb.",
-      );
-    }
     if ((args.mode === undefined) === (args.restore === undefined)) {
       throw new ActionableError("Specify exactly one of mode or restore.");
     }
@@ -158,6 +153,7 @@ const windowModeTool = defineDeviceTool({
   input: windowModeInput,
   handler: createWindowModeHandler(),
   options: {
+    platforms: ["android"],
     ...PLAN_RELEVANT,
     defaultEnabled: false,
     // Plain adb (am, settings, dumpsys, WM Shell commands): no CtrlProxy setup.

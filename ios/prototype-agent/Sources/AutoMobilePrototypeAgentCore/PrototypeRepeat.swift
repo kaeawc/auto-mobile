@@ -365,6 +365,7 @@ enum PrototypeRepeat {
         case .string("image")?:
             string("asset", &fields)
             string("url", &fields)
+        case .string("webView")?: string("url", &fields)
         case .string("listItem")?:
             string("headline", &fields)
             string("supporting", &fields)
@@ -494,6 +495,7 @@ extension PrototypeRepeat {
                         for (name, value) in scope.items[index].objectFields ?? [:] {
                             values["outer.\(name)"] = value
                         }
+                        values["$outerIndex"] = .number(Double(index))
                         return .object(values)
                     }
                 })
@@ -529,7 +531,15 @@ extension PrototypeRepeat {
         {
             throw PrototypeLimits.violation("\(path).repeat", "Nested repeat is not supported")
         }
-        for name in ["onTap", "onLongPress", "onDoubleTap", "onEndReached", "onAppear"] {
+        for name in [
+            "onTap",
+            "onLongPress",
+            "onDoubleTap",
+            "onEndReached",
+            "onAppear",
+            "onNavigate",
+            "onBlockedNavigation",
+        ] {
             try validateEmitActions(fields[name], path: "\(path).\(name)", scope: scope)
         }
         if let linkify = fields["linkify"]?.objectFields {
@@ -835,7 +845,7 @@ struct PrototypeRepeatInstance {
 
     private func bindDataAction(_ fields: inout [String: JSONValue]) {
         if case let .string(path)? = fields["path"] { fields["path"] = .string(bindDataPath(path)) }
-        if case let .object(binding)? = fields["value"] { fields["value"] = bindDataValue(binding) }
+        if case let .object(binding)? = fields["value"] { fields["value"] = bindDataActionValue(binding) }
         if var selector = fields["where"]?.objectFields, let binding = selector["equals"]?.objectFields {
             selector["equals"] = bindDataValue(binding)
             fields["where"] = .object(selector)
@@ -947,6 +957,16 @@ struct PrototypeRepeatInstance {
             .joined(separator: "/")
     }
 
+    /// A data action's value: an `{object}` value (#18826) binds each member like a value binding.
+    private func bindDataActionValue(_ binding: [String: JSONValue]) -> JSONValue {
+        guard case let .object(members)? = binding["object"] else { return bindDataValue(binding) }
+        var bound = binding
+        bound["object"] = .object(members.mapValues { member in
+            member.objectFields.map(bindDataValue) ?? member
+        })
+        return .object(bound)
+    }
+
     /// A data action's value binding, bound like an `emit.context` entry: `item` and `index` become
     /// literals of this row, and a `state` key interpolates.
     private func bindDataValue(_ binding: [String: JSONValue]) -> JSONValue {
@@ -960,6 +980,7 @@ struct PrototypeRepeatInstance {
     private func bindCondition(_ condition: JSONValue) -> JSONValue {
         guard case var .object(fields) = condition else { return condition }
         bindString("key", in: &fields)
+        bindString("equalsKey", in: &fields)
         if case let .array(keys)? = fields["valid"] {
             fields["valid"] = .array(keys.map { .string(interpolate($0.stringValue ?? "")) })
         } else {

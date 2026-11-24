@@ -44,4 +44,14 @@ extension ElementLocating {
     var gestureCoordinateGeometry: GestureCoordinateGeometry? {
         (self as? ElementLocator)?.observedGestureGeometry
     }
+
+    /// The geometry a gesture command's delivery route is decided on, with the iPad window
+    /// placement re-read only for a command the cache keeps on the `XCUICoordinate` path (#19050).
+    func gestureRouteGeometry(
+        synthesizes: (GestureCoordinateGeometry) -> Bool
+    )
+        -> GestureCoordinateGeometry?
+    {
+        (self as? ElementLocator)?.routedGestureGeometry(synthesizes: synthesizes)
+    }
 }

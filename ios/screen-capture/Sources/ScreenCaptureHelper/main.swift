@@ -318,6 +318,42 @@ case let .captureSimulator(windowID, fps, audio, encode):
     }
     RunLoop.main.run()
 
+case let .captureSimulatorFramebuffer(udid, fps, encode):
+    // No Screen Recording check: the framebuffer comes from CoreSimulator, not a window.
+    let sink = FileHandleFrameSink(handle: .standardOutput) { _ = kill(getpid(), SIGTERM) }
+    let writer = FrameWriter(sink: sink)
+    let metricsReporter = FrameMetricsReporter(writer: writer, output: logError)
+    metricsReporter.start()
+    let framebufferSession = FramebufferCaptureSession(
+        writer: writer,
+        source: CoreSimulatorFramebufferSource(udid: udid),
+        fps: fps,
+        encode: encode
+    ) { error in
+        logError("error: Simulator framebuffer capture failed: \(error.localizedDescription)")
+        exit(midStreamFatalExitCode)
+    }
+    let framebufferControlChannel = ControlChannel { command in
+        switch command {
+        case .forceKeyFrame:
+            framebufferSession.forceKeyFrameLatch.request()
+        }
+    }
+    framebufferControlChannel.start()
+    installShutdownHandlers {
+        metricsReporter.stop()
+        framebufferControlChannel.stop()
+        framebufferSession.stop()
+        exit(0)
+    }
+    do {
+        try framebufferSession.start()
+    } catch {
+        logError("error: failed to start Simulator framebuffer capture: \(error.localizedDescription)")
+        exit(1)
+    }
+    RunLoop.main.run()
+
 case let .capture(deviceID, encode):
     CMIOSystem.enableScreenCaptureDevices()
     // Poll briefly for the requested device to register instead of an

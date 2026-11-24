@@ -48,10 +48,11 @@ internal object PrototypeRepeatTree {
     val alias = repeat.text("as") ?: return null
     val source = repeat["items"] as? JsonObject
     val pointer = source?.text("path")
+    val derived = source?.text("derived")
     val items =
       if (pointer != null) data.items(pointer)
       else
-        source?.text("derived")?.let { name ->
+        derived?.let { name ->
           // Derived rows are data rows: templates see only their named scalars, as for a path.
           (data.derived[name] as? JsonArray)
             .orEmpty()
@@ -69,9 +70,11 @@ internal object PrototypeRepeatTree {
       projected,
       source != null,
       names,
-      if (source?.text("derived") != null) "derived" else "path",
+      if (derived != null) "derived" else "path",
       sourceItems =
         if (pointer != null) data.source(pointer).orEmpty().filterIsInstance<JsonObject>()
+        else if (derived != null)
+          (data.derived[derived] as? JsonArray).orEmpty().filterIsInstance<JsonObject>()
         else items,
     )
   }
@@ -90,7 +93,7 @@ internal object PrototypeRepeatTree {
       else pointer?.let(state.data::source))
         ?: return fail(at, "Repeat path does not resolve to an array")
     val maximum =
-      if (node.text("type") == "list") PrototypeSpecValidator.MAX_PROTOTYPE_LIST_ITEMS
+      if (node.text("type") == "list") state.data.listItems
       else PrototypeSpecValidator.maxRepeatItems
     if (items.size > maximum) return fail(at, "Repeat path resolves to more than $maximum items")
     val maxItems = (node["maxItems"] as? JsonPrimitive)?.doubleOrNull
@@ -99,7 +102,8 @@ internal object PrototypeRepeatTree {
     val invalid = items.indexOfFirst { it !is JsonObject }
     if (invalid >= 0) return fail(at, "Repeat path item $invalid is not an object")
     state.cells +=
-      if (derived != null) PrototypeRepeatData(JsonObject(mapOf("rows" to items))).cells("/rows")
+      if (derived != null)
+        PrototypeRepeatData(JsonObject(mapOf("rows" to items)), state.data.listItems).cells("/rows")
       else state.data.cells(checkNotNull(pointer))
     return if (state.cells > PrototypeSpecValidator.MAX_PROTOTYPE_REPEAT_PATH_CELLS)
       fail(at, "Repeat path cell limit exceeded")
@@ -113,7 +117,7 @@ internal object PrototypeRepeatTree {
     if (scope.items.any { !it.containsKey(key) }) {
       return fail(at, "Unknown repeat field ${JsonPrimitive(key)}")
     }
-    if (key in scope.derivedNames) return null
+    if (key in scope.derivedNames) return PrototypeDerivedRepeatKeys.error(node, scope, key, at)
     val seen = mutableMapOf<String, Int>()
     val numbers = mutableMapOf<Double, Int>()
     for ((index, item) in scope.items.withIndex()) {

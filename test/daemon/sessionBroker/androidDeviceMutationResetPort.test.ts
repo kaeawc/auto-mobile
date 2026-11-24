@@ -11,6 +11,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { createExecResult } from "../../../src/utils/execResult";
 import { shellQuote } from "../../../src/utils/shellQuote";
 import { readFileSync } from "node:fs";
+import { NIGHT_MODE_UNSUPPORTED_RESULTS } from "./fixtures/androidMutationBaseline";
 import { join } from "node:path";
 
 const channelFixture = (name: string) =>
@@ -169,6 +170,22 @@ describe("AndroidDeviceMutationResetPort", () => {
   ] as const)("restores %s to its exact prior value", async (key, priorValue, command) => {
     await port.revert(mutation("device-setting", key, priorValue), context);
     expect(adb.getExecutedCommands()).toEqual([command]);
+  });
+
+  test.each(NIGHT_MODE_UNSUPPORTED_RESULTS)(
+    "skips the night-mode restore on Android before 8 (%s)",
+    async (_shape, result) => {
+      adb.setCommandResponse("shell cmd uimode night no", result);
+      await port.revert(mutation("device-setting", "display:night-mode", present("no")), context);
+      expect(adb.getExecutedCommands()).toEqual(["shell cmd uimode night no"]);
+    },
+  );
+
+  test("unrelated night-mode restore stderr still fails", async () => {
+    adb.setCommandResponse("shell cmd uimode night no", createExecResult("", "Error: denied"));
+    await expect(
+      port.revert(mutation("device-setting", "display:night-mode", present("no")), context),
+    ).rejects.toThrow("Android reset command failed");
   });
 
   test("user-0 put and delete target the captured user, never the foreground user's default", async () => {

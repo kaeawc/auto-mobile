@@ -11,6 +11,13 @@
     <!-- The renderer's debug dependency includes a Compose test host, not app UI. -->
     <activity android:name="androidx.activity.ComponentActivity" tools:node="remove"/>
     <activity android:name="dev.jasonpearson.automobile.prototype.appshell.PrototypeAppActivity" android:exported="true" android:launchMode="singleTask" android:enableOnBackInvokedCallback="true" tools:ignore="UnusedAttribute">
+      <meta-data android:name="automobile.prototype.linkSchemes" android:value="amp-template"/>
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="amp-template"/>
+      </intent-filter>
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
         <category android:name="android.intent.category.LAUNCHER"/>

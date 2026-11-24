@@ -462,13 +462,4 @@ describe("wearSurface tool", () => {
     await expect(call).rejects.toThrow(/wearSurface requires a Wear OS watch.*nothing was changed/);
     expect(calls).toEqual([]);
   });
-
-  test("iOS is refused before constructing the surface", async () => {
-    const handler = createWearSurfaceHandler(() => {
-      throw new Error("must not construct");
-    }, announces("watch"));
-    await expect(
-      handler({ ...watchDevice, platform: "ios" }, { action: "showTile", index: 0 }),
-    ).rejects.toThrow(/Android-only/);
-  });
 });

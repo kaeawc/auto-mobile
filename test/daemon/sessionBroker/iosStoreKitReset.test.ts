@@ -20,6 +20,7 @@ import { StoreKitMutationPriorReader } from "../../../src/server/deviceMutationS
 import { FakeIosResidueInspector } from "../../fakes/FakeIosResidueInspector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { InMemoryStoreKitClearedSessions } from "../../../src/features/storekit/StoreKitClearedSessions";
+import { FakeSimulatorKeyboardBridge } from "../../fakes/FakeSimulatorKeyboardBridge";
 
 const UDID = "11111111-2222-4333-8444-555555555555";
 const IOS: BootedDevice = { deviceId: UDID, platform: "ios", name: "iPhone" };
@@ -63,6 +64,7 @@ function portRig() {
       trustStore: { readUserTrustedCertificates: unused },
       residue: new FakeIosResidueInspector(),
       storeKit,
+      keyboard: new FakeSimulatorKeyboardBridge(),
     },
     new FakeTimer(),
   );

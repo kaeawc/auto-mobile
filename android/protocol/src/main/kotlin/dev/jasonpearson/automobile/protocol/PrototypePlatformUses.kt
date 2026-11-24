@@ -54,6 +54,11 @@ internal object PrototypePlatformUses {
     for ((handler, path) in PrototypeChannels.handlers(root)) {
       scan(handler, path, ScanContext(inHandler = true), found)
     }
+    (root["links"] as? JsonArray).orEmpty().forEachIndexed { index, entry ->
+      (entry as? JsonObject)?.get("actions")?.let {
+        scan(it, "links[$index].actions", ScanContext(), found)
+      }
+    }
     root["root"]?.let { scan(it, "root", ScanContext(), found) }
     for ((node, path) in context.nodes) {
       PrototypeBindableFields.first(node, path) { field, at, kind ->

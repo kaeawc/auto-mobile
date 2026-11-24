@@ -98,6 +98,12 @@ describe("prototype spec schema forms", () => {
     expect(references(terse)).toEqual([]);
   });
 
+  test("the terse form exposes links and both requires forms without binding details", () => {
+    const properties = terseAdvertisedSpecSchema().properties as Record<string, unknown>;
+    expect(properties.links).toEqual({ type: "array" });
+    expect(properties.requires).toEqual({ anyOf: [{ type: "object" }, { type: "array" }] });
+  });
+
   test("the flag selects the full schema, rooted under the spec property", () => {
     expect(isPrototypeFullSchemaEnabled({})).toBe(false);
     expect(isPrototypeFullSchemaEnabled({ AUTOMOBILE_PROTOTYPE_FULL_SCHEMA: "1" })).toBe(true);

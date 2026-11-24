@@ -1,6 +1,19 @@
 import OSLog
 import SwiftUI
 
+extension PrototypePlatformRegistry {
+    static let viewer = makeSystemRegistry(webView: PrototypeWebViewModule())
+
+    /// One list for import checks, MCP reports and rendering: the web view module plus
+    /// delivery-derived capabilities such as `prototype_links_v1`. Hook delegates first.
+    @MainActor static var viewerReportCapabilities: [String] {
+        Set(PrototypeInboundLinkSchemes.rendererCapabilities(
+            registry: viewer.capabilities.filter { $0 == PrototypeWebViewModule.capabilityName },
+            delivery: PrototypeURLDelivery.capabilities
+        )).sorted()
+    }
+}
+
 let libraryLog = Logger(subsystem: "dev.jasonpearson.automobile.protoviewer", category: "library")
 
 @main
@@ -10,6 +23,7 @@ struct ProtoViewerApp: App {
     private let library: Result<(PrototypeLibraryStore, PrototypeLibraryImportService, PrototypeMcpInbox), Error>
 
     init() {
+        PrototypeURLDelivery.hookExistingDelegates()
         library = Result {
             let support = try FileManager.default.url(
                 for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
@@ -19,8 +33,11 @@ struct ProtoViewerApp: App {
             let inbox = try FileManager.default.url(
                 for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true
             ).appendingPathComponent("Inbox", isDirectory: true)
+            let capabilities = PrototypePlatformRegistry.viewerReportCapabilities
+            let supported = Set(capabilities)
             let store = try PrototypeLibraryStore(
                 root: root, storageRoot: storage, blocklist: PrototypeDefaultsContentBlocklist(),
+                supportedCapabilities: supported,
                 secureStorage: PrototypePlatformRegistry.system.secureStorage
             )
             // Retry deletes of hidden content that failed earlier, so it never holds library quota.
@@ -29,12 +46,18 @@ struct ProtoViewerApp: App {
             PrototypeLibraryStartupCleanup(
                 exporter: PrototypeLibraryExporter(store: store), inbox: PrototypeLibraryInbox(root: inbox)
             ).run { libraryLog.error("\($0, privacy: .public)") }
-            let imports = PrototypeLibraryImportService(root: root, storageRoot: storage, inbox: inbox) {
+            let imports = PrototypeLibraryImportService(
+                root: root, storageRoot: storage, inbox: inbox, supportedCapabilities: supported
+            ) {
                 libraryLog.error("\($0, privacy: .public)")
+            }
+            let report = Bundle.main.infoDictionary.flatMap {
+                PrototypeMcpCapabilitiesReport(info: $0, capabilities: capabilities)
             }
             let mcp = PrototypeMcpInbox(
                 root: support.appendingPathComponent("mcp", isDirectory: true), libraryRoot: root, storageRoot: storage,
-                report: Bundle.main.infoDictionary.flatMap { PrototypeMcpCapabilitiesReport(info: $0) }
+                supportedCapabilities: supported,
+                report: report
             ) {
                 libraryLog.warning("\($0, privacy: .private)")
             }

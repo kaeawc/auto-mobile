@@ -9,6 +9,11 @@ export const ANDROID_ICON_DRAWABLES = {
   foreground: "prototype_icon_foreground",
   monochrome: "prototype_icon_monochrome",
 } as const;
+const ASSET_ID_PATTERN = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
+/** Whether an asset id can be its own ZIP entry name under `assets/prototype/assets/`. */
+export function isAndroidStampAssetId(id: string): boolean {
+  return ASSET_ID_PATTERN.test(id);
+}
 /** What a stamp bakes into the template beside the relinked manifest. */
 export interface AndroidStampContent {
   spec: string;
@@ -47,7 +52,7 @@ export class DefaultAndroidStampZip implements AndroidStampZip {
     this.addAttachAssets(zip, content);
     const seen = new Set<string>();
     for (const asset of assets) {
-      if (!/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/.test(asset.id) || seen.has(asset.id)) {
+      if (!isAndroidStampAssetId(asset.id) || seen.has(asset.id)) {
         throw new ActionableError(`Invalid or duplicate prototype asset id: ${asset.id}`);
       }
       seen.add(asset.id);

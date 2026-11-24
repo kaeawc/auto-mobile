@@ -8,6 +8,12 @@ import {
 } from "../../src/server/deviceTools";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { withWireDeadline } from "../helpers/requestDeadline";
+import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
+import {
+  registerLiveDeadline,
+  unregisterLiveDeadline,
+} from "../../src/daemon/liveDeadlineRegistry";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -367,6 +373,51 @@ test("a retryable failure that keeps its cold boot running reports it still boot
       "Next step: retry getAndroid with the same arguments.",
   );
   expect(child.killed).toBe(false);
+});
+
+test("a live-deadline timeout during a cold boot still reports the device left (#19153)", async () => {
+  const timer = new FakeTimer();
+  setDeviceToolsDependencies({ timer });
+  const child = new FakeChildProcess(timer);
+  const booted = Promise.withResolvers<void>();
+  const handlers = createAcquisitionHandlers({
+    bootAndPrepareDevice: async (_args, _budgets, _deps, { options: context }) => {
+      context.state.boot = {
+        device: coldBootedPixel,
+        source: "cold-boot",
+        provisioned: false,
+        processHandle: child,
+      };
+      booted.resolve();
+      // A step that honors cancellation rejects with the signal's own reason.
+      return await new Promise<never>((_resolve, reject) => {
+        context.signal?.addEventListener("abort", () => reject(context.signal?.reason), {
+          once: true,
+        });
+      });
+    },
+  });
+  const key = "bare-cold-boot-live-deadline";
+  registerLiveDeadline(key, new ProgressExtendableDeadline(0, 500));
+  try {
+    const rejected = withWireDeadline(
+      { avdName: "Pixel_A", __mcpRequestDeadlineMs: 500, __mcpLiveDeadlineKey: key },
+      (args) => handlers.getAndroidHandler(args),
+    ).catch((error: unknown) => error);
+    await booted.promise;
+    timer.advanceTime(500);
+    const error = await rejected;
+    if (!(error instanceof ActionableError)) {
+      throw new Error("expected an ActionableError");
+    }
+    expect(error.message).toContain("timed out at the live MCP request deadline");
+    expect(error.message).toContain("deviceLeft: shutdown");
+    expect(error.message).toContain(
+      'Next step: retry getAndroid with the same avdName ("Pixel_A").',
+    );
+  } finally {
+    unregisterLiveDeadline(key);
+  }
 });
 
 test("a failure on a device that was already running keeps its message (#19124)", async () => {

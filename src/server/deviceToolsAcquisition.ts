@@ -110,6 +110,19 @@ export const ACQUISITION_DEADLINE_BACKSTOP_GRACE_MS = 3 * ABORT_SETTLEMENT_GRACE
  * session binding checks that signal before it commits (#6034), so a step that
  * succeeds late does not bind a session.
  */
+/**
+ * Deadline errors `runWithAcquisitionDeadline` creates for its own request. They become the
+ * operation signal's abort reason, but unlike a caller's reason nothing outside this request holds
+ * them, so a failure carrying one is still annotated with the device it left (#19153).
+ */
+const requestDeadlineErrors = new WeakSet<Error>();
+
+function requestDeadlineError(message: string): ActionableError {
+  const error = new ActionableError(message);
+  requestDeadlineErrors.add(error);
+  return error;
+}
+
 export async function runWithAcquisitionDeadline<T>(
   requestedDeadlineMs: number,
   signal: AbortSignal | undefined,
@@ -142,13 +155,13 @@ export async function runWithAcquisitionDeadline<T>(
   };
   const abortAtLiveDeadline = (): void =>
     controller.abort(
-      new ActionableError(
+      requestDeadlineError(
         `${operationName} timed out at the live MCP request deadline while ${stage.current}. ` +
           `Retry device acquisition.`,
       ),
     );
   const expire = (): void => {
-    const error = new ActionableError(
+    const error = requestDeadlineError(
       `${operationName} did not finish by its MCP request deadline; the ${stage.current} stage ` +
         `ignored cancellation and is still running. The device stays reserved until that stage ` +
         `settles. Retry device acquisition.`,
@@ -519,9 +532,10 @@ function preparationFailure(
     error instanceof ActionableError || error instanceof TerminalSessionError
       ? error
       : toActionableError(error, `Failed to start ${platform} device`);
-  // A cancellation reason stays the very object its signal carries: callers recognize a
-  // cancellation by identity with `signal.reason`, and an annotated copy would hide it.
-  const isCancellationReason = signal?.aborted === true && failure === signal.reason;
+  // A caller's cancellation reason stays the very object the caller's signal carries, so the
+  // caller can still recognize it by identity. A deadline error this request created is annotated.
+  const isCancellationReason =
+    signal?.aborted === true && failure === signal.reason && !requestDeadlineErrors.has(failure);
   return deviceLeft === undefined || isCancellationReason
     ? failure
     : annotateAcquisitionFailure(

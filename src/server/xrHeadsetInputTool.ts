@@ -147,11 +147,6 @@ export const createXrHeadsetInputHandler =
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
-    if (device.platform !== "android") {
-      throw new ActionableError(
-        "xrHeadsetInput is Android-only: it drives the Android XR headset emulator's gRPC input stream.",
-      );
-    }
     const headset = await checkHeadset(device);
     if (headset !== true) {
       throw new ActionableError(
@@ -188,6 +183,7 @@ const xrHeadsetInputTool = defineDeviceTool({
   handler: createXrHeadsetInputHandler(),
   options: {
     ...PLAN_RELEVANT,
+    platforms: ["android"],
     defaultEnabled: false,
     outputSchema: xrHeadsetInputResultSchema,
   },

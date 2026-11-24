@@ -153,6 +153,7 @@ export const focusNavigateTool = defineDeviceTool({
     return withIsErrorOnFailure(createStructuredToolResponse(response), result.success);
   },
   options: {
+    platforms: ["android", "tvos"],
     ...PLAN_RELEVANT,
     // `select` can navigate, so record the call like tapOn and sendKeys for navigateTo to replay.
     recordsNavigation: true,

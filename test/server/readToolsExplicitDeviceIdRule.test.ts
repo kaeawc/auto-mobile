@@ -363,6 +363,9 @@ beforeAll(async () => {
           return { success: true };
         },
         ...options,
+        // Drop the typed platform restriction (#18721) so Android-only reads still exercise
+        // resolution on iOS; the restriction itself is covered by toolPlatformRestriction.test.ts.
+        platforms: undefined,
         ...("sessionlessDeviceRead" in options && options.sessionlessDeviceRead
           ? { sessionlessDeviceRead: sessionlessDeviceReadFor(access, { timer: retryTimer }) }
           : {}),

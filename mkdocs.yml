@@ -537,6 +537,7 @@ nav:
       - "2026-11-21: Prototype media runtime placement spike": devlog/2026-11-21-prototype-media-runtime-placement-spike.md
       - "2026-11-21: iOS Simulator audio routing open questions": devlog/2026-11-21-ios-simulator-audio-routing-open-questions.md
       - "2026-11-20: Fixture capture mode": devlog/2026-11-20-fixture-capture-mode.md
+      - "2026-11-19: Typed platform restriction for device-aware tools": devlog/2026-11-19-typed-tool-platform-restriction.md
       - "2026-11-19: Committed page bundle and one export budget": devlog/2026-11-19-prototype-web-page-bundle.md
       - "2026-11-19: Per-runtime prototype budgets": devlog/2026-11-19-prototype-runtime-budgets.md
       - "2026-11-19: Material 3 Expressive components drawn from stable primitives": devlog/2026-11-19-m3-expressive-stable-primitives.md

@@ -18,7 +18,6 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 isolateToolRegistry();
 
 const ANDROID: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
-const IOS: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "SIM" };
 const APP = "dev.example.playground";
 
 const result = (stdout: string): ExecResult => ({
@@ -95,15 +94,6 @@ describe("backgroundWork tool (#14090)", () => {
       status: "failed",
       success: false,
       errorCode: "job_not_found",
-    });
-  });
-
-  test("iOS is a typed unsupported result", async () => {
-    const { handler } = handlerWith(() => {});
-    const response = await handler(IOS, { appId: APP, action: "list" } as BackgroundWorkArgs);
-    expect(backgroundWorkResultSchema.parse(toolStructured(response))).toMatchObject({
-      status: "unsupported",
-      success: false,
     });
   });
 

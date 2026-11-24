@@ -2,7 +2,7 @@
 
 | Tool                               | What it does                                                                                    | Platforms                                                                                                                                                   | Needs                             |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| 🚦 <code>performanceAudit</code>   | Pass/fail performance checks of an app on the current screen, against the configured thresholds | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span></span> | <span class="tool-needs">—</span> |
+| 🚦 <code>performanceAudit</code>   | Pass/fail performance checks of an app on the current screen, against the configured thresholds | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span></span>                                                         | <span class="tool-needs">—</span> |
 | ✅ <code>accessibilityAudit</code> | Audit the accessibility of the current screen                                                   | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span></span> | <span class="tool-needs">—</span> |
 
 Two tools check the current screen on demand and can fail a plan step: `accessibilityAudit` for

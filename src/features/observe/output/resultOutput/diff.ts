@@ -9,7 +9,9 @@ import {
   type ObserveDiffSelector,
   type ObserveDiffNode,
   type ObserveDiffNodeChange,
+  type ObserveDiffNodeSummary,
   type ObserveDiffRelayout,
+  MAX_DIFF_SUMMARY_LABELS,
   type ObserveDiff,
   type DiffObserveConfig,
   type FlatObserveNode,
@@ -62,6 +64,11 @@ const DIFF_STATE_ATTRS: readonly string[] = ["checked", "selected", "state-descr
  * screen's Airplane switch and the new screen's Wi-Fi switch. Reporting that
  * pair as one switch whose state flipped asserts a toggle that never happened
  * (#11638); leave it as removed + added instead.
+ *
+ * A pair that has not moved is the exception (#19122): a list relayout that
+ * resizes an ancestor re-keys every row under it, and the one control with that
+ * id left in exactly the same place is the same control, so its flip is real.
+ * The caller already requires the id to be unique on both sides.
  */
 function isUnlabelledStateFlip(
   attributes: Record<string, unknown>,
@@ -69,7 +76,8 @@ function isUnlabelledStateFlip(
 ): boolean {
   const labelled =
     String(attributes["text"] ?? "") !== "" || String(attributes["content-desc"] ?? "") !== "";
-  return !labelled && DIFF_STATE_ATTRS.some((attr) => attr in attrChanges);
+  const samePlace = !("bounds" in attrChanges) && boundsKey(attributes.bounds) !== "";
+  return !labelled && !samePlace && DIFF_STATE_ATTRS.some((attr) => attr in attrChanges);
 }
 
 /** Index leftover diff nodes by their content-identity key, dropping keyless nodes. */
@@ -477,6 +485,41 @@ export function diffObserveResult(
   preserveImportedPrototypeContent(diff, baseline, next);
 
   return diff;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/** A diff node's readable name: skeleton `label ?? elementId`, or the raw-attribute equivalent. */
+function diffNodeSummaryLabel(attributes: Record<string, unknown>): string | undefined {
+  return (
+    nonEmptyString(attributes.label) ??
+    diffLabel(attributes) ??
+    nonEmptyString(attributes.elementId) ??
+    diffElementId(attributes)
+  );
+}
+
+/**
+ * What an `added` or `removed` list held, for the wire diff that drops the list
+ * itself (#11637 item 2, #19122): its count and up to
+ * {@link MAX_DIFF_SUMMARY_LABELS} distinct labels. `undefined` for an empty list.
+ */
+export function summarizeDiffNodes(
+  nodes: readonly ObserveDiffNode[],
+): ObserveDiffNodeSummary | undefined {
+  if (nodes.length === 0) {
+    return undefined;
+  }
+  const labels = [
+    ...new Set(
+      nodes
+        .map((node) => diffNodeSummaryLabel(node.attributes))
+        .filter((label): label is string => label !== undefined),
+    ),
+  ].slice(0, MAX_DIFF_SUMMARY_LABELS);
+  return { count: nodes.length, ...(labels.length > 0 ? { labels } : {}) };
 }
 
 function preserveImportedPrototypeContent(

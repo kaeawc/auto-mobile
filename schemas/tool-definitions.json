@@ -6055,11 +6055,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -9516,11 +9517,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -15521,11 +15523,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -19288,11 +19291,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -30128,11 +30132,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -32775,11 +32780,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -39389,11 +39395,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -42879,11 +42886,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -45291,11 +45299,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -52499,11 +52508,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -54599,11 +54609,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -56723,11 +56734,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -60723,11 +60735,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -63756,11 +63769,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },
@@ -65812,11 +65826,12 @@
               "maximum": 9007199254740991
             },
             "labels": {
-              "description": "Up to 5 distinct node labels (label, else element id).",
+              "description": "Up to 5 distinct node labels (label, else element id), each at most 60 characters.",
               "maxItems": 5,
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 60
               }
             }
           },

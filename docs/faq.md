@@ -33,7 +33,8 @@ and options.
 
 ## When do I pass `avdName` vs `deviceId` to `getAndroid` / `getApple`?
 
-Both tools take two ways to name a target; pass one. For `getAndroid`, prefer
+Both tools take two ways to name a target; pass one. `getAndroid` also accepts
+neither and then picks a phone; see [Get a device](using/android.md#get-a-device). For `getAndroid`, prefer
 `avdName` when you want to boot or coordinate a named Android Virtual Device — it
 sets the exact-name match, AVD name, and stable target AutoMobile uses for
 lifecycle coordination. `deviceId` is the copy-paste-from-discovery convenience:

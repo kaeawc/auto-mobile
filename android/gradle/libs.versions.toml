@@ -5,7 +5,7 @@
 [versions]
 # Build tool versions
 build-android-buildTools = "37.0.0"        # Used in playground Android modules
-build-android-compileSdk = "37"            # Used in playground Android modules
+build-android-compileSdk = "37.1"          # <major> or <major>.<minor>; Compose 1.13 AARs require 37.1
 build-android-minSdk = "24"                # Used in playground Android modules
 build-android-targetSdk = "37"             # Used in playground Android modules
 build-robolectric-maxSdk = "35"             # Highest SDK that runs on JDK 21 without extra JVM flags (Robolectric 4.18 registers 37, but SDK 36+ fails in ApplicationSharedMemory); raise when fixed
@@ -33,8 +33,8 @@ androidx-core = "1.19.1"
 androidx-exifinterface = "1.4.2"
 androidx-window = "1.5.0"
 androidx-activity-compose = "1.13.0"
-androidx-compose-bom = "2026.09.00"
-androidx-compose-adaptive = "1.3.0" # Independently versioned; aligned with the 2026.09.00 BOM
+androidx-compose-bom = "2026.11.01"
+androidx-compose-adaptive = "1.3.0" # Independently versioned; aligned with the 2026.11.01 BOM
 androidx-lifecycle = "2.11.0"
 androidx-startup = "1.2.0"
 # Background-survival fixture only; latest stable resolved metadata available offline.

@@ -278,7 +278,8 @@ show_installation_progress() {
 # Read the required Android compileSdk version from libs.versions.toml so the
 # installer never hardcodes the platform number — bumping
 # `build-android-compileSdk` is the single source of truth.
-# Echoes the version (e.g. "37") on success; non-zero exit if missing/unreadable.
+# Echoes the version (e.g. "37", or "37.1" for a minor SDK release, whose
+# platform installs as android-37.1) on success; non-zero exit if missing/unreadable.
 read_required_compile_sdk() {
     local toml_file="$1"
     [[ -f "${toml_file}" ]] || return 1
@@ -293,9 +294,10 @@ read_required_compile_sdk() {
 }
 
 # Verify the Gradle-required SDK platform (the android.jar) is actually
-# installed under ${android_home}/platforms/android-<compileSdk>. Mirrors the
-# build's fallback (android/video-server/build.gradle.kts), which accepts both
-# the `android-<sdk>` and `android-<sdk>.0` directory layouts.
+# installed under ${android_home}/platforms/android-<compileSdk>, accepting both
+# the `android-<sdk>` and `android-<sdk>.0` directory layouts. A minor compileSdk
+# (37.1) needs its own platform: AGP modules compile against it, even though
+# android/video-server can fall back to the major platform's android.jar.
 # Returns 0 when present, non-zero otherwise.
 android_platform_installed() {
     local android_home="$1"

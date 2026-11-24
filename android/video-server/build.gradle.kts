@@ -17,11 +17,14 @@ val androidSdkPath: String =
 val compileSdk: String = libs.versions.build.android.compileSdk.get()
 val buildToolsVersion: String = libs.versions.build.android.buildTools.get()
 val minSdk: String = libs.versions.build.android.minSdk.get()
+// compileSdk may carry a minor level ("37.1"). This module only needs the API surface as a
+// compileOnly jar and is configured before AGP can download a missing platform, so a minor level
+// falls back to its major platform (android-37 / android-37.0) when that is all that is installed.
+val compileSdkMajor: String = compileSdk.substringBefore('.')
 val androidPlatformJar: File =
-  listOf(
-      File("$androidSdkPath/platforms/android-$compileSdk/android.jar"),
-      File("$androidSdkPath/platforms/android-$compileSdk.0/android.jar"),
-    )
+  listOf(compileSdk, "$compileSdk.0", compileSdkMajor, "$compileSdkMajor.0")
+    .distinct()
+    .map { File("$androidSdkPath/platforms/android-$it/android.jar") }
     .firstOrNull { it.exists() }
     ?: error("Unable to find android.jar for compileSdk $compileSdk in $androidSdkPath/platforms")
 

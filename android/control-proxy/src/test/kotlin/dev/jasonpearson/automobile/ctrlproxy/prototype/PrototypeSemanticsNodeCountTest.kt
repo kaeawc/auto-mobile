@@ -46,11 +46,13 @@ class PrototypeSemanticsNodeCountTest {
     private const val GALLERY_ROLE_NODES = 15
     // fullscreen-all-nodes BEFORE: 30 semantics nodes, 5 role nodes.
     // No decorative icon/image or single-text tappable container; pinned to show no change.
-    private const val FULLSCREEN_SEMANTICS_NODES = 30
+    // Compose 1.13 / Material 3 1.5 (BOM 2026.11.01) emit one fewer Material-internal node here and
+    // in doc-example-1 (both carry a textField and a bottomSheet); role nodes are unchanged.
+    private const val FULLSCREEN_SEMANTICS_NODES = 29
     private const val FULLSCREEN_ROLE_NODES = 5
     // doc-example-1 BEFORE: 16 semantics nodes, 5 role nodes.
     // No decorative icon/image or single-text tappable container; pinned to show no change.
-    private const val DOC_EXAMPLE_SEMANTICS_NODES = 16
+    private const val DOC_EXAMPLE_SEMANTICS_NODES = 15
     private const val DOC_EXAMPLE_ROLE_NODES = 5
   }
 

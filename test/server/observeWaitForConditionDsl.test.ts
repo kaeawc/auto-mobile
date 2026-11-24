@@ -542,6 +542,50 @@ describe("waitForObservation DSL branch", () => {
 
     expect(outcome.awaitTimeout).toBe(true);
     expect(outcome.timedOut).toBe(true);
+    expect(outcome.timeoutIsResult).toBeUndefined();
+  });
+
+  test("for:'stable' timeout on a moving screen is a result naming what changed (#19123)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult((index) =>
+      makeObservation(
+        [node({ "resource-id": "sheet", text: "Device only", selected: index % 2 === 0 })],
+        (index + 1) * 10,
+      ),
+    );
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      { for: "stable", timeout: 300 } satisfies WaitForWithSettled,
+      { skipBackStack: false, timer },
+    );
+
+    expect(outcome.awaitTimeout).toBe(true);
+    expect(outcome.timedOut).toBe(true);
+    expect(outcome.settled).toBe(false);
+    expect(outcome.timeoutIsResult).toBe(true);
+    expect(outcome.unsettledBy).toEqual([
+      { elementId: "sheet", label: "Device only", field: "selected" },
+    ]);
+  });
+
+  test("for:'stable' screen-off fast-fail stays an error", async () => {
+    const timer = new FakeTimer();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult({
+      ...makeObservation([node({ "resource-id": "content" })], 10),
+      wakefulness: "Asleep",
+    });
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      { for: "stable" } satisfies WaitForWithSettled,
+      { skipBackStack: false, timer },
+    );
+
+    expect(outcome.timeoutIsResult).toBeUndefined();
   });
 });
 

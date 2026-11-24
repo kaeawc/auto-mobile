@@ -1,4 +1,4 @@
-import type { ObserveResult } from "../../../models";
+import type { ObserveResult, UnsettledNode } from "../../../models";
 
 /**
  * Options for a settle-loop observe (issue #4389). All time control flows through
@@ -88,6 +88,11 @@ export interface SettleResult {
   waitMs: number;
   /** Why polling completed. This distinguishes a budget timeout from screen-off. */
   terminalReason: "settled" | "screen_off" | "timeout";
+  /**
+   * Unsettled only: up to three nodes from the last non-empty diff between same-screen reads
+   * (#19123). Absent when settled or when no same-screen diff was seen.
+   */
+  unsettledBy?: UnsettledNode[];
 }
 
 /**

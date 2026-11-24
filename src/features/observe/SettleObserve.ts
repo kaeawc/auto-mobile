@@ -9,8 +9,9 @@ import {
   splitVolatileChanges,
   untrackableIdentities,
 } from "./settleVolatileText";
+import { unsettledByFromDiff } from "./settleUnsettledBy";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import type { ObserveResult } from "../../models";
+import type { ObserveResult, UnsettledNode } from "../../models";
 
 export const DEFAULT_SETTLE_TIMEOUT_MS = 2500;
 export const DEFAULT_SETTLE_POLL_MS = 150;
@@ -52,7 +53,15 @@ function seedFromReference(
   ) {
     return;
   }
-  tracker.mask(diffObserveResult(reference, first), untrackableIdentities(reference, first));
+  tracker.mask(diffSettleReads(reference, first), untrackableIdentities(reference, first));
+}
+
+/**
+ * The structural diff between two same-screen reads, without the SystemUI status bar: its clock,
+ * battery and cell-signal rows change on their own and are not part of the app screen (#19123).
+ */
+function diffSettleReads(previous: ObserveResult, next: ObserveResult): ObserveDiff {
+  return diffObserveResult(previous, next, { skipStatusBar: true });
 }
 
 /**
@@ -98,6 +107,8 @@ export class RealSettleObserve implements SettleObserve {
     // Whether only ticking or blinking nodes have changed since the last tick (#17749).
     let onlyTicking = false;
     const volatileExtensionMs = Math.max(0, options.volatileExtensionMs ?? 0);
+    // What the last same-screen read pair that differed changed, for `unsettledBy` (#19123).
+    let lastUnsettledBy: UnsettledNode[] | undefined;
 
     const outcome = await pollObserveUntil(
       this.observeScreen,
@@ -128,6 +139,7 @@ export class RealSettleObserve implements SettleObserve {
           // A motion read is not diffed, so later diffs are not consecutive with
           // earlier ones, and the screen may change behind it: start over.
           volatileText.reset();
+          lastUnsettledBy = undefined;
           return false;
         }
         if (previous === undefined) {
@@ -138,17 +150,23 @@ export class RealSettleObserve implements SettleObserve {
         if (!isSameObservationScreen(previous, observation)) {
           onlyTicking = false;
           volatileText.reset();
+          // Nodes from the previous screen say nothing about this one.
+          lastUnsettledBy = undefined;
           equalRun = 1;
           return equalRun >= stableReads;
         }
-        const diff = diffObserveResult(previous, observation);
+        const diff = diffSettleReads(previous, observation);
         const untrackable = untrackableIdentities(previous, observation);
         const split = splitVolatileChanges(diff, untrackable);
         // A tick grants the extension and any other change withdraws it; an
         // empty diff keeps it, so a tick confirmed on this read can still
         // finish its terminal back-stack read.
         onlyTicking = isStabilityDiffEmpty(split.rest) && (split.ticks > 0 || onlyTicking);
-        const structurallyStable = isStabilityDiffEmpty(volatileText.mask(diff, untrackable));
+        const masked = volatileText.mask(diff, untrackable);
+        const structurallyStable = isStabilityDiffEmpty(masked);
+        if (!structurallyStable) {
+          lastUnsettledBy = unsettledByFromDiff(masked);
+        }
         equalRun = structurallyStable ? equalRun + 1 : 1;
         return equalRun >= stableReads;
       },
@@ -160,6 +178,7 @@ export class RealSettleObserve implements SettleObserve {
       polls: outcome.polls,
       waitMs: outcome.waitMs,
       terminalReason: outcome.terminalReason === "matched" ? "settled" : outcome.terminalReason,
+      ...(!outcome.stopped && lastUnsettledBy ? { unsettledBy: lastUnsettledBy } : {}),
     };
   }
 }

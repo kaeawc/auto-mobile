@@ -35,3 +35,26 @@ const SYSTEMUI_STATUS_BAR_ID_PATTERN =
 export function isSystemUiStatusBarId(resourceId: unknown): boolean {
   return typeof resourceId === "string" && SYSTEMUI_STATUS_BAR_ID_PATTERN.test(resourceId);
 }
+
+/**
+ * SystemUI status-bar cell-signal rows (`mobile_combo`, `mobile_signal`, `signal_cluster`, …).
+ * Their content-desc follows the simulated signal strength on an emulator, so they change between
+ * any two captures (#19123). Kept out of {@link SYSTEMUI_STATUS_BAR_ID_PATTERN} so the skeleton's
+ * status-bar folding is unchanged; quick-settings tiles use other ids.
+ */
+const SYSTEMUI_SIGNAL_ROW_ID_PATTERN =
+  /^com\.android\.systemui:id\/(mobile_[a-zA-Z_]*|signal_cluster[a-zA-Z_]*)$/;
+
+/**
+ * Whether a node and its subtree are status-bar chrome that screen-change detection leaves out
+ * (`flattenForDiff`'s `skipStatusBar`): a known status-bar root, an allowlisted status-bar id, or
+ * a cell-signal row, so chrome found outside a known root is skipped too (#19123).
+ */
+export function isStatusBarDiffSubtreeId(resourceId: unknown): boolean {
+  return (
+    typeof resourceId === "string" &&
+    (STATUS_BAR_ROOT_IDS.has(resourceId) ||
+      SYSTEMUI_STATUS_BAR_ID_PATTERN.test(resourceId) ||
+      SYSTEMUI_SIGNAL_ROW_ID_PATTERN.test(resourceId))
+  );
+}

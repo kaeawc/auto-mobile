@@ -13,6 +13,7 @@ import { ActionableError } from "../../../models/ActionableError";
 import { hasUsableHierarchy } from "../ObserveScreen";
 import type { ObserveScreen, ObserveScreenExecuteOptions } from "../interfaces/ObserveScreen";
 import { RealSettleObserve } from "../SettleObserve";
+import type { SettleResult } from "../interfaces/SettleObserve";
 import { RealWaitForCondition } from "../WaitForCondition";
 import { hierarchyUpdatedAtToMillis } from "../observeTimestamp";
 import type { ConditionPredicate } from "../interfaces/WaitForCondition";
@@ -30,7 +31,7 @@ import {
   isDeviceLostError,
   throwDeviceLostFromAbortSignal,
 } from "../../../utils/deviceLossOutcome";
-import { BootedDevice, Element, ObserveResult } from "../../../models";
+import { BootedDevice, Element, ObserveResult, type UnsettledNode } from "../../../models";
 import { createGlobalPerformanceTracker } from "../../../utils/PerformanceTracker";
 import {
   ElementResolver,
@@ -77,6 +78,8 @@ export interface WaitForObservationOutcome {
   awaitTimeout: boolean;
   matched?: boolean;
   settled?: boolean;
+  /** A `stable` wait that ended unsettled: what was still changing (#19123). */
+  unsettledBy?: UnsettledNode[];
   timedOut: boolean;
   timeoutReason?: string;
   polls: number;
@@ -84,6 +87,12 @@ export interface WaitForObservationOutcome {
   matchedElement?: Element;
   candidates?: Element[];
   containerFailure?: ContainerFailure;
+  /**
+   * A timeout the response reports as a normal result, without `isError` (#19123). Set only for
+   * a `stable` wait that ran out of budget on an awake, usable capture: the screen only kept
+   * moving. Every other timeout is an error (#16889). Not serialized.
+   */
+  timeoutIsResult?: true;
 }
 
 /** True when the waitFor options are the #4398 declarative `for` DSL form. */
@@ -181,6 +190,8 @@ const runWaitForConditionDsl = async (
       timedOut: settle.terminalReason === "timeout",
       polls: settle.polls,
       waitMs: settle.waitMs,
+      ...(settle.unsettledBy ? { unsettledBy: settle.unsettledBy } : {}),
+      ...(isUsableStableTimeout(settle) ? { timeoutIsResult: true as const } : {}),
     };
     return applySettledGate(outcome, settle.settled);
   }
@@ -238,6 +249,19 @@ const runWaitForConditionDsl = async (
   };
   return applySettledGate(outcome, result.matched, predicate);
 };
+
+/**
+ * A `stable` wait that ran out of budget on an awake screen with a usable hierarchy (#19123).
+ * Its observation is a complete read the client can act on; a screen-off fast-fail, stale
+ * Asleep frames or an unavailable capture are not.
+ */
+function isUsableStableTimeout(settle: SettleResult): boolean {
+  return (
+    settle.terminalReason === "timeout" &&
+    settle.observation.wakefulness !== "Asleep" &&
+    waitCaptureUnavailableReason(settle.observation) === undefined
+  );
+}
 
 function waitPollingScreen(observeScreen: ObserveScreen, skipBackStack: boolean): ObserveScreen {
   // Omit collectDeferredBackStack here: explicit skipBackStack opts out of terminal reads too.

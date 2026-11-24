@@ -380,8 +380,19 @@ function aggregateObserveTimeoutMs(args: ObserveArgs): number | undefined {
 }
 
 /**
+ * Whether a waitFor that did not succeed is a tool error. Every timeout is (#16889), except a
+ * plain `stable` timeout (`timeoutIsResult`): its observation is a complete read of a screen
+ * that only kept moving, so it returns as a normal result with `awaitTimeout: true` and
+ * `unsettledBy` (#19123).
+ */
+function isWaitErrorOutcome(waitOutcome: Omit<WaitForObservationOutcome, "observation">): boolean {
+  return waitOutcome.awaitTimeout && waitOutcome.timeoutIsResult !== true;
+}
+
+/**
  * A timed-out waitFor still returns the last observation and its wait diagnostics, but
  * marks the envelope `isError` so a client does not continue as if the condition held (#16889).
+ * A plain `stable` timeout is the exception ({@link isWaitErrorOutcome}).
  */
 export async function createObserveWaitResponse<
   T extends ObserveResponsePayload = ObserveToolPayload,
@@ -391,12 +402,13 @@ export async function createObserveWaitResponse<
   includeScreenshotImage?: boolean,
   options: { signal?: AbortSignal; protection?: ScreenshotPathProtection } = {},
 ): Promise<ObserveResponse<T> & { isError?: true }> {
-  const waitMetadata: Omit<WaitForObservationOutcome, "observation"> = {
+  const waitMetadata: Omit<WaitForObservationOutcome, "observation" | "timeoutIsResult"> = {
     awaitedElement: waitOutcome.awaitedElement,
     awaitDuration: waitOutcome.awaitDuration,
     awaitTimeout: waitOutcome.awaitTimeout,
     matched: waitOutcome.matched,
     settled: waitOutcome.settled,
+    ...(waitOutcome.unsettledBy ? { unsettledBy: waitOutcome.unsettledBy } : {}),
     timedOut: waitOutcome.timedOut,
     polls: waitOutcome.polls,
     waitMs: waitOutcome.waitMs,
@@ -409,7 +421,7 @@ export async function createObserveWaitResponse<
     includeScreenshotImage,
     options,
   );
-  return waitOutcome.awaitTimeout ? { ...response, isError: true as const } : response;
+  return isWaitErrorOutcome(waitOutcome) ? { ...response, isError: true as const } : response;
 }
 
 export async function attachObserveCrop(

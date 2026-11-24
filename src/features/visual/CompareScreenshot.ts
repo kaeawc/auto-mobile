@@ -7,7 +7,7 @@ import { assertBaselineName, type VisualBaselineStore } from "./VisualBaselineSt
 import { profileDifferences, type VisualDeviceProfile } from "./VisualDeviceProfile";
 import { diffPngs, type PixelRect } from "./VisualDiff";
 
-/** A region in platform-native screen units (Android pixels, iOS and tvOS points). */
+/** A region in platform-native screen units (Android pixels, iOS, tvOS and watchOS points). */
 export interface VisualRegion {
   elementId?: string;
   rect?: ElementBounds;

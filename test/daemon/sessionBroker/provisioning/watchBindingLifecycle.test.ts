@@ -47,6 +47,8 @@ import { FakeDeviceSessionPersistence } from "../../../fakes/FakeDeviceSessionPe
 import { FakeDeviceUtils } from "../../../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { useEmptyVideoRecordings } from "../../../helpers/emptyVideoRecordings";
+import { resetVideoRecordingManagerDependencies } from "../../../../src/daemon/videoRecordingManager";
 import {
   FakeWatchProvisionSimctl,
   WATCH_DEVICE_TYPE,
@@ -107,6 +109,7 @@ describe("broker watch bindings over the real watch modules", () => {
     DaemonState.getInstance().reset();
     sessionManager?.stopCleanupTimer();
     sessionManager = undefined;
+    resetVideoRecordingManagerDependencies();
   };
   beforeEach(cleanup);
   afterEach(cleanup);
@@ -143,6 +146,8 @@ describe("broker watch bindings over the real watch modules", () => {
       await new WatchSimulatorLifecycle(simctl, watches).shutdown(device);
     };
     const timer = new FakeTimer();
+    // A watch delete stops its active recordings first (#19056); answer without the real DB.
+    await useEmptyVideoRecordings(timer);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {

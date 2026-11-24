@@ -2645,6 +2645,36 @@ describe("videoRecordingManager", () => {
       expect(fakeBackend.startCalls.length).toBe(0);
     });
 
+    test("an Apple Watch recording takes the simctl cap and is stored as watchos (#19056)", async () => {
+      const watch: BootedDevice = {
+        name: "Apple Watch Series 10",
+        platform: "watchos",
+        deviceId: "watch-udid",
+      };
+      await expect(
+        startVideoRecording({ device: watch, maxDurationSeconds: 3601 }),
+      ).rejects.toThrow("maxDuration must be <= 3600 seconds.");
+      const active = await startVideoRecording({ device: watch, maxDurationSeconds: 500 });
+      expect(fakeBackend.startCalls.map((call) => call.device?.platform)).toEqual(["watchos"]);
+      expect((await fakeRepository.getRecording(active.recordingId))?.platform).toBe("watchos");
+      expect(
+        (await listActiveVideoRecordings({ platform: "watchos" })).map((r) => r.recordingId),
+      ).toEqual([active.recordingId]);
+      await stopVideoRecording(active.recordingId);
+    });
+
+    test("an Apple Watch recording with audio is refused before capture (#19056)", async () => {
+      const watch: BootedDevice = {
+        name: "Apple Watch Series 10",
+        platform: "watchos",
+        deviceId: "watch-udid",
+      };
+      await expect(startVideoRecording({ device: watch, audio: true })).rejects.toThrow(
+        "audio is not supported for Apple Watch recordings; record without audio.",
+      );
+      expect(fakeBackend.startCalls.length).toBe(0);
+    });
+
     test("non-iOS recording above the 300s cap is still rejected (Android segments before the manager)", async () => {
       await expect(
         startVideoRecording({ device: testDevice, maxDurationSeconds: 301 }),

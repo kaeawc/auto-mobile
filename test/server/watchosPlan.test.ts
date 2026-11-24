@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { dump, load } from "js-yaml";
-import type { BootedDevice, Plan } from "../../src/models";
+import type { BootedDevice, Plan, VideoRecordingMetadata } from "../../src/models";
 import { assertToolSupportsDevicePlatform } from "../../src/server/applePlatformToolSupport";
 import {
   PlanExecutionOrchestrator,
@@ -27,6 +27,26 @@ const watch: BootedDevice = {
   platform: "watchos",
   deviceId: "AEC5C81F-B29B-4A0C-976A-6081F3617E1C",
   name: "l16836-watch",
+};
+
+const watchRecording: VideoRecordingMetadata = {
+  recordingId: "watch-rec",
+  filePath: "/fake/watch.mp4",
+  fileName: "watch.mp4",
+  format: "mp4",
+  sizeBytes: 1,
+  createdAt: "1970-01-01T00:00:00.000Z",
+  startedAt: "1970-01-01T00:00:00.000Z",
+  lastAccessedAt: "1970-01-01T00:00:00.000Z",
+  durationMs: 1_000,
+  config: {
+    qualityPreset: "medium",
+    targetBitrateKbps: 1000,
+    maxThroughputMbps: 1,
+    fps: 30,
+    maxArchiveSizeMb: 100,
+    format: "mp4",
+  },
 };
 
 // The plan recordToolCalls returned for a watch session in the #16836 acceptance run (#18051).
@@ -87,17 +107,8 @@ describe("watchOS plan orchestration", () => {
   });
   afterEach(() => execute.mockRestore());
 
-  test("replays on watchOS without attempting automatic video and records the platform", async () => {
-    const videoRecorder: VideoRecorder = {
-      startVideoRecording: mock(async () => {
-        throw new Error("watchOS has no plan video recorder");
-      }),
-      stopVideoRecording: mock(async () => {
-        throw new Error("nothing started");
-      }),
-    };
-    const recordExecution = mock(async () => 1);
-    const result = await new PlanExecutionOrchestrator(
+  function run(videoRecorder: VideoRecorder, recordExecution = mock(async () => 1)) {
+    return new PlanExecutionOrchestrator(
       {
         device: watch,
         request: {
@@ -118,10 +129,36 @@ describe("watchOS plan orchestration", () => {
         }),
       },
     ).execute();
-    expect(result).toMatchObject({ success: true, platform: "watchos", deviceId: watch.deviceId });
-    expect(result.videoFilePaths ?? []).toEqual([]);
+  }
+
+  test("replays on watchOS, records one simctl video like tvOS and records the platform (#19056)", async () => {
+    const videoRecorder: VideoRecorder = {
+      startVideoRecording: mock(async () => ({
+        recordingId: "watch-rec",
+        outputPath: watchRecording.filePath,
+        fileName: watchRecording.fileName,
+        startedAt: watchRecording.startedAt,
+        config: watchRecording.config,
+      })),
+      stopVideoRecording: mock(async () => ({ metadata: watchRecording, evictedRecordingIds: [] })),
+    };
+    const recordExecution = mock(async () => 1);
+    const result = await run(videoRecorder, recordExecution);
+    expect(result).toMatchObject({
+      success: true,
+      platform: "watchos",
+      deviceId: watch.deviceId,
+      videoFilePaths: [watchRecording.filePath],
+      videoRecordingIds: ["watch-rec"],
+    });
     expect(result.videoWarnings).toBeUndefined();
-    expect(videoRecorder.startVideoRecording).not.toHaveBeenCalled();
+    expect(videoRecorder.startVideoRecording).toHaveBeenCalledTimes(1);
+    const started = (videoRecorder.startVideoRecording as ReturnType<typeof mock>).mock
+      .calls[0]![0] as { device: BootedDevice; audio?: unknown };
+    expect(started.device).toEqual(watch);
+    // Apple Watch recordings refuse audio, so the plan must never ask for it.
+    expect(started.audio).toBeUndefined();
+    expect(videoRecorder.stopVideoRecording).toHaveBeenCalledTimes(1);
     expect(execute.mock.calls[0]?.[0]).toMatchObject(plan);
     expect(execute.mock.calls[0]?.slice(2, 4)).toEqual(["watchos", watch.deviceId]);
     expect(recordExecution).toHaveBeenCalledWith(
@@ -129,6 +166,23 @@ describe("watchOS plan orchestration", () => {
     );
     registerPlanTools();
     expect(ToolRegistry.getTool("executePlan")!.outputSchema!.safeParse(result).success).toBe(true);
+  });
+
+  test("a watch recording that cannot start leaves a warning and the plan still runs", async () => {
+    const videoRecorder: VideoRecorder = {
+      startVideoRecording: mock(async () => {
+        throw new Error("simctl recordVideo failed");
+      }),
+      stopVideoRecording: mock(async () => {
+        throw new Error("never started");
+      }),
+    };
+    const result = await run(videoRecorder);
+    expect(result.success).toBe(true);
+    expect(result.videoWarnings).toEqual([
+      "Failed to start automatic video recording: simctl recordVideo failed",
+    ]);
+    expect(videoRecorder.stopVideoRecording).not.toHaveBeenCalled();
   });
 });
 

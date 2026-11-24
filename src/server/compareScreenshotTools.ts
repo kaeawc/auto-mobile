@@ -19,6 +19,7 @@ import {
 import type { BootedDevice } from "../models";
 import type { ImageBackend } from "../utils/image/backend/ImageBackend";
 import { resolveImageBackend } from "../utils/image/backend/resolveImageBackend";
+import { watchAwarePlatformSchema } from "../utils/schemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { compareScreenshotResultSchema } from "./compareScreenshotToolOutputSchemas";
 import { defineDeviceTool, type DeviceToolSchema } from "./defineTool";
@@ -28,7 +29,7 @@ const finite = z.number().finite();
 const rectSchema = z
   .object({ left: finite, top: finite, right: finite, bottom: finite })
   .strict()
-  .describe("Platform-native screen rectangle: Android pixels, iOS and tvOS points");
+  .describe("Platform-native screen rectangle: Android pixels, iOS, tvOS and watchOS points");
 const regionSchema = z
   .object({
     elementId: z.string().min(1).optional().describe("Unique exposed element ID"),
@@ -40,6 +41,8 @@ const regionSchema = z
   });
 
 const compareScreenshotInput = z.object({
+  // An Apple Watch simulator compares its simctl screenshot (#19056).
+  platform: watchAwarePlatformSchema(),
   baseline: z
     .string()
     .min(1)

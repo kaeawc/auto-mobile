@@ -2,6 +2,8 @@ import { z } from "zod/v4";
 
 /** Failures throw, so these results always describe a completed call. */
 const route = z.enum(["emulator-grpc", "host-loopback"]);
+/** A simulator capture taps that simulator's processes unless the helper is too old (#19046). */
+const captureRoute = z.enum(["emulator-grpc", "host-loopback", "process-tap"]);
 
 export const injectAudioInputResultSchema = z
   .object({
@@ -37,7 +39,7 @@ export const captureAudioResultSchema = z
     activeRatio: z.number(),
     silent: z.boolean(),
     timedOut: z.boolean(),
-    route,
+    route: captureRoute,
     path: z.string().optional(),
     sizeBytes: z.number().optional(),
   })

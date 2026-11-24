@@ -34,6 +34,7 @@ function setup(
   hostLoopback = false,
 ) {
   const sessions: FakeSession[] = [];
+  const hostLoopbackDevices: string[] = [];
   const lookups: number[] = [];
   const guestCapture = new FakeGuestAudioCapture();
   const incarnation = { pid: ENDPOINT.pid };
@@ -63,7 +64,8 @@ function setup(
       return bytes;
     },
     createHostLoopbackSession: hostLoopback
-      ? () => {
+      ? (deviceId) => {
+          hostLoopbackDevices.push(deviceId);
           const session = new FakeSession({ ...ENDPOINT, consolePort: 0 });
           prepare(session);
           sessions.push(session);
@@ -73,7 +75,16 @@ function setup(
     ids: new CountingIdGenerator("inj"),
     maxSourceBytes,
   });
-  return { service, sessions, lookups, guestCapture, consolePorts, incarnation, outputTail };
+  return {
+    service,
+    sessions,
+    lookups,
+    guestCapture,
+    consolePorts,
+    incarnation,
+    outputTail,
+    hostLoopbackDevices,
+  };
 }
 
 describe("EmulatorAudioService host microphone safety", () => {
@@ -833,6 +844,20 @@ describe("EmulatorAudioService iOS Simulators over the host loopback", () => {
     expect(guestCapture.opened).toEqual([]);
     expect(guestCapture.closed).toEqual([]);
     expect(lookups).toEqual([]);
+  });
+
+  test("a simulator capture opens a session for that UDID and reports the session's route", async () => {
+    const { service, hostLoopbackDevices } = setup(
+      {},
+      (session) => {
+        session.captureRoute = "process-tap";
+      },
+      [5554],
+      undefined,
+      true,
+    );
+    expect((await service.capture(SIM_B, { durationMs: 10 })).route).toBe("process-tap");
+    expect(hostLoopbackDevices).toEqual([SIM_B]);
   });
 
   test("a failed host-loopback injection preserves its error without checking an emulator PID", async () => {

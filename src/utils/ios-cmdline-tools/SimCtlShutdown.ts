@@ -25,6 +25,7 @@ import { getAbortSignal } from "../AbortContext";
 
 import { SimulatorStillShuttingDownError } from "./SimulatorStillShuttingDownError";
 import { isIosSimulatorAlreadyStoppedError } from "./simulatorStateErrors";
+import { launchdSimPattern, parsePgrepPid } from "./launchdSimPid";
 
 /** Trailing options for one `simctl` argv invocation. */
 export interface SimctlArgvOptions {
@@ -322,15 +323,7 @@ export class SimCtlShutdown {
     const timeoutError = new Error("launchd_sim process probe timed out");
     try {
       const result = await raceWithDeadline(
-        () =>
-          this.context.execAsync(
-            "pgrep",
-            [
-              "-f",
-              `launchd_sim .*CoreSimulator/Devices/${udid}/data/var/run/launchd_bootstrap[.]plist`,
-            ],
-            { signal },
-          ),
+        () => this.context.execAsync("pgrep", ["-f", launchdSimPattern(udid)], { signal }),
         {
           timer: this.context.timer,
           timeoutMs: LAUNCHD_SIM_PROBE_TIMEOUT_MS,
@@ -339,8 +332,8 @@ export class SimCtlShutdown {
           timeoutError: () => timeoutError,
         },
       );
-      const pid = Number(result.stdout.trim().match(/^\d+$/m)?.[0]);
-      if (Number.isSafeInteger(pid) && pid > 0) {
+      const pid = parsePgrepPid(result.stdout);
+      if (pid !== undefined) {
         return pid;
       }
       logger.debug(`[iOS] launchd_sim process probe found no PID for ${udid}`);

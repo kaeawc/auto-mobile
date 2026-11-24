@@ -268,8 +268,17 @@ class TelemetryPushSocketClientTest {
     override fun close() = Unit
   }
 
-  private class SilentFakeSocket(private val finishInterruptedRead: CountDownLatch? = null) :
-    TelemetrySocket {
+  /**
+   * A socket whose read blocks until it is interrupted or, when [closeReleasesRead] is true, until
+   * it is closed. disconnect() interrupts the reader and closes the socket back to back, so a test
+   * that must observe the interrupt passes `closeReleasesRead = false`: otherwise a close that
+   * lands before the reader parks lets CountDownLatch.await() acquire the released latch and return
+   * normally without ever throwing InterruptedException (#19101).
+   */
+  private class SilentFakeSocket(
+    private val finishInterruptedRead: CountDownLatch? = null,
+    private val closeReleasesRead: Boolean = true,
+  ) : TelemetrySocket {
     val readEntered = CompletableDeferred<Unit>()
     val readInterrupted = CompletableDeferred<Unit>()
     val closed = CompletableDeferred<Unit>()
@@ -295,7 +304,7 @@ class TelemetryPushSocketClientTest {
 
     override fun close() {
       closeCount.incrementAndGet()
-      closeGate.countDown()
+      if (closeReleasesRead) closeGate.countDown()
       closed.complete(Unit)
     }
   }
@@ -499,7 +508,7 @@ class TelemetryPushSocketClientTest {
   @Test
   fun `reconnect interrupts the old read without closing the new socket`() = runTest {
     val finishInterruptedRead = CountDownLatch(1)
-    val firstSocket = SilentFakeSocket(finishInterruptedRead)
+    val firstSocket = SilentFakeSocket(finishInterruptedRead, closeReleasesRead = false)
     val secondSocket = SilentFakeSocket()
     val sockets = ArrayDeque(listOf(firstSocket, secondSocket))
     val client = TelemetryPushSocketClient({ sockets.removeFirst() }, {}, backgroundScope, { true })

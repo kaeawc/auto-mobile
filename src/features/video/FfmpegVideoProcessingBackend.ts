@@ -217,7 +217,8 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     if (!device) {
       throw new ActionableError("Device is required to start video recording.");
     }
-    // Apple TV simulators record through the same `simctl io recordVideo` path as iOS (#16725).
+    // Apple TV and Apple Watch simulators record through the iOS `simctl io recordVideo` path
+    // (#16725, #19056).
     const simctlCapture = isSimctlVideoPlatform(device.platform);
     const iosStartDeadlineMs = simctlCapture
       ? this.timer.now() + this.iosRecordingStartTimeoutMs
@@ -561,8 +562,9 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     deadlineMs: number,
   ): Promise<string | undefined> {
     const remainingMs = deadlineMs - this.timer.now();
-    // An Apple TV has one external display and no Integrated screen; simctl's default captures it.
-    if (remainingMs <= 0 || device.platform === "tvos") {
+    // An Apple TV has one external display and no Integrated screen, and a watch has one screen;
+    // simctl's default display captures either.
+    if (remainingMs <= 0 || device.platform === "tvos" || device.platform === "watchos") {
       return undefined;
     }
     let displays: Awaited<ReturnType<VideoSimCtl["enumerateDisplays"]>>;

@@ -4,10 +4,38 @@ import Foundation
 enum VisionCommandPolicy {
     static let supportedCommands = [
         "request_hierarchy", "request_tap_element", "request_append_text",
+        "request_tap_coordinates", "request_swipe", "request_press_home",
     ]
 
     static func supports(_ command: String) -> Bool {
         supportedCommands.contains(command)
+    }
+
+    struct Offset: Equatable {
+        let dx: Double
+        let dy: Double
+    }
+
+    /// The offset from the application frame's origin that lands on a hierarchy point. Observe
+    /// reports frames in the application's own space, so a point is its frame origin plus this offset.
+    /// Nil for a non-finite or negative point.
+    static func coordinateOffset(x: Double, y: Double, appOriginX: Double, appOriginY: Double) -> Offset? {
+        guard x.isFinite, y.isFinite, x >= 0, y >= 0, appOriginX.isFinite, appOriginY.isFinite else {
+            return nil
+        }
+        return Offset(dx: x - appOriginX, dy: y - appOriginY)
+    }
+
+    /// Stroke durations the runner accepts, in milliseconds.
+    static let swipeDurationRangeMs = 50 ... 10000
+
+    /// Drag velocity in points per second that covers the stroke in `durationMs`. Nil for an
+    /// out-of-range duration or a stroke shorter than one point, which has no direction to drag.
+    static func swipeVelocity(from start: Offset, to end: Offset, durationMs: Int) -> Double? {
+        guard swipeDurationRangeMs.contains(durationMs) else { return nil }
+        let distance = hypot(end.dx - start.dx, end.dy - start.dy)
+        guard distance >= 1 else { return nil }
+        return distance / (Double(durationMs) / 1000)
     }
 
     /// An app launched before XCTest may lack an accessible main window until relaunched.

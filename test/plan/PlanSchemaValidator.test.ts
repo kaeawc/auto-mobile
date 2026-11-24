@@ -213,6 +213,25 @@ ${condition}
     expect(validator.validateYaml(vehicle("          speed: 30")).valid).toBe(false);
   });
 
+  it("accepts vehicle.property steps by name, hex id and area, and rejects unknown names", () => {
+    const property = (value: string) =>
+      `name: vehicle\nsteps:\n  - tool: setDeviceState\n    params:\n      deviceCondition:\n        vehicle:\n          property:\n${value}\n`;
+    const accepts = (value: string) => validator.validateYaml(property(value)).valid;
+    expect(accepts("            id: GEAR_SELECTION\n            value: 8")).toBe(true);
+    expect(accepts("            id: '0x11600307'\n            value: 12500.5")).toBe(true);
+    expect(
+      accepts(
+        "            id: HVAC_TEMPERATURE_SET\n            areaId: 1\n            value: 21.5",
+      ),
+    ).toBe(true);
+    expect(accepts("            id: PARKING_BRAKE_ON\n            value: true")).toBe(true);
+    expect(
+      validator.validateYaml(property("").replace("property:\n", "property: unset")).valid,
+    ).toBe(true);
+    expect(accepts("            id: NOT_A_PROPERTY\n            value: 1")).toBe(false);
+    expect(accepts("            id: GEAR_SELECTION")).toBe(false);
+  });
+
   it("reports the window error for an unquoted out-of-window clock instant", () => {
     const result = validator.validateYaml(`
 name: clock-plan

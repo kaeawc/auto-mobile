@@ -95,7 +95,7 @@ export {
   type VideoRecorder,
 } from "./planExecutionRecords";
 
-/** Platforms a plan runs on: Android, iOS, tvOS, and visionOS (platform-allowlisted steps only). */
+/** Platforms a plan runs on: Android, iOS, tvOS, visionOS and watchOS (platform-allowlisted steps only). */
 type PlanPlatform = AndroidOrIosPlatform | "tvos" | "visionos" | "watchos";
 
 function requirePlanPlatform(platform: BootedDevice["platform"]): PlanPlatform {
@@ -110,7 +110,7 @@ function requirePlanPlatform(platform: BootedDevice["platform"]): PlanPlatform {
  * Phases (each is a private method, all tested in isolation):
  *   1. {@link preparePlan} — base64 decode, schema validation, YAML parse, device-list reconcile
  *   2. {@link allocateDevices} — multi-device upfront allocation with shared timeout
- *   3. {@link startVideoRecording} — Android segmented OR iOS single-file recording
+ *   3. {@link startVideoRecording} — Android segmented OR iOS/tvOS/watchOS single-file recording
  *   4. {@link runPlan} — delegates to executePlan (planExecutorFactory) with the right options
  *   5. {@link finalizeVideo} — stops/finalizes recording (always runs in finally)
  *   6. {@link recordExecution} — writes a row to the test-execution timing DB
@@ -667,8 +667,9 @@ export class PlanExecutionOrchestrator {
    * a failing recording must never abort plan execution.
    */
   private async startVideoRecording(plan: Plan): Promise<VideoState> {
-    // visionOS and watchOS have no plan video recorder; its plan still replays the allowlisted tools.
-    if (this.platform === "visionos" || this.platform === "watchos") {
+    // visionOS has no plan video recorder; its plan still replays the allowlisted tools. tvOS and
+    // watchOS record one simctl file like iOS (#16725, #19056).
+    if (this.platform === "visionos") {
       return {};
     }
     const videoOutputPrefix = `test-${plan.name}-${this.timer.now()}`;

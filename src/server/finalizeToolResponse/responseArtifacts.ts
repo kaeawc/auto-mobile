@@ -21,6 +21,7 @@ const OBSERVE_WAIT_METADATA_KEYS = [
   "awaitTimeout",
   "matched",
   "settled",
+  "unsettledBy",
   "timedOut",
   "timeoutReason",
   "polls",

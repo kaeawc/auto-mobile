@@ -2,6 +2,12 @@ import { z } from "zod/v3";
 import { INTEGRITY_SIGNALS } from "./integritySignals";
 import { DEVICE_CLOCK_TOLERANCE_MS, MAX_DEVICE_CLOCK_ADVANCE_MS } from "../utility/DeviceClock";
 import { STATUS_BAR_BATTERY_STATES, STATUS_BAR_DATA_NETWORKS } from "../utility/StatusBarOverride";
+import {
+  VEHICLE_MAX_ID,
+  VEHICLE_NUMERIC_ID_PATTERN,
+  VEHICLE_PROPERTY_NAMES,
+  type VehiclePropertyName,
+} from "./vehicleProperties";
 
 /**
  * Session-scoped device-condition fixtures (#14050, epic #14047): root, integrity
@@ -175,6 +181,34 @@ export const deviceLocationParamsSchema = () =>
     })
     .strict();
 
+/** One vehicle HAL property to inject on an Android Automotive emulator. */
+export interface DeviceConditionVehicleProperty {
+  /** A `VehicleProperty` name from the built-in table, or the numeric id (decimal or `0x` hex). */
+  id: VehiclePropertyName | number | string;
+  /** The area for a zoned property (seat, window, door...); omitted or 0 for a global one. */
+  areaId?: number | string;
+  /** `true`/`false` for BOOLEAN, a number, or an array for a vector type. */
+  value: number | boolean | number[];
+}
+
+const vehicleIdNumberSchema = () => z.number().int().min(0).max(VEHICLE_MAX_ID);
+
+/** `vehicle.property` parameters; the injector re-validates its params with the same schema. */
+export const vehiclePropertyParamsSchema = () =>
+  z
+    .object({
+      id: z.union([
+        vehicleIdNumberSchema(),
+        z.enum(VEHICLE_PROPERTY_NAMES),
+        z.string().regex(VEHICLE_NUMERIC_ID_PATTERN),
+      ]),
+      areaId: z
+        .union([vehicleIdNumberSchema(), z.string().regex(VEHICLE_NUMERIC_ID_PATTERN)])
+        .optional(),
+      value: z.union([z.boolean(), z.number().finite(), z.array(z.number().finite()).min(1)]),
+    })
+    .strict();
+
 export type DeviceConditionIntegrityPreset = "maximally-detectable" | "minimally-detectable";
 export type DeviceConditionSignalId = (typeof INTEGRITY_SIGNALS)[number]["id"];
 
@@ -263,6 +297,8 @@ export interface DeviceConditionInput {
   vehicle?: {
     motion?: "parked" | "driving" | typeof DEVICE_CONDITION_UNSET;
     nightMode?: "on" | "off" | typeof DEVICE_CONDITION_UNSET;
+    /** Inject one VHAL property and read it back (#19058). */
+    property?: DeviceConditionVehicleProperty | typeof DEVICE_CONDITION_UNSET;
   };
   expiresInSeconds?: number;
   reset?: true;
@@ -494,6 +530,12 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .describe(
             "Vehicle night-mode signal on an Android Automotive emulator: 'on' or 'off' sets the signal; unset or reset returns day/night to automatic sensor control without preserving a prior manual override. On a phone projecting to a Desktop Head Unit: 'on' sends night, 'off' and reset send day.",
           ),
+        property: z
+          .union([z.literal(DEVICE_CONDITION_UNSET), vehiclePropertyParamsSchema()])
+          .optional()
+          .describe(
+            "Inject one vehicle HAL property on an Android Automotive emulator ({ id, areaId?, value }) and read it back with `get-property-value`; the change's vehicleProperty reports value and readBack. id: a listed VehicleProperty name, or a decimal or 0x hex id. areaId: needed for a zoned property (e.g. 0x1, row 1 left seat). value: true/false, a number, or an array for a vector type. The event reaches car service and apps but not the VHAL store, so readBack can show the VHAL's own value. Reset re-injects the value read before the first change. Non-user builds only. Or unset.",
+          ),
       })
       .strict()
       .optional()
@@ -574,10 +616,26 @@ export interface DeviceConditionSignalResult {
   detail?: string;
 }
 
+/** What a `vehicle.property` change injected and what `get-property-value` read back after it. */
+export interface DeviceConditionVehiclePropertyResult {
+  /** `0x` hex property id. */
+  id: string;
+  name?: VehiclePropertyName;
+  areaId: number;
+  /** The id's VehiclePropertyType, e.g. `INT32` or `FLOAT_VEC`. */
+  type: string;
+  /** The injected value, as given to `inject-vhal-event`. */
+  value: string;
+  /** The read-back value, in the same encoding. */
+  readBack: string;
+  matches: boolean;
+}
+
 export interface DeviceConditionChangeResult {
   key: DeviceConditionKey;
   status: DeviceConditionChangeStatus;
   signals?: DeviceConditionSignalResult[];
+  vehicleProperty?: DeviceConditionVehiclePropertyResult;
   /** Why the condition was not applied, or what the injector reported. */
   detail?: string;
 }

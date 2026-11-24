@@ -1,8 +1,8 @@
 # `tapAt`
 
-| Tool                  | What it does                                                                                 | Platforms                                                                                                                                                                                                                   | Needs                             |
-| --------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| 📍 <code>tapAt</code> | Tap, long press, or double tap at screen coordinates in native, normalized, or percent units | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span> <span role="img" aria-label="watchOS" title="watchOS">⌚</span></span> | <span class="tool-needs">—</span> |
+| Tool                  | What it does                                                                                 | Platforms                                                                                                                                                                                                                                                                                     | Needs                             |
+| --------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| 📍 <code>tapAt</code> | Tap, long press, or double tap at screen coordinates in native, normalized, or percent units | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span> <span role="img" aria-label="watchOS" title="watchOS">⌚</span> <span role="img" aria-label="visionOS" title="visionOS">🥽</span></span> | <span class="tool-needs">—</span> |
 
 `tapAt` taps, long presses, or double taps at `x`, `y`. Absolute coordinates use
 platform-native units; `coordinateSpace: "normalized"` uses 0–1 and `"percent"`
@@ -18,6 +18,8 @@ On an iOS Simulator held upright in portrait, taps and long presses go to the si
 Double taps, taps on a named display, landscape and upside-down screens use the runner. The runner also takes taps while the input helper starts or is unavailable. These runner taps keep the idle wait and the stale-frame check. If the runner cannot be reached, the tap waits for the helper to start and uses it.
 
 If Xcode cannot compile the helper, input uses the runner and the build is not retried for 30 minutes. Other build failures, such as a failed `codesign` or `xcrun` call, retry after 30 seconds. Ending the device session also clears the wait. Set `AUTOMOBILE_DISABLE_IOS_SIM_HID=1` to always use the runner.
+
+On visionOS, `tapAt` takes one tap at absolute window points; see [Apple Vision Pro simulator](visionos-simulator.md#tap-swipe-and-press-home).
 
 ## Android XR
 

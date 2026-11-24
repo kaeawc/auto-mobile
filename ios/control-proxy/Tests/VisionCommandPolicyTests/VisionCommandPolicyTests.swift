@@ -20,9 +20,10 @@ final class VisionCommandPolicyTests: XCTestCase {
         }
     }
 
-    func testOnlyWindowHierarchyElementTapAndAppendTextAreSupported() {
+    func testWindowHierarchyTapsTextSwipeAndHomeAreTheSupportedCommands() {
         XCTAssertEqual(VisionCommandPolicy.supportedCommands, [
             "request_hierarchy", "request_tap_element", "request_append_text",
+            "request_tap_coordinates", "request_swipe", "request_press_home",
         ])
         for command in VisionCommandPolicy.supportedCommands {
             XCTAssertTrue(VisionCommandPolicy.supports(command))
@@ -31,7 +32,7 @@ final class VisionCommandPolicyTests: XCTestCase {
             "",
             "request_screenshot",
             "request_press_button",
-            "request_tap_coordinates",
+            "request_drag",
             "request_set_text",
             "request_focus",
             "request_open_immersive_space",
@@ -40,6 +41,43 @@ final class VisionCommandPolicyTests: XCTestCase {
         ] {
             XCTAssertFalse(VisionCommandPolicy.supports(command), command)
         }
+    }
+
+    func testCoordinateOffsetIsTheHierarchyPointRelativeToTheAppFrameOrigin() {
+        XCTAssertEqual(
+            VisionCommandPolicy.coordinateOffset(x: 640, y: 360, appOriginX: 0, appOriginY: 0),
+            VisionCommandPolicy.Offset(dx: 640, dy: 360)
+        )
+        XCTAssertEqual(
+            VisionCommandPolicy.coordinateOffset(x: 640.5, y: 360, appOriginX: 200, appOriginY: -40),
+            VisionCommandPolicy.Offset(dx: 440.5, dy: 400)
+        )
+        for (x, y) in [(-1.0, 0.0), (0.0, -0.5), (.nan, 0), (0, .infinity)] {
+            XCTAssertNil(VisionCommandPolicy.coordinateOffset(x: x, y: y, appOriginX: 0, appOriginY: 0), "\(x),\(y)")
+        }
+        XCTAssertNil(VisionCommandPolicy.coordinateOffset(x: 1, y: 1, appOriginX: .nan, appOriginY: 0))
+    }
+
+    func testSwipeVelocityCoversTheStrokeInTheRequestedDuration() {
+        let start = VisionCommandPolicy.Offset(dx: 640, dy: 540)
+        let end = VisionCommandPolicy.Offset(dx: 640, dy: 180)
+        XCTAssertEqual(try XCTUnwrap(VisionCommandPolicy.swipeVelocity(from: start, to: end, durationMs: 300)), 1200)
+        let diagonal = VisionCommandPolicy.Offset(dx: 670, dy: 580)
+        XCTAssertEqual(
+            try XCTUnwrap(VisionCommandPolicy.swipeVelocity(from: start, to: diagonal, durationMs: 50)), 1000
+        )
+    }
+
+    func testSwipeVelocityRefusesOutOfRangeDurationsAndSubPointStrokes() {
+        let start = VisionCommandPolicy.Offset(dx: 10, dy: 10)
+        let end = VisionCommandPolicy.Offset(dx: 10, dy: 300)
+        for duration in [-1, 0, 49, 10001] {
+            XCTAssertNil(VisionCommandPolicy.swipeVelocity(from: start, to: end, durationMs: duration), "\(duration)")
+        }
+        XCTAssertNotNil(VisionCommandPolicy.swipeVelocity(from: start, to: end, durationMs: 10000))
+        XCTAssertNil(VisionCommandPolicy.swipeVelocity(
+            from: start, to: VisionCommandPolicy.Offset(dx: 10.5, dy: 10.5), durationMs: 300
+        ))
     }
 
     func testTapSelectorRequiresIdentifierOrNonEmptyLabelAndTypeWithoutFrameContext() {

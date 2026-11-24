@@ -188,6 +188,13 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       calls: 1,
       reason: "Teardown precondition routes its discovery through the funnel.",
     },
+    "src/server/deviceToolsAcquisition.ts": {
+      calls: 1,
+      reason:
+        "A bare getAndroid checks that the device its session already holds is still listed (#19153); " +
+        "it only compares the session's assigned serial with the listed ids and never consults pooled " +
+        "identity.",
+    },
     "src/server/deviceToolsStartupLease.ts": {
       calls: 1,
       reason: "Startup offline-recovery classification uses fresh discovery and reconciles first.",

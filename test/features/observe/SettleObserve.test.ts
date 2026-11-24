@@ -449,3 +449,208 @@ describe("RealSettleObserve recomposition tracking opt-out (#6932)", () => {
     expect(fake.getProcessRecompositionObservations()).toEqual([terminal]);
   });
 });
+
+const SYSTEMUI = "com.android.systemui:id/";
+const SIGNAL_LABELS = ["T-Mobile, one bar.", "T-Mobile, three bars.", "T-Mobile, signal full."];
+
+/** An API-36-like SystemUI status bar whose cell-signal row reads `signal`. */
+function api36StatusBar(signal: string): TestHierarchyNode {
+  return {
+    "resource-id": `${SYSTEMUI}status_bar_container`,
+    bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+    node: [
+      {
+        "resource-id": `${SYSTEMUI}status_bar`,
+        bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+        node: [
+          {
+            "resource-id": `${SYSTEMUI}statusIcons`,
+            bounds: { left: 800, top: 0, right: 1000, bottom: 63 },
+            node: [
+              {
+                "resource-id": `${SYSTEMUI}mobile_combo`,
+                "content-desc": signal,
+                bounds: { left: 900, top: 0, right: 950, bottom: 63 },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/** Status-bar signal rows with no known status-bar root above them. */
+function bareSignalRow(signal: string): TestHierarchyNode {
+  return {
+    bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+    node: [
+      {
+        "resource-id": `${SYSTEMUI}mobile_combo`,
+        "content-desc": signal,
+        bounds: { left: 900, top: 0, right: 950, bottom: 63 },
+        node: [
+          {
+            "resource-id": `${SYSTEMUI}mobile_signal`,
+            "content-desc": signal,
+            bounds: { left: 900, top: 0, right: 950, bottom: 63 },
+          },
+        ],
+      },
+      {
+        "resource-id": `${SYSTEMUI}signal_cluster`,
+        "content-desc": signal,
+        bounds: { left: 950, top: 0, right: 1000, bottom: 63 },
+      },
+    ],
+  };
+}
+
+function appScreen(statusBar: TestHierarchyNode, content: TestHierarchyNode[]): TestHierarchyNode {
+  return {
+    bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+    node: [
+      statusBar,
+      {
+        "resource-id": "com.example:id/content",
+        bounds: { left: 0, top: 63, right: 1080, bottom: 1920 },
+        node: content,
+      },
+    ],
+  };
+}
+
+const sheetRows: TestHierarchyNode[] = [
+  {
+    text: "Device only",
+    clickable: "true",
+    bounds: { left: 0, top: 900, right: 1080, bottom: 1000 },
+  },
+  {
+    text: "Storage settings",
+    clickable: "true",
+    bounds: { left: 0, top: 1000, right: 1080, bottom: 1100 },
+  },
+];
+
+describe("RealSettleObserve status-bar chrome (#19123)", () => {
+  test("settles while the status-bar cell signal keeps cycling", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult((index) =>
+      obs(appScreen(api36StatusBar(SIGNAL_LABELS[index % 3]), sheetRows), {
+        updatedAt: (index + 1) * 10,
+      }),
+    );
+
+    const result = await new RealSettleObserve(fake, timer).execute({
+      timeoutMs: 600,
+      pollMs: 150,
+    });
+
+    expect(result.settled).toBe(true);
+    expect(result.polls).toBe(2);
+    expect(result.unsettledBy).toBeUndefined();
+  });
+
+  test("settles when the signal rows are not under a known status-bar root", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult((index) =>
+      obs(appScreen(bareSignalRow(SIGNAL_LABELS[index % 3]), sheetRows), {
+        updatedAt: (index + 1) * 10,
+      }),
+    );
+
+    const result = await new RealSettleObserve(fake, timer).execute({
+      timeoutMs: 600,
+      pollMs: 150,
+    });
+
+    expect(result.settled).toBe(true);
+    expect(result.polls).toBe(2);
+  });
+});
+
+describe("RealSettleObserve unsettledBy (#19123)", () => {
+  const box = { left: 0, top: 100, right: 1080, bottom: 200 };
+
+  test("names the app node whose attribute kept changing", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult((index) =>
+      obs(
+        appScreen(api36StatusBar(SIGNAL_LABELS[index % 3]), [
+          {
+            "resource-id": "com.example:id/progress",
+            "content-desc": "Loading",
+            checked: index % 2 === 0 ? "true" : "false",
+            bounds: box,
+          },
+        ]),
+        { updatedAt: (index + 1) * 10 },
+      ),
+    );
+
+    const result = await new RealSettleObserve(fake, timer).execute({
+      timeoutMs: 500,
+      pollMs: 150,
+    });
+
+    expect(result.settled).toBe(false);
+    expect(result.terminalReason).toBe("timeout");
+    expect(result.unsettledBy).toEqual([
+      { elementId: "com.example:id/progress", label: "Loading", field: "checked" },
+    ]);
+  });
+
+  test("reports added and removed nodes, at most three entries", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const rows = (prefix: string): TestHierarchyNode[] =>
+      [0, 1, 2, 3].map((row) => ({
+        "resource-id": `com.example:id/${prefix}${row}`,
+        text: `${prefix} ${row}`,
+        bounds: { left: 0, top: 100 + row * 100, right: 1080, bottom: 200 + row * 100 },
+      }));
+    fake.setObserveResult((index) =>
+      obs(appScreen(api36StatusBar(SIGNAL_LABELS[0]), rows(index % 2 === 0 ? "a" : "b")), {
+        updatedAt: (index + 1) * 10,
+      }),
+    );
+
+    const result = await new RealSettleObserve(fake, timer).execute({
+      timeoutMs: 500,
+      pollMs: 150,
+    });
+
+    expect(result.settled).toBe(false);
+    expect(result.unsettledBy).toHaveLength(3);
+    const fields = result.unsettledBy!.map((entry) => entry.field);
+    expect(fields.every((field) => field === "added" || field === "removed")).toBe(true);
+    expect(result.unsettledBy![0].elementId).toMatch(/^com\.example:id\/[ab]0$/);
+  });
+
+  test("is absent when the screen settles after changing", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveSequence([
+      obs({ "resource-id": "a", bounds: box, text: "loading" }, { updatedAt: 10 }),
+      obs({ "resource-id": "a", bounds: box, text: "done" }, { updatedAt: 20 }),
+      obs({ "resource-id": "a", bounds: box, text: "done" }, { updatedAt: 30 }),
+    ]);
+
+    const result = await new RealSettleObserve(fake, timer).execute({
+      timeoutMs: 2500,
+      pollMs: 150,
+    });
+
+    expect(result.settled).toBe(true);
+    expect(result.unsettledBy).toBeUndefined();
+  });
+});

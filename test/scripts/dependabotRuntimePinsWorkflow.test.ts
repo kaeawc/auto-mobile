@@ -64,11 +64,11 @@ describe("Dependabot runtime pin refresh contract", () => {
       }
     }
     expect(allSteps.filter((step) => step.uses).map((step) => step.uses)).toEqual([
-      "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803",
+      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
       "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
-      "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f",
-      "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803",
-      "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131",
+      "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
     ]);
     const checkout = regenerateSteps.find((step) => step.uses?.startsWith("actions/checkout@"));
     expect(checkout?.with?.ref).toBe("${{ github.event.pull_request.head.sha }}");

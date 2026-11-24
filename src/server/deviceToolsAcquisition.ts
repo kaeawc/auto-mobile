@@ -14,6 +14,7 @@ import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import type { DeviceBootResult } from "../devices/deviceBootService";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
+import { NoMatchingDeviceError } from "../devices/NoMatchingDeviceError";
 import {
   selectorLifecycleIdentity,
   type VirtualDeviceLifecycleCoordinator,
@@ -65,6 +66,17 @@ import {
   setAcquisitionStage,
   validateRequestedAndroidIdentifiersBeforeBoot,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
+import {
+  type AcquisitionDeviceLeft,
+  acquisitionDeviceLeft,
+  acquisitionNextStep,
+  annotateAcquisitionFailure,
+} from "../features/deviceLifecycle/boot/acquisitionFailureDeviceState";
+import {
+  hasDefinedRequirement,
+  keepsPhoneDefault,
+  sessionHeldAndroidDevice,
+} from "../features/deviceLifecycle/boot/bareAndroidSelection";
 
 // Match the cancellation settlement grace in RunnerReadinessService and DeviceBootService.
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
@@ -98,6 +110,19 @@ export const ACQUISITION_DEADLINE_BACKSTOP_GRACE_MS = 3 * ABORT_SETTLEMENT_GRACE
  * session binding checks that signal before it commits (#6034), so a step that
  * succeeds late does not bind a session.
  */
+/**
+ * Deadline errors `runWithAcquisitionDeadline` creates for its own request. They become the
+ * operation signal's abort reason, but unlike a caller's reason nothing outside this request holds
+ * them, so a failure carrying one is still annotated with the device it left (#19153).
+ */
+const requestDeadlineErrors = new WeakSet<Error>();
+
+function requestDeadlineError(message: string): ActionableError {
+  const error = new ActionableError(message);
+  requestDeadlineErrors.add(error);
+  return error;
+}
+
 export async function runWithAcquisitionDeadline<T>(
   requestedDeadlineMs: number,
   signal: AbortSignal | undefined,
@@ -130,13 +155,13 @@ export async function runWithAcquisitionDeadline<T>(
   };
   const abortAtLiveDeadline = (): void =>
     controller.abort(
-      new ActionableError(
+      requestDeadlineError(
         `${operationName} timed out at the live MCP request deadline while ${stage.current}. ` +
           `Retry device acquisition.`,
       ),
     );
   const expire = (): void => {
-    const error = new ActionableError(
+    const error = requestDeadlineError(
       `${operationName} did not finish by its MCP request deadline; the ${stage.current} stage ` +
         `ignored cancellation and is still running. The device stays reserved until that stage ` +
         `settles. Retry device acquisition.`,
@@ -478,6 +503,48 @@ async function assertAndroidCtrlProxyApkOverrideBeforeBoot(
   }
 }
 
+/**
+ * Stops the cold boot a failed preparation still owns (unless the failure is retryable) and
+ * reports what that left of the device, so the caller knows the emulator was shut down rather
+ * than lost (#19124).
+ */
+function cancelUnownedBootAfterFailure(
+  state: { boot: DeviceBootResult | undefined; coldBootSettlements: Promise<void>[] },
+  error: unknown,
+  signal: AbortSignal | undefined,
+): AcquisitionDeviceLeft | undefined {
+  const settlement = cancelUnownedColdBootUnlessRetryable(state.boot, error, signal);
+  if (settlement) {
+    state.coldBootSettlements.push(settlement);
+  }
+  return acquisitionDeviceLeft(state.boot, error, settlement);
+}
+
+/** The client-facing preparation failure, ending with the device state when one was cold-booted. */
+function preparationFailure(
+  error: unknown,
+  platform: StartDeviceArgs["platform"],
+  budgets: DevicePreparationBudgets,
+  outcome: { deviceLeft: AcquisitionDeviceLeft | undefined; signal: AbortSignal | undefined },
+): Error {
+  const { deviceLeft, signal } = outcome;
+  const failure =
+    error instanceof ActionableError || error instanceof TerminalSessionError
+      ? error
+      : toActionableError(error, `Failed to start ${platform} device`);
+  // A caller's cancellation reason stays the very object the caller's signal carries, so the
+  // caller can still recognize it by identity. A deadline error this request created is annotated.
+  const isCancellationReason =
+    signal?.aborted === true && failure === signal.reason && !requestDeadlineErrors.has(failure);
+  return deviceLeft === undefined || isCancellationReason
+    ? failure
+    : annotateAcquisitionFailure(
+        failure,
+        deviceLeft,
+        acquisitionNextStep(budgets.operationName, budgets.androidAvdName),
+      );
+}
+
 async function prepareDevice(
   bootAndPrepareDevice: AcquisitionHooks["bootAndPrepareDevice"],
   args: StartDeviceArgs,
@@ -576,24 +643,18 @@ async function prepareDevice(
   } catch (error) {
     preparationFailed = true;
     perf.end();
-    if (!state.ownershipTransferred) {
-      const settlement = cancelUnownedColdBootUnlessRetryable(state.boot, error, coordinatedSignal);
-      if (settlement) {
-        state.coldBootSettlements.push(settlement);
-      }
-    }
+    const deviceLeft = state.ownershipTransferred
+      ? undefined
+      : cancelUnownedBootAfterFailure(state, error, coordinatedSignal);
     // The startup-lease boundary propagates raw caller abort reasons; later
     // preparation retains its established structured cancellation errors.
     if (!lifecycleReservations) {
       signal?.throwIfAborted();
     }
-    if (error instanceof ActionableError) {
-      throw error;
-    }
-    if (error instanceof TerminalSessionError) {
-      throw error;
-    }
-    throw toActionableError(error, `Failed to start ${args.platform} device`);
+    throw preparationFailure(error, args.platform, budgets, {
+      deviceLeft,
+      signal: coordinatedSignal,
+    });
   } finally {
     const cleanup = async () => {
       const releaseReadiness = async () => {
@@ -666,79 +727,150 @@ function stripInternalAcquisitionParams(rawArgs: object) {
   deleteInternalToolParams(externalArgs);
   return externalArgs;
 }
-async function getAndroidHandler(
-  prepareDevice: PrepareDevice,
-  rawArgs: GetAndroidArgs & Record<string, unknown>,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-) {
-  const presentationOrder = acceptancePresentationOrder();
-  const externalArgs = stripInternalAcquisitionParams(rawArgs);
-  const args = getAndroidSchema.parse(externalArgs);
-  const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
-  const automationReadyTimeoutMs =
-    args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_PROVISION_TIMEOUT_MS;
-  const startedAtMs = getDeviceToolsDependencies().timer.now();
+type GetAndroidParsedArgs = ReturnType<typeof getAndroidSchema.parse>;
+
+/**
+ * The start request a getAndroid call makes. A call naming no device selects one (#19124): the
+ * running Android device its session already holds when it sets no requirement (#19153), otherwise
+ * a phone unless a requirement names another form factor, preferring a running one over a
+ * configured image. Lifecycle coordination then falls back to the selector lease, which binds the
+ * resolved AVD's stable identity before the boot mutates anything.
+ */
+function getAndroidTarget(
+  args: GetAndroidParsedArgs,
+  requester: {
+    sessionUuid: string | undefined;
+    presentationOrder: StartDeviceArgs["presentationOrder"];
+  },
+  sessionDeviceId: string | undefined,
+): StartDeviceArgs {
+  const { presentationOrder } = requester;
+  const requesterSessionUuid = requester.sessionUuid;
   // Prefer the AVD name (exact virtual-device identity); otherwise target the
   // booted serial by deviceId (#5870). A paired AVD name and serial keeps
   // lifecycle coordination by stable name while directing boot to the
   // validated serial.
   const explicitAdbSerial =
     args.deviceId && isAndroidEmulatorSerial(args.deviceId) ? args.deviceId : undefined;
-  const target: StartDeviceArgs = args.avdName
-    ? {
-        platform: "android",
-        requires: args.requires,
-        name: args.avdName,
-        ...(explicitAdbSerial ? { deviceId: explicitAdbSerial } : {}),
-        matchExactName: true,
-        ...(presentationOrder !== undefined ? { presentationOrder } : {}),
-        preferRunning: true,
-        createIfMissing: false,
-        __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
-      }
-    : {
-        platform: "android",
-        requires: args.requires,
-        deviceId: args.deviceId,
-        preferRunning: true,
-        createIfMissing: false,
-        __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
-      };
+  if (args.avdName) {
+    return {
+      platform: "android",
+      requires: args.requires,
+      name: args.avdName,
+      ...(explicitAdbSerial ? { deviceId: explicitAdbSerial } : {}),
+      matchExactName: true,
+      ...(presentationOrder !== undefined ? { presentationOrder } : {}),
+      preferRunning: true,
+      createIfMissing: false,
+      __requesterSessionUuid: requesterSessionUuid,
+    };
+  }
+  const deviceId = args.deviceId ?? sessionDeviceId;
+  return {
+    platform: "android",
+    requires: args.requires,
+    deviceId,
+    ...(deviceId === undefined && keepsPhoneDefault(args.requires)
+      ? { formFactor: "phone" as const }
+      : {}),
+    preferRunning: true,
+    createIfMissing: false,
+    __requesterSessionUuid: requesterSessionUuid,
+  };
+}
+
+/** The booted device a bare, requirement-free getAndroid hands back to its session (#19153). */
+async function getAndroidSessionDevice(
+  args: GetAndroidParsedArgs,
+  requesterSessionUuid: string | undefined,
+): Promise<string | undefined> {
+  if (args.avdName || args.deviceId || hasDefinedRequirement(args.requires)) {
+    return undefined;
+  }
+  const deps = getDeviceToolsDependencies();
+  return await sessionHeldAndroidDevice(requesterSessionUuid, deps.daemonState, () =>
+    deps.deviceManagerFactory().getBootedDevices("android"),
+  );
+}
+
+async function getAndroidHandler(
+  prepareDevice: PrepareDevice,
+  rawArgs: GetAndroidArgs & Record<string, unknown>,
+  progress?: ProgressCallback,
+  signal?: AbortSignal,
+) {
+  const externalArgs = stripInternalAcquisitionParams(rawArgs);
+  const args = getAndroidSchema.parse(externalArgs);
+  const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
+  const automationReadyTimeoutMs =
+    args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_PROVISION_TIMEOUT_MS;
+  const startedAtMs = getDeviceToolsDependencies().timer.now();
+  const requester = {
+    sessionUuid: lifecycleRequester(rawArgs).sessionUuid,
+    presentationOrder: acceptancePresentationOrder(),
+  };
+  const namesNoDevice = !args.avdName && !args.deviceId;
   return await runWithAcquisitionDeadline(
     startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
     signal,
     {
       operationName: "getAndroid",
-      operation: (deadlineMs, requestSignal, stage) =>
-        prepareDevice(
-          target,
-          {
-            bootTimeoutMs,
-            automationReadyTimeoutMs,
-            automationDeadlineMs: deadlineMs,
-            stage,
-            operationName: "getAndroid",
-            ...(args.avdName
-              ? {
-                  androidAvdName: args.avdName,
-                  stableTarget: { platform: "android", stableId: args.avdName },
-                  ...(args.deviceId
-                    ? {
-                        requestedAndroidIdentifierPair: {
-                          avdName: args.avdName,
-                          deviceId: args.deviceId,
-                        },
-                      }
-                    : {}),
-                }
-              : {}),
-          },
-          progress,
-          requestSignal,
-        ),
+      operation: async (deadlineMs, requestSignal, stage) => {
+        const sessionDeviceId = await getAndroidSessionDevice(args, requester.sessionUuid);
+        return await prepareSelectedAndroidDevice(namesNoDevice, () =>
+          prepareDevice(
+            getAndroidTarget(args, requester, sessionDeviceId),
+            {
+              bootTimeoutMs,
+              automationReadyTimeoutMs,
+              automationDeadlineMs: deadlineMs,
+              stage,
+              operationName: "getAndroid",
+              ...(args.avdName
+                ? {
+                    androidAvdName: args.avdName,
+                    stableTarget: { platform: "android", stableId: args.avdName },
+                    ...(args.deviceId
+                      ? {
+                          requestedAndroidIdentifierPair: {
+                            avdName: args.avdName,
+                            deviceId: args.deviceId,
+                          },
+                        }
+                      : {}),
+                  }
+                : {}),
+            },
+            progress,
+            requestSignal,
+          ),
+        );
+      },
     },
   );
+}
+
+/**
+ * A bare getAndroid that finds nothing to select names the identifiers that pick a device, rather
+ * than the phone criteria the caller never wrote (#19124).
+ */
+async function prepareSelectedAndroidDevice<T>(
+  namesNoDevice: boolean,
+  prepare: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await prepare();
+  } catch (error) {
+    if (!namesNoDevice || !(error instanceof NoMatchingDeviceError)) {
+      throw error;
+    }
+    throw new ActionableError(
+      `getAndroid found no running Android device and no configured AVD to select (${error.message}). ` +
+        "Call listDeviceImages with platform android to see the configured AVDs, then call getAndroid " +
+        "with avdName set to one of their names, or pass deviceId to target a booted device.",
+      { cause: error },
+    );
+  }
 }
 
 async function getAppleHandler(

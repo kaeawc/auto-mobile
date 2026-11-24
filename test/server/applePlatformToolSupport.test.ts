@@ -90,9 +90,9 @@ describe("assertToolSupportsDevicePlatform", () => {
   });
 
   test("rejects a Vision Pro for a tool that has not opted in, naming the tool and platform", () => {
-    expect(() => assertToolSupportsDevicePlatform("tapAt", visionPro)).toThrow(
+    expect(() => assertToolSupportsDevicePlatform("pinchOn", visionPro)).toThrow(
       new ActionableError(
-        "tapAt does not support visionOS yet. Target an Android or iOS device instead.",
+        "pinchOn does not support visionOS yet. Target an Android or iOS device instead.",
       ),
     );
   });
@@ -110,6 +110,10 @@ describe("assertToolSupportsDevicePlatform", () => {
         "observe",
         "tapOn",
         "sendKeys",
+        "tapAt",
+        "swipeOn",
+        "pressButton",
+        "homeScreen",
         "getLogs",
       ].sort(),
     );
@@ -124,12 +128,16 @@ describe("assertToolSupportsDevicePlatform", () => {
       "observe",
       "tapOn",
       "sendKeys",
+      "tapAt",
+      "swipeOn",
+      "pressButton",
+      "homeScreen",
       "getLogs",
     ]) {
       expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).not.toThrow();
       expect(() => assertRequestedPlatformSupported(tool, { platform: "visionos" })).not.toThrow();
     }
-    for (const tool of ["pressButton", "tapAt", "swipeOn", "pinchOn", "tapAny"]) {
+    for (const tool of ["pinchOn", "multiTouch", "dragAndDrop", "tapAny"]) {
       expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).toThrow(
         new ActionableError(unsupportedPlatformToolMessage(tool, "visionos")),
       );
@@ -313,8 +321,8 @@ describe("assertRequestedPlatformSupported", () => {
     expect(() => assertRequestedPlatformSupported("pinchOn", { platform: "watchos" })).toThrow(
       new ActionableError(unsupportedPlatformToolMessage("pinchOn", "watchos")),
     );
-    expect(() => assertRequestedPlatformSupported("pressButton", { platform: "visionos" })).toThrow(
-      new ActionableError(unsupportedPlatformToolMessage("pressButton", "visionos")),
+    expect(() => assertRequestedPlatformSupported("pinchOn", { platform: "visionos" })).toThrow(
+      new ActionableError(unsupportedPlatformToolMessage("pinchOn", "visionos")),
     );
   });
 
@@ -394,12 +402,19 @@ describe("a device-aware tool refuses a requested tvOS platform before session r
   });
 });
 
-test("tvOS opts into videoRecording and compareScreenshot (#16725)", () => {
+test("tvOS and watchOS opt into videoRecording and compareScreenshot (#16725, #19056)", () => {
   for (const tool of ["videoRecording", "compareScreenshot"]) {
-    expect(() => assertToolSupportsDevicePlatform(tool, appleTv)).not.toThrow();
-    expect(() => assertRequestedPlatformSupported(tool, { platform: "tvos" })).not.toThrow();
-    expect(APPLE_PLATFORM_SUPPORTED_TOOLS.watchos.has(tool)).toBe(false);
+    for (const [device, platform] of [
+      [appleTv, "tvos"],
+      [watch, "watchos"],
+    ] as const) {
+      expect(() => assertToolSupportsDevicePlatform(tool, device)).not.toThrow();
+      expect(() => assertRequestedPlatformSupported(tool, { platform })).not.toThrow();
+    }
     expect(APPLE_PLATFORM_SUPPORTED_TOOLS.visionos.has(tool)).toBe(false);
+    expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).toThrow(
+      new ActionableError(unsupportedPlatformToolMessage(tool, "visionos")),
+    );
   }
 });
 

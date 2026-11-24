@@ -3034,9 +3034,19 @@ describe("startDevice handler", () => {
       });
       const start = spyOn(fakeDeviceUtils, "startDevice");
       try {
-        await expect(
-          callStartDevice({ platform: "android", avdName: coldImage.name }, controller.signal),
-        ).rejects.toBe(failure);
+        const rejected = await callStartDevice(
+          { platform: "android", avdName: coldImage.name },
+          controller.signal,
+        ).catch((error: unknown) => error);
+        // A cancellation keeps its reason's identity; any other failure is an annotated copy
+        // that carries the original as its cause and leaves it unchanged (#19153).
+        if (kind === "aborted") {
+          expect(rejected).toBe(failure);
+        } else {
+          expect(rejected).toBeInstanceOf(failure.constructor);
+          expect(rejected).toHaveProperty("cause", failure);
+          expect(failure.message).not.toContain("deviceLeft");
+        }
         const keep = kind === "bind-offline" || kind === "runner-deadline";
         expect(kill).toHaveBeenCalledTimes(keep ? 0 : 1);
         expect(start).toHaveBeenCalledTimes(1);

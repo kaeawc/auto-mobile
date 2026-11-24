@@ -16,6 +16,12 @@ import type { VisualScreen } from "./CompareScreenshot";
 import type { VisualDeviceProfile } from "./VisualDeviceProfile";
 import { captureTvosScreenshot, type TvosScreenshotCapture } from "../tvos/TvosScreenshot";
 import { tvosRunners } from "../tvos/TvosRunnerRegistry";
+import {
+  captureWatchSimctlScreenshot,
+  type WatchScreenshotCapture,
+} from "../watch/WatchScreenshot";
+import { watchRunners } from "../watch/WatchRunnerRegistry";
+import { WatchRunnerError } from "../watch/WatchRunnerError";
 import { readImageHeaderDimensions } from "../../utils/screenshot/imageHeaderDimensions";
 
 export interface DeviceVisualScreenDependencies {
@@ -26,6 +32,10 @@ export interface DeviceVisualScreenDependencies {
   tvosScreenshot?: TvosScreenshotCapture;
   /** Whether a tvOS runner (and so a view hierarchy) is connected for the device. */
   tvosRunnerConnected?: (deviceId: string) => boolean;
+  /** Apple Watch screen capture; defaults to `simctl io screenshot` on the watch's display. */
+  watchScreenshot?: WatchScreenshotCapture;
+  /** Whether a watch runner (and so a view hierarchy) is connected for the device. */
+  watchRunnerConnected?: (deviceId: string) => boolean;
 }
 
 /** Why an Apple TV comparison without a runner can compare only the full screen. */
@@ -33,6 +43,18 @@ export const TVOS_REGIONS_NEED_RUNNER_MESSAGE =
   "compareScreenshot target and mask regions on tvOS need the tvOS runner's view hierarchy, " +
   "and no runner is connected. Call startDevice to prepare the runner, or compare the full " +
   "screen without target or mask.";
+
+/** Why an Apple Watch comparison without a runner can compare only the full screen. */
+export const WATCH_REGIONS_NEED_RUNNER_MESSAGE =
+  "compareScreenshot target and mask regions on watchOS need the watch runner's view hierarchy, " +
+  "and no runner is connected. Call startDevice to prepare the runner, or compare the full " +
+  "screen without target or mask.";
+
+/** Why an Apple Watch comparison whose runner app is in the background compares the full screen. */
+export const WATCH_REGIONS_NEED_FOREGROUND_APP_MESSAGE =
+  "compareScreenshot target and mask regions on watchOS need the runner's target app in the " +
+  "foreground, and it is not. Launch the app with launchApp, or compare the full screen without " +
+  "target or mask.";
 
 type EdgeInsets = { top: number; right: number; bottom: number; left: number };
 
@@ -95,49 +117,75 @@ async function captureScreenshotPng(
 }
 
 /** The PNG's pixel size, read from its header. */
-function pngSize(png: Buffer): { width: number; height: number } {
+function pngSize(png: Buffer, label: string): { width: number; height: number } {
   const size = readImageHeaderDimensions(png);
   if (!size || size.width <= 0 || size.height <= 0) {
-    throw new ActionableError("compareScreenshot could not read the tvOS screenshot's size");
+    throw new ActionableError(`compareScreenshot could not read the ${label} screenshot's size`);
   }
   return { width: size.width, height: size.height };
 }
 
+/** How one runner-backed Apple simulator platform captures a comparison screen. */
+interface AppleRunnerVisualSource {
+  label: string;
+  connected: boolean;
+  screenshot: (device: BootedDevice) => Promise<Buffer>;
+  regionsNeedRunnerMessage: string;
+  /** The message for a runner hierarchy failure that still allows a full-screen comparison. */
+  fullScreenOnlyReason?: (error: unknown) => string | undefined;
+}
+
+/** A screenshot whose regions cannot be placed: its point size is its pixel size. */
+async function fullScreenOnlyVisualScreen(
+  device: BootedDevice,
+  source: AppleRunnerVisualSource,
+  reason: string,
+): Promise<VisualScreen & { hierarchy: Partial<ViewHierarchyResult> }> {
+  const png = await source.screenshot(device);
+  const screenSize = pngSize(png, source.label);
+  return {
+    png,
+    hierarchy: {},
+    geometry: { platform: "ios", screenSize, rasterOrientation: "display" },
+    systemBars: [],
+    resolveElement: () => {
+      throw new ActionableError(reason);
+    },
+    regionsUnavailable: reason,
+  };
+}
+
 /**
- * An Apple TV screen (#16725). Apple TV has no system bars. With the tvOS runner connected the
- * hierarchy places element ids and point rectangles; without it only the full screen compares.
+ * An Apple TV (#16725) or Apple Watch (#19056) screen. Neither has system bars. With the
+ * platform runner connected the hierarchy places element ids and point rectangles; without it
+ * only the full screen compares.
  */
-async function captureTvosVisualScreen(
+async function captureAppleRunnerVisualScreen(
   device: BootedDevice,
   deps: DeviceVisualScreenDependencies,
+  source: AppleRunnerVisualSource,
 ): Promise<VisualScreen & { hierarchy: Partial<ViewHierarchyResult> }> {
-  const connected = (deps.tvosRunnerConnected ?? ((id) => tvosRunners.get(id) !== undefined))(
-    device.deviceId,
-  );
-  const screenshot = deps.tvosScreenshot ?? captureTvosScreenshot;
-  if (!connected) {
-    const png = await screenshot(device);
-    const screenSize = pngSize(png);
-    return {
-      png,
-      hierarchy: {},
-      geometry: { platform: "ios", screenSize, rasterOrientation: "display" },
-      systemBars: [],
-      resolveElement: () => {
-        throw new ActionableError(TVOS_REGIONS_NEED_RUNNER_MESSAGE);
-      },
-      regionsUnavailable: TVOS_REGIONS_NEED_RUNNER_MESSAGE,
-    };
+  if (!source.connected) {
+    return fullScreenOnlyVisualScreen(device, source, source.regionsNeedRunnerMessage);
   }
   const capture = deps.hierarchyCaptureFactory?.(device) ?? createDeviceHierarchyCapture(device);
-  const snapshot = await capture.capture({ freshness: "fresh" });
+  let snapshot: HierarchySnapshot;
+  try {
+    snapshot = await capture.capture({ freshness: "fresh" });
+  } catch (error) {
+    const reason = source.fullScreenOnlyReason?.(error);
+    if (reason === undefined) {
+      throw error;
+    }
+    return fullScreenOnlyVisualScreen(device, source, reason);
+  }
   const { screenWidth, screenHeight } = snapshot.hierarchy;
   if (!screenWidth || !screenHeight) {
     throw new ActionableError(
       "compareScreenshot requires screen dimensions from a fresh hierarchy",
     );
   }
-  const png = await screenshot(device);
+  const png = await source.screenshot(device);
   return {
     png,
     hierarchy: snapshot.hierarchy,
@@ -152,6 +200,38 @@ async function captureTvosVisualScreen(
   };
 }
 
+function tvosVisualSource(
+  device: BootedDevice,
+  deps: DeviceVisualScreenDependencies,
+): AppleRunnerVisualSource {
+  const connected = deps.tvosRunnerConnected ?? ((id) => tvosRunners.get(id) !== undefined);
+  return {
+    label: "tvOS",
+    connected: connected(device.deviceId),
+    screenshot: (target) => (deps.tvosScreenshot ?? captureTvosScreenshot)(target),
+    regionsNeedRunnerMessage: TVOS_REGIONS_NEED_RUNNER_MESSAGE,
+  };
+}
+
+/** The watch runner has no screenshot command, so a watch always captures through simctl. */
+function watchVisualSource(
+  device: BootedDevice,
+  deps: DeviceVisualScreenDependencies,
+): AppleRunnerVisualSource {
+  const connected = deps.watchRunnerConnected ?? ((id) => watchRunners.get(id) !== undefined);
+  return {
+    label: "watchOS",
+    connected: connected(device.deviceId),
+    screenshot: (target) => (deps.watchScreenshot ?? captureWatchSimctlScreenshot)(target),
+    regionsNeedRunnerMessage: WATCH_REGIONS_NEED_RUNNER_MESSAGE,
+    // A backgrounded runner app has no hierarchy, but its screenshot still compares (#19056).
+    fullScreenOnlyReason: (error) =>
+      error instanceof WatchRunnerError && error.errorCode === "app_not_foreground"
+        ? WATCH_REGIONS_NEED_FOREGROUND_APP_MESSAGE
+        : undefined,
+  };
+}
+
 /**
  * One fresh hierarchy plus screenshot of the device (#14083), the same capture `snapshotOf` uses,
  * so element ids and rectangles resolve against the screen the pixels came from.
@@ -161,7 +241,10 @@ export async function captureDeviceVisualScreen(
   deps: DeviceVisualScreenDependencies = {},
 ): Promise<VisualScreen & { hierarchy: Partial<ViewHierarchyResult> }> {
   if (device.platform === "tvos") {
-    return captureTvosVisualScreen(device, deps);
+    return captureAppleRunnerVisualScreen(device, deps, tvosVisualSource(device, deps));
+  }
+  if (device.platform === "watchos") {
+    return captureAppleRunnerVisualScreen(device, deps, watchVisualSource(device, deps));
   }
   const platform = requireAndroidOrIosPlatform(device.platform, "Visual screenshot comparison");
   const capture = deps.hierarchyCaptureFactory?.(device) ?? createDeviceHierarchyCapture(device);
@@ -204,10 +287,17 @@ export async function readVisualDeviceProfile(
   backend: Pick<ImageBackend, "metadata">,
   readSettings: DisplaySettingsReader = defaultDisplaySettingsReader,
 ): Promise<VisualDeviceProfile> {
-  // Apple TV has no display settings reader: its profile is its screenshot size alone.
-  if (device.platform === "tvos") {
+  // Apple TV and Apple Watch have no display settings reader: the profile is the screenshot size.
+  if (device.platform === "tvos" || device.platform === "watchos") {
     const { width, height } = await backend.metadata(screen.png);
-    return { platform: "tvos", width, height, density: null, fontScale: null, theme: null };
+    return {
+      platform: device.platform,
+      width,
+      height,
+      density: null,
+      fontScale: null,
+      theme: null,
+    };
   }
   const [{ width, height }, settings] = await Promise.all([
     backend.metadata(screen.png),

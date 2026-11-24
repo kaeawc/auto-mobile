@@ -57,6 +57,12 @@ function installCommand(apkPath: string): string {
   return `install -r "${apkPath}"`;
 }
 
+/** One `adb install` invocation and the stage label its timeout and cancellation errors name. */
+interface ApkInstallStage {
+  command: string;
+  label: string;
+}
+
 interface InstallReadinessOptions {
   settleProbe?: AndroidInstallSettleProbe;
   installBackoff?: BackoffPolicy;
@@ -423,7 +429,7 @@ export class AndroidCtrlProxyApkInstaller {
   }
 
   private async installAttemptWithoutSettling(
-    apkPath: string,
+    stage: ApkInstallStage,
     attempt: number,
     signal: AbortSignal | undefined,
   ): Promise<ExecResult> {
@@ -434,7 +440,7 @@ export class AndroidCtrlProxyApkInstaller {
     }
     let output: ExecResult | undefined;
     try {
-      output = await this.host.executeApkStage(installCommand(apkPath), "CtrlProxy APK install");
+      output = await this.host.executeApkStage(stage.command, stage.label);
       if (
         !isEmptyStreamedInstallFailure(output.stdout, output.stderr, "", this.host.device.deviceId)
       ) {
@@ -476,12 +482,23 @@ export class AndroidCtrlProxyApkInstaller {
   }
 
   private async installWithoutSettling(apkPath: string): Promise<ExecResult> {
-    const signal = getAbortSignal();
+    return await this.executeApkInstallStage(installCommand(apkPath), "CtrlProxy APK install");
+  }
 
-    // The first attempt retains the direct phone path, including stage cancellation errors.
+  /**
+   * Runs one `adb install` stage, retrying only the header-only streamed-install failure a
+   * just-booted package manager returns (#16119, #19124) through the shared install backoff,
+   * bounded by the ambient abort signal. Every other failure is thrown unchanged on its first
+   * attempt. The fresh phone install and the in-place upgrade (`install -r -d`) both use it.
+   */
+  async executeApkInstallStage(command: string, label: string): Promise<ExecResult> {
+    const signal = getAbortSignal();
+    const stage: ApkInstallStage = { command, label };
+
+    // The first attempt retains the direct path, including stage cancellation errors.
     let initialFailure: RetryableCtrlProxyInstallFailure;
     try {
-      return await this.installAttemptWithoutSettling(apkPath, 1, signal);
+      return await this.installAttemptWithoutSettling(stage, 1, signal);
     } catch (error) {
       if (!(error instanceof RetryableCtrlProxyInstallFailure)) {
         throw error;
@@ -496,7 +513,7 @@ export class AndroidCtrlProxyApkInstaller {
           throw initialFailure;
         }
         try {
-          return { output: await this.installAttemptWithoutSettling(apkPath, attempt, signal) };
+          return { output: await this.installAttemptWithoutSettling(stage, attempt, signal) };
         } catch (error) {
           if (error instanceof RetryableCtrlProxyInstallFailure) {
             throw error;

@@ -426,13 +426,12 @@ export function validateDevicePreparationTimeout(
 
 // #5870: `deviceId` — the identifier at `runtime.deviceId` for booted resources
 // or `identity.stableId` for configured resources — is
-// accepted alongside the platform-native identifier. Either is sufficient; the
-// refine names both sources when neither is given so the caller is never left
-// guessing which field of which resource to read.
-// The at-least-one rule lives in `.superRefine()` + a sourced error message, not
-// in the advertised JSON Schema: a top-level `anyOf`/`oneOf` is exactly what
-// `TopLevelUnionFlattener` strips (the Anthropic API rejects top-level
-// combinators), so it cannot be advertised in the flat object schema.
+// accepted alongside the platform-native identifier. Neither is required (#19124):
+// every advertised property is optional, so a call naming no device selects one
+// (a running phone first, then a configured phone image) instead of being refused
+// by a rule the flat schema cannot advertise — a top-level `anyOf`/`oneOf` is what
+// `TopLevelUnionFlattener` strips, because the Anthropic API rejects top-level
+// combinators.
 export const getAndroidSchema = devicePreparationTimeoutSchema
   .extend({
     requires: startDeviceParametersSchema.shape.requires,
@@ -441,7 +440,8 @@ export const getAndroidSchema = devicePreparationTimeoutSchema
       .min(1)
       .optional()
       .describe(
-        "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android)",
+        "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android). Omit both avdName and deviceId to select a device: with no requires, the running device the session already holds; else a running phone emulator first, then a configured phone AVD (cold-booted). " +
+          "requires narrows that phone choice; only panels above 1, posture, screenRound or vehicle.motion selects another form factor instead",
       ),
     deviceId: z
       .string()
@@ -456,25 +456,15 @@ export const getAndroidSchema = devicePreparationTimeoutSchema
     // mints; this handler ignores the field.
     enableTools: enableToolsSchemaField,
   })
-  .superRefine(validateDevicePreparationTimeout)
-  .superRefine((value, ctx) => {
-    if (!value.avdName && !value.deviceId) {
-      ctx.addIssue({
-        code: "custom",
-        message:
-          "Provide avdName (the `name` field of automobile:devices/images/android) or deviceId (the `runtime.deviceId` field of automobile:devices/booted/android)",
-        path: ["avdName"],
-      });
-    }
-    // Both spellings are accepted together: `deviceId` takes a serial OR an
-    // image name, so `avdName: "Pixel_A"` + that AVD's running serial names ONE
-    // device and must not be rejected by the schema, which cannot know which
-    // serial an AVD is running on. The pair is validated after discovery
-    // instead (`validateRequestedAndroidSerial`), where a genuine disagreement
-    // is reported with the same machine-readable `identifier_conflict` code.
-    // Silently preferring `avdName` without that check would prepare a device
-    // the caller did not name — the worst failure mode for a device-identity API.
-  });
+  // Both spellings are accepted together: `deviceId` takes a serial OR an
+  // image name, so `avdName: "Pixel_A"` + that AVD's running serial names ONE
+  // device and must not be rejected by the schema, which cannot know which
+  // serial an AVD is running on. The pair is validated after discovery
+  // instead (`validateRequestedAndroidSerial`), where a genuine disagreement
+  // is reported with the same machine-readable `identifier_conflict` code.
+  // Silently preferring `avdName` without that check would prepare a device
+  // the caller did not name — the worst failure mode for a device-identity API.
+  .superRefine(validateDevicePreparationTimeout);
 
 export const getAppleSchema = devicePreparationTimeoutSchema
   .extend({

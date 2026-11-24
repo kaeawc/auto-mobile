@@ -2,8 +2,8 @@ import { z } from "zod/v4";
 import type { BootedDevice } from "../models";
 import {
   addDeviceTargetingToSchema,
-  platformSchema,
   resourceLinkField,
+  watchAwarePlatformSchema,
 } from "../utils/schemaHelpers";
 import { highlightShapeSchema } from "../features/debug/VisualHighlight";
 import { IOS_MAX_DURATION_SECONDS } from "../daemon/videoRecordingManager";
@@ -71,8 +71,8 @@ export const videoRecordingSchema = addDeviceTargetingToSchema(
       action: z.enum(["start", "stop"]),
       // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
       // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
+      // its own. An Apple Watch simulator records through simctl like tvOS (#19056).
+      platform: watchAwarePlatformSchema(),
       deviceId: z.string().optional(),
       recordingId: z.string().optional().describe("Recording ID"),
       qualityPreset: z.enum(["low", "medium", "high"]).optional(),

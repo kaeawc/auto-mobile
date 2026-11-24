@@ -182,6 +182,17 @@ export type ObservationBackend = "sdk" | "xctest";
 /** Why XCTest stood in for the SDK observation bridge (#5159). */
 export type ObservationFallbackReason = "unavailable" | "unsupported";
 
+/**
+ * One node that kept a stability check from settling (#19123). `field` is the first attribute
+ * that changed, or `added`/`removed` for a node that appeared or disappeared, or the name of a
+ * changed top-level field (then without `elementId`/`label`).
+ */
+export interface UnsettledNode {
+  elementId?: string;
+  label?: string;
+  field: string;
+}
+
 export type ObserveResult = {
   /** Applies to all UI content in this payload, including raw trees and projected labels. */
   importedPrototypeContent?: import("./ImportedPrototypeContent").ImportedPrototypeContent;
@@ -571,6 +582,12 @@ export type ObserveResult = {
 
   /** Re-observations the embedded gate took; with `settleMs`, separates slow reads from motion. */
   settlePolls?: number;
+
+  /**
+   * With `settled: false` after a stability check ran: up to three nodes that changed between
+   * the last two differing reads (#19123), so a client can tell app content from chrome.
+   */
+  unsettledBy?: UnsettledNode[];
 
   /** True if a declarative waitFor condition or stability wait timed out. */
   timedOut?: boolean;

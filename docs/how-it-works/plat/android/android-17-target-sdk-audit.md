@@ -1,6 +1,6 @@
 # Android 17 behaviour changes for targetSdk 37 (CtrlProxy audit)
 
-CtrlProxy reads `targetSdk = 37`, `compileSdk = 37` and `buildTools = 37.0.0` from
+CtrlProxy reads `targetSdk = 37`, `compileSdk = 37.1` and `buildTools = 37.0.0` from
 `android/gradle/libs.versions.toml`. The Robolectric maximum stays 35, with the CtrlProxy SDK 24
 and Playground SDK 30 test pins.
 
@@ -23,3 +23,4 @@ Facts the targetSdk 37 behaviour changes depend on:
 ## Background
 
 - [Android 17 CtrlProxy targetSdk 37 audit](../../../devlog/2026-10-14-android-17-target-sdk-audit.md)
+- [compileSdk carries a minor API level](../../../devlog/2026-11-24-compile-sdk-minor-level.md)

@@ -29,6 +29,9 @@ on:
       - "scripts/ios/build-simulator-runner-release.sh"
       - "ios/control-proxy/project.yml"
       - "ios/control-proxy/CtrlProxy.xcodeproj/xcshareddata/xcschemes/AutoMobileVisionTest.xcscheme"
+      # The runner's own sources compile only in this build.
+      - "ios/control-proxy/AutoMobileVisionTest/**"
+      - "ios/control-proxy/Tests/CtrlProxyVisionUITests/**"
   # Manual build check outside a release; it uploads nothing.
   workflow_dispatch:
 
@@ -44,7 +47,7 @@ jobs:
       sha256: ${{ steps.checksum.outputs.sha256 }}
     steps:
       - name: "Checkout code"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
           ref: ${{ inputs.checkout-ref || github.sha }}
@@ -67,7 +70,7 @@ jobs:
 
       - name: "Upload visionOS runner archive"
         if: ${{ inputs.upload-artifact }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: visionos-runner
           path: /tmp/visionos-runner-macos.zip

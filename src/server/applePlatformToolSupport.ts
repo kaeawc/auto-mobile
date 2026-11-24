@@ -34,6 +34,9 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "observe",
     // simctl spawn <udid> log show, as on an iOS simulator (#17547).
     "getLogs",
+    // simctl io recordVideo / screenshot capture, as on an Apple TV simulator (#19056).
+    "videoRecording",
+    "compareScreenshot",
   ]),
   tvos: new Set<string>([
     "getLogs",
@@ -67,7 +70,8 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "postNotification",
     "setAppPermissions",
   ]),
-  // simctl lifecycle and app management; observe, tapOn and sendKeys go through the window-app XCUITest runner.
+  // simctl lifecycle and app management; observe, tapOn, sendKeys, coordinate taps and swipes and
+  // the home press go through the window-app XCUITest runner (#19055).
   visionos: new Set<string>([
     "executePlan",
     // simctl spawn <udid> log show, as on an iOS simulator (#18011).
@@ -80,6 +84,10 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "observe",
     "tapOn",
     "sendKeys",
+    "tapAt",
+    "swipeOn",
+    "pressButton",
+    "homeScreen",
     "listDevices",
     "listDeviceImages",
     "provisionDevice",

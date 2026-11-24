@@ -150,6 +150,13 @@ export interface IosH264SourceOptions extends H264CaptureSourceOptions {
   runningReconnectMaxAttempts?: number;
   /** Backoff schedule between running-phase reconnect attempts. */
   runningReconnectBackoff?: BackoffInput;
+  /**
+   * Try headless Simulator capture from the device framebuffer (#19015) before
+   * the ScreenCaptureKit window path, falling back to the window when it fails.
+   * The production factory enables it; it defaults off so window-path tests do
+   * not have to opt out.
+   */
+  simulatorFramebufferCapture?: boolean;
 }
 
 export interface IosH264FrameMetrics extends H264CaptureSourceMetrics {}

@@ -1,3 +1,4 @@
+import type { PrototypePlatformReport } from "../../src/features/prototype/prototypePlatformReport";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -98,6 +99,30 @@ describe("prototype tool on an iOS simulator", () => {
     const status = await call({ action: "status" });
     expect(status.payload.prototypes?.map((entry) => entry.id)).toEqual(["panel"]);
     expect(types()).toHaveLength(2);
+  });
+
+  test("show uses the reported platform reasons without a follow-up device query", async () => {
+    const platformRuntime: PrototypePlatformReport = {
+      runtime: "iosAgent",
+      modules: {
+        haptics: { availability: "degraded", mode: "simulated", reason: "simulator" },
+      },
+    };
+    agent.queueReplies({ platformRuntime });
+    const { payload } = await call({
+      action: "show",
+      spec: { ...spec, root: { type: "text", text: "Ready" } },
+    });
+    expect(payload.platformNotes).toMatchObject([
+      {
+        platform: "ios",
+        construct: "platform.haptics",
+        effect: "simulated",
+        paths: [],
+      },
+    ]);
+    expect((await call({ action: "status" })).payload.platformRuntime).toEqual(platformRuntime);
+    expect(types()).toEqual(["show_prototype"]);
   });
 
   test("a supplied asset the agent reports missing is re-sent once with the prototype", async () => {
@@ -212,6 +237,13 @@ describe("prototype tool on an iOS simulator", () => {
         assets: [],
         ...overrides,
       },
+    });
+
+    test("inspect and status expose the runtime report alongside existing platform state", async () => {
+      const platformRuntime: PrototypePlatformReport = { runtime: "iosAgent", modules: {} };
+      agent.queueReplies(agentStatus({ platform: { device: { os: "ios" } }, platformRuntime }));
+      expect((await call({ action: "inspect" })).payload.platformRuntime).toEqual(platformRuntime);
+      expect((await call({ action: "status" })).payload.platformRuntime).toEqual(platformRuntime);
     });
 
     test("inspect and status preserve iOS stack paths", async () => {

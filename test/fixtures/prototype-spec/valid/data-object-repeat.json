@@ -1,0 +1,60 @@
+{
+  "id": "data-object-repeat",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "todos": [
+      {
+        "id": 1,
+        "title": "Walk dog"
+      },
+      {
+        "id": 2,
+        "title": "Buy milk"
+      }
+    ],
+    "archive": []
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "items": {
+        "path": "/todos"
+      },
+      "as": "todo",
+      "key": "id"
+    },
+    "children": [
+      {
+        "type": "button",
+        "label": "Archive {todo.title}",
+        "onTap": [
+          {
+            "type": "prependData",
+            "path": "/data/archive",
+            "value": {
+              "object": {
+                "title": {
+                  "item": "title"
+                },
+                "position": {
+                  "index": true
+                },
+                "done": {
+                  "value": true
+                }
+              }
+            }
+          },
+          {
+            "type": "removeData",
+            "path": "/data/todos/{index}"
+          }
+        ]
+      }
+    ]
+  }
+}

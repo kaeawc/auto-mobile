@@ -27,7 +27,7 @@ export const createH264CaptureSource: H264CaptureSourceFactory = (options, jarPa
         "WebRTC playback audio capture is available only for iOS Simulator targets; public iOS APIs cannot capture playback audio from a physical device.",
       );
     }
-    return new IosH264Source(options);
+    return new IosH264Source({ ...options, simulatorFramebufferCapture: true });
   }
   throw new ActionableError(
     `WebRTC streaming does not support ${options.device.platform} devices.`,

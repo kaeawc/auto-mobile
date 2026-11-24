@@ -1,0 +1,47 @@
+{
+  "spec": {
+    "id": "data-object",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "ratio": 0.25
+    },
+    "derive": {
+      "label": {
+        "of": {
+          "state": "ratio"
+        },
+        "format": {
+          "percent": {
+            "maxFraction": 1
+          }
+        }
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Save",
+      "onTap": [
+        {
+          "type": "setData",
+          "path": "/data/todo",
+          "value": {
+            "object": {
+              "t": {
+                "derived": "missing"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "data": {
+      "todo": {}
+    }
+  },
+  "expectedPath": "root.onTap[0].value.object.t.derived",
+  "expectedMessage": "Unknown derived value \"missing\""
+}

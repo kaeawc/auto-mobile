@@ -47,6 +47,7 @@ enum PrototypeAgentProtocol {
         dataModelCapability,
         dataActionsCapability,
         dataActionsV2Capability,
+        dataActionsV3Capability,
         networkCapability,
         networkDeviceCapability,
         networkUploadCapability,
@@ -67,6 +68,7 @@ enum PrototypeAgentProtocol {
         glassCapability,
         scrollEdgeEffectCapability,
         stringsCapability,
+        remoteImageCapability,
         semanticsCapability,
         stringConditionsCapability,
         textFieldLeadingIconCapability,
@@ -195,6 +197,8 @@ enum PrototypeAgentProtocol {
     /// `change` event named for the `/data/...` path with `{op, value?, revision}` (#12519). Same name
     /// as the CtrlProxy capability; the host refuses a spec using one on an agent without it.
     static let dataActionsV2Capability = "prototype_data_actions_v2"
+    /// `{object}` data-action values whose members are flat bindings (#18826).
+    static let dataActionsV3Capability = "prototype_data_actions_v3"
     static let dataActionsCapability = "prototype_data_actions_v1"
     /// The `request` action (#12529): host-proxied calls (`via: "host"`, the default) through
     /// `prototype_request` / `prototype_response` frames, and the `/data`, `__meta`, `statusKey` and
@@ -266,6 +270,8 @@ enum PrototypeAgentProtocol {
     /// iOS 26+), a tonal fill where blur is unavailable, and `backdrop: blur|fallback` in the show reply.
     static let backdropCapability = "prototype_backdrop_v1"
     static let timersCapability = "prototype_timers_v1"
+    static let queueCallOutcomeRequest = "queue_prototype_call_outcome"
+    static let platformOutcomesCapability = "prototype_platform_outcomes_v1"
     static let simulatePlatformRequest = "simulate_prototype_platform"
     static let platformSimulationCapability = "prototype_platform_simulation_v1"
     static let advanceClockRequest = "advance_prototype_clock"

@@ -194,6 +194,8 @@ internal enum class PrototypeBindableKind {
   OPERAND,
   DATA_OPERAND,
   DERIVED_CONDITION,
+  DERIVED_BINDING,
+  EQUALS_KEY,
   EMIT_NAME,
   EMIT_BINDING,
   KEY,
@@ -217,6 +219,11 @@ internal enum class PrototypeBindableKind {
 
   /** The kinds holding a `/data/...` path with `{index}` segments. */
   fun isDataPath(): Boolean = this == DATA_PATH || this == REQUEST_INTO
+
+  fun isStateKey(): Boolean = this == KEY || this == EQUALS_KEY
+
+  fun requiresDerive(): Boolean =
+    this == DERIVED_CONDITION || this == DERIVED_BINDING || this == EQUALS_KEY
 }
 
 /**
@@ -311,10 +318,18 @@ internal object PrototypeBindableFields {
     field(action, "path", path, PrototypeBindableKind.DATA_PATH)?.let {
       return it
     }
-    if (hasValue)
-      binding(action["value"], "$path.value")?.let {
+    if (hasValue) {
+      // An `{object}` value (#18826) binds each member like a value.
+      val value = action["value"]
+      val members = (value as? JsonObject)?.get("object") as? JsonObject
+      val bound =
+        members?.entries?.firstNotNullOfOrNull { (name, member) ->
+          binding(member, memberPath("$path.value.object", name))
+        } ?: if (members == null) binding(value, "$path.value") else null
+      bound?.let {
         return it
       }
+    }
     return binding((action["where"] as? JsonObject)?.get("equals"), "$path.where.equals")
   }
 
@@ -379,6 +394,9 @@ internal object PrototypeBindableFields {
         return it
       }
       field(condition, "key", path, PrototypeBindableKind.KEY)?.let {
+        return it
+      }
+      field(condition, "equalsKey", path, PrototypeBindableKind.EQUALS_KEY)?.let {
         return it
       }
       keyList(condition, "valid", path)?.let {
@@ -498,6 +516,7 @@ internal object PrototypeBindableFields {
       return (value as? JsonObject)?.let {
         field(it, "state", at, PrototypeBindableKind.KEY)
           ?: field(it, "data", at, PrototypeBindableKind.ROUTE_POINTER)
+          ?: field(it, "derived", at, PrototypeBindableKind.DERIVED_BINDING)
       }
     }
 
@@ -796,7 +815,9 @@ internal object PrototypeRepeatValidator {
       val field = ((node["repeat"] as? JsonObject)?.get("items") as? JsonObject)?.text("field")
       val own =
         if (field != null && outer != null)
-          outer.items.indices.map { PrototypeNestedRepeat.innerScope(node, path, outer, it) }
+          (0 until maxOf(1, outer.items.size)).map {
+            PrototypeNestedRepeat.innerScope(node, path, outer, it)
+          }
         else listOf(scopeOf(node, path, data))
       for (scope in own) {
         if (scope != null) scopes.add(scope)

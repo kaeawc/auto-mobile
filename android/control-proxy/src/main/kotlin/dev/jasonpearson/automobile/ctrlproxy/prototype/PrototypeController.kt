@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypePlatformCalls
+import dev.jasonpearson.automobile.protocol.PrototypePlatformReport
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
@@ -115,10 +116,10 @@ fun interface PrototypeResultSink : PrototypeReplySink {
   ) = sendShown(requestId, missingAssets, appearance, hiddenReason)
 
   /**
-   * A successful show that also reports [degradedEffects] (`prototype_effects_v1`). The default
-   * drops them, so sinks that predate the field keep answering as before.
+   * A successful show with effect fallbacks and the platform runtime snapshot. The default forwards
+   * the navigation context for sinks that only consume it.
    */
-  @Suppress("LongParameterList") // Mirrors sendShownNavigation plus the one new field.
+  @Suppress("LongParameterList") // The complete successful show response.
   suspend fun sendShownDegraded(
     requestId: String?,
     missingAssets: List<String>,
@@ -127,6 +128,7 @@ fun interface PrototypeResultSink : PrototypeReplySink {
     stacks: Map<String, PrototypeStackSnapshot>,
     hiddenReason: PrototypeHiddenReason?,
     degradedEffects: List<PrototypeDegradedEffect>,
+    platformRuntime: PrototypePlatformReport? = null,
   ) = sendShownNavigation(requestId, missingAssets, appearance, pages, stacks, hiddenReason)
 
   /** The reply to `clear_prototype_storage`. Sinks that predate it answer a bare success. */
@@ -448,6 +450,8 @@ class PrototypeController(
           stacks = shown.runtime.current.stacks,
           backdrop = shown.host.appliedBackdrop?.wire,
           displayId = shown.request.displayId,
+          platformRuntime =
+            shown.runtime.platformRuntimeReport(PrototypePlatformReport.Runtime.CTRL_PROXY),
           degradedEffects =
             prototypeEffectReport(
               shown.runtime.renderModel(shown.runtime.current).root,
@@ -518,6 +522,7 @@ class PrototypeController(
     val backdrop: String? = null,
     val displayId: Int = Display.DEFAULT_DISPLAY,
     val degradedEffects: List<PrototypeDegradedEffect> = emptyList(),
+    val platformRuntime: PrototypePlatformReport? = null,
   )
 
   private fun validate(spec: JsonObject): PrototypeSpec =
@@ -1090,26 +1095,16 @@ class PrototypeController(
     missing: List<String>,
     appearance: PrototypeAppearance,
   ) {
-    if (outcome.degradedEffects.isNotEmpty()) {
-      sink.sendShownDegraded(
-        requestId,
-        missing,
-        appearance,
-        outcome.pages.orEmpty(),
-        outcome.stacks.orEmpty(),
-        outcome.hiddenReason,
-        outcome.degradedEffects,
-      )
-    } else {
-      sink.sendShownNavigation(
-        requestId,
-        missing,
-        appearance,
-        outcome.pages.orEmpty(),
-        outcome.stacks.orEmpty(),
-        outcome.hiddenReason,
-      )
-    }
+    sink.sendShownDegraded(
+      requestId,
+      missing,
+      appearance,
+      outcome.pages.orEmpty(),
+      outcome.stacks.orEmpty(),
+      outcome.hiddenReason,
+      outcome.degradedEffects,
+      outcome.platformRuntime,
+    )
   }
 
   private fun armIdle(
@@ -1193,6 +1188,25 @@ class PrototypeController(
     } catch (error: Exception) {
       Log.w("PrototypeController", "Prototype storage clear failed", error)
       sink.send(requestId, false, error.message ?: "Prototype storage clear failed")
+    }
+  }
+
+  suspend fun queueCallOutcome(
+    requestId: String?,
+    id: String,
+    call: String,
+    outcome: JsonObject,
+  ) = mutex.withLock {
+    try {
+      check(!destroyed) { "Prototype host destroyed" }
+      val runtime = surfaces[id]?.runtime ?: error("Unknown or inactive prototype id: $id")
+      runtime.queueCallOutcome(call, outcome)
+      sink.send(requestId, true, null)
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("PrototypeController", "Could not queue platform call outcome", error)
+      sink.send(requestId, false, error.message ?: "Could not queue platform call outcome")
     }
   }
 
@@ -1281,6 +1295,7 @@ class PrototypeController(
       degradedEffects =
         prototypeEffectReport(runtime.renderModel(runtime.current).root, runtime.effectHealth),
       feedbackLog = runtime.feedbackLog.snapshot(),
+      platformRuntime = runtime.platformRuntimeReport(PrototypePlatformReport.Runtime.CTRL_PROXY),
       orientation = surface.request.windowControls.orientation,
       statusBar = surface.request.windowControls.statusBarSupport,
     )

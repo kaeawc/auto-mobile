@@ -114,6 +114,9 @@ export function unsupportedPlatformToolMessage(
   toolName: string,
   platform: NonIosApplePlatform,
 ): string {
+  if (toolName === "shareSheet") {
+    return `shareSheet supports Android and iOS. Target an Android or iOS device instead of ${NON_IOS_APPLE_PLATFORM_LABELS[platform]}.`;
+  }
   if (
     platform === "tvos" &&
     ["tapAt", "swipeOn", "pinchOn", "multiTouch", "dragAndDrop", "tapAny"].includes(toolName)

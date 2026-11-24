@@ -103,6 +103,7 @@ internal object PrototypeSensitiveSinkRules {
             else "Sensitive value cannot be bound into a request",
           )
         }
+        .distinctBy { it.path }
     return Scan(
       if (budget.checks > MAX_COPY_TAINT_CHECKS) listOf(PrototypeSpecError("$", CHECK_MESSAGE))
       else errors,
@@ -183,13 +184,25 @@ internal object PrototypeSensitiveSinkRules {
       .ifEmpty { listOf(field.text) }
   }
 
-  private fun bindingFields(raw: JsonElement?, path: String, text: Boolean = false): List<Field> {
+  private fun bindingFields(
+    raw: JsonElement?,
+    path: String,
+    text: Boolean = false,
+    spec: JsonObject? = null,
+  ): List<Field> {
     val fields = mutableListOf<Field>()
     if (text && raw is JsonPrimitive && raw.isString) fields.add(Field(raw.content, path))
     val form = raw as? JsonObject ?: return fields
     form.text("state")?.let {
       fields.add(Field(it, "$path.state", stateKey = true))
       return fields
+    }
+    form.text("derived")?.let { name ->
+      return PrototypeDerivedRules.inputs(spec, name).map { (source, read) ->
+        val at = "$path.derived"
+        if (source == "state") Field(read, at, stateKey = true)
+        else Field(read, at, pointerSource = source)
+      }
     }
     for (source in listOf("data", "platform")) {
       form.text(source)?.let { fields.add(Field(it, path, pointerSource = source)) }
@@ -206,7 +219,7 @@ internal object PrototypeSensitiveSinkRules {
           if (kind == PrototypeBindableKind.REQUEST_TEXT)
             fields.addAll(bindingFields(raw, path, text = true))
           else if (kind == PrototypeBindableKind.EMIT_BINDING)
-            fields.addAll(bindingFields(raw, path))
+            fields.addAll(bindingFields(raw, path, spec = spec))
         }
         null
       }
@@ -233,7 +246,7 @@ internal object PrototypeSensitiveSinkRules {
         null -> Unit
       }
     }
-    return fields.distinctBy { it.path }
+    return fields.distinct()
   }
 
   private fun inRequest(path: String, at: String): Boolean =

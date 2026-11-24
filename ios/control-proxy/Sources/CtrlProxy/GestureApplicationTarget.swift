@@ -105,6 +105,12 @@ enum GestureDeliveryRoute: Equatable {
     /// the foreground app was not pinned by the runner, no strategy was forced, and the cached
     /// observation of that app is a full-screen, single-panel frame with a known rotation.
     /// Anything else keeps the `XCUICoordinate` path and its multi-panel and window mapping.
+    ///
+    /// An inset iPadOS window (a floating or tiled window: `windowTranslation` set, or
+    /// `insetWindow` for a tile at the screen origin, #19050) is the one exception to the
+    /// pinned-app and multi-panel guards: observe already reports its nodes in screen space
+    /// (#18830), so its points are screen points, and the `XCUICoordinate` path on a focused
+    /// field in such a window blocked the runner for 60 s or more (#18960).
     static func resolve(
         target: GestureApplicationTarget,
         forced: TapCoordinateStrategy?,
@@ -123,14 +129,15 @@ enum GestureDeliveryRoute: Equatable {
         -> Decision
     {
         let fallback: Fallback
-        if case .keepPinned = target {
+        let insetWindow = geometry.map { $0.windowTranslation != nil || $0.insetWindow } ?? false
+        if case .keepPinned = target, !insetWindow {
             fallback = .pinnedApp
         } else if forced != nil {
             fallback = .forcedStrategy
         } else if let geometry {
             if !geometry.app.isValid || !geometry.screen.isValid {
                 fallback = .invalidSize
-            } else if hasMultiPanelMismatch(app: geometry.app, screen: geometry.screen) {
+            } else if !insetWindow, hasMultiPanelMismatch(app: geometry.app, screen: geometry.screen) {
                 fallback = .multiPanel
             } else if let orientation = DeviceRotation
                 .gestureInterfaceOrientationRawValue(rotation: geometry.rotation)
@@ -161,6 +168,17 @@ enum GestureKind: String, CaseIterable, Equatable {
 enum UnpinnedGestureSynthesis {
     /// Touch-up to next touch-down; the synthesis helper separately enforces minimum contact.
     static let doubleTapGap: TimeInterval = 0.05
+
+    /// A routed tap: `route` decides once per command and every contact of a double tap is
+    /// delivered on that decision (#19050). Nil from `route` keeps the caller's other path.
+    static func tap(
+        doubleTap: Bool, route: () -> Int?, deliver: (Int) throws -> Bool, wait: (TimeInterval) -> Void
+    )
+        throws -> Bool
+    {
+        guard let orientation = route() else { return false }
+        return try tap(doubleTap: doubleTap, deliver: { try deliver(orientation) }, wait: wait)
+    }
 
     /// Keep both contacts in one command without a rebound XCUIApplication idle wait (#10858).
     /// Inject delivery and waiting so host tests exercise the route without platform I/O or sleep.

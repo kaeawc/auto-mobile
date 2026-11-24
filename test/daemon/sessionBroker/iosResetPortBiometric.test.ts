@@ -9,6 +9,7 @@ import type { ExecResult } from "../../../src/models/ExecResult";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeIosResidueInspector } from "../../fakes/FakeIosResidueInspector";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeSimulatorKeyboardBridge } from "../../fakes/FakeSimulatorKeyboardBridge";
 
 const UDID = "11111111-2222-4333-8444-555555555555";
 const KEY = "com.apple.BiometricKit.enrollmentChanged";
@@ -34,6 +35,7 @@ function rig(notifyutilStdout: (enrolled: string) => string) {
       residue: new FakeIosResidueInspector(),
 
       storeKit: { clear: async () => {} },
+      keyboard: new FakeSimulatorKeyboardBridge(),
     },
     new FakeTimer(),
   );

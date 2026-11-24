@@ -99,7 +99,8 @@ internal object PrototypeRepeatTextChecks {
     }
     return when (kind) {
       PrototypeBindableKind.EMIT_NAME -> emptyEmitName(segments, path, scope)
-      PrototypeBindableKind.KEY -> invalidBoundKey(text, segments, path, scope)
+      PrototypeBindableKind.KEY,
+      PrototypeBindableKind.EQUALS_KEY -> invalidBoundKey(text, segments, path, scope)
       else -> null
     }
   }

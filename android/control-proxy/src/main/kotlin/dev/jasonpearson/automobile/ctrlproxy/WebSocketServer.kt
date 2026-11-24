@@ -133,6 +133,7 @@ class WebSocketServer(
         "clear_prototype_storage",
         "advance_prototype_clock",
         "simulate_prototype_platform",
+        "queue_prototype_call_outcome",
       ) + prototypeAssetRequestTypes
 
     /** Requests whose payload is typed user input, which may be a password. */
@@ -381,6 +382,8 @@ class WebSocketServer(
     // for a device lacking this flag. Advertised only together with prototype_data_model_v1.
     add("prototype_data_actions_v1")
     add("prototype_data_actions_v2")
+    // `{object}` data-action values built from member bindings (#18826).
+    add("prototype_data_actions_v3")
     // The request action (#12528): an HTTP call from a tap, run by the host (via "host") or by the
     // device itself (via "device"), that writes /data and moves a status key. Older APKs reject the
     // action as unknown. Advertised only together with prototype_data_model_v1, since the
@@ -473,6 +476,7 @@ class WebSocketServer(
     add("prototype_pager_state_key_v1")
     add("prototype_timers_v1")
     add("prototype_platform_simulation_v1")
+    add("prototype_platform_outcomes_v1")
   }
 
   /** Prototype window, patch, anchor and screenshot flags. */

@@ -98,7 +98,7 @@ enum PrototypeStrictCapabilities {
             if PrototypeM3Expressive.required(fields) { result.insert(PrototypeM3Expressive.capability) }
             let type = fields["type"]?.stringValue ?? ""
             if type.isEmpty, let pointer = fields["platform"]?.stringValue { platformRead(pointer) }
-            if !PrototypeDerivedValidator.conditionReferences(fields, path: "").isEmpty { need("derive") }
+            if PrototypeDerivedValidator.requiresCapability(fields) { need("derive") }
             if PrototypeStringConditions.uses(fields) { need("string_conditions") }
             let types = [
                 "startTimer": "timers",
@@ -184,6 +184,8 @@ enum PrototypeStrictCapabilities {
             if ["setData", "appendData", "prependData", "upsertData", "removeData"]
                 .contains(type) { need("data_actions") }
             if PrototypeGeneratedValues.needsDataV2(fields) { result.insert("prototype_data_actions_v2") }
+            if ["setData", "appendData", "prependData", "upsertData"].contains(type),
+               fields["value"]?.objectFields?["object"] != nil { result.insert("prototype_data_actions_v3") }
             if type == "upsertData" || (type == "appendData" && fields["maxItems"] != nil) || PrototypeChannels
                 .needsValueCapability(fields) { need("platform_realtime") }
             if type == "prependData" { need("lazy_list") }
@@ -224,7 +226,7 @@ enum PrototypeStrictCapabilities {
                 }
                 if key == "repeat" {
                     if child.objectFields?["items"]?.objectFields?["derived"] != nil { need("derive") }
-                    if child.objectFields?["items"]?.objectFields?["field"] != nil { need("nested_repeat") }
+                    if PrototypeRepeat.requiresNestedCapability(child) { need("nested_repeat") }
                     if child.objectFields?["derive"] != nil { need("format") }
                     if child.objectFields?["stagger"] != nil { need("window_motion") }
                     if let repeatSpec = child.objectFields,

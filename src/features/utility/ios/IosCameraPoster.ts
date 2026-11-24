@@ -12,11 +12,17 @@ import {
   iosCameraPosterDylibProvider,
   type IosCameraPosterDylibProvider,
 } from "./IosCameraPosterDylibProvider";
+import {
+  defaultIosCameraPosterDeviceWide,
+  type IosCameraPosterDeviceWide,
+} from "./IosCameraPosterDeviceWide";
 
 export const IOS_CAMERA_POSTER_UNSUPPORTED =
   "cameraPoster is unsupported on physical iOS devices: the camera is injected into simulator app processes. Use an iOS Simulator and launchApp to apply the poster.";
 export const IOS_CAMERA_POSTER_RELAUNCH_WARNING =
-  "The poster applies at the next launchApp (cold launch) of each app. Any app already running must be relaunched; after clear use launchApp coldBoot:true. surface is ignored on iOS.";
+  "The poster applies at the next launch of each app, from launchApp, the home screen or XCUITest. Any app already running must be relaunched; after clear use launchApp coldBoot:true. surface is ignored on iOS.";
+export const IOS_CAMERA_POSTER_LAUNCH_ONLY_WARNING =
+  "The poster applies only at the next launchApp (cold launch) of each app: it could not be turned on for apps launched another way.";
 
 export interface IosCameraPosterDependencies {
   registry?: IosCameraPosterRegistry;
@@ -24,6 +30,8 @@ export interface IosCameraPosterDependencies {
   fileExists?: (path: string) => boolean;
   /** Preflighted when a poster is set, so a missing compiler or source fails here, not at launchApp. */
   dylibProvider?: IosCameraPosterDylibProvider;
+  /** Turns the poster on for apps launched any way, not only by launchApp (#19047). */
+  deviceWide?: Pick<IosCameraPosterDeviceWide, "activate" | "deactivate">;
 }
 
 export async function writeIosCameraPoster(
@@ -45,6 +53,8 @@ export async function writeIosCameraPoster(
   try {
     if (input.mode === "clear") {
       registry.clear(device.deviceId);
+      // Awaited so the launchd environment is back to its pre-poster state when clear returns.
+      await deviceWideActivator(deps)?.deactivate(device.deviceId);
       return { ...base, warning: IOS_CAMERA_POSTER_RELAUNCH_WARNING };
     }
     const recordable = await recordablePosterPath(input, deps);
@@ -56,10 +66,49 @@ export async function writeIosCameraPoster(
       device.deviceId,
       input.mode === "image" ? { kind: "image", path } : { kind: "qr", text: input.text, path },
     );
-    return { ...base, path, warning: IOS_CAMERA_POSTER_RELAUNCH_WARNING };
+    const failure = await activateDeviceWide(device.deviceId, deviceWideActivator(deps));
+    return {
+      ...base,
+      path,
+      deviceWide: failure === undefined,
+      warning:
+        failure === undefined
+          ? IOS_CAMERA_POSTER_RELAUNCH_WARNING
+          : [IOS_CAMERA_POSTER_LAUNCH_ONLY_WARNING, failure].filter(Boolean).join(" "),
+    };
   } catch (error) {
     logger.warn(`Failed to record iOS camera poster: ${errorMessage(error)}`, error);
     return { ...base, error: `Failed to record iOS camera poster: ${errorMessage(error)}` };
+  }
+}
+
+/**
+ * The production activator pairs with the production dylib provider; a caller that injects its own
+ * provider (a test fake) gets device-wide activation only by injecting an activator too.
+ */
+function deviceWideActivator(
+  deps: IosCameraPosterDependencies,
+): Pick<IosCameraPosterDeviceWide, "activate" | "deactivate"> | undefined {
+  return deps.deviceWide ?? (deps.dylibProvider ? undefined : defaultIosCameraPosterDeviceWide());
+}
+
+/**
+ * Per-launch injection still applies when this fails, so the poster stays recorded. Returns why
+ * it failed, or undefined once the poster is on device-wide.
+ */
+async function activateDeviceWide(
+  udid: string,
+  deviceWide: Pick<IosCameraPosterDeviceWide, "activate"> | undefined,
+): Promise<string | undefined> {
+  if (!deviceWide) {
+    return "";
+  }
+  try {
+    await deviceWide.activate(udid);
+    return undefined;
+  } catch (error) {
+    logger.warn(`Device-wide iOS camera poster failed on ${udid}: ${errorMessage(error)}`, error);
+    return errorMessage(error);
   }
 }
 

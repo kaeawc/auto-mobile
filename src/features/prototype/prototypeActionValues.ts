@@ -35,9 +35,15 @@ const prototypeExistingDataValueSchema = z.union([
   ...prototypeReadBindingSchema.options,
   z.object({ value: prototypeJsonSchema }).strict(),
 ]);
-export const prototypeDataActionValueSchema = z.union([
+/** Every value binding except `{derived}`: generated, read and the `{value}` literal forms. */
+export const prototypeValueBindingSchema = z.union([
   ...prototypeGeneratedValueSchema.options,
   ...prototypeExistingDataValueSchema.options,
+]);
+const prototypeDerivedBindingSchema = z.object({ derived: keySchema }).strict();
+export const prototypeDataActionValueSchema = z.union([
+  ...prototypeValueBindingSchema.options,
+  prototypeDerivedBindingSchema,
 ]);
 /** A single unescaped object member; never interpreted as a pointer. */
 export const dataMemberSchema = z
@@ -63,8 +69,26 @@ export const dataActionPathSchema = z
   .string()
   .min(1)
   .max(contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5);
+/**
+ * `{object: {member: binding}}` (#18826): a data-action value built from named members, each one
+ * flat binding form. It is valid only as a data action's `value`, not in the shared binding slots
+ * (emit context, `where.equals`, request headers, route params), and members never nest.
+ */
+export const prototypeDataObjectValueSchema = z
+  .object({
+    object: prototypeOwnKeyRecordV3(
+      z.string().regex(prototypeContractPatterns.pathKey),
+      prototypeDataActionValueSchema,
+    ).refine((members) => {
+      const count = Object.keys(members).length;
+      return count >= 1 && count <= contract.limits.MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES;
+    }),
+  })
+  .strict();
+export type PrototypeDataObjectValue = z.infer<typeof prototypeDataObjectValueSchema>;
 type PrototypeDataActionBinding =
   | PrototypeDataActionValue
+  | PrototypeDataObjectValue
   | z.infer<typeof prototypeMatchBindingSchema>
   | { event: string }
   | { platform: string };
@@ -75,6 +99,7 @@ export const dataActionFields: {
   path: dataActionPathSchema,
   value: z.union([
     ...prototypeDataActionValueSchema.options,
+    prototypeDataObjectValueSchema,
     prototypeMatchBindingSchema,
     z.object({ event: z.union([z.literal(""), pointerSchema]) }).strict(),
     z.object({ platform: pointerSchema }).strict(),
@@ -105,7 +130,8 @@ export const appendDataActionSchema = z
       .number()
       .int()
       .min(1)
-      .max(contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS)
+      // The largest runtime budget (#18804); the validator applies the target's own limit.
+      .max(contract.runtimeBudgets.prototype_large_budget_v1.MAX_PROTOTYPE_DATA_ARRAY_ITEMS)
       .optional(),
   })
   .strict();
@@ -118,17 +144,20 @@ export const upsertDataActionSchema = z
       .number()
       .int()
       .min(1)
-      .max(contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS)
+      // The largest runtime budget (#18804); the validator applies the target's own limit.
+      .max(contract.runtimeBudgets.prototype_large_budget_v1.MAX_PROTOTYPE_DATA_ARRAY_ITEMS)
       .optional(),
   })
   .strict();
 
 export type PrototypeEmitContextBinding =
   | z.infer<typeof prototypeExistingDataValueSchema>
+  | z.infer<typeof prototypeDerivedBindingSchema>
   | { page: string }
   | z.infer<typeof prototypeMatchBindingSchema>;
 export const prototypeEmitContextBindingSchema: z.ZodType<PrototypeEmitContextBinding> = z.union([
   ...prototypeExistingDataValueSchema.options,
+  prototypeDerivedBindingSchema,
   z.object({ page: z.string().min(1) }).strict(),
   prototypeMatchBindingSchema,
 ]);

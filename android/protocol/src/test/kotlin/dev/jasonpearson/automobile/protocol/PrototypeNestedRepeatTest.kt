@@ -118,6 +118,75 @@ class PrototypeNestedRepeatTest {
   }
 
   @Test
+  fun `empty outer sources keep inner state key scopes`() {
+    val child =
+      Json.parseToJsonElement(
+          """{"type":"checkbox","stateKey":"checked_{line.id}","onTap":[{"type":"toggle","key":"checked_{line.id}"},{"type":"increment","key":"count_{line.id}"}]}""",
+        )
+        .jsonObject
+    for (outer in 0..1) {
+      val result = PrototypeSpecValidator.validate(nested(outer, 0, child).toString())
+      assertTrue(result is PrototypeSpecValidation.Success, "$result")
+    }
+  }
+
+  @Test
+  fun `derived inner siblings share substituted text budget`() {
+    val text = "x".repeat(16000)
+    val rows = List(100) { mapOf("sku" to PrototypeScalar.Text(text)) }
+    fun template(count: Int): PrototypeNode {
+      val child = Json.parseToJsonElement("""{"type":"text","text":"{line.sku}"}""")
+      val node = buildJsonObject {
+        put("type", "column")
+        put("repeat", Json.parseToJsonElement("""{"as":"line","items":[]}"""))
+        put("children", JsonArray(List(count) { child }))
+      }
+      return PrototypeSpecValidator.json.decodeFromJsonElement<PrototypeNode>(node)
+    }
+    assertNull(PrototypeDerivedRows.validate(template(2), rows, outerAlias = "order"))
+    assertEquals(
+      "Substituted text total limit exceeded",
+      PrototypeDerivedRows.validate(template(3), rows, outerAlias = "order")?.message,
+    )
+  }
+
+  @Test
+  fun `derived outer scopes retain raw array fields`() {
+    val raw = Json.parseToJsonElement("""{"id":"a","lines":[{"sku":"x"}]}""").jsonObject
+    val node =
+      Json.parseToJsonElement(
+          """{"type":"column","repeat":{"items":{"derived":"orders"},"as":"order"}}""",
+        )
+        .jsonObject
+    val data = PrototypeRepeatData(null) { mapOf("orders" to JsonArray(listOf(raw))) }
+    val scope = checkNotNull(PrototypeRepeatTree.scopeOf(node, "root", data))
+    assertEquals(raw, scope.sourceItems.single())
+    assertFalse("lines" in scope.items.single())
+  }
+
+  @Test
+  fun `unused literal arrays require nested capability in strict and bundle gates`() {
+    val text = File(directory, "repeat/nested-literal-unused-array.json").readText()
+    val spec = Json.parseToJsonElement(text).jsonObject
+    val required = PrototypeStrictPolicy.required(spec)
+    assertTrue("prototype_nested_repeat_v1" in required)
+    assertTrue(
+      "prototype_nested_repeat_v1" in
+        PrototypeBundleCapabilities.required(
+          PrototypeBundleSpec.references(text.toByteArray()),
+        ),
+    )
+    assertEquals(
+      "Unsupported capabilities: prototype_nested_repeat_v1",
+      (PrototypeSpecValidator.validate(text, required - "prototype_nested_repeat_v1")
+          as PrototypeSpecValidation.Failure)
+        .error
+        .message,
+    )
+    assertTrue(PrototypeSpecValidator.validate(text, required) is PrototypeSpecValidation.Success)
+  }
+
+  @Test
   fun `shared cell fixture reaches the exact contract limit`() {
     val source =
       Json.parseToJsonElement(File(directory, "repeat/nested-cell-limit.json").readText())

@@ -42,8 +42,10 @@ internal fun PrototypeCondition.holds(
   val lengthGt = lengthGt
   val lengthLt = lengthLt
   val valid = valid
+  val comparedKey = equalsKey
   return when {
     valid != null -> valid.keys().all { validity[it] == true }
+    comparedKey != null -> stored != null && stored.sameValue(state[comparedKey])
     (key != null || derivedName != null) && equals != null -> stored.sameValue(equals)
     (key != null || derivedName != null) && notEquals != null -> !stored.sameValue(notEquals)
     contains != null -> text != null && text.contains(contains)

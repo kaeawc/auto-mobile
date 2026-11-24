@@ -1,0 +1,13 @@
+{
+  "spec": {
+    "id": "cart-bindings",
+    "window": { "placement": { "type": "fullscreen" } },
+    "root": {
+      "type": "text",
+      "text": "Checkout",
+      "visibleWhen": { "key": "confirm", "equals": "sample", "equalsKey": "password" }
+    }
+  },
+  "expectedPath": "root.visibleWhen.equalsKey",
+  "expectedMessage": "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt, equalsKey is required"
+}

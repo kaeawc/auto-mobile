@@ -38,7 +38,7 @@ public struct PrototypeEvent: Equatable, Sendable {
     let wireKind: String
     /// The authored event name, state key, or data path.
     public let name: String?
-    let payload: JSONValue
+    var payload: JSONValue
     let state: [String: JSONValue]
     let pages: [String: Int]
     let stacks: [String: PrototypeStackSnapshot]
@@ -669,7 +669,8 @@ struct PrototypeSession {
             pages: pages,
             dataModel: data,
             platformModel: spec?.platformState,
-            eventData: platformEventData
+            eventData: platformEventData,
+            derivedValues: spec?.derivedValues
         ), handlerContext: action.mapMarkerId.map { ["markerId": .string($0)] } ?? [:]) : nil
         return emit(kind: "emit", name: action.name, payload: action.payload ?? .null, context: context)
     }
@@ -746,7 +747,7 @@ struct PrototypeSession {
     /// changes and emits nothing, and the rest of the action list still runs.
     private mutating func runDataWrite(_ action: PrototypeAction) -> [PrototypeEvent] {
         guard let spec, let operation = PrototypeDataWrite.Operation(actionType: action.type),
-              let path = action.path
+              let path = action.path, !usesSecureDerivedValue(action, spec: spec)
         else {
             return []
         }
@@ -755,7 +756,8 @@ struct PrototypeSession {
             pages: pages,
             dataModel: spec.data,
             platformModel: spec.platformState,
-            eventData: platformEventData
+            eventData: platformEventData,
+            derivedValues: spec.derivedValues
         )
         var value: JSONValue?
         if operation != .remove {
@@ -785,6 +787,15 @@ struct PrototypeSession {
         }
         return (try? commitDataWrite(operation, path: path, value: value, where: match, member: action.member).get()) ??
             []
+    }
+
+    private func usesSecureDerivedValue(_ action: PrototypeAction, spec: PrototypeSpec) -> Bool {
+        guard let secure = spec.storage?.secure, !secure.isEmpty else { return false }
+        return [action.value, action.where?.equals].contains { binding in
+            guard let name = binding?.objectFields?["derived"]?.stringValue, let entry = spec.derive?[name]
+            else { return false }
+            return PrototypeDerive.stateKeys(entry).contains { secure.contains("state:\($0)") }
+        }
     }
 
     /// Applies one data write to the shown spec: the data change, the rebuilt drawn tree, the
@@ -1428,6 +1439,12 @@ enum PrototypeTestHooks {
 // MARK: Requests (#12529)
 
 extension PrototypeSession {
+    var platformInFlight: [String: UInt] {
+        platformCalls.values.reduce(into: [:]) { counts, pending in
+            counts[pending.job.call.moduleName, default: 0] += 1
+        }
+    }
+
     /// The commands for the request driver since the last call. A transition calls this on its new
     /// value before it is stored, so the driver sees exactly what that transition started or ended.
     mutating func takeRequestCommands() -> [PrototypeRequestCommand] {
@@ -1446,7 +1463,8 @@ extension PrototypeSession {
             pages: pages,
             dataModel: spec.data,
             platformModel: spec.platformState,
-            eventData: platformEventData
+            eventData: platformEventData,
+            derivedValues: spec.derivedValues
         )
         var events: [PrototypeEvent] = []
         let into = action.into
@@ -1680,6 +1698,7 @@ private struct EmitContextInputs: PrototypeEmitContextInputs {
     let dataModel: [String: JSONValue]?
     var platformModel: [String: JSONValue]?
     var eventData: JSONValue?
+    var derivedValues: [String: JSONValue]?
 
     func platform(_ pointer: String) -> JSONValue? { PrototypeDataPointer.resolve(platformModel, pointer: pointer) }
     func event(_ pointer: String) -> JSONValue? {
@@ -1691,6 +1710,11 @@ private struct EmitContextInputs: PrototypeEmitContextInputs {
     func state(_ key: String) -> JSONValue? { state[key] }
     func page(_ id: String) -> Int? { pages[id] }
     func data(_ pointer: String) -> JSONValue? { PrototypeDataPointer.resolve(dataModel, pointer: pointer) }
+    func derived(_ name: String) -> JSONValue? {
+        guard let value = derivedValues?[name], value != .null, value.numberValue?.isFinite != false
+        else { return nil }
+        return value
+    }
 }
 
 extension PrototypeSession {
@@ -1952,6 +1976,7 @@ extension PrototypeSession {
         fields["callId"] = .string(pending.job.call.callId)
         fields["call"] = .string(pending.job.call.call)
         fields["outcome"] = .string(fields["error"] == nil ? "success" : "error")
+        fields["inFlight"] = .number(Double(platformInFlight[pending.job.call.moduleName, default: 0]))
         return emit(kind: "emit", name: "prototype_platform", payload: .object(fields))
     }
 

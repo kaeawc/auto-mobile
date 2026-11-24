@@ -19,6 +19,8 @@ public struct PlatformCall: Equatable, Sendable {
     public let callId: String
     public let call: String
     public let args: [String: JSONValue]
+
+    var moduleName: String { String(call.prefix(while: { $0 != "." })) }
 }
 
 public enum PlatformCallResult: Equatable, Sendable {
@@ -161,6 +163,11 @@ public final class PrototypePlatformRegistry {
             scoped[module.name] = module
             owned.append(module)
         }
+        if modules["webview"] is PrototypeWebViewModule {
+            let module = PrototypeWebViewModule()
+            scoped[module.name] = module
+            owned.append(module)
+        }
         return PrototypePlatformRegistry(modules: scoped, parent: self, presentationModules: owned)
     }
 
@@ -200,6 +207,8 @@ public final class PrototypePlatformRegistry {
         let simulation = supportsSimulation ? [
             PrototypeAgentProtocol.platformSimulationCapability,
             PrototypeAgentProtocol.simulatePlatformRequest,
+            PrototypeAgentProtocol.platformOutcomesCapability,
+            PrototypeAgentProtocol.queueCallOutcomeRequest,
         ] : []
         let moduleCapabilities = modules.values.flatMap { module in
             (module as? PrototypeNotificationsModule)?.capabilities ?? [module.capability]
@@ -267,7 +276,8 @@ public final class PrototypePlatformRegistry {
         permissionAuthorities: [String: any PrototypePermissionAuthority] = [:],
         biometric: (any PrototypeBiometricSource)? = nil,
         secureStorage: (any PrototypeSecureValueStore)? = nil,
-        notifications: (any NotificationCenterClient)? = nil
+        notifications: (any NotificationCenterClient)? = nil,
+        webView: PrototypeWebViewModule? = nil
     )
         -> PrototypePlatformRegistry
     {
@@ -289,6 +299,7 @@ public final class PrototypePlatformRegistry {
             ))
         }
         if let notifications { modules.append(PrototypeNotificationsModule(client: notifications)) }
+        if let webView { modules.append(webView) }
         return PrototypePlatformRegistry(modules: modules, bundle: bundle)
     }
 

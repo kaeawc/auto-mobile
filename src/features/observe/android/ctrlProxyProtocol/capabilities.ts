@@ -1,3 +1,4 @@
+export const PROTOTYPE_PLATFORM_OUTCOMES_CAPABILITY = "prototype_platform_outcomes_v1";
 export const PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY = "prototype_platform_simulation_v1";
 export const PROTOTYPE_TIMERS_CAPABILITY = "prototype_timers_v1";
 /** Android control-proxy capability negotiation and request/response registries. */
@@ -96,6 +97,8 @@ export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
 /** setData/appendData/prependData/removeData on `/data`, each write reported as a `change` event. */
 export const PROTOTYPE_DATA_ACTIONS_CAPABILITY = "prototype_data_actions_v1";
 export const PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY = "prototype_data_actions_v2";
+/** A data action `value` of `{object: {member: binding}}` built from flat bindings (#18826). */
+export const PROTOTYPE_DATA_ACTIONS_V3_CAPABILITY = "prototype_data_actions_v3";
 /** The `request` action (#12523); see prototypeRequest.ts. A `via: "device"` one also needs the second. */
 export const PROTOTYPE_NETWORK_CAPABILITY = "prototype_network_v1";
 export const PROTOTYPE_NETWORK_DEVICE_CAPABILITY = "prototype_network_device_v1";
@@ -159,6 +162,12 @@ export const PROTOTYPE_CHART_CAPABILITY = "prototype_chart_v1";
 /** Chat-list scroll options and the `scrollTo` action (#14232); see prototypeChatScroll.ts. */
 export const PROTOTYPE_ROUTES_CAPABILITY = "prototype_routes_v1";
 export const PROTOTYPE_CHAT_SCROLL_CAPABILITY = "prototype_chat_scroll_v1";
+/**
+ * Advertised by an activity-hosted runtime (disposable app, ProtoViewer, an embedding app) whose
+ * process can hold a larger spec than the overlay (#18804). Its limits are the contract's
+ * `runtimeBudgets` entry of this name; a runtime without it keeps the contract `limits`.
+ */
+export const PROTOTYPE_LARGE_BUDGET_CAPABILITY = "prototype_large_budget_v1";
 
 /** Runs long-press and double-tap action lists on generic prototype gesture nodes. */
 export const PROTOTYPE_SCROLL_MOTION_CAPABILITY = "prototype_scroll_motion_v1";
@@ -487,6 +496,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   delete_saved_prototype: true,
   advance_prototype_clock: true,
   simulate_prototype_platform: true,
+  queue_prototype_call_outcome: true,
   clear_prototype_storage: true,
   put_prototype_asset: true,
   remove_prototype_asset: true,

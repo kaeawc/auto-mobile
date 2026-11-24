@@ -94,6 +94,24 @@ class PrototypeSensitiveSinkRulesTest {
   }
 
   @Test
+  fun taintFollowsDerivedInputsIntoRequestsAndDataCopies() {
+    val stateWrite = """{"type":"setState","key":"u","value":{"platform":"/auth/userId"}}"""
+    val dataWrite = """{"type":"setData","path":"/data/leak","value":{"derived":"user"}}"""
+    val derive = Json.parseToJsonElement("""{"user":{"of":{"state":"u"},"format":{"number":{}}}}""")
+    val direct = stateSpec(stateWrite, """{"derived":"user"}""")
+    val copy = stateSpec("$stateWrite,$dataWrite", """{"data":"/leak"}""")
+    for ((spec, path) in
+      listOf(direct to "root.onTap[1].query.q.derived", copy to "root.onTap[2].query.q")) {
+      val source = Json.parseToJsonElement(spec).jsonObject
+      val withDerive = JsonObject(source + ("derive" to derive))
+      assertEquals(
+        listOf(PrototypeSpecError(path, "Sensitive value cannot be bound into a request")),
+        sinkErrors(withDerive.toString()),
+      )
+    }
+  }
+
+  @Test
   fun stateTextPlatformPlaceholderReachesStorage() {
     val spec =
       stateSpec(

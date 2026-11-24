@@ -61,7 +61,9 @@ data class PrototypeRuntimeSnapshot(
 sealed interface PrototypeInteraction {
   /** Device observation and restored pager positions do not extend the host's idle expiry. */
   fun countsAsUserActivity(pages: Map<String, Int>): Boolean =
-    this !is DeviceState && (this !is PagerMotion || scrolling || pages[pager] != page)
+    this !is DeviceState &&
+      this !is WebNavigation &&
+      (this !is PagerMotion || scrolling || pages[pager] != page)
 
   data class Guarded(val identity: String, val interaction: PrototypeInteraction) :
     PrototypeInteraction
@@ -73,6 +75,11 @@ sealed interface PrototypeInteraction {
   data object Back : PrototypeInteraction
 
   data class Tap(val actions: List<PrototypeAction>) : PrototypeInteraction
+
+  data class WebNavigation(
+    val writes: Map<String, PrototypeScalar>,
+    val actions: List<PrototypeAction>,
+  ) : PrototypeInteraction
 
   data class DeviceState(val snapshot: JsonObject) : PrototypeInteraction
 
@@ -193,6 +200,12 @@ class PrototypeRuntime(
   private val uploadAssets: PrototypeAssetSource? = null,
   private val idGenerator: PrototypeIdGenerator = SystemPrototypeIdGenerator,
   private val generatedClock: PrototypeClock = PrototypeClock(clock),
+  /**
+   * The limits state and data writes are checked against (#18804): the overlay keeps the base
+   * budget, an activity-hosted runtime advertising `prototype_large_budget_v1` passes the large
+   * one.
+   */
+  private val budget: PrototypeRuntimeBudget = PrototypeRuntimeBudget.BASE,
 ) {
   private var actionContext = PrototypeActionContext(idGenerator, generatedClock)
 
@@ -210,7 +223,7 @@ class PrototypeRuntime(
 
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
-    PrototypeSpecValidator.prepareStateWrites(it, runtimeJson)
+    PrototypeSpecValidator.prepareStateWrites(it, runtimeJson, budget)
   }
 
   // A runtime is owned by one show; list disposal during navigation never clears its signatures.
@@ -234,6 +247,7 @@ class PrototypeRuntime(
 
   /** Called only after the host accepts the show. A preserving replacement seeds without firing. */
   suspend fun shown(preservingState: Boolean = false) {
+    platformDispatcher.outcomes.clear()
     // Posted first, so a realtime call this show makes queues behind its declarations.
     realtimeModule?.let {
       it.update(channelDeclarations(current.spec))
@@ -322,6 +336,19 @@ class PrototypeRuntime(
   fun timerReports(): List<PrototypeTimerReport> = timerEngine.reports()
 
   suspend fun advanceClock(ms: Int): Int = timerEngine.advance(ms)
+
+  /** Host-only outcome queue, scoped to this shown runtime. */
+  fun queueCallOutcome(call: String, outcome: JsonObject) {
+    check(current.active) { "Prototype is inactive" }
+    val owner =
+      requireNotNull(PrototypePlatformCalls.callOwner(call)) {
+        "Unknown platform call: $call"
+      }
+    require(owner in current.spec.requires?.platform.orEmpty()) {
+      "Declare $owner in requires.platform before simulation"
+    }
+    platformDispatcher.queueCallOutcome(call, outcome)
+  }
 
   /** Host-only injection, deliberately absent from the spec action vocabulary. */
   suspend fun simulatePlatformEvent(name: String, data: JsonObject): Boolean {
@@ -442,6 +469,7 @@ class PrototypeRuntime(
         is PrototypePermissionsModule -> it.session(requestScope)
         is PrototypeLocationModule -> it.session(requestScope)
         is PrototypeSensorsModule -> it.session(requestScope)
+        is PrototypeWebViewModule -> it.session()
         else -> it
       }
     }
@@ -505,8 +533,14 @@ class PrototypeRuntime(
       monotonicMs,
     )
 
+  private val platformReporting =
+    PrototypePlatformReporting(platformRegistry, platformDispatcher::inFlightByModule)
+
   private var platformModulesStarted = false
   private var platformForeground = true
+
+  fun platformRuntimeReport(runtime: PrototypePlatformReport.Runtime): PrototypePlatformReport =
+    platformReporting.report(runtime, if (platformForeground) "active" else "background")
 
   private fun locationModules(): List<PrototypeLocationModule> {
     return platformRegistry.modules.filterIsInstance<PrototypeLocationModule>()
@@ -710,6 +744,7 @@ class PrototypeRuntime(
     platformRegistry.modules.filterIsInstance<PrototypePermissionsModule>().forEach { it.detach() }
     locationModules().forEach { it.detach() }
     sensorsModules().forEach { it.detach() }
+    platformRegistry.modules.filterIsInstance<PrototypeWebViewModule>().forEach { it.close() }
     platformDispatcher.close()
     realtimeModule?.close()
     platformState.close()
@@ -800,13 +835,8 @@ class PrototypeRuntime(
       // eligible, preserve the existing Back dismissal rather than changing a hidden screen.
       PrototypeInteraction.Back -> if (!popTopmostStack()) dismiss()
       is PrototypeInteraction.Tap -> control(emptyMap(), interaction.actions)
-      is PrototypeInteraction.TimerFire -> {
-        try {
-          control(emptyMap(), interaction.actions)
-        } catch (error: IllegalArgumentException) {
-          warn("Refused timer fire: ${error.message}")
-        }
-      }
+      is PrototypeInteraction.WebNavigation -> control(interaction.writes, interaction.actions)
+      is PrototypeInteraction.TimerFire -> fireTimer(interaction.actions)
       is PrototypeInteraction.DeadTap -> deadTap(interaction)
       is PrototypeInteraction.PagerMotion ->
         if (!interaction.scrolling) setPage(interaction.pager, interaction.page)
@@ -841,6 +871,14 @@ class PrototypeRuntime(
           interaction.actions,
         )
       }
+    }
+  }
+
+  private suspend fun fireTimer(actions: List<PrototypeAction>) {
+    try {
+      control(emptyMap(), actions)
+    } catch (error: IllegalArgumentException) {
+      warn("Refused timer fire: ${error.message}")
     }
   }
 
@@ -1386,6 +1424,8 @@ class PrototypeRuntime(
     )
   }
 
+  private val actionDerivedValues = PrototypeDerivedValuesCache()
+
   /** Bindings read the committed values at the action, after the writes before it in the list. */
   private fun bindingInputs() =
     object : EmitContextInputs {
@@ -1399,6 +1439,12 @@ class PrototypeRuntime(
 
       override fun data(pointer: String): JsonElement? =
         PrototypeDataPointer.resolve(current.spec.data, pointer)
+
+      override fun derived(name: String): JsonElement? =
+        actionDerivedValues.evaluate(current.spec)[name]?.takeUnless { value ->
+          value == JsonNull ||
+            (value is JsonPrimitive && !value.isString && value.doubleOrNull?.isFinite() == false)
+        }
 
       override fun platform(pointer: String): JsonElement? =
         PrototypeDataPointer.resolve(current.platformState, pointer)
@@ -1466,11 +1512,11 @@ class PrototypeRuntime(
     write: PrototypeDataWrite,
   ): StagedWrite {
     val data =
-      when (val result = PrototypeDataWriter.apply(from.data, write)) {
+      when (val result = PrototypeDataWriter.apply(from.data, write, budget)) {
         is PrototypeDataWriteResult.Success -> result.data
         is PrototypeDataWriteResult.Failure -> return StagedWrite.Refused(result.error)
       }
-    prototypeListDataWriteError(from, data, write.path)?.let {
+    prototypeListDataWriteError(from, data, write.path, budget)?.let {
       return StagedWrite.Refused(
         PrototypeDataWriteError(PrototypeDataWriteErrorCode.INVALID_VALUE, it.message),
       )
@@ -1524,9 +1570,22 @@ class PrototypeRuntime(
     }
   }
 
+  /**
+   * A `{state}` binding of a secure key, a `{derived}` one reading such a key, or an `{object}`
+   * (#18826) with such a member.
+   */
   private fun isSecureStateBinding(binding: JsonObject?): Boolean {
-    val key = (binding?.get("state") as? JsonPrimitive)?.content ?: return false
-    return "state:$key" in current.spec.storage?.secure.orEmpty()
+    val secure = current.spec.storage?.secure.orEmpty()
+    if (binding == null || secure.isEmpty()) return false
+    (binding["object"] as? JsonObject)?.let { members ->
+      return members.values.any { isSecureStateBinding(it as? JsonObject) }
+    }
+    (binding["state"] as? JsonPrimitive)?.content?.let {
+      return "state:$it" in secure
+    }
+    val derivedName = (binding["derived"] as? JsonPrimitive)?.content ?: return false
+    val entry = current.spec.derive?.get(derivedName) ?: return false
+    return PrototypeDerive.stateInputs(entry).any { "state:$it" in secure }
   }
 
   private fun dataWrite(action: PrototypeAction): PrototypeDataWrite? {
@@ -1660,6 +1719,16 @@ class PrototypeRuntime(
     }
   }
 
+  private fun platformOutcomePayload(
+    call: PrototypePlatformDispatcher.Pending,
+    error: PlatformError?,
+    durationMs: Long,
+  ): JsonObject =
+    JsonObject(
+      platformCallPayload(call, error, durationMs) +
+        platformReporting.outcomeMetadata(call.action.call),
+    )
+
   /** Writes a call's result and metadata under `into`; returns the error to report. */
   private suspend fun writePlatformResult(
     call: PrototypePlatformDispatcher.Pending,
@@ -1723,7 +1792,7 @@ class PrototypeRuntime(
           emit(
             PrototypeEventKind.EMIT,
             PrototypePlatform.CALL_EVENT_NAME,
-            platformCallPayload(call, closed, duration),
+            platformOutcomePayload(call, closed, duration),
           )
         }
         return
@@ -1739,7 +1808,7 @@ class PrototypeRuntime(
       emit(
         PrototypeEventKind.EMIT,
         PrototypePlatform.CALL_EVENT_NAME,
-        platformCallPayload(call, error, duration),
+        platformOutcomePayload(call, error, duration),
       )
       runPlatformFollowUp(call, error)
     } finally {

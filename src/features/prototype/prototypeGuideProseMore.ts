@@ -121,7 +121,11 @@ Reduced scalars support the existing format, locale and timeZone options.
 Use a derived condition such as \`visibleWhen:{derived:"cartCount",gt:0}\`. These conditions compare
 raw values and follow their inputs. They accept equals, notEquals, gt, lt, empty, contains, startsWith,
 lengthGt and lengthLt.
-Collections, derived repeat items and derived conditions require \`prototype_derive_v1\`.
+Use \`{derived:"cartCount"}\` in data action values and selectors, emit context, request query
+entries and request body values (including form and multipart values). The action reads the
+current raw value. Use \`{key:"confirm",equalsKey:"password"}\` to compare two set state keys.
+Collections, derived repeat items, derived conditions, derived bindings and equalsKey require
+\`prototype_derive_v1\`.
 For two-level repeats, put \`repeat:{items:{field:"lines"},as:"line"}\` on an inner container.
 Each outer item must hold a lines array of at most 100 object rows; empty arrays draw no inner rows.
 The inner alias must differ from the outer alias and route. Inner templates can read both
@@ -242,7 +246,10 @@ written:
 
 \`value\` uses the emit.context binding forms except \`page\`: \`{value: json}\` is the literal,
 \`{state: key}\` reads state, \`{data: pointer}\` reads data, and \`{item: field}\` and
-\`{index: true}\` read the repeat row (repeat only). A written value must be data: strings, booleans,
+\`{index: true}\` read the repeat row (repeat only). \`{object: {title: {state: "draft"}, done: {value: false}}}\`
+writes an object built from 1-16 named members, each one of those five flat forms (no nesting), so an
+\`appendData\` of it adds a whole new row from a text field; an \`upsertData\` key must start with a member.
+A missing member source fails the write. A written value must be data: strings, booleans,
 finite numbers, arrays and objects, without null. Inside a repeat, a whole \`{index}\` segment of
 \`path\`, as in \`/data/cart/{index}\`, is bound to the current row; \`{index}\` anywhere else, or
 \`{alias.field}\`, is rejected.
@@ -298,8 +305,9 @@ has written a prototype's data, a patch with \`/data\` ops needs \`baseRevision\
 newer than that revision touched an overlapping path (\`data\` lists those paths). A \`show\` makes its
 own \`data\` authoritative again and clears the history.
 
-Data actions require \`prototype_data_actions_v1\`. A show or patch result that contains one is
-refused on a device without it, before anything is shown or sent.
+Data actions require \`prototype_data_actions_v1\`, and an \`{object}\` value also
+\`prototype_data_actions_v3\`. A show or patch result that contains one is refused on a device without
+it, before anything is shown or sent.
 
 
 ### Realtime channels
@@ -374,7 +382,7 @@ A spec reaches a platform feature through a module. Declare every module it uses
 - **Call.** \`{type:"platform", call:"<module>.<op>", args, into?, statusKey?, timeoutMs?, onSuccess?, onError?}\` in any action list. \`args\` are strict per call; values are \`{value}\`, \`{state}\`, \`{data}\`, \`{platform}\`, \`{item}\`/\`{index}\` in a repeat, or \`{event}\` in a handler. \`into\` (a \`/data\` path) and \`statusKey\` (a declared string state key that moves loading, then success or error) behave as for \`request\`. A failure writes one of unsupported, unavailable, permission_denied, invalid_args, cancelled, timeout, too_many_in_flight or platform_error to \`<into>__meta.error\`. Each finished call is an emit event \`prototype_platform\` (\`{callId, call, outcome, error?, durationMs}\`).
 - **Handler.** A root \`platform: {on: {"<module>.<event>": [actions]}}\`. Inside a handler only, \`{event: "/pointer"}\` reads the event's data. Handlers run atomically like a tap and may use \`push\`, \`pop\`, data actions and further calls. A delivered event is an emit event \`prototype_platform_event\` (\`{event, data, truncated?, simulated?}\`).
 - **Read.** \`/platform/<module>/<key>\` is device-owned, read-only JSON: \`{platform:/device/os}\` in text, \`{platform: "/device/widthClass", equals: "expanded"}\` as a condition, \`{platform: pointer}\` as a value. It is not patchable or stored and is not part of the \`/data\` revision log.
-- **Simulate.** \`prototype {action:"simulate",id,event:"test.tick",data:{count:7}}\` injects a known module event on Android and iOS with \`prototype_platform_simulation_v1\`. The module must opt in (debug \`test.tick\` does), and be declared in \`requires.platform\`. Data follows its event schema where defined, otherwise accepts any JSON object; the delivered payload including \`simulated:true\` must fit 4096 UTF-8 bytes. Injection updates module state, runs the ordinary handler and reports \`prototype_platform_event\`. Unsupported modules fail without delivery. Push and media events keep their dedicated routes. Call outcomes and \`platformMode\` remain unavailable.
+- **Simulate.** \`prototype {action:"simulate",id,event:"test.tick",data:{count:7}}\` injects a known module event on Android and iOS with \`prototype_platform_simulation_v1\`. The module must opt in (debug \`test.tick\` does), and be declared in \`requires.platform\`. Data follows its event schema where defined, otherwise accepts any JSON object; the delivered payload including \`simulated:true\` must fit 4096 UTF-8 bytes. Injection updates module state, runs the ordinary handler and reports \`prototype_platform_event\`. Unsupported modules fail without delivery. Push and media events keep their dedicated routes. With \`prototype_platform_outcomes_v1\`, use \`prototype {action:"simulate",id,call:"test.echo",outcome:{result:"fake"}}\` (or \`outcome:{error:{code:"unavailable",message:"Try again"}}\`) to queue up to 16 outcomes per call of a declared, simulation-enabled module, consumed in order by valid calls until the queue empties or the prototype is shown again or closed.
 - **Names.** Authored emit names cannot start with \`prototype_\`.
 
 Each module needs \`prototype_platform_v1\` plus its own capability; a device without either refuses show, patch and \`replaceNode\` and names the capability. The table below is generated from the contract, so it lists every module, call, event and key a spec may name; a device can run only the modules whose capabilities it advertises:

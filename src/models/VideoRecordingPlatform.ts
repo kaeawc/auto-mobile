@@ -3,15 +3,15 @@ import { PLATFORM_LABELS, type Platform } from "./Platform";
 
 /**
  * Platforms `videoRecording` captures: Android, and the Apple simulators `simctl io recordVideo`
- * drives (iOS and Apple TV). Watch and Vision Pro simulators are refused before any capture.
+ * drives (iOS, Apple TV and Apple Watch). Vision Pro simulators are refused before any capture.
  */
-export type VideoRecordingPlatform = "android" | "ios" | "tvos";
+export type VideoRecordingPlatform = "android" | "ios" | "tvos" | "watchos";
 
-/** Platforms captured by `simctl io <udid> recordVideo` (iOS and Apple TV simulators). */
+/** Platforms captured by `simctl io <udid> recordVideo` (iOS, Apple TV and Apple Watch simulators). */
 export type SimctlVideoPlatform = Exclude<VideoRecordingPlatform, "android">;
 
 export function isSimctlVideoPlatform(platform: string): platform is SimctlVideoPlatform {
-  return platform === "ios" || platform === "tvos";
+  return platform === "ios" || platform === "tvos" || platform === "watchos";
 }
 
 export function isVideoRecordingPlatform(platform: string): platform is VideoRecordingPlatform {
@@ -28,6 +28,6 @@ export function requireVideoRecordingPlatform(
   }
   throw new ActionableError(
     `${operation} is not supported on ${PLATFORM_LABELS[platform]} yet. ` +
-      "Target an Android, iOS or Apple TV device instead.",
+      "Target an Android, iOS, Apple TV or Apple Watch device instead.",
   );
 }

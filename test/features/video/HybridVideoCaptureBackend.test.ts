@@ -112,20 +112,22 @@ describe("HybridVideoCaptureBackend - Unit Tests", function () {
     expect(ffmpegBackend.stopCalls.length).toBe(0);
   });
 
-  test("routes an Apple TV simulator to the simctl recordVideo (ffmpeg) backend (#16725)", async function () {
-    const handle = await backend.start({
-      ...baseConfig,
-      device: { platform: "tvos", deviceId: "tv-udid", name: "Apple TV 4K" },
+  for (const device of [
+    { platform: "tvos", deviceId: "tv-udid", name: "Apple TV 4K" },
+    { platform: "watchos", deviceId: "watch-udid", name: "Apple Watch Series 10" },
+  ] as const) {
+    test(`routes a ${device.platform} simulator to the simctl recordVideo (ffmpeg) backend (#16725, #19056)`, async function () {
+      const handle = await backend.start({ ...baseConfig, device: { ...device } });
+
+      expect(ffmpegBackend.startCalls.length).toBe(1);
+      expect(platformBackend.startCalls.length).toBe(0);
+      expect(physicalIosBackend.startCalls.length).toBe(0);
+
+      await backend.stop(handle);
+
+      expect(ffmpegBackend.stopCalls.length).toBe(1);
     });
-
-    expect(ffmpegBackend.startCalls.length).toBe(1);
-    expect(platformBackend.startCalls.length).toBe(0);
-    expect(physicalIosBackend.startCalls.length).toBe(0);
-
-    await backend.stop(handle);
-
-    expect(ffmpegBackend.stopCalls.length).toBe(1);
-  });
+  }
 
   test("routes Android recording to ffmpeg backend when AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE=1", async function () {
     process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE = "1";

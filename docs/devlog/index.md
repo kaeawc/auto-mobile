@@ -16,6 +16,7 @@ regenerates the table below.
 | Date | Kind | Entry |
 | --- | --- | --- |
 | 2026-11-23 | decision | [XR headset hand and eye input over emulator gRPC](2026-11-23-xr-headset-hand-and-eye-input.md) |
+| 2026-11-23 | decision | [Apple Watch evidence tools, and no side button yet](2026-11-23-watchos-evidence-tools-and-side-button.md) |
 | 2026-11-23 | decision | [Reach Simulator render overlays through osascript](2026-11-23-simulator-render-overlays-osascript.md) |
 | 2026-11-23 | decision | [Read Simulator network activity with host tools](2026-11-23-simulator-network-activity-host-tools.md) |
 | 2026-11-23 | decision | [Keyboard control through CoreSimulator](2026-11-23-simulator-keyboard-coresimulator.md) |

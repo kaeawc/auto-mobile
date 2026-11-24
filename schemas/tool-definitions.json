@@ -2445,6 +2445,11 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
+          "type": "string",
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
+        },
         "baseline": {
           "type": "string",
           "minLength": 1,
@@ -2482,7 +2487,7 @@
               },
               "required": ["left", "top", "right", "bottom"],
               "additionalProperties": false,
-              "description": "Platform-native screen rectangle: Android pixels, iOS and tvOS points"
+              "description": "Platform-native screen rectangle: Android pixels, iOS, tvOS and watchOS points"
             }
           },
           "additionalProperties": false
@@ -2517,7 +2522,7 @@
                 },
                 "required": ["left", "top", "right", "bottom"],
                 "additionalProperties": false,
-                "description": "Platform-native screen rectangle: Android pixels, iOS and tvOS points"
+                "description": "Platform-native screen rectangle: Android pixels, iOS, tvOS and watchOS points"
               }
             },
             "additionalProperties": false
@@ -2544,10 +2549,6 @@
             }
           },
           "additionalProperties": false
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2685,7 +2686,12 @@
     },
     "_meta": {
       "automobile/deviceReadOnly": true,
-      "automobile/requires": ["platform:android", "platform:ios", "platform:tvos"]
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos"
+      ]
     }
   },
   {
@@ -66231,8 +66237,9 @@
           "enum": ["start", "stop"]
         },
         "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session. Name \"tvos\" for an Apple TV simulator; tools without tvOS support refuse it",
           "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "deviceId": {
           "type": "string"
@@ -66535,7 +66542,12 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios", "platform:tvos"]
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:watchos",
+        "platform:tvos"
+      ]
     }
   },
   {

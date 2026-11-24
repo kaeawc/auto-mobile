@@ -394,12 +394,19 @@ describe("a device-aware tool refuses a requested tvOS platform before session r
   });
 });
 
-test("tvOS opts into videoRecording and compareScreenshot (#16725)", () => {
+test("tvOS and watchOS opt into videoRecording and compareScreenshot (#16725, #19056)", () => {
   for (const tool of ["videoRecording", "compareScreenshot"]) {
-    expect(() => assertToolSupportsDevicePlatform(tool, appleTv)).not.toThrow();
-    expect(() => assertRequestedPlatformSupported(tool, { platform: "tvos" })).not.toThrow();
-    expect(APPLE_PLATFORM_SUPPORTED_TOOLS.watchos.has(tool)).toBe(false);
+    for (const [device, platform] of [
+      [appleTv, "tvos"],
+      [watch, "watchos"],
+    ] as const) {
+      expect(() => assertToolSupportsDevicePlatform(tool, device)).not.toThrow();
+      expect(() => assertRequestedPlatformSupported(tool, { platform })).not.toThrow();
+    }
     expect(APPLE_PLATFORM_SUPPORTED_TOOLS.visionos.has(tool)).toBe(false);
+    expect(() => assertToolSupportsDevicePlatform(tool, visionPro)).toThrow(
+      new ActionableError(unsupportedPlatformToolMessage(tool, "visionos")),
+    );
   }
 });
 

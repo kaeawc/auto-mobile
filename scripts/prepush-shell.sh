@@ -498,6 +498,12 @@ for path in "${changed_files[@]}"; do
   esac
 
   case "${path}" in
+    mkdocs.yml|docs/devlog/*|scripts/docs/generate-devlog-index.ts)
+      add_check "devlog-index"
+      ;;
+  esac
+
+  case "${path}" in
     docs/*.md|scripts/docs/banned-phrases.json|scripts/docs/banned-phrases-allowlist.json)
       add_check "docs-banned-phrases"
       ;;

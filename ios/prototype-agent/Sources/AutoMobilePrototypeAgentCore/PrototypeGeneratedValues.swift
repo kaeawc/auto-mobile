@@ -113,8 +113,13 @@ enum PrototypeGeneratedValues {
     static func bindings(_ action: [String: JSONValue]) -> [JSONValue] {
         let type = action["type"]?.stringValue ?? ""
         var result: [JSONValue] = []
-        if ["setData", "appendData", "prependData", "upsertData", "setState"].contains(type),
-           let value = action["value"]
+        // An `{object}` data value contributes its member bindings in sorted name order (#18826).
+        if ["setData", "appendData", "prependData", "upsertData"].contains(type),
+           let members = action["value"]?.objectFields?["object"]?.objectFields
+        {
+            result += members.keys.sorted().compactMap { members[$0] }
+        } else if ["setData", "appendData", "prependData", "upsertData", "setState"].contains(type),
+                  let value = action["value"]
         {
             result.append(value)
         }

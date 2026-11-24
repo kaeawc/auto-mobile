@@ -46,8 +46,9 @@ host's traversal order; the strict boundary also enforces the host data byte-cos
 
 Advertises `prototype_data_actions_v1` for `setData`, `appendData`, `prependData`, `removeData`
 ([contract](../android/prototype-ux-actions.md#data-actions-12519)), plus `prototype_data_actions_v2`
-for keyed writes with `where` and optional set `member`, generated value bindings and keyed request into. The `PrototypeRepeat` type binds a whole `{index}`
-path segment and `{item}`/`{index}` values per row at expansion, so row actions arrive concrete.
+for keyed writes with `where` and optional set `member`, generated value bindings and keyed request into, and
+`prototype_data_actions_v3` for `{object}` values. The `PrototypeRepeat` type binds a whole `{index}`
+path segment and `{item}`/`{index}` values, including `{object}` members, per row at expansion, so row actions arrive concrete.
 
 Generated bindings follow the shared [action-list scope rules](../android/prototype-ux-actions.md#data-actions-12519):
 ids and time resolve once on the device, requests capture lastGenerated for their callbacks, and
@@ -55,7 +56,7 @@ change events carry resolved values to both host mirrors. An unset read is `last
 Keyed requests use the [shared request rules](../android/prototype-ux-data-network.md#data-storage-and-network-12531),
 including metadata beside the array and secure selector guards.
 
-The `PrototypeSession` type resolves `{value}`/`{state}`/`{data}` and applies `PrototypeDataWrite` (twin of the
+The `PrototypeSession` type resolves `{value}`/`{state}`/`{data}` (each `{object}` member the same way) and applies `PrototypeDataWrite` (twin of the
 host's `applyPrototypeDataWrite`: codes `invalid_path`, `invalid_value`, `not_found`, `ambiguous_match`, `not_array`,
 `limit_exceeded`; `MAX_PROTOTYPE_DATA_WRITE_BYTES`). It then rebuilds the tree from the authored root with
 `PrototypeSpec.replacingData`, so data text, repeat rows and conditions refresh. The session refuses a write when it
@@ -204,6 +205,7 @@ Android doc, [Data, storage and network](../android/prototype-ux-data-network.md
 | ----------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------- |
 | `prototype_data_actions_v1`   | `setData`, `appendData`, `prependData`, `removeData`                 | [Data actions capability](#data-actions-capability)            |
 | `prototype_data_actions_v2`   | Keyed `setData`, `removeData`                                        | [Data actions capability](#data-actions-capability)            |
+| `prototype_data_actions_v3`   | `{object}` data-action values                                        | [Data actions capability](#data-actions-capability)            |
 | `prototype_storage_v1`        | root `storage` block, `inspect` `storage`, `clear_prototype_storage` | Sandbox `Application Support/AutoMobilePrototypeAgent/storage` |
 | `prototype_network_v1`        | `request` with `via: "host"`                                         | [Request action capability](#request-action-capability)        |
 | `prototype_network_device_v1` | `request` with `via: "device"`                                       | Dedicated ephemeral `URLSession`                               |

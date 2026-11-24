@@ -84,6 +84,9 @@ internal object PrototypeDataRules {
     path: String,
     budget: PrototypeRuntimeBudget,
   ): PrototypeSpecError? {
+    ((value["value"] as? JsonObject)?.get("object") as? JsonObject)?.let {
+      return PrototypeObjectDataValue.literalError(value, it, path, budget)
+    }
     val type = value.text("type")
     val literal = (value["value"] as? JsonObject)?.get("value")
     if (type == "upsertData" && literal != null) {

@@ -69,8 +69,26 @@ export const dataActionPathSchema = z
   .string()
   .min(1)
   .max(contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5);
+/**
+ * `{object: {member: binding}}` (#18826): a data-action value built from named members, each one
+ * flat binding form. It is valid only as a data action's `value`, not in the shared binding slots
+ * (emit context, `where.equals`, request headers, route params), and members never nest.
+ */
+export const prototypeDataObjectValueSchema = z
+  .object({
+    object: prototypeOwnKeyRecordV3(
+      z.string().regex(prototypeContractPatterns.pathKey),
+      prototypeDataActionValueSchema,
+    ).refine((members) => {
+      const count = Object.keys(members).length;
+      return count >= 1 && count <= contract.limits.MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES;
+    }),
+  })
+  .strict();
+export type PrototypeDataObjectValue = z.infer<typeof prototypeDataObjectValueSchema>;
 type PrototypeDataActionBinding =
   | PrototypeDataActionValue
+  | PrototypeDataObjectValue
   | z.infer<typeof prototypeMatchBindingSchema>
   | { event: string }
   | { platform: string };
@@ -81,6 +99,7 @@ export const dataActionFields: {
   path: dataActionPathSchema,
   value: z.union([
     ...prototypeDataActionValueSchema.options,
+    prototypeDataObjectValueSchema,
     prototypeMatchBindingSchema,
     z.object({ event: z.union([z.literal(""), pointerSchema]) }).strict(),
     z.object({ platform: pointerSchema }).strict(),

@@ -174,6 +174,8 @@ enum PrototypeDerivedValidator {
         case let type? where PrototypeDataWrite.actionTypes.contains(type):
             binding(action["where"]?.objectFields?["equals"], "\(path).where.equals")
             binding(action["value"], "\(path).value")
+            // `{object}` members (#18826) bind like a top-level value.
+            entries(action["value"]?.objectFields?["object"], "\(path).value.object")
         default:
             break
         }

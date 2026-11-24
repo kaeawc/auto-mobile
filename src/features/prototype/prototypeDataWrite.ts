@@ -350,11 +350,18 @@ function writtenData(
   return { success: true, data: next as PrototypeData, trimmed };
 }
 
-/** The binding forms a device resolves at the action; `item` and `index` are bound by repeat first. */
-export type PrototypeRuntimeDataActionValue = Exclude<
+type PrototypeRuntimeFlatValue = Exclude<
   PrototypeDataActionValue,
   { item: string } | { index: true }
 >;
+
+/**
+ * The binding forms a device resolves at the action; `item` and `index` are bound by repeat first,
+ * including inside an `{object}` value (#18826), whose members are flat forms.
+ */
+export type PrototypeRuntimeDataActionValue =
+  | PrototypeRuntimeFlatValue
+  | { object: Record<string, PrototypeRuntimeFlatValue> };
 
 export interface PrototypeDataWriteInputs {
   state: Readonly<Record<string, PrototypeJson>>;
@@ -372,6 +379,9 @@ export function resolvePrototypeDataWriteValue(
   binding: PrototypeRuntimeDataActionValue,
   inputs: PrototypeDataWriteInputs,
 ): PrototypeDataWriteValueResult {
+  if ("object" in binding) {
+    return resolveObjectValue(binding.object, inputs);
+  }
   const generated = resolveGeneratedBinding(binding, inputs.context);
   if (generated) {
     return generated;
@@ -397,7 +407,10 @@ export function resolvePrototypeDataWriteValue(
       : { success: true, value };
   }
   if (!("data" in binding)) {
-    return { success: false, error: { code: "invalid_value", message: "Invalid binding" } };
+    return {
+      success: false,
+      error: { code: "invalid_value", message: "Unknown data write value binding" },
+    };
   }
   const value = resolvePrototypeDataPointer(inputs.data, binding.data);
   return value === undefined
@@ -406,6 +419,31 @@ export function resolvePrototypeDataWriteValue(
         error: { code: "not_found", message: `Data pointer ${binding.data} does not exist` },
       }
     : { success: true, value: value as PrototypeJson };
+}
+
+/**
+ * Each member resolves like a top-level value, in sorted name order (iOS cannot see authored order,
+ * and a `{generate}` member must precede a `{lastGenerated}` one identically everywhere); the first
+ * unresolved one fails the write.
+ */
+function resolveObjectValue(
+  members: Record<string, PrototypeRuntimeFlatValue>,
+  inputs: PrototypeDataWriteInputs,
+): PrototypeDataWriteValueResult {
+  const value: Record<string, PrototypeJson> = {};
+  for (const name of Object.keys(members).sort()) {
+    const member = resolvePrototypeDataWriteValue(members[name], inputs);
+    if (!member.success) {
+      return member;
+    }
+    Object.defineProperty(value, name, {
+      value: member.value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return { success: true, value };
 }
 
 function resolveGeneratedBinding(
@@ -523,14 +561,8 @@ function applyResolvedDataAction(
         maxItems,
       });
     case "prependData":
-      return Array.isArray(value)
-        ? applyPrototypeDataWrite(data, {
-            op: "prepend",
-            path,
-            value: value,
-            maxItems,
-          })
-        : refused("invalid_value", "prependData requires an array");
+      // One row, wrapped as the page `[row]` exactly as the Android and iOS runtimes do (#16715).
+      return applyPrototypeDataWrite(data, { op: "prepend", path, value: [value], maxItems });
     default:
       return refused("invalid_value", "Not a data action");
   }

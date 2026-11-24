@@ -115,20 +115,23 @@ internal object PrototypeCopyTaint {
           else null
         if (into == null) return@flatMap emptyList()
         val raw = action.value["value"]
-        val read = raw as? JsonObject
         val sources =
           if (state) stateReads(raw, action.path, context)
-          else dataReads(read, action.path, context)
+          else dataReads(raw as? JsonObject, action.path, context)
         sources.map { (source, from) -> Copy(into, source, from, state) }
       }
       .sortedBy { it.intoState }
 
+  /** A data write's value reads; an `{object}` value (#18826) reads every member. */
   private fun dataReads(
     raw: JsonObject?,
     path: String,
     context: PrototypeStateChecks.Context,
   ): List<Pair<String, String>> {
     raw ?: return emptyList()
+    (raw["object"] as? JsonObject)?.let { members ->
+      return members.values.flatMap { dataReads(it as? JsonObject, path, context) }
+    }
     raw.text("derived")?.let { name ->
       return PrototypeDerivedRules.inputs(context.root, name)
     }

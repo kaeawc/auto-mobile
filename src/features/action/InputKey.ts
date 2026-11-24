@@ -11,6 +11,16 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import {
+  type IosSimulatorRawInput,
+  type SimHidRouteMode,
+} from "../../utils/ios/simHid/IosSimulatorRawInput";
+import {
+  isCtrlProxyUnreachable,
+  logSimHidUnavailable,
+  resolveIosRawInput,
+  routeSimulatorRawInput,
+} from "./simHidRouting";
+import {
   isRunnerFocusQueryFailed,
   RUNNER_FOCUS_QUERY_FAILED_FALLBACK_MESSAGE,
 } from "../observe/ios/runnerErrorCodes";
@@ -243,6 +253,7 @@ export class InputKey {
   private readonly frameContextValidator?: FrameContextValidator;
   private readonly timer: Timer;
   private readonly iosClientFactory: InputKeyIosClientFactory;
+  private readonly iosRawInput?: IosSimulatorRawInput;
 
   constructor(
     device: BootedDevice,
@@ -251,11 +262,14 @@ export class InputKey {
       frameContextValidator,
       timer = defaultTimer,
       iosClientFactory = defaultInputKeyIosClientFactory,
+      iosRawInput,
     }: {
       adbFactory?: AdbClientFactory;
       frameContextValidator?: FrameContextValidator;
       timer?: Timer;
       iosClientFactory?: InputKeyIosClientFactory;
+      /** The iOS Simulator HID route (#19118); `null` disables it. */
+      iosRawInput?: IosSimulatorRawInput | null;
     } = {},
   ) {
     this.adbFactory = adbFactory;
@@ -263,6 +277,7 @@ export class InputKey {
     this.timer = timer;
     this.iosClientFactory = iosClientFactory;
     this.device = device;
+    this.iosRawInput = resolveIosRawInput(device, iosRawInput);
     this.adb = adbFactory.create(device);
   }
 
@@ -442,21 +457,65 @@ export class InputKey {
     key: InputKeyName,
     modifiers: readonly InputKeyModifier[],
     timeoutMs?: number,
-    { signal, onDispatch }: InputKeyRouting = {},
+    routing: InputKeyRouting = {},
+  ): Promise<InputKeyResult> {
+    const uniqueModifiers = [...new Set(modifiers)];
+    // The runner verifies meta+h reached the home screen; the HID helper cannot.
+    const input = key === "h" && uniqueModifiers.includes("meta") ? undefined : this.iosRawInput;
+    if (!input) {
+      return this.pressIosRunner({ key, modifiers: uniqueModifiers, timeoutMs }, routing);
+    }
+    let dispatched = false;
+    let unreachable = false;
+    return routeSimulatorRawInput<InputKeyResult>({
+      label: `key ${key}`,
+      signal: routing.signal,
+      hid: (mode) =>
+        this.pressSimulatorHid(input, { key, modifiers: uniqueModifiers, mode }, routing),
+      ctrlProxy: (markDispatched) =>
+        this.pressIosRunner(
+          { key, modifiers: uniqueModifiers, timeoutMs },
+          {
+            ...routing,
+            onDispatch: () => {
+              dispatched = true;
+              markDispatched();
+              routing.onDispatch?.();
+            },
+          },
+          (reply) => {
+            unreachable = isCtrlProxyUnreachable(reply, dispatched);
+          },
+        ),
+      unreachable: () => unreachable,
+    });
+  }
+
+  private async pressIosRunner(
+    {
+      key,
+      modifiers,
+      timeoutMs,
+    }: { key: InputKeyName; modifiers: InputKeyModifier[]; timeoutMs: number | undefined },
+    { signal, onDispatch }: InputKeyRouting,
+    onReply: (reply: {
+      success: boolean;
+      dispatched?: boolean;
+      acknowledged?: boolean;
+    }) => void = () => {},
   ): Promise<InputKeyResult> {
     let result: Awaited<ReturnType<InputKeyIosClient["requestPressKey"]>>;
     try {
       throwIfAborted(signal);
-      result = await this.iosClientFactory(this.device).requestPressKey(
-        key,
-        [...new Set(modifiers)],
-        timeoutMs,
-        { signal, onDispatch },
-      );
+      result = await this.iosClientFactory(this.device).requestPressKey(key, modifiers, timeoutMs, {
+        signal,
+        onDispatch,
+      });
     } catch (error) {
       throwIfAborted(signal);
       const message = errorMessage(error);
       logger.warn(`iOS input/key failed for ${key}: ${message}`, error);
+      onReply({ success: false });
       return {
         success: false,
         key,
@@ -464,10 +523,33 @@ export class InputKey {
         error: `Failed to press key "${key}" on iOS: ${message}`,
       };
     }
+    onReply(result);
     if (!result.success && result.dispatched && result.acknowledged === false) {
       throw InputKey.indeterminateError(result.error ?? "unknown error");
     }
     return iosInputKeyResult(key, result);
+  }
+
+  /** A key through the iOS Simulator HID helper, or undefined when it sent nothing. */
+  private async pressSimulatorHid(
+    input: IosSimulatorRawInput,
+    {
+      key,
+      modifiers,
+      mode,
+    }: { key: InputKeyName; modifiers: readonly InputKeyModifier[]; mode: SimHidRouteMode },
+    { signal, onDispatch }: InputKeyRouting,
+  ): Promise<InputKeyResult | undefined> {
+    const outcome = await input.key(key, modifiers, { mode, signal, onDispatch });
+    switch (outcome.status) {
+      case "delivered":
+        return { success: true, key, keyCode: key };
+      case "indeterminate":
+        throw InputKey.indeterminateError(outcome.reason);
+      case "unavailable":
+        logSimHidUnavailable("key", mode, outcome.reason);
+        return undefined;
+    }
   }
 
   private async validateFrameContext(

@@ -1,4 +1,5 @@
 import { resolvePrototypeDataPointer } from "./prototypeData";
+import type { PrototypeJson } from "./prototypeJson";
 import { record } from "./prototypeTemplate";
 import type { PrototypeDerivedEntry } from "./prototypeFormatSchema";
 import { prototypeRenderLimits } from "./prototypeRenderContract.generated";
@@ -134,19 +135,38 @@ function collect(entry: Collection, data: unknown, state: Record<string, unknown
     : 0;
 }
 
-function inputs(entry: PrototypeDerivedEntry): { pointer?: string; keys: string[] } {
-  if ("collection" in entry) {
-    return {
-      pointer: entry.collection.of.data,
-      keys: (entry.collection.where ?? []).flatMap((clause) =>
-        "state" in clause.value ? [clause.value.state] : [],
-      ),
-    };
-  }
-  return {
-    pointer: "data" in entry.of ? entry.of.data : undefined,
-    keys: "state" in entry.of ? [entry.of.state] : [],
-  };
+function inputs(raw: unknown): { pointer?: string; keys: string[] } {
+  const entry = record(raw);
+  const collection = record(entry?.collection);
+  const source = record(collection ? collection.of : entry?.of);
+  const pointer = typeof source?.data === "string" ? source.data : undefined;
+  const keys =
+    typeof source?.state === "string" ? [source.state] : collectionStateKeys(collection?.where);
+  return { pointer, keys };
+}
+
+function collectionStateKeys(where: unknown): string[] {
+  return (Array.isArray(where) ? where : []).flatMap((clause) => {
+    const value = record(record(clause)?.value);
+    return typeof value?.state === "string" ? [value.state] : [];
+  });
+}
+
+/** State and data reads of a raw derived binding, including collection filter inputs. */
+export function prototypeDerivedInputs(derive: unknown, name: string) {
+  const entries = record(derive);
+  return inputs(entries && Object.hasOwn(entries, name) ? entries[name] : undefined);
+}
+
+/** Looks up a raw derived value at the action. Missing native cache entries may be null. */
+export function resolvePrototypeDerivedBinding(
+  derived: Readonly<Record<string, unknown>> | undefined,
+  name: string,
+): PrototypeJson | undefined {
+  const value = derived && Object.hasOwn(derived, name) ? derived[name] : undefined;
+  return value === null || (typeof value === "number" && !Number.isFinite(value))
+    ? undefined
+    : (value as PrototypeJson | undefined);
 }
 
 function affected(entry: PrototypeDerivedEntry, changed: PrototypeDeriveChanges): boolean {

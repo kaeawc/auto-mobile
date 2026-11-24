@@ -239,7 +239,8 @@ data class PrototypeReplaceAction(
  * `setData`, `appendData` and `removeData` change the prototype's own `/data` on the device
  * (`prototype_data_actions_v1`, #12519). [path] is `/data/<RFC 6901 pointer>`; inside a `repeat`, a
  * whole `{index}` segment binds to the current row. [value] is an emit-context binding without
- * `page`: `{value}`, `{state}`, `{data}` and, in a repeat, `{item}` or `{index}`.
+ * `page`: `{value}`, `{state}`, `{data}` and, in a repeat, `{item}` or `{index}`; or (with
+ * `prototype_data_actions_v3`, #18826) `{object}` whose members are each one of those forms.
  */
 @SerialName("setData")
 @Serializable
@@ -2236,12 +2237,16 @@ data class PrototypePlatformHandlers(
   val on: Map<String, List<PrototypeAction>>,
 )
 
-/** The root `requires` block (#14294): platform modules, permissions and background needs. */
+/**
+ * The root `requires` block (#14294): platform modules, permissions, background needs and explicit
+ * capabilities.
+ */
 @Serializable
 data class PrototypeRequires(
   val platform: List<String>? = null,
   val permissions: List<PrototypePermissionRequirement>? = null,
   val background: List<String>? = null,
+  val capabilities: List<String> = emptyList(),
 )
 
 /** One declared permission: a canonical [name] and the [purpose] shown to the user. */
@@ -2640,6 +2645,7 @@ data class PrototypeCondition(
   val lengthGt: Int? = null,
   val lengthLt: Int? = null,
   val derived: String? = null,
+  val equalsKey: String? = null,
 )
 
 @Serializable

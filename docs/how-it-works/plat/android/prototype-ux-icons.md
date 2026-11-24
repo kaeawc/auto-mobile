@@ -16,7 +16,7 @@ reported in `missingAssets`. Bytes, MIME types, cache paths and screenshot handl
 properties.
 
 The remote-image contract requires `prototype_remote_image_v1` for any `url`, `placeholder`,
-`error`, `crossfade` or `via` field. Android advertises and implements it; iOS and web support validation only.
+`error`, `crossfade` or `via` field. Android and iOS advertise and implement it; web supports validation only.
 Refused specs must replace `url` and remote-image options with a bundled `asset`.
 `url` is 1–2048 UTF-16 units and supports state, data, repeat and route text bindings.
 Only a whole-field binding skips static URL checks; literal text outside it still requires a valid URL.
@@ -34,14 +34,16 @@ The loader contract caps each download at 8 MiB, Android memory at one-eighth of
 and iOS memory at 64 MiB. The per-app disk cache holds 128 MiB keyed by URL; concurrent loads are capped at six.
 The accessibility state-description contract is `loading|loaded|error`; inspect's per-prototype
 image counts are `{loaded, failed, pending}`. URLs must never enter accessibility text, observe or
-events. Android loads device URLs through the request transport with strict public-address egress checks,
+events. iOS does not report inspect image counts yet.
+
+Android loads device URLs through the request transport with strict public-address egress checks,
 DNS and socket validation, and the asset renderer's sampled layout-size decoder. Loading and errors draw the authored asset or color fallback; crossfade
 respects reduced motion.
 
 Inspect reports counts for mounted remote image instances as `images`.
 Loopback HTTP is enabled only in debug builds, excluding protected daemon ports. Embedded apps
 provide a device transport implementing `PrototypeRemoteImageProvider`; disabling device networking disables
-remote loads. A saved viewer with an injected device client uses only that client's supplied image loader; without one it shows the fallback. Host fetch-and-upload and the iOS loader remain separate runtimes. See the [remote-image decision](../../../devlog/2026-11-05-prototype-ux-remote-image-urls.md).
+remote loads. A saved viewer with an injected device client uses only that client's supplied image loader; without one it shows the fallback. Host fetch-and-upload remains a separate runtime. See the [remote-image decision](../../../devlog/2026-11-05-prototype-ux-remote-image-urls.md).
 
 ## Asset transport (#9301)
 

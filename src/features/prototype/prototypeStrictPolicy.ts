@@ -1,3 +1,5 @@
+import { prototypeDeclaredCapabilities } from "./prototypeDeclaredCapabilities";
+import { prototypeDerivedInputs } from "./prototypeDerive";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeMapMarkerAssetsError } from "./prototypeMap";
 import {
@@ -11,9 +13,11 @@ import {
   prototypeDataPathPointer,
   prototypeDataPlaceholders,
   prototypePlatformPlaceholders,
+  PrototypeRepeatData,
 } from "./prototypeData";
 import { parsePrototypeStorageKey } from "./prototypeStorage";
 import { prototypeShaderFields } from "./prototypeShaders";
+import { PROTOTYPE_LARGE_BUDGET, type PrototypeRuntimeBudget } from "./prototypeRuntimeBudget";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { repeatErrors, repeatFieldReferences, repeatKeyInstances } from "./prototypeRepeat";
@@ -40,6 +44,8 @@ export interface PrototypeStrictOptions {
   library?: boolean;
   /** Complete uploaded asset inventory, when statically known. */
   shareAssetIds?: readonly string[];
+  /** The target runtime's budget (#18804); the base budget when absent. */
+  budget?: PrototypeRuntimeBudget;
 }
 
 /** Host/device capability negotiation and the additional unprivileged import boundary. */
@@ -145,7 +151,12 @@ export function prototypeSensitiveSinkScan(spec: unknown): {
   sinkFields.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   // Direct warning callers may precede repeat validation. Keep their authored-text scan
   // for invalid repeats; the binder (including the budget probe) requires valid repeats.
-  const validRepeats = repeatErrors(spec) === undefined;
+  // The validator already applied the target's list budget; this only asks if repeats are sound.
+  const validRepeats =
+    repeatErrors(
+      spec,
+      new PrototypeRepeatData(object(spec)?.data, PROTOTYPE_LARGE_BUDGET.MAX_PROTOTYPE_LIST_ITEMS),
+    ) === undefined;
   if (validRepeats) {
     const budgetError = secureScanBudgetError(spec, sinkFields);
     if (budgetError) {
@@ -187,9 +198,11 @@ export function prototypeSensitiveSinkScan(spec: unknown): {
     }
     const boundTexts = texts.get(field.path) ?? [field.text];
     // A key field reads the named state entry; text interpolates `{key}` state placeholders.
-    const readsTaintedState = field.key
-      ? boundTexts.some((key) => stateIndex.key(key))
-      : !field.pointerSource && boundTexts.some((text) => stateIndex.text(text));
+    const readsTaintedState = field.derivedKeys
+      ? field.derivedKeys.some((key) => stateIndex.key(key))
+      : field.key
+        ? boundTexts.some((key) => stateIndex.key(key))
+        : !field.pointerSource && boundTexts.some((text) => stateIndex.text(text));
     if (field.key) {
       return readsTaintedState ? [sinkError(field.path)] : [];
     }
@@ -610,6 +623,7 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
     (field) =>
       // mapBinding visits only the state key of request/data/emit/platform value bindings.
       (field.key && field.path.endsWith(".state")) ||
+      field.derivedKeys?.length ||
       inRequest(field.path) ||
       sharePaths.has(field.path),
   );
@@ -627,7 +641,12 @@ function secureLibraryError(spec: unknown): PrototypeValidationError | undefined
   );
   for (const { value, located: field } of instances) {
     const text = String(value.stateKey);
-    if (field.key ? secure.has(text) : [...secure].some((key) => text.includes(`{${key}}`))) {
+    const readsSecure = field.derivedKeys
+      ? field.derivedKeys.some((key) => secure.has(key))
+      : field.key
+        ? secure.has(text)
+        : [...secure].some((key) => text.includes(`{${key}}`));
+    if (readsSecure) {
       return {
         path: field.path,
         message: inRequest(field.path)
@@ -667,6 +686,7 @@ interface LibraryField {
   key: boolean;
   pointerSource?: "data" | "platform";
   itemBinding?: boolean;
+  derivedKeys?: readonly string[];
 }
 export interface DataWrite {
   /** The `/data` pointer written, or the state key when `intoState` is set. */
@@ -678,6 +698,20 @@ export interface DataWrite {
 }
 
 type CopyRead = Pick<DataWrite, "source" | "from">;
+
+const OBJECT_MEMBER_VALUE = /\.value\.object\.[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * The action path a data value read at `at` belongs to: `<action>.value`, or an `{object}` member
+ * at `<action>.value.object.<member>` (#18826).
+ */
+function dataValuePrefix(at: string): string | undefined {
+  const member = OBJECT_MEMBER_VALUE.exec(at);
+  if (member) {
+    return at.slice(0, member.index);
+  }
+  return at.endsWith(".value") ? at.slice(0, -".value".length) : undefined;
+}
 
 /**
  * Pairs a data action's `path` (or a `setState`'s `key`) with its `value` read; both are visited
@@ -692,7 +726,10 @@ class DataCopies {
   private readonly stateReads = new Map<string, CopyRead[]>();
   private readonly repeats: { path: string; from: string; alias: string }[];
 
-  constructor(nodes: readonly Located[]) {
+  constructor(
+    nodes: readonly Located[],
+    private readonly derive: unknown,
+  ) {
     this.repeats = nodes.flatMap(({ value, path }) => {
       const repeat = object(value.repeat);
       const from = object(repeat?.items)?.path;
@@ -715,8 +752,9 @@ class DataCopies {
     if (kind === "operand" && at.endsWith(".value")) {
       this.visitStateValue(raw, at.slice(0, -".value".length));
     }
-    if (kind === "emitBinding" && at.endsWith(".value")) {
-      this.visitDataValue(object(raw), at);
+    const prefix = kind === "emitBinding" ? dataValuePrefix(at) : undefined;
+    if (prefix !== undefined) {
+      this.visitDataValue(object(raw), at, prefix);
     }
   }
 
@@ -736,28 +774,45 @@ class DataCopies {
     ];
   }
 
-  private visitDataValue(binding: Record<string, unknown> | undefined, at: string): void {
+  /** An `{object}` value's members all read into one action, so reads accumulate per prefix. */
+  private addReads(prefix: string, reads: CopyRead[]): void {
+    this.reads.set(prefix, [...(this.reads.get(prefix) ?? []), ...reads]);
+  }
+
+  private visitDataValue(
+    binding: Record<string, unknown> | undefined,
+    at: string,
+    prefix: string,
+  ): void {
     for (const source of ["data", "platform"] as const) {
       const from = binding?.[source];
       if (typeof from === "string") {
-        this.reads.set(at.slice(0, -".value".length), [{ source, from }]);
+        this.addReads(prefix, [{ source, from }]);
       }
     }
-    if (typeof binding?.item === "string") {
-      const scopes = this.scopes(at);
-      if (scopes.length > 0) {
-        this.reads.set(
-          at.slice(0, -".value".length),
-          scopes.map(({ from }) => ({ source: "data", from })),
-        );
+    if (typeof binding?.derived === "string") {
+      const { pointer, keys } = prototypeDerivedInputs(this.derive, binding.derived);
+      const reads = keys.map((from): CopyRead => ({ source: "state", from }));
+      if (pointer !== undefined) {
+        reads.push({ source: "data", from: pointer });
       }
+      this.addReads(prefix, reads);
+    }
+    if (typeof binding?.item === "string") {
+      this.addReads(
+        prefix,
+        this.scopes(at).map(({ from }): CopyRead => ({ source: "data", from })),
+      );
     }
   }
 
   /** A data action's `{state}` value reads a key; a `setState`'s `key` names its destination. */
   private visitKey(key: string, at: string): void {
-    if (at.endsWith(".value.state")) {
-      this.reads.set(at.slice(0, -".value.state".length), [{ source: "state", from: key }]);
+    const prefix = at.endsWith(".state")
+      ? dataValuePrefix(at.slice(0, -".state".length))
+      : undefined;
+    if (prefix !== undefined) {
+      this.addReads(prefix, [{ source: "state", from: key }]);
     } else if (at.endsWith(".key")) {
       this.stateDestinations.set(at.slice(0, -".key".length), key);
     }
@@ -790,6 +845,25 @@ class DataCopies {
   }
 }
 
+function libraryValueBindingFields(
+  binding: Record<string, unknown> | undefined,
+  path: string,
+): LibraryField[] {
+  if (!binding || Object.hasOwn(binding, "state")) {
+    return [];
+  }
+  const fields: LibraryField[] = [];
+  for (const source of ["data", "platform"] as const) {
+    if (typeof binding[source] === "string") {
+      fields.push({ text: binding[source], path, key: false, pointerSource: source });
+    }
+  }
+  if (typeof binding.item === "string") {
+    fields.push({ text: "", path, key: false, itemBinding: true });
+  }
+  return fields;
+}
+
 function libraryFields(
   spec: unknown,
   nodes: readonly Located[],
@@ -797,7 +871,8 @@ function libraryFields(
 ): { requests: string[]; fields: LibraryField[]; dataWrites: DataWrite[] } {
   const requests: string[] = [];
   const fields: LibraryField[] = [];
-  const copies = new DataCopies(nodes);
+  const derive = object(spec)?.derive;
+  const copies = new DataCopies(nodes, derive);
   const collect: FieldVisitor = (raw, at, kind) => {
     copies.visit(raw, at, kind);
     if (kind === "request") {
@@ -806,16 +881,19 @@ function libraryFields(
     if (typeof raw === "string" && (kind === "text" || kind === "key")) {
       fields.push({ text: raw, path: at, key: kind === "key" });
     }
-    const binding = kind === "emitBinding" ? object(raw) : undefined;
-    if (includeDataBindings && binding && !Object.hasOwn(binding, "state")) {
-      for (const source of ["data", "platform"] as const) {
-        if (typeof binding[source] === "string") {
-          fields.push({ text: binding[source], path: at, key: false, pointerSource: source });
-        }
-      }
-      if (typeof binding.item === "string") {
-        fields.push({ text: "", path: at, key: false, itemBinding: true });
-      }
+    if (kind === "derivedBinding" && typeof raw === "string") {
+      const { keys, pointer } = prototypeDerivedInputs(derive, raw);
+      const dataPointer = includeDataBindings ? pointer : undefined;
+      fields.push({
+        text: dataPointer ?? "",
+        path: at,
+        key: false,
+        derivedKeys: keys,
+        pointerSource: dataPointer === undefined ? undefined : "data",
+      });
+    }
+    if (includeDataBindings && kind === "emitBinding") {
+      fields.push(...libraryValueBindingFields(object(raw), at));
     }
     return raw;
   };
@@ -859,10 +937,12 @@ function unsupportedCapabilitiesError(
   spec: unknown,
   options: PrototypeStrictOptions,
 ): PrototypeValidationError | undefined {
-  if (options.supportedCapabilities !== undefined && options.requiredCapabilities !== undefined) {
-    const missing = options
-      .requiredCapabilities(spec)
-      .filter((name) => !options.supportedCapabilities?.includes(name));
+  if (options.supportedCapabilities !== undefined) {
+    const required = new Set([
+      ...(options.requiredCapabilities?.(spec) ?? []),
+      ...prototypeDeclaredCapabilities(object(spec)?.requires),
+    ]);
+    const missing = [...required].filter((name) => !options.supportedCapabilities?.includes(name));
     if (missing.length) {
       return { path: "$", message: `Unsupported capabilities: ${missing.join(", ")}` };
     }

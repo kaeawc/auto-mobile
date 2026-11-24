@@ -34,6 +34,23 @@ describe("deriveToolRequirements (#18141)", () => {
     ).toEqual(["platform:android", "platform:tvos"]);
   });
 
+  test("a typed platform restriction narrows the gate to its platforms (#18721)", () => {
+    expect(
+      deriveToolRequirements(
+        { name: "tap", requiresDevice: true, platforms: ["android"] },
+        NO_PLATFORM_FIELD,
+        TABLE,
+      ),
+    ).toEqual(["platform:android"]);
+    expect(
+      deriveToolRequirements(
+        { name: "tap", requiresDevice: true, platforms: ["android", "tvos"] },
+        NO_PLATFORM_FIELD,
+        TABLE,
+      ),
+    ).toEqual(["platform:android", "platform:tvos"]);
+  });
+
   test("gates come first in a stable order, flags sorted and deduplicated", () => {
     expect(
       deriveToolRequirements(

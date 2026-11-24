@@ -220,6 +220,7 @@ enum PrototypePlatformValidator {
         var notificationChannels: Set<String> = []
         /// `state:` keys kept in secure storage, which an emit context may not carry (#14321).
         var secureKeys: [String] = []
+        var derive: [String: JSONValue] = [:]
         var players: Set<String> = []
         /// The root `sensors` block: the sensors the device listens to (#14327).
         var sensors: JSONValue?
@@ -233,7 +234,7 @@ enum PrototypePlatformValidator {
         commerce: JSONValue? = nil,
         storage: JSONValue? = nil, location: JSONValue? = nil, sensors: JSONValue? = nil,
         notifications: JSONValue? = nil,
-        media: JSONValue? = nil, root: JSONValue,
+        media: JSONValue? = nil, links: JSONValue? = nil, derive: JSONValue? = nil, root: JSONValue,
         state: [String: JSONValue]
     )
         throws
@@ -252,6 +253,7 @@ enum PrototypePlatformValidator {
         declared.products = PrototypeCommerceRules.products(commerce)
         declared.notificationChannels = PrototypeNotificationRules.channels(notifications)
         declared.secureKeys = PrototypeSecureStorageRules.secureKeys(storage)
+        declared.derive = derive?.objectFields ?? [:]
         declared.sensors = sensors
         declared.players = PrototypeMedia.players(media).union(PrototypeMedia.inlinePlayers(root))
         declared.previews = PrototypeCameraPreview.ids(root)
@@ -265,6 +267,17 @@ enum PrototypePlatformValidator {
                 state: state
             ) }
             try scan(handler, path: path, context: ScanContext(inHandler: true), declared: declared, state: state)
+        }
+        for (index, entry) in PrototypeStrictBindings.array(links).enumerated() {
+            if let actions = entry.objectFields?["actions"] {
+                try scan(
+                    actions,
+                    path: "links[\(index)].actions",
+                    context: ScanContext(),
+                    declared: declared,
+                    state: state
+                )
+            }
         }
         try scan(root, path: "root", context: ScanContext(), declared: declared, state: state)
     }
@@ -284,17 +297,24 @@ enum PrototypePlatformValidator {
 
     // MARK: requires
 
+    static func capabilities(_ requires: JSONValue?) -> [String] {
+        PrototypeContractValidator.strings(requires?.objectFields?["capabilities"] ?? requires)
+    }
+
     private static func validateRequires(_ raw: JSONValue?) throws -> Declared {
         var declared = Declared()
         guard let raw else { return declared }
+        if case .array = raw { return declared }
         guard case let .object(fields) = raw else { throw fail("requires", "Expected object") }
-        for key in sorted(Set(fields.keys).union(["platform", "permissions", "background"])) {
+        for key in sorted(Set(fields.keys).union(["platform", "permissions", "background", "capabilities"])) {
             let path = "requires.\(key)"
-            guard ["platform", "permissions", "background"].contains(key) else {
+            guard ["platform", "permissions", "background", "capabilities"].contains(key) else {
                 throw fail(PrototypeLimits.dataMemberPath("requires", key: key), "Unknown property")
             }
             guard let value = fields[key] else { continue }
             switch key {
+            case "capabilities":
+                _ = try strings(value, path: path, range: 1 ... 128, unique: false) { _, _ in }
             case "platform":
                 let names = try strings(value, path: path, range: 1 ... 32, unique: true) { name, at in
                     guard name.utf16.count <= 64 else { throw fail(at, "Invalid string value") }
@@ -428,10 +448,21 @@ enum PrototypePlatformValidator {
                     "Emit names starting with \(reservedEmitPrefix) are reserved for runtime events"
                 )
             }
-            try PrototypeSecureStorageRules.validateDataAction(fields, path: path, secure: declared.secureKeys)
-            try PrototypeSecureStorageRules.validateEmit(fields, path: path, secure: declared.secureKeys)
-            try PrototypeSecureStorageRules.validateRequest(fields, path: path, secure: declared.secureKeys)
-            try PrototypeSecureStorageRules.validateBindings(fields, path: path, secure: declared.secureKeys)
+            try PrototypeDerivedValidator.validateReferences(
+                PrototypeDerivedValidator.bindingReferences(fields, path: path), entries: declared.derive
+            )
+            try PrototypeSecureStorageRules.validateDataAction(
+                fields, path: path, secure: declared.secureKeys, derive: declared.derive
+            )
+            try PrototypeSecureStorageRules.validateEmit(
+                fields, path: path, secure: declared.secureKeys, derive: declared.derive
+            )
+            try PrototypeSecureStorageRules.validateRequest(
+                fields, path: path, secure: declared.secureKeys, derive: declared.derive
+            )
+            try PrototypeSecureStorageRules.validateBindings(
+                fields, path: path, secure: declared.secureKeys, derive: declared.derive
+            )
             if fields["type"] == nil {
                 if case let .string(pointer)? = fields["platform"] {
                     try read(pointer, path: "\(path).platform", declared: declared)

@@ -37,6 +37,7 @@ enum PrototypeStrictBindings {
             "secure",
             "keyboardType",
             "imeAction",
+            "allowedOrigins",
         ].contains($0.key) }
         if fields["type"] == .string("adaptive") { own["items"] = fields["items"] }
         if fields["type"] == .string("menu") { own["items"] = .array([]) }
@@ -143,7 +144,8 @@ enum PrototypeStrictBindings {
                 ) }
                 if type == "setState", !action.operandTemplated, let operand = value["value"],
                    PrototypeGeneratedValues.form(operand) == nil,
-                   operand.objectFields?["event"] == nil, operand.objectFields?["platform"] == nil
+                   operand.objectFields?["event"] == nil, operand.objectFields?["platform"] == nil,
+                   operand.objectFields?["link"] == nil
                 {
                     let controls = nodes.filter { boundKeys($0.value).contains(key) }
                     if Set(controls.compactMap { $0.value["type"]?.stringValue }).count == 1 {

@@ -69,6 +69,14 @@ Before a node becomes `native`, simulator verification must establish the testab
 Its `testTag` and every `<testTag>.<part>` remain reachable by `observe` and `tapOn`, and observed
 bounds match the control. Motion-off settles in one frame, and active motion emits the
 motion-active signal.
+ProtoViewer renders `webView` and advertises `prototype_platform_webview_v1`. Imported prototypes
+with web content require network access for imports. WebKit checks navigation and resource URLs
+against the declared HTTPS origins, with JavaScript and script bridges disabled. Library Reset
+and Delete clear the WebKit data store scoped to the library entry.
+
+WebKit filters URL origins without checking resolved addresses, cancels connections that reach
+the server-trust challenge delegate, and reports a blocked redirect URL only when it exposes it.
+
 The native controls expose no additional authored part suffixes. Segmented Picker, TabView and Menu
 cannot preserve per-item identifiers, so segmentedButton, tabBar, bottomNav, menu and select stay
 custom-drawn Material.
@@ -167,6 +175,7 @@ observe pointer delivery.
 | `window.persistence: "device"`                                         | Refused: the agent dies with the app process                                                                                                                                                                                                                                                                                                                                                                   |
 | `window.chrome` (#12064)                                               | Fullscreen only, `prototype_window_chrome_v1`; see [Dismiss control](prototype-agent-components.md#dismiss-control). Older agents keep the bar; explicit `none` is refused with a relaunch hint                                                                                                                                                                                                                |
 | `inspect`                                                              | `prototype_inspect_v1`; [Inspect](prototype-agent-runtime.md#inspect)                                                                                                                                                                                                                                                                                                                                          |
+| Platform runtime report                                                | `platformRuntime` carries registry availability and mode, including simulated haptics. [Inspect](prototype-agent-runtime.md#inspect)                                                                                                                                                                                                                                                                           |
 | Idle TTL, dismissal on host disconnect                                 | [Expiry](#expiry)                                                                                                                                                                                                                                                                                                                                                                                              |
 | Per-mode colours/images, gradients, role scrims (#11220)               | `prototype_theme_modes_v1`; [Light and dark values](prototype-agent-runtime.md#light-and-dark-values)                                                                                                                                                                                                                                                                                                          |
 | Appearance override/inference/live re-theme (#11222)                   | `prototype_appearance_v1`; [Appearance](prototype-agent-components.md#appearance)                                                                                                                                                                                                                                                                                                                              |

@@ -95,6 +95,8 @@ internal class RuntimeAttachTarget(
             storage = current.storage?.report(),
             timers = current.timerReports(),
             feedbackLog = current.feedbackLog.snapshot(),
+            platformRuntime =
+              current.platformRuntimeReport(PrototypePlatformReport.Runtime.DISPOSABLE_APP),
             degradedEffects = prototypeEffectReport(model.root, current.effectHealth),
           )
         JsonObject(
@@ -118,7 +120,10 @@ internal class RuntimeAttachTarget(
   }
 
   private fun validate(spec: JsonObject): PrototypeSpec =
-    when (val validation = PrototypeSpecValidator.validate(spec.toString())) {
+    when (
+      val validation =
+        PrototypeSpecValidator.validate(spec.toString(), budget = PrototypeRuntimeBudget.LARGE)
+    ) {
       is PrototypeSpecValidation.Success -> validation.spec
       is PrototypeSpecValidation.Failure ->
         error("${validation.error.path}: ${validation.error.message}")

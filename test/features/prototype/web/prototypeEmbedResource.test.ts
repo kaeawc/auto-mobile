@@ -40,6 +40,16 @@ describe("readPrototypeEmbedResource", () => {
     expect(embed.meta).not.toHaveProperty("frame");
   });
 
+  test.each([
+    { requires: ["prototype_links_v1"] },
+    { requires: { capabilities: ["prototype_links_v1"] } },
+  ])("embeds explicit capabilities from either requires form: %j", ({ requires }) => {
+    const store = new PrototypeSpecRevisions(new FakeTimer());
+    store.recordShow("links", { spec: { ...spec("links", "Links"), requires } });
+    const embed = readPrototypeEmbedResource(store, { id: "links" }, "v");
+    expect(embed.envelope.requires).toEqual(["prototype_links_v1"]);
+  });
+
   test("reads revision=N with that revision's requires", () => {
     const embed = readPrototypeEmbedResource(revisions(), { id: "checkout", revision: "1" }, "v");
     expect(embed.meta.revision).toBe(1);

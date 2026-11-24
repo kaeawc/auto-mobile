@@ -34,7 +34,17 @@
     "!dist/**/*.map",
     "schemas",
     "mcp-skills",
-    "ios/CameraPosterInjection/Injection/CameraPosterInjection.m"
+    "ios/CameraPosterInjection/Injection/CameraPosterInjection.m",
+    "ios/CameraPosterInjection/Injection/CameraPosterGate.c",
+    "ios/NetworkShaper/netshape.c",
+    "ios/NetworkShaper/libdns_services.tbd",
+    "ios/NetworkShaper/LICENSE",
+    "ios/sim-hid/Sources/SimHidCore/SimHidCommand.swift",
+    "ios/sim-hid/Sources/SimHidCore/SimHidKeyboard.swift",
+    "ios/sim-hid/Sources/SimHidCore/SimHidPlanner.swift",
+    "ios/sim-hid/Sources/SimHidCore/SimHidServer.swift",
+    "ios/sim-hid/Sources/SimHidHelper/SimulatorKitHIDBackend.swift",
+    "ios/sim-hid/Sources/SimHidHelper/main.swift"
   ],
   "main": "dist/src/index.js",
   "publishConfig": {
@@ -201,7 +211,7 @@
     "@modelcontextprotocol/client": "^2.4.0",
     "@modelcontextprotocol/node": "^2.1.1",
     "@modelcontextprotocol/server": "^2.4.0",
-    "@types/bun": "1.4.4",
+    "@types/bun": "1.4.5",
     "@types/node": "^26.0.0",
     "@types/pngjs": "^6.0.5",
     "@types/ws": "^8.18.1",

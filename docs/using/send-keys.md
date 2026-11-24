@@ -30,12 +30,22 @@ A letter with modifiers is a keyboard shortcut:
 
 - **iOS simulator:** the chord is sent as the simulator's hardware keyboard, so
   system shortcuts reach SpringBoard and no text field needs focus. The result
-  does not confirm what the shortcut did; observe the screen afterwards.
+  does not confirm what the shortcut did; observe the screen afterwards. The
+  exception is `meta+h`: it succeeds only once the home screen shows, and fails
+  with "was not delivered" on a simulator that ignores it (iPhone Duo). Use
+  `homeScreen` or `pressButton home` there.
 - **iOS physical device:** a key command needs a focused text field. Without
   one, the command fails; tap a field first or pass `selector`.
 - **Android:** a letter without modifiers is a key event. A chord needs Android
   API 31 or later; older devices return an error naming the API level.
 
-On iOS, every other key command needs a focused text field: a letter without
-modifiers, and `enter`, `tab`, `escape`, `backspace`, `delete` or an arrow with
-or without modifiers.
+On an iOS device, every other key command needs a focused text field: a letter
+without modifiers, and `enter`, `tab`, `escape`, `backspace`, `delete` or an
+arrow.
+
+On an iOS simulator, key commands go to the simulator's hardware keyboard
+directly, so success means the simulator took the key. A text key with no
+focused field does nothing. Observe to check it landed. A shortcut such as
+`meta+alt+d` can still act without a focused field. `meta+h` and the
+`next`/`done`/`search`-style keys still use the runner, and so does `type` text.
+Set `AUTOMOBILE_DISABLE_IOS_SIM_HID=1` to send every key through the runner.

@@ -83,4 +83,102 @@ final class PrototypeSecureStorageBindingTests: XCTestCase {
         ]
         XCTAssertNoThrow(try PrototypeSecureStorageRules.validateBindings(plain, path: "p", secure: []))
     }
+
+    // MARK: - Derived bindings (#19013)
+
+    private let derive: [String: JSONValue] = [
+        "secret": .object(["of": .object(["state": .string("token")]), "format": .object(["number": .object([:])])]),
+        "matching": .object([
+            "collection": .object([
+                "of": .object(["data": .string("/rows")]),
+                "where": .array([.object([
+                    "field": .string("t"), "op": .string("eq"), "value": .object(["state": .string("token")]),
+                ])]),
+            ]),
+            "reduce": .object(["op": .string("count")]),
+        ]),
+        "open": .object(["of": .object(["state": .string("public")]), "format": .object(["number": .object([:])])]),
+    ]
+
+    private func assertRuleRejects(
+        _ fields: [String: JSONValue], path: String, message: String, line: UInt = #line,
+        _ check: ([String: JSONValue]) throws -> Void
+    ) {
+        XCTAssertThrowsError(try check(fields), line: line) { error in
+            XCTAssertEqual(error as? PrototypeLoadError, .invalidSpec(path: path, message: message), line: line)
+        }
+    }
+
+    func testRouteParamsAndPlatformArgsRefuseDerivedSecureState() {
+        let route = "Secure storage key state:token cannot be sent in route params"
+        for name in ["secret", "matching"] {
+            let binding: JSONValue = .object(["derived": .string(name)])
+            let cases: [([String: JSONValue], String, String)] = [
+                (["type": .string("push"), "params": .object(["t": binding])], "p.params.t", route),
+                (["type": .string("replace"), "params": .object(["t": binding])], "p.params.t", route),
+                (
+                    ["type": .string("setStack"), "path": .array([.object(["params": .object(["t": binding])])])],
+                    "p.path[0].params.t", route
+                ),
+                (
+                    ["type": .string("platform"), "args": .object(["text": binding])], "p.args.text",
+                    "Secure storage key state:token cannot be sent in platform args"
+                ),
+            ]
+            for (fields, path, message) in cases {
+                assertRuleRejects(fields, path: path, message: message) {
+                    try PrototypeSecureStorageRules.validateBindings(
+                        $0,
+                        path: "p",
+                        secure: ["state:token"],
+                        derive: derive
+                    )
+                }
+            }
+        }
+        let open: [String: JSONValue] = [
+            "type": .string("push"),
+            "params": .object(["t": .object(["derived": .string("open")])]),
+        ]
+        XCTAssertNoThrow(try PrototypeSecureStorageRules.validateBindings(
+            open, path: "p", secure: ["state:token"], derive: derive
+        ))
+    }
+
+    func testEmitRequestAndDataActionsRefuseDerivedSecureState() {
+        for name in ["secret", "matching"] {
+            let binding: JSONValue = .object(["derived": .string(name)])
+            assertRuleRejects(
+                ["type": .string("emit"), "name": .string("x"), "context": .object(["t": binding])],
+                path: "p.context.t", message: "Secure storage key state:token cannot be sent in an emit context"
+            ) { try PrototypeSecureStorageRules.validateEmit($0, path: "p", secure: ["state:token"], derive: derive) }
+            assertRuleRejects(
+                ["type": .string("request"), "url": .string("https://a.test"), "query": .object(["t": binding])],
+                path: "p.query.t",
+                message: "Secure storage key state:token cannot be sent in a request without allowSecureInRequest"
+            ) { try PrototypeSecureStorageRules.validateRequest($0, path: "p", secure: ["state:token"], derive: derive)
+            }
+            assertRuleRejects(
+                ["type": .string("setData"), "path": .string("/data/copy"), "value": binding],
+                path: "p.value", message: "Secure storage key state:token cannot be sent in data actions"
+            ) {
+                try PrototypeSecureStorageRules.validateDataAction(
+                    $0, path: "p", secure: ["state:token"], derive: derive
+                )
+            }
+        }
+    }
+
+    func testContractHasNoDerivedFormForRouteParamsOrPlatformArgs() {
+        let data = Data(#"""
+        {"id":"secure-routes","window":{"placement":{"type":"fullscreen"}},
+         "requires":{"platform":["secureStorage","share"]},
+         "state":{"token":"","public":"hello"},
+         "storage":{"version":1,"keys":[],"secure":["state:token"]},
+         "derive":{"secret":{"of":{"state":"token"},"format":{"number":{}}}},
+         "root":{"type":"button","label":"Go","onTap":[
+          {"type":"platform","call":"share.open","args":{"text":{"derived":"secret"}}}]}}
+        """#.utf8)
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: data))
+    }
 }

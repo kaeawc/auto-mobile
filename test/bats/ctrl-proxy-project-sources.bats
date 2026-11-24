@@ -97,7 +97,7 @@ if [[ ${1:-} == test && ${2:-} == list ]]; then
   echo 'XCTestRunnerTests.ExampleTests/testExample'
 elif [[ ${1:-} == test ]]; then
   if [[ "$PWD" == */control-proxy ]]; then
-    echo 'Executed 68 tests, with 0 failures (0 unexpected)'
+    echo 'Executed 1266 tests, with 0 failures (0 unexpected)'
   else
     echo 'Executed 1 tests, with 0 failures (0 unexpected)'
   fi

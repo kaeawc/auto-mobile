@@ -120,10 +120,15 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
         var request = initial
         for count in 0 ... 5 {
             try Task.checkCancellation()
-            let url = try validatedURL(request)
-            let addresses = try await checkedAddresses(url)
+            let egress = PrototypeRequestEgressCheck(
+                policy: policy, resolver: resolver,
+                remoteImageDevelopment: request.isRemoteImage ?
+                    PrototypeRemoteImages.developmentLoopback && allowsCleartext : nil
+            )
+            let url = try validatedURL(request, egress: egress)
+            let addresses = try await checkedAddresses(url, egress: egress)
             try Task.checkCancellation()
-            let connection = try await connect(addresses, url: url)
+            let connection = try await connect(addresses, url: url, egress: egress)
             try call.install(connection: connection)
             defer { connection.cancel() }
             try Task.checkCancellation()
@@ -134,7 +139,10 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
             let response = try await read(connection, request: request)
             if [301, 302, 303, 307, 308].contains(response.status), let location = response.headers["location"] {
                 guard count < 5, let next = URL(string: location, relativeTo: url)?.absoluteURL,
-                      !(url.scheme?.lowercased() == "https" && next.scheme?.lowercased() == "http")
+                      !(
+                          url.scheme?.lowercased() == "https" && next.scheme?.lowercased() == "http" &&
+                              !egress.isImageLoopback(next)
+                      )
                 else { throw PrototypeRequestEgressCheck.blocked }
                 request = Self.redirect(request, from: url, to: next, status: response.status)
                 continue
@@ -149,13 +157,18 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
         throw PrototypeRequestEgressCheck.blocked
     }
 
-    private func validatedURL(_ request: PrototypeHttpRequest) throws -> URL {
+    private func validatedURL(
+        _ request: PrototypeHttpRequest, egress: PrototypeRequestEgressCheck
+    )
+        throws -> URL
+    {
         if let problem = PrototypeHttpHeaderCheck.problem(in: request.headers) { throw problem }
         guard let url = URL(string: request.url), let scheme = url.scheme?.lowercased(),
               ["http", "https"].contains(scheme), let host = url.host, !host.isEmpty
         else {
             throw PrototypeRequestError(.invalidURL, "Not an absolute URL: \(request.url)")
         }
+        if request.isRemoteImage { try egress.validateImageURL(request.url) }
         if scheme == "http", !allowsCleartext {
             throw PrototypeRequestError(
                 .blockedDestination,
@@ -165,15 +178,20 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
         return url
     }
 
-    private func checkedAddresses(_ url: URL) async throws -> [String] {
+    private func checkedAddresses(_ url: URL, egress: PrototypeRequestEgressCheck) async throws -> [String] {
         let host = Self.host(url)
         let port = PrototypeRequestEgressCheck.port(url)
-        guard policy.checkHost(host: host, port: port) == .allow else { throw PrototypeRequestEgressCheck.blocked }
-        if let literal = PrototypeEgressPolicy.canonicalLiteral(host) { return [literal] }
+        guard egress.isImageLoopback(url) || policy.checkHost(host: host, port: port) == .allow else {
+            throw PrototypeRequestEgressCheck.blocked
+        }
+        if let literal = PrototypeEgressPolicy.canonicalLiteral(host) {
+            guard egress.checkConnected(address: literal, url: url) else { throw PrototypeRequestEgressCheck.blocked }
+            return [literal]
+        }
         let addresses: [String]
         do { addresses = try await resolver.addresses(for: host) }
         catch { throw PrototypeRequestError(.network, "Destination resolution failed.") }
-        guard !addresses.isEmpty, policy.check(host: host, port: port, addresses: addresses) == .allow else {
+        guard !addresses.isEmpty, addresses.allSatisfy({ egress.checkConnected(address: $0, url: url) }) else {
             throw PrototypeRequestEgressCheck.blocked
         }
         let literals = addresses.compactMap(PrototypeEgressPolicy.canonicalLiteral)
@@ -181,7 +199,11 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
         return literals
     }
 
-    private func connect(_ addresses: [String], url: URL) async throws -> any PrototypePinnedConnection {
+    private func connect(
+        _ addresses: [String], url: URL, egress: PrototypeRequestEgressCheck
+    )
+        async throws -> any PrototypePinnedConnection
+    {
         var lastError: Error = URLError(.cannotConnectToHost)
         for address in addresses {
             try Task.checkCancellation()
@@ -202,7 +224,9 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
                 lastError = error
                 continue
             }
-            guard let remote = connection.remoteAddress, Self.sameAddress(remote, address) else {
+            guard let remote = connection.remoteAddress, Self.sameAddress(remote, address),
+                  egress.checkConnected(address: remote, url: url)
+            else {
                 connection.cancel()
                 throw PrototypeRequestEgressCheck.blocked
             }
@@ -247,6 +271,8 @@ struct PrototypePinnedHttpClient: PrototypeHttpClient {
             "content-location",
         ]
         let headers = request.headers.filter { name, _ in
+            if request.isRemoteImage,
+               ["authorization", "cookie", "referer"].contains(name.lowercased()) { return false }
             if rewrite, entityHeaders.contains(name.lowercased()) { return false }
             return name.lowercased() != "authorization" || PrototypeRequestEgressCheck.sameOrigin(previous, next)
         }
@@ -317,5 +343,6 @@ extension PrototypeHttpRequest {
         uploadBody = dropBody ? nil : request.uploadBody
         timeoutMs = request.timeoutMs
         maxResponseBytes = request.maxResponseBytes
+        isRemoteImage = request.isRemoteImage
     }
 }

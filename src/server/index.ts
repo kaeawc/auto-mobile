@@ -234,6 +234,7 @@ export function registerMcpTools(daemonMode: boolean): void {
       daemonMode,
       iosRunnerLocation: iosRunnerClient,
       iosAccessibilityFocus: iosRunnerClient,
+      iosShareSheet: iosRunnerClient,
       keystoreReset: (device) => AndroidCtrlProxyClient.getInstance(device),
     });
     lastToolRegistration = { daemonMode, removalEpoch: ToolRegistry.removalEpochForRegistration };

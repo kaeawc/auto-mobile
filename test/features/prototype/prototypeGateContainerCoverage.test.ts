@@ -335,6 +335,16 @@ const fixtures: Record<string, Node> = {
       },
     ],
   },
+  prototype_data_actions_v3: {
+    ...label,
+    onTap: [
+      {
+        type: "appendData",
+        path: "/data/rows",
+        value: { object: { title: { state: "liked" }, done: { value: false } } },
+      },
+    ],
+  },
   prototype_network_v1: {
     ...label,
     onTap: [{ type: "request", url: "http://localhost:8080/feed", into: "/data/feed" }],
@@ -450,6 +460,7 @@ const containers: {
 // Gates on a root-level spec field, not a node: no container can hold them, so they get a
 // dedicated test below instead of a container fixture.
 const ROOT_LEVEL_GATES = [
+  "prototype_links_v1",
   "prototype_layout_direction_v1",
   "prototype_platform_realtime_device_v1",
   "prototype_storage_v1",
@@ -741,6 +752,14 @@ test("layout direction is an independent root window gate", () => {
   expect(gate.unsupportedMessage(["window.layoutDirection"], "ios")).toContain(
     "window.layoutDirection",
   );
+});
+
+test("inbound links gate is root-only and independent of outbound platform links", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_links_v1",
+  )!;
+  expect(gate.fields({ root: label, links: [] })).toEqual(["links"]);
+  expect(gate.fields({ root: label, data: { links: [] } })).toEqual([]);
 });
 
 for (const container of containers) {

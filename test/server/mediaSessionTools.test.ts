@@ -1,14 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { createMediaSessionHandler, mediaSessionSchema } from "../../src/server/mediaSessionTools";
 import { mediaSessionResultSchema } from "../../src/server/mediaSessionToolOutputSchemas";
-import { ActionableError, type BootedDevice } from "../../src/models";
+import type { BootedDevice } from "../../src/models";
 import type { MediaSessionInfo } from "../../src/features/media/MediaSessionTypes";
 import { waitForTimeoutError } from "../../src/utils/plan/waitForTimeout";
 import { FakeMediaSessionController } from "../fakes/FakeMediaSessionController";
 import { toolJson } from "../helpers/toolResponse";
 
 const android: BootedDevice = { name: "Pixel", deviceId: "emulator-5554", platform: "android" };
-const ios: BootedDevice = { name: "iPhone", deviceId: "sim-1", platform: "ios" };
 const PLAYER = { package: "dev.example.player", tag: "PlaybackService", userId: 0 };
 const playing: MediaSessionInfo = {
   ...PLAYER,
@@ -220,10 +219,9 @@ describe("mediaSession handler", () => {
     expect(result.restore).toEqual({ volume: { stream: "ring", level: 3 } });
   });
 
-  test("refuses iOS and waitFor on a mutation before touching the device", async () => {
+  test("refuses waitFor on a mutation before touching the device", async () => {
     const { controller, handler } = setup();
 
-    await expect(handler(ios, { action: "get" })).rejects.toBeInstanceOf(ActionableError);
     await expect(
       handler(android, { action: { dispatch: "play" }, waitFor: { mediaState: "playing" } }),
     ).rejects.toThrow('waitFor is only valid with action "get"');

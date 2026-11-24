@@ -17,6 +17,7 @@ export const DEVICE_MUTATION_TOOL_CASES: readonly {
     kind: "permission",
   },
   { name: "clipboard", args: { action: "copy", text: "new" }, kind: "clipboard" },
+  { name: "shareSheet", args: { action: "select", label: "Copy" }, kind: "clipboard" },
   { name: "displayConfig", args: { theme: "dark" }, kind: "device-setting" },
   { name: "changeLocalization", args: { locale: "ja-JP" }, kind: "device-setting" },
   { name: "setDeviceState", args: { location: { latitude: 1, longitude: 2 } }, kind: "location" },

@@ -1,5 +1,22 @@
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { createExecResult } from "../../../../src/utils/execResult";
+import { readFileSync } from "node:fs";
+
+function displayCapture(name: string): string {
+  return readFileSync(
+    new URL(`../../../fixtures/android-display-config/${name}.txt`, import.meta.url),
+    "utf8",
+  );
+}
+
+/**
+ * Captured `cmd uimode night` results on Android before 8 (#18984): API 25 prints the
+ * message on stdout, API 24 on stderr with empty stdout. Both exit 0.
+ */
+export const NIGHT_MODE_UNSUPPORTED_RESULTS = [
+  ["API 25 stdout", createExecResult(displayCapture("night-mode-unsupported-api25"), "")],
+  ["API 24 stderr", createExecResult("", displayCapture("night-mode-unsupported-api24.stderr"))],
+] as const;
 
 export function androidPackageDump(name: string, users: readonly number[] = [0]): string {
   return `Packages:

@@ -9,7 +9,7 @@ func prototypeAccessibilityGrouping(type: String, tappable: Bool) -> Accessibili
     if type == "list" { return .contain }
     if [
         "radioGroup", "segmentedButton", "select", "menu", "topAppBar", "searchBar", "dialog", "snackbar",
-        "bottomSheet", "drawer", "map",
+        "bottomSheet", "drawer", "map", "webView",
     ].contains(type) {
         return .contain
     }

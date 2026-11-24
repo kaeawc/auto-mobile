@@ -26,6 +26,12 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 
 internal object PrototypeStructuralWalk {
+  /** A `maxLimit` rule's bound is the budget's value of that limit; `max` is the base value. */
+  private fun budgetRule(rule: JsonObject, budget: PrototypeRuntimeBudget): JsonObject {
+    val bound = rule.text("maxLimit")?.let(budget::limit) ?: return rule
+    return JsonObject(rule + ("max" to JsonPrimitive(bound)))
+  }
+
   fun walk(
     value: JsonElement,
     rule: JsonObject,
@@ -42,10 +48,10 @@ internal object PrototypeStructuralWalk {
       "screenMap" -> visitScreenMap(value, rule, path, context, depth)
       "record" -> visitRecord(value, rule, path, context, depth)
       "choice" -> visitChoice(value, rule, path, context, depth)
-      "data" -> dataError(value)
+      "data" -> dataError(value, context.budget)
       "strings" -> PrototypeStringsRules.tableError(value)
       else ->
-        if (primitiveValid(value, rule)) null
+        if (primitiveValid(value, budgetRule(rule, context.budget))) null
         else
           fail(path, "Invalid ${rule.text("kind").takeUnless { it == "boundKey" } ?: "key"} value")
     }

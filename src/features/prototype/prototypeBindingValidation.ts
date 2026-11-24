@@ -20,6 +20,8 @@ export interface Rule {
   integer?: boolean;
   min?: number;
   max?: number;
+  /** A runtime-budget limit name whose budget value replaces `max` (#18804). */
+  maxLimit?: string;
   maxBytes?: number;
   maxDepth?: number;
   unique?: boolean;
@@ -595,7 +597,11 @@ export const bound = ({ located, value, item, operandTemplated }: KeyInstance<Lo
 });
 
 function dynamicStateValue(value: unknown): boolean {
-  return object(value)?.event !== undefined || object(value)?.platform !== undefined;
+  return (
+    object(value)?.event !== undefined ||
+    object(value)?.platform !== undefined ||
+    object(value)?.link !== undefined
+  );
 }
 
 /** `empty` tests a `/data` value (#14207); state key and `/platform` conditions have no emptiness. */

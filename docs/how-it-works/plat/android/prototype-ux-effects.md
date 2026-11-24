@@ -164,8 +164,9 @@ The `map` node needs `map` in `requires.platform`. iOS renders it with MapKit an
 
 ## Web content (#14312)
 
-The `webView` node (contract only: no renderer draws it and no runtime advertises
-`prototype_platform_webview_v1`) shows an https page and needs `webview` in `requires.platform`:
+ProtoViewer renders the `webView` node and advertises `prototype_platform_webview_v1`.
+The node displays an HTTPS page and needs `webview` in `requires.platform`. Registration is opt-in.
+The Android app shell and CtrlProxy accessibility overlay omit the module.
 
 ```json
 {
@@ -195,22 +196,23 @@ The `webView` node (contract only: no renderer draws it and no runtime advertise
   `canGoBackKey` names declared boolean state. All three bind component props like other node state keys, and
   every state write re-checks their types.
 - A `webView` `id` uses the state-key pattern, the grammar of the `webview.*` `node` argument that names it.
-- `javaScript` defaults to `false`; `true` is accepted and never comes with a bridge. Page subresources cannot
-  be checked at a resolved address the way `request` is, so an imported (ProtoViewer) prototype may show a
-  `webView` only while network for imported prototypes is on. Turning it off replaces the entire imported
-  prototype with a refusal, and turning it on restores rendering. The refusal names the first `webView` depth first
-  in a fixed order (adaptive slots, a list's `header` and `footer`, `child`, `children`, then `screens` by key),
-  pinned by `test/fixtures/prototype-spec/webview-import/cases.json`. An MCP `open` gets one outcome per load.
+- The contract accepts `javaScript: true`. Android keeps JavaScript off for either value. Imported
+  prototypes with a web view render only while network access for imports is on. Turning it off
+  replaces the prototype with a refusal.
+- For intercepted requests, ProtoViewer fetches GET and HEAD itself and checks each redirect and
+  resolved address, following at most five redirects. Other methods receive an empty 405. It blocks
+  local addresses and daemon ports.
+  Only Accept, Accept-Language and User-Agent pass from the page to the fetcher.
+- WebView interception cannot see blob URLs or Android asset and resource file URLs.
+  The renderer disables local file and content access.
+- `onNavigate` runs when an allowed top-frame page finishes. `onBlockedNavigation` runs when a
+  top-frame navigation is blocked. Both bind `{url}`. Subresource blocks are silent.
+  `webview.back` and `webview.reload` take `args: {node}` and require an attached node.
+- Android shares the system WebView data store across the app process. ProtoViewer library Reset
+  and Delete wipe it. Web data clearing through MCP `clearStorage` is a follow-up.
 - A CtrlProxy saved prototype (`save` on Android, and on iOS without ProtoViewer) refuses a spec with a `webView`
   node with `errorCode: "unsupported_capability"` naming the node path, before any upload or install. The host
   and CtrlProxy's saved-prototype store both refuse it.
-- `onNavigate` and `onBlockedNavigation` are action lists. `{type: "platform", call: "webview.back"}` and
-  `webview.reload` take `args: {node}`; a literal `node` must be the id of a `webView` node ("Unknown webView").
-  The `webview` module has no state; its `webview.navigate` event exists so a simulation can deliver it.
-- Runtimes check every top-frame and subframe navigation against `allowedOrigins` before it starts and block
-  loopback, link-local, `10.0.2.2` and the daemon ports by URL host. They never add a JavaScript bridge or user
-  script (`addJavascriptInterface`, `evaluateJavascript`, `WKUserContentController.add(_:name:)`), and keep
-  cookies and web storage per prototype.
 
 ## Charts (#14209)
 

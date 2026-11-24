@@ -1,12 +1,10 @@
 # Embedding a prototype in an app
 
-Embed a prototype shown with `prototype` in an Android or iOS app using the published renderer
-library shared with CtrlProxy and the iOS prototype agent. Layout, theme, state, data, `request`
-actions, storage, images and fonts keep working. AutoMobile generates a short host file; the
-renderer draws the rest.
+Embed a prototype shown with `prototype` in an Android or iOS app using the renderer library that
+CtrlProxy and the iOS prototype agent use. Layout, theme, state, data, `request` actions, storage,
+images and fonts keep working. AutoMobile generates a short host file; the renderer draws the rest.
 
-To view a prototype in a browser or export it as HTML, see
-[Prototype web preview](prototype-web-preview.md).
+For browser viewing and HTML export, see [Prototype web preview](prototype-web-preview.md).
 
 ## Add the library
 
@@ -20,7 +18,7 @@ cd auto-mobile/android
 ./gradlew :protocol:publishToMavenLocal :prototype-compose:publishToMavenLocal -PVERSION_NAME=<version>
 ```
 
-Then add `mavenLocal()` to the app's repositories and depend on it:
+Then add `mavenLocal()` to the repositories and depend on it:
 
 ```kotlin
 dependencies {
@@ -43,9 +41,8 @@ Use the resource's reported version: the earliest that renders the whole spec.
 
 ## Read the native resource
 
-Ask the agent to read `automobile:prototype/native?id=<id>` for a prototype it is showing, or
-`automobile:prototype/native?id=<id>&deviceId=<device>` for one that is saved but no longer shown.
-Parameters:
+Read `automobile:prototype/native?id=<id>` for a prototype a device is showing, or
+`automobile:prototype/native?id=<id>&deviceId=<device>` for a saved one no longer shown.
 
 | Parameter  | Meaning                                                                                                                                                             |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -56,15 +53,15 @@ The JSON result holds:
 
 - `library`: the Gradle coordinate or the Swift package to add.
 - `requiredCapabilities` and `minimumLibraryVersion`: what the spec needs from the renderer.
-- `files`: the spec (`spec.json`) and the host file, each with the path it goes to.
-- `assets`: each referenced image or font, its path, and whether the host has its bytes. Read a
-  saved prototype's bytes from the asset's `uri`, which is
+- `files`: the spec (`spec.json`) and the host file, each with its target path.
+- `assets`: each referenced image or font, its path, and whether the host has its bytes. A saved
+  prototype's bytes are at the asset's `uri`,
   `automobile:prototype/native/asset?id=<id>&assetId=<asset>&deviceId=<device>`.
 - `notes`: anything the app must still do, such as supplying asset files or an HTTP client.
 
 ## Read one Compose or SwiftUI file
 
-For a single file to paste into an app, read `automobile:prototype/<id>/compose` (Kotlin,
+For one file to paste into an app, read `automobile:prototype/<id>/compose` (Kotlin,
 `text/x-kotlin`) or `automobile:prototype/<id>/swiftui` (Swift, `text/x-swift`) for a prototype
 shown in this daemon session.
 
@@ -74,22 +71,19 @@ shown in this daemon session.
 | `revision`     | A kept revision. Defaults to the latest.                                                                                                     |
 | `mcpSessionId` | Only revisions this MCP session produced. Defaults to every session's.                                                                       |
 
-This native-resource host embeds the spec as a string constant, adding a frame-sized `@Preview`
-(Compose) or `#Preview` (SwiftUI). Its header lists the library, required capabilities, and each
-image or font's load path and `automobile:prototype/native/asset` URI.
+The file embeds the spec as a string constant and adds a frame-sized `@Preview` (Compose) or
+`#Preview` (SwiftUI). Its header lists the library, required capabilities, and each image or font's
+load path and `automobile:prototype/native/asset` URI.
 
-The file does not build in assets: add those files yourself. A saved prototype serves their bytes
-from the URI. Revisions, errors, `_meta` (without `variants`) and subscriptions work as for the
-[web page](prototype-web-preview.md). `resources/list` lists both files for every prototype shown
-in this daemon session.
+Add asset files yourself; a saved prototype serves their bytes from the URI. Revisions, errors,
+`_meta` (without `variants`) and subscriptions work as for the [web page](prototype-web-preview.md).
+`resources/list` lists both files for every prototype shown in this daemon session.
 
 ## Eject to code you own
 
-For manually styled screens, read `automobile:prototype/eject?id=<id>` and edit the result.
-It accepts the native resource's `id`, `platform` and `deviceId` parameters. Edits never sync back
+For manually styled screens, read `automobile:prototype/eject?id=<id>` and edit the JSON result.
+It takes the native resource's `id`, `platform` and `deviceId` parameters. Edits never sync back
 to the spec.
-
-The result is JSON:
 
 | Field        | Meaning                                                                                                                                   |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
@@ -98,7 +92,7 @@ The result is JSON:
 | `remaining`  | What is left for you, by spec path: `node` (an unsupported node), `action` (an action other than stack navigation) or `binding`.          |
 | `notes`      | Limits of the scaffold for this prototype.                                                                                                |
 
-What the scaffold writes:
+The scaffold writes:
 
 - `box`, `row`, `column`, `card`, `scroll`, `spacer`, `divider`, `text`, `button`, `textField`,
   `list`, `listItem` and `stack` become native code.
@@ -112,44 +106,41 @@ What the scaffold writes:
 - Explicit theme color roles become a Material 3 color scheme or SwiftUI colors. A seeded scheme
   is not exported.
 - Every `testTag` stays as `Modifier.testTag` or `.accessibilityIdentifier`, with `{index}` bound
-  to the row index. Tests and flows recorded against the prototype can target the ejected screens.
+  to the row index, so tests and flows recorded against the prototype target the ejected screens.
 
 ## Where the files go
 
-Copy each `files[].path` and `assets[].path` exactly as the resource returns it. The host file reads
-from that directory, which is the id only when the id is already file-safe (see below).
+Copy each `files[].path` and `assets[].path` exactly as returned. The host file reads from that
+directory, which is the id only when the id is already file-safe (see below).
 
 **Android:** `spec.json` and the assets go under `app/src/main/assets/prototypes/<directory>/`, and
-the host file under `app/src/main/java/prototypes/`. Call the generated composable, for example
+the host file under `app/src/main/java/prototypes/`. Call the generated composable, such as
 `CheckoutPrototype(onDismiss = { ... })`, from any screen.
 
 **iOS:** `spec.json` and the assets go under `Prototypes/<directory>/`. Add the `Prototypes` folder
 to the app target as a folder reference (blue folder), so the files keep their subdirectory in the
 bundle. Add the host `.swift` file to the target outside that folder, since Xcode compiles nothing
-inside a folder reference. Use the generated view, for example `CheckoutPrototype()`, in any
+inside a folder reference. Use the generated view, such as `CheckoutPrototype()`, in any
 SwiftUI hierarchy.
 
 An id that is not plain letters and digits gets a short hash in its type name. An id with
 characters outside letters, digits, `-` and `_`, or more than 64 characters, also gets it in its
 directory and file names. So `checkout-flow` becomes `CheckoutFlowPrototype` plus an 8-character
-suffix. The host file's path names the type; pick a plain id such as `checkoutFlow` for a hash-free name.
+suffix. The host file's path names the type; a plain id such as `checkoutFlow` gives a hash-free name.
 
-On both platforms, a missing asset draws the renderer's placeholder and a missing spec shows its
-load-error view.
+A missing asset draws the renderer's placeholder and a missing spec shows its load-error view.
 
-Embedded prototypes fill their allotted space edge to edge; unsized images use their natural
+An embedded prototype fills its space edge to edge; unsized images use their natural
 size. Place the composable below app and status bars. Offsetting it by less than the bar's height
 hides the image row behind the bar.
 
 ## Requests
 
-How `request` actions reach the network:
-
 - **Android:** pass a device client, `PrototypeNetwork(device = myClient)`. Without one, every
   request fails with a typed `network` error. A `hostHandler` takes over host-routed requests (those
-  with `via: "host"` or no `via`), for example to add authentication or serve canned responses.
-  The app supplies its own HTTP client; the renderer ships none. On Android 17, a request to the
-  emulator host alias `10.0.2.2` (a local-network address) times out until the app declares
+  with `via: "host"` or no `via`), such as adding authentication or serving canned responses.
+  The renderer ships no HTTP client. On Android 17, a request to the emulator host alias
+  `10.0.2.2` (a local-network address) times out until the app declares
   `android.permission.ACCESS_LOCAL_NETWORK` and the user grants it.
 - **iOS:** the default `PrototypeNetworkConfiguration` uses the renderer's `URLSession` client with
   its egress checks. Pass `PrototypeNetworkConfiguration(hostHandler:)` to take over host-routed
@@ -168,22 +159,21 @@ The app closes its modules after all renderers using them detach.
 
 Specs accept the [allowed prototype icons](prototype-icons.md), including all five Material styles.
 
-The renderer looks up Android icons named in a spec by reflection, which R8 cannot see. The library
-ships no consumer keep rule for them: one would retain all of `material-icons-extended` (about 3 MB
-of dex) in every app. An app that minifies and renders icons by name adds the rule itself:
+The renderer looks up Android icons named in a spec by reflection, which R8 cannot see, and the
+library ships no keep rule for them. An app that minifies and renders icons by name adds it:
 
 ```
 -keep class androidx.compose.material.icons.** { *; }
 ```
 
-Narrow it to the icons your specs use if size matters, for example
+To save size, keep only the icons your specs use, for example
 `-keep class androidx.compose.material.icons.filled.HomeKt { *; }` per icon and style. An icon the
-shrinker removed draws no glyph. The renderer then logs `Prototype icon '<name>' resolved in no
-style` once per name at warn level. Apps that never shrink, and specs without icons, need nothing.
+shrinker removed draws no glyph, and the renderer logs `Prototype icon '<name>' resolved in no
+style` once per name at warn level. Apps that never shrink, and specs without icons, need no rule.
 
 ## Storage
 
-When the spec has a `storage` block, the generated host opts in to file-backed storage
+With a `storage` block in the spec, the generated host opts in to file-backed storage
 (`PrototypeStorage.fileBacked(context)` on Android, `.fileBacked` on iOS). The listed state and
 data keys then survive app restarts. Specs without a `storage` block use no storage.
 
@@ -196,41 +186,40 @@ layout. Leave it out to follow the app's direction. For example:
 { "placement": { "type": "fullscreen" }, "layoutDirection": "rtl" }
 ```
 
-Use this object as the spec's `window`. The option changes only the prototype's layout; it does
-not change the device locale or translate text. iOS supports it and requires
-`prototype_layout_direction_v1`. Android refuses specs that set it; remove the option to show there.
+Use this object as the spec's `window`. It changes only layout, not the device locale or text
+language. iOS supports it and requires `prototype_layout_direction_v1`. Android refuses specs that
+set it; remove the option to show there.
 
 Other optional window controls are `keepScreenOn`, `brightness`, `orientation` and `statusBar`.
 They require `prototype_platform_window_controls_v1`, and AutoMobile refuses them when unsupported.
 On Android, these controls and the `hideKeyboard` action work through CtrlProxy overlays, not the
 embedded renderer. Overlay orientation is best effort. Inspect reports the requested `orientation`,
-and reports `statusBar: "unsupported"` when the spec requested a status bar style.
+and `statusBar: "unsupported"` for a requested status bar style.
 
 ## Capability errors
 
-Renderers older than the spec requires show a visible error instead of rendering partly:
+A renderer older than the spec requires shows an error instead of rendering partly:
 
-- On Android the `onError` slot draws it: the renderer's default view unless you pass your own.
+- On Android the `onError` slot draws it, by default with the renderer's own view.
 - On iOS the renderer shows its diagnostic and calls `onLoadError`.
 
-The generated host passes neither, so it shows the defaults; edit the host's call to pass them.
-Compare `requiredCapabilities` with `AutoMobilePrototype.capabilities` (Android) or
-`AutoMobilePrototypeCapabilities` (iOS) to check ahead of time.
+The generated host passes neither and shows the defaults; edit its call to pass them. To check
+ahead of time, compare `requiredCapabilities` with `AutoMobilePrototype.capabilities` (Android) or
+`AutoMobilePrototypeCapabilities` (iOS).
 
 ## Not supported when embedded
 
 - Overlay window placement: `window` placement and the overlay options (`layer`, `persistence`).
-  An embedded prototype fills the space the app gives it.
 - CtrlProxy-only chrome, such as the host dismiss bar and the two-finger dismiss gesture. The app
   decides what dismissal does through `onDismiss`.
 
 ## Samples
 
-`samples/prototype-embedding/` in the AutoMobile repository holds the resource's output for one
-sample prototype on each platform. The Android sample requests `http://10.0.2.2:8080/greeting`,
+`samples/prototype-embedding/` in the repository holds the resource's output for a sample
+prototype per platform. The Android sample requests `http://10.0.2.2:8080/greeting`,
 the Android emulator's host alias. The iOS sample uses the placeholder
 `http://192.168.1.10:8080/greeting`; replace `192.168.1.10` with the machine's LAN address. Both
-samples ship a generated `hero.png` image.
+ship a generated `hero.png`.
 
 On Android emulators, access a running disposable app with `prototype` actions `patch`, `status`,
 `inspect` or `awaitEvent` and its installed spec's `id`. For `status` and `inspect`, optional `id`
@@ -241,3 +230,15 @@ Events survive rotation and reconnects within the app process. If attachment fai
 overlay showing that id without ending other apps' waits. Otherwise relaunch; reinstall with
 `prototype installApp` for a stale saved token. Installed apps need distinct spec ids; ambiguous
 ids return conflicting app slugs. Other actions use the overlay.
+
+### Platform runtime report
+
+`prototype inspect` reads `platformRuntime` from the device. Host-local `status` returns the last
+report from `show` or `inspect`, with call mode and in-flight counts updated as events arrive.
+Run `inspect` to refresh availability, app state and permissions. The report names the runtime and
+lists registered modules as `ready`, `degraded` or `unavailable`. A module can also report its mode
+(`real`, `fake` or `simulated`), reason and in-flight count. Unknown fields are omitted.
+
+A successful `show` reports one `platformNotes` entry for each reported module reason. Look for
+`platform.<module>` and an effect of `ignored` or `simulated`, for example `platform.haptics` for
+simulated haptics on iOS.

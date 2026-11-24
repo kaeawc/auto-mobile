@@ -1,13 +1,16 @@
 package dev.jasonpearson.automobile.protoviewer
 
+import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeDirectoryStore
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeLimits
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeLoadResult
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeSaveRequest
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeSaveResult
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeStore
 import dev.jasonpearson.automobile.ctrlproxy.prototype.sha256Hex
+import dev.jasonpearson.automobile.protocol.PrototypeRuntimeBudget
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
+import java.io.File
 import java.util.UUID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -16,6 +19,19 @@ import kotlinx.serialization.json.Json
 const val MAX_LIBRARY_PROTOTYPES = 200
 const val MAX_LIBRARY_BYTES = 100L * 1024 * 1024
 val libraryLimits = SavedPrototypeLimits(maxSavedPrototypes = MAX_LIBRARY_PROTOTYPES)
+
+/**
+ * The library's backing store, validating with ProtoViewer's runtime budget (#18804); its spec byte
+ * cap is that budget's, so a spec the budget admits also fits on disk.
+ */
+internal fun librarySavedStore(root: File): SavedPrototypeDirectoryStore {
+  val budget = PrototypeRuntimeBudget.forCapabilities(protoViewerCapabilities)
+  return SavedPrototypeDirectoryStore(
+    root,
+    limits = libraryLimits.copy(maxSpecBytes = budget.maxSpecBytes),
+    budget = budget,
+  )
+}
 
 fun interface IdGenerator {
   fun newId(): String
@@ -335,8 +351,12 @@ internal fun <T> storageResult(block: () -> T): LibraryResult<T> =
   }
 
 private fun validLibrarySpec(spec: String): Boolean =
-  PrototypeSpecValidator.validate(spec, protoViewerCapabilities, library = true) is
-    PrototypeSpecValidation.Success
+  PrototypeSpecValidator.validate(
+    spec,
+    protoViewerCapabilities,
+    library = true,
+    budget = PrototypeRuntimeBudget.forCapabilities(protoViewerCapabilities),
+  ) is PrototypeSpecValidation.Success
 
 /**
  * Validity and admission checks for a new entry. [DirectoryLibraryRepository.add] repeats the

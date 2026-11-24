@@ -236,6 +236,7 @@ enum PrototypeRouteBinder {
         private func condition(_ value: inout Object) {
             field(&value, "data", .pointer)
             field(&value, "key")
+            field(&value, "equalsKey")
             keys(&value, "valid")
             for key in ["equals", "notEquals"] { field(&value, key, .typed) }
             for key in ["contains", "startsWith"] { field(&value, key) }

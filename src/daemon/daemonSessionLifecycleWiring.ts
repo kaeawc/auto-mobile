@@ -1,4 +1,5 @@
 import { registerAXBridgeSessionLifecycle } from "./axBridgeSessionLifecycle";
+import { registerSimHidSessionLifecycle } from "./simHidSessionLifecycle";
 import { lazySessionReleasePool } from "./releaseSessionAndDevice";
 import { logger } from "../utils/logger";
 import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
@@ -13,7 +14,10 @@ import {
 import { registerDisplayProfileSessionCleanup } from "./displayProfileSessionCleanup";
 import { registerKeyboardProfileSessionCleanup } from "./keyboardProfileSessionCleanup";
 import { registerDeviceConditionSessionCleanup } from "./deviceConditionSessionCleanup";
-import { registerIosCameraPosterSessionCleanup } from "./iosCameraPosterSessionCleanup";
+import {
+  registerIosCameraPosterSessionCleanup,
+  type IosCameraPosterDaemonHooks,
+} from "./iosCameraPosterSessionCleanup";
 import { registerPortReverseSessionCleanup } from "./portReverseSessionCleanup";
 import { registerBlePeripheralSessionCleanup } from "./blePeripheralSessionCleanup";
 import { registerAndroidAutoSessionCleanup } from "./androidAutoSessionCleanup";
@@ -100,6 +104,8 @@ export interface DaemonSessionLifecycleHost {
     query: ActiveSessionExecutionQuery,
     releasedDeviceId: string | undefined,
   ): void;
+  /** Touches the data dir and simulators at registration, so tests pass a fake. */
+  iosCameraPosterDaemonHooks: IosCameraPosterDaemonHooks;
 }
 
 // Capture aliases before release removes the session and derived-label relationships.
@@ -123,7 +129,10 @@ function captureNetworkGapMarker(
 }
 
 /** The per-feature device-state restores, in their release-listener order. */
-function registerDeviceStateSessionCleanups(sessionManager: SessionManager): void {
+function registerDeviceStateSessionCleanups(
+  sessionManager: SessionManager,
+  host: Pick<DaemonSessionLifecycleHost, "iosCameraPosterDaemonHooks">,
+): void {
   registerStatusBarSessionCleanup(sessionManager);
   registerAppLinksSessionCleanup(sessionManager);
   registerKillProfileSessionCleanup(sessionManager);
@@ -132,7 +141,7 @@ function registerDeviceStateSessionCleanups(sessionManager: SessionManager): voi
   registerDisplayProfileSessionCleanup(sessionManager);
   registerKeyboardProfileSessionCleanup(sessionManager);
   registerDeviceConditionSessionCleanup(sessionManager);
-  registerIosCameraPosterSessionCleanup(sessionManager);
+  registerIosCameraPosterSessionCleanup(sessionManager, host.iosCameraPosterDaemonHooks);
   registerPortReverseSessionCleanup(sessionManager);
   registerBlePeripheralSessionCleanup(sessionManager);
   registerAndroidAutoSessionCleanup(sessionManager);
@@ -147,19 +156,20 @@ function registerDeviceStateSessionCleanups(sessionManager: SessionManager): voi
 function registerFeatureSessionLifecycle(
   sessionManager: SessionManager,
   timer: Timer,
-  host: Pick<DaemonSessionLifecycleHost, "markMutationUnrecorded">,
+  host: Pick<DaemonSessionLifecycleHost, "markMutationUnrecorded" | "iosCameraPosterDaemonHooks">,
 ): void {
   registerLocationRouteSessionCleanup(sessionManager);
   registerNetworkStateSessionCleanup(sessionManager, {
     timer,
     gapMarkerFor: (sessionId) => captureNetworkGapMarker(sessionManager, host, sessionId),
   });
-  registerDeviceStateSessionCleanups(sessionManager);
+  registerDeviceStateSessionCleanups(sessionManager, host);
   registerRecordingSessionCleanup(sessionManager, {
     ...defaultRecordingSessionCleanupDeps,
     markDeviceNeedsRecorderRecovery: createRecorderTeardownRecoveryMarker(sessionManager),
   });
   registerAXBridgeSessionLifecycle(sessionManager);
+  registerSimHidSessionLifecycle(sessionManager);
 }
 
 /**

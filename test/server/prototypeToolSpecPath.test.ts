@@ -2,7 +2,10 @@ import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerPrototypeTools, prototypeOutputSchema } from "../../src/server/prototypeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { MAX_PROTOTYPE_SPEC_BYTES } from "../../src/features/prototype/prototypeSpec";
+import { PROTOTYPE_LARGE_BUDGET } from "../../src/features/prototype/prototypeRuntimeBudget";
+
+// A specPath file may hold a spec for a large-budget runtime (#18804); the show preflight gates it.
+const MAX_PROTOTYPE_SPEC_BYTES = PROTOTYPE_LARGE_BUDGET.MAX_PROTOTYPE_SPEC_BYTES;
 import type { BootedDevice } from "../../src/models";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";

@@ -21,6 +21,8 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import { layerGestureRefusal } from "../observe/hierarchyLayer";
 import { StaleDisplayError, withStaleDisplay } from "../observe/StaleDisplayError";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { type IosSimulatorRawInput } from "../../utils/ios/simHid/IosSimulatorRawInput";
+import { resolveIosRawInput, simHidScreenFromObservation } from "./simHidRouting";
 import { snapshotReferences, type SnapshotReferenceStore } from "../observe/SnapshotReferenceStore";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
@@ -61,6 +63,8 @@ export interface SwipeAtCoordinateDependencies extends DisplayFenceDependencies 
   lastRenderedObservation?: RenderedObservationReader;
   /** Stylus routes and device facts; the defaults use instrumentation or root-only uinput and live device facts. */
   stylus?: Pick<RichStylusOptions, "injectors" | "readEnvironment">;
+  /** The iOS Simulator HID route (#19118); `null` disables it. */
+  iosRawInput?: IosSimulatorRawInput | null;
 }
 
 type NativePoint = { x: number; y: number };
@@ -144,6 +148,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
   private readonly androidClient: Pick<AndroidCtrlProxy, "requestSwipe" | "supportsCommand">;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private readonly stylusRoutes: Pick<RichStylusOptions, "injectors" | "readEnvironment">;
+  private readonly iosRawInput?: IosSimulatorRawInput;
 
   constructor(
     device: BootedDevice,
@@ -162,6 +167,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       dependencies.androidClient ?? androidCtrlProxyClientForPlatform(device, this.adbFactory);
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.stylusRoutes = dependencies.stylus ?? {};
+    this.iosRawInput = resolveIosRawInput(device, dependencies.iosRawInput);
     this.invalidateIosCache =
       dependencies.invalidateIosCache ??
       (() => IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache());
@@ -516,6 +522,14 @@ export class SwipeAtCoordinate extends BaseVisualChange {
                     duration,
                     // A display change since the pre-dispatch read refuses just before the finger goes down.
                     displayFence: fence,
+                    ...(this.iosRawInput
+                      ? {
+                          simulatorHid: {
+                            input: this.iosRawInput,
+                            screen: simHidScreenFromObservation(observation),
+                          },
+                        }
+                      : {}),
                   },
                   { perf, signal },
                 ),

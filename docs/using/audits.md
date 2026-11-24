@@ -2,7 +2,7 @@
 
 | Tool                               | What it does                                                                                    | Platforms                                                                                                                                                   | Needs                             |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| 🚦 <code>performanceAudit</code>   | Pass/fail performance checks of an app on the current screen, against the configured thresholds | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span></span> | <span class="tool-needs">—</span> |
+| 🚦 <code>performanceAudit</code>   | Pass/fail performance checks of an app on the current screen, against the configured thresholds | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span></span>                                                         | <span class="tool-needs">—</span> |
 | ✅ <code>accessibilityAudit</code> | Audit the accessibility of the current screen                                                   | <span class="tool-platforms"><span role="img" aria-label="Android" title="Android">🤖</span> <span role="img" aria-label="iOS" title="iOS">🍎</span></span> | <span class="tool-needs">—</span> |
 
 Two tools check the current screen on demand and can fail a plan step: `accessibilityAudit` for
@@ -74,6 +74,29 @@ frames from app launch or earlier screens. When the app rendered no frames durin
 `p50Ms`–`p99Ms` are null and `metrics.frameTimeUnmeasured` says why. AutoMobile then skips the
 frame-time check, so it does not fail the call. For raw captures use `performanceTrace` (its `categories` option records a custom Perfetto trace),
 [`measureStartup`](#measurestartup) or [`heapDump`](#heapdump).
+
+## Render overlays (iOS Simulator)
+
+To see rendering cost in screenshots, turn on the Simulator's Core Animation overlays with
+`displayConfig` `renderOverlays`, take a screenshot, then turn them off:
+
+```json
+{ "renderOverlays": { "blendedLayers": true, "offscreenRendered": true } }
+```
+
+| Overlay               | What the screenshot shows                       |
+| --------------------- | ----------------------------------------------- |
+| `blendedLayers`       | Opaque layers green, blended layers red         |
+| `offscreenRendered`   | Off-screen rendered layers yellow               |
+| `misalignedImages`    | Misaligned images magenta, scaled images yellow |
+| `copiedImages`        | Images Core Animation copied cyan               |
+| `cacheHits`           | Rasterized layer cache hits green, misses red   |
+| `flashUpdatedRegions` | Regions flash yellow as they redraw             |
+
+The result's `applied.renderOverlays` and `previous.renderOverlays` report every overlay, and a
+read reports them under `current.renderOverlays`. The overlays tint every app on screen until you
+turn them off, send `reset: true`, or shut the Simulator down. Releasing a session puts each
+overlay it changed back to its value before the session, so one that was already on stays on. Android and physical iOS devices refuse `renderOverlays`.
 
 ## `measureStartup`
 

@@ -6,7 +6,7 @@
     <array><dict>
         <key>CFBundleTypeRole</key><string>Viewer</string>
         <key>CFBundleURLName</key><string>AutoMobile ProtoViewer</string>
-        <key>CFBundleURLSchemes</key><array><string>automobile-proto</string></array>
+        <key>CFBundleURLSchemes</key><array><string>automobile-proto</string><string>amp-demo</string></array>
     </dict></array>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Confirm your identity when a prototype asks you to authenticate.</string>

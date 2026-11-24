@@ -1,4 +1,5 @@
 import { prototypeDegradedEffectsOutput } from "../features/prototype/prototypeDegradedEffects";
+import type { PrototypeRuntimeBudget } from "../features/prototype/prototypeRuntimeBudget";
 import { prototypeTimerWarnings } from "../features/prototype/prototypeTimers";
 import { prototypeTopAppBarInsetWarnings } from "../features/prototype/prototypeTopAppBarInsetLint";
 import { prototypeSettingsPagePlatformError } from "../features/prototype/prototypeSettings";
@@ -88,16 +89,18 @@ export interface PrototypePatchOutput {
 }
 const failure = (error: string): PrototypePatchOutput => ({ success: false, error });
 
+/** `budget` is the runtime budget the spec was shown under (#18804). */
 function patchSpec(
   spec: ShownSpecJson,
   ops: unknown,
+  budget: PrototypeRuntimeBudget,
 ): { spec: Record<string, unknown>; validated: PrototypeSpec } | PrototypePatchOutput {
   try {
     const applied = applyPrototypePatch(spec, ops, { stateTests: "skip" });
     if (!applied.success) {
       return failure(`Invalid patch at ${applied.error.path}: ${applied.error.message}`);
     }
-    const validated = validatePrototypeSpec(applied.spec);
+    const validated = validatePrototypeSpec(applied.spec, { budget });
     return validated.success
       ? { spec: applied.spec, validated: validated.data }
       : failure(`Invalid patch result at spec.${validated.error.path}: ${validated.error.message}`);
@@ -236,7 +239,7 @@ function plannedPatch(
   args: PrototypePatchInput,
   spec: ShownSpecJson,
 ): ReturnType<typeof patchSpec> {
-  const applied = patchSpec(spec, args.ops);
+  const applied = patchSpec(spec, args.ops, deps.store.shownSpecs.budgetOf(deviceId, args.id));
   return "spec" in applied ? (dataWriteGuard(deps, deviceId, args) ?? applied) : applied;
 }
 

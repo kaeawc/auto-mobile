@@ -1,4 +1,5 @@
 import { watchPairResultSchema } from "../../utils/ios-cmdline-tools/SimulatorPairs";
+import { HARDWARE_KEYBOARD_LAYOUTS } from "../../utils/ios/SimulatorKeyboardBridge";
 import { disabledResourcesSchema } from "../../utils/deviceResourceSchemas";
 import { z } from "zod/v4";
 import { deviceDescriptionSchema } from "../../daemon/deviceDescription";
@@ -213,7 +214,9 @@ const deviceStateOutputFields = {
       observedValues: networkConditionValuesOutputSchema.partial().optional(),
       expiresInSeconds: z.number().optional(),
       rawStatus: z.string().optional(),
-      backend: z.literal("network-extension").optional(),
+      backend: z.enum(["network-extension", "socket-shaper"]).optional(),
+      rebooted: z.boolean().optional(),
+      offline: z.boolean().optional(),
       controller: z
         .object({
           state: z.string(),
@@ -258,6 +261,7 @@ const deviceStateOutputFields = {
       mode: z.enum(["image", "qr", "clear"]).optional(),
       method: z.enum(["android_emulator_console", "ios_simulator_dyld_injection"]).optional(),
       relaunchRequired: z.boolean().optional(),
+      deviceWide: z.boolean().optional(),
       surface: z.enum(["wall", "table"]).optional(),
       path: z.string().optional(),
     })
@@ -330,6 +334,46 @@ const deviceStateOutputFields = {
       preconditions: z.array(z.string()).optional(),
       restoreOnRelease: z.boolean().optional(),
       errorCode: z.string().optional(),
+    })
+    .passthrough()
+    .optional(),
+  // iOS Simulator hardware keyboard and keyboard language (#19017).
+  keyboard: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      hardwareKeyboard: z.boolean().optional(),
+      hardwareLayout: z.enum(HARDWARE_KEYBOARD_LAYOUTS).optional(),
+      language: z.string().optional(),
+    })
+    .passthrough()
+    .optional(),
+  // iOS Simulator per-process sockets and traffic read from host ps/lsof/nettop (#19020).
+  networkActivity: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      processCount: z.number().optional(),
+      activeProcessCount: z.number().optional(),
+      truncated: z.boolean().optional(),
+      warnings: z.array(z.string()).optional(),
+      processes: z
+        .array(
+          z.object({
+            pid: z.number(),
+            name: z.string(),
+            appId: z.string().optional(),
+            sockets: z.array(
+              z.object({
+                protocol: z.string(),
+                local: z.string(),
+                remote: z.string().optional(),
+                state: z.string().optional(),
+              }),
+            ),
+            bytesIn: z.number(),
+            bytesOut: z.number(),
+          }),
+        )
+        .optional(),
     })
     .passthrough()
     .optional(),

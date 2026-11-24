@@ -43,7 +43,7 @@ extension PrototypeAgentProtocol {
 
 /// Spec feature capabilities supported by the native prototype renderer.
 public enum AutoMobilePrototypeCapabilities {
-    /// Derived from the agent's advertised capabilities so embedded renderers share its contract.
+    /// Shared renderer capabilities. Each host adds the capabilities of the modules it registers.
     public static let supported: [String] = PrototypeAgentProtocol.advertisedCapabilities()
         .filter { $0.hasPrefix("prototype_") }
         .sorted()

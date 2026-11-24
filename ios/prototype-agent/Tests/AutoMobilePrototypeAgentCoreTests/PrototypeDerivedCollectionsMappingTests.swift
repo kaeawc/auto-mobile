@@ -20,6 +20,122 @@ final class PrototypeDerivedCollectionsMappingTests: XCTestCase {
         return try XCTUnwrap(JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: path)).objectFields)
     }
 
+    private func bindingFixture() throws -> [String: JSONValue] {
+        let path = PrototypeSpecFixtures.directory.appendingPathComponent("derive/bindings.json")
+        return try XCTUnwrap(JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: path)).objectFields)
+    }
+
+    func testSharedDerivedBindingsUseCurrentRawValues() throws {
+        let fixture = try bindingFixture()
+        let data = try JSONEncoder().encode(XCTUnwrap(fixture["spec"]))
+        try PrototypeSpecStrictValidator.validate(data: data)
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: data)
+        let button = try XCTUnwrap(spec.root.children?.first)
+        let actions = try XCTUnwrap(button.onTap)
+        let expected = try XCTUnwrap(fixture["expected"]?.objectFields)
+
+        var session = PrototypeSession()
+        session.show(spec)
+        XCTAssertTrue(session.isEnabled(button))
+        let events = session.run(actions)
+        XCTAssertEqual(session.data?["count"], expected["count"])
+        XCTAssertEqual(events.first { $0.name == "checkout" }?.context, expected["context"]?.objectFields)
+        guard case let .start(job)? = session.takeRequestCommands().first else { return XCTFail("Expected a request") }
+        XCTAssertEqual(job.body, expected["body"])
+        XCTAssertEqual(job.url, expected["url"]?.stringValue)
+
+        _ = session.setStates([("query", .string("no match"))])
+        let updated = session.run(actions)
+        XCTAssertEqual(session.data?["count"], .number(0))
+        XCTAssertEqual(updated.first { $0.name == "checkout" }?.context, ["count": .number(0)])
+        guard case let .start(next)? = session.takeRequestCommands().first else { return XCTFail("Expected a request") }
+        XCTAssertEqual(next.body, .array([]))
+        XCTAssertEqual(next.url, "https://example.com/cart?count=0")
+    }
+
+    func testSharedStateKeyComparisonUsesBothCurrentValues() throws {
+        let fixture = try bindingFixture()
+        let data = try JSONEncoder().encode(XCTUnwrap(fixture["spec"]))
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: data)
+        let condition = try XCTUnwrap(spec.root.children?.first?.enabledWhen)
+        for entry in PrototypeStrictBindings.array(fixture["changes"]) {
+            let change = try XCTUnwrap(entry.objectFields)
+            let state = try XCTUnwrap(change["state"]?.objectFields)
+            XCTAssertEqual(condition.holds(state), change["visible"] == .bool(true))
+        }
+    }
+
+    func testDerivedValueBindingsInFormAndMultipartBodies() throws {
+        let fixture = try bindingFixture()
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: JSONEncoder().encode(XCTUnwrap(fixture["spec"])))
+        var session = PrototypeSession()
+        session.uploadBoundary = Boundary()
+        session.show(spec)
+        let requests = #"""
+        [
+          {"type":"request","method":"POST","via":"device","url":"https://example.com/cart",
+           "body":{"form":{"count":{"derived":"cartCount"}}}},
+          {"type":"request","method":"POST","via":"device","url":"https://example.com/cart",
+           "body":{"multipart":[{"name":"count","value":{"derived":"cartCount"}}]}}
+        ]
+        """#
+        let actions = try JSONDecoder().decode([PrototypeAction].self, from: Data(requests.utf8))
+        _ = session.run(actions)
+        let bodies = session.takeRequestCommands().compactMap { command -> String? in
+            guard case let .start(job) = command, let body = job.uploadBody else { return nil }
+            return String(decoding: body.data, as: UTF8.self)
+        }
+        XCTAssertEqual(bodies, [
+            "count=1",
+            "--fixed-boundary\r\nContent-Disposition: form-data; name=\"count\"\r\n\r\n1\r\n--fixed-boundary--\r\n",
+        ])
+    }
+
+    func testDerivedDataWriteCannotCopySecureStorageState() throws {
+        let json = #"""
+        {"id":"secure-alias","window":{"placement":{"type":"fullscreen"}},
+         "state":{"token":"","remember":false},"data":{"copy":"original"},
+         "requires":{"platform":["secureStorage"]},
+         "storage":{"version":1,"keys":["state:remember"],"secure":["state:token"]},
+         "derive":{"tokenAlias":{"of":{"state":"token"},"format":{"number":{}}}},
+         "root":{"type":"button","label":"Copy","onTap":[
+           {"type":"setData","path":"/data/copy","value":{"derived":"tokenAlias"}}
+         ]}}
+        """#
+        // Validation follows the derived binding to its secure source, so the spec never loads (#19013).
+        XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: Data(json.utf8))) { error in
+            XCTAssertEqual(error as? PrototypeLoadError, .invalidSpec(
+                path: "root.onTap[0].value",
+                message: "Secure storage key state:token cannot be sent in data actions"
+            ))
+        }
+    }
+
+    func testStateKeyComparisonRequiresDeriveCapabilityWithoutDeclarations() throws {
+        let raw = try XCTUnwrap(bindingFixture()["spec"]?.objectFields)
+        let button = try XCTUnwrap(PrototypeStrictBindings.array(raw["root"]?.objectFields?["children"]).first)
+        let condition = try XCTUnwrap(button.objectFields?["enabledWhen"])
+        let fields = raw.merging(["root": .object([
+            "type": .string("text"), "text": .string("Matches"), "visibleWhen": condition,
+        ])]) { _, new in new }.filter { $0.key != "derive" }
+        let data = try JSONEncoder().encode(JSONValue.object(fields))
+        XCTAssertTrue(PrototypeStrictCapabilities.required(fields).contains("prototype_derive_v1"))
+        XCTAssertTrue(try PrototypeBundleCapabilities.required(data).contains("prototype_derive_v1"))
+        try PrototypeSpecStrictValidator.validate(data: data)
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(
+            data: data, supportedCapabilities: PrototypeStrictCapabilities.required(fields).subtracting([
+                "prototype_derive_v1",
+            ])
+        )) { error in
+            XCTAssertEqual(
+                error as? PrototypeLoadError, .invalidSpec(
+                    path: "$",
+                    message: "Unsupported capabilities: prototype_derive_v1"
+                )
+            )
+        }
+    }
+
     func testSharedDerivedConditionsRecomputeAndValidateNames() throws {
         let fixture = try conditionFixture()
         let raw = try XCTUnwrap(fixture["spec"])
@@ -256,5 +372,9 @@ final class PrototypeDerivedCollectionsMappingTests: XCTestCase {
     private final class Observer: PrototypeDeriveObserver {
         var names: [String] = []
         func recomputed(name: String) { names.append(name) }
+    }
+
+    private struct Boundary: PrototypeUploadBoundaryGenerating {
+        func nextBoundary() -> String { "fixed-boundary" }
     }
 }

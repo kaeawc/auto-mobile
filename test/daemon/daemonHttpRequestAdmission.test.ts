@@ -311,6 +311,7 @@ describe("Daemon HTTP request admission", () => {
         clientCount: () => ingress.openRequestCount(),
         clientActivityCount: () => ingress.requestsSeenCount(),
         liveSessionCount: () => 0,
+        controlSocketRemoved: () => false,
         shutdown: (reason) => {
           shutdowns.push(reason);
         },

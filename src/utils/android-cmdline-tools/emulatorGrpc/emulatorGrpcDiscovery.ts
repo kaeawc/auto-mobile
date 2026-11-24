@@ -25,7 +25,6 @@ export interface EmulatorGrpcEndpoint {
   descriptionFile: string;
 }
 
-const DEFAULT_GRPC_PORT = 8554;
 const PID_FILE = /^pid_(\d+)\.ini$/;
 
 /** `key=value` lines; the first `=` splits, so values may contain `=`. */
@@ -51,11 +50,30 @@ function authFrom(ini: Record<string, string>): EmulatorGrpcAuth {
   return { kind: "none" };
 }
 
+/** A whole decimal port; `8554junk` or `8554.5` is not one, so it never resolves to 8554. */
 function parsePort(value: string | undefined): number | undefined {
-  const port = Number.parseInt(value ?? "", 10);
-  return Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
+  const text = value?.trim() ?? "";
+  if (!/^\d+$/.test(text)) {
+    return undefined;
+  }
+  const port = Number(text);
+  return port > 0 && port < 65536 ? port : undefined;
 }
 
+function advertisedAddress(ini: Record<string, string>): string | undefined {
+  if (ini["grpc.address"]) {
+    return ini["grpc.address"];
+  }
+  const port = parsePort(ini["grpc.port"]);
+  return port === undefined ? undefined : `localhost:${port}`;
+}
+
+/**
+ * The gRPC endpoint a running-instance file advertises, or `undefined` when it names no console
+ * port or no gRPC server. An emulator started with `-no-grpc` (or a third-party emulator) writes
+ * neither `grpc.address` nor `grpc.port`; guessing the default 8554 would reach whichever emulator
+ * holds that port instead (#19134).
+ */
 export function endpointFromDescription(
   pid: number,
   descriptionFile: string,
@@ -65,8 +83,10 @@ export function endpointFromDescription(
   if (consolePort === undefined) {
     return undefined;
   }
-  const address =
-    ini["grpc.address"] || `localhost:${parsePort(ini["grpc.port"]) ?? DEFAULT_GRPC_PORT}`;
+  const address = advertisedAddress(ini);
+  if (address === undefined) {
+    return undefined;
+  }
   return { pid, consolePort, address, auth: authFrom(ini), descriptionFile };
 }
 

@@ -103,6 +103,22 @@ export class IosCaptureResolver {
     return { kind: "device", deviceId: this.dependencies.options.device.deviceId };
   }
 
+  /**
+   * The headless framebuffer target for a Simulator stream (#19015), or `null`
+   * when it does not apply: a physical device, or audio, which only the window
+   * path captures.
+   */
+  framebufferCaptureTarget(): CaptureTarget | null {
+    const { device, audioEnabled } = this.dependencies.options;
+    if (
+      audioEnabled === true ||
+      resolveIosDeviceKind({ deviceId: device.deviceId }) !== "simulator"
+    ) {
+      return null;
+    }
+    return { kind: "simulatorFramebuffer", udid: device.deviceId, fps: this.dependencies.fps };
+  }
+
   async resolveHelperPath(): Promise<string> {
     const configuredPath =
       this.dependencies.helperPath ?? readScreenCaptureHelperEnvOverride(process.env);
@@ -188,9 +204,14 @@ export class IosCaptureResolver {
 }
 
 export function describeCaptureTarget(target: CaptureTarget): string {
-  return target.kind === "simulator"
-    ? `iOS Simulator window ${target.windowID} at ${target.fps ?? DEFAULT_IOS_WEBRTC_FPS} fps`
-    : `iOS device ${target.deviceId ?? "default"}`;
+  switch (target.kind) {
+    case "simulator":
+      return `iOS Simulator window ${target.windowID} at ${target.fps ?? DEFAULT_IOS_WEBRTC_FPS} fps`;
+    case "simulatorFramebuffer":
+      return `iOS Simulator ${target.udid} framebuffer at ${target.fps ?? DEFAULT_IOS_WEBRTC_FPS} fps`;
+    case "device":
+      return `iOS device ${target.deviceId ?? "default"}`;
+  }
 }
 
 export async function defaultResolveSimulatorWindowId(
@@ -360,7 +381,7 @@ export function resolveEncodeSettings(
   const bitrate: EncodeBitratePolicy =
     override !== undefined
       ? { kind: "explicitBps", bps: override }
-      : targetKind === "simulator"
+      : targetKind !== "device"
         ? { kind: "bitsPerPixel", bpp: IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL }
         : { kind: "videoToolboxDefault" };
   const maxLongSide = options.quality ? QUALITY_PRESET_MAX_LONG_SIDE[options.quality] : undefined;

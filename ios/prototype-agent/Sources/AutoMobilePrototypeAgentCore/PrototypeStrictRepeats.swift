@@ -180,14 +180,19 @@ struct PrototypeStrictRepeats {
         }
     }
 
-    private func fields(_ value: JSONValue, path: String, scope: Scope?, dataCondition: Bool = false) throws {
+    private func fields(
+        _ value: JSONValue, path: String, scope: Scope?, dataCondition: Bool = false, condition: Bool = false
+    )
+        throws
+    {
         if case let .array(items) = value {
             for (index, child) in items.enumerated() {
                 try fields(
                     child,
                     path: "\(path)[\(index)]",
                     scope: scope,
-                    dataCondition: dataCondition
+                    dataCondition: dataCondition,
+                    condition: condition
                 )
             }
             return
@@ -204,6 +209,7 @@ struct PrototypeStrictRepeats {
                 let keyField = ["stateKey", "activeKey", "hourKey", "minuteKey", "atEndKey", "statusKey", "state"]
                     .contains(key)
                     || (key == "key" && object["repeat"] == nil && object["type"] != .string("upsertData"))
+                    || (key == "equalsKey" && condition)
                 let dataActionPath = key == "path"
                     && PrototypeDataWrite.actionTypes.contains(object["type"]?.stringValue ?? "")
                 let appendTarget = (key == "to" && object["from"] != nil) || dataActionPath
@@ -329,7 +335,9 @@ struct PrototypeStrictRepeats {
                     child,
                     path: at,
                     scope: scope,
-                    dataCondition: object["data"] != nil && ["equals", "notEquals", "gt", "lt"].contains(key)
+                    dataCondition: object["data"] != nil && ["equals", "notEquals", "gt", "lt"].contains(key),
+                    condition: ["visibleWhen", "enabledWhen", "errorWhen", "when"].contains(key)
+                        || (condition && ["all", "any", "not"].contains(key))
                 )
             }
             if object["data"] != nil, ["equals", "notEquals", "gt", "lt"].contains(key), let text = child.stringValue,

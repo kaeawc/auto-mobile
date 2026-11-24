@@ -87,7 +87,7 @@ internal object PrototypeStrictPolicy {
     }
     val shares = SharePolicy.fields(context)
     val sinks =
-      (requestFields(context) + channelFields + shares)
+      (requestFields(spec, context) + channelFields + shares)
         .sortedBy { it.path }
         .filter { isSinkBinding(it, requests) || it in shares }
     var expandedBytes = 0L
@@ -133,7 +133,7 @@ internal object PrototypeStrictPolicy {
       }
       .toSet()
 
-  private fun requestFields(context: PrototypeStateChecks.Context): List<Field> {
+  private fun requestFields(spec: JsonObject, context: PrototypeStateChecks.Context): List<Field> {
     val fields = mutableListOf<Field>()
     for (node in context.nodes) {
       PrototypeBindableFields.first<Boolean>(node.value, node.path) { raw, at, kind ->
@@ -149,11 +149,18 @@ internal object PrototypeStrictPolicy {
     for (action in context.actions) {
       PrototypeBindableFields.firstAction<Boolean>(action.value, action.path) { raw, at, kind ->
         val text = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content
-        if (
-          text != null &&
-            kind in listOf(PrototypeBindableKind.REQUEST_TEXT, PrototypeBindableKind.KEY)
-        )
-          fields.add(Field(text, at, kind == PrototypeBindableKind.KEY))
+        if (text != null) {
+          when (kind) {
+            PrototypeBindableKind.REQUEST_TEXT,
+            PrototypeBindableKind.KEY ->
+              fields.add(Field(text, at, kind == PrototypeBindableKind.KEY))
+            PrototypeBindableKind.DERIVED_BINDING ->
+              PrototypeDerivedRules.inputs(spec, text)
+                .filter { (source, _) -> source == "state" }
+                .forEach { (_, key) -> fields.add(Field(key, at, true)) }
+            else -> Unit
+          }
+        }
         null
       }
     }
@@ -218,7 +225,8 @@ internal object PrototypeStrictPolicy {
 
   private fun isSinkBinding(field: Field, requests: List<String>): Boolean =
     // The binding visitor exposes request/data/emit/platform state bindings as KEY fields.
-    (field.key && field.path.endsWith(".state")) || inRequest(field.path, requests)
+    (field.key && (field.path.endsWith(".state") || field.path.endsWith(".derived"))) ||
+      inRequest(field.path, requests)
 
   private fun inRequest(path: String, requests: List<String>): Boolean = requests.any { at ->
     path == "$at.url" ||
@@ -268,7 +276,10 @@ internal object PrototypeStrictPolicy {
 
   fun required(spec: JsonObject): Set<String> {
     val scanner = CapabilityScanner()
+    scanner.result.addAll(declaredPrototypeCapabilities(spec["requires"]))
     scanner.envelope(spec)
+    if ("links" in spec) scanner.result.add("prototype_links_v1")
+    spec["links"]?.let { scanner.scan(it) }
     spec["root"]?.let { scanner.scan(it) }
     (spec["channels"] as? JsonObject).orEmpty().values.forEach { scanner.scan(it) }
     scanner.platform(spec)
@@ -483,7 +494,7 @@ internal object PrototypeStrictPolicy {
     private fun nodeFeatures(fields: JsonObject, routeAlias: Boolean) {
       if ("shared" in fields) result.add("prototype_shared_element_v2")
       PrototypeBindableFields.first<Unit>(fields, "") { raw, _, kind ->
-        if (kind == PrototypeBindableKind.DERIVED_CONDITION) need("derive")
+        if (kind.requiresDerive()) need("derive")
         if (usesData(raw, kind)) need("data_model")
         null
       }
@@ -492,7 +503,16 @@ internal object PrototypeStrictPolicy {
       typeNamespaceFeatures(type, fields, ::need)
       iconEffectNeeds(type, fields).forEach(::need)
       typeFeatures[type]?.let(::need)
+      if (
+        type in PrototypeSpecValidator.actionTypes &&
+          PrototypeBindableFields.firstAction(fields, "") { _, _, kind ->
+            true.takeIf { kind.requiresDerive() }
+          } != null
+      )
+        need("derive")
       if (PrototypeGeneratedValues.needsDataV2(fields)) result.add("prototype_data_actions_v2")
+      if (PrototypeObjectDataValue.isObjectValueAction(fields))
+        result.add("prototype_data_actions_v3")
       for ((feature, keys) in typeFieldFeatures[type].orEmpty()) {
         if (keys.any { fields[it] != null }) need(feature)
       }
@@ -519,8 +539,7 @@ internal object PrototypeStrictPolicy {
 
     private fun repeatFeatures(child: JsonElement) {
       val repeatSpec = child as? JsonObject
-      if ((repeatSpec?.get("items") as? JsonObject)?.containsKey("field") == true)
-        need("nested_repeat")
+      if (PrototypeNestedRepeat.requiresCapability(repeatSpec)) need("nested_repeat")
       if (repeatSpec?.containsKey("derive") == true) need("format")
       if ((repeatSpec?.get("items") as? JsonObject)?.containsKey("derived") == true) need("derive")
       if (repeatSpec?.get("stagger") != null) need("window_motion")

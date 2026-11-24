@@ -1,0 +1,75 @@
+{
+  "spec": {
+    "id": "data-object-append",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "draft": "Buy milk"
+    },
+    "data": {
+      "todos": [
+        {
+          "title": "Walk dog",
+          "done": true
+        }
+      ]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "draft",
+          "placeholder": "New todo"
+        },
+        {
+          "type": "button",
+          "label": "Add",
+          "onTap": [
+            {
+              "type": "appendData",
+              "path": "/data/todos",
+              "value": {
+                "object": {
+                  "title": {
+                    "state": "draft"
+                  },
+                  "done": {
+                    "value": false
+                  }
+                }
+              }
+            },
+            {
+              "type": "upsertData",
+              "path": "/data/todos",
+              "key": "/title",
+              "value": {
+                "object": {
+                  "title": {
+                    "data": "/todos/0/title"
+                  },
+                  "done": {
+                    "value": false
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": [
+      "prototype_data_actions_v1",
+      "prototype_data_model_v1",
+      "prototype_platform_realtime_v1"
+    ]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_data_actions_v3"
+}

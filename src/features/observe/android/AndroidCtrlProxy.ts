@@ -1,4 +1,7 @@
-import type { PrototypePlatformSimulationRequest } from "./ctrlProxyProtocol";
+import type {
+  PrototypePlatformOutcomeRequest,
+  PrototypePlatformSimulationRequest,
+} from "./ctrlProxyProtocol";
 import type { PinchRequest } from "../shared/SharedGestureDelegate";
 import type { TwoFingerSwipeRequest } from "./types";
 import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
@@ -85,6 +88,7 @@ export type AndroidCtrlProxyClientSurface = Pick<
   | "notifyRecordingStopped"
   | "onDisplayTransition"
   | "requestAdvancePrototypeClock"
+  | "requestQueuePrototypeCallOutcome"
   | "requestSimulatePrototypePlatform"
   | "requestClearPrototypeStorage"
   | "requestDeviceInfo"
@@ -359,6 +363,12 @@ export interface AndroidCtrlProxy
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<PrototypeResult>;
+  requestQueuePrototypeCallOutcome(
+    request: PrototypePlatformOutcomeRequest,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult>;
+
   requestSimulatePrototypePlatform(
     simulation: PrototypePlatformSimulationRequest,
     timeoutMs?: number,

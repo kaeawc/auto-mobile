@@ -147,6 +147,9 @@ test("#11637 item 2: a diff beside its skeleton carries no added/removed lists",
   expect(diff.skeleton.length).toBeGreaterThan(0);
   expect("added" in diff).toBe(false);
   expect("removed" in diff).toBe(false);
+  // #19122: nothing appeared or went away, so there is nothing to summarize.
+  expect("addedSummary" in diff).toBe(false);
+  expect("removedSummary" in diff).toBe(false);
   // `changed` stays: the skeleton cannot say what moved from what.
   expect(diff.changed.map((c: any) => c.selector.elementId)).toContain("android:id/checkbox");
 });
@@ -165,4 +168,10 @@ test("#11637 item 2: a node that appears is visible in the skeleton, not an adde
   expect("added" in out.observation).toBe(false);
   expect("removed" in out.observation).toBe(false);
   expect(JSON.stringify(out.observation.skeleton)).toContain("brand_new_checkbox");
+  // #19122: a short summary stays in place of the dropped lists.
+  expect(out.observation.addedSummary).toEqual({
+    count: 1,
+    labels: ["android:id/brand_new_checkbox"],
+  });
+  expect(out.observation.removedSummary).toEqual({ count: 1, labels: ["android:id/checkbox"] });
 });

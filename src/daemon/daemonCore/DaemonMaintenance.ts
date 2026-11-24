@@ -23,6 +23,7 @@ import { readDeviceLeaseActivity } from "../deviceLeaseActivity";
 import { daemonDeviceLeaseActivitySources } from "../deviceLeaseActivitySources";
 import {
   PrivateDaemonOrphanWatchdog,
+  isControlSocketRemoved,
   isHarnessPrivateDaemon,
   resolveLauncherPid,
   resolvePrivateDaemonOrphanIdleMs,
@@ -205,7 +206,10 @@ export class DaemonMaintenance {
     this.host.lifecycle.forwardLeaseIdleReleaser()!.start();
   }
 
-  /** Stop a private daemon that outlived its launcher with nothing using it (#10497). */
+  /**
+   * Stop a private daemon that outlived its launcher with nothing using it (#10497), or whose
+   * control socket was removed under it (#19132).
+   */
   startPrivateDaemonOrphanWatchdog(): void {
     if (process.platform === "win32" || !isHarnessPrivateDaemon(SOCKET_PATH, DEFAULT_SOCKET_PATH)) {
       return;
@@ -219,6 +223,8 @@ export class DaemonMaintenance {
           launcherPid: () => launcherPid,
           launcherIsExplicit: () => launcherPid !== PROCESS_ENTRY_PARENT_PID,
           isProcessRunning: (pid) => isProcessRunning(pid),
+          // Streamable HTTP is stateless (#4678): open requests, SSE streams included, are all
+          // there is of an HTTP client, so no separate live-session count exists.
           clientCount: () =>
             (this.host.lifecycle.socketServer()?.getClientConnectionCount() ?? 0) +
             getLiveAuxSocketConnectionCount() +
@@ -228,6 +234,8 @@ export class DaemonMaintenance {
             getAcceptedAuxSocketConnectionCount() +
             this.host.services.httpIngress().requestsSeenCount,
           liveSessionCount: () => this.host.services.sessionManager().getAllSessions().length,
+          controlSocketRemoved: () =>
+            isControlSocketRemoved(this.host.lifecycle.socketServer(), SOCKET_PATH),
           shutdown: () => {
             this.host.lifecycle.selfExitRecorder().record("orphan-watchdog");
             setImmediate(() => process.kill(process.pid, "SIGTERM"));

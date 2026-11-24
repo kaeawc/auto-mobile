@@ -33,14 +33,17 @@ enum PrototypeDerive {
 
     static func affected(_ entry: PrototypeDerivedEntry, changed: PrototypeDeriveChanges) -> Bool {
         let source = entry.collection?["of"]?.objectFields ?? entry.of
-        let keys = entry.collection.map { collection in
-            PrototypeCollection.clauses(collection).compactMap { $0["value"]?.objectFields?["state"]?.stringValue }
-        } ?? [source["state"]?.stringValue].compactMap { $0 }
-        if keys.contains(where: changed.stateKeys.contains) { return true }
+        if stateKeys(entry).contains(where: changed.stateKeys.contains) { return true }
         guard let pointer = source["data"]?.stringValue else { return false }
         return changed.dataPointers.contains { path in
             path == pointer || path.hasPrefix(pointer + "/") || pointer.hasPrefix(path + "/")
         }
+    }
+
+    static func stateKeys(_ entry: PrototypeDerivedEntry) -> [String] {
+        entry.collection.map { collection in
+            PrototypeCollection.clauses(collection).compactMap { $0["value"]?.objectFields?["state"]?.stringValue }
+        } ?? [entry.of["state"]?.stringValue].compactMap { $0 }
     }
 
     static func value(

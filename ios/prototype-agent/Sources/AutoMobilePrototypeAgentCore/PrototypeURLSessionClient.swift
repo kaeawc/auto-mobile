@@ -22,13 +22,18 @@ final class PrototypeURLSessionClient: PrototypeHttpClient, @unchecked Sendable 
     init(
         protocolClasses: [AnyClass]? = nil,
         policy: PrototypeEgressPolicy = PrototypeEgressPolicy(),
+        remoteImageDevelopment: Bool? = nil,
         resolver: any HostResolving = PrototypeSystemHostResolver(),
         metrics: any PrototypeConnectionMetricsProviding = PrototypeConnectionMetrics(),
         deadlines: any PrototypeDNSDeadlineScheduling = PrototypeDNSDeadline(),
         nowMs: @escaping @Sendable () -> Double = { ProcessInfo.processInfo.systemUptime * 1000 }
     ) {
         let configuration = Self.configuration(protocolClasses: protocolClasses)
-        let egress = PrototypeRequestEgressCheck(policy: policy, resolver: resolver)
+        let egress = PrototypeRequestEgressCheck(
+            policy: policy,
+            resolver: resolver,
+            remoteImageDevelopment: remoteImageDevelopment
+        )
         let delegate = PrototypeURLSessionDelegate(egress: egress, metrics: metrics)
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
@@ -289,7 +294,10 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
     func redirect(to url: URL, status: Int, egress: PrototypeRequestEgressCheck) async throws -> URLRequest {
         var next = try lock.withLock {
             guard redirectCount < 5, let previous = currentRequest.url,
-                  !(previous.scheme?.lowercased() == "https" && url.scheme?.lowercased() == "http")
+                  !(
+                      previous.scheme?.lowercased() == "https" && url.scheme?.lowercased() == "http" && !egress
+                          .isImageLoopback(url)
+                  )
             else {
                 throw PrototypeRequestEgressCheck.blocked
             }
@@ -299,6 +307,9 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
             // for the next hop; a GET rewrite below removes both this stream and the retained bytes.
             if let uploadBody { next.httpBodyStream = InputStream(data: uploadBody) }
             next.url = url
+            if egress.remoteImageDevelopment != nil {
+                for name in ["Authorization", "Cookie", "Referer"] { next.setValue(nil, forHTTPHeaderField: name) }
+            }
             if !PrototypeRequestEgressCheck.sameOrigin(previous, url) {
                 next.setValue(nil, forHTTPHeaderField: "Authorization")
             }

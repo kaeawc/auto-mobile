@@ -80,9 +80,10 @@ export const FACE_ID_USAGE_KEY = "NSFaceIDUsageDescription";
 const DEFAULT_FACE_ID_USAGE = "Confirm your identity when a prototype asks you to authenticate.";
 
 function parsedRequires(spec: PrototypeJson) {
-  return prototypeRequiresSchema.parse(
+  const parsed = prototypeRequiresSchema.parse(
     spec && typeof spec === "object" && !Array.isArray(spec) ? (spec.requires ?? {}) : {},
   );
+  return Array.isArray(parsed) ? {} : parsed;
 }
 
 /**

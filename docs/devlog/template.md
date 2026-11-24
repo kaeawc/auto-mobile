@@ -1,8 +1,9 @@
 # Devlog entry template
 
 Copy this file to `docs/devlog/YYYY-MM-DD-<slug>.md`, where the date is when the decision or text
-was first recorded. Add the entry to `mkdocs.yml` under "Devlog" and to the
-[devlog index](index.md), newest first.
+was first recorded. Then run `bun scripts/docs/generate-devlog-index.ts`: it lists the entry in the
+[devlog index](index.md) and the `mkdocs.yml` "Devlog" nav, newest first, from its title, kind and
+date. Do not edit either list by hand.
 
 ```markdown
 # <Title in sentence case>

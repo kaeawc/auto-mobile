@@ -80,6 +80,98 @@ class PrototypeSecureStorageRulesTest {
     )
   }
 
+  @Test
+  fun derivedBindingsPreserveSecureStorageRestrictions() {
+    val derive =
+      Json.parseToJsonElement("""{"secret":{"of":{"state":"token"},"format":{"number":{}}}}""")
+    fun result(action: String): PrototypeSpecValidation {
+      val spec = Json.parseToJsonElement(spec(action)).jsonObject
+      return PrototypeSpecValidator.validate(JsonObject(spec + ("derive" to derive)).toString())
+    }
+    val base = "root.screens[\"home\"].onTap[0]"
+    val emit = """{"type":"emit","name":"token","context":{"token":{"derived":"secret"}}}"""
+    assertEquals(
+      PrototypeSpecValidation.Failure(
+        PrototypeSpecError(
+          "$base.context.token",
+          "Secure storage key state:token cannot be sent in an emit context",
+        ),
+      ),
+      result(emit),
+    )
+    val request =
+      """{"type":"request","url":"https://example.com","query":{"token":{"derived":"secret"}}}"""
+    assertEquals(
+      PrototypeSpecValidation.Failure(
+        PrototypeSpecError(
+          "$base.query.token",
+          "Secure storage key state:token cannot be sent in a request without allowSecureInRequest",
+        ),
+      ),
+      result(request),
+    )
+    assertTrue(
+      result(request.dropLast(1) + ""","allowSecureInRequest":true}""")
+        is PrototypeSpecValidation.Success,
+    )
+  }
+
+  /** #19013: route params and platform args resolve derived bindings like emit and request. */
+  @TestFactory
+  fun derivedBindingsCannotReachRouteParamsOrPlatformArgs(): List<DynamicTest> {
+    val root =
+      Json.parseToJsonElement(
+          """{"storage":{"secure":["state:token"]},"derive":{
+            "secret":{"of":{"state":"token"},"format":{"number":{}}},
+            "matching":{"collection":{"of":{"data":"/rows"},
+              "where":[{"field":"t","op":"eq","value":{"state":"token"}}]},"reduce":{"op":"count"}},
+            "open":{"of":{"state":"public"},"format":{"number":{}}}}}""",
+        )
+        .jsonObject
+    fun error(action: String) =
+      PrototypeSecureStorageRules.actionError(
+        Json.parseToJsonElement(action).jsonObject,
+        "root.onTap[0]",
+        root,
+      )
+    return listOf("secret", "matching").flatMap { name ->
+      val binding = """{"derived":"$name"}"""
+      listOf(
+          """{"type":"push","params":{"t":$binding}}""" to
+            PrototypeSpecError(
+              "root.onTap[0].params.t",
+              "Secure storage key state:token cannot be sent in route params",
+            ),
+          """{"type":"setStack","path":[{"screen":"detail","params":{"t":$binding}}]}""" to
+            PrototypeSpecError(
+              "root.onTap[0].path[0].params.t",
+              "Secure storage key state:token cannot be sent in route params",
+            ),
+          """{"type":"platform","args":{"text":$binding}}""" to
+            PrototypeSpecError(
+              "root.onTap[0].args.text",
+              "Secure storage key state:token cannot be sent in platform args",
+            ),
+        )
+        .map { (action, expected) ->
+          DynamicTest.dynamicTest("$name: $action") {
+            assertEquals(expected, error(action))
+            assertNull(error(action.replace("\"$name\"", "\"open\"")))
+          }
+        }
+    }
+  }
+
+  @Test
+  fun contractHasNoDerivedFormForRouteParamsOrPlatformArgs() {
+    val derive =
+      Json.parseToJsonElement("""{"secret":{"of":{"state":"token"},"format":{"number":{}}}}""")
+    val action = """{"type":"platform","call":"share.open","args":{"text":{"derived":"secret"}}}"""
+    val spec = Json.parseToJsonElement(spec(action)).jsonObject
+    val result = PrototypeSpecValidator.validate(JsonObject(spec + ("derive" to derive)).toString())
+    assertTrue(result is PrototypeSpecValidation.Failure, result.toString())
+  }
+
   @TestFactory
   fun ordinaryPlatformArgs(): List<DynamicTest> =
     listOf("""{"state":"public"}""", """{"value":"{token}"}""").map { binding ->

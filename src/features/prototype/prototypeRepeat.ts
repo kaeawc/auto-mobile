@@ -4,6 +4,7 @@ import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { chargeMotionNode } from "./prototypeMotionBudget";
 import { PrototypeScreenBudget, prototypeScreenBudgetMessage } from "./prototypeScreenBudget";
 import { effectUses } from "./prototypeEffects";
+import { imageUses } from "./prototypeImageUses";
 import { prototypeNodeChildren } from "./prototypeNodeChildren";
 import { PrototypeRepeatData, projectPrototypeDataItem } from "./prototypeData";
 import contract from "../../../schemas/prototype-spec-contract.json";
@@ -375,7 +376,12 @@ function scopeOf(node: Raw, path: string, data: PrototypeRepeatData): Scope | un
     return undefined;
   }
   const source = record(repeat.items);
-  const rawItems = typeof source?.path === "string" ? data.source(source.path) : undefined;
+  const rawItems =
+    typeof source?.path === "string"
+      ? data.source(source.path)
+      : typeof source?.derived === "string"
+        ? data.derived[source.derived]
+        : undefined;
   return {
     sourceItems: Array.isArray(rawItems) ? rawItems : undefined,
     path,
@@ -482,7 +488,7 @@ function innerScope(node: Raw, path: string, outer: Scope, index: number): Scope
     binding: { alias: String(repeat.as), index: true, outerAlias: outer.binding.alias },
     outerItem,
     pathBound: "field",
-    items: derivedValidationItems(rows, repeat.derive).map((row) => ({
+    items: derivedValidationItems(rows.map(projectPrototypeDataItem), repeat.derive).map((row) => ({
       ...row,
       ...fields,
       $outerIndex: index,
@@ -577,8 +583,64 @@ function repeatIdentityError(
   scope: Scope | undefined,
 ): RepeatError | undefined {
   const key = record(node.repeat)?.key;
-  return scope && typeof key === "string" && !scope.derivedFields.has(key)
-    ? repeatKeyError(scope.items, key, `${path}.repeat.key`)
+  if (!scope || typeof key !== "string") {
+    return undefined;
+  }
+  return scope.derivedFields.has(key)
+    ? derivedKeyError(node, scope, key, `${path}.repeat.key`)
+    : repeatKeyError(scope.items, key, `${path}.repeat.key`);
+}
+
+/**
+ * A derived key's string is formatted on the device, but one entry formats equal inputs to equal
+ * strings, so two rows that feed it the same input always share a key (#18665).
+ */
+function derivedKeyError(
+  node: Raw,
+  scope: Scope,
+  key: string,
+  path: string,
+): RepeatError | undefined {
+  const of = record(record(record(record(node.repeat)?.derive)?.[key])?.of);
+  if (!of || scope.items.length < 2) {
+    return undefined;
+  }
+  const constant = Object.hasOwn(of, "value");
+  const field = of.item;
+  if (!constant && (typeof field !== "string" || scope.derivedFields.has(field))) {
+    return undefined;
+  }
+  const seen = new Map<string, number>();
+  for (const [index, item] of scope.items.entries()) {
+    const input = derivedKeyInput(constant, item, String(field));
+    if (input === undefined) {
+      continue;
+    }
+    const first = seen.get(input);
+    if (first !== undefined) {
+      return fail(
+        path,
+        `Derived repeat key ${JSON.stringify(key)} has the same input for items ${first} and ${index}`,
+      );
+    }
+    seen.set(input, index);
+  }
+  return undefined;
+}
+
+/** The row's input to a derived key, or `undefined` when it is not a comparable scalar. */
+function derivedKeyInput(
+  constant: boolean,
+  item: Readonly<Raw>,
+  field: string,
+): string | undefined {
+  if (constant) {
+    return "constant";
+  }
+  const value = Object.hasOwn(item, field) ? item[field] : undefined;
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+    ? // `String(-0)` is "0", but a formatter renders -0 as "-0": keep the sign apart.
+      `${typeof value}:${Object.is(value, -0) ? "-0" : String(value)}`
     : undefined;
 }
 
@@ -586,12 +648,15 @@ const MAX_REPEAT_ITEMS =
   contract.definitions.repeat.fields.items.rule.options.find((option) => option.kind === "array")
     ?.max ?? Infinity;
 
-function resolvedRepeatItemsError(items: unknown, node: Raw, at: string): RepeatError | undefined {
+function resolvedRepeatItemsError(
+  items: unknown,
+  node: Raw,
+  { at, listItems }: { at: string; listItems: number },
+): RepeatError | undefined {
   if (!Array.isArray(items)) {
     return fail(at, "Repeat path does not resolve to an array");
   }
-  const maximum =
-    node.type === "list" ? contract.limits.MAX_PROTOTYPE_LIST_ITEMS : MAX_REPEAT_ITEMS;
+  const maximum = node.type === "list" ? listItems : MAX_REPEAT_ITEMS;
   if (items.length > maximum) {
     return fail(at, `Repeat path resolves to more than ${maximum} items`);
   }
@@ -612,12 +677,12 @@ function repeatSourceErrors(node: Raw, path: string, state: RepeatState): Repeat
     ? state.data.derived[String(source.derived)]
     : state.data.source(String(source.path));
   const at = `${path}.repeat.items.${derived ? "derived" : "path"}`;
-  const error = resolvedRepeatItemsError(items, node, at);
+  const error = resolvedRepeatItemsError(items, node, { at, listItems: state.data.listItems });
   if (error) {
     return error;
   }
   state.cells += derived
-    ? new PrototypeRepeatData({ rows: items }).cells("/rows")
+    ? new PrototypeRepeatData({ rows: items }, state.data.listItems).cells("/rows")
     : state.data.cells(String(source.path));
   return state.cells > contract.limits.MAX_PROTOTYPE_REPEAT_PATH_CELLS
     ? fail(at, "Repeat path cell limit exceeded")
@@ -654,47 +719,6 @@ interface Budget {
   animatedEffects: number;
   keyframeNodes: number;
   videoNodes: number;
-}
-
-/**
- * What one image slot costs against `MAX_PROTOTYPE_IMAGES`: an asset id costs 1, and a
- * `{light, dark}` pair costs 2 when the two modes name different assets (#11218). Absent is 0.
- */
-export function imageSlotUses(value: unknown): number {
-  if (typeof value === "string") {
-    return 1;
-  }
-  const pair = record(value);
-  if (!pair) {
-    return 0;
-  }
-  // A data-bound slot names a device media item, not an uploaded asset: it costs no image budget.
-  if (typeof pair.data === "string") {
-    return 0;
-  }
-  return typeof pair.light === "string" && typeof pair.dark === "string" && pair.light !== pair.dark
-    ? 2
-    : 1;
-}
-
-/** The node's own image slots: an `image` costs at least 1, a `videoPlayer` its `poster`. */
-export function nodeImageUses(node: Raw): number {
-  if (node.type === "image") {
-    return (
-      (node.url === undefined ? Math.max(1, imageSlotUses(node.asset)) : 0) +
-      imageSlotUses(record(node.placeholder)?.asset) +
-      imageSlotUses(record(node.error)?.asset)
-    );
-  }
-  return node.type === "videoPlayer" ? imageSlotUses(node.poster) : 0;
-}
-
-function imageUses(node: Raw): number {
-  if (node.type === "image" || node.type === "videoPlayer") {
-    return nodeImageUses(node);
-  }
-  const items = Array.isArray(node.items) ? (node.items as unknown[]) : [];
-  return items.reduce<number>((sum, item) => sum + imageSlotUses(record(item)?.image), 0);
 }
 
 /** Charges one expanded node against every budget; returns the first limit it breaks. */
@@ -735,32 +759,57 @@ function expansionScope(
     : scopeOf(node, path, data);
 }
 
+function expansionInstanceScope(
+  scope: Scope | undefined,
+  outer: Scope | undefined,
+  instance: number,
+): Scope | undefined {
+  return scope
+    ? {
+        ...scope,
+        items: scope.items.slice(instance, instance + 1),
+        sourceItems: (scope.sourceItems ?? scope.items).slice(instance, instance + 1),
+      }
+    : outer;
+}
+
 /** Walks the expanded tree; an overflow inside a template is reported at its `repeat`. */
 function expandedErrors(
   node: Raw,
   path: string,
   budget: Budget,
-  { data, repeatPath, outer }: { data: PrototypeRepeatData; repeatPath?: string; outer?: Scope },
+  {
+    data,
+    repeatPath,
+    outer,
+    templateCounted = false,
+  }: {
+    data: PrototypeRepeatData;
+    repeatPath?: string;
+    outer?: Scope;
+    templateCounted?: boolean;
+  },
 ): RepeatError | undefined {
-  const overflow = chargeExpandedNode(node, path, budget, repeatPath ?? path);
+  const overflow = templateCounted
+    ? undefined
+    : chargeExpandedNode(node, path, budget, repeatPath ?? path);
   if (overflow) {
     return overflow;
   }
   const scope = expansionScope(node, path, { data, outer });
-  const instances = scope && node.type !== "list" ? scope.items.length : 1;
+  const instances = scope
+    ? node.type === "list"
+      ? Math.max(1, scope.items.length)
+      : scope.items.length
+    : 1;
   const nestedPath = scope ? `${path}.repeat` : repeatPath;
   for (let instance = 0; instance < instances; instance++) {
-    const single = scope
-      ? {
-          ...scope,
-          items: scope.items.slice(instance, instance + 1),
-          sourceItems: (scope.sourceItems ?? scope.items).slice(instance, instance + 1),
-        }
-      : outer;
+    const single = expansionInstanceScope(scope, outer, instance);
     const error = expandedChildErrors(node, path, budget, {
       data,
       repeatPath: nestedPath,
       outer: single,
+      templateCounted: node.type === "list" ? instance > 0 : scope ? false : templateCounted,
     });
     if (error) {
       return error;
@@ -774,13 +823,25 @@ function expandedChildErrors(
   node: Raw,
   path: string,
   budget: Budget,
-  options: { data: PrototypeRepeatData; repeatPath?: string; outer?: Scope },
+  options: {
+    data: PrototypeRepeatData;
+    repeatPath?: string;
+    outer?: Scope;
+    templateCounted?: boolean;
+  },
 ): RepeatError | undefined {
   const stack = record(node.screens) !== undefined;
   if (stack) {
     budget.screens.enterStack();
   }
   for (const child of childrenOf(node, path)) {
+    if (
+      node.type === "list" &&
+      options.templateCounted &&
+      !child.path.startsWith(`${path}.children[`)
+    ) {
+      continue;
+    }
     const screen = stack && child.path.startsWith(`${path}.screens[`);
     if (screen) {
       budget.screens.enterScreen();
@@ -842,7 +903,9 @@ function collectScopes(
   const field = record(record(node.repeat)?.items)?.field;
   const own =
     typeof field === "string" && outer
-      ? outer.items.map((_item, index) => innerScope(node, path, outer, index))
+      ? Array.from({ length: Math.max(1, outer.items.length) }, (_item, index) =>
+          innerScope(node, path, outer, index),
+        )
       : [scopeOf(node, path, data)];
   for (const scope of own) {
     if (scope) {

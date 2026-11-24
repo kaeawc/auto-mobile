@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { githubAnnotation, summarize } from "../../scripts/docs/check-readability";
+import { githubAnnotation, selectDocsPages, summarize } from "../../scripts/docs/check-readability";
 import {
   analyzeMarkdown,
   annotateLines,
@@ -195,5 +195,24 @@ describe("docs readability budgets", () => {
     const config = parseConfig({ sections: [BUDGET] });
     const findings = checkPage("docs/using/x.md", `${words(10)}.`, BUDGET);
     expect(summarize(config, findings)).toEqual(["using: 1 finding(s) (sentence-length=1)"]);
+  });
+
+  test("--files keeps unique existing docs Markdown pages, normalized and sorted", () => {
+    const present = new Set(["docs/using/b.md", "docs/devlog/a.md", "docs/using/c.md"]);
+    expect(
+      selectDocsPages(
+        [
+          "docs/using/b.md",
+          "./docs/devlog/a.md",
+          "docs\\using\\c.md",
+          "docs/using/b.md",
+          "docs/using/deleted.md",
+          "docs/assets/x.js",
+          "src/readme.md",
+        ],
+        (file) => present.has(file),
+      ),
+    ).toEqual(["docs/devlog/a.md", "docs/using/b.md", "docs/using/c.md"]);
+    expect(selectDocsPages([], () => true)).toEqual([]);
   });
 });

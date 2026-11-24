@@ -300,3 +300,8 @@ tasks
       ":prototype-saved:verifySavedPrototypeDependencies",
     )
   }
+
+// TEMP (#19140 debug): print assertion messages for failing unit tests. Reverted in the next commit.
+tasks.withType<Test>().configureEach {
+  testLogging { exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
+}

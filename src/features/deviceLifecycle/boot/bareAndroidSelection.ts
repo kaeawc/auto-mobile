@@ -33,7 +33,7 @@ export function keepsPhoneDefault(requires: AndroidRequirements): boolean {
 export interface SessionDeviceSource {
   isInitialized(): boolean;
   getSessionManager(): {
-    getSession(sessionId: string): Pick<Session, "assignedDevice" | "platform"> | null;
+    findSession(sessionId: string): Pick<Session, "assignedDevice" | "platform"> | null;
   };
 }
 
@@ -51,7 +51,7 @@ export async function sessionHeldAndroidDevice(
   if (sessionUuid === undefined || !daemonState.isInitialized()) {
     return undefined;
   }
-  const session = daemonState.getSessionManager().getSession(sessionUuid);
+  const session = daemonState.getSessionManager().findSession(sessionUuid);
   if (!session || session.platform !== "android" || session.assignedDevice.length === 0) {
     return undefined;
   }

@@ -46,7 +46,7 @@ function sessionSource(
 ): SessionDeviceSource {
   return {
     isInitialized: () => initialized,
-    getSessionManager: () => ({ getSession: () => session }),
+    getSessionManager: () => ({ findSession: () => session }),
   };
 }
 

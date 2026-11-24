@@ -43,9 +43,13 @@ describe("CarPlay screen power", () => {
     );
     expect(await powerer.status("udid")).toEqual(state);
     await powerer.powerOn("udid");
+    await powerer.powerOn("udid", { headUnitInputs: false });
+    await powerer.powerOn("udid", { headUnitInputs: true });
     expect(calls).toEqual([
       ["/helper with spaces", "udid", "status"],
       ["/helper with spaces", "udid", "power-on"],
+      ["/helper with spaces", "udid", "power-on"],
+      ["/helper with spaces", "udid", "power-on", "--head-unit-inputs"],
     ]);
   });
   test("caps power-on's exec timeout at the caller's budget and forwards its signal", async () => {
@@ -76,6 +80,8 @@ describe("CarPlay screen power", () => {
       "unsupported-screen-type",
       "carplay-not-powered",
       "hid-failed",
+      "head-unit-inputs-disabled",
+      "usage",
     ]) {
       const powerer = new DefaultCarPlayScreenPowerer(
         async () => {

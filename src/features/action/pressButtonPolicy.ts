@@ -14,6 +14,8 @@ const NAVIGATION_PRESS_BUTTONS = new Set([
   "select",
   // The rotary press activates the focused item, which usually navigates (#14920).
   "rotary_select",
+  // The CarPlay voice button opens Siri over the current screen (#19059).
+  "siri",
   ...ANDROID_SYSTEM_ACTION_BUTTONS,
 ]);
 const IN_PLACE_PRESS_BUTTONS = new Set([

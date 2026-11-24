@@ -128,8 +128,10 @@ export const pressButtonInput = z.object({
     "screenshot",
     "split_screen",
     "dismiss_notification_shade",
-    // Rotary controller input on Android Automotive (#14920); refused on other devices.
+    // Rotary controller input on Android Automotive (#14920) and the CarPlay knob (#19059).
     ...ROTARY_BUTTONS,
+    // The CarPlay head unit's voice button (#19059); every other display refuses it.
+    "siri",
   ]),
   steps: z
     .number()
@@ -137,7 +139,9 @@ export const pressButtonInput = z.object({
     .min(1)
     .max(MAX_ROTARY_STEPS)
     .optional()
-    .describe("Detents for rotary_rotate_cw / rotary_rotate_ccw (default 1)."),
+    .describe(
+      "Detents for rotary_rotate_cw / rotary_rotate_ccw (default 1), on AAOS or the CarPlay knob.",
+    ),
   durationMs: z
     .number()
     .int()
@@ -151,7 +155,7 @@ export const pressButtonInput = z.object({
     .string()
     .optional()
     .describe(
-      'Target panel key, role, or active; Android only. Sends the key to that display and checks it for the visual change. "headUnit" sends it to the Android Auto head unit',
+      'Target panel key, role, or active (Android): sends the key to that display and checks it for the visual change. "headUnit" sends it to the Android Auto head unit; "carPlay" sends back, home, siri or a rotary_* knob input to an iOS 26.x simulator\'s CarPlay screen',
     ),
   // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
   // not required — a device handle from getAndroid/getApple is sufficient on

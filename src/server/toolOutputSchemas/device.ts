@@ -81,6 +81,10 @@ export const startDeviceOutputSchema = z
       .object({
         display: z.string().describe("The car display's identity, e.g. Car[2]."),
         displayId: z.number().int().describe("The simulator screen id of the car display."),
+        headUnitInputs: z
+          .literal(true)
+          .optional()
+          .describe("Present when the car has a back button, a home button and a knob."),
       })
       .passthrough()
       .optional()

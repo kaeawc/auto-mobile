@@ -56,10 +56,15 @@ export async function withRequestedCarPlay(
   const deps = dependencies();
   const activate = async (holdSignal?: AbortSignal) => {
     const signals = [bounds.signal, holdSignal].filter((signal) => signal !== undefined);
-    return await activateCarPlayDisplay(device.deviceId, deps, {
-      signal: signals.length > 0 ? AbortSignal.any(signals) : undefined,
-      deadlineMs: bounds.totalDeadlineMs,
-    });
+    return await activateCarPlayDisplay(
+      device.deviceId,
+      deps,
+      {
+        signal: signals.length > 0 ? AbortSignal.any(signals) : undefined,
+        deadlineMs: bounds.totalDeadlineMs,
+      },
+      { headUnitInputs: options.headUnitInputs },
+    );
   };
   try {
     // Held like startDevice's head unit: the client has no session id to heartbeat until this

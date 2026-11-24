@@ -12,8 +12,9 @@ rendering path.
 
 ## CarPlay screen power helper
 
-`ios/carplay-power` (`carplay-power-helper <udid> status|power-on|tap <x> <y>`) reports a booted
-simulator's screens, makes its TVOut screen the CarPlay car display, or taps it. It checks private CoreSimulator
+`ios/carplay-power` (`carplay-power-helper <udid> status|power-on [--head-unit-inputs]|tap <x> <y>|input <name> [count]`)
+reports a booted simulator's screens, makes its TVOut screen the CarPlay car display, taps it, or
+sends it a head-unit input. It checks private CoreSimulator
 selectors, waits for callbacks, and re-enumerates to verify power state; unavailable APIs produce
 actionable errors.
 
@@ -21,7 +22,8 @@ actionable errors.
   `<device data>/Library/Application Support/Simulator/extended_display.plist` (800x480 @2x,
   `stark` and `hasTouchScreen` true, the other `has*` keys false), then sets TVOut's mode with the
   `HasTouchScreen` and `Stark` CarPlay properties. That powers TVOut on; backboardd makes it the car
-  display and CarPlay's home screen renders within about 2 s.
+  display and CarPlay's home screen renders within about 2 s. `--head-unit-inputs` sets
+  `hasBackButton`, `hasHomeButton`, `hasWheel` and `hasWheelBump` true as well.
 - Both steps are required. CoreSimulator resets the plist to `{"stark":0}` on every boot, so run
   `power-on` after each boot. Running it again on a projecting screen is harmless.
 - `power-on` refuses iOS 27 and later runtimes with `unsupported-runtime`: Apple does not support
@@ -57,6 +59,35 @@ Indigo HID messages (`SimDeviceLegacyHIDClient`, loaded from
   the projection probe to report the car display, so a screen that is not projecting is refused
   before the helper runs. In turn, `tapAt` with `display: "carPlay"` calls it; phone-only `tapAt`
   fields are refused. `tapOn` has no CarPlay selector because nothing reads the car screen's hierarchy.
+
+## CarPlay head-unit input contract
+
+`carplay-power-helper <udid> input <name> [count]` sends one head-unit input to the CarPlay service,
+target `1`. No mapping has been run on a simulator yet; see
+[CarPlay head-unit inputs on the simulator](../../../devlog/2026-11-23-carplay-head-unit-inputs.md).
+
+| Input                                             | Message                                                                                                        | StarkConfig key |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | --------------- |
+| `back`                                            | `IndigoHIDMessageForHIDArbitrary`, Consumer `0x224` (AC Back)                                                  | `hasBackButton` |
+| `home`                                            | `IndigoHIDMessageForHIDArbitrary`, Consumer `0x223` (AC Home)                                                  | `hasHomeButton` |
+| `siri`                                            | `IndigoHIDMessageForHIDArbitrary`, Consumer `0xCF` (Voice Command)                                             | none            |
+| `knob-select`                                     | `IndigoHIDMessageForHIDArbitrary`, Consumer `0x41` (Menu Pick)                                                 | `hasWheel`      |
+| `knob-up`, `knob-down`, `knob-left`, `knob-right` | `IndigoHIDMessageForHIDArbitrary`, Consumer `0x42`-`0x45` (Menu Up, Down, Left, Right)                         | `hasWheelBump`  |
+| `knob-cw`, `knob-ccw`                             | `IOHIDEventCreateScrollEvent` y `-1` / `+1` per detent through `IndigoHIDMessageForScrollEventFromHIDEventRef` | `hasWheel`      |
+
+- A usage is a press (op `1`), an 80 ms hold, then a release (op `2`). Rotation sends `count`
+  events (1-50) 50 ms apart; every other input refuses a count other than 1 with `usage`.
+- Before sending, the helper runs the touch contract's checks (runtime, TVOut, screen type, power)
+  and reads `extended_display.plist`. An input whose key is not true there is refused with
+  `head-unit-inputs-disabled`. Then it creates the CarPlay service, as for a tap.
+- The output is one JSON line, `sent`: `input`, `count`, `screenID`, `screenType`, `target`, and
+  either `usagePage` and `usage` or `scrollDelta`.
+- `carPlayInput.ts` runs it through the same exec seam, and `sendCarPlayInput` requires the
+  projection probe to report the car display first.
+- `pressButton` with `display: "carPlay"` maps `back`, `home`, `siri` and the `rotary_*` buttons to
+  these inputs; `steps` is the rotation count. It refuses every other button. Any other display
+  refuses `siri` before the phone path runs.
+- `startDevice` `carPlay.headUnitInputs` passes `--head-unit-inputs` to power-on.
 
 ## Projection readiness contract
 

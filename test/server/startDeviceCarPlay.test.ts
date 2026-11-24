@@ -67,6 +67,15 @@ describe("startDevice carPlay", () => {
     expect(powerer.calls).toEqual([{ udid: "SIM-UDID", action: "power-on" }]);
   });
 
+  test("powers on with head-unit inputs when asked", async () => {
+    const { powerer, deps } = fakes();
+    const response = await withRequestedCarPlay({ headUnitInputs: true }, ready, bounds, deps);
+    expect(getStructuredPayload(response)).toMatchObject({
+      carPlay: { display: "Car[2]", displayId: 2, headUnitInputs: true },
+    });
+    expect(powerer.powerOnOptions[0]).toMatchObject({ headUnitInputs: true });
+  });
+
   test("holds the bound session while CarPlay activates, then releases it", async () => {
     const { holds, powerer, deps } = fakes();
     let heldDuringPowerOn = false;
@@ -111,10 +120,16 @@ describe("startDevice carPlay", () => {
     );
   });
 
-  test("accepts carPlay only as an empty object on iOS", () => {
+  test("accepts carPlay only as an object with an optional headUnitInputs on iOS", () => {
     expect(startDeviceSchema.parse({ platform: "ios", carPlay: {} })).toMatchObject({
       carPlay: {},
     });
+    expect(
+      startDeviceSchema.parse({ platform: "ios", carPlay: { headUnitInputs: true } }),
+    ).toMatchObject({ carPlay: { headUnitInputs: true } });
+    expect(
+      startDeviceSchema.safeParse({ platform: "ios", carPlay: { headUnitInputs: "yes" } }).success,
+    ).toBe(false);
     expect(startDeviceSchema.safeParse({ platform: "android", carPlay: {} }).success).toBe(false);
     expect(startDeviceSchema.safeParse({ platform: "ios", carPlay: { size: 1 } }).success).toBe(
       false,
